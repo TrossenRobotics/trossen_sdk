@@ -1,0 +1,40 @@
+# To use:
+#
+#     pre-commit run -a
+#
+# Or:
+#
+#     pre-commit install  # (runs every time you commit in git)
+#
+# To update this file:
+#
+#     pre-commit autoupdate
+#
+# See https://github.com/pre-commit/pre-commit
+
+repos:
+-   repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+    - id: check-added-large-files
+    - id: check-case-conflict
+    - id: check-docstring-first
+    - id: check-merge-conflict
+    - id: check-symlinks
+    - id: check-yaml
+    - id: end-of-file-fixer
+    - id: no-commit-to-branch
+    - id: trailing-whitespace
+
+-   repo: https://github.com/codespell-project/codespell
+    rev: v2.4.1
+    hooks:
+    -   id: codespell
+        additional_dependencies:
+        -   tomli
+
+-   repo: https://github.com/PyCQA/doc8
+    rev: d66cb70cb8fcb9dbc7f8d3192f38403e1d46b7c3  # v1.1.2
+    hooks:
+    - id: doc8
+      args: ["--ignore=D001"]  # ignore line length
