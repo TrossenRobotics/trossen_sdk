@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
+#include "trossen_sdk_utils/logging_utils.hpp"
 
 
 namespace trossen_sdk {
@@ -12,6 +13,9 @@ public:
     void control_loop(trossen_data_collection_sdk::TrossenAIStationary& robot, 
     float control_time,
     trossen_dataset::TrossenAIDataset& dataset);
+
+private:
+    // Logging utility
 };
 
 } // namespace trossen_sdk

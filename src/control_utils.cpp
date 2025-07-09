@@ -21,6 +21,9 @@ void ControlUtils::control_loop(trossen_data_collection_sdk::TrossenAIStationary
     trossen_dataset::EpisodeData episode_data(episode_idx);  // Assuming a single episode
 
     while (std::chrono::system_clock::now() < end_time) {
+        // Get the start time of the loop
+        auto loop_start_time = std::chrono::system_clock::now();
+
         state = robot.teleop_step(episode_data);  // Call the teleop step function
 
         // Create a FrameData object to log the current state
@@ -32,6 +35,15 @@ void ControlUtils::control_loop(trossen_data_collection_sdk::TrossenAIStationary
         frame_data.episode_idx = episode_idx;  // Episode index
         frame_data.frame_idx = episode_data.get_frames().size();  // Frame index
         episode_data.add_frame(frame_data);  // Add the frame data to the episode   
+
+        // Get the total time taken for the loop
+        auto loop_end_time = std::chrono::system_clock::now();
+        auto loop_duration = std::chrono::duration_cast<std::chrono::duration<double>>(loop_end_time - loop_start_time).count();
+
+        trossen_sdk_utils::log_info("Loop duration: " + std::to_string(loop_duration) + " seconds" 
+                                    + " | Frequency: " + std::to_string(1.0 / loop_duration) + " Hz"
+                                    + " | Episode: " + std::to_string(episode_idx) 
+                                    + " | Frame: " + std::to_string(frame_data.frame_idx));
         
     }
 

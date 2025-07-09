@@ -39,43 +39,6 @@ void TrossenAIStationary::disconnect() {
     std::cout << "Disconnected from Trossen AI Stationary." << std::endl;
 }
 
-void TrossenAIStationary::control_loop(int episode_idx, float control_time,trossen_dataset::TrossenAIDataset& dataset) {
-
-
-    //TODO: Move this logic to a separate function
-    leader_left_driver_.write("external_efforts", std::vector<double>(7, 0.0));
-    leader_right_driver_.write("external_efforts", std::vector<double>(7, 0.0));
-
-    auto start_time = std::chrono::system_clock::now();
-    auto end_time = start_time + std::chrono::seconds(static_cast<int>(control_time));
-
-    // State to hold the observation and action
-    trossen_dataset::State state;
-
-    // Create EpisodeData for logging
-    trossen_dataset::EpisodeData episode_data(episode_idx);  // Assuming a single episode
-
-    while (std::chrono::system_clock::now() < end_time) {
-        state = teleop_step(episode_data);  // Call the teleop step function
-
-        // Create a FrameData object to log the current state
-        trossen_dataset::FrameData frame_data;
-        frame_data.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            std::chrono::system_clock::now().time_since_epoch()).count();
-        frame_data.observation_state = state.observation_state;  // Joint positions
-        frame_data.action = state.action;  // Action to be taken
-        frame_data.episode_idx = episode_idx;  // Episode index
-        frame_data.frame_idx = episode_data.get_frames().size();  // Frame index
-        episode_data.add_frame(frame_data);  // Add the frame data to the episode   
-        
-    }
-
-    dataset.save_episode(episode_data);  // Close the episode data to finalize it
-    std::cout << "Control loop finished." << std::endl;
-
-}
-
-
 trossen_dataset::State TrossenAIStationary::teleop_step(trossen_dataset::EpisodeData& episode_data) {
 
     // Get the current joint positions from the leader drivers

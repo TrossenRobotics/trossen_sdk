@@ -46,9 +46,11 @@ public:
     {}
 
     void connect() override;
+    
     void write(const std::string& data_name, const std::vector<double>& value);
+
     trossen_dataset::State teleop_step(trossen_dataset::EpisodeData& episode_data) override;
-    void control_loop(int episode_idx, float control_time, trossen_dataset::TrossenAIDataset& dataset);
+
     void disconnect() override;
 
     void deactivate_leaders() {
@@ -63,7 +65,7 @@ public:
     trossen_ai_robot_devices::TrossenAIArm follower_left_driver_;
     trossen_ai_robot_devices::TrossenAIArm leader_right_driver_;
     trossen_ai_robot_devices::TrossenAIArm follower_right_driver_;
-    
+
 private:
     
     bool is_connected_ = false;  // Track connection status
