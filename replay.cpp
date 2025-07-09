@@ -1,4 +1,4 @@
-#include "trossen_data_collection_sdk/arms_move.hpp"
+#include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 #include "trossen_dataset/dataset.hpp"
 #include <boost/program_options.hpp>
 #include <filesystem>
@@ -34,10 +34,11 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
     trossen_data_collection_sdk::TrossenAIStationary robot(robot_name);
-    robot.deactivate_leaders(); // Deactivate the leader arms
+    robot.connect(); // Connect to the robot arms
+    // robot.deactivate_leaders(); // Deactivate the leader arms
     std::filesystem::path dataset_path = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name / "data" / ("episode_" + std::to_string(episode_number) + ".parquet");
     robot.replay(dataset_path.string());
-    robot.sleep_arms();
+    robot.disconnect();
 
     return 0;
 }

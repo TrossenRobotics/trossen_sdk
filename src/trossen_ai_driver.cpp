@@ -1,5 +1,6 @@
 #include "trossen_ai_robot_devices/trossen_ai_driver.hpp"
 #include <iostream>
+#include <algorithm>
 #define PI 3.14159265358979323846
 
 namespace trossen_ai_robot_devices {
@@ -39,7 +40,7 @@ void TrossenAIArm::disconnect() {
         return;
     }
     driver_.set_all_modes(trossen_arm::Mode::position); 
-    driver_.set_all_positions({0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 2.0, false);
+    driver_.set_all_positions({0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0}, 2.0, true);
     driver_.set_all_modes(trossen_arm::Mode::idle);
     is_connected_ = false;
 }
@@ -67,18 +68,38 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
         return;
     }
     if (data_name == "positions") {
+        // Check if any mode is not set to position
+        const auto& modes = driver_.get_modes();
+        if (!std::all_of(modes.begin(), modes.end(), [](const auto& mode){ return mode == trossen_arm::Mode::position; })) {
+            driver_.set_all_modes(trossen_arm::Mode::position);
+        }
+        // Check if the data size is correct for positions
         if (data.size() != 7) {
             std::cerr << "Invalid data size for positions. Expected 7 values." << std::endl;
             return;
         }
         driver_.set_all_positions(data, time_to_move_, false);
     } else if (data_name == "velocities") {
+        // Check if any mode is not set to velocity
+        const auto& modes = driver_.get_modes();
+        bool all_velocity = std::all_of(modes.begin(), modes.end(), [](const auto& mode){ return mode == trossen_arm::Mode::velocity; });   
+        if (!all_velocity) {
+            driver_.set_all_modes(trossen_arm::Mode::velocity);
+        }
+        // Check if the data size is correct for velocities
         if (data.size() != 7) {
             std::cerr << "Invalid data size for velocities. Expected 7 values." << std::endl;
             return;
         }
         driver_.set_all_velocities(data, time_to_move_, false);
     } else if (data_name == "external_efforts") {
+        // Check if any mode is not set to external_effort
+        const auto& modes = driver_.get_modes();
+        bool all_efforts = std::all_of(modes.begin(), modes.end(), [](const auto& mode){ return mode == trossen_arm::Mode::external_effort; });
+        if (!all_efforts) {
+            driver_.set_all_modes(trossen_arm::Mode::external_effort);
+        }
+        // Check if the data size is correct for external efforts
         if (data.size() != 7) {
             std::cerr << "Invalid data size for external_efforts. Expected 7 values." << std::endl;
             return;

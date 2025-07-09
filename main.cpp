@@ -1,7 +1,8 @@
-#include "trossen_data_collection_sdk/arms_move.hpp"
+#include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 
 int main() {
-    trossen_data_collection_sdk::TrossenAIStationary greeter("Trossen AI Stationary");
-    greeter.sleep_arms(); // Say hello to the user
+    trossen_data_collection_sdk::TrossenAIStationary robot("Trossen AI Stationary");
+    robot.connect(); // Connect to the robot
+    robot.disconnect(); // Say hello to the user
     return 0;
 }

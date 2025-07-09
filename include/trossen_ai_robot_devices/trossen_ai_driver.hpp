@@ -23,7 +23,7 @@ namespace trossen_ai_robot_devices {
         trossen_arm::TrossenArmDriver driver_;  // Assuming TrossenArmDriver is the class to control the arm
 
         bool is_connected_ = false;  // Track connection status
-        float time_to_move_ = 2.0;  // Default time to move in seconds
+        float time_to_move_ = 0.0;  // Default time to move in seconds
     };
 
 } // namespace trossen_ai_robot_devices

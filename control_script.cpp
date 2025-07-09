@@ -1,5 +1,5 @@
 #include "trossen_dataset/dataset.hpp"
-#include "trossen_data_collection_sdk/arms_move.hpp"
+#include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -38,6 +38,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "Control script started." << std::endl;
+
     
     // Initialize metadata
     trossen_dataset::Metadata metadata(dataset_name);
@@ -47,15 +48,16 @@ int main(int argc, char* argv[]) {
 
     // Initialize the robot arm controller
     trossen_data_collection_sdk::TrossenAIStationary robot_controller(robot_name);
+    robot_controller.connect(); // Connect to the robot arms
 
     // Start the control loop for each episode
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
-        std::cout << "Starting episode " << episode_idx + 1 << " of " << num_episodes << std::endl;
+        std::cout << "Starting episode " << episode_idx  << std::endl;
         robot_controller.control_loop(episode_idx, recording_time, metadata);
-        std::cout << "Episode " << episode_idx + 1 << " completed." << std::endl;
-    }       
+        std::cout << "Episode " << episode_idx << " completed." << std::endl;
+    }
     std::cout << "All episodes completed." << std::endl;
-    robot_controller.sleep_arms(); // Sleep the arms at the end of the control script
+    robot_controller.disconnect(); // Sleep the arms at the end of the control script
     std::cout << "Control script finished." << std::endl;
     return 0;
 }

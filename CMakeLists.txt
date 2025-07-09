@@ -15,7 +15,7 @@ include_directories(include)
 include_directories(${Boost_INCLUDE_DIRS})
 
 # Build library
-add_library(trossen_data_collection_sdk src/arms_move.cpp src/dataset.cpp)
+add_library(trossen_data_collection_sdk src/trossen_ai_robot.cpp  src/dataset.cpp src/trossen_ai_driver.cpp)
 
 target_include_directories(trossen_data_collection_sdk PUBLIC include)
 
