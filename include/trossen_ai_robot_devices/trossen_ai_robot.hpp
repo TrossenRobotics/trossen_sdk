@@ -46,7 +46,7 @@ public:
     {}
 
     void connect() override;
-    
+
     void write(const std::string& data_name, const std::vector<double>& value);
 
     trossen_dataset::State teleop_step(trossen_dataset::EpisodeData& episode_data) override;
@@ -58,6 +58,8 @@ public:
         leader_right_driver_.disconnect();
         std::cout << "Deactivating leader arms." << std::endl;
     }
+
+    void teleop_safety_stop();
 
     const arrow::Status replay(const std::string& output_file);
 

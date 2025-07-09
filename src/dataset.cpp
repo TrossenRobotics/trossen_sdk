@@ -156,6 +156,7 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
     } else {
         std::cerr << "Successfully wrote dataset." << std::endl;
     }
+    episodes_buffer_.push_back(episode_data);
 }
 
 
@@ -198,8 +199,6 @@ void TrossenAIDataset::add_frame(const FrameData& frame_data) {
         std::cerr << "No active episode to add frame to." << std::endl;
         return;
     }
-    episodes_buffer_.back()->add_frame(frame_data);
-    std::cout << "Frame added to episode " << episodes_buffer_.back()->get_episode_idx() << std::endl;
 }
 
 Metadata::Metadata(std::string dataset_name) : dataset_name_(std::move(dataset_name)) {

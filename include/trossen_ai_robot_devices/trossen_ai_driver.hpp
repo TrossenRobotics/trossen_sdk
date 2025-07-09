@@ -15,6 +15,7 @@ namespace trossen_ai_robot_devices {
         void disconnect();
         std::vector<double> read(std::string data_name);
         void write(const std::string& data_name, const std::vector<double>& data);
+        void stage_arm();
 
     private:
         std::string name_;

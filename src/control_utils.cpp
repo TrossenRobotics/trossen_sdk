@@ -46,9 +46,10 @@ void ControlUtils::control_loop(trossen_data_collection_sdk::TrossenAIStationary
                                     + " | Frame: " + std::to_string(frame_data.frame_idx));
         
     }
-
     dataset.save_episode(episode_data);  // Close the episode data to finalize it
     std::cout << "Control loop finished." << std::endl;
+    robot.teleop_safety_stop();
+    
 
 }
 

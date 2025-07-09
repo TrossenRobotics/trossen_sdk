@@ -2,6 +2,7 @@
 #include "trossen_ai_robot_devices/trossen_ai_driver.hpp"
 #include "trossen_dataset/dataset.hpp"
 #include <iostream>
+#define PI 3.14159265358979323846
 
 namespace trossen_data_collection_sdk {
 
@@ -37,6 +38,14 @@ void TrossenAIStationary::disconnect() {
     follower_right_driver_.disconnect();
     is_connected_ = false;
     std::cout << "Disconnected from Trossen AI Stationary." << std::endl;
+}
+
+
+void TrossenAIStationary::teleop_safety_stop() {
+    leader_left_driver_.stage_arm();
+    leader_right_driver_.stage_arm();
+    follower_left_driver_.stage_arm();
+    follower_right_driver_.stage_arm();
 }
 
 trossen_dataset::State TrossenAIStationary::teleop_step(trossen_dataset::EpisodeData& episode_data) {

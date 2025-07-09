@@ -100,7 +100,7 @@ public:
 private:
     std::string dataset_name_;
     trossen_dataset::Metadata metadata_;
-    std::vector<std::shared_ptr<EpisodeData>> episodes_buffer_;  // Store episodes in a vector
+    std::vector<EpisodeData> episodes_buffer_;  // Store episodes in a vector
 };
 
 }  // namespace trossen_dataset
