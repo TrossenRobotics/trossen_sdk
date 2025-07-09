@@ -35,7 +35,7 @@ int main(int argc, char* argv[]) {
     }
     trossen_data_collection_sdk::TrossenAIStationary robot(robot_name);
     robot.connect(); // Connect to the robot arms
-    // robot.deactivate_leaders(); // Deactivate the leader arms
+    robot.deactivate_leaders(); // Deactivate the leader arms
     std::filesystem::path dataset_path = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name / "data" / ("episode_" + std::to_string(episode_number) + ".parquet");
     robot.replay(dataset_path.string());
     robot.disconnect();

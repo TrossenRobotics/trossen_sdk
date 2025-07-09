@@ -28,7 +28,7 @@ void TrossenAIArm::connect() {
     }
     // Stage the arm
     driver_.set_all_modes(trossen_arm::Mode::position);
-    driver_.set_all_positions({0.0, PI/3, PI/6, PI/5, 0.0, 0.0, 0.0}, 2.0, false);
+    driver_.set_all_positions({0.0, PI/3, PI/6, PI/5, 0.0, 0.0, 0.0}, 2.0, true);
 
     is_connected_ = true;
 }
