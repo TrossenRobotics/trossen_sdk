@@ -37,7 +37,10 @@ int main(int argc, char* argv[]) {
     robot.connect(); // Connect to the robot arms
     robot.deactivate_leaders(); // Deactivate the leader arms
     std::filesystem::path dataset_path = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name / "data" / ("episode_" + std::to_string(episode_number) + ".parquet");
-    robot.replay(dataset_path.string());
+    arrow::Status status = robot.replay(dataset_path.string());
+    if (!status.ok()) {
+        std::cerr << "Error replaying dataset: " << status.ToString() << std::endl;
+    }
     robot.disconnect();
 
     return 0;

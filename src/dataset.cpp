@@ -5,7 +5,8 @@
 namespace trossen_dataset {
 
 
-EpisodeData::EpisodeData(int64_t episode_idx, const Metadata& metadata) : episode_idx_(episode_idx), metadata_(metadata) {
+EpisodeData::EpisodeData(int64_t episode_idx) : episode_idx_(episode_idx) {
+    // TODO: Change the buffer size to match episode length
     buffer_.reserve(100);  // Reserve space for 100 frames initially can be adjusted based on the episode length
     std::cout << "Episode " << episode_idx_ << " initialized." << std::endl;
 }
@@ -15,7 +16,29 @@ void EpisodeData::add_frame(const FrameData& frame) {
 const std::vector<FrameData>& EpisodeData::get_frames() const {
     return buffer_;
 }
-void EpisodeData::close() {
+
+TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name) : dataset_name_(dataset_name) {
+    std::cout << "TrossenAIDataset : " << dataset_name_ << std::endl;
+    // Create dataset folder structure: <dataset_name>/data, <dataset_name>/meta, <dataset_name>/videos
+    // Set dataset root directory under ~/.cache/trossen_dataset_collection_sdk/
+    // TODO: Make this configurable
+    std::filesystem::path cache_root = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk";
+    std::filesystem::path dataset_dir = cache_root / dataset_name_;
+    if (dataset_dir.has_extension()) {
+        dataset_dir = dataset_dir.parent_path();
+    }
+    if (std::filesystem::exists(dataset_dir)) {
+        throw std::runtime_error("Dataset directory already exists: " + dataset_dir.string());
+    }
+    std::filesystem::create_directories(dataset_dir / "data");
+    std::filesystem::create_directories(dataset_dir / "meta");
+    std::filesystem::create_directories(dataset_dir / "videos");
+
+    // Initialize metadata
+    metadata_ = trossen_dataset::Metadata(dataset_name_);
+}
+
+void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_data) {
     // Finalize the episode data if needed
     using namespace arrow;
 
@@ -30,7 +53,7 @@ void EpisodeData::close() {
     auto* action_value_builder = static_cast<DoubleBuilder*>(action_builder.value_builder());
 
 
-    for (const auto& sample : buffer_) {
+    for (const auto& sample : episode_data.get_frames()) {
         auto st = timestamp_builder.Append(sample.timestamp_ms);
         if (!st.ok()) {
             std::cerr << "[Arrow Error] Failed to append timestamp: " << st.ToString() << std::endl;
@@ -117,7 +140,7 @@ void EpisodeData::close() {
     if (dataset_dir.has_extension()) {
         dataset_dir = dataset_dir.parent_path();
     }
-    std::filesystem::path episode_file = dataset_dir  / ("episode_" + std::to_string(episode_idx_) + ".parquet");
+    std::filesystem::path episode_file = dataset_dir  / ("episode_" + std::to_string(episode_data.get_episode_idx()) + ".parquet");
     std::string output_path_ = episode_file.string();
     auto result = arrow::io::FileOutputStream::Open(output_path_);
     if (!result.ok()) {
@@ -126,70 +149,60 @@ void EpisodeData::close() {
     }
     outfile = result.ValueOrDie();
 
-    std::cerr << "[JointLogger] Writing to: " << output_path_ << std::endl;
+    std::cerr << "Writing to: " << output_path_ << std::endl;
     status = parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), outfile, 1024);
     if (!status.ok()) {
         std::cerr << "[Parquet Error] Failed to write table: " << status.ToString() << std::endl;
     } else {
-        std::cerr << "[JointLogger] Successfully wrote dataset." << std::endl;
+        std::cerr << "Successfully wrote dataset." << std::endl;
     }
 }
 
-DatasetWriter::DatasetWriter(const std::string& name, const trossen_dataset::Metadata& metadata) : output_path_(name), metadata_(metadata) {
-    std::cout << "DatasetWriter initialized with output file: " << output_path_ << std::endl;
-    // Create dataset folder structure: <dataset_name>/data, <dataset_name>/meta, <dataset_name>/videos
-    // Set dataset root directory under ~/.cache/trossen_dataset_collection_sdk/
-    
-   
 
-}
-
-bool DatasetWriter::verify() const {
+bool TrossenAIDataset::verify() const {
     // Implement verification logic here
     std::cout << "Verifying dataset structure..." << std::endl;
     return true;  // Placeholder for actual verification logic
 }
-void DatasetWriter::compute_statistics() const {
+void TrossenAIDataset::compute_statistics() const {
     // Implement statistics computation logic here
     std::cout << "Computing dataset statistics..." << std::endl;
 }
-void DatasetWriter::add_episode(const EpisodeData& episode_data) {
+void TrossenAIDataset::add_episode(const EpisodeData& episode_data) {
     // Add episode data to the dataset
     std::cout<< "Adding episode" << std::endl; 
 }
-void DatasetWriter::create_metadata(const std::string& metadata_file) const {
+void TrossenAIDataset::create_metadata(const std::string& metadata_file) const {
     // Create metadata for the dataset
     std::cout << "Creating metadata file: " << metadata_file << std::endl;
     // Placeholder for actual metadata creation logic
 }
-void DatasetWriter::update_metadata(const std::string& metadata_file) const {
+void TrossenAIDataset::update_metadata(const std::string& metadata_file) const {
     // Update the metadata of the dataset
     std::cout << "Updating metadata file: " << metadata_file << std::endl;
     // Placeholder for actual metadata update logic
 }
-void DatasetWriter::edit_dataset(const std::string& edit_file) {
+void TrossenAIDataset::edit_dataset(const std::string& edit_file) {
     // Edit the dataset based on the provided edit file
     std::cout << "Editing dataset with file: " << edit_file << std::endl;
     // Placeholder for actual edit logic
 }
-void DatasetWriter::create_new_dataset(const std::string& new_dataset_file) {   
+void TrossenAIDataset::create_new_dataset(const std::string& new_dataset_file) {   
     // Create a new dataset
        
 }       
 
-Metadata::Metadata(std::string dataset_name) : dataset_name_(std::move(dataset_name)) {
+void TrossenAIDataset::add_frame(const FrameData& frame_data) {
+    // Add a frame to the current episode
+    if (episodes_buffer_.empty()) {
+        std::cerr << "No active episode to add frame to." << std::endl;
+        return;
+    }
+    episodes_buffer_.back()->add_frame(frame_data);
+    std::cout << "Frame added to episode " << episodes_buffer_.back()->get_episode_idx() << std::endl;
+}
 
-    std::filesystem::path cache_root = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk";
-    std::filesystem::path dataset_dir = cache_root / dataset_name_;
-    if (dataset_dir.has_extension()) {
-        dataset_dir = dataset_dir.parent_path();
-    }
-    if (std::filesystem::exists(dataset_dir)) {
-        throw std::runtime_error("Dataset directory already exists: " + dataset_dir.string());
-    }
-    std::filesystem::create_directories(dataset_dir / "data");
-    std::filesystem::create_directories(dataset_dir / "meta");
-    std::filesystem::create_directories(dataset_dir / "videos");
+Metadata::Metadata(std::string dataset_name) : dataset_name_(std::move(dataset_name)) {
 
     add_entry("dataset_name", dataset_name_);
     add_entry("version", "1.0");

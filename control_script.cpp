@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 #include <boost/program_options.hpp>
+#include "trossen_sdk_utils/control_utils.hpp"
 
 namespace po = boost::program_options;
 
@@ -38,13 +39,10 @@ int main(int argc, char* argv[]) {
     }
 
     std::cout << "Control script started." << std::endl;
+    // Create a dataset instance
+    trossen_dataset::TrossenAIDataset dataset(dataset_name);
 
-    
-    // Initialize metadata
-    trossen_dataset::Metadata metadata(dataset_name);
-    metadata.add_entry("robot_name", robot_name);
-    metadata.add_entry("num_episodes", std::to_string(num_episodes));
-    metadata.add_entry("recording_time", std::to_string(recording_time));   
+    trossen_sdk::ControlUtils control_utils;
 
     // Initialize the robot arm controller
     trossen_data_collection_sdk::TrossenAIStationary robot_controller(robot_name);
@@ -53,7 +51,7 @@ int main(int argc, char* argv[]) {
     // Start the control loop for each episode
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
         std::cout << "Starting episode " << episode_idx  << std::endl;
-        robot_controller.control_loop(episode_idx, recording_time, metadata);
+        control_utils.control_loop(robot_controller, recording_time, dataset);
         std::cout << "Episode " << episode_idx << " completed." << std::endl;
     }
     std::cout << "All episodes completed." << std::endl;
