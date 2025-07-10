@@ -13,9 +13,9 @@
 namespace trossen_sdk_utils {
 
 
-    //TODo: Move these into a cpp file
+    //TODO: Move these into a cpp file
     inline void log_info(const std::string& message) {
-        std::cout << BLUE << "[INFO] " << message << RESET << std::endl;
+        std::cout << "[INFO] " << message << std::endl;
     }
 
     inline void log_warning(const std::string& message) {
