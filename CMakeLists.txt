@@ -10,23 +10,32 @@ find_package(libtrossen_arm REQUIRED)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
+find_package(nlohmann_json REQUIRED)
 
 include_directories(include)
 include_directories(${Boost_INCLUDE_DIRS})
 
+# Collect all source files
+set( SOURCE_FILES
+    src/trossen_ai_robot_devices/trossen_ai_robot.cpp
+    src/trossen_ai_robot_devices/trossen_ai_driver.cpp
+    src/trossen_dataset/dataset.cpp
+    src/trossen_sdk_utils/control_utils.cpp
+)
+
 # Build library
-add_library(trossen_data_collection_sdk src/trossen_ai_robot.cpp  src/dataset.cpp src/trossen_ai_driver.cpp src/control_utils.cpp)
+add_library(trossen_data_collection_sdk SHARED ${SOURCE_FILES})
 
 target_include_directories(trossen_data_collection_sdk PUBLIC include)
 
 
 # Link Arrow and libtrossen_arm to the library target
 
-
 target_link_libraries(trossen_data_collection_sdk
     libtrossen_arm
     Arrow::arrow_shared
     Parquet::parquet_shared
+    nlohmann_json::nlohmann_json
 )
 
 # Main executable
