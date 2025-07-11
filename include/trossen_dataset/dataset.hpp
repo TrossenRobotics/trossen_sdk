@@ -8,12 +8,16 @@
 #include <arrow/io/api.h>
 #include <parquet/arrow/writer.h>
 #include <opencv2/opencv.hpp>       // OpenCV
+#include <filesystem>
 
+
+namespace fs = std::filesystem;
 
 
 namespace trossen_dataset{
 
 struct ImageData {
+    std::string camera_name; // Name of the camera that captured the image
     cv::Mat image; // OpenCV Mat to hold the image data
     std::string file_path; // File path where the image will be saved
 };
@@ -109,6 +113,12 @@ public:
     std::string get_image_path() const {
         return metadata_.get_entry("image_path");
     }
+
+    std::string get_videos_path() const {
+        return metadata_.get_entry("videos_path");
+    }
+
+    void convert_to_videos(const std::string& output_dir) const;
 
 private:
     std::string dataset_name_;

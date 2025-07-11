@@ -204,6 +204,63 @@ void TrossenAIDataset::add_frame(const FrameData& frame_data) {
     }
 }
 
+
+void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
+    int fps = 30;  // Default frames per second for the video
+    for (const auto& folder_entry : fs::directory_iterator(output_path)) {
+        if (!folder_entry.is_directory()) continue;
+
+        std::string folder_name = folder_entry.path().filename().string();
+        std::vector<fs::path> image_paths;
+
+        // Collect all jpg/jpeg images in the folder
+        for (const auto& file : fs::directory_iterator(folder_entry.path())) {
+            std::string ext = file.path().extension().string();
+            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+            if (file.is_regular_file() && (ext == ".jpg" || ext == ".jpeg")) {
+                image_paths.push_back(file.path());
+            }
+        }
+
+        if (image_paths.empty()) {
+            std::cout << "No images found in folder: " << folder_name << std::endl;
+            continue;
+        }
+
+        // Sort images by filename (assumes timestamps in names)
+        std::sort(image_paths.begin(), image_paths.end());
+
+        // Read first image to get frame size
+        cv::Mat first_frame = cv::imread(image_paths.front().string());
+        if (first_frame.empty()) {
+            std::cerr << "Could not read first image in folder: " << folder_name << std::endl;
+            continue;
+        }
+
+        cv::Size frame_size(first_frame.cols, first_frame.rows);
+        std::string output_video = output_path + "/" + folder_name + ".mp4";
+
+        cv::VideoWriter writer(output_video, cv::VideoWriter::fourcc('m','p','4','v'), fps, frame_size);
+        if (!writer.isOpened()) {
+            std::cerr << "Failed to open video writer for: " << output_video << std::endl;
+            continue;
+        }
+
+        std::cout << "Creating video: " << output_video << std::endl;
+        for (const auto& img_path : image_paths) {
+            cv::Mat frame = cv::imread(img_path.string());
+            if (frame.empty()) {
+                std::cerr << "Failed to read image: " << img_path << std::endl;
+                continue;
+            }
+            writer.write(frame);
+        }
+
+        writer.release();
+        std::cout << "Finished video: " << output_video << std::endl;
+    }
+}
+
 Metadata::Metadata(std::string dataset_name) : dataset_name_(std::move(dataset_name)) {
 
     add_entry("dataset_name", dataset_name_);

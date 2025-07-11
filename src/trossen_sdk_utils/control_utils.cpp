@@ -42,7 +42,9 @@ void ControlUtils::control_loop(trossen_data_collection_sdk::TrossenAIStationary
         // Save images from the cameras
         for (const auto& image_data : state.images) {
             // add the above folder
-            std::string image_file_path = (std::filesystem::path(image_folder_path) / image_data.file_path).string();
+            std::filesystem::path camera_folder = std::filesystem::path(image_folder_path) / image_data.camera_name;
+            std::filesystem::create_directories(camera_folder); // Ensure the folder exists
+            std::string image_file_path = (camera_folder / image_data.file_path).string();
             // Save the image using the async image writer
             image_writer.push(image_data.image, image_file_path);
         }   
@@ -59,6 +61,7 @@ void ControlUtils::control_loop(trossen_data_collection_sdk::TrossenAIStationary
         
     }
     dataset.save_episode(episode_data);  // Close the episode data to finalize it
+    dataset.convert_to_videos(dataset.get_videos_path());  // Convert the dataset frames to videos
     std::cout << "Control loop finished." << std::endl;
     robot.teleop_safety_stop();
     

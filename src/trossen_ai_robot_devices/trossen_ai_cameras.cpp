@@ -61,7 +61,7 @@ trossen_dataset::ImageData TrossenAICamera::async_read() {
         std::string file_path = "image_" + name_ + "_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".jpg";
         {
             std::lock_guard<std::mutex> lock(mtx);
-            result = trossen_dataset::ImageData{image, file_path};
+            result = trossen_dataset::ImageData{name_, image, file_path};
             done = true;
         }
         cv.notify_one();
@@ -120,8 +120,15 @@ void TrossenAsyncImageWriter::worker_loop() {
         lock.unlock();
         // Convert the image to BGR format
         cv::cvtColor(image, image, cv::COLOR_RGB2BGR);  // Convert RGB to BGR for OpenCV compatibility
-        cv::imwrite(filename, image);  // Blocking I/O
-        std::cout << "Image written to: " << filename << std::endl;
+        try {
+            if (!cv::imwrite(filename, image)) {
+            std::cerr << "Failed to write image to: " << filename << std::endl;
+            } else {
+            std::cout << "Image written to: " << filename << std::endl;
+            }
+        } catch (const cv::Exception& e) {
+            std::cerr << "Exception while writing image to " << filename << ": " << e.what() << std::endl;
+        }
     }
 }
 
