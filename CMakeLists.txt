@@ -11,6 +11,9 @@ find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(Boost REQUIRED COMPONENTS program_options)
 find_package(nlohmann_json REQUIRED)
+find_package(realsense2 REQUIRED)
+find_package(OpenCV REQUIRED)
+
 
 include_directories(include)
 include_directories(${Boost_INCLUDE_DIRS})
@@ -48,3 +51,7 @@ add_executable(control control_script.cpp)
 target_link_libraries(control  PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
 target_link_libraries(sleep trossen_data_collection_sdk)
 target_link_libraries(replay PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
+
+
+add_executable(realsense_main camera.cpp)
+target_link_libraries(realsense_main realsense2::realsense2 ${OpenCV_LIBS})

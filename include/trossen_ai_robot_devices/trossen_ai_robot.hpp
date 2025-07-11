@@ -61,6 +61,20 @@ public:
 
     void teleop_safety_stop();
 
+    void send_action(const std::vector<double>& action) {
+        // Make this modular to handle different action sizes (use metadata or robot configuration)
+        if (action.size() != 14) {
+            std::cerr << "Error: Expected 14 joint positions, got " << action.size() << std::endl;
+            return;
+        }
+        // Set positions for left (first 7) and right (last 7) drivers
+        std::vector<double> left_positions(action.begin(), action.begin() + 7);
+        std::vector<double> right_positions(action.begin() + 7, action.end());
+
+        follower_left_driver_.write("positions", left_positions);
+        follower_right_driver_.write("positions", right_positions);
+    }
+
     const arrow::Status replay(const std::string& output_file);
 
     trossen_ai_robot_devices::TrossenAIArm leader_left_driver_;
