@@ -18,10 +18,14 @@ void TrossenAIStationary::connect() {
         follower_left_driver_.connect();
         leader_right_driver_.connect();
         follower_right_driver_.connect();
+        camera_low_.connect();
+        camera_high_.connect();
     } catch (const std::exception& e) {
         std::cerr << "Connection error: " << e.what() << std::endl;
         return;
     }
+
+
     is_connected_ = true;
     std::cout << "Connected to Trossen AI Stationary." << std::endl;
 }
@@ -62,6 +66,7 @@ trossen_dataset::State TrossenAIStationary::teleop_step(trossen_dataset::Episode
     std::vector<double> follower_left_positions = follower_left_driver_.read("positions");
     std::vector<double> follower_right_positions = follower_right_driver_.read("positions");
 
+
     // Create observation state with the left follower positions
     std::vector<double> observation_state = follower_left_positions;
     // Append the right follower positions to the observation state
@@ -72,9 +77,13 @@ trossen_dataset::State TrossenAIStationary::teleop_step(trossen_dataset::Episode
     // Append the right leader positions to the action
     action.insert(action.end(), right_leader_positions.begin(), right_leader_positions.end());
 
+    trossen_dataset::ImageData camera_low_image = camera_low_.async_read();
+    trossen_dataset::ImageData camera_high_image = camera_high_.async_read();
+
     trossen_dataset::State state {
         observation_state,
-        action
+        action,
+        {camera_low_image, camera_high_image}
     };
     return state;
 

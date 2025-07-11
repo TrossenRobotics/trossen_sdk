@@ -18,10 +18,9 @@ void TrossenAICamera::connect() {
     }
 
     cfg.enable_stream(
-                rs2::stream::color, capture_width_, capture_height_, rs2::format::rgb8, fps_
+                RS2_STREAM_COLOR, capture_width_, capture_height_, RS2_FORMAT_RGB8, fps_
             );
-    rs2::pipeline camera;
-    rs2::pipeline_profile profile = camera.start(cfg);
+    rs2::pipeline_profile profile = camera_.start(cfg);
     // Add more configuration options as needed
     // Start the camera pipeline
     std::cout << "Camera connected successfully." << std::endl;
@@ -37,8 +36,7 @@ void TrossenAICamera::disconnect() {
 cv::Mat TrossenAICamera::read() {
     // Read a frame from the camera
     std::cout << "Reading frame from camera: " << name_ << std::endl;
-    rs2::pipeline camera;
-    rs2::frameset frames = camera.wait_for_frames(5000); // Wait for a frame for up to 5000 ms
+    rs2::frameset frames = camera_.wait_for_frames(5000); // Wait for a frame for up to 5000 ms
     rs2::frame color_frame = frames.get_color_frame();
     
     // Convert the frame to OpenCV format
@@ -48,22 +46,22 @@ cv::Mat TrossenAICamera::read() {
     return image.clone();  // Return a copy of the image
 }
 
-trossen_data_collection_sdk::ImageData TrossenAICamera::async_read() {
+trossen_dataset::ImageData TrossenAICamera::async_read() {
     // Start an asynchronous read thread
     std::cout << "Starting asynchronous read from camera: " << name_ << std::endl;
     // Note: In a real implementation, you would use a separate thread to read frames asynchronously
     // For simplicity, we will use the synchronous read method here.
-    trossen_data_collection_sdk::ImageData result;
+    trossen_dataset::ImageData result;
     std::mutex mtx;
     std::condition_variable cv;
     bool done = false;
 
     std::thread([this, &result, &mtx, &cv, &done]() {
         cv::Mat image = read();  // Use the synchronous read for simplicity
-        std::string file_path = "image_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".jpg";
+        std::string file_path = "image_" + name_ + "_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".jpg";
         {
             std::lock_guard<std::mutex> lock(mtx);
-            result = trossen_data_collection_sdk::ImageData{image, file_path};
+            result = trossen_dataset::ImageData{image, file_path};
             done = true;
         }
         cv.notify_one();
@@ -73,12 +71,12 @@ trossen_data_collection_sdk::ImageData TrossenAICamera::async_read() {
     if (!cv.wait_for(lock, std::chrono::seconds(2), [&done]{ return done; })) {
         std::cerr << "Timeout: Failed to receive image within 2 seconds." << std::endl;
         // Optionally, set result to an empty image or error state
-        result = trossen_data_collection_sdk::ImageData{};
+        result = trossen_dataset::ImageData{};
     }
     return result;
 }
 
-}
+
 
 
 TrossenAsyncImageWriter::TrossenAsyncImageWriter(int num_threads)
@@ -120,8 +118,10 @@ void TrossenAsyncImageWriter::worker_loop() {
         auto [image, filename] = std::move(image_queue_.front());
         image_queue_.pop();
         lock.unlock();
-
+        // Convert the image to BGR format
+        cv::cvtColor(image, image, cv::COLOR_RGB2BGR);  // Convert RGB to BGR for OpenCV compatibility
         cv::imwrite(filename, image);  // Blocking I/O
+        std::cout << "Image written to: " << filename << std::endl;
     }
 }
 

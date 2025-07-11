@@ -22,6 +22,7 @@ include_directories(${Boost_INCLUDE_DIRS})
 set( SOURCE_FILES
     src/trossen_ai_robot_devices/trossen_ai_robot.cpp
     src/trossen_ai_robot_devices/trossen_ai_driver.cpp
+    src/trossen_ai_robot_devices/trossen_ai_cameras.cpp
     src/trossen_dataset/dataset.cpp
     src/trossen_sdk_utils/control_utils.cpp
 )
@@ -39,19 +40,18 @@ target_link_libraries(trossen_data_collection_sdk
     Arrow::arrow_shared
     Parquet::parquet_shared
     nlohmann_json::nlohmann_json
+    realsense2::realsense2
+    ${OpenCV_LIBS}
 )
 
 # Main executable
 add_executable(sleep main.cpp)
-
 add_executable(replay replay.cpp)
 add_executable(control control_script.cpp)
+add_executable(realsense_main camera.cpp)
 
 
 target_link_libraries(control  PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
 target_link_libraries(sleep trossen_data_collection_sdk)
 target_link_libraries(replay PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
-
-
-add_executable(realsense_main camera.cpp)
-target_link_libraries(realsense_main realsense2::realsense2 ${OpenCV_LIBS})
+target_link_libraries(realsense_main   trossen_data_collection_sdk)

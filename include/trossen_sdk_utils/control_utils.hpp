@@ -3,7 +3,8 @@
 #include <vector>
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 #include "trossen_sdk_utils/logging_utils.hpp"
-
+#include "trossen_ai_robot_devices/trossen_ai_cameras.hpp"
+#include <filesystem>
 
 namespace trossen_sdk {
 

@@ -34,6 +34,8 @@ TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name) : dataset_na
     std::filesystem::create_directories(dataset_dir / "data");
     std::filesystem::create_directories(dataset_dir / "meta");
     std::filesystem::create_directories(dataset_dir / "videos");
+    std::filesystem::create_directories(dataset_dir / "images");
+
 
     // Initialize metadata
     metadata_ = trossen_dataset::Metadata(dataset_name_);
@@ -215,6 +217,7 @@ Metadata::Metadata(std::string dataset_name) : dataset_name_(std::move(dataset_n
     add_entry("data_path", std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_ / "data");
     add_entry("meta_path", std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_ / "meta");
     add_entry("videos_path", std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_ / "videos");
+    add_entry("image_path", std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_ / "images");
     // Save metadata to file
     save_to_file();
     std::cout << "Metadata entries initialized." << std::endl;

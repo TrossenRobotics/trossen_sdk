@@ -15,7 +15,7 @@
 #include "libtrossen_arm/trossen_arm.hpp"
 #include "trossen_dataset/dataset.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_driver.hpp"
-
+#include "trossen_ai_robot_devices/trossen_ai_cameras.hpp"
 
 namespace trossen_data_collection_sdk {
 
@@ -42,7 +42,9 @@ public:
           leader_left_driver_("leader_left", "192.168.1.3", "leader"),
           follower_left_driver_("follower_left", "192.168.1.5", "follower"),
           leader_right_driver_("leader_right", "192.168.1.2", "leader"),
-          follower_right_driver_("follower_right", "192.168.1.4", "follower")
+          follower_right_driver_("follower_right", "192.168.1.4", "follower"),
+          camera_low_("cam_low", "218622274938"),
+          camera_high_("cam_high", "130322272628")
     {}
 
     void connect() override;
@@ -81,6 +83,8 @@ public:
     trossen_ai_robot_devices::TrossenAIArm follower_left_driver_;
     trossen_ai_robot_devices::TrossenAIArm leader_right_driver_;
     trossen_ai_robot_devices::TrossenAIArm follower_right_driver_;
+    trossen_data_collection_sdk::TrossenAICamera camera_low_;
+    trossen_data_collection_sdk::TrossenAICamera camera_high_;
 
 private:
     

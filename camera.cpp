@@ -13,12 +13,12 @@ int main() {
 
     // Start Time
     auto start_time = std::chrono::steady_clock::now();
-    float control_time = 10.0f; // Control time in seconds
+    float control_time = 1.0f; // Control time in seconds
 
     while(std::chrono::duration<float>(std::chrono::steady_clock::now() - start_time).count() < control_time) {
         // Read images from both cameras
-        trossen_data_collection_sdk::ImageData image0 = camera0.async_read();
-        trossen_data_collection_sdk::ImageData image1 = camera1.async_read();
+        trossen_dataset::ImageData image0 = camera0.async_read();
+        trossen_dataset::ImageData image1 = camera1.async_read();
 
         image_writer.push(image0.image, image0.file_path);
         image_writer.push(image1.image, image1.file_path);

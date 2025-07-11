@@ -1,5 +1,6 @@
 #include "trossen_dataset/dataset.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
+#include "trossen_ai_robot_devices/trossen_ai_cameras.hpp"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -37,6 +38,11 @@ int main(int argc, char* argv[]) {
         std::cout << desc << std::endl;
         return 0;
     }
+    // Initialize the camera
+    // Initialize two cameras (camera IDs 0 and 1)
+    trossen_data_collection_sdk::TrossenAsyncImageWriter image_writer(4);
+
+
 
     std::cout << "Control script started." << std::endl;
     // Create a dataset instance

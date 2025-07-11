@@ -7,14 +7,22 @@
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <parquet/arrow/writer.h>
+#include <opencv2/opencv.hpp>       // OpenCV
+
 
 
 namespace trossen_dataset{
+
+struct ImageData {
+    cv::Mat image; // OpenCV Mat to hold the image data
+    std::string file_path; // File path where the image will be saved
+};
 
 
 struct State{
     std::vector<double> observation_state;  // Joint positions
     std::vector<double> action;             // Action to be taken
+    std::vector<ImageData> images; // Images captured during the episode
 };
 struct FrameData {
     int64_t timestamp_ms;
@@ -37,6 +45,7 @@ public:
     std::vector<std::string> get_values() const;
     void save_to_file() const;
     void load_from_file(const std::string& file_path);
+
 private:
     std::vector<std::pair<std::string, std::string>> entries_;  //
     std::string dataset_name_;  // Name of the dataset for which this metadata is associated
@@ -95,6 +104,10 @@ public:
     // Get number of episodes in the dataset
     size_t get_num_episodes() const {
         return episodes_buffer_.size();
+    }
+
+    std::string get_image_path() const {
+        return metadata_.get_entry("image_path");
     }
 
 private:

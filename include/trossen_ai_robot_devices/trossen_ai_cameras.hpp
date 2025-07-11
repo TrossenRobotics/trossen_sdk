@@ -11,25 +11,21 @@
 #include <condition_variable>
 #include <queue>
 #include <atomic>
+#include "trossen_dataset/dataset.hpp" // Dataset structures
 namespace trossen_data_collection_sdk {
 
 
 
-struct ImageData {
-    cv::Mat image; // OpenCV Mat to hold the image data
-    std::string file_path; // File path where the image will be saved
-};
 
 class TrossenAICamera {
 public:
     
-    explicit TrossenAICamera(const std::string& name, const std::string& serial_number = "")
-            : name_(name), serial_number_(serial_number) {}
+        explicit TrossenAICamera(const std::string& name, const std::string& serial_number = "");
 
         void connect() ;
         void disconnect() ;
         cv::Mat read() ;
-        trossen_data_collection_sdk::ImageData async_read();
+        trossen_dataset::ImageData async_read();
 
 
     private:
@@ -38,6 +34,7 @@ public:
         int capture_width_ = 640; // Default width
         int capture_height_ = 480; // Default height
         int fps_ = 30; // Default frames per second
+        rs2::pipeline camera_; // RealSense camera pipeline
     };
 
 

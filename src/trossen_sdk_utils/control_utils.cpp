@@ -5,6 +5,8 @@ namespace trossen_sdk {
 
 void ControlUtils::control_loop(trossen_data_collection_sdk::TrossenAIStationary& robot, float control_time, trossen_dataset::TrossenAIDataset& dataset) {
 
+    // Start a asynchronous image writer (TODO: Move this to a better location)
+    trossen_data_collection_sdk::TrossenAsyncImageWriter image_writer(4);
 
     //TODO: Move this logic to a separate function
     robot.leader_left_driver_.write("external_efforts", std::vector<double>(7, 0.0));
@@ -34,7 +36,17 @@ void ControlUtils::control_loop(trossen_data_collection_sdk::TrossenAIStationary
         frame_data.action = state.action;  // Action to be taken
         frame_data.episode_idx = episode_idx;  // Episode index
         frame_data.frame_idx = episode_data.get_frames().size();  // Frame index
-        episode_data.add_frame(frame_data);  // Add the frame data to the episode   
+        episode_data.add_frame(frame_data);  // Add the frame data to the episode
+        // Get the file location from metadata in the dataset
+        std::string image_folder_path = dataset.get_image_path();
+        // Save images from the cameras
+        for (const auto& image_data : state.images) {
+            // add the above folder
+            std::string image_file_path = (std::filesystem::path(image_folder_path) / image_data.file_path).string();
+            // Save the image using the async image writer
+            image_writer.push(image_data.image, image_file_path);
+        }   
+
 
         // Get the total time taken for the loop
         auto loop_end_time = std::chrono::system_clock::now();
