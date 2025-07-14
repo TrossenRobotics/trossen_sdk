@@ -17,11 +17,10 @@ It supports efficient data recording for machine learning workflows through asyn
   - `Solo`: 1 leader + 1 follower, 2 cameras
   - `Mobile`: 2 leader + 2 follower, 3 cameras
 - **TrossenAIArm**: Abstract representation of an arm. Arms may be marked as `leader` or `follower`.
-- **TrossenAICamera**: Interface for camera modules. Provides `captureImage()` which returns an `ImageData` struct.
+- **TrossenAICamera**: Interface for camera modules. Provides `async_read()` which returns an `ImageData` struct.
 - **ImageData**: Struct containing:
-  - `pixels`: raw image bytes
-  - `width`, `height`: image dimensions
-  - `encoding`: e.g., RGB8, BGR8
+  - `image`: cv2::Mat 
+  - `image_path` : file path for saving image
 
 ### 2.2 Dataset
 
@@ -29,7 +28,7 @@ It supports efficient data recording for machine learning workflows through asyn
   - Accepts metadata describing the recording session
   - Stores structured data (state, actions, images)
   - Is used during the control loop for logging and replay
-  - Can be exported to formats like Parquet
+  - Stored in `parquet` format
 
 ---
 
@@ -52,7 +51,7 @@ It supports efficient data recording for machine learning workflows through asyn
     - Starts the episode
     - Records sensor and image data
     - Logs metadata and stores it through `Dataset`
-  - Triggers `TrossenAIRobot.recordData()` for episodic data recording
+  - Triggers `TrossenAIRobot.teleop_step()` for frame data recording
   - Ensures real-time control is not blocked by I/O using **asynchronous image writers**.
 
 ### 4.1 CLI Configuration
@@ -74,31 +73,31 @@ Datasets are stored in a structured folder format to ensure easy loading and sha
 │ └── episode_1.parquet
 ├── images/
 │ ├── cam_high/
-│ │ ├── image_cam_high_.jpg
+│ │ ├── image_cam_high_<timestamp>.jpg
 │ └── cam_low/
-│ ├── image_cam_low_.jpg
+│ ├── image_cam_low_<timestamp>.jpg
 ├── meta/
 │ └── info.json
 └── videos/
 ```
 
 
-- `data/`: Contains structured state/action info per episode
+- `data/`: Contains structured state/action info per episode in parquet format
 - `images/`: Subfolders per camera with frame-stamped images
 - `meta/`: JSON with session-level metadata (e.g., robot config, timestamps)
 - `videos/`: Rendered or replayed episodes (optional)
 
 ### 5.1 Asynchronous Image Writing
 
-To maintain a consistent control frequency and prevent blocking operations in the control loop, the SDK uses an `AsyncImageWriter` component that runs in the background.
+To maintain a consistent control frequency and prevent blocking operations in the control loop, the SDK uses an `TrossenAsyncImageWriter` component that runs in the background.
 
 - **Controller** captures images in real-time from multiple cameras during the control loop.
-- Each captured image is pushed to an **internal queue** managed by `AsyncImageWriter`.
+- Each captured image is pushed to an **internal queue** managed by `TrossenAsyncImageWriter`.
 - The queue item includes:
   - The `cv2::Mat` object (or raw bytes)
   - The target **file path** (e.g., `images/cam_low/image_cam_low_<timestamp>.jpg`)
 
-**AsyncImageWriter** is designed to:
+**TrossenAsyncImageWriter** is designed to:
 - Run multiple background threads
 - Continuously poll the queue
 - Write images to disk asynchronously (e.g., using OpenCV or PIL)
