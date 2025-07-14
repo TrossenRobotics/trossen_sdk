@@ -10,8 +10,7 @@ TrossenAICamera::TrossenAICamera(const std::string& name, const std::string& ser
 }
 void TrossenAICamera::connect() {
     // Connect to the camera
-    std::cout << "Connecting to camera: " << name_ << " (Serial: " << serial_number_ << ")" << std::endl;
-    // Add connection logic here
+   // Add connection logic here
     rs2::config cfg;
     if (!serial_number_.empty()) {
         cfg.enable_device(serial_number_);
@@ -23,7 +22,6 @@ void TrossenAICamera::connect() {
     rs2::pipeline_profile profile = camera_.start(cfg);
     // Add more configuration options as needed
     // Start the camera pipeline
-    std::cout << "Camera connected successfully." << std::endl;
 
 }
 
@@ -35,7 +33,6 @@ void TrossenAICamera::disconnect() {
 
 cv::Mat TrossenAICamera::read() {
     // Read a frame from the camera
-    std::cout << "Reading frame from camera: " << name_ << std::endl;
     rs2::frameset frames = camera_.wait_for_frames(5000); // Wait for a frame for up to 5000 ms
     rs2::frame color_frame = frames.get_color_frame();
     
@@ -48,7 +45,6 @@ cv::Mat TrossenAICamera::read() {
 
 trossen_dataset::ImageData TrossenAICamera::async_read() {
     // Start an asynchronous read thread
-    std::cout << "Starting asynchronous read from camera: " << name_ << std::endl;
     // Note: In a real implementation, you would use a separate thread to read frames asynchronously
     // For simplicity, we will use the synchronous read method here.
     trossen_dataset::ImageData result;
@@ -124,7 +120,6 @@ void TrossenAsyncImageWriter::worker_loop() {
             if (!cv::imwrite(filename, image)) {
             std::cerr << "Failed to write image to: " << filename << std::endl;
             } else {
-            std::cout << "Image written to: " << filename << std::endl;
             }
         } catch (const cv::Exception& e) {
             std::cerr << "Exception while writing image to " << filename << ": " << e.what() << std::endl;

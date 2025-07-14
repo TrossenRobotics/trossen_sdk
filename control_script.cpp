@@ -42,9 +42,6 @@ int main(int argc, char* argv[]) {
     // Initialize two cameras (camera IDs 0 and 1)
     trossen_data_collection_sdk::TrossenAsyncImageWriter image_writer(4);
 
-
-
-    std::cout << "Control script started." << std::endl;
     // Create a dataset instance
     trossen_dataset::TrossenAIDataset dataset(dataset_name);
 

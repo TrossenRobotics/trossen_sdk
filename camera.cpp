@@ -24,7 +24,6 @@ int main() {
         image_writer.push(image1.image, image1.file_path);
     }
 
-    std::cout << "Image writing from both cameras stopped." << std::endl;
 
     return 0;
 }

@@ -33,6 +33,9 @@ public:
 
 protected:
     std::string name_;
+    std::vector<trossen_ai_robot_devices::TrossenAIArm> leader_arms_;  // Store arms associated with the robot
+    std::vector<trossen_ai_robot_devices::TrossenAIArm> follower_arms_;  // Store arms associated with the robot
+    std::vector<trossen_data_collection_sdk::TrossenAICamera> cameras_;  // Store cameras associated with the robot
     // Derived classes can define ArmDriverType members as needed
 };
 class TrossenAIStationary : public TrossenAIRobot {
@@ -58,7 +61,6 @@ public:
     void deactivate_leaders() {
         leader_left_driver_.disconnect();
         leader_right_driver_.disconnect();
-        std::cout << "Deactivating leader arms." << std::endl;
     }
 
     void teleop_safety_stop();

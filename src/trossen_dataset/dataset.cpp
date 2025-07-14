@@ -219,7 +219,6 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
             if (file.is_regular_file() && (ext == ".jpg" || ext == ".jpeg")) {
                 image_paths.push_back(file.path());
-                std::cout << "Found image: " << file.path() << std::endl;
             }
         }
 

@@ -26,7 +26,6 @@ set( SOURCE_FILES
     src/trossen_dataset/dataset.cpp
     src/trossen_sdk_utils/control_utils.cpp
 )
-
 # Build library
 add_library(trossen_data_collection_sdk SHARED ${SOURCE_FILES})
 
