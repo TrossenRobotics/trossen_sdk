@@ -219,6 +219,7 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
             if (file.is_regular_file() && (ext == ".jpg" || ext == ".jpeg")) {
                 image_paths.push_back(file.path());
+                std::cout << "Found image: " << file.path() << std::endl;
             }
         }
 
@@ -238,7 +239,7 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
         }
 
         cv::Size frame_size(first_frame.cols, first_frame.rows);
-        std::string output_video = output_path + "/" + folder_name + ".mp4";
+        std::string output_video = get_videos_path() + "/" + folder_name + std::to_string(get_num_episodes()) + ".mp4";
 
         cv::VideoWriter writer(output_video, cv::VideoWriter::fourcc('m','p','4','v'), fps, frame_size);
         if (!writer.isOpened()) {

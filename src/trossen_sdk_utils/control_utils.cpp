@@ -61,7 +61,9 @@ void ControlUtils::control_loop(trossen_data_collection_sdk::TrossenAIStationary
         
     }
     dataset.save_episode(episode_data);  // Close the episode data to finalize it
-    dataset.convert_to_videos(dataset.get_videos_path());  // Convert the dataset frames to videos
+    std::cout << "Converting dataset frames to videos..." << std::endl;
+    std::cout << "Videos will be saved to: " << dataset.get_image_path() << std::endl;
+    dataset.convert_to_videos(dataset.get_image_path());  // Convert the dataset frames to videos
     std::cout << "Control loop finished." << std::endl;
     robot.teleop_safety_stop();
     
