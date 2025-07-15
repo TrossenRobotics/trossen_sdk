@@ -207,57 +207,69 @@ void TrossenAIDataset::add_frame(const FrameData& frame_data) {
 
 void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
     int fps = 30;  // Default frames per second for the video
-    for (const auto& folder_entry : fs::directory_iterator(output_path)) {
-        if (!folder_entry.is_directory()) continue;
+    namespace fs = std::filesystem;
 
-        std::string folder_name = folder_entry.path().filename().string();
-        std::vector<fs::path> image_paths;
+    // Iterate over camera folders inside output_path
+    for (const auto& cam_dir : fs::directory_iterator(output_path)) {
+        if (!cam_dir.is_directory()) continue;
 
-        // Collect all jpg/jpeg images in the folder
-        for (const auto& file : fs::directory_iterator(folder_entry.path())) {
-            std::string ext = file.path().extension().string();
-            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-            if (file.is_regular_file() && (ext == ".jpg" || ext == ".jpeg")) {
-                image_paths.push_back(file.path());
+        std::string cam_name = cam_dir.path().filename().string();
+        std::cout << "Processing camera folder: " << cam_name << std::endl;
+
+        // Iterate over episode folders inside each camera folder
+        for (const auto& episode_dir : fs::directory_iterator(cam_dir.path())) {
+            if (!episode_dir.is_directory()) continue;
+
+            std::string episode_name = episode_dir.path().filename().string();
+            std::cout << "Processing episode folder: " << episode_name << std::endl;
+            std::vector<fs::path> image_paths;
+
+            // Collect all jpg/jpeg images in the episode folder
+            for (const auto& file : fs::directory_iterator(episode_dir.path())) {
+                std::string ext = file.path().extension().string();
+                std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                if (file.is_regular_file() && (ext == ".jpg" || ext == ".jpeg")) {
+                    image_paths.push_back(file.path());
+                }
             }
-        }
 
-        if (image_paths.empty()) {
-            std::cout << "No images found in folder: " << folder_name << std::endl;
-            continue;
-        }
-
-        // Sort images by filename (assumes timestamps in names)
-        std::sort(image_paths.begin(), image_paths.end());
-
-        // Read first image to get frame size
-        cv::Mat first_frame = cv::imread(image_paths.front().string());
-        if (first_frame.empty()) {
-            std::cerr << "Could not read first image in folder: " << folder_name << std::endl;
-            continue;
-        }
-
-        cv::Size frame_size(first_frame.cols, first_frame.rows);
-        std::string output_video = get_videos_path() + "/" + folder_name + std::to_string(get_num_episodes()) + ".mp4";
-
-        cv::VideoWriter writer(output_video, cv::VideoWriter::fourcc('m','p','4','v'), fps, frame_size);
-        if (!writer.isOpened()) {
-            std::cerr << "Failed to open video writer for: " << output_video << std::endl;
-            continue;
-        }
-
-        std::cout << "Creating video: " << output_video << std::endl;
-        for (const auto& img_path : image_paths) {
-            cv::Mat frame = cv::imread(img_path.string());
-            if (frame.empty()) {
-                std::cerr << "Failed to read image: " << img_path << std::endl;
+            if (image_paths.empty()) {
+                std::cout << "No images found in episode folder: " << episode_name << std::endl;
                 continue;
             }
-            writer.write(frame);
-        }
 
-        writer.release();
-        std::cout << "Finished video: " << output_video << std::endl;
+            // Sort images by filename (assumes timestamps in names)
+            std::sort(image_paths.begin(), image_paths.end());
+
+            // Read first image to get frame size
+            cv::Mat first_frame = cv::imread(image_paths.front().string());
+            if (first_frame.empty()) {
+                std::cerr << "Could not read first image in episode folder: " << episode_name << std::endl;
+                continue;
+            }
+
+            cv::Size frame_size(first_frame.cols, first_frame.rows);
+            std::string output_video = get_videos_path() + "/" + cam_name + "_" + episode_name + ".mp4";
+
+            cv::VideoWriter writer(output_video, cv::VideoWriter::fourcc('m','p','4','v'), fps, frame_size);
+            if (!writer.isOpened()) {
+                std::cerr << "Failed to open video writer for: " << output_video << std::endl;
+                continue;
+            }
+
+            std::cout << "Creating video: " << output_video << std::endl;
+            for (const auto& img_path : image_paths) {
+                cv::Mat frame = cv::imread(img_path.string());
+                if (frame.empty()) {
+                    std::cerr << "Failed to read image: " << img_path << std::endl;
+                    continue;
+                }
+                writer.write(frame);
+            }
+
+            writer.release();
+            std::cout << "Finished video: " << output_video << std::endl;
+        }
     }
 }
 

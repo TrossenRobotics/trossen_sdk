@@ -34,7 +34,8 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIStationary* r
 
         std::string image_folder_path = dataset.get_image_path();
         for (const auto& image_data : state.images) {
-            std::filesystem::path camera_folder = std::filesystem::path(image_folder_path) / image_data.camera_name;
+            std::string episode_folder_name = "episode_" + std::to_string(episode_idx);
+            std::filesystem::path camera_folder = std::filesystem::path(image_folder_path) / image_data.camera_name / episode_folder_name;
             std::filesystem::create_directories(camera_folder);
             std::string image_file_path = (camera_folder / image_data.file_path).string();
             image_writer.push(image_data.image, image_file_path);
@@ -49,7 +50,6 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIStationary* r
                                     + " | Frame: " + std::to_string(frame_data.frame_idx));
     }
     dataset.save_episode(episode_data);
-    dataset.convert_to_videos(dataset.get_image_path());
     std::cout << "Control loop finished." << std::endl;
     robot->teleop_safety_stop();
 }
