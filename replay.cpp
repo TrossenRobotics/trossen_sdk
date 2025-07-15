@@ -1,4 +1,5 @@
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
+#include "trossen_sdk_utils/config_parser_utils.hpp"
 #include "trossen_dataset/dataset.hpp"
 #include <boost/program_options.hpp>
 #include <filesystem>
@@ -33,15 +34,20 @@ int main(int argc, char* argv[]) {
         std::cout << desc << "\n";
         exit(1);
     }
-    trossen_data_collection_sdk::TrossenAIStationary robot(robot_name);
-    robot.connect(); // Connect to the robot arms
-    robot.deactivate_leaders(); // Deactivate the leader arms
+
+    // Load the robot configuration
+    trossen_sdk_config::RobotConfig robot_config = trossen_sdk_config::load_robot_config("../config/stationary.json");
+    // Create a robot instance from the configuration
+    auto robot_controller = trossen_sdk_config::create_robot_from_config(robot_config);
+
+    robot_controller->connect(); // Connect to the robot arms
+    robot_controller->deactivate_leaders(); // Deactivate the leader arms
     std::filesystem::path dataset_path = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name / "data" / ("episode_" + std::to_string(episode_number) + ".parquet");
-    arrow::Status status = robot.replay(dataset_path.string());
+    arrow::Status status = robot_controller->replay(dataset_path.string());
     if (!status.ok()) {
         std::cerr << "Error replaying dataset: " << status.ToString() << std::endl;
     }
-    robot.disconnect();
+    robot_controller->disconnect();
 
     return 0;
 }

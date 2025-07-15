@@ -12,7 +12,7 @@
 #include <queue>
 #include <atomic>
 #include "trossen_dataset/dataset.hpp" // Dataset structures
-namespace trossen_data_collection_sdk {
+namespace trossen_ai_robot_devices {
 
 
 

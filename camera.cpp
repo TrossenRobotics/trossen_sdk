@@ -4,10 +4,10 @@
 int main() {
 
     // Initialize two cameras (camera IDs 0 and 1)
-    trossen_data_collection_sdk::TrossenAsyncImageWriter image_writer(4);
+    trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer(4);
 
-    trossen_data_collection_sdk::TrossenAICamera camera0("cam_low", "218622274938");
-    trossen_data_collection_sdk::TrossenAICamera camera1("cam_high", "130322272628");
+    trossen_ai_robot_devices::TrossenAICamera camera0("cam_low", "218622274938");
+    trossen_ai_robot_devices::TrossenAICamera camera1("cam_high", "130322272628");
     camera0.connect();
     camera1.connect();
 

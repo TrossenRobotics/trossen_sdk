@@ -4,9 +4,27 @@
 #include <iostream>
 #define PI 3.14159265358979323846
 
-namespace trossen_data_collection_sdk {
+namespace trossen_ai_robot_devices {
 
+TrossenAIStationary::TrossenAIStationary(const trossen_sdk_config::RobotConfig& config)
+    : TrossenAIRobot(config.robot_name){
+    for (const auto& arm_cfg : config.leader_arms) {
+        leader_arms_.emplace_back(std::make_unique<TrossenAIArm>(arm_cfg.name, arm_cfg.ip, "leader"));
+    }
 
+    for (const auto& arm_cfg : config.follower_arms) {
+        follower_arms_.emplace_back(std::make_unique<TrossenAIArm>(arm_cfg.name, arm_cfg.ip, "follower"));
+    }
+
+    for (const auto& cam_cfg : config.cameras) {
+        cameras_.emplace_back(std::make_unique<TrossenAICamera>(cam_cfg.name, cam_cfg.serial));
+    }
+
+    std::cout << "[TrossenAIStationary] Initialized with "
+              << leader_arms_.size() << " leader arms, "
+              << follower_arms_.size() << " follower arms, "
+              << cameras_.size() << " cameras." << std::endl;
+}
 
 void TrossenAIStationary::connect() {
     if (is_connected_) {
@@ -14,12 +32,15 @@ void TrossenAIStationary::connect() {
         return;
     }
     try {
-        leader_left_driver_.connect();
-        follower_left_driver_.connect();
-        leader_right_driver_.connect();
-        follower_right_driver_.connect();
-        camera_low_.connect();
-        camera_high_.connect();
+        for (auto& arm : leader_arms_) {
+            arm->connect();
+        }
+        for (auto& arm : follower_arms_) {
+            arm->connect();
+        }
+        for (auto& camera : cameras_) {
+            camera->connect();
+        }
     } catch (const std::exception& e) {
         std::cerr << "Connection error: " << e.what() << std::endl;
         return;
@@ -36,54 +57,68 @@ void TrossenAIStationary::disconnect() {
         std::cout << "Not connected to " << name_ << std::endl;
         return;
     }
-    leader_left_driver_.disconnect();
-    follower_left_driver_.disconnect();
-    leader_right_driver_.disconnect();
-    follower_right_driver_.disconnect();
+    for (auto& arm : follower_arms_) {
+        arm->disconnect();
+    }
+    for (auto& camera : cameras_) {
+        camera->disconnect();
+    }
     is_connected_ = false;
     std::cout << "Disconnected from Trossen AI Stationary." << std::endl;
 }
 
 
 void TrossenAIStationary::teleop_safety_stop() {
-    leader_left_driver_.stage_arm();
-    leader_right_driver_.stage_arm();
-    follower_left_driver_.stage_arm();
-    follower_right_driver_.stage_arm();
+    for (auto& arm : leader_arms_) {
+        arm->stage_arm(); // Stop leader arms
+    }
+    for (auto& arm : follower_arms_) {
+        arm->stage_arm(); // Stop follower arms
+    }
 }
 
 trossen_dataset::State TrossenAIStationary::teleop_step(trossen_dataset::EpisodeData& episode_data) {
 
     // Get the current joint positions from the leader drivers
-    std::vector<double>  left_leader_positions = leader_left_driver_.read("positions");
-    std::vector<double>  right_leader_positions = leader_right_driver_.read("positions");
+    std::map<std::string, std::vector<double>> leader_positions_;
+    for (auto& arm : leader_arms_) {
+        std::vector<double> positions = arm->read("positions");
+        leader_positions_[arm->get_name()] = positions;
+    }
 
-    // Send the current positions to the follower drivers
-    follower_left_driver_.write("positions", left_leader_positions);
-    follower_right_driver_.write("positions", right_leader_positions);
+    for (auto& arm : follower_arms_) {
+        // Write the positions to the follower arm
+        arm->write("positions", leader_positions_[arm->get_name()]);
+    }
 
-    // Get follower left driver positions
-    std::vector<double> follower_left_positions = follower_left_driver_.read("positions");
-    std::vector<double> follower_right_positions = follower_right_driver_.read("positions");
+    std::map<std::string, std::vector<double>> follower_positions_;
+    for (auto& arm : follower_arms_) {
+        std::vector<double> positions = arm->read("positions");
+        follower_positions_[arm->get_name()] = positions;
+    }
 
 
-    // Create observation state with the left follower positions
-    std::vector<double> observation_state = follower_left_positions;
-    // Append the right follower positions to the observation state
-    observation_state.insert(observation_state.end(), follower_right_positions.begin(), follower_right_positions.end());
-
-    // Create action (for now, just a copy of observation state)
-    std::vector<double> action = left_leader_positions;
-    // Append the right leader positions to the action
-    action.insert(action.end(), right_leader_positions.begin(), right_leader_positions.end());
-
-    trossen_dataset::ImageData camera_low_image = camera_low_.async_read();
-    trossen_dataset::ImageData camera_high_image = camera_high_.async_read();
+    std::vector<double> observation_state;
+    // Collect joint positions from both leader and follower arms
+    for (auto &state : follower_positions_) {
+        observation_state.insert(observation_state.end(), state.second.begin(), state.second.end());
+    }
+    std::vector<double> action;
+    for (auto &state : leader_positions_) {
+        action.insert(action.end(), state.second.begin(), state.second.end());
+    }
+   
+    // Collect images from cameras
+    std::vector<trossen_dataset::ImageData> images;
+    for (auto& camera : cameras_) {
+        trossen_dataset::ImageData image_data = camera->async_read();
+        images.push_back(image_data);
+    }
 
     trossen_dataset::State state {
         observation_state,
         action,
-        {camera_low_image, camera_high_image}
+        images
     };
     return state;
 
@@ -159,12 +194,12 @@ void TrossenAIStationary::write(const std::string& data_name, const std::vector<
             std::cerr << "Error: Expected 14 joint positions, got " << value.size() << std::endl;
             return;
         }
-        // Set positions for left (first 7) and right (last 7) drivers
-        std::vector<double> left_positions(value.begin(), value.begin() + 7);
-        std::vector<double> right_positions(value.begin() + 7, value.end());
+        // // Set positions for left (first 7) and right (last 7) drivers
+        // std::vector<double> left_positions(value.begin(), value.begin() + 7);
+        // std::vector<double> right_positions(value.begin() + 7, value.end());
 
-        follower_left_driver_.write("positions", left_positions);
-        follower_right_driver_.write("positions", right_positions);
+        // follower_left_driver_.write("positions", left_positions);
+        // follower_right_driver_.write("positions", right_positions);
 }
 
 } // namespace trossen_data_collection_sdk

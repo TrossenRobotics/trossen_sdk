@@ -6,6 +6,7 @@
 #include <string>
 #include <boost/program_options.hpp>
 #include "trossen_sdk_utils/control_utils.hpp"
+#include "trossen_sdk_utils/config_parser_utils.hpp"
 
 namespace po = boost::program_options;
 
@@ -40,7 +41,7 @@ int main(int argc, char* argv[]) {
     }
     // Initialize the camera
     // Initialize two cameras (camera IDs 0 and 1)
-    trossen_data_collection_sdk::TrossenAsyncImageWriter image_writer(4);
+    trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer(4);
 
     // Create a dataset instance
     trossen_dataset::TrossenAIDataset dataset(dataset_name);
@@ -48,17 +49,25 @@ int main(int argc, char* argv[]) {
     trossen_sdk::ControlUtils control_utils;
 
     // Initialize the robot arm controller
-    trossen_data_collection_sdk::TrossenAIStationary robot_controller(robot_name);
-    robot_controller.connect(); // Connect to the robot arms
+    auto robot_controller = trossen_sdk_config::create_robot_from_config(
+        trossen_sdk_config::load_robot_config("../config/stationary.json"));
+    robot_controller->connect(); // Connect to the robot arms
+    
+    // Try casting to the specific derived type
+    auto* stationary_robot = dynamic_cast<trossen_ai_robot_devices::TrossenAIStationary*>(robot_controller.get());
+    if (!stationary_robot) {
+        std::cerr << "Error: Robot is not of type TrossenAIStationary!" << std::endl;
+        return -1;
+    }
 
     // Start the control loop for each episode
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
         std::cout << "Starting episode " << episode_idx  << std::endl;
-        control_utils.control_loop(robot_controller, recording_time, dataset);
+        control_utils.control_loop(stationary_robot, recording_time, dataset);
         std::cout << "Episode " << episode_idx << " completed." << std::endl;
     }
     std::cout << "All episodes completed." << std::endl;
-    robot_controller.disconnect(); // Sleep the arms at the end of the control script
+    robot_controller->disconnect(); // Sleep the arms at the end of the control script
     std::cout << "Control script finished." << std::endl;
     return 0;
 }

@@ -1,6 +1,6 @@
 #include "trossen_ai_robot_devices/trossen_ai_cameras.hpp"
 
-namespace trossen_data_collection_sdk {
+namespace trossen_ai_robot_devices {
 
 TrossenAICamera::TrossenAICamera(const std::string& name, const std::string& serial_number)
     : name_(name), serial_number_(serial_number) {

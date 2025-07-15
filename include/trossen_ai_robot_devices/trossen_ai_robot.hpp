@@ -16,8 +16,9 @@
 #include "trossen_dataset/dataset.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_driver.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_cameras.hpp"
+#include "trossen_sdk_utils/config_utils.hpp"
 
-namespace trossen_data_collection_sdk {
+namespace trossen_ai_robot_devices {
 
 
 class TrossenAIRobot {
@@ -30,26 +31,18 @@ public:
     virtual void connect() = 0;
     virtual void disconnect() = 0;
     virtual trossen_dataset::State teleop_step(trossen_dataset::EpisodeData& episode_data) = 0;
+    virtual const arrow::Status replay(const std::string& output_file) = 0;
+    virtual void deactivate_leaders() = 0;
 
 protected:
     std::string name_;
-    std::vector<trossen_ai_robot_devices::TrossenAIArm> leader_arms_;  // Store arms associated with the robot
-    std::vector<trossen_ai_robot_devices::TrossenAIArm> follower_arms_;  // Store arms associated with the robot
-    std::vector<trossen_data_collection_sdk::TrossenAICamera> cameras_;  // Store cameras associated with the robot
-    // Derived classes can define ArmDriverType members as needed
+    std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm>> leader_arms_;
+    std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm>> follower_arms_;
+    std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAICamera>> cameras_;
 };
 class TrossenAIStationary : public TrossenAIRobot {
 public:
-    TrossenAIStationary(const std::string& name)
-        : TrossenAIRobot(name),
-          leader_left_driver_("leader_left", "192.168.1.3", "leader"),
-          follower_left_driver_("follower_left", "192.168.1.5", "follower"),
-          leader_right_driver_("leader_right", "192.168.1.2", "leader"),
-          follower_right_driver_("follower_right", "192.168.1.4", "follower"),
-          camera_low_("cam_low", "218622274938"),
-          camera_high_("cam_high", "130322272628")
-    {}
-
+    TrossenAIStationary(const trossen_sdk_config::RobotConfig& config);
     void connect() override;
 
     void write(const std::string& data_name, const std::vector<double>& value);
@@ -59,39 +52,35 @@ public:
     void disconnect() override;
 
     void deactivate_leaders() {
-        leader_left_driver_.disconnect();
-        leader_right_driver_.disconnect();
+        for (auto& arm : leader_arms_) {
+            arm->disconnect(); // Stop leader arms
+        }
     }
 
     void teleop_safety_stop();
 
     void send_action(const std::vector<double>& action) {
         // Make this modular to handle different action sizes (use metadata or robot configuration)
-        if (action.size() != 14) {
-            std::cerr << "Error: Expected 14 joint positions, got " << action.size() << std::endl;
-            return;
-        }
-        // Set positions for left (first 7) and right (last 7) drivers
-        std::vector<double> left_positions(action.begin(), action.begin() + 7);
-        std::vector<double> right_positions(action.begin() + 7, action.end());
+        // if (action.size() != 14) {
+        //     std::cerr << "Error: Expected 14 joint positions, got " << action.size() << std::endl;
+        //     return;
+        // }
+        // // Set positions for left (first 7) and right (last 7) drivers
+        // std::vector<double> left_positions(action.begin(), action.begin() + 7);
+        // std::vector<double> right_positions(action.begin() + 7, action.end());
 
-        follower_left_driver_.write("positions", left_positions);
-        follower_right_driver_.write("positions", right_positions);
+        // follower_left_driver_->write("positions", left_positions);
+        // follower_right_driver_->write("positions", right_positions);
     }
 
     const arrow::Status replay(const std::string& output_file);
-
-    trossen_ai_robot_devices::TrossenAIArm leader_left_driver_;
-    trossen_ai_robot_devices::TrossenAIArm follower_left_driver_;
-    trossen_ai_robot_devices::TrossenAIArm leader_right_driver_;
-    trossen_ai_robot_devices::TrossenAIArm follower_right_driver_;
-    trossen_data_collection_sdk::TrossenAICamera camera_low_;
-    trossen_data_collection_sdk::TrossenAICamera camera_high_;
+    std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm>> leader_arms_;
+    std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm>> follower_arms_;
+    std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAICamera>> cameras_;
 
 private:
-    
     bool is_connected_ = false;  // Track connection status
-
+   
 };
 
 } 

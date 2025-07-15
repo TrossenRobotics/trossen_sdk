@@ -11,11 +11,21 @@ namespace trossen_ai_robot_devices {
     class TrossenAIArm {
     public:
         TrossenAIArm(const std::string& name, const std::string& ip_address, const std::string& model) : name_(name), ip_address_(ip_address), model_(model) {}
+        
+        // Move constructor and assignment
+        TrossenAIArm(TrossenAIArm&&) noexcept = default;
+        TrossenAIArm& operator=(TrossenAIArm&&) noexcept = default;
+
+        // Delete copy constructor and assignment
+        TrossenAIArm(const TrossenAIArm&) = delete;
+        TrossenAIArm& operator=(const TrossenAIArm&) = delete;
+
         void connect();
         void disconnect();
         std::vector<double> read(std::string data_name);
         void write(const std::string& data_name, const std::vector<double>& data);
         void stage_arm();
+        std::string get_name() const { return name_; }
 
     private:
         std::string name_;
