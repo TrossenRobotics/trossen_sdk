@@ -31,17 +31,14 @@ void TrossenAICamera::disconnect() {
     // Add disconnection logic here
 }
 
-cv::Mat TrossenAICamera::read() {
+rs2::frame TrossenAICamera::read() {
     // Read a frame from the camera
     rs2::frameset frames = camera_.wait_for_frames(5000); // Wait for a frame for up to 5000 ms
     rs2::frame color_frame = frames.get_color_frame();
-    
-    // Convert the frame to OpenCV format
-    cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3, 
-                  (void*)color_frame.get_data(), cv::Mat::AUTO_STEP);
-    
-    return image.clone();  // Return a copy of the image
+    return color_frame;
 }
+
+
 
 trossen_dataset::ImageData TrossenAICamera::async_read() {
     // Start an asynchronous read thread
@@ -53,8 +50,10 @@ trossen_dataset::ImageData TrossenAICamera::async_read() {
     bool done = false;
 
     std::thread([this, &result, &mtx, &cv, &done]() {
-        cv::Mat image = read();  // Use the synchronous read for simplicity
-        std::string file_path = "image_" + name_ + "_" + std::to_string(std::chrono::system_clock::now().time_since_epoch().count()) + ".jpg";
+        rs2::frame color_frame = read();  // Use the synchronous read for simplicity
+        cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3, (void*)color_frame.get_data(), cv::Mat::AUTO_STEP);
+        int64_t timestamp = color_frame.get_timestamp();
+        std::string file_path = "image_" + name_ + "_" + std::to_string(timestamp) + ".jpg";
         {
             std::lock_guard<std::mutex> lock(mtx);
             result = trossen_dataset::ImageData{name_, image, file_path};

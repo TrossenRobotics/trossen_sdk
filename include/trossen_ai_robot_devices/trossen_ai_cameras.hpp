@@ -24,7 +24,7 @@ public:
 
         void connect() ;
         void disconnect() ;
-        cv::Mat read() ;
+        rs2::frame read() ;
         trossen_dataset::ImageData async_read();
 
 
