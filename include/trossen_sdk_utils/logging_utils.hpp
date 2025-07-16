@@ -19,10 +19,10 @@ namespace trossen_sdk_utils {
     }
 
     inline void log_warning(const std::string& message) {
-        std::cout << YELLOW << "[WARNING] " << message << RESET << std::endl;
+        std::cout << YELLOW << "[WARN] " << message << RESET << std::endl;
     }
 
     inline void log_error(const std::string& message) {
-        std::cerr << RED << "[ERROR] " << message << RESET << std::endl;
+        std::cerr << RED << "[ERRO] " << message << RESET << std::endl;
     }
 }  // namespace trossen_sdk_utils

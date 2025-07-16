@@ -14,6 +14,17 @@ public:
     float control_time,
     trossen_dataset::TrossenAIDataset& dataset);
 
+    inline void busy_wait_until(const std::chrono::steady_clock::time_point& loop_start, double frequency) {
+    using namespace std::chrono;
+    auto desired_duration = duration<double>(1.0 / frequency);
+    auto elapsed = steady_clock::now() - loop_start;
+    auto remaining = duration_cast<microseconds>(desired_duration - elapsed);
+    if (remaining.count() > 0){
+        std::this_thread::sleep_for(remaining);
+    }
+    }
+
+
 private:
     // Logging utility
 };
