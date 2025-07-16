@@ -198,6 +198,12 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
         std::string cam_name = cam_dir.path().filename().string();
         std::cout << "Processing camera folder: " << cam_name << std::endl;
 
+        // Create camera folder in videos path if it doesn't exist
+        fs::path videos_cam_dir = fs::path(get_videos_path()) / cam_name;
+        if (!fs::exists(videos_cam_dir)) {
+            fs::create_directories(videos_cam_dir);
+        }
+
         // Iterate over episode folders inside each camera folder
         for (const auto& episode_dir : fs::directory_iterator(cam_dir.path())) {
             if (!episode_dir.is_directory()) continue;
@@ -231,7 +237,7 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
             }
 
             cv::Size frame_size(first_frame.cols, first_frame.rows);
-            std::string output_video = get_videos_path() + "/" + cam_name + "_" + episode_name + ".mp4";
+            std::string output_video = (videos_cam_dir / (episode_name + ".mp4")).string();
 
             cv::VideoWriter writer(output_video, cv::VideoWriter::fourcc('m','p','4','v'), fps, frame_size);
             if (!writer.isOpened()) {
