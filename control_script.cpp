@@ -68,6 +68,7 @@ int main(int argc, char* argv[]) {
     }
     std::cout << "All episodes completed." << std::endl;
     dataset.convert_to_videos(dataset.get_image_path());
+    dataset.compute_statistics(); // Compute statistics after all episodes
 
     robot_controller->disconnect(); // Sleep the arms at the end of the control script
     std::cout << "Control script finished." << std::endl;

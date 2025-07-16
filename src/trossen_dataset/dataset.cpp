@@ -168,40 +168,22 @@ bool TrossenAIDataset::verify() const {
     std::cout << "Verifying dataset structure..." << std::endl;
     return true;  // Placeholder for actual verification logic
 }
-void TrossenAIDataset::compute_statistics() const {
+void TrossenAIDataset::compute_statistics() {
     // Implement statistics computation logic here
+    // Load parquet files and compute statistics
     std::cout << "Computing dataset statistics..." << std::endl;
-}
-void TrossenAIDataset::add_episode(const EpisodeData& episode_data) {
-    // Add episode data to the dataset
-    std::cout<< "Adding episode" << std::endl; 
-}
-void TrossenAIDataset::create_metadata(const std::string& metadata_file) const {
-    // Create metadata for the dataset
-    std::cout << "Creating metadata file: " << metadata_file << std::endl;
-    // Placeholder for actual metadata creation logic
-}
-void TrossenAIDataset::update_metadata(const std::string& metadata_file) const {
-    // Update the metadata of the dataset
-    std::cout << "Updating metadata file: " << metadata_file << std::endl;
-    // Placeholder for actual metadata update logic
-}
-void TrossenAIDataset::edit_dataset(const std::string& edit_file) {
-    // Edit the dataset based on the provided edit file
-    std::cout << "Editing dataset with file: " << edit_file << std::endl;
-    // Placeholder for actual edit logic
-}
-void TrossenAIDataset::create_new_dataset(const std::string& new_dataset_file) {   
-    // Create a new dataset
-       
-}       
-
-void TrossenAIDataset::add_frame(const FrameData& frame_data) {
-    // Add a frame to the current episode
-    if (episodes_buffer_.empty()) {
-        std::cerr << "No active episode to add frame to." << std::endl;
-        return;
+    // Get the total number of episodes
+    size_t num_episodes = get_num_episodes();
+    // Print all the metadata entries
+    for (const auto& key : metadata_.get_keys()) {
+        std::cout << "Metadata entry - " << key << ": " << metadata_.get_entry(key) << std::endl;
     }
+
+    // Add it to metadata
+    metadata_.update_entry("total_episodes", std::to_string(num_episodes));
+    // Save metadata to file
+    metadata_.save_to_file();
+
 }
 
 
@@ -276,7 +258,8 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
 Metadata::Metadata(std::string dataset_name) : dataset_name_(std::move(dataset_name)) {
 
     add_entry("dataset_name", dataset_name_);
-    add_entry("version", "1.0");
+    add_entry("codebase_version", "1.0");
+    add_entry("robot_name", "Trossen AI Stationary");
     // Store current time as creation date in mm-dd-yyyy format
     std::time_t t = std::time(nullptr);
     std::tm tm = *std::localtime(&t);
@@ -311,6 +294,17 @@ void Metadata::remove_entry(const std::string& key) {
                                   [&key](const auto& entry) { return entry.first == key; }),
                    entries_.end());
 }
+
+void Metadata::update_entry(const std::string& key, const std::string& value) {
+    for (auto& entry : entries_) {
+        if (entry.first == key) {
+            entry.second = value;
+            return;
+        }
+    }
+    // If key not found, add a new entry
+    add_entry(key, value);
+}
 void Metadata::clear() {
     entries_.clear();
 }
@@ -343,8 +337,8 @@ void Metadata::save_to_file() const {
         info_json[entry.first] = entry.second;
     }
 
-    // Write the JSON to the file
-    std::ofstream file(info_json_path);
+    // Write the JSON to the file (overwrite if exists)
+    std::ofstream file(info_json_path, std::ios::trunc);
     if (!file.is_open()) {
         std::cerr << "Error opening file for saving metadata: " << info_json_path << std::endl;
         return;

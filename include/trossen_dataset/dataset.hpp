@@ -49,9 +49,10 @@ public:
     std::vector<std::string> get_values() const;
     void save_to_file() const;
     void load_from_file(const std::string& file_path);
+    void update_entry(const std::string& key, const std::string& value);
 
 private:
-    std::vector<std::pair<std::string, std::string>> entries_;  //
+    std::vector<std::pair<std::string, std::string>> entries_;  // Key-value pairs for metadata entries
     std::string dataset_name_;  // Name of the dataset for which this metadata is associated
     // Key-value pairs for metadata entries
     // Each entry is a pair of strings, where the first string is the key and the
@@ -82,25 +83,7 @@ public:
     bool verify() const;
 
     // Compute statistics of the dataset
-    void compute_statistics() const;
-
-    // Add episode data to the dataset
-    void add_episode(const EpisodeData& episode_data);
-
-    // create metadata for the dataset
-    void create_metadata(const std::string& metadata_file) const;
-
-    // update the metadata of the dataset
-    void update_metadata(const std::string& metadata_file) const;
-
-    // edit the dataset
-    void edit_dataset(const std::string& edit_file);
-
-    // create a new dataset
-    void create_new_dataset(const std::string& new_dataset_file);
-
-    // Add frame
-    void add_frame(const FrameData& frame_data);
+    void compute_statistics();
 
     // Save the current episode data to the dataset
     void save_episode(const EpisodeData& episode_data);
