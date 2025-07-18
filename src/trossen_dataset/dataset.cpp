@@ -183,10 +183,6 @@ void TrossenAIDataset::compute_statistics() {
     // Get the total number of episodes
     size_t num_episodes = get_num_episodes();
     // Print all the metadata entries
-    for (const auto& key : metadata_->get_keys()) {
-        std::cout << "Metadata entry - " << key << ": " << metadata_->get_entry(key) << std::endl;
-    }
-
     // Add it to metadata
     metadata_->update_entry("total_episodes", std::to_string(num_episodes));
     // Save metadata to file
@@ -204,7 +200,6 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
         if (!cam_dir.is_directory()) continue;
 
         std::string cam_name = cam_dir.path().filename().string();
-        std::cout << "Processing camera folder: " << cam_name << std::endl;
 
         // Create camera folder in videos path if it doesn't exist
         fs::path videos_cam_dir = fs::path(get_videos_path()) / cam_name;
@@ -217,7 +212,11 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
             if (!episode_dir.is_directory()) continue;
 
             std::string episode_name = episode_dir.path().filename().string();
-            std::cout << "Processing episode folder: " << episode_name << std::endl;
+            fs::path output_video_path = videos_cam_dir / (episode_name + ".mp4");
+            if (fs::exists(output_video_path)) {
+                continue;
+            }
+
             std::vector<fs::path> image_paths;
 
             // Collect all jpg/jpeg images in the episode folder
@@ -245,15 +244,13 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
             }
 
             cv::Size frame_size(first_frame.cols, first_frame.rows);
-            std::string output_video = (videos_cam_dir / (episode_name + ".mp4")).string();
 
-            cv::VideoWriter writer(output_video, cv::VideoWriter::fourcc('m','p','4','v'), fps, frame_size);
+            cv::VideoWriter writer(output_video_path, cv::VideoWriter::fourcc('m','p','4','v'), fps, frame_size);
             if (!writer.isOpened()) {
-                std::cerr << "Failed to open video writer for: " << output_video << std::endl;
+                std::cerr << "Failed to open video writer for: " << output_video_path << std::endl;
                 continue;
             }
 
-            std::cout << "Creating video: " << output_video << std::endl;
             for (const auto& img_path : image_paths) {
                 cv::Mat frame = cv::imread(img_path.string());
                 if (frame.empty()) {
@@ -264,8 +261,7 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
             }
 
             writer.release();
-            std::cout << "Finished video: " << output_video << std::endl;
-        }
+            std::cout << "Converted episode " << episode_name << " to video: " << output_video_path << std::endl;}
     }
 
 }
