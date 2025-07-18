@@ -15,15 +15,19 @@ int main(int argc, char* argv[]) {
     std::string robot_name;
     int num_episodes;
     double recording_time;
-
+    double warmup_time;
+    double reset_time;
+    
     // Argument parsing
     po::options_description desc("Allowed options");
     desc.add_options()
-        ("help,h", "produce help message")
-        ("dataset,d", po::value<std::string>(&dataset_name)->default_value("test_dataset_01"), "dataset name")
-        ("robot,r", po::value<std::string>(&robot_name)->default_value("Trossen AI Stationary"), "robot name")
-        ("episodes,e", po::value<int>(&num_episodes)->default_value(2), "number of episodes")
-        ("time,t", po::value<double>(&recording_time)->default_value(10.0), "recording time per episode (seconds)");
+        ("help", "produce help message")
+        ("dataset", po::value<std::string>(&dataset_name)->default_value("test_dataset_01"), "dataset name")
+        ("robot", po::value<std::string>(&robot_name)->default_value("Trossen AI Stationary"), "robot name")
+        ("episodes", po::value<int>(&num_episodes)->default_value(2), "number of episodes")
+        ("recording_time", po::value<double>(&recording_time)->default_value(10.0), "recording time per episode (seconds)")
+        ("warmup_time", po::value<double>(&warmup_time)->default_value(5.0), "warmup time for the robot arms (seconds)")
+        ("reset_time", po::value<double>(&reset_time)->default_value(2.0), "reset time between episodes (seconds)");
 
     po::variables_map vm;
     try {
@@ -72,13 +76,15 @@ int main(int argc, char* argv[]) {
         return -1;
     }
     std::cout << "Warming up the robot arms..." << std::endl;
-    control_utils.control_loop(trossen_ai_robot, 5.0, dataset, true); // Warm up the robot arms for 5 seconds
+    control_utils.control_loop(trossen_ai_robot, warmup_time, dataset, true); // Warm up the robot arms for 5 seconds
 
     // Start the control loop for each episode
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
         std::cout << "Starting episode " << dataset.get_num_episodes() << std::endl;
         control_utils.control_loop(trossen_ai_robot, recording_time, dataset);
         std::cout << "Episode " <<  dataset.get_num_episodes() << " completed." << std::endl;
+        // Reset time
+        std::this_thread::sleep_for(std::chrono::duration<double>(reset_time));
     }
     dataset.convert_to_videos(dataset.get_image_path());
     dataset.compute_statistics(); // Compute statistics after all episodes
