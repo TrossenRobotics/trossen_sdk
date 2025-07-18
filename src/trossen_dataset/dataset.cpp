@@ -29,6 +29,9 @@ TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::s
     }
     if (std::filesystem::exists(dataset_dir)) {
         metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, robot_name_, true);
+        if(!verify()) {
+            throw std::runtime_error("Dataset verification failed: metadata does not match or is incomplete.");
+        }
         // If the dataset directory already exists, we assume it is an existing dataset
         int existing_episodes = get_existing_episodes();
         for (int i = 0; i < existing_episodes; ++i) {
@@ -196,7 +199,18 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
 
 bool TrossenAIDataset::verify() const {
     // Implement verification logic here
-    std::cout << "Verifying dataset structure..." << std::endl;
+    // Load metadata and check if all required fields are present
+    if (!metadata_) {
+        std::cerr << "Metadata is not initialized." << std::endl;
+        return false;
+    }
+    // Check is the dataset name , robot name, and task name match the metadata
+    if (metadata_->get_info_entry("dataset_name") != dataset_name_ ||
+        metadata_->get_info_entry("robot_name") != robot_name_ ||
+        metadata_->get_info_entry("tasks") != task_name_) {     
+               std::cerr << "Dataset metadata does not match the dataset name, robot name, or task name." << std::endl;
+        return false;
+    }
     return true;  // Placeholder for actual verification logic
 }
 void TrossenAIDataset::compute_statistics() {
