@@ -64,6 +64,9 @@ void TrossenAIRobot::disconnect() {
         std::cout << "Not connected to " << name_ << std::endl;
         return;
     }
+    for (auto& arm : leader_arms_) {
+        arm->disconnect(); 
+    }
     for (auto& arm : follower_arms_) {
         arm->disconnect();
     }
