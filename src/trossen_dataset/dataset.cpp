@@ -9,7 +9,6 @@ namespace trossen_dataset {
 EpisodeData::EpisodeData(int64_t episode_idx) : episode_idx_(episode_idx) {
     // TODO: Change the buffer size to match episode length
     buffer_.reserve(100);  // Reserve space for 100 frames initially can be adjusted based on the episode length
-    std::cout << "Episode " << episode_idx_ << " initialized." << std::endl;
 }
 void EpisodeData::add_frame(const FrameData& frame) {
     buffer_.push_back(frame);
@@ -160,12 +159,11 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
     }
     outfile = result.ValueOrDie();
 
-    std::cerr << "Writing to: " << output_path_ << std::endl;
     status = parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), outfile, 1024);
     if (!status.ok()) {
         std::cerr << "[Parquet Error] Failed to write table: " << status.ToString() << std::endl;
     } else {
-        std::cerr << "Successfully wrote dataset." << std::endl;
+        std::cout << "Successfully wrote dataset." << std::endl;
     }
     episodes_buffer_.push_back(episode_data);
 }
@@ -261,7 +259,7 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
             }
 
             writer.release();
-            std::cout << "Converted episode " << episode_name << " to video: " << output_video_path << std::endl;}
+        }
     }
 
 }
@@ -399,8 +397,6 @@ void Metadata::load_from_file(const std::string& file_path) {
     for (auto it = info_json.begin(); it != info_json.end(); ++it) {
         add_entry(it.key(), it.value());
     }
-
-    std::cout << "Metadata loaded from file: " << file_path << std::endl;
 }
 
 

@@ -64,7 +64,6 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIStationary* r
     }
 
     dataset.save_episode(episode_data);
-    std::cout << "Control loop finished." << std::endl;
     robot->teleop_safety_stop();
 }
 

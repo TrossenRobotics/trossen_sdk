@@ -63,11 +63,10 @@ int main(int argc, char* argv[]) {
 
     // Start the control loop for each episode
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
-        std::cout << "Starting episode " << episode_idx  << std::endl;
+        std::cout << "Starting episode " << dataset.get_num_episodes() << std::endl;
         control_utils.control_loop(stationary_robot, recording_time, dataset);
-        std::cout << "Episode " << episode_idx << " completed." << std::endl;
+        std::cout << "Episode " <<  dataset.get_num_episodes() << " completed." << std::endl;
     }
-    std::cout << "All episodes completed." << std::endl;
     dataset.convert_to_videos(dataset.get_image_path());
     dataset.compute_statistics(); // Compute statistics after all episodes
 
