@@ -6,8 +6,8 @@
 
 namespace trossen_ai_robot_devices {
 
-TrossenAIStationary::TrossenAIStationary(const trossen_sdk_config::RobotConfig& config)
-    : TrossenAIRobot(config.robot_name){
+TrossenAIRobot::TrossenAIRobot(const trossen_sdk_config::RobotConfig& config)
+    : name_(config.robot_name) {
     for (const auto& arm_cfg : config.leader_arms) {
         leader_arms_.emplace_back(std::make_unique<TrossenAIArm>(arm_cfg.name, arm_cfg.ip, "leader"));
     }
@@ -19,14 +19,21 @@ TrossenAIStationary::TrossenAIStationary(const trossen_sdk_config::RobotConfig& 
     for (const auto& cam_cfg : config.cameras) {
         cameras_.emplace_back(std::make_unique<TrossenAICamera>(cam_cfg.name, cam_cfg.serial, cam_cfg.width, cam_cfg.height, cam_cfg.fps));
     }
+    if (config.base.name == "none") {
+        std::cout << "No base configuration provided." << std::endl;
+    } else if (config.base.name == "slate") {
+        std::cout << "Base config: " << config.base.name << std::endl;
+    } else {
+        std::cout << "Base configuration: " << config.base.name << std::endl;
+    }
 
-    std::cout << "[TrossenAIStationary] Initialized with "
+    std::cout << "[TrossenAIRobot] Initialized with "
               << leader_arms_.size() << " leader arms, "
               << follower_arms_.size() << " follower arms, "
               << cameras_.size() << " cameras." << std::endl;
 }
 
-void TrossenAIStationary::connect() {
+void TrossenAIRobot::connect() {
     if (is_connected_) {
         std::cout << "Already connected to " << name_ << std::endl;
         return;
@@ -51,7 +58,7 @@ void TrossenAIStationary::connect() {
     std::cout << "Connected to Trossen AI Stationary." << std::endl;
 }
 
-void TrossenAIStationary::disconnect() {
+void TrossenAIRobot::disconnect() {
     std::cout << "Disconnecting from " << name_ << std::endl;
     if (!is_connected_) {
         std::cout << "Not connected to " << name_ << std::endl;
@@ -68,7 +75,7 @@ void TrossenAIStationary::disconnect() {
 }
 
 
-void TrossenAIStationary::teleop_safety_stop() {
+void TrossenAIRobot::teleop_safety_stop() {
     for (auto& arm : leader_arms_) {
         arm->stage_arm(); // Stop leader arms
     }
@@ -77,7 +84,7 @@ void TrossenAIStationary::teleop_safety_stop() {
     }
 }
 
-trossen_dataset::State TrossenAIStationary::teleop_step(trossen_dataset::EpisodeData& episode_data) {
+trossen_dataset::State TrossenAIRobot::teleop_step(trossen_dataset::EpisodeData& episode_data) {
 
     // Get the current joint positions from the leader drivers
     std::map<std::string, std::vector<double>> leader_positions_;
@@ -125,7 +132,7 @@ trossen_dataset::State TrossenAIStationary::teleop_step(trossen_dataset::Episode
 }
 
 
-const arrow::Status TrossenAIStationary::replay(const std::string& output_file) {
+const arrow::Status TrossenAIRobot::replay(const std::string& output_file) {
     std::cout << "Replaying joint data from: " << output_file << std::endl;
 
     std::shared_ptr<arrow::io::ReadableFile> infile;
@@ -189,7 +196,7 @@ const arrow::Status TrossenAIStationary::replay(const std::string& output_file) 
 }
 
 
-void TrossenAIStationary::write(const std::string& data_name, const std::vector<double>& value) {
+void TrossenAIRobot::write(const std::string& data_name, const std::vector<double>& value) {
         if (value.size() != 14) {
             std::cerr << "Error: Expected 14 joint positions, got " << value.size() << std::endl;
             return;

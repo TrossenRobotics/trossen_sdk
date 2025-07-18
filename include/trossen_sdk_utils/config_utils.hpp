@@ -24,16 +24,21 @@ struct CameraConfig {
     int height;
 };
 
+struct BaseConfig {
+    std::string name;
+};
 struct RobotConfig {
     std::string robot_name;
     std::vector<ArmConfig> leader_arms;
     std::vector<ArmConfig> follower_arms;
     std::vector<CameraConfig> cameras;
+    BaseConfig base;
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ArmConfig, name, ip, model)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name, serial, fps, width, height)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RobotConfig, robot_name, leader_arms, follower_arms, cameras)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BaseConfig, name)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RobotConfig, robot_name, leader_arms, follower_arms, cameras, base)
 
 
 }  // namespace trossen_sdk_config

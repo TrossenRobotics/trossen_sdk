@@ -53,6 +53,8 @@ int main(int argc, char* argv[]) {
         config_file = "../config/stationary.json";
     } else if (robot_name == "trossen_ai_solo") {
         config_file = "../config/solo.json";
+    } else if (robot_name == "trossen_ai_mobile") {
+        config_file = "../config/mobile.json";
     } else {
         std::cerr << "Unknown robot type: " << robot_name << std::endl;
         return 1;
@@ -64,9 +66,9 @@ int main(int argc, char* argv[]) {
     robot_controller->connect(); // Connect to the robot arms
     
     // Try casting to the specific derived type
-    auto* stationary_robot = dynamic_cast<trossen_ai_robot_devices::TrossenAIStationary*>(robot_controller.get());
+    auto* stationary_robot = dynamic_cast<trossen_ai_robot_devices::TrossenAIRobot*>(robot_controller.get());
     if (!stationary_robot) {
-        std::cerr << "Error: Robot is not of type TrossenAIStationary!" << std::endl;
+        std::cerr << "Error: Robot is not of type TrossenAIRobot!" << std::endl;
         return -1;
     }
 

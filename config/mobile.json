@@ -26,14 +26,6 @@
   ],
   "cameras": [
     {
-      "name": "cam_low",
-      "serial": "218622274938",
-      "fps": 30,
-      "width": 640,
-      "height": 480
-
-    },
-    {
       "name": "cam_high",
       "serial": "130322272628",
       "fps": 30,
@@ -55,8 +47,8 @@
       "height": 480
     }
   ],
-  "base" : {
-    "name": "none"
+  "base": {
+    "name": "slate"
   }
 }
 

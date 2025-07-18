@@ -21,35 +21,18 @@
 namespace trossen_ai_robot_devices {
 
 
+
 class TrossenAIRobot {
 public:
-    TrossenAIRobot(const std::string& name)
-        : name_(name) {}
+    TrossenAIRobot(const trossen_sdk_config::RobotConfig& config);
 
-    virtual ~TrossenAIRobot() = default;
-
-    virtual void connect() = 0;
-    virtual void disconnect() = 0;
-    virtual trossen_dataset::State teleop_step(trossen_dataset::EpisodeData& episode_data) = 0;
-    virtual const arrow::Status replay(const std::string& output_file) = 0;
-    virtual void deactivate_leaders() = 0;
-
-protected:
-    std::string name_;
-    std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm>> leader_arms_;
-    std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm>> follower_arms_;
-    std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAICamera>> cameras_;
-};
-class TrossenAIStationary : public TrossenAIRobot {
-public:
-    TrossenAIStationary(const trossen_sdk_config::RobotConfig& config);
-    void connect() override;
+    void connect();
 
     void write(const std::string& data_name, const std::vector<double>& value);
 
-    trossen_dataset::State teleop_step(trossen_dataset::EpisodeData& episode_data) override;
+    trossen_dataset::State teleop_step(trossen_dataset::EpisodeData& episode_data);
 
-    void disconnect() override;
+    void disconnect();
 
     void deactivate_leaders() {
         for (auto& arm : leader_arms_) {
@@ -79,6 +62,7 @@ public:
     std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAICamera>> cameras_;
 
 private:
+    std::string name_;
     bool is_connected_ = false;  // Track connection status
    
 };

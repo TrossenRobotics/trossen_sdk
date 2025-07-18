@@ -18,8 +18,8 @@ inline trossen_sdk_config::RobotConfig load_robot_config(const std::string& json
 
 inline std::unique_ptr<trossen_ai_robot_devices::TrossenAIRobot> create_robot_from_config(const trossen_sdk_config::RobotConfig& config) {
     // This function can be used to create robot instances based on the configuration
-    // For example, you can instantiate TrossenAIStationary or other robot types here
-    return std::make_unique<trossen_ai_robot_devices::TrossenAIStationary>(config); // Change the classs name  to something generic
+    // For example, you can instantiate TrossenAIRobot or other robot types here
+    return std::make_unique<trossen_ai_robot_devices::TrossenAIRobot>(config);
     // Add more robot types as needed
     throw std::runtime_error("Unknown robot type");
 }

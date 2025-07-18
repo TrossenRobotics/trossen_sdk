@@ -10,7 +10,7 @@ namespace trossen_sdk {
 class ControlUtils {
 public:
     // Function to write joint positions to the robot arm
-    void control_loop(trossen_ai_robot_devices::TrossenAIStationary* robot, 
+    void control_loop(trossen_ai_robot_devices::TrossenAIRobot* robot, 
     float control_time,
     trossen_dataset::TrossenAIDataset& dataset);
 

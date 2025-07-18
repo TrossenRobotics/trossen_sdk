@@ -3,7 +3,7 @@
 
 namespace trossen_sdk {
 
-void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIStationary* robot,
+void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIRobot* robot,
                                 float control_time,
                                 trossen_dataset::TrossenAIDataset& dataset) {
     using steady_clock = std::chrono::steady_clock;
