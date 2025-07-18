@@ -66,16 +66,18 @@ int main(int argc, char* argv[]) {
     robot_controller->connect(); // Connect to the robot arms
     
     // Try casting to the specific derived type
-    auto* stationary_robot = dynamic_cast<trossen_ai_robot_devices::TrossenAIRobot*>(robot_controller.get());
-    if (!stationary_robot) {
+    auto* trossen_ai_robot = dynamic_cast<trossen_ai_robot_devices::TrossenAIRobot*>(robot_controller.get());
+    if (!trossen_ai_robot) {
         std::cerr << "Error: Robot is not of type TrossenAIRobot!" << std::endl;
         return -1;
     }
+    std::cout << "Warming up the robot arms..." << std::endl;
+    control_utils.control_loop(trossen_ai_robot, 5.0, dataset, true); // Warm up the robot arms for 5 seconds
 
     // Start the control loop for each episode
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
         std::cout << "Starting episode " << dataset.get_num_episodes() << std::endl;
-        control_utils.control_loop(stationary_robot, recording_time, dataset);
+        control_utils.control_loop(trossen_ai_robot, recording_time, dataset);
         std::cout << "Episode " <<  dataset.get_num_episodes() << " completed." << std::endl;
     }
     dataset.convert_to_videos(dataset.get_image_path());

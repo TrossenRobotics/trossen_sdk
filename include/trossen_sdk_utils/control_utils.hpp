@@ -12,7 +12,8 @@ public:
     // Function to write joint positions to the robot arm
     void control_loop(trossen_ai_robot_devices::TrossenAIRobot* robot, 
     float control_time,
-    trossen_dataset::TrossenAIDataset& dataset);
+    trossen_dataset::TrossenAIDataset& dataset,
+    bool teleop_mode = false);
 
     inline void busy_wait_until(const std::chrono::steady_clock::time_point& loop_start, double frequency) {
     using namespace std::chrono;

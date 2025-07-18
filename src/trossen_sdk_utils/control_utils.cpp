@@ -5,7 +5,8 @@ namespace trossen_sdk {
 
 void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIRobot* robot,
                                 float control_time,
-                                trossen_dataset::TrossenAIDataset& dataset) {
+                                trossen_dataset::TrossenAIDataset& dataset,
+                                bool teleop_mode) {
     using steady_clock = std::chrono::steady_clock;
     using time_point = std::chrono::steady_clock::time_point;
 
@@ -36,15 +37,18 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIRobot* robot,
         frame_data.frame_idx = episode_data.get_frames().size();
         episode_data.add_frame(frame_data);
 
-        std::string image_folder_path = dataset.get_image_path();
-        for (const auto& image_data : state.images) {
-            std::string episode_folder_name = "episode_" + std::to_string(episode_idx);
-            std::filesystem::path camera_folder = std::filesystem::path(image_folder_path) / image_data.camera_name / episode_folder_name;
-            std::filesystem::create_directories(camera_folder);
-            std::string image_file_path = (camera_folder / image_data.file_path).string();
-            image_writer.push(image_data.image, image_file_path);
-        }
+        if(!teleop_mode) {
+        
+            std::string image_folder_path = dataset.get_image_path();
 
+            for (const auto& image_data : state.images) {
+                std::string episode_folder_name = "episode_" + std::to_string(episode_idx);
+                std::filesystem::path camera_folder = std::filesystem::path(image_folder_path) / image_data.camera_name / episode_folder_name;
+                std::filesystem::create_directories(camera_folder);
+                std::string image_file_path = (camera_folder / image_data.file_path).string();
+                image_writer.push(image_data.image, image_file_path);
+            }
+        }
         // Display images/videos using OpenCV
         display_images(state.images);
 
@@ -65,8 +69,9 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIRobot* robot,
                                     + " | Frame: " + std::to_string(frame_data.frame_idx));
         }
     }
-
-    dataset.save_episode(episode_data);
+    if (!teleop_mode) {
+         dataset.save_episode(episode_data);
+    }   
     robot->teleop_safety_stop();
 }
 
