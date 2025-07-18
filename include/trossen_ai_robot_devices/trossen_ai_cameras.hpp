@@ -20,7 +20,8 @@ namespace trossen_ai_robot_devices {
 class TrossenAICamera {
 public:
     
-        explicit TrossenAICamera(const std::string& name, const std::string& serial_number = "");
+        explicit TrossenAICamera(const std::string& name, const std::string& serial_number, 
+                                 int capture_width = 640, int capture_height = 480, int fps = 30);
 
         void connect() ;
         void disconnect() ;

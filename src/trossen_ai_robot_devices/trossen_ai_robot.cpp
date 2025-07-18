@@ -17,7 +17,7 @@ TrossenAIStationary::TrossenAIStationary(const trossen_sdk_config::RobotConfig& 
     }
 
     for (const auto& cam_cfg : config.cameras) {
-        cameras_.emplace_back(std::make_unique<TrossenAICamera>(cam_cfg.name, cam_cfg.serial));
+        cameras_.emplace_back(std::make_unique<TrossenAICamera>(cam_cfg.name, cam_cfg.serial, cam_cfg.width, cam_cfg.height, cam_cfg.fps));
     }
 
     std::cout << "[TrossenAIStationary] Initialized with "

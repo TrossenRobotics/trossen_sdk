@@ -1,18 +1,60 @@
 {
   "robot_name": "trossen_ai_stationary",
   "leader_arms": [
-    { "name": "left", "ip": "192.168.1.3", "model": "leader" },
-    { "name": "right", "ip": "192.168.1.2", "model": "leader" }
+    {
+      "name": "left",
+      "ip": "192.168.1.3",
+      "model": "leader"
+    },
+    {
+      "name": "right",
+      "ip": "192.168.1.2",
+      "model": "leader"
+    }
   ],
   "follower_arms": [
-    { "name": "left", "ip": "192.168.1.5", "model": "follower" },
-    { "name": "right", "ip": "192.168.1.4", "model": "follower" }
+    {
+      "name": "left",
+      "ip": "192.168.1.5",
+      "model": "follower"
+    },
+    {
+      "name": "right",
+      "ip": "192.168.1.4",
+      "model": "follower"
+    }
   ],
   "cameras": [
-    { "name": "cam_low", "serial": "218622274938" },
-    { "name": "cam_high", "serial": "130322272628" },
-    { "name": "cam_left_wrist", "serial": "128422271347" },
-    { "name": "cam_right_wrist", "serial": "218622270304" }
+    {
+      "name": "cam_low",
+      "serial": "218622274938",
+      "fps": 30,
+      "width": 640,
+      "height": 480
+
+    },
+    {
+      "name": "cam_high",
+      "serial": "130322272628",
+      "fps": 30,
+      "width": 640,
+      "height": 480
+    },
+    {
+      "name": "cam_left_wrist",
+      "serial": "128422271347",
+      "fps": 30,
+      "width": 640,
+      "height": 480
+    },
+    {
+      "name": "cam_right_wrist",
+      "serial": "218622270304",
+      "fps": 30,
+      "width": 640,
+      "height": 480
+    }
   ]
 }
+
 

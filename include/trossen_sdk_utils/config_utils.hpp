@@ -19,6 +19,9 @@ struct ArmConfig {
 struct CameraConfig {
     std::string name;
     std::string serial;
+    int fps;
+    int width;
+    int height;
 };
 
 struct RobotConfig {
@@ -29,7 +32,7 @@ struct RobotConfig {
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ArmConfig, name, ip, model)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name, serial)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name, serial, fps, width, height)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RobotConfig, robot_name, leader_arms, follower_arms, cameras)
 
 

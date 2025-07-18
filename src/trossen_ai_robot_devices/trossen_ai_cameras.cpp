@@ -2,11 +2,15 @@
 
 namespace trossen_ai_robot_devices {
 
-TrossenAICamera::TrossenAICamera(const std::string& name, const std::string& serial_number)
-    : name_(name), serial_number_(serial_number) {
+TrossenAICamera::TrossenAICamera(const std::string& name, const std::string& serial_number, 
+                                 int capture_width, int capture_height, int fps)
+    : name_(name), serial_number_(serial_number), capture_width_(capture_width), capture_height_(capture_height), fps_(fps) {
     // Initialize camera settings if needed
-    std::cout << "TrossenAICamera initialized with name: " << name_ 
-              << " and serial number: " << serial_number_ << std::endl;
+    std::cout << "TrossenAICamera initialized with name: " << name_
+              << ", serial number: " << serial_number_
+              << ", width: " << capture_width_
+              << ", height: " << capture_height_
+              << ", fps: " << fps_ << std::endl;
 }
 void TrossenAICamera::connect() {
     // Connect to the camera
