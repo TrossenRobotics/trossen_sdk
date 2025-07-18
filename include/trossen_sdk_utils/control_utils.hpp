@@ -24,7 +24,8 @@ public:
     }
     }
 
-
+    void display_images(const std::vector<trossen_dataset::ImageData>& images) const;
+    
 private:
     // Logging utility
 };

@@ -45,6 +45,9 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIStationary* r
             image_writer.push(image_data.image, image_file_path);
         }
 
+        // Display images/videos using OpenCV
+        display_images(state.images);
+
         busy_wait_until(loop_start_time, 30.0);  // 30 Hz loop
 
         auto loop_duration = std::chrono::duration_cast<std::chrono::duration<double>>(steady_clock::now() - loop_start_time).count();
@@ -68,7 +71,42 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIStationary* r
 }
 
 
+void ControlUtils::display_images(const std::vector<trossen_dataset::ImageData>& images) const {
+    // Display all images together in a grid format using OpenCV
+        if (!images.empty()) {
+            // Determine grid size (rows x cols)
+            int num_images = images.size();
+            int grid_cols = static_cast<int>(std::ceil(std::sqrt(num_images)));
+            int grid_rows = static_cast<int>(std::ceil(static_cast<float>(num_images) / grid_cols));
 
+            // Resize all images to the same size (use the first image's size)
+            cv::Size target_size = images[0].image.size();
+            std::vector<cv::Mat> resized_images;
+            for (const auto& image_data : images) {
+            cv::Mat resized;
+            cv::resize(image_data.image, resized, target_size);
+            resized_images.push_back(resized);
+            }
+
+            // Create a blank canvas for the grid
+            int grid_width = grid_cols * target_size.width;
+            int grid_height = grid_rows * target_size.height;
+            cv::Mat grid_image(grid_height, grid_width, resized_images[0].type(), cv::Scalar::all(0));
+
+            // Copy each image into the grid
+            for (int idx = 0; idx < num_images; ++idx) {
+            int row = idx / grid_cols;
+            int col = idx % grid_cols;
+            cv::Rect roi(col * target_size.width, row * target_size.height, target_size.width, target_size.height);
+            cv::Mat rgb_image;
+            cv::cvtColor(resized_images[idx], rgb_image, cv::COLOR_BGR2RGB);
+            rgb_image.copyTo(grid_image(roi));
+            }
+
+            cv::imshow("Camera Grid", grid_image);
+            cv::waitKey(1);
+        }
+}
 
 
 } // namespace trossen_sdk
