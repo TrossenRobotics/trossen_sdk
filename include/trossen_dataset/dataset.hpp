@@ -39,7 +39,7 @@ struct FrameData {
 
 class Metadata {
 public:
-    explicit Metadata(std::string dataset_name = "default_dataset");
+    explicit Metadata(const std::string& dataset_name, bool existing = false);
     void add_entry(const std::string& key, const std::string& value);
     std::string get_entry(const std::string& key) const;        
     void remove_entry(const std::string& key);
@@ -94,18 +94,20 @@ public:
     }
 
     std::string get_image_path() const {
-        return metadata_.get_entry("image_path");
+        return metadata_->get_entry("image_path");
     }
 
     std::string get_videos_path() const {
-        return metadata_.get_entry("videos_path");
+        return metadata_->get_entry("videos_path");
     }
 
     void convert_to_videos(const std::string& output_dir) const;
 
+    int get_existing_episodes() const;
+
 private:
     std::string dataset_name_;
-    trossen_dataset::Metadata metadata_;
+    std::unique_ptr<trossen_dataset::Metadata> metadata_;
     std::vector<EpisodeData> episodes_buffer_;  // Store episodes in a vector
 };
 

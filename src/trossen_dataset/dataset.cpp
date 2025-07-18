@@ -29,16 +29,24 @@ TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name) : dataset_na
         dataset_dir = dataset_dir.parent_path();
     }
     if (std::filesystem::exists(dataset_dir)) {
-        throw std::runtime_error("Dataset directory already exists: " + dataset_dir.string());
+        metadata_ = std::make_unique<Metadata>(dataset_name_, true);
+        // If the dataset directory already exists, we assume it is an existing dataset
+        int existing_episodes = get_existing_episodes();
+        for (int i = 0; i < existing_episodes; ++i) {
+            // Load each episode and add it to the buffer
+            EpisodeData episode_data(i);
+            // TODO: Implement loading of episode data
+            episodes_buffer_.push_back(episode_data);
+        }
+        
+    } else {
+        std::filesystem::create_directories(dataset_dir / "data");
+        std::filesystem::create_directories(dataset_dir / "meta");
+        std::filesystem::create_directories(dataset_dir / "videos");
+        std::filesystem::create_directories(dataset_dir / "images");
+        metadata_ = std::make_unique<Metadata>(dataset_name_);
+
     }
-    std::filesystem::create_directories(dataset_dir / "data");
-    std::filesystem::create_directories(dataset_dir / "meta");
-    std::filesystem::create_directories(dataset_dir / "videos");
-    std::filesystem::create_directories(dataset_dir / "images");
-
-
-    // Initialize metadata
-    metadata_ = trossen_dataset::Metadata(dataset_name_);
 }
 
 void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_data) {
@@ -139,7 +147,7 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
     std::shared_ptr<arrow::io::FileOutputStream> outfile;
     // Set output path for the episode in the dataset's data directory under cache root
     std::filesystem::path cache_root = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk";
-    std::filesystem::path dataset_dir = cache_root / metadata_.get_entry("data_path");
+    std::filesystem::path dataset_dir = cache_root / metadata_->get_entry("data_path");
     if (dataset_dir.has_extension()) {
         dataset_dir = dataset_dir.parent_path();
     }
@@ -175,14 +183,14 @@ void TrossenAIDataset::compute_statistics() {
     // Get the total number of episodes
     size_t num_episodes = get_num_episodes();
     // Print all the metadata entries
-    for (const auto& key : metadata_.get_keys()) {
-        std::cout << "Metadata entry - " << key << ": " << metadata_.get_entry(key) << std::endl;
+    for (const auto& key : metadata_->get_keys()) {
+        std::cout << "Metadata entry - " << key << ": " << metadata_->get_entry(key) << std::endl;
     }
 
     // Add it to metadata
-    metadata_.update_entry("total_episodes", std::to_string(num_episodes));
+    metadata_->update_entry("total_episodes", std::to_string(num_episodes));
     // Save metadata to file
-    metadata_.save_to_file();
+    metadata_->save_to_file();
 
 }
 
@@ -259,27 +267,53 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
             std::cout << "Finished video: " << output_video << std::endl;
         }
     }
+
 }
 
-Metadata::Metadata(std::string dataset_name) : dataset_name_(std::move(dataset_name)) {
+int TrossenAIDataset::get_existing_episodes() const {
+    // Count the number of existing episodes by checking the data directory
+    std::string data_path = metadata_->get_entry("data_path");
+    
+    if (!std::filesystem::exists(data_path)) {
+        std::cerr << "Data path does not exist: " << data_path << std::endl;
+        return 0;
+    }
 
-    add_entry("dataset_name", dataset_name_);
-    add_entry("codebase_version", "1.0");
-    add_entry("robot_name", "Trossen AI Stationary");
-    // Store current time as creation date in mm-dd-yyyy format
-    std::time_t t = std::time(nullptr);
-    std::tm tm = *std::localtime(&t);
-    char date_buf[11];
-    std::strftime(date_buf, sizeof(date_buf), "%m-%d-%Y", &tm);
-    add_entry("date_created", date_buf);
-    add_entry("data_path", std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_ / "data");
-    add_entry("meta_path", std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_ / "meta");
-    add_entry("videos_path", std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_ / "videos");
-    add_entry("image_path", std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_ / "images");
-    // Save metadata to file
-    save_to_file();
-    std::cout << "Metadata entries initialized." << std::endl;
-    std::cout << "Dataset name: " << dataset_name_ << std::endl;
+    int count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(data_path)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".parquet") {
+            count++;
+        }
+    }
+    return count;
+}
+
+Metadata::Metadata(const std::string& dataset_name, bool existing) : dataset_name_(dataset_name) {
+
+    if (existing) {
+        load_from_file((std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_ / "meta" / "info.json").string());
+    }
+    else {
+        add_entry("dataset_name", dataset_name_);
+        add_entry("codebase_version", "1.0");
+        add_entry("robot_name", "Trossen AI Stationary");
+        // Store current time as creation date in mm-dd-yyyy format
+        std::time_t t = std::time(nullptr);
+        std::tm tm = *std::localtime(&t);
+        char date_buf[11];
+        std::strftime(date_buf, sizeof(date_buf), "%m-%d-%Y", &tm);
+        add_entry("date_created", date_buf);
+        auto home = std::getenv("HOME");
+        std::filesystem::path base_path = std::filesystem::path(home) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_;
+
+        add_entry("data_path",    (base_path / "data").string());
+        add_entry("meta_path",    (base_path / "meta").string());
+        add_entry("videos_path",  (base_path / "videos").string());
+        add_entry("image_path",   (base_path / "images").string());
+        // Save metadata to file
+        save_to_file();
+    }
+
 }
 
 void Metadata::add_entry(const std::string& key, const std::string& value) {
@@ -351,25 +385,25 @@ void Metadata::save_to_file() const {
     }
     file << info_json.dump(4);  // Pretty print with 4 spaces indentation
     file.close();
-
-    std::cout << "Metadata saved to file: " << get_entry("meta_path") << std::endl;
 }
+
+
 void Metadata::load_from_file(const std::string& file_path) {
     std::ifstream file(file_path);
     if (!file.is_open()) {
         std::cerr << "Error opening file for loading metadata: " << file_path << std::endl;
         return;
-    }       
-    std::string line;
-    while (std::getline(file, line)) {
-        size_t delimiter_pos = line.find(':');
-        if (delimiter_pos != std::string::npos) {
-            std::string key = line.substr(0, delimiter_pos);
-            std::string value = line.substr(delimiter_pos + 1);
-            add_entry(key, value);
-        }
     }
+
+    nlohmann::json info_json;
+    file >> info_json;
     file.close();
+
+    entries_.clear();
+    for (auto it = info_json.begin(); it != info_json.end(); ++it) {
+        add_entry(it.key(), it.value());
+    }
+
     std::cout << "Metadata loaded from file: " << file_path << std::endl;
 }
 

@@ -44,6 +44,7 @@ int main(int argc, char* argv[]) {
     trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer(4);
 
     // Create a dataset instance
+    std::cout << "Initializing dataset [control_script.cpp]: " << dataset_name << std::endl;
     trossen_dataset::TrossenAIDataset dataset(dataset_name);
 
     trossen_sdk::ControlUtils control_utils;

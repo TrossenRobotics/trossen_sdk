@@ -17,7 +17,7 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIStationary* r
 
     auto start_time = steady_clock::now();
     auto end_time = start_time + std::chrono::duration<float>(control_time);
-
+    
     trossen_dataset::State state;
     int episode_idx = dataset.get_num_episodes();
     trossen_dataset::EpisodeData episode_data(episode_idx);
@@ -48,6 +48,7 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIStationary* r
         busy_wait_until(loop_start_time, 30.0);  // 30 Hz loop
 
         auto loop_duration = std::chrono::duration_cast<std::chrono::duration<double>>(steady_clock::now() - loop_start_time).count();
+        // TODO: Improve this logging to be more elegant and less verbose
         if (loop_duration > 1 / 29.0) {
             trossen_sdk_utils::log_warning("Loop duration: " + std::to_string(loop_duration) + " seconds"
                                     + " | Frequency: " + std::to_string(1.0 / loop_duration) + " Hz"
