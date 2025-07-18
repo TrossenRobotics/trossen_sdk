@@ -48,10 +48,19 @@ int main(int argc, char* argv[]) {
     trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_name);
 
     trossen_sdk::ControlUtils control_utils;
-
+    std::string config_file;
+    if (robot_name == "trossen_ai_stationary") {
+        config_file = "../config/stationary.json";
+    } else if (robot_name == "trossen_ai_solo") {
+        config_file = "../config/solo.json";
+    } else {
+        std::cerr << "Unknown robot type: " << robot_name << std::endl;
+        return 1;
+    }
+    
     // Initialize the robot arm controller
-    auto robot_controller = trossen_sdk_config::create_robot_from_config(
-        trossen_sdk_config::load_robot_config("../config/stationary.json"));
+    auto robot_controller = trossen_sdk_config::create_robot_from_config(trossen_sdk_config::load_robot_config(config_file));
+
     robot_controller->connect(); // Connect to the robot arms
     
     // Try casting to the specific derived type

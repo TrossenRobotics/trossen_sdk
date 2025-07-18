@@ -1,0 +1,36 @@
+{
+  "robot_name": "trossen_ai_solo",
+  "leader_arms": [
+    {
+      "name": "main",
+      "ip": "192.168.1.3",
+      "model": "leader"
+    }
+  ],
+  "follower_arms": [
+    {
+      "name": "main",
+      "ip": "192.168.1.5",
+      "model": "follower"
+    }
+  ],
+  "cameras": [
+    {
+      "name": "cam_wrist",
+      "serial": "218622274938",
+      "fps": 30,
+      "width": 640,
+      "height": 480
+
+    },
+    {
+      "name": "cam_main",
+      "serial": "130322272628",
+      "fps": 30,
+      "width": 640,
+      "height": 480
+    }
+  ]
+}
+
+
