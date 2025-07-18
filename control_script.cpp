@@ -45,7 +45,7 @@ int main(int argc, char* argv[]) {
 
     // Create a dataset instance
     std::cout << "Initializing dataset [control_script.cpp]: " << dataset_name << std::endl;
-    trossen_dataset::TrossenAIDataset dataset(dataset_name);
+    trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_name);
 
     trossen_sdk::ControlUtils control_utils;
 

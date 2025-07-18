@@ -9,6 +9,7 @@
 #include <parquet/arrow/writer.h>
 #include <opencv2/opencv.hpp>       // OpenCV
 #include <filesystem>
+#include <nlohmann/json.hpp>
 
 
 namespace fs = std::filesystem;
@@ -39,24 +40,43 @@ struct FrameData {
 
 class Metadata {
 public:
-    explicit Metadata(const std::string& dataset_name, bool existing = false);
-    void add_entry(const std::string& key, const std::string& value);
-    std::string get_entry(const std::string& key) const;        
-    void remove_entry(const std::string& key);
-    void clear();   
-    bool contains(const std::string& key) const;
-    std::vector<std::string> get_keys() const;
-    std::vector<std::string> get_values() const;
-    void save_to_file() const;
-    void load_from_file(const std::string& file_path);
-    void update_entry(const std::string& key, const std::string& value);
+    explicit Metadata(const std::string& dataset_name, const std::string& task_name, const std::string& robot_name, bool existing = false);
+
+    // Info.json key-value manipulation
+    void set_info_entry(const std::string& key, const std::string& value);
+    std::string get_info_entry(const std::string& key) const;
+    bool contains_info_entry(const std::string& key) const;
+    void remove_info_entry(const std::string& key);
+    void clear_info();
+
+    std::vector<std::string> get_info_keys() const;
+    std::vector<std::string> get_info_values() const;
+
+    // JSONL entry management
+    void add_episode(const nlohmann::json& episode);
+    void add_episode_stats(const nlohmann::json& stats);
+    void add_task(const nlohmann::json& task);
+
+    void save_all() const;
+    void save_info_file() const;
+
+
 
 private:
-    std::vector<std::pair<std::string, std::string>> entries_;  // Key-value pairs for metadata entries
-    std::string dataset_name_;  // Name of the dataset for which this metadata is associated
-    // Key-value pairs for metadata entries
-    // Each entry is a pair of strings, where the first string is the key and the
-    // second string is the value.
+    std::string dataset_name_;
+    std::string task_name_;
+    std::string robot_name_;
+    nlohmann::json info_;  
+    std::vector<nlohmann::json> episode_data_;
+    std::vector<nlohmann::json> episode_stats_data_;
+    std::vector<nlohmann::json> task_data_;
+
+    std::string info_file_path_;
+
+    void load_info_file(const std::string& path);
+
+    void load_jsonl_file(const std::string& path, std::vector<nlohmann::json>& target);
+    void save_jsonl_file(const std::string& path, const std::vector<nlohmann::json>& data) const;
 };
 
 class EpisodeData {
@@ -77,7 +97,7 @@ private:
 
 class TrossenAIDataset {
 public:
-    explicit TrossenAIDataset(const std::string& name);
+    explicit TrossenAIDataset(const std::string& name, const std::string& task_name, const std::string& robot_name);
 
     // Verify the dataset structure
     bool verify() const;
@@ -94,11 +114,11 @@ public:
     }
 
     std::string get_image_path() const {
-        return metadata_->get_entry("image_path");
+        return metadata_->get_info_entry("image_path");
     }
 
     std::string get_videos_path() const {
-        return metadata_->get_entry("videos_path");
+        return metadata_->get_info_entry("videos_path");
     }
 
     void convert_to_videos(const std::string& output_dir) const;
@@ -107,6 +127,8 @@ public:
 
 private:
     std::string dataset_name_;
+    std::string task_name_;
+    std::string robot_name_;
     std::unique_ptr<trossen_dataset::Metadata> metadata_;
     std::vector<EpisodeData> episodes_buffer_;  // Store episodes in a vector
 };
