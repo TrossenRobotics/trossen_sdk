@@ -1,6 +1,5 @@
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_driver.hpp"
-#include "trossen_dataset/dataset.hpp"
 #include <iostream>
 #define PI 3.14159265358979323846
 
@@ -87,7 +86,7 @@ void TrossenAIRobot::teleop_safety_stop() {
     }
 }
 
-trossen_dataset::State TrossenAIRobot::teleop_step(trossen_dataset::EpisodeData& episode_data) {
+trossen_ai_robot_devices::State TrossenAIRobot::teleop_step() {
 
     // Get the current joint positions from the leader drivers
     std::map<std::string, std::vector<double>> leader_positions_;
@@ -119,13 +118,13 @@ trossen_dataset::State TrossenAIRobot::teleop_step(trossen_dataset::EpisodeData&
     }
    
     // Collect images from cameras
-    std::vector<trossen_dataset::ImageData> images;
+    std::vector<trossen_ai_robot_devices::ImageData> images;
     for (auto& camera : cameras_) {
-        trossen_dataset::ImageData image_data = camera->async_read();
+        trossen_ai_robot_devices::ImageData image_data = camera->async_read();
         images.push_back(image_data);
     }
 
-    trossen_dataset::State state {
+    trossen_ai_robot_devices::State state {
         observation_state,
         action,
         images

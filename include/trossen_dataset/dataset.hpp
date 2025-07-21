@@ -10,6 +10,7 @@
 #include <opencv2/opencv.hpp>       // OpenCV
 #include <filesystem>
 #include <nlohmann/json.hpp>
+#include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 
 
 namespace fs = std::filesystem;
@@ -17,18 +18,6 @@ namespace fs = std::filesystem;
 
 namespace trossen_dataset{
 
-struct ImageData {
-    std::string camera_name; // Name of the camera that captured the image
-    cv::Mat image; // OpenCV Mat to hold the image data
-    std::string file_path; // File path where the image will be saved
-};
-
-
-struct State{
-    std::vector<double> observation_state;  // Joint positions
-    std::vector<double> action;             // Action to be taken
-    std::vector<ImageData> images; // Images captured during the episode
-};
 struct FrameData {
     int64_t timestamp_ms;
     std::vector<double> observation_state;  // Joint positions
@@ -40,7 +29,7 @@ struct FrameData {
 
 class Metadata {
 public:
-    explicit Metadata(const std::string& dataset_name, const std::string& task_name, const std::string& robot_name, bool existing = false);
+    explicit Metadata(const std::string& dataset_name, const std::string& task_name, bool existing = false);
 
     // Info.json key-value manipulation
     void set_info_entry(const std::string& key, const std::string& value);
@@ -65,8 +54,7 @@ public:
 private:
     std::string dataset_name_;
     std::string task_name_;
-    std::string robot_name_;
-    nlohmann::json info_;  
+    nlohmann::json info_;
     std::vector<nlohmann::json> episode_data_;
     std::vector<nlohmann::json> episode_stats_data_;
     std::vector<nlohmann::json> task_data_;
@@ -97,7 +85,7 @@ private:
 
 class TrossenAIDataset {
 public:
-    explicit TrossenAIDataset(const std::string& name, const std::string& task_name, const std::string& robot_name);
+    explicit TrossenAIDataset(const std::string& name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::TrossenAIRobot>& robot);
 
     // Verify the dataset structure
     bool verify() const;
@@ -128,7 +116,7 @@ public:
 private:
     std::string dataset_name_;
     std::string task_name_;
-    std::string robot_name_;
+    std::shared_ptr<trossen_ai_robot_devices::TrossenAIRobot> robot_;
     std::unique_ptr<trossen_dataset::Metadata> metadata_;
     std::vector<EpisodeData> episodes_buffer_;  // Store episodes in a vector
 };

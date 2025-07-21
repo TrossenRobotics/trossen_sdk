@@ -44,11 +44,11 @@ rs2::frame TrossenAICamera::read() {
 
 
 
-trossen_dataset::ImageData TrossenAICamera::async_read() {
+trossen_ai_robot_devices::ImageData TrossenAICamera::async_read() {
     // Start an asynchronous read thread
     // Note: In a real implementation, you would use a separate thread to read frames asynchronously
     // For simplicity, we will use the synchronous read method here.
-    trossen_dataset::ImageData result;
+    trossen_ai_robot_devices::ImageData result;
     std::mutex mtx;
     std::condition_variable cv;
     bool done = false;
@@ -60,7 +60,7 @@ trossen_dataset::ImageData TrossenAICamera::async_read() {
         std::string file_path = "image_" + name_ + "_" + std::to_string(timestamp) + ".jpg";
         {
             std::lock_guard<std::mutex> lock(mtx);
-            result = trossen_dataset::ImageData{name_, image, file_path};
+            result = trossen_ai_robot_devices::ImageData{name_, image, file_path};
             done = true;
         }
         cv.notify_one();
@@ -70,7 +70,7 @@ trossen_dataset::ImageData TrossenAICamera::async_read() {
     if (!cv.wait_for(lock, std::chrono::seconds(2), [&done]{ return done; })) {
         std::cerr << "Timeout: Failed to receive image within 2 seconds." << std::endl;
         // Optionally, set result to an empty image or error state
-        result = trossen_dataset::ImageData{};
+        result = trossen_ai_robot_devices::ImageData{};
     }
     return result;
 }

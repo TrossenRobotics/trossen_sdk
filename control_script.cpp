@@ -47,9 +47,7 @@ int main(int argc, char* argv[]) {
     // Initialize two cameras (camera IDs 0 and 1)
     trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer(4);
 
-    // Create a dataset instance
-    std::cout << "Initializing dataset [control_script.cpp]: " << dataset_name << std::endl;
-    trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_name);
+   
 
     trossen_sdk::ControlUtils control_utils;
     std::string config_file;
@@ -67,6 +65,12 @@ int main(int argc, char* argv[]) {
     // Initialize the robot arm controller
     auto robot_controller = trossen_sdk_config::create_robot_from_config(trossen_sdk_config::load_robot_config(config_file));
 
+    // Create a dataset instance
+    std::cout << "Initializing dataset [control_script.cpp]: " << dataset_name << std::endl;
+    trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_controller);
+
+    // Move the robot controller to this scope
+    std::cout << "Connecting to robot: " << std::endl;
     robot_controller->connect(); // Connect to the robot arms
     
     // Try casting to the specific derived type

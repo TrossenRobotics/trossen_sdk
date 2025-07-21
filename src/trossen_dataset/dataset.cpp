@@ -1,6 +1,5 @@
 #include "trossen_dataset/dataset.hpp"
-#include <iostream>
-#include <filesystem>
+
 
 namespace trossen_dataset {
 
@@ -16,7 +15,7 @@ const std::vector<FrameData>& EpisodeData::get_frames() const {
     return buffer_;
 }
 
-TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::string& task_name, const std::string& robot_name) : dataset_name_(dataset_name), task_name_(task_name), robot_name_(robot_name) {
+TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::TrossenAIRobot>& robot) : dataset_name_(dataset_name), task_name_(task_name), robot_(robot) {
     std::cout << "TrossenAIDataset : " << dataset_name_ << std::endl;
 
     // Create dataset folder structure: <dataset_name>/data, <dataset_name>/meta, <dataset_name>/videos
@@ -28,7 +27,7 @@ TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::s
         dataset_dir = dataset_dir.parent_path();
     }
     if (std::filesystem::exists(dataset_dir)) {
-        metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, robot_name_, true);
+        metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, true);
         if(!verify()) {
             throw std::runtime_error("Dataset verification failed: metadata does not match or is incomplete.");
         }
@@ -46,9 +45,13 @@ TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::s
         std::filesystem::create_directories(dataset_dir / "meta");
         std::filesystem::create_directories(dataset_dir / "videos");
         std::filesystem::create_directories(dataset_dir / "images");
-        metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, robot_name_);
+        metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, false);
 
     }
+
+    metadata_->set_info_entry("robot_name", robot_->name());
+
+    
 }
 
 void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_data) {
@@ -206,9 +209,9 @@ bool TrossenAIDataset::verify() const {
     }
     // Check is the dataset name , robot name, and task name match the metadata
     if (metadata_->get_info_entry("dataset_name") != dataset_name_ ||
-        metadata_->get_info_entry("robot_name") != robot_name_ ||
-        metadata_->get_info_entry("tasks") != task_name_) {     
-               std::cerr << "Dataset metadata does not match the dataset name, robot name, or task name." << std::endl;
+        metadata_->get_info_entry("robot_name") != robot_->name() ||
+        metadata_->get_info_entry("tasks") != task_name_) {
+        std::cerr << "Dataset metadata does not match the dataset name, robot name, or task name." << std::endl;
         return false;
     }
     return true;  // Placeholder for actual verification logic
@@ -321,8 +324,8 @@ int TrossenAIDataset::get_existing_episodes() const {
     return count;
 }
 
-Metadata::Metadata(const std::string& dataset_name, const std::string& task_name, const std::string& robot_name, bool existing)
-    : dataset_name_(dataset_name), task_name_(task_name), robot_name_(robot_name) {
+Metadata::Metadata(const std::string& dataset_name, const std::string& task_name, bool existing)
+    : dataset_name_(dataset_name), task_name_(task_name) {
 
     std::filesystem::path base_path = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_;
     std::filesystem::path meta_path = base_path / "meta";
@@ -335,7 +338,6 @@ Metadata::Metadata(const std::string& dataset_name, const std::string& task_name
     } else {
         set_info_entry("dataset_name", dataset_name_);
         set_info_entry("codebase_version", "1.0");
-        set_info_entry("robot_name", robot_name_);
         set_info_entry("tasks", task_name_);
 
         std::time_t t = std::time(nullptr);
@@ -348,7 +350,6 @@ Metadata::Metadata(const std::string& dataset_name, const std::string& task_name
         set_info_entry("meta_path",    meta_path.string());
         set_info_entry("videos_path",  (base_path / "videos").string());
         set_info_entry("image_path",   (base_path / "images").string());
-
         save_all();
     }
 }

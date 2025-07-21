@@ -13,14 +13,19 @@
 #include <thread>
 #include <chrono>
 #include "libtrossen_arm/trossen_arm.hpp"
-#include "trossen_dataset/dataset.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_driver.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_cameras.hpp"
 #include "trossen_sdk_utils/config_utils.hpp"
+#include <any>
 
 namespace trossen_ai_robot_devices {
 
 
+struct State{
+    std::vector<double> observation_state;  // Joint positions
+    std::vector<double> action;             // Action to be taken
+    std::vector<ImageData> images; // Images captured during the episode
+};
 
 class TrossenAIRobot {
 public:
@@ -30,7 +35,7 @@ public:
 
     void write(const std::string& data_name, const std::vector<double>& value);
 
-    trossen_dataset::State teleop_step(trossen_dataset::EpisodeData& episode_data);
+    trossen_ai_robot_devices::State teleop_step();
 
     void disconnect();
 
@@ -60,6 +65,23 @@ public:
     std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm>> leader_arms_;
     std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm>> follower_arms_;
     std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAICamera>> cameras_;
+
+    const std::string& name() const { return name_; }
+
+    std::map<std::string, std::map<std::string, std::any>> camera_features() const {
+        std::map<std::string, std::map<std::string, std::any>> cam_ft;
+        for (const auto& cam_ptr : cameras_) {
+            if (!cam_ptr) continue;
+            std::string cam_key = cam_ptr->name();
+            std::string key = "observation.images." + cam_key;
+            cam_ft[key] = {
+                {"shape", std::make_tuple(cam_ptr->height(), cam_ptr->width(), cam_ptr->channels())},
+                {"names", std::vector<std::string>{"height", "width", "channels"}},
+                {"info", nullptr}
+            };
+        }
+        return cam_ft;
+    }
 
 private:
     std::string name_;

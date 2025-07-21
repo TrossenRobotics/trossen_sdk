@@ -1,6 +1,7 @@
 #pragma once
 #include <string>
 #include <vector>
+#include "trossen_dataset/dataset.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 #include "trossen_sdk_utils/logging_utils.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_cameras.hpp"
@@ -25,8 +26,8 @@ public:
     }
     }
 
-    void display_images(const std::vector<trossen_dataset::ImageData>& images) const;
-    
+    void display_images(const std::vector<trossen_ai_robot_devices::ImageData>& images) const;
+
 private:
     // Logging utility
 };

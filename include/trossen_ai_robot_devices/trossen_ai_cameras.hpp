@@ -11,11 +11,14 @@
 #include <condition_variable>
 #include <queue>
 #include <atomic>
-#include "trossen_dataset/dataset.hpp" // Dataset structures
 namespace trossen_ai_robot_devices {
 
 
-
+struct ImageData {
+    std::string camera_name; // Name of the camera that captured the image
+    cv::Mat image; // OpenCV Mat to hold the image data
+    std::string file_path; // File path where the image will be saved
+};
 
 class TrossenAICamera {
 public:
@@ -26,7 +29,13 @@ public:
         void connect() ;
         void disconnect() ;
         rs2::frame read() ;
-        trossen_dataset::ImageData async_read();
+        trossen_ai_robot_devices::ImageData async_read();
+
+        const std::string& name() const { return name_; }
+        int width() const { return capture_width_; }
+        int height() const { return capture_height_; }
+        int fps() const { return fps_; }
+        int channels() const { return 3; } // Assuming RGB images
 
 
     private:

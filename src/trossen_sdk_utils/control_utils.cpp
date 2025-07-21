@@ -1,5 +1,4 @@
 #include "trossen_sdk_utils/control_utils.hpp"
-#include "trossen_dataset/dataset.hpp"
 
 namespace trossen_sdk {
 
@@ -19,14 +18,14 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIRobot* robot,
     auto start_time = steady_clock::now();
     auto end_time = start_time + std::chrono::duration<float>(control_time);
     
-    trossen_dataset::State state;
+    trossen_ai_robot_devices::State state;
     int episode_idx = dataset.get_num_episodes();
     trossen_dataset::EpisodeData episode_data(episode_idx);
 
     while (steady_clock::now() < end_time) {
         auto loop_start_time = steady_clock::now();
 
-        state = robot->teleop_step(episode_data);
+        state = robot->teleop_step();
 
         trossen_dataset::FrameData frame_data;
         frame_data.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
@@ -76,7 +75,7 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIRobot* robot,
 }
 
 
-void ControlUtils::display_images(const std::vector<trossen_dataset::ImageData>& images) const {
+void ControlUtils::display_images(const std::vector<trossen_ai_robot_devices::ImageData>& images) const {
     // Display all images together in a grid format using OpenCV
         if (!images.empty()) {
             // Determine grid size (rows x cols)
