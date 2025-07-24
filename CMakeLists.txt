@@ -3,10 +3,6 @@ project(TrossenDataCollectionSDK)
 
 set(CMAKE_CXX_STANDARD 17)
 
-set(Torch_DIR "${CMAKE_SOURCE_DIR}/third_party/libtorch/share/cmake/Torch")
-set(CMAKE_CUDA_COMPILER /usr/local/cuda/bin/nvcc)
-
-find_package(Torch REQUIRED)
 
 
 # Find the libtrossen_arm package
@@ -17,7 +13,6 @@ find_package(Boost REQUIRED COMPONENTS program_options)
 find_package(nlohmann_json REQUIRED)
 find_package(realsense2 REQUIRED)
 find_package(OpenCV REQUIRED)
-find_package(Torch REQUIRED)
 
 
 include_directories(include)
@@ -55,14 +50,8 @@ target_link_libraries(trossen_data_collection_sdk
 add_executable(sleep main.cpp)
 add_executable(replay replay.cpp)
 add_executable(control control_script.cpp)
-# add_executable(config config.cpp)
 
 
 target_link_libraries(control  PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
 target_link_libraries(sleep trossen_data_collection_sdk)
 target_link_libraries(replay PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
-# target_link_libraries(config PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
-
-add_executable(torch_test torch.cpp)
-target_link_libraries(torch_test "${TORCH_LIBRARIES}")
-set_property(TARGET torch_test PROPERTY CXX_STANDARD 17)

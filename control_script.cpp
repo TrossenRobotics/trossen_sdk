@@ -23,7 +23,7 @@ int main(int argc, char* argv[]) {
     desc.add_options()
         ("help", "produce help message")
         ("dataset", po::value<std::string>(&dataset_name)->default_value("test_dataset_01"), "dataset name")
-        ("robot", po::value<std::string>(&robot_name)->default_value("Trossen AI Stationary"), "robot name")
+        ("robot", po::value<std::string>(&robot_name)->default_value("trossen_ai_solo"), "robot name")
         ("episodes", po::value<int>(&num_episodes)->default_value(2), "number of episodes")
         ("recording_time", po::value<double>(&recording_time)->default_value(10.0), "recording time per episode (seconds)")
         ("warmup_time", po::value<double>(&warmup_time)->default_value(5.0), "warmup time for the robot arms (seconds)")
@@ -61,9 +61,11 @@ int main(int argc, char* argv[]) {
         std::cerr << "Unknown robot type: " << robot_name << std::endl;
         return 1;
     }
-    
+    std::string foll_config_file = "../config/widowxai.json";
+    std::string lead_config_file = "../config/widowx_leader.json";
     // Initialize the robot arm controller
-    auto robot_controller = trossen_sdk_config::create_robot_from_config(trossen_sdk_config::load_robot_config(config_file));
+    auto robot_controller = trossen_sdk_config::create_follower_from_config(trossen_sdk_config::load_follower_config(foll_config_file));
+    auto teleop_robot = trossen_sdk_config::create_leader_from_config(trossen_sdk_config::load_leader_config(lead_config_file));
 
     // Create a dataset instance
     std::cout << "Initializing dataset [control_script.cpp]: " << dataset_name << std::endl;
@@ -72,28 +74,24 @@ int main(int argc, char* argv[]) {
     // Move the robot controller to this scope
     std::cout << "Connecting to robot: " << std::endl;
     robot_controller->connect(); // Connect to the robot arms
-    
-    // Try casting to the specific derived type
-    auto* trossen_ai_robot = dynamic_cast<trossen_ai_robot_devices::TrossenAIRobot*>(robot_controller.get());
-    if (!trossen_ai_robot) {
-        std::cerr << "Error: Robot is not of type TrossenAIRobot!" << std::endl;
-        return -1;
-    }
+    teleop_robot->connect(); // Connect to the teleoperation robot
+
     std::cout << "Warming up the robot arms..." << std::endl;
-    control_utils.control_loop(trossen_ai_robot, warmup_time, dataset, true); // Warm up the robot arms for 5 seconds
+    control_utils.control_loop(robot_controller, teleop_robot, warmup_time, dataset, true); // Warm up the robot arms for specified time
 
     // Start the control loop for each episode
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
         std::cout << "Starting episode " << dataset.get_num_episodes() << std::endl;
-        control_utils.control_loop(trossen_ai_robot, recording_time, dataset);
+        control_utils.control_loop(robot_controller, teleop_robot, recording_time, dataset);
         std::cout << "Episode " <<  dataset.get_num_episodes() << " completed." << std::endl;
         // Reset time
         std::this_thread::sleep_for(std::chrono::duration<double>(reset_time));
     }
-    dataset.convert_to_videos(dataset.get_image_path());
-    dataset.compute_statistics(); // Compute statistics after all episodes
+    // dataset.convert_to_videos(dataset.get_image_path());
+    // dataset.compute_statistics(); // Compute statistics after all episodes
 
     robot_controller->disconnect(); // Sleep the arms at the end of the control script
+    teleop_robot->disconnect(); // Disconnect the teleoperation robot
     std::cout << "Control script finished." << std::endl;
     return 0;
 }

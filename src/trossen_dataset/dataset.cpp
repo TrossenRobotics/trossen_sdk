@@ -15,7 +15,7 @@ const std::vector<FrameData>& EpisodeData::get_frames() const {
     return buffer_;
 }
 
-TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::TrossenAIRobot>& robot) : dataset_name_(dataset_name), task_name_(task_name), robot_(robot) {
+TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenAIWidowXRobot>& robot) : dataset_name_(dataset_name), task_name_(task_name), robot_(robot) {
     std::cout << "TrossenAIDataset : " << dataset_name_ << std::endl;
 
     // Create dataset folder structure: <dataset_name>/data, <dataset_name>/meta, <dataset_name>/videos

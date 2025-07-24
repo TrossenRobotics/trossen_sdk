@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TROSSEN_AI_DRIVER_HPP
+#define TROSSEN_AI_DRIVER_HPP
 #include <iostream>
 #include <string>
 #include <vector>
@@ -40,3 +41,4 @@ namespace trossen_ai_robot_devices {
 } // namespace trossen_ai_robot_devices
 
 
+#endif // TROSSEN_AI_DRIVER_HPP

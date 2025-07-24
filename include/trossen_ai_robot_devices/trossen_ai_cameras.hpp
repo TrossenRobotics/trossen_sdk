@@ -1,5 +1,5 @@
-#pragma once
-
+#ifndef TROSSEN_AI_CAMERAS_HPP
+#define TROSSEN_AI_CAMERAS_HPP
 #include <iostream>
 #include <string>
 #include <librealsense2/rs.hpp>     // RealSense SDK
@@ -46,9 +46,9 @@ public:
     private:
         std::string name_;
         std::string serial_number_;
-        int capture_width_ = 640; // Default width
-        int capture_height_ = 480; // Default height
-        int fps_ = 30; // Default frames per second
+        int capture_width_ {640}; // Default width
+        int capture_height_ {480}; // Default height
+        int fps_ {30}; // Default frames per second
         rs2::pipeline camera_; // RealSense camera pipeline
     };
 
@@ -74,3 +74,5 @@ private:
     void worker_loop();
 };
 } // namespace trossen_data_collection_sdk
+
+#endif // TROSSEN_AI_CAMERAS_HPP

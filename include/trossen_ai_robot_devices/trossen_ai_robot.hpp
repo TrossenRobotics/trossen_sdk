@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TROSSEN_AI_ROBOT_HPP
+#define TROSSEN_AI_ROBOT_HPP
 #include <cmath>
 #include <iostream>
 #include <vector>
@@ -27,23 +28,68 @@ struct State{
     std::vector<ImageData> images; // Images captured during the episode
 };
 
-class TrossenAIRobot {
-public:
-    TrossenAIRobot(const trossen_sdk_config::RobotConfig& config);
+namespace teleoperator {
 
-    void connect();
+    class TrossenAIWidowXLeader {
 
-    void write(const std::string& data_name, const std::vector<double>& value);
+        public: 
+            TrossenAIWidowXLeader(const trossen_sdk_config::WidowXLeaderConfig& config);
+            void connect();
+            void calibrate();
+            void configure();
+            std::vector<double> get_action();
+            void send_feedback();
+            void disconnect();
+        
+        private:
+            std::string name_;
+            std::string ip_address_;
+            std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> robot_driver_;  // Assuming TrossenArmDriver is the class to control the arm
 
-    trossen_ai_robot_devices::State teleop_step();
+            bool is_connected_ = false;  // Track connection status
+    };
 
-    void disconnect();
+}
 
-    void deactivate_leaders() {
-        for (auto& arm : leader_arms_) {
-            arm->disconnect(); // Stop leader arms
+namespace robot {
+
+    class TrossenAIWidowXRobot {
+    public:
+        TrossenAIWidowXRobot(const trossen_sdk_config::WidowXRobotConfig& config);
+        void connect();
+        void disconnect();
+        void calibrate();
+        void configure();
+        std::string name() const { return name_; }
+        trossen_ai_robot_devices::State get_observation();
+        void send_action(const std::vector<double>& action);
+
+    private:
+        std::string name_;
+        std::string ip_address_;
+        std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> robot_driver_;
+        bool is_connected_ = false;  // Track connection status
+    };
+}
+
+
+    class TrossenAIRobot {
+    public:
+        TrossenAIRobot(const trossen_sdk_config::RobotConfig& config);
+
+        void connect();
+
+        void write(const std::string& data_name, const std::vector<double>& value);
+
+        trossen_ai_robot_devices::State teleop_step();
+
+        void disconnect();
+
+        void deactivate_leaders() {
+            for (auto& arm : leader_arms_) {
+                arm->disconnect(); // Stop leader arms
+            }
         }
-    }
 
     void teleop_safety_stop();
 
@@ -92,3 +138,5 @@ private:
 
 
 } // namespace trossen_ai_robot_devices
+
+#endif // TROSSEN_AI_ROBOT_HPP

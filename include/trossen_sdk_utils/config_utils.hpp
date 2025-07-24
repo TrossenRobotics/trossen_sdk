@@ -1,5 +1,5 @@
-// robot_config.hpp
-#pragma once
+#ifndef TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP
+#define TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP
 #include <string>
 #include <nlohmann/json.hpp>
 #include <fstream>
@@ -41,6 +41,20 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BaseConfig, name)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RobotConfig, robot_name, leader_arms, follower_arms, cameras, base)
 
 
+struct WidowXLeaderConfig {
+    std::string name;
+    std::string ip_address;
+};
+struct WidowXRobotConfig {
+    std::string name;
+    std::string ip_address;
+    CameraConfig camera;  // Camera configuration for the follower arm
+
+};
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXLeaderConfig, name, ip_address)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXRobotConfig, name, ip_address, camera)
+
 }  // namespace trossen_sdk_config
 
 
+#endif // TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP

@@ -7,6 +7,6 @@ int main() {
     // Create a robot instance from the configuration
     auto robot_controller = trossen_sdk_config::create_robot_from_config(robot_config);
     robot_controller->connect(); // Connect to the robot
-    robot_controller->disconnect(); // Say hello to the user
+    robot_controller->disconnect(); // Disconnect from the robot
     return 0;
 }

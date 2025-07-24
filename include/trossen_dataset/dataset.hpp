@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TROSSEN_DATASET_HPP
+#define TROSSEN_DATASET_HPP
 #include <string>
 #include <vector>
 #include <memory>
@@ -85,7 +86,7 @@ private:
 
 class TrossenAIDataset {
 public:
-    explicit TrossenAIDataset(const std::string& name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::TrossenAIRobot>& robot);
+    explicit TrossenAIDataset(const std::string& name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenAIWidowXRobot>& robot);
 
     // Verify the dataset structure
     bool verify() const;
@@ -116,9 +117,11 @@ public:
 private:
     std::string dataset_name_;
     std::string task_name_;
-    std::shared_ptr<trossen_ai_robot_devices::TrossenAIRobot> robot_;
+    std::shared_ptr<trossen_ai_robot_devices::robot::TrossenAIWidowXRobot> robot_;
     std::unique_ptr<trossen_dataset::Metadata> metadata_;
     std::vector<EpisodeData> episodes_buffer_;  // Store episodes in a vector
 };
 
 }  // namespace trossen_dataset
+
+#endif // TROSSEN_DATASET_HPP

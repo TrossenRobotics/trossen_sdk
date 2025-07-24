@@ -1,9 +1,97 @@
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_driver.hpp"
 #include <iostream>
-#define PI 3.14159265358979323846
 
 namespace trossen_ai_robot_devices {
+
+
+    namespace robot {
+
+        TrossenAIWidowXRobot::TrossenAIWidowXRobot(const trossen_sdk_config::WidowXRobotConfig& config)
+            : name_(config.name), ip_address_(config.ip_address) {
+            
+            robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, "follower");
+            std::cout << "TrossenAIWidowXRobot initialized with name: " << name_
+                      << ", IP address: " << ip_address_ << std::endl;
+        }
+
+        void TrossenAIWidowXRobot::connect() {
+            if (is_connected_) {
+                std::cout << "Already connected to robot: " << name_ << std::endl;
+                return;
+            }
+            robot_driver_->connect();
+            is_connected_ = true;
+        }
+
+        void TrossenAIWidowXRobot::disconnect() {
+            std::cout << "Disconnecting from robot: " << name_ << std::endl;
+            robot_driver_->disconnect();
+            is_connected_ = false;
+        }
+
+        void TrossenAIWidowXRobot::calibrate() {
+        }
+
+        void TrossenAIWidowXRobot::configure() {
+            robot_driver_->stage_arm(); // Stage the arm to a safe position
+        }
+
+        trossen_ai_robot_devices::State TrossenAIWidowXRobot::get_observation() {
+            trossen_ai_robot_devices::State state;
+            std::vector<double> positions = robot_driver_->read("positions");
+            state.observation_state = positions;
+            state.action = robot_driver_->read("positions"); // Assuming action is read from the robot driver
+            // Add camera logic here
+            return state;
+        }
+
+        void TrossenAIWidowXRobot::send_action(const std::vector<double>& action) {
+            robot_driver_->write("positions", action);
+        }
+    }
+
+    namespace teleoperator {
+
+        TrossenAIWidowXLeader::TrossenAIWidowXLeader(const trossen_sdk_config::WidowXLeaderConfig& config)
+            : name_(config.name), ip_address_(config.ip_address) {
+            robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, "leader");
+        }
+
+        void TrossenAIWidowXLeader::connect() {
+            if (is_connected_) {
+                std::cout << "Already connected to leader: " << name_ << std::endl;
+                return;
+            }
+            robot_driver_->connect();
+        }
+    
+
+        void TrossenAIWidowXLeader::calibrate() {
+        }
+
+        void TrossenAIWidowXLeader::configure() {
+            robot_driver_->stage_arm(); // Stage the arm to a safe position
+            robot_driver_->write("external_efforts", std::vector<double>(7, 0.0));
+        }
+
+        std::vector<double> TrossenAIWidowXLeader::get_action() {
+            std::vector<double> positions = robot_driver_->read("positions");
+            return positions;
+        }
+
+        void TrossenAIWidowXLeader::send_feedback() {
+
+        }
+
+        void TrossenAIWidowXLeader::disconnect() {
+            robot_driver_->stage_arm(); // Stop the arm
+            robot_driver_->disconnect();
+            is_connected_ = false;
+            std::cout << "Disconnected from leader: " << name_ << std::endl;
+        }
+    }
+
 
 TrossenAIRobot::TrossenAIRobot(const trossen_sdk_config::RobotConfig& config)
     : name_(config.robot_name) {

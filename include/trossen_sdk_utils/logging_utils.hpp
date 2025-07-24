@@ -1,4 +1,5 @@
-#pragma once
+#ifndef TROSSEN_SDK_UTILS_LOGGING_UTILS_HPP
+#define TROSSEN_SDK_UTILS_LOGGING_UTILS_HPP
 
 #include <iostream>
 #include <vector>
@@ -26,3 +27,6 @@ namespace trossen_sdk_utils {
         std::cerr << RED << "[ERRO] " << message << RESET << std::endl;
     }
 }  // namespace trossen_sdk_utils
+
+
+#endif // TROSSEN_SDK_UTILS_LOGGING_UTILS_HPP
