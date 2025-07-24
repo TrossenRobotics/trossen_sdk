@@ -13,10 +13,15 @@
 #include <atomic>
 namespace trossen_ai_robot_devices {
 
+struct ColorDepthData {
+    rs2::frame color_image; // Color image captured by the camera
+    rs2::frame depth_map;   // Depth map corresponding to the color image
+};
 
 struct ImageData {
     std::string camera_name; // Name of the camera that captured the image
     cv::Mat image; // OpenCV Mat to hold the image data
+    cv::Mat depth_map; // OpenCV Mat to hold the depth information
     std::string file_path; // File path where the image will be saved
 };
 
@@ -28,7 +33,7 @@ public:
 
         void connect() ;
         void disconnect() ;
-        rs2::frame read() ;
+        trossen_ai_robot_devices::ColorDepthData read() ;
         trossen_ai_robot_devices::ImageData async_read();
 
         const std::string& name() const { return name_; }

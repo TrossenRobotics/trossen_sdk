@@ -26,7 +26,6 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIRobot* robot,
         auto loop_start_time = steady_clock::now();
 
         state = robot->teleop_step();
-
         trossen_dataset::FrameData frame_data;
         frame_data.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
             steady_clock::now().time_since_epoch()).count();
@@ -35,7 +34,6 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIRobot* robot,
         frame_data.episode_idx = episode_idx;
         frame_data.frame_idx = episode_data.get_frames().size();
         episode_data.add_frame(frame_data);
-
         if(!teleop_mode) {
         
             std::string image_folder_path = dataset.get_image_path();
@@ -43,14 +41,23 @@ void ControlUtils::control_loop(trossen_ai_robot_devices::TrossenAIRobot* robot,
             for (const auto& image_data : state.images) {
                 std::string episode_folder_name = "episode_" + std::to_string(episode_idx);
                 std::filesystem::path camera_folder = std::filesystem::path(image_folder_path) / image_data.camera_name / episode_folder_name;
-                std::filesystem::create_directories(camera_folder);
+                std::string depth_camera_name = image_data.camera_name + "_depth";
+                std::filesystem::path depth_camera_folder = std::filesystem::path(image_folder_path) / depth_camera_name / episode_folder_name;
+                if (!std::filesystem::exists(camera_folder)) {
+                    std::filesystem::create_directories(camera_folder);
+                }
+                if (!std::filesystem::exists(depth_camera_folder)) {
+                    std::filesystem::create_directories(depth_camera_folder);
+                }
                 std::string image_file_path = (camera_folder / image_data.file_path).string();
+                std::string depth_image_file_path = (depth_camera_folder / image_data.file_path).string();
+
                 image_writer.push(image_data.image, image_file_path);
+                image_writer.push(image_data.depth_map, depth_image_file_path);
             }
         }
         // Display images/videos using OpenCV
         display_images(state.images);
-
         busy_wait_until(loop_start_time, 30.0);  // 30 Hz loop
 
         auto loop_duration = std::chrono::duration_cast<std::chrono::duration<double>>(steady_clock::now() - loop_start_time).count();
