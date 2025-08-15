@@ -36,8 +36,17 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 
-    // Load the robot configuration
-    std::string foll_config_file = "../config/bimanual_widowxai.json";
+    std::string foll_config_file;
+    if (robot_name == "trossen_ai_stationary") {
+        foll_config_file = "../config/bimanual_widowxai.json";
+    } else if (robot_name == "trossen_ai_solo") {
+        foll_config_file = "../config/widowxai.json";
+    } else if (robot_name == "trossen_ai_mobile") {
+        foll_config_file = "../config/mobile.json";
+    } else {
+        std::cerr << "Unknown robot type: " << robot_name << std::endl;
+        return 1;
+    }
     // Create a robot instance from the configuration
     auto follower_config = trossen_sdk_config::load_follower_config(foll_config_file);
     auto robot_controller = trossen_sdk_config::create_robot_from_config(*follower_config);

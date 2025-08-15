@@ -50,19 +50,22 @@ int main(int argc, char* argv[]) {
    
 
     trossen_sdk::ControlUtils control_utils;
-    std::string config_file;
+    std::string lead_config_file;
+    std::string foll_config_file;
     if (robot_name == "trossen_ai_stationary") {
-        config_file = "../config/stationary.json";
+        foll_config_file = "../config/bimanual_widowxai.json";
+        lead_config_file = "../config/bimanual_widowx_leader.json";
     } else if (robot_name == "trossen_ai_solo") {
-        config_file = "../config/solo.json";
+        lead_config_file = "../config/widowx_leader.json";
+        foll_config_file = "../config/widowxai.json";
     } else if (robot_name == "trossen_ai_mobile") {
-        config_file = "../config/mobile.json";
+        lead_config_file = "../config/mobile.json";
+        foll_config_file = "../config/mobile.json";
     } else {
         std::cerr << "Unknown robot type: " << robot_name << std::endl;
         return 1;
     }
-    std::string foll_config_file = "../config/bimanual_widowxai.json";
-    std::string lead_config_file = "../config/bimanual_widowx_leader.json";
+    
     // Initialize the robot arm controller
     // auto robot_controller = trossen_sdk_config::create_follower_from_config(trossen_sdk_config::load_bimanual_follower_config(foll_config_file));
     // auto teleop_robot = trossen_sdk_config::create_leader_from_config(trossen_sdk_config::load_bimanual_leader_config(lead_config_file));
