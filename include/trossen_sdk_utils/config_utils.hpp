@@ -51,10 +51,26 @@ struct WidowXRobotConfig {
     CameraConfig camera;  // Camera configuration for the follower arm
 
 };
+
+struct BimanualWidowXLeaderConfig {
+    std::string name;
+    std::string left_ip_address;
+    std::string right_ip_address;
+};
+
+struct BimanualWidowXRobotConfig {
+    std::string name;
+    std::string left_ip_address;
+    std::string right_ip_address;
+    CameraConfig camera;  // Camera configuration for the follower arm
+};
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXLeaderConfig, name, left_ip_address, right_ip_address)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXRobotConfig, name, left_ip_address, right_ip_address, camera)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXLeaderConfig, name, ip_address)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXRobotConfig, name, ip_address, camera)
 
 }  // namespace trossen_sdk_config
-
+    
 
 #endif // TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP

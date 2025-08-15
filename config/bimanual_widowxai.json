@@ -1,0 +1,12 @@
+{
+  "name": "bimanual_widowxai",
+  "left_ip_address": "192.168.1.5",
+  "right_ip_address": "192.168.1.4",
+  "camera": {
+    "name": "cam_main",
+    "serial": "130322272628",
+    "fps": 30,
+    "width": 640,
+    "height": 480
+  }
+}

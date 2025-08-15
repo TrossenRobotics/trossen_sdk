@@ -61,11 +61,11 @@ int main(int argc, char* argv[]) {
         std::cerr << "Unknown robot type: " << robot_name << std::endl;
         return 1;
     }
-    std::string foll_config_file = "../config/widowxai.json";
-    std::string lead_config_file = "../config/widowx_leader.json";
+    std::string foll_config_file = "../config/bimanual_widowxai.json";
+    std::string lead_config_file = "../config/bimanual_widowx_leader.json";
     // Initialize the robot arm controller
-    auto robot_controller = trossen_sdk_config::create_follower_from_config(trossen_sdk_config::load_follower_config(foll_config_file));
-    auto teleop_robot = trossen_sdk_config::create_leader_from_config(trossen_sdk_config::load_leader_config(lead_config_file));
+    auto robot_controller = trossen_sdk_config::create_follower_from_config(trossen_sdk_config::load_bimanual_follower_config(foll_config_file));
+    auto teleop_robot = trossen_sdk_config::create_leader_from_config(trossen_sdk_config::load_bimanual_leader_config(lead_config_file));
 
     // Create a dataset instance
     std::cout << "Initializing dataset [control_script.cpp]: " << dataset_name << std::endl;

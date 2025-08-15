@@ -15,7 +15,7 @@ const std::vector<FrameData>& EpisodeData::get_frames() const {
     return buffer_;
 }
 
-TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenAIWidowXRobot>& robot) : dataset_name_(dataset_name), task_name_(task_name), robot_(robot) {
+TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot>& robot) : dataset_name_(dataset_name), task_name_(task_name), robot_(robot) {
     std::cout << "TrossenAIDataset : " << dataset_name_ << std::endl;
 
     // Create dataset folder structure: <dataset_name>/data, <dataset_name>/meta, <dataset_name>/videos
@@ -323,6 +323,66 @@ int TrossenAIDataset::get_existing_episodes() const {
     }
     return count;
 }
+
+std::vector<std::vector<double>> TrossenAIDataset::read(const std::string& output_file) {
+    std::cout << "Replaying joint data from: " << output_file << std::endl;
+
+    // Open the file and handle errors
+    auto infile_result = arrow::io::ReadableFile::Open(output_file);
+    if (!infile_result.ok()) {
+        std::cerr << "Failed to open Arrow file: " << infile_result.status().ToString() << std::endl;
+        return std::vector<std::vector<double>>{};
+    }
+    std::shared_ptr<arrow::io::ReadableFile> infile = infile_result.ValueOrDie();
+
+    // Open the Parquet file reader and handle errors
+    auto reader_result = parquet::arrow::OpenFile(infile, arrow::default_memory_pool());
+    if (!reader_result.ok()) {
+        std::cerr << "Failed to open Parquet file: " << reader_result.status().ToString() << std::endl;
+        return std::vector<std::vector<double>>{};
+    }
+    std::unique_ptr<parquet::arrow::FileReader> reader = std::move(reader_result.ValueOrDie());
+
+    std::shared_ptr<arrow::Table> parquet_table;
+    // Read the table and handle errors
+    auto status = reader->ReadTable(&parquet_table);
+    if (!status.ok()) {
+        std::cerr << "Failed to read Parquet table: " << status.ToString() << std::endl;
+        return std::vector<std::vector<double>>{};
+    }
+
+    // Access columns
+    auto timestamp_array = std::static_pointer_cast<arrow::Int64Array>(
+        parquet_table->GetColumnByName("timestamp_ms")->chunk(0));
+    auto joints_array = std::static_pointer_cast<arrow::ListArray>(
+        parquet_table->GetColumnByName("observation.state")->chunk(0));
+    auto values_array = std::static_pointer_cast<arrow::DoubleArray>(
+        joints_array->values());
+    auto action_array = std::static_pointer_cast<arrow::ListArray>(
+        parquet_table->GetColumnByName("action")->chunk(0));
+    auto episode_idx_array = std::static_pointer_cast<arrow::Int64Array>(
+        parquet_table->GetColumnByName("episode_idx")->chunk(0));
+    auto frame_idx_array = std::static_pointer_cast<arrow::Int64Array>(
+        parquet_table->GetColumnByName("frame_idx")->chunk(0)); 
+    std::vector<std::vector<double>> joint_positions_list;
+    for (int64_t i = 0; i < parquet_table->num_rows(); ++i) {
+        auto start = joints_array->value_offset(i);
+        auto end = joints_array->value_offset(i + 1);
+        std::vector<double> joint_positions;
+        for (int64_t j = start; j < end; ++j) {
+            joint_positions.push_back(values_array->Value(j));
+        }
+    
+        // Send to the robot arm
+        joint_positions_list.push_back(joint_positions);
+        // Sleep for a short duration to simulate real-time playback
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));  // Adjust
+    }
+
+    return joint_positions_list;
+}
+
+
 
 Metadata::Metadata(const std::string& dataset_name, const std::string& task_name, bool existing)
     : dataset_name_(dataset_name), task_name_(task_name) {

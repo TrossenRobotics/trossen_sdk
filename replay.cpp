@@ -3,6 +3,7 @@
 #include "trossen_dataset/dataset.hpp"
 #include <boost/program_options.hpp>
 #include <filesystem>
+#include <trossen_sdk_utils/control_utils.hpp>
 
 namespace po = boost::program_options;
 
@@ -36,17 +37,36 @@ int main(int argc, char* argv[]) {
     }
 
     // Load the robot configuration
-    trossen_sdk_config::RobotConfig robot_config = trossen_sdk_config::load_robot_config("../config/stationary.json");
+    std::string foll_config_file = "../config/bimanual_widowxai.json";
     // Create a robot instance from the configuration
-    auto robot_controller = trossen_sdk_config::create_robot_from_config(robot_config);
+    auto robot_controller = trossen_sdk_config::create_follower_from_config(trossen_sdk_config::load_bimanual_follower_config(foll_config_file));
 
     robot_controller->connect(); // Connect to the robot arms
-    robot_controller->deactivate_leaders(); // Deactivate the leader arms
     std::filesystem::path dataset_path = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name / "data" / ("episode_" + std::to_string(episode_number) + ".parquet");
-    arrow::Status status = robot_controller->replay(dataset_path.string());
-    if (!status.ok()) {
-        std::cerr << "Error replaying dataset: " << status.ToString() << std::endl;
+    std::vector<std::vector<double>> joints_array = trossen_dataset::TrossenAIDataset::read(dataset_path.string());
+    if (joints_array.empty()) {
+        std::cerr << "No joint data found in the specified episode." << std::endl;
+        return 1;
     }
+    std::vector<double> joint_positions;
+
+    // Loop start time
+    trossen_sdk::ControlUtils control_utils;
+    for (int64_t i = 0; i < joints_array.size(); ++i) {
+        auto loop_start_time = std::chrono::steady_clock::now();
+        joint_positions = joints_array[i];
+        std::cout << "Replaying frame " << i << " with joint positions: ";
+        for (const auto& pos : joint_positions) {
+            std::cout << pos << " ";
+        }
+        std::cout << std::endl;
+        robot_controller->send_action(joint_positions);
+        control_utils.busy_wait_until(loop_start_time , 30.0);
+    }
+    
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));  // Adjust
+    std::cout << "Replay completed." << std::endl;
     robot_controller->disconnect();
 
     return 0;

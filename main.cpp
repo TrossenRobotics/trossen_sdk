@@ -3,9 +3,9 @@
 
 int main() {
     // Load the robot configuration
-    trossen_sdk_config::RobotConfig robot_config = trossen_sdk_config::load_robot_config("../config/stationary.json");
+    trossen_sdk_config::BimanualWidowXRobotConfig robot_config = trossen_sdk_config::load_bimanual_follower_config("../config/bimanual_widowxai.json");
     // Create a robot instance from the configuration
-    auto robot_controller = trossen_sdk_config::create_robot_from_config(robot_config);
+    auto robot_controller = trossen_sdk_config::create_follower_from_config(robot_config);
     robot_controller->connect(); // Connect to the robot
     robot_controller->disconnect(); // Disconnect from the robot
     return 0;

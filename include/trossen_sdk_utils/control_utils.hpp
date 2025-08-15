@@ -13,8 +13,8 @@ namespace trossen_sdk {
 class ControlUtils {
 public:
     // Function to write joint positions to the robot arm
-    void control_loop(std::shared_ptr<trossen_ai_robot_devices::robot::TrossenAIWidowXRobot> robot,
-                    std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenAIWidowXLeader> teleop_robot, 
+    void control_loop(std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,
+                    std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader> teleop_robot,
                     float control_time,
                     trossen_dataset::TrossenAIDataset& dataset,
                     bool teleop_mode = false);

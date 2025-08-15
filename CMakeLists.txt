@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 project(TrossenDataCollectionSDK)
 
 set(CMAKE_CXX_STANDARD 17)
+set(realsense2_DIR "/usr/lib/x86_64-linux-gnu/cmake/realsense2")
 
 
 

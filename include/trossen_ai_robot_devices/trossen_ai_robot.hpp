@@ -30,16 +30,32 @@ struct State{
 
 namespace teleoperator {
 
-    class TrossenAIWidowXLeader {
+    class TrossenLeader{
+
+        public:
+
+            virtual void connect() = 0;
+            virtual void disconnect() = 0;
+            virtual void calibrate() = 0;
+            virtual void configure() = 0;
+            virtual std::vector<double> get_action() const = 0;
+            virtual void send_feedback() = 0;
+            virtual std::string name() const = 0;
+            
+        
+    };
+
+    class TrossenAIWidowXLeader : public TrossenLeader {
 
         public: 
             TrossenAIWidowXLeader(const trossen_sdk_config::WidowXLeaderConfig& config);
-            void connect();
-            void calibrate();
-            void configure();
-            std::vector<double> get_action();
-            void send_feedback();
-            void disconnect();
+            void connect() override;
+            void calibrate() override;
+            void configure() override;
+            std::vector<double> get_action() const override;
+            void send_feedback() override;
+            void disconnect() override;
+            std::string name() const override { return name_; }
         
         private:
             std::string name_;
@@ -49,20 +65,54 @@ namespace teleoperator {
             bool is_connected_ = false;  // Track connection status
     };
 
+    class TrossenAIBimanualWidowXLeader : public TrossenLeader {
+
+        public: 
+            TrossenAIBimanualWidowXLeader(const trossen_sdk_config::BimanualWidowXLeaderConfig& config);
+            void connect() override;
+            void calibrate() override;
+            void configure() override;
+            std::vector<double> get_action() const override;
+            void send_feedback() override;
+            void disconnect() override;
+            std::string name() const override { return name_; }
+
+        private:
+            std::string name_;
+            std::string left_ip_address_;
+            std::string right_ip_address_;
+            std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> right_robot_driver_;  // Assuming TrossenArmDriver is the class to control the arm
+            std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> left_robot_driver_;  // Assuming TrossenArmDriver is the class to control the arm
+
+            bool is_connected_ = false;  // Track connection status
+    };
+
 }
 
 namespace robot {
 
-    class TrossenAIWidowXRobot {
+    class TrossenRobot {
+
+        public:
+            virtual void connect() = 0;
+            virtual void disconnect() = 0;
+            virtual void calibrate() = 0;
+            virtual void configure() = 0;
+            virtual trossen_ai_robot_devices::State get_observation() = 0;
+            virtual void send_action(const std::vector<double>& action) = 0;
+            virtual std::string name() const = 0;
+    };
+
+    class TrossenAIWidowXRobot : public TrossenRobot {
     public:
         TrossenAIWidowXRobot(const trossen_sdk_config::WidowXRobotConfig& config);
-        void connect();
-        void disconnect();
-        void calibrate();
-        void configure();
-        std::string name() const { return name_; }
-        trossen_ai_robot_devices::State get_observation();
-        void send_action(const std::vector<double>& action);
+        void connect() override;
+        void disconnect() override;
+        void calibrate() override;
+        void configure() override;
+        std::string name() const override { return name_; }
+        trossen_ai_robot_devices::State get_observation() override;
+        void send_action(const std::vector<double>& action) override;
 
     private:
         std::string name_;
@@ -70,6 +120,27 @@ namespace robot {
         std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> robot_driver_;
         bool is_connected_ = false;  // Track connection status
     };
+
+    class TrossenAIBimanualWidowXRobot : public TrossenRobot  {
+    public:
+        TrossenAIBimanualWidowXRobot(const trossen_sdk_config::BimanualWidowXRobotConfig& config);
+        void connect() override;
+        void disconnect() override;
+        void calibrate() override;
+        void configure() override;
+        std::string name() const override { return name_; }
+        trossen_ai_robot_devices::State get_observation() override;
+        void send_action(const std::vector<double>& action) override;
+
+    private:
+        std::string name_;
+        std::string left_ip_address_;
+        std::string right_ip_address_;
+        std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> right_robot_driver_;
+        std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> left_robot_driver_;
+        bool is_connected_ = false;  // Track connection status
+    };
+
 }
 
 

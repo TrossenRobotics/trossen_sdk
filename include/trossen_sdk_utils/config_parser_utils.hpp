@@ -38,13 +38,27 @@ inline trossen_sdk_config::WidowXRobotConfig load_follower_config(const std::str
     return j.get<trossen_sdk_config::WidowXRobotConfig>();  
 }
 
-inline std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenAIWidowXLeader> create_leader_from_config(const trossen_sdk_config::WidowXLeaderConfig& config) {
-    return std::make_shared<trossen_ai_robot_devices::teleoperator::TrossenAIWidowXLeader>(config);
+inline trossen_sdk_config::BimanualWidowXLeaderConfig load_bimanual_leader_config(const std::string& json_path) {
+    std::ifstream file(json_path);
+    nlohmann::json j;
+    file >> j;
+    return j.get<trossen_sdk_config::BimanualWidowXLeaderConfig>();
+}
+
+inline trossen_sdk_config::BimanualWidowXRobotConfig load_bimanual_follower_config(const std::string& json_path) {
+    std::ifstream file(json_path);
+    nlohmann::json j;
+    file >> j;
+    return j.get<trossen_sdk_config::BimanualWidowXRobotConfig>();
+}
+
+inline std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenAIBimanualWidowXLeader> create_leader_from_config(const trossen_sdk_config::BimanualWidowXLeaderConfig& config) {
+    return std::make_shared<trossen_ai_robot_devices::teleoperator::TrossenAIBimanualWidowXLeader>(config);
 
 }
 
-inline std::shared_ptr<trossen_ai_robot_devices::robot::TrossenAIWidowXRobot> create_follower_from_config(const trossen_sdk_config::WidowXRobotConfig& config) {
-    return std::make_shared<trossen_ai_robot_devices::robot::TrossenAIWidowXRobot>(config);
+inline std::shared_ptr<trossen_ai_robot_devices::robot::TrossenAIBimanualWidowXRobot> create_follower_from_config(const trossen_sdk_config::BimanualWidowXRobotConfig& config) {
+    return std::make_shared<trossen_ai_robot_devices::robot::TrossenAIBimanualWidowXRobot>(config);
 }
 
 }  // namespace trossen_sdk_config

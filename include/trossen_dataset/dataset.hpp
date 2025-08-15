@@ -86,7 +86,7 @@ private:
 
 class TrossenAIDataset {
 public:
-    explicit TrossenAIDataset(const std::string& name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenAIWidowXRobot>& robot);
+    explicit TrossenAIDataset(const std::string& name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot>& robot);
 
     // Verify the dataset structure
     bool verify() const;
@@ -114,10 +114,12 @@ public:
 
     int get_existing_episodes() const;
 
+    static std::vector<std::vector<double>> read(const std::string& output_file);
+
 private:
     std::string dataset_name_;
     std::string task_name_;
-    std::shared_ptr<trossen_ai_robot_devices::robot::TrossenAIWidowXRobot> robot_;
+    std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot_;
     std::unique_ptr<trossen_dataset::Metadata> metadata_;
     std::vector<EpisodeData> episodes_buffer_;  // Store episodes in a vector
 };
