@@ -1,4 +1,5 @@
-{
+{ 
+  "type": "bimanual",
   "name": "bimanual_widowxai",
   "left_ip_address": "192.168.1.5",
   "right_ip_address": "192.168.1.4",

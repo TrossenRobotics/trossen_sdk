@@ -1,4 +1,5 @@
 {
-  "name": "leader_arm_1",
+  "type": "widowx",
+  "name": "widowxai_leader",
   "ip_address": "192.168.1.2"
 }

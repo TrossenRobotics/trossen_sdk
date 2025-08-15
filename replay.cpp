@@ -39,7 +39,8 @@ int main(int argc, char* argv[]) {
     // Load the robot configuration
     std::string foll_config_file = "../config/bimanual_widowxai.json";
     // Create a robot instance from the configuration
-    auto robot_controller = trossen_sdk_config::create_follower_from_config(trossen_sdk_config::load_bimanual_follower_config(foll_config_file));
+    auto follower_config = trossen_sdk_config::load_follower_config(foll_config_file);
+    auto robot_controller = trossen_sdk_config::create_robot_from_config(*follower_config);
 
     robot_controller->connect(); // Connect to the robot arms
     std::filesystem::path dataset_path = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name / "data" / ("episode_" + std::to_string(episode_number) + ".parquet");
@@ -55,18 +56,10 @@ int main(int argc, char* argv[]) {
     for (int64_t i = 0; i < joints_array.size(); ++i) {
         auto loop_start_time = std::chrono::steady_clock::now();
         joint_positions = joints_array[i];
-        std::cout << "Replaying frame " << i << " with joint positions: ";
-        for (const auto& pos : joint_positions) {
-            std::cout << pos << " ";
-        }
-        std::cout << std::endl;
         robot_controller->send_action(joint_positions);
         control_utils.busy_wait_until(loop_start_time , 30.0);
     }
-    
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));  // Adjust
-    std::cout << "Replay completed." << std::endl;
+        std::cout << "Replay completed." << std::endl;
     robot_controller->disconnect();
 
     return 0;

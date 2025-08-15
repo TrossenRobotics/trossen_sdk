@@ -64,9 +64,13 @@ int main(int argc, char* argv[]) {
     std::string foll_config_file = "../config/bimanual_widowxai.json";
     std::string lead_config_file = "../config/bimanual_widowx_leader.json";
     // Initialize the robot arm controller
-    auto robot_controller = trossen_sdk_config::create_follower_from_config(trossen_sdk_config::load_bimanual_follower_config(foll_config_file));
-    auto teleop_robot = trossen_sdk_config::create_leader_from_config(trossen_sdk_config::load_bimanual_leader_config(lead_config_file));
+    // auto robot_controller = trossen_sdk_config::create_follower_from_config(trossen_sdk_config::load_bimanual_follower_config(foll_config_file));
+    // auto teleop_robot = trossen_sdk_config::create_leader_from_config(trossen_sdk_config::load_bimanual_leader_config(lead_config_file));
+    auto follower_config = trossen_sdk_config::load_follower_config(foll_config_file);
+    auto robot_controller = trossen_sdk_config::create_robot_from_config(*follower_config);
 
+    auto teleop_config = trossen_sdk_config::load_leader_config(lead_config_file);
+    auto teleop_robot = trossen_sdk_config::create_leader_from_config(*teleop_config);
     // Create a dataset instance
     std::cout << "Initializing dataset [control_script.cpp]: " << dataset_name << std::endl;
     trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_controller);

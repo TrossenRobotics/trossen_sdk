@@ -10,12 +10,6 @@
 
 namespace trossen_sdk_config {
 
-struct ArmConfig {
-    std::string name;
-    std::string ip;
-    std::string model;  // e.g. "leader" or "follower"
-};
-
 struct CameraConfig {
     std::string name;
     std::string serial;
@@ -27,41 +21,56 @@ struct CameraConfig {
 struct BaseConfig {
     std::string name;
 };
-struct RobotConfig {
-    std::string robot_name;
-    std::vector<ArmConfig> leader_arms;
-    std::vector<ArmConfig> follower_arms;
-    std::vector<CameraConfig> cameras;
-    BaseConfig base;
-};
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ArmConfig, name, ip, model)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name, serial, fps, width, height)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BaseConfig, name)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(RobotConfig, robot_name, leader_arms, follower_arms, cameras, base)
 
 
-struct WidowXLeaderConfig {
+struct RobotConfigBase {
+    virtual ~RobotConfigBase() = default;
+    virtual std::string get_name() const = 0;
+};
+
+struct LeaderConfigBase {
+    virtual ~LeaderConfigBase() = default;
+    virtual std::string get_name() const = 0;
+};
+
+struct WidowXLeaderConfig : public LeaderConfigBase {
     std::string name;
     std::string ip_address;
+
+    std::string get_name() const override {
+        return name;
+    }
 };
-struct WidowXRobotConfig {
+
+struct WidowXRobotConfig : public RobotConfigBase {
     std::string name;
     std::string ip_address;
     CameraConfig camera;  // Camera configuration for the follower arm
-
+    std::string get_name() const override {
+        return name;
+    }
 };
 
-struct BimanualWidowXLeaderConfig {
+struct BimanualWidowXLeaderConfig : public LeaderConfigBase {
     std::string name;
     std::string left_ip_address;
     std::string right_ip_address;
+
+    std::string get_name() const override {
+        return name;
+    }
 };
 
-struct BimanualWidowXRobotConfig {
+struct BimanualWidowXRobotConfig : public RobotConfigBase {
     std::string name;
     std::string left_ip_address;
     std::string right_ip_address;
+    std::string get_name() const override {
+        return name;
+    }
     CameraConfig camera;  // Camera configuration for the follower arm
 };
 
