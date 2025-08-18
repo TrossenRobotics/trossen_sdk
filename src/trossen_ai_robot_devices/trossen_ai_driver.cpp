@@ -7,7 +7,7 @@ namespace trossen_ai_robot_devices {
 
 void TrossenAIArm::connect() {
     if (is_connected_) {
-        std::cout << "Already connected to " << name_ << std::endl;
+        spdlog::info("Already connected to {}", name_);
         return;
     }
     try
@@ -18,13 +18,13 @@ void TrossenAIArm::connect() {
     else if (model_ == "follower") {
         driver_.configure(trossen_arm::Model::wxai_v0, trossen_arm::StandardEndEffector::wxai_v0_follower, ip_address_, true);
     } else {
-        std::cerr << "Unknown model: " << model_ << std::endl;
+        spdlog::error("Unknown model: {}", model_);
         return;
     }
     }
     catch(const std::exception& e)
     {
-        std::cerr << e.what() << '\n';
+        spdlog::error("Exception occurred: {}", e.what());
     }
     // Stage the arm
     driver_.set_all_modes(trossen_arm::Mode::position);
@@ -34,9 +34,9 @@ void TrossenAIArm::connect() {
 }
 
 void TrossenAIArm::disconnect() {
-    std::cout << "Disconnecting from " << name_ << std::endl;
+    spdlog::info("Disconnecting from {}", name_);
     if (!is_connected_) {
-        std::cout << "Not connected to " << name_ << std::endl;
+        spdlog::error("Not connected to {}.", name_);
         return;
     }
     driver_.set_all_modes(trossen_arm::Mode::position); 
@@ -47,7 +47,7 @@ void TrossenAIArm::disconnect() {
 
 std::vector<double> TrossenAIArm::read(std::string data_name) {
     if (!is_connected_) {
-        std::cerr << "Not connected to " << name_ << ". Cannot read data." << std::endl;
+        spdlog::error("Not connected to {}. Cannot read data.", name_);
         return {};
     }
     if (data_name == "positions") {
@@ -57,14 +57,14 @@ std::vector<double> TrossenAIArm::read(std::string data_name) {
     } else if (data_name == "external_efforts") {
         return driver_.get_all_external_efforts();
     } else {
-        std::cerr << "Unknown data name: " << data_name << std::endl;
+        spdlog::error("Unknown data name: {}", data_name);
         return {};
     }
 }
 
 void TrossenAIArm::write(const std::string& data_name, const std::vector<double>& data) {
     if (!is_connected_) {
-        std::cerr << "Not connected to " << name_ << ". Cannot write data." << std::endl;
+        spdlog::error("Not connected to {}. Cannot write data.", name_);
         return;
     }
     if (data_name == "positions") {
@@ -75,7 +75,7 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
         }
         // Check if the data size is correct for positions
         if (data.size() != 7) {
-            std::cerr << "Invalid data size for positions. Expected 7 values." << std::endl;
+            spdlog::error("Invalid data size for positions. Expected 7 values.");
             return;
         }
         driver_.set_all_positions(data, time_to_move_, false);
@@ -88,7 +88,7 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
         }
         // Check if the data size is correct for velocities
         if (data.size() != 7) {
-            std::cerr << "Invalid data size for velocities. Expected 7 values." << std::endl;
+            spdlog::error("Invalid data size for velocities. Expected 7 values.");
             return;
         }
         driver_.set_all_velocities(data, time_to_move_, false);
@@ -101,12 +101,12 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
         }
         // Check if the data size is correct for external efforts
         if (data.size() != 7) {
-            std::cerr << "Invalid data size for external_efforts. Expected 7 values." << std::endl;
+            spdlog::error("Invalid data size for external_efforts. Expected 7 values.");
             return;
         }
         driver_.set_all_external_efforts(data, time_to_move_, false);
     } else {
-        std::cerr << "Unknown data name: " << data_name << std::endl;
+        spdlog::error("Unknown data name: {}", data_name);
         return;
     }
 
@@ -115,7 +115,7 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
 
 void TrossenAIArm::stage_arm() {
     if (!is_connected_) {
-        std::cerr << "Not connected to " << name_ << ". Cannot stage arm." << std::endl;
+        spdlog::error("Not connected to {}. Cannot stage arm.", name_);
         return;
     }
     // Stage the arm to a default position

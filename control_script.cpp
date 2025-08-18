@@ -34,13 +34,17 @@ int main(int argc, char* argv[]) {
         po::store(po::parse_command_line(argc, argv, desc), vm);
         po::notify(vm);
     } catch (const std::exception& ex) {
-        std::cerr << "Error parsing arguments: " << ex.what() << std::endl;
-        std::cout << desc << std::endl;
+        spdlog::error("Error parsing arguments: {}", ex.what());
+        std::stringstream ss;
+        ss << desc;
+        spdlog::info("Available options: {}", ss.str());
         return 1;
     }
 
     if (vm.count("help")) {
-        std::cout << desc << std::endl;
+        std::stringstream ss;
+        ss << desc;
+        spdlog::info("{}", ss.str());
         return 0;
     }
 
@@ -54,7 +58,7 @@ int main(int argc, char* argv[]) {
     std::ifstream foll_file_check(foll_config_file);
     std::ifstream lead_file_check(lead_config_file);
     if (!foll_file_check.good() || !lead_file_check.good()) {
-        std::cerr << "Config file(s) not found for robot: " << robot_name << std::endl;
+        spdlog::error("Config file(s) not found for robot: {}", robot_name);
         return 1;
     }
     
@@ -64,20 +68,20 @@ int main(int argc, char* argv[]) {
     auto teleop_config = trossen_sdk_config::load_leader_config(lead_config_file);
     auto teleop_robot = trossen_sdk_config::create_leader_from_config(*teleop_config);
 
-    std::cout << "Initializing dataset [control_script.cpp]: " << dataset_name << std::endl;
+    spdlog::info("Initializing dataset [control_script.cpp]: {}", dataset_name);
     trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_controller);
 
-    std::cout << "Connecting to robot: " << std::endl;
+    spdlog::info("Connecting to robot: {}", robot_name);
     robot_controller->connect();
     teleop_robot->connect();
 
-    std::cout << "Warming up the robot arms..." << std::endl;
+    spdlog::info("Warming up the robot arms...");
     control_utils.control_loop(robot_controller, teleop_robot, warmup_time, dataset, true);
 
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
-        std::cout << "Starting episode " << dataset.get_num_episodes() << std::endl;
+        spdlog::info("Starting episode {}", dataset.get_num_episodes());
         control_utils.control_loop(robot_controller, teleop_robot, recording_time, dataset);
-        std::cout << "Episode " <<  dataset.get_num_episodes() << " completed." << std::endl;
+        spdlog::info("Episode {} completed.", dataset.get_num_episodes());
         // Reset time
         std::this_thread::sleep_for(std::chrono::duration<double>(reset_time));
     }
@@ -86,6 +90,6 @@ int main(int argc, char* argv[]) {
 
     robot_controller->disconnect(); // Sleep the arms at the end of the control script
     teleop_robot->disconnect(); // Disconnect the teleoperation robot
-    std::cout << "Control script finished." << std::endl;
+    spdlog::info("Control script finished.");
     return 0;
 }

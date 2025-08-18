@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include "libtrossen_arm/trossen_arm.hpp"
+#include <spdlog/spdlog.h>
 
 
 

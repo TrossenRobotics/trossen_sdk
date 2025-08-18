@@ -7,6 +7,7 @@
 #include <iostream>
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 #include "trossen_sdk_utils/config_utils.hpp"
+#include <spdlog/spdlog.h>
 
 namespace trossen_sdk_config {
 

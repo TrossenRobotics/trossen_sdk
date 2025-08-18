@@ -8,6 +8,9 @@
 #include "trossen_sdk_utils/logging_utils.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_cameras.hpp"
 #include <filesystem>
+#include <spdlog/spdlog.h>
+
+
 namespace trossen_sdk {
 
 class ControlUtils {

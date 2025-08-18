@@ -16,7 +16,7 @@ const std::vector<FrameData>& EpisodeData::get_frames() const {
 }
 
 TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot>& robot) : dataset_name_(dataset_name), task_name_(task_name), robot_(robot) {
-    std::cout << "TrossenAIDataset : " << dataset_name_ << std::endl;
+    spdlog::info("TrossenAIDataset : {}", dataset_name_);
 
     // Create dataset folder structure: <dataset_name>/data, <dataset_name>/meta, <dataset_name>/videos
     // Set dataset root directory under ~/.cache/trossen_dataset_collection_sdk/
@@ -72,37 +72,37 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
     for (const auto& sample : episode_data.get_frames()) {
         auto st = timestamp_builder.Append(sample.timestamp_ms);
         if (!st.ok()) {
-            std::cerr << "[Arrow Error] Failed to append timestamp: " << st.ToString() << std::endl;
+            spdlog::error("[Arrow Error] Failed to append timestamp: {}", st.ToString());
         }
 
         st = observation_builder.Append();
         if (!st.ok()) {
-            std::cerr << "[Arrow Error] Failed to append observation list: " << st.ToString() << std::endl;
+            spdlog::error("[Arrow Error] Failed to append observation list: {}", st.ToString());
         }
 
         for (const auto& pos : sample.observation_state) {
             st = observation_value_builder->Append(pos);
             if (!st.ok()) {
-                std::cerr << "[Arrow Error] Failed to append observation state value: " << st.ToString() << std::endl;
+                spdlog::error("[Arrow Error] Failed to append observation state value: {}", st.ToString());
             }
         }
         st = action_builder.Append();
         if (!st.ok()) {
-            std::cerr << "[Arrow Error] Failed to append action list: " << st.ToString() << std::endl;
+            spdlog::error("[Arrow Error] Failed to append action list: {}", st.ToString());
         }
         for (const auto& act : sample.action) {
             st = action_value_builder->Append(act);
             if (!st.ok()) {
-                std::cerr << "[Arrow Error] Failed to append action value: " << st.ToString() << std::endl;
+                spdlog::error("[Arrow Error] Failed to append action value: {}", st.ToString());
             }
         }
         st = episode_idx_builder.Append(sample.episode_idx);
         if (!st.ok()) {
-            std::cerr << "[Arrow Error] Failed to append episode index: " << st.ToString() << std::endl;
+            spdlog::error("[Arrow Error] Failed to append episode index: {}", st.ToString());
         }
         st = frame_idx_builder.Append(sample.frame_idx);
         if (!st.ok()) {
-            std::cerr << "[Arrow Error] Failed to append frame index: " << st.ToString() << std::endl;
+            spdlog::error("[Arrow Error] Failed to append frame index: {}", st.ToString());
         }
     }
 
@@ -114,29 +114,29 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
 
     auto status = timestamp_builder.Finish(&timestamp_array);
     if (!status.ok()) {
-        std::cerr << "[Arrow Error] Failed to finish timestamp builder: " << status.ToString() << std::endl;
+        spdlog::error("[Arrow Error] Failed to finish timestamp builder: {}", status.ToString());
         return;
     }
 
     status = observation_builder.Finish(&observation_array);
     if (!status.ok()) {
-        std::cerr << "[Arrow Error] Failed to finish observation builder: " << status.ToString() << std::endl;
+        spdlog::error("[Arrow Error] Failed to finish observation builder: {}", status.ToString());
         return;
     }
 
     status = action_builder.Finish(&action_array);
     if (!status.ok()) {
-        std::cerr << "[Arrow Error] Failed to finish action builder: " << status.ToString() << std::endl;
+        spdlog::error("[Arrow Error] Failed to finish action builder: {}", status.ToString());
         return;
     }
     status = episode_idx_builder.Finish(&episode_idx_array);
-    if (!status.ok()) {     
-        std::cerr << "[Arrow Error] Failed to finish episode index builder: " << status.ToString() << std::endl;
+    if (!status.ok()) {
+        spdlog::error("[Arrow Error] Failed to finish episode index builder: {}", status.ToString());
         return;
     }
     status = frame_idx_builder.Finish(&frame_idx_array);
     if (!status.ok()) {
-        std::cerr << "[Arrow Error] Failed to finish frame index builder: " << status.ToString() << std::endl;
+        spdlog::error("[Arrow Error] Failed to finish frame index builder: {}", status.ToString());
         return;
     }
     auto schema = arrow::schema({
@@ -160,16 +160,16 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
     std::string output_path_ = episode_file.string();
     auto result = arrow::io::FileOutputStream::Open(output_path_);
     if (!result.ok()) {
-        std::cerr << "[Arrow Error] Failed to open file output stream: " << result.status().ToString() << std::endl;
+        spdlog::error("[Arrow Error] Failed to open file output stream: {}", result.status().ToString());
         return;
     }
     outfile = result.ValueOrDie();
 
     status = parquet::arrow::WriteTable(*table, arrow::default_memory_pool(), outfile, 1024);
     if (!status.ok()) {
-        std::cerr << "[Parquet Error] Failed to write table: " << status.ToString() << std::endl;
+        spdlog::error("[Parquet Error] Failed to write table: {}", status.ToString());
     } else {
-        std::cout << "Successfully wrote dataset." << std::endl;
+        spdlog::info("Successfully wrote dataset.");
     }
     episodes_buffer_.push_back(episode_data);
 
@@ -204,14 +204,14 @@ bool TrossenAIDataset::verify() const {
     // Implement verification logic here
     // Load metadata and check if all required fields are present
     if (!metadata_) {
-        std::cerr << "Metadata is not initialized." << std::endl;
+        spdlog::error("Metadata is not initialized.");
         return false;
     }
     // Check is the dataset name , robot name, and task name match the metadata
     if (metadata_->get_info_entry("dataset_name") != dataset_name_ ||
         metadata_->get_info_entry("robot_name") != robot_->name() ||
         metadata_->get_info_entry("tasks") != task_name_) {
-        std::cerr << "Dataset metadata does not match the dataset name, robot name, or task name." << std::endl;
+        spdlog::error("Dataset metadata does not match the dataset name, robot name, or task name.");
         return false;
     }
     return true;  // Placeholder for actual verification logic
@@ -219,7 +219,7 @@ bool TrossenAIDataset::verify() const {
 void TrossenAIDataset::compute_statistics() {
     // Implement statistics computation logic here
     // Load parquet files and compute statistics
-    std::cout << "Computing dataset statistics..." << std::endl;
+    spdlog::info("Computing dataset statistics...");
     // Get the total number of episodes
     size_t num_episodes = get_num_episodes();
     // Print all the metadata entries
@@ -269,7 +269,7 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
             }
 
             if (image_paths.empty()) {
-                std::cout << "No images found in episode folder: " << episode_name << std::endl;
+                spdlog::warn("No images found in episode folder: {}", episode_name);
                 continue;
             }
 
@@ -279,7 +279,7 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
             // Read first image to get frame size
             cv::Mat first_frame = cv::imread(image_paths.front().string());
             if (first_frame.empty()) {
-                std::cerr << "Could not read first image in episode folder: " << episode_name << std::endl;
+                spdlog::error("Could not read first image in episode folder: {}", episode_name);
                 continue;
             }
 
@@ -287,14 +287,14 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
 
             cv::VideoWriter writer(output_video_path, cv::VideoWriter::fourcc('m','p','4','v'), fps, frame_size);
             if (!writer.isOpened()) {
-                std::cerr << "Failed to open video writer for: " << output_video_path << std::endl;
+                spdlog::error("Failed to open video writer for: {}", output_video_path.string());
                 continue;
             }
 
             for (const auto& img_path : image_paths) {
                 cv::Mat frame = cv::imread(img_path.string());
                 if (frame.empty()) {
-                    std::cerr << "Failed to read image: " << img_path << std::endl;
+                    spdlog::error("Failed to read image: {}", img_path.string());
                     continue;
                 }
                 writer.write(frame);
@@ -311,7 +311,7 @@ int TrossenAIDataset::get_existing_episodes() const {
     std::string data_path = metadata_->get_info_entry("data_path");
 
     if (!std::filesystem::exists(data_path)) {
-        std::cerr << "Data path does not exist: " << data_path << std::endl;
+        spdlog::error("Data path does not exist: {}", data_path);
         return 0;
     }
 
@@ -325,12 +325,12 @@ int TrossenAIDataset::get_existing_episodes() const {
 }
 
 std::vector<std::vector<double>> TrossenAIDataset::read(const std::string& output_file) {
-    std::cout << "Replaying joint data from: " << output_file << std::endl;
+    spdlog::info("Replaying joint data from: {}", output_file);
 
     // Open the file and handle errors
     auto infile_result = arrow::io::ReadableFile::Open(output_file);
     if (!infile_result.ok()) {
-        std::cerr << "Failed to open Arrow file: " << infile_result.status().ToString() << std::endl;
+        spdlog::error("Failed to open Arrow file: {}", infile_result.status().ToString());
         return std::vector<std::vector<double>>{};
     }
     std::shared_ptr<arrow::io::ReadableFile> infile = infile_result.ValueOrDie();
@@ -338,7 +338,7 @@ std::vector<std::vector<double>> TrossenAIDataset::read(const std::string& outpu
     // Open the Parquet file reader and handle errors
     auto reader_result = parquet::arrow::OpenFile(infile, arrow::default_memory_pool());
     if (!reader_result.ok()) {
-        std::cerr << "Failed to open Parquet file: " << reader_result.status().ToString() << std::endl;
+        spdlog::error("Failed to open Parquet file: {}", reader_result.status().ToString());
         return std::vector<std::vector<double>>{};
     }
     std::unique_ptr<parquet::arrow::FileReader> reader = std::move(reader_result.ValueOrDie());
@@ -347,7 +347,7 @@ std::vector<std::vector<double>> TrossenAIDataset::read(const std::string& outpu
     // Read the table and handle errors
     auto status = reader->ReadTable(&parquet_table);
     if (!status.ok()) {
-        std::cerr << "Failed to read Parquet table: " << status.ToString() << std::endl;
+        spdlog::error("Failed to read Parquet table: {}", status.ToString());
         return std::vector<std::vector<double>>{};
     }
 
@@ -454,7 +454,7 @@ std::vector<std::string> Metadata::get_info_values() const {
 void Metadata::save_info_file() const {
     std::ofstream file(info_file_path_);
     if (!file.is_open()) {
-        std::cerr << "Failed to write info.json to: " << info_file_path_ << std::endl;
+        spdlog::error("Failed to write info.json to: {}", info_file_path_);
         return;
     }
     file << info_.dump(4);
@@ -463,7 +463,7 @@ void Metadata::save_info_file() const {
 void Metadata::load_info_file(const std::string& path) {
     std::ifstream file(path);
     if (!file.is_open()) {
-        std::cerr << "Failed to load info.json from: " << path << std::endl;
+        spdlog::error("Failed to load info.json from: {}", path);
         return;
     }
     file >> info_;

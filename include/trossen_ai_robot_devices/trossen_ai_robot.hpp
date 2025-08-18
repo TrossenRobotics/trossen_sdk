@@ -18,6 +18,7 @@
 #include "trossen_ai_robot_devices/trossen_ai_cameras.hpp"
 #include "trossen_sdk_utils/config_utils.hpp"
 #include <any>
+#include <spdlog/spdlog.h>
 
 namespace trossen_ai_robot_devices {
 

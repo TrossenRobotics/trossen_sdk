@@ -70,13 +70,13 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
         // TODO: Improve this logging to be more elegant and less verbose
         // TODO: Make FPS tolerance configurable/ constant
         if (loop_duration > 1.0 / 29.0) {
-            trossen_sdk_utils::log_warning("Loop duration: " + std::to_string(loop_duration) + " seconds"
+            spdlog::warn("Loop duration: " + std::to_string(loop_duration) + " seconds"
                                     + " | Frequency: " + std::to_string(1.0 / loop_duration) + " Hz"
                                     + " | Episode: " + std::to_string(episode_idx)
                                     + " | Frame: " + std::to_string(frame_data.frame_idx));
         }
         else {
-            trossen_sdk_utils::log_info("Loop duration: " + std::to_string(loop_duration) + " seconds"
+            spdlog::info("Loop duration: " + std::to_string(loop_duration) + " seconds"
                                     + " | Frequency: " + std::to_string(1.0 / loop_duration) + " Hz"
                                     + " | Episode: " + std::to_string(episode_idx)
                                     + " | Frame: " + std::to_string(frame_data.frame_idx));

@@ -6,11 +6,8 @@ TrossenAICamera::TrossenAICamera(const std::string& name, const std::string& ser
                                  int capture_width, int capture_height, int fps)
     : name_(name), serial_number_(serial_number), capture_width_(capture_width), capture_height_(capture_height), fps_(fps) {
     // Initialize camera settings if needed
-    std::cout << "TrossenAICamera initialized with name: " << name_
-              << ", serial number: " << serial_number_
-              << ", width: " << capture_width_
-              << ", height: " << capture_height_
-              << ", fps: " << fps_ << std::endl;
+    spdlog::info("TrossenAICamera initialized: name={}, serial={}, width={}, height={}, fps={}", 
+                 name_, serial_number_, capture_width_, capture_height_, fps_);
 }
 void TrossenAICamera::connect() {
     // Connect to the camera
@@ -34,7 +31,7 @@ void TrossenAICamera::connect() {
 
 void TrossenAICamera::disconnect() {
     // Disconnect from the camera
-    std::cout << "Disconnecting from camera: " << name_ << std::endl;
+    spdlog::info("Disconnecting from camera: {}", name_);
     // Add disconnection logic here
 }
 
@@ -44,7 +41,7 @@ trossen_ai_robot_devices::ColorDepthData TrossenAICamera::read() {
     try {
         frames = camera_.wait_for_frames(3000); // Wait for a frame for up to 5000 ms
     } catch (const rs2::error& e) {
-        std::cerr << "Failed to get frameset from camera: " << name_ << ". Error: " << e.what() << std::endl;
+        spdlog::error("Failed to get frameset from camera: {}. Error: {}", name_, e.what());
         return trossen_ai_robot_devices::ColorDepthData{};
     }
 
@@ -56,10 +53,10 @@ trossen_ai_robot_devices::ColorDepthData TrossenAICamera::read() {
             if (color_frame) {
                 data.color_image = color_frame;
             } else {
-                std::cerr << "Failed to read color frame from camera: " << name_ << std::endl;
+                spdlog::error("Failed to read color frame from camera: {}", name_);
             }
         } catch (const rs2::error& e) {
-            std::cerr << "Error retrieving color frame from camera: " << name_ << ". Error: " << e.what() << std::endl;
+            spdlog::error("Error retrieving color frame from camera: {}. Error: {}", name_, e.what());
         }
 
         // Try to get depth frame
@@ -68,13 +65,13 @@ trossen_ai_robot_devices::ColorDepthData TrossenAICamera::read() {
             if (depth_frame) {
                 data.depth_map = depth_frame;
             } else {
-                std::cerr << "Failed to read depth frame from camera: " << name_ << std::endl;
+                spdlog::error("Failed to read depth frame from camera: {}", name_);
             }
         } catch (const rs2::error& e) {
-            std::cerr << "Error retrieving depth frame from camera: " << name_ << ". Error: " << e.what() << std::endl;
+            spdlog::error("Error retrieving depth frame from camera: {}. Error: {}", name_, e.what());
         }
     } else {
-        std::cerr << "Frameset is empty for camera: " << name_ << std::endl;
+        spdlog::error("Frameset is empty for camera: {}", name_);
     }
     return data;
 }
@@ -110,7 +107,7 @@ trossen_ai_robot_devices::ImageData TrossenAICamera::async_read() {
 
     std::unique_lock<std::mutex> lock(mtx);
     if (!cv.wait_for(lock, std::chrono::seconds(5), [&done]{ return done; })) {
-        std::cerr << "Timeout: Failed to receive image within 5 seconds." << std::endl;
+        spdlog::error("Timeout: Failed to receive image within 5 seconds.");
         // Optionally, set result to an empty image or error state
         result = trossen_ai_robot_devices::ImageData{};
     }
@@ -171,10 +168,10 @@ void TrossenAsyncImageWriter::worker_loop() {
             }
             try {
                 if (!cv::imwrite(filename, depth_image)) {
-                    std::cerr << "Failed to write depth image to: " << filename << std::endl;
+                    spdlog::error("Failed to write depth image to: {}", filename);
                 }
             } catch (const cv::Exception& e) {
-                std::cerr << "Exception while writing depth image to " << filename << ": " << e.what() << std::endl;
+                spdlog::error("Exception while writing depth image to {}: {}", filename, e.what());
             }
         } else {
             // Save color image (assume RGB, convert to BGR for OpenCV)
@@ -189,10 +186,10 @@ void TrossenAsyncImageWriter::worker_loop() {
             }
             try {
                 if (!cv::imwrite(filename, bgr_image)) {
-                    std::cerr << "Failed to write color image to: " << filename << std::endl;
+                    spdlog::error("Failed to write color image to: {}", filename);
                 }
             } catch (const cv::Exception& e) {
-                std::cerr << "Exception while writing color image to " << filename << ": " << e.what() << std::endl;
+                spdlog::error("Exception while writing color image to {}: {}", filename, e.what());
             }
         }
     }

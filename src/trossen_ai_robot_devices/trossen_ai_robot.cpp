@@ -70,14 +70,12 @@ namespace trossen_ai_robot_devices {
             for (const auto& cam_config : config.cameras) {
                 cameras_.emplace_back(cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps);
             }
-            std::cout << "TrossenAIBimanualWidowXRobot initialized with name: " << name_
-                      << ", Right IP address: " << right_ip_address_
-                      << ", Left IP address: " << left_ip_address_ << std::endl;
+            spdlog::info("TrossenAIBimanualWidowXRobot initialized with name: {}, Right IP address: {}, Left IP address: {}", name_, right_ip_address_, left_ip_address_);
         }
 
         void TrossenAIBimanualWidowXRobot::connect() {
             if (is_connected_) {
-                std::cout << "Already connected to bimanual robot: " << name_ << std::endl;
+                spdlog::info("Already connected to bimanual robot: {}", name_);
                 return;
             }
             right_robot_driver_->connect();
@@ -113,7 +111,7 @@ namespace trossen_ai_robot_devices {
         void TrossenAIBimanualWidowXRobot::send_action(const std::vector<double>& action) {
             // Assuming action is split between the two arms
             if (action.size() < 14) {
-                std::cerr << "Error: Expected at least 14 joint positions, got " << action.size() << std::endl;
+                spdlog::error("Error: Expected at least 14 joint positions, got {}", action.size());
                 return;
             }
             std::vector<double> right_action(action.begin(), action.begin() + 7);
@@ -131,7 +129,7 @@ namespace trossen_ai_robot_devices {
                 camera.disconnect();
             }
             is_connected_ = false;
-            std::cout << "Disconnected from bimanual robot: " << name_ << std::endl;
+            spdlog::info("Disconnected from bimanual robot: {}", name_);
         }
 
     }
@@ -145,7 +143,7 @@ namespace trossen_ai_robot_devices {
 
         void TrossenAIWidowXLeader::connect() {
             if (is_connected_) {
-                std::cout << "Already connected to leader: " << name_ << std::endl;
+                spdlog::warn("Already connected to leader: {}", name_);
                 return;
             }
             robot_driver_->connect();
@@ -173,7 +171,7 @@ namespace trossen_ai_robot_devices {
             robot_driver_->stage_arm(); // Stop the arm
             robot_driver_->disconnect();
             is_connected_ = false;
-            std::cout << "Disconnected from leader: " << name_ << std::endl;
+            spdlog::info("Disconnected from leader: {}", name_);
         }
 
 
@@ -184,7 +182,7 @@ namespace trossen_ai_robot_devices {
         }
         void TrossenAIBimanualWidowXLeader::connect() {
             if (is_connected_) {
-                std::cout << "Already connected to bimanual leader: " << name_ << std::endl;
+                spdlog::warn("Already connected to bimanual leader: {}", name_);
                 return;
             }
             right_robot_driver_->connect();
@@ -215,7 +213,7 @@ namespace trossen_ai_robot_devices {
             right_robot_driver_->disconnect();
             left_robot_driver_->disconnect();
             is_connected_ = false;
-            std::cout << "Disconnected from bimanual leader: " << name_ << std::endl;
+            spdlog::info("Disconnected from bimanual leader: {}", name_);
         }
 
     }  // namespace teleoperator

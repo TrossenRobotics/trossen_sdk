@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
+#include <spdlog/spdlog.h>
 
 
 namespace fs = std::filesystem;

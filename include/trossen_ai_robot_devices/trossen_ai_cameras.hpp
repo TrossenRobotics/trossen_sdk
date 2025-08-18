@@ -11,6 +11,8 @@
 #include <condition_variable>
 #include <queue>
 #include <atomic>
+#include <spdlog/spdlog.h>
+
 namespace trossen_ai_robot_devices {
 
 struct ColorDepthData {
