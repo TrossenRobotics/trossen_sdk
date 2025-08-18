@@ -52,6 +52,7 @@ int main(int argc, char* argv[]) {
     trossen_sdk::ControlUtils control_utils;
     std::string lead_config_file;
     std::string foll_config_file;
+    // TODO: Implement config file selection based on robot_name (match the robot name to config and use string formatting)
     if (robot_name == "trossen_ai_stationary") {
         foll_config_file = "../config/bimanual_widowxai.json";
         lead_config_file = "../config/bimanual_widowx_leader.json";
@@ -67,8 +68,6 @@ int main(int argc, char* argv[]) {
     }
     
     // Initialize the robot arm controller
-    // auto robot_controller = trossen_sdk_config::create_follower_from_config(trossen_sdk_config::load_bimanual_follower_config(foll_config_file));
-    // auto teleop_robot = trossen_sdk_config::create_leader_from_config(trossen_sdk_config::load_bimanual_leader_config(lead_config_file));
     auto follower_config = trossen_sdk_config::load_follower_config(foll_config_file);
     auto robot_controller = trossen_sdk_config::create_robot_from_config(*follower_config);
 

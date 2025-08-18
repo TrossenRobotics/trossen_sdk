@@ -119,6 +119,7 @@ namespace robot {
         std::string ip_address_;
         std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> robot_driver_;
         bool is_connected_ = false;  // Track connection status
+        std::vector<trossen_ai_robot_devices::TrossenAICamera> cameras_;
     };
 
     class TrossenAIBimanualWidowXRobot : public TrossenRobot  {
@@ -139,6 +140,7 @@ namespace robot {
         std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> right_robot_driver_;
         std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> left_robot_driver_;
         bool is_connected_ = false;  // Track connection status
+        std::vector<trossen_ai_robot_devices::TrossenAICamera> cameras_;
     };
 
 }
