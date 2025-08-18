@@ -11,7 +11,9 @@ namespace trossen_ai_robot_devices {
             : name_(config.name), ip_address_(config.ip_address) {
             
             robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, "follower");
-            cameras_.emplace_back(config.camera.name, config.camera.serial, config.camera.width, config.camera.height, config.camera.fps);
+            for (const auto& cam_config : config.cameras) {
+                cameras_.emplace_back(cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps);
+            }
             std::cout << "TrossenAIWidowXRobot initialized with name: " << name_
                       << ", IP address: " << ip_address_ << std::endl;
         }
@@ -65,7 +67,9 @@ namespace trossen_ai_robot_devices {
             : name_(config.name), right_ip_address_(config.right_ip_address), left_ip_address_(config.left_ip_address) {
             right_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.right_ip_address, "follower");
             left_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.left_ip_address, "follower");
-            cameras_.emplace_back(config.camera.name, config.camera.serial, config.camera.width, config.camera.height, config.camera.fps);
+            for (const auto& cam_config : config.cameras) {
+                cameras_.emplace_back(cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps);
+            }
             std::cout << "TrossenAIBimanualWidowXRobot initialized with name: " << name_
                       << ", Right IP address: " << right_ip_address_
                       << ", Left IP address: " << left_ip_address_ << std::endl;

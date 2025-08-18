@@ -48,7 +48,7 @@ struct WidowXLeaderConfig : public LeaderConfigBase {
 struct WidowXRobotConfig : public RobotConfigBase {
     std::string name;
     std::string ip_address;
-    CameraConfig camera;  // Camera configuration for the follower arm
+    std::vector<CameraConfig> cameras;  // Camera configuration for the follower arm
     std::string get_name() const override {
         return name;
     }
@@ -71,13 +71,13 @@ struct BimanualWidowXRobotConfig : public RobotConfigBase {
     std::string get_name() const override {
         return name;
     }
-    CameraConfig camera;  // Camera configuration for the follower arm
+    std::vector<CameraConfig> cameras;  // Camera configuration for the follower arm
 };
 
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXLeaderConfig, name, left_ip_address, right_ip_address)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXRobotConfig, name, left_ip_address, right_ip_address, camera)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXRobotConfig, name, left_ip_address, right_ip_address, cameras)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXLeaderConfig, name, ip_address)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXRobotConfig, name, ip_address, camera)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXRobotConfig, name, ip_address, cameras)
 
 }  // namespace trossen_sdk_config
     

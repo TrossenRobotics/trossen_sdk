@@ -43,11 +43,8 @@ int main(int argc, char* argv[]) {
         std::cout << desc << std::endl;
         return 0;
     }
-    // Initialize the camera
-    // Initialize two cameras (camera IDs 0 and 1)
-    trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer(4);
 
-   
+    trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer(4);
 
     trossen_sdk::ControlUtils control_utils;
 
@@ -61,25 +58,22 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    // Initialize the robot arm controller
     auto follower_config = trossen_sdk_config::load_follower_config(foll_config_file);
     auto robot_controller = trossen_sdk_config::create_robot_from_config(*follower_config);
 
     auto teleop_config = trossen_sdk_config::load_leader_config(lead_config_file);
     auto teleop_robot = trossen_sdk_config::create_leader_from_config(*teleop_config);
-    // Create a dataset instance
+
     std::cout << "Initializing dataset [control_script.cpp]: " << dataset_name << std::endl;
     trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_controller);
 
-    // Move the robot controller to this scope
     std::cout << "Connecting to robot: " << std::endl;
-    robot_controller->connect(); // Connect to the robot arms
-    teleop_robot->connect(); // Connect to the teleoperation robot
+    robot_controller->connect();
+    teleop_robot->connect();
 
     std::cout << "Warming up the robot arms..." << std::endl;
-    control_utils.control_loop(robot_controller, teleop_robot, warmup_time, dataset, true); // Warm up the robot arms for specified time
+    control_utils.control_loop(robot_controller, teleop_robot, warmup_time, dataset, true);
 
-    // Start the control loop for each episode
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
         std::cout << "Starting episode " << dataset.get_num_episodes() << std::endl;
         control_utils.control_loop(robot_controller, teleop_robot, recording_time, dataset);

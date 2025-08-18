@@ -3,11 +3,34 @@
   "name": "bimanual_widowxai",
   "left_ip_address": "192.168.1.5",
   "right_ip_address": "192.168.1.4",
-  "camera": {
-    "name": "cam_main",
-    "serial": "218622270304",
-    "fps": 30,
-    "width": 640,
-    "height": 480
-  }
+  "cameras": [
+    {
+      "name": "cam_head",
+      "serial": "218622270304",
+      "fps": 30,
+      "width": 640,
+      "height": 480
+    },
+    {
+      "name": "cam_right_wrist",
+      "serial": "130322272628",
+      "fps": 30,
+      "width": 640,
+      "height": 480
+    },
+    {
+      "name": "cam_left_wrist",
+      "serial": "128422271347",
+      "fps": 30,
+      "width": 640,
+      "height": 480
+    },
+   {
+      "name": "cam_low",
+      "serial": "218622274938",
+      "fps": 30,
+      "width": 640,
+      "height": 480
+    }
+  ]
 }
