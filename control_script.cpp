@@ -50,20 +50,14 @@ int main(int argc, char* argv[]) {
    
 
     trossen_sdk::ControlUtils control_utils;
-    std::string lead_config_file;
-    std::string foll_config_file;
-    // TODO: Implement config file selection based on robot_name (match the robot name to config and use string formatting)
-    if (robot_name == "trossen_ai_stationary") {
-        foll_config_file = "../config/bimanual_widowxai.json";
-        lead_config_file = "../config/bimanual_widowx_leader.json";
-    } else if (robot_name == "trossen_ai_solo") {
-        lead_config_file = "../config/widowx_leader.json";
-        foll_config_file = "../config/widowxai.json";
-    } else if (robot_name == "trossen_ai_mobile") {
-        lead_config_file = "../config/mobile.json";
-        foll_config_file = "../config/mobile.json";
-    } else {
-        std::cerr << "Unknown robot type: " << robot_name << std::endl;
+
+    std::string foll_config_file = "../config/" + robot_name + ".json";
+    std::string lead_config_file = "../config/" + robot_name + "_leader.json";
+
+    std::ifstream foll_file_check(foll_config_file);
+    std::ifstream lead_file_check(lead_config_file);
+    if (!foll_file_check.good() || !lead_file_check.good()) {
+        std::cerr << "Config file(s) not found for robot: " << robot_name << std::endl;
         return 1;
     }
     
@@ -93,7 +87,7 @@ int main(int argc, char* argv[]) {
         // Reset time
         std::this_thread::sleep_for(std::chrono::duration<double>(reset_time));
     }
-    // dataset.convert_to_videos(dataset.get_image_path());
+    dataset.convert_to_videos(dataset.get_image_path());
     // dataset.compute_statistics(); // Compute statistics after all episodes
 
     robot_controller->disconnect(); // Sleep the arms at the end of the control script
