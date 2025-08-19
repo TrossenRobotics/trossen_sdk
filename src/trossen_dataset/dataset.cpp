@@ -50,8 +50,8 @@ TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::s
     }
 
     metadata_->set_info_entry("robot_name", robot_->name());
+    metadata_->add_features(*robot_);
 
-    
 }
 
 void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_data) {
@@ -412,6 +412,27 @@ Metadata::Metadata(const std::string& dataset_name, const std::string& task_name
         set_info_entry("image_path",   (base_path / "images").string());
         save_all();
     }
+}
+
+
+void Metadata::add_features(const trossen_ai_robot_devices::robot::TrossenRobot& robot) {
+    // Action
+    nlohmann::json action;
+    action["dtype"] = "float32";
+    action["shape"] = {static_cast<int>(robot.get_observation_features().size())};
+    action["names"] = robot.get_observation_features();
+
+    nlohmann::json observation_state;
+    observation_state["dtype"] = "float32";
+    observation_state["shape"] = {static_cast<int>(robot.get_observation_features().size())};
+    observation_state["names"] = robot.get_observation_features();
+
+    nlohmann::json features;
+    features["action"] = action;
+    features["observation.state"] = observation_state;
+
+    info_["features"] = features;
+
 }
 
 void Metadata::set_info_entry(const std::string& key, const std::string& value) {

@@ -124,4 +124,9 @@ void TrossenAIArm::stage_arm() {
 
 }
 
+
+std::vector<std::string> TrossenAIArm::get_joint_names() const {
+    return {"joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"};
+}
+
 } // namespace trossen_ai_robot_devices

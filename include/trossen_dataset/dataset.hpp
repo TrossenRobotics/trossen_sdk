@@ -51,6 +51,8 @@ public:
     void save_all() const;
     void save_info_file() const;
 
+    void add_features(const trossen_ai_robot_devices::robot::TrossenRobot& robot);
+
 
 
 private:

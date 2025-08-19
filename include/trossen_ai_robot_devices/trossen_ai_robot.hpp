@@ -42,8 +42,6 @@ namespace teleoperator {
             virtual std::vector<double> get_action() const = 0;
             virtual void send_feedback() = 0;
             virtual std::string name() const = 0;
-            
-        
     };
 
     class TrossenAIWidowXLeader : public TrossenLeader {
@@ -57,7 +55,7 @@ namespace teleoperator {
             void send_feedback() override;
             void disconnect() override;
             std::string name() const override { return name_; }
-        
+
         private:
             std::string name_;
             std::string ip_address_;
@@ -102,6 +100,9 @@ namespace robot {
             virtual trossen_ai_robot_devices::State get_observation() = 0;
             virtual void send_action(const std::vector<double>& action) = 0;
             virtual std::string name() const = 0;
+            virtual std::vector<std::string> get_joint_features() const = 0;
+            virtual std::vector<std::string> get_observation_features() const = 0;
+            
     };
 
     class TrossenAIWidowXRobot : public TrossenRobot {
@@ -114,6 +115,8 @@ namespace robot {
         std::string name() const override { return name_; }
         trossen_ai_robot_devices::State get_observation() override;
         void send_action(const std::vector<double>& action) override;
+        std::vector<std::string> get_joint_features() const override;
+        std::vector<std::string> get_observation_features() const override;
 
     private:
         std::string name_;
@@ -133,6 +136,8 @@ namespace robot {
         std::string name() const override { return name_; }
         trossen_ai_robot_devices::State get_observation() override;
         void send_action(const std::vector<double>& action) override;
+        std::vector<std::string> get_joint_features() const override;
+        std::vector<std::string> get_observation_features() const override;
 
     private:
         std::string name_;

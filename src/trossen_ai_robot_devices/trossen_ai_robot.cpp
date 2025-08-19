@@ -62,6 +62,15 @@ namespace trossen_ai_robot_devices {
             robot_driver_->write("positions", action);
         }
 
+        std::vector<std::string> TrossenAIWidowXRobot::get_joint_features() const{
+            return robot_driver_->get_joint_names();
+        }
+
+        
+        std::vector<std::string> TrossenAIWidowXRobot::get_observation_features() const{
+            std::vector<std::string> features = get_joint_features();
+            return features;
+        }
 
         TrossenAIBimanualWidowXRobot::TrossenAIBimanualWidowXRobot(const trossen_sdk_config::BimanualWidowXRobotConfig& config)
             : name_(config.name), right_ip_address_(config.right_ip_address), left_ip_address_(config.left_ip_address) {
@@ -130,6 +139,34 @@ namespace trossen_ai_robot_devices {
             }
             is_connected_ = false;
             spdlog::info("Disconnected from bimanual robot: {}", name_);
+        }
+
+        std::vector<std::string> TrossenAIBimanualWidowXRobot::get_joint_features() const{
+            std::vector<std::string> right_features_raw = right_robot_driver_->get_joint_names();
+            std::vector<std::string> left_features_raw = left_robot_driver_->get_joint_names();
+            std::vector<std::string> right_features, left_features;
+            for (const auto& name : right_features_raw) {
+                right_features.push_back("right_" + name);
+            }
+            for (const auto& name : left_features_raw) {
+                left_features.push_back("left_" + name);
+            }
+            right_features.insert(right_features.end(), left_features.begin(), left_features.end());
+            return right_features;
+        }
+
+        std::vector<std::string> TrossenAIBimanualWidowXRobot::get_observation_features() const {
+            std::vector<std::string> right_features_raw = right_robot_driver_->get_joint_names();
+            std::vector<std::string> left_features_raw = left_robot_driver_->get_joint_names();
+            std::vector<std::string> right_features, left_features;
+            for (const auto& name : right_features_raw) {
+                right_features.push_back("right_" + name);
+            }
+            for (const auto& name : left_features_raw) {
+                left_features.push_back("left_" + name);
+            }
+            right_features.insert(right_features.end(), left_features.begin(), left_features.end());
+            return right_features;
         }
 
     }

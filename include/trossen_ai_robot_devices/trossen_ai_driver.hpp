@@ -29,6 +29,8 @@ namespace trossen_ai_robot_devices {
         void stage_arm();
         std::string get_name() const { return name_; }
 
+        std::vector<std::string> get_joint_names() const;
+        
     private:
         std::string name_;
         std::string ip_address_;
