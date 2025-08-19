@@ -36,15 +36,11 @@ int main(int argc, char* argv[]) {
         exit(1);
     }
 
-    std::string foll_config_file;
-    if (robot_name == "trossen_ai_stationary") {
-        foll_config_file = "../config/bimanual_widowxai.json";
-    } else if (robot_name == "trossen_ai_solo") {
-        foll_config_file = "../config/widowxai.json";
-    } else if (robot_name == "trossen_ai_mobile") {
-        foll_config_file = "../config/mobile.json";
-    } else {
-        std::cerr << "Unknown robot type: " << robot_name << std::endl;
+    std::string foll_config_file = "../config/" + robot_name + ".json";
+
+    std::ifstream foll_file_check(foll_config_file);
+    if (!foll_file_check.good()) {
+        spdlog::error("Config file not found for robot: {}", robot_name);
         return 1;
     }
     // Create a robot instance from the configuration
