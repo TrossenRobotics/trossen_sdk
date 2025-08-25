@@ -15,25 +15,53 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
 
     teleop_robot->configure(); // Configure the teleoperation robot
     robot->configure(); // Configure the robot arm
-
-    auto start_time = steady_clock::now();
-    auto end_time = start_time + std::chrono::duration<float>(control_time);
     
     trossen_ai_robot_devices::State state;
     int episode_idx = dataset.get_num_episodes();
     trossen_dataset::EpisodeData episode_data(episode_idx);
 
+    std::string image_folder_path = dataset.get_image_path();
+    std::ostringstream oss;
+    oss << "episode_" << std::setw(6) << std::setfill('0') << episode_idx;
+    std::string episode_folder_name = oss.str();
+
+    std::vector<std::string> camera_names = robot->get_camera_names();
+    if (camera_names.empty()) {
+        spdlog::error("No cameras found on the robot.");
+        return;
+    }
+    // Create a map from camera name to its folder path
+    std::unordered_map<std::string, std::filesystem::path> camera_folder_map;
+    std::unordered_map<std::string, std::filesystem::path> depth_camera_folder_map;
+    for (const auto& camera_name : camera_names) {
+        std::filesystem::path camera_folder = std::filesystem::path(image_folder_path) / camera_name / episode_folder_name;
+        std::string depth_camera_name = camera_name + "_depth";
+        std::filesystem::path depth_camera_folder = std::filesystem::path(image_folder_path) / depth_camera_name / episode_folder_name;
+        if (!std::filesystem::exists(camera_folder)) {
+            std::filesystem::create_directories(camera_folder);
+        }
+        if (!std::filesystem::exists(depth_camera_folder)) {
+            std::filesystem::create_directories(depth_camera_folder);
+        }
+        camera_folder_map[camera_name] = camera_folder;
+        depth_camera_folder_map[camera_name] = depth_camera_folder;
+    }
+    
+
+    auto start_time = steady_clock::now();
+    auto end_time = start_time + std::chrono::duration<float>(control_time);
     while (steady_clock::now() < end_time) {
         auto loop_start_time = steady_clock::now();
+        trossen_dataset::FrameData frame_data;
+        frame_data.timestamp_ms = std::chrono::duration<float>(steady_clock::now() - start_time).count();
+        spdlog::info("Timestamp: " + std::to_string(frame_data.timestamp_ms));
 
         std::vector<double> action = teleop_robot->get_action(); // Get action from the teleoperation robot
         robot->send_action(action); // Send action to the robot arm
         state = robot->get_observation(); // Get the current state from the robot arm
         state.action = action; // Set the action in the state
 
-        trossen_dataset::FrameData frame_data;
-        frame_data.timestamp_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-            steady_clock::now().time_since_epoch()).count();
+        
         frame_data.observation_state = state.observation_state;
         frame_data.action = state.action;
         frame_data.episode_idx = episode_idx;
@@ -41,21 +69,10 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
         episode_data.add_frame(frame_data);
         if(!teleop_mode) {
         
-            std::string image_folder_path = dataset.get_image_path();
-
             for (const auto& image_data : state.images) {
-                std::string episode_folder_name = "episode_" + std::to_string(episode_idx);
-                std::filesystem::path camera_folder = std::filesystem::path(image_folder_path) / image_data.camera_name / episode_folder_name;
-                std::string depth_camera_name = image_data.camera_name + "_depth";
-                std::filesystem::path depth_camera_folder = std::filesystem::path(image_folder_path) / depth_camera_name / episode_folder_name;
-                if (!std::filesystem::exists(camera_folder)) {
-                    std::filesystem::create_directories(camera_folder);
-                }
-                if (!std::filesystem::exists(depth_camera_folder)) {
-                    std::filesystem::create_directories(depth_camera_folder);
-                }
-                std::string image_file_path = (camera_folder / image_data.file_path).string();
-                std::string depth_image_file_path = (depth_camera_folder / image_data.file_path).string();
+                const std::string& camera_name = image_data.camera_name;
+                std::string image_file_path = (camera_folder_map[camera_name] / image_data.file_path).string();
+                std::string depth_image_file_path = (depth_camera_folder_map[camera_name] / image_data.file_path).string();
 
                 image_writer.push(image_data.image, image_file_path);
                 image_writer.push(image_data.depth_map, depth_image_file_path);

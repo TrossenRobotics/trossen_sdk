@@ -72,6 +72,14 @@ namespace trossen_ai_robot_devices {
             return features;
         }
 
+        std::vector<std::string> TrossenAIWidowXRobot::get_camera_names() const {
+            std::vector<std::string> camera_names;
+            for (const auto& camera : cameras_) {
+                camera_names.push_back(camera.name());
+            }
+            return camera_names;
+        }
+
         TrossenAIBimanualWidowXRobot::TrossenAIBimanualWidowXRobot(const trossen_sdk_config::BimanualWidowXRobotConfig& config)
             : name_(config.name), right_ip_address_(config.right_ip_address), left_ip_address_(config.left_ip_address) {
             right_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.right_ip_address, "follower");
@@ -167,6 +175,14 @@ namespace trossen_ai_robot_devices {
             }
             right_features.insert(right_features.end(), left_features.begin(), left_features.end());
             return right_features;
+        }
+
+        std::vector<std::string> TrossenAIBimanualWidowXRobot::get_camera_names() const {
+            std::vector<std::string> camera_names;
+            for (const auto& camera : cameras_) {
+                camera_names.push_back(camera.name());
+            }
+            return camera_names;
         }
 
     }

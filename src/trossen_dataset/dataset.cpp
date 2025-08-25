@@ -41,9 +41,9 @@ TrossenAIDataset::TrossenAIDataset(const std::string& dataset_name, const std::s
         }
         
     } else {
-        std::filesystem::create_directories(dataset_dir / "data");
+        std::filesystem::create_directories(dataset_dir / "data" / "chunk-000");
         std::filesystem::create_directories(dataset_dir / "meta");
-        std::filesystem::create_directories(dataset_dir / "videos");
+        std::filesystem::create_directories(dataset_dir / "videos"/ "chunk-000");
         std::filesystem::create_directories(dataset_dir / "images");
         metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, false);
 
@@ -58,13 +58,15 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
     // Finalize the episode data if needed
     using namespace arrow;
 
-    Int64Builder timestamp_builder;
+    FloatBuilder timestamp_builder;
     ListBuilder observation_builder(default_memory_pool(),
                                    std::make_shared<DoubleBuilder>());
     ListBuilder action_builder(default_memory_pool(),
                                    std::make_shared<DoubleBuilder>());
     Int64Builder episode_idx_builder;
     Int64Builder frame_idx_builder;
+    Int64Builder index_builder;
+    Int64Builder task_index_builder;
     auto* observation_value_builder = static_cast<DoubleBuilder*>(observation_builder.value_builder());
     auto* action_value_builder = static_cast<DoubleBuilder*>(action_builder.value_builder());
 
@@ -104,6 +106,14 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
         if (!st.ok()) {
             spdlog::error("[Arrow Error] Failed to append frame index: {}", st.ToString());
         }
+        st = index_builder.Append(sample.frame_idx);
+        if (!st.ok()) {
+            spdlog::error("[Arrow Error] Failed to append global index: {}", st.ToString());
+        }
+        st = task_index_builder.Append(0); // Placeholder for task index
+        if (!st.ok()) {
+            spdlog::error("[Arrow Error] Failed to append task index: {}", st.ToString());
+        }
     }
 
     std::shared_ptr<Array> timestamp_array;
@@ -111,6 +121,8 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
     std::shared_ptr<Array> action_array;
     std::shared_ptr<Array> episode_idx_array;
     std::shared_ptr<Array> frame_idx_array;
+    std::shared_ptr<Array> index_array;
+    std::shared_ptr<Array> task_index_array;
 
     auto status = timestamp_builder.Finish(&timestamp_array);
     if (!status.ok()) {
@@ -139,15 +151,27 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
         spdlog::error("[Arrow Error] Failed to finish frame index builder: {}", status.ToString());
         return;
     }
+    status = index_builder.Finish(&index_array);
+    if (!status.ok()) {
+        spdlog::error("[Arrow Error] Failed to finish index builder: {}", status.ToString());
+        return;
+    }
+    status = task_index_builder.Finish(&task_index_array);
+    if (!status.ok()) {
+        spdlog::error("[Arrow Error] Failed to finish task index builder: {}", status.ToString());
+        return;
+    }
     auto schema = arrow::schema({
-        arrow::field("timestamp_ms", arrow::int64()),
+        arrow::field("timestamp", arrow::float32()),
         arrow::field("observation.state", arrow::list(arrow::float64())),
         arrow::field("action", arrow::list(arrow::float64())),
-        arrow::field("episode_idx", arrow::int64()),
-        arrow::field("frame_idx", arrow::int64()),
+        arrow::field("episode_index", arrow::int64()),
+        arrow::field("frame_index", arrow::int64()),
+        arrow::field("index", arrow::int64()),
+        arrow::field("task_index", arrow::int64()),
     });
 
-    auto table = Table::Make(schema, {timestamp_array, observation_array, action_array, episode_idx_array, frame_idx_array});
+    auto table = Table::Make(schema, {timestamp_array, observation_array, action_array, episode_idx_array, frame_idx_array, index_array, task_index_array});
 
     std::shared_ptr<arrow::io::FileOutputStream> outfile;
     // Set output path for the episode in the dataset's data directory under cache root
@@ -156,7 +180,9 @@ void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData& episode_
     if (dataset_dir.has_extension()) {
         dataset_dir = dataset_dir.parent_path();
     }
-    std::filesystem::path episode_file = dataset_dir  / ("episode_" + std::to_string(episode_data.get_episode_idx()) + ".parquet");
+    std::ostringstream oss;
+    oss << "episode_" << std::setw(6) << std::setfill('0') << episode_data.get_episode_idx() << ".parquet";
+    std::filesystem::path episode_file = dataset_dir / oss.str();
     std::string output_path_ = episode_file.string();
     auto result = arrow::io::FileOutputStream::Open(output_path_);
     if (!result.ok()) {
@@ -242,7 +268,7 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
         std::string cam_name = cam_dir.path().filename().string();
 
         // Create camera folder in videos path if it doesn't exist
-        fs::path videos_cam_dir = fs::path(get_videos_path()) / cam_name;
+        fs::path videos_cam_dir = fs::path(get_videos_path()) / ("observation.images." + cam_name);
         if (!fs::exists(videos_cam_dir)) {
             fs::create_directories(videos_cam_dir);
         }
@@ -252,7 +278,7 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
             if (!episode_dir.is_directory()) continue;
 
             std::string episode_name = episode_dir.path().filename().string();
-            fs::path output_video_path = videos_cam_dir / (episode_name + ".mp4");
+            fs::path output_video_path = videos_cam_dir / episode_name;
             if (fs::exists(output_video_path)) {
                 continue;
             }
@@ -392,7 +418,7 @@ Metadata::Metadata(const std::string& dataset_name, const std::string& task_name
     info_file_path_ = (meta_path / "info.json").string();
     if (existing) {
         load_info_file(meta_path / "info.json");
-        load_jsonl_file(meta_path / "episode.jsonl", episode_data_);
+        load_jsonl_file(meta_path / "episodes.jsonl", episode_data_);
         load_jsonl_file(meta_path / "episode_stats.jsonl", episode_stats_data_);
         load_jsonl_file(meta_path / "tasks.jsonl", task_data_);
     } else {
@@ -406,9 +432,9 @@ Metadata::Metadata(const std::string& dataset_name, const std::string& task_name
         std::strftime(buf, sizeof(buf), "%m-%d-%Y", &tm);
         set_info_entry("date_created", buf);
 
-        set_info_entry("data_path",    (base_path / "data").string());
+        set_info_entry("data_path",    (base_path /"data"/ "chunk-000" ).string());
         set_info_entry("meta_path",    meta_path.string());
-        set_info_entry("videos_path",  (base_path / "videos").string());
+        set_info_entry("videos_path",  (base_path / "videos"/ "chunk-000").string());
         set_info_entry("image_path",   (base_path / "images").string());
         save_all();
     }
@@ -416,6 +442,8 @@ Metadata::Metadata(const std::string& dataset_name, const std::string& task_name
 
 
 void Metadata::add_features(const trossen_ai_robot_devices::robot::TrossenRobot& robot) {
+    //TODO [TDS-15]: Extract features from the robot's observation space and action space
+    //TODO [TDS-16]: Get feature specifications from a configuration file or constant definitions
     // Action
     nlohmann::json action;
     action["dtype"] = "float32";
@@ -427,9 +455,39 @@ void Metadata::add_features(const trossen_ai_robot_devices::robot::TrossenRobot&
     observation_state["shape"] = {static_cast<int>(robot.get_observation_features().size())};
     observation_state["names"] = robot.get_observation_features();
 
+    nlohmann::json timestamp_feature;
+    timestamp_feature["dtype"] = "int64";
+    timestamp_feature["shape"] = {1};
+    timestamp_feature["names"] = {};
+    
+    nlohmann::json frame_index_feature;
+    frame_index_feature["dtype"] = "int64";
+    frame_index_feature["shape"] = {1};
+    frame_index_feature["names"] = {};
+
+    nlohmann::json episode_index_feature;
+    episode_index_feature["dtype"] = "int64";
+    episode_index_feature["shape"] = {1};
+    episode_index_feature["names"] = {};    
+
+    nlohmann::json index_feature;
+    index_feature["dtype"] = "int64";
+    index_feature["shape"] = {1};
+    index_feature["names"] = {};
+
+    nlohmann::json task_index_feature;
+    task_index_feature["dtype"] = "int64";
+    task_index_feature["shape"] = {1};
+    task_index_feature["names"] = {};
+
     nlohmann::json features;
     features["action"] = action;
     features["observation.state"] = observation_state;
+    features["timestamp"] = timestamp_feature;
+    features["frame_index"] = frame_index_feature;
+    features["episode_index"] = episode_index_feature;
+    features["index"] = index_feature;
+    features["task_index"] = task_index_feature;
 
     info_["features"] = features;
 

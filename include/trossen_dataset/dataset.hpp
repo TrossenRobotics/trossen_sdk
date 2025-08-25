@@ -21,7 +21,7 @@ namespace fs = std::filesystem;
 namespace trossen_dataset{
 
 struct FrameData {
-    int64_t timestamp_ms;
+    float timestamp_ms;
     std::vector<double> observation_state;  // Joint positions
     std::vector<double> action;             // Action to be taken
     int64_t episode_idx;                    // Episode index
