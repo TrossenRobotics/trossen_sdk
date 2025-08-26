@@ -258,34 +258,28 @@ void TrossenAIDataset::compute_statistics() {
 
 
 void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
-    int fps = 30;  // Default frames per second for the video
-    namespace fs = std::filesystem;
+    int fps = 30;  // Default FPS
 
-    // Iterate over camera folders inside output_path
     for (const auto& cam_dir : fs::directory_iterator(output_path)) {
         if (!cam_dir.is_directory()) continue;
 
         std::string cam_name = cam_dir.path().filename().string();
-
-        // Create camera folder in videos path if it doesn't exist
         fs::path videos_cam_dir = fs::path(get_videos_path()) / ("observation.images." + cam_name);
-        if (!fs::exists(videos_cam_dir)) {
-            fs::create_directories(videos_cam_dir);
-        }
+        fs::create_directories(videos_cam_dir);
 
-        // Iterate over episode folders inside each camera folder
         for (const auto& episode_dir : fs::directory_iterator(cam_dir.path())) {
             if (!episode_dir.is_directory()) continue;
 
             std::string episode_name = episode_dir.path().filename().string();
-            fs::path output_video_path = videos_cam_dir / episode_name;
+            fs::path output_video_path = videos_cam_dir / (episode_name + ".mp4");
+
             if (fs::exists(output_video_path)) {
+                spdlog::info("Skipping existing video: {}", output_video_path.string());
                 continue;
             }
 
+            // Ensure there are .jpg files
             std::vector<fs::path> image_paths;
-
-            // Collect all jpg/jpeg images in the episode folder
             for (const auto& file : fs::directory_iterator(episode_dir.path())) {
                 std::string ext = file.path().extension().string();
                 std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
@@ -299,37 +293,26 @@ void TrossenAIDataset::convert_to_videos(const std::string& output_path) const {
                 continue;
             }
 
-            // Sort images by filename (assumes timestamps in names)
+            // Sort filenames
             std::sort(image_paths.begin(), image_paths.end());
 
-            // Read first image to get frame size
-            cv::Mat first_frame = cv::imread(image_paths.front().string());
-            if (first_frame.empty()) {
-                spdlog::error("Could not read first image in episode folder: {}", episode_name);
-                continue;
+            // Check that filenames are sequential or compatible with glob
+            std::string glob_pattern = episode_dir.path().string() + "/*.jpg";
+            std::ostringstream ffmpeg_cmd;
+            ffmpeg_cmd << "ffmpeg -y -framerate " << fps
+                       << " -pattern_type glob -i '" << glob_pattern << "'"
+                       << " -c:v libsvtav1 -crf 30 -preset 4 -pix_fmt yuv420p "
+                       << "'" << output_video_path.string() << "' > /dev/null 2>&1";
+
+            spdlog::info("Running ffmpeg for episode: {}", episode_name);
+            int ret_code = std::system(ffmpeg_cmd.str().c_str());
+            if (ret_code != 0) {
+                spdlog::error("FFmpeg failed for {}: exit code {}", episode_name, ret_code);
+            } else {
+                spdlog::info("Video saved to: {}", output_video_path.string());
             }
-
-            cv::Size frame_size(first_frame.cols, first_frame.rows);
-
-            cv::VideoWriter writer(output_video_path, cv::VideoWriter::fourcc('m','p','4','v'), fps, frame_size);
-            if (!writer.isOpened()) {
-                spdlog::error("Failed to open video writer for: {}", output_video_path.string());
-                continue;
-            }
-
-            for (const auto& img_path : image_paths) {
-                cv::Mat frame = cv::imread(img_path.string());
-                if (frame.empty()) {
-                    spdlog::error("Failed to read image: {}", img_path.string());
-                    continue;
-                }
-                writer.write(frame);
-            }
-
-            writer.release();
         }
     }
-
 }
 
 int TrossenAIDataset::get_existing_episodes() const {
