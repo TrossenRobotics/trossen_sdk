@@ -85,6 +85,7 @@ int main(int argc, char* argv[]) {
         // Reset time
         std::this_thread::sleep_for(std::chrono::duration<double>(reset_time));
     }
+    
     dataset.convert_to_videos();
     // dataset.compute_statistics(); // Compute statistics after all episodes
 

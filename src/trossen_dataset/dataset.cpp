@@ -394,7 +394,7 @@ namespace trossen_dataset
 
         std::vector<std::thread> threads;
         std::mutex log_mutex;
-
+        auto start_time = std::chrono::steady_clock::now();
         for (const auto &cam_dir : fs::directory_iterator(images_path))
         {
             if (!cam_dir.is_directory())
@@ -449,11 +449,18 @@ namespace trossen_dataset
                     std::ostringstream ffmpeg_cmd;
                     ffmpeg_cmd << "ffmpeg -y -framerate " << fps
                             << " -i " << input_pattern.string()
-                            << " -c:v libsvtav1 -crf 30 -g 30 -preset 4 -pix_fmt yuv420p "
+                            << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p "
                             << output_video_path.string()
                             << " > /dev/null 2>&1";
 
+                    auto start_time = std::chrono::steady_clock::now();
                     int ret_code = std::system(ffmpeg_cmd.str().c_str());
+                    auto end_time = std::chrono::steady_clock::now();
+                    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+                    {
+                        std::lock_guard<std::mutex> lock(log_mutex);
+                        spdlog::info("FFmpeg command for {} took {} ms", episode_name, duration_ms);
+                    }
                     std::lock_guard<std::mutex> lock(log_mutex);
                     if (ret_code != 0)
                     {
@@ -469,6 +476,10 @@ namespace trossen_dataset
 
         for (auto &t : threads)
             t.join();
+
+        auto end_time = std::chrono::steady_clock::now();
+        auto duration_sec = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
+        spdlog::info("Video encoding took {} seconds", duration_sec);
     }
 
     int TrossenAIDataset::get_existing_episodes() const
