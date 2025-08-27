@@ -81,11 +81,11 @@ int main(int argc, char* argv[]) {
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
         spdlog::info("Starting episode {}", dataset.get_num_episodes());
         control_utils.control_loop(robot_controller, teleop_robot, recording_time, dataset);
-        spdlog::info("Episode {} completed.", dataset.get_num_episodes());
+        spdlog::info("Episode {} completed.", dataset.get_num_episodes()-1);
         // Reset time
         std::this_thread::sleep_for(std::chrono::duration<double>(reset_time));
     }
-    dataset.convert_to_videos(dataset.get_image_path());
+    dataset.convert_to_videos();
     // dataset.compute_statistics(); // Compute statistics after all episodes
 
     robot_controller->disconnect(); // Sleep the arms at the end of the control script

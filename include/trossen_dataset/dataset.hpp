@@ -13,6 +13,7 @@
 #include <nlohmann/json.hpp>
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 #include <spdlog/spdlog.h>
+#include <format>
 
 
 namespace fs = std::filesystem;
@@ -52,7 +53,7 @@ public:
     void save_info_file() const;
 
     void add_features(const trossen_ai_robot_devices::robot::TrossenRobot& robot);
-
+    void update_info(int total_frames);
 
 
 private:
@@ -113,11 +114,14 @@ public:
         return metadata_->get_info_entry("videos_path");
     }
 
-    void convert_to_videos(const std::string& output_dir) const;
+    void convert_to_videos() const;
 
     int get_existing_episodes() const;
 
     static std::vector<std::vector<double>> read(const std::string& output_file);
+
+    nlohmann::json compute_list_stats(const std::shared_ptr<arrow::ListArray>& list_array);
+    nlohmann::json compute_flat_stats(const std::shared_ptr<arrow::Array>& array);
 
 private:
     std::string dataset_name_;
