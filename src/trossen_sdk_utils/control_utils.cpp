@@ -70,8 +70,11 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
         
             for (const auto& image_data : state.images) {
                 const std::string& camera_name = image_data.camera_name;
-                std::string image_file_path = (camera_folder_map[camera_name] / image_data.file_path).string();
-                std::string depth_image_file_path = (depth_camera_folder_map[camera_name] / image_data.file_path).string();
+                std::string filename = image_data.file_path + std::to_string(frame_data.frame_idx) + ".jpg";
+                std::string image_file_path = (camera_folder_map[camera_name] / filename).string();
+
+                std::string depth_filename = image_data.file_path + std::to_string(frame_data.frame_idx) + ".jpg";
+                std::string depth_image_file_path = (depth_camera_folder_map[camera_name] / depth_filename).string();
 
                 image_writer.push(image_data.image, image_file_path);
                 image_writer.push(image_data.depth_map, depth_image_file_path);

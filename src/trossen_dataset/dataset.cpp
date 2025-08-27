@@ -385,14 +385,16 @@ namespace trossen_dataset
     }
 
     void TrossenAIDataset::convert_to_videos() const
-    {   
-        //TODO [TDS-28] Optimize to speed up the process of video creation
-        int fps = 30; // Default FPS
-        int episode_index = 0;
+    {
+        int fps = 30;
         int episode_chunk = 0;
         std::string images_path = metadata_->get_info_entry("image_path");
         std::string dataset_name = metadata_->get_info_entry("dataset_name");
         std::filesystem::path base_path = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name;
+
+        std::vector<std::thread> threads;
+        std::mutex log_mutex;
+
         for (const auto &cam_dir : fs::directory_iterator(images_path))
         {
             if (!cam_dir.is_directory())
@@ -401,11 +403,9 @@ namespace trossen_dataset
             std::string video_key = "observation.images." + cam_dir.path().filename().string();
             std::ostringstream oss;
             oss << "videos/chunk-" << std::setw(3) << std::setfill('0') << episode_chunk
-                << "/" << video_key
-                << "/episode_" << std::setw(6) << std::setfill('0') << episode_index << ".mp4";
-            std::string episode_path = oss.str();
-
-            fs::path videos_cam_dir = base_path / fs::path(episode_path).parent_path();
+                << "/" << video_key;
+            std::string episode_subdir = oss.str();
+            fs::path videos_cam_dir = base_path / episode_subdir;
             fs::create_directories(videos_cam_dir);
 
             for (const auto &episode_dir : fs::directory_iterator(cam_dir.path()))
@@ -418,46 +418,57 @@ namespace trossen_dataset
 
                 if (fs::exists(output_video_path))
                 {
+                    std::lock_guard<std::mutex> lock(log_mutex);
                     spdlog::info("Skipping existing video: {}", output_video_path.string());
                     continue;
                 }
 
-                // Ensure there are .jpg files
-                std::vector<fs::path> image_paths;
-                for (const auto &file : fs::directory_iterator(episode_dir.path()))
-                {
-                    std::string ext = file.path().extension().string();
-                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                    if (file.is_regular_file() && (ext == ".jpg" || ext == ".jpeg"))
+                threads.emplace_back([=, &log_mutex]() {
+                    spdlog::info("Started encoding {}", output_video_path.string());
+                    // Collect image files
+                    std::vector<fs::path> image_paths;
+                    for (const auto &file : fs::directory_iterator(episode_dir.path()))
                     {
-                        image_paths.push_back(file.path());
+                        std::string ext = file.path().extension().string();
+                        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                        if (file.is_regular_file() && (ext == ".jpg" || ext == ".jpeg"))
+                        {
+                            image_paths.push_back(file.path());
+                        }
                     }
-                }
 
-                if (image_paths.empty())
-                {
-                    spdlog::warn("No images found in episode folder: {}", episode_name);
-                    continue;
-                }
+                    if (image_paths.empty())
+                    {
+                        std::lock_guard<std::mutex> lock(log_mutex);
+                        spdlog::warn("No images found in episode folder: {}", episode_name);
+                        return;
+                    }
+                    // Assuming you renamed images to image_cam_head_%d.jpg
+                    fs::path input_pattern = episode_dir.path() / "image_%d.jpg";
 
-                // Sort filenames
-                std::sort(image_paths.begin(), image_paths.end());
+                    std::ostringstream ffmpeg_cmd;
+                    ffmpeg_cmd << "ffmpeg -y -framerate " << fps
+                            << " -i " << input_pattern.string()
+                            << " -c:v libsvtav1 -crf 30 -g 30 -preset 4 -pix_fmt yuv420p "
+                            << output_video_path.string()
+                            << " > /dev/null 2>&1";
 
-                // Check that filenames are sequential or compatible with glob
-                std::string glob_pattern = episode_dir.path().string() + "/*.jpg";
-                std::ostringstream ffmpeg_cmd;
-                ffmpeg_cmd << "ffmpeg -y -framerate " << fps
-                           << " -pattern_type glob -i '" << glob_pattern << "'"
-                           << " -c:v libsvtav1 -crf 30 -preset 4 -pix_fmt yuv420p "
-                           << "'" << output_video_path.string() << "' > /dev/null 2>&1";
-
-                int ret_code = std::system(ffmpeg_cmd.str().c_str());
-                if (ret_code != 0)
-                {
-                    spdlog::error("FFmpeg failed for {}: exit code {}", episode_name, ret_code);
-                }
+                    int ret_code = std::system(ffmpeg_cmd.str().c_str());
+                    std::lock_guard<std::mutex> lock(log_mutex);
+                    if (ret_code != 0)
+                    {
+                        spdlog::error("FFmpeg failed for {}: exit code {}", episode_name, ret_code);
+                    }
+                    else
+                    {
+                        spdlog::info("Created video: {}", output_video_path.string());
+                    }
+                });
             }
         }
+
+        for (auto &t : threads)
+            t.join();
     }
 
     int TrossenAIDataset::get_existing_episodes() const

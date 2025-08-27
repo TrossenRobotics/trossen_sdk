@@ -14,7 +14,8 @@
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 #include <spdlog/spdlog.h>
 #include <format>
-
+#include <thread>
+#include <mutex>
 
 namespace fs = std::filesystem;
 
