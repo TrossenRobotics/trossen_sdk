@@ -14,14 +14,14 @@ int main(int argc, char* argv[]) {
 
     std::string robot_name;
     double teleop_time;
-    int fps;
+    double fps;
     bool display_cameras;
     
     // Argument parsing
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help", "produce help message")
-        ("fps", po::value<int>(&fps)->default_value(30), "frames per second")
+        ("fps", po::value<double>(&fps)->default_value(30.0), "frames per second")
         ("robot", po::value<std::string>(&robot_name)->default_value("trossen_ai_solo"), "robot name")
         ("teleop_time", po::value<double>(&teleop_time)->default_value(10.0), "teleoperation time per episode (seconds)")
         ("display_cameras", po::value<bool>(&display_cameras)->default_value(true), "flag to display camera feeds during recording");
@@ -68,7 +68,7 @@ int main(int argc, char* argv[]) {
     teleop_robot->connect();
 
     spdlog::info("Teleoperating the robot arms...");
-    control_utils.control_loop(robot_controller, teleop_robot, teleop_time);
+    control_utils.control_loop(robot_controller, teleop_robot, teleop_time, display_cameras, fps);
 
     robot_controller->disconnect(); // Sleep the arms at the end of the control script
     teleop_robot->disconnect(); // Disconnect the teleoperation robot

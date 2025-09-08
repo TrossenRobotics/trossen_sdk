@@ -33,7 +33,7 @@ struct FrameData {
 
 class Metadata {
 public:
-    explicit Metadata(const std::string& dataset_name, const std::string& task_name, bool existing = false);
+    explicit Metadata(const std::string& dataset_name, const std::string& task_name, std::filesystem::path root, bool existing = false);
 
     // Info.json key-value manipulation
     void set_info_entry(const std::string& key, const std::string& value);
@@ -61,6 +61,7 @@ private:
     std::string dataset_name_;
     std::string task_name_;
     nlohmann::json info_;
+    std::filesystem::path root_;
     std::vector<nlohmann::json> episode_data_;
     std::vector<nlohmann::json> episode_stats_data_;
     std::vector<nlohmann::json> task_data_;
@@ -91,13 +92,18 @@ private:
 
 class TrossenAIDataset {
 public:
-    explicit TrossenAIDataset(const std::string& name, const std::string& task_name, const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot>& robot);
+    explicit TrossenAIDataset(const std::string& name,
+                              const std::string& task_name,
+                              const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot>& robot,
+                              std::filesystem::path root,
+                              bool run_compute_stats = true,
+                              bool overwrite = false,
+                              double fps = 30.0);
 
     // Verify the dataset structure
     bool verify() const;
 
-    // Compute statistics of the dataset
-    void compute_statistics();
+    
 
     // Save the current episode data to the dataset
     void save_episode(const EpisodeData& episode_data);
@@ -124,9 +130,16 @@ public:
     nlohmann::json compute_list_stats(const std::shared_ptr<arrow::ListArray>& list_array);
     nlohmann::json compute_flat_stats(const std::shared_ptr<arrow::Array>& array);
 
+    // Compute statistics of the dataset
+    void compute_statistics(std::shared_ptr<arrow::Table> table, int episode_index);
+
 private:
     std::string dataset_name_;
     std::string task_name_;
+    std::filesystem::path root_;
+    bool run_compute_stats_;
+    bool overwrite_;
+    double fps_ = 30.0;
     std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot_;
     std::unique_ptr<trossen_dataset::Metadata> metadata_;
     std::vector<EpisodeData> episodes_buffer_;  // Store episodes in a vector

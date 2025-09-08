@@ -19,11 +19,16 @@ public:
     void control_loop(std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,
                     std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader> teleop_robot,
                     float control_time,
-                    trossen_dataset::TrossenAIDataset& dataset);
+                    trossen_dataset::TrossenAIDataset& dataset,
+                    int num_image_writer_threads_per_camera,
+                    bool display_cameras,
+                    double fps);
 
     void control_loop(std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,
                     std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader> teleop_robot,
-                    float control_time);
+                    float control_time,
+                    bool display_cameras,
+                    double fps);
 
     inline void busy_wait_until(const std::chrono::steady_clock::time_point& loop_start, double frequency) {
         auto desired_duration = std::chrono::duration<double>(1.0 / frequency);

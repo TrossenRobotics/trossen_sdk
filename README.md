@@ -89,3 +89,43 @@ Install recommended driver
 ```bash
 sudo ubuntu-drivers autoinstall
 ```
+
+
+## Dummy Control Command
+
+
+        ("help", "produce help message")
+        ("fps", po::value<double>(&fps)->default_value(30.0), "frames per second")
+        ("single_task", po::value<std::string>(&single_task)->default_value("pick_place"), "single task name")
+        ("repo_id", po::value<std::string>(&repo_id)->default_value("trossen-ai/trossen-widowx"), "HuggingFace repo ID for model")
+        ("tags", po::value<std::vector<std::string>>(&tags)->multitoken(), "comma-separated list of tags")
+        ("dataset", po::value<std::string>(&dataset_name)->default_value("test_dataset_01"), "dataset name")
+        ("robot", po::value<std::string>(&robot_name)->default_value("trossen_ai_solo"), "robot name")
+        ("num_episodes", po::value<int>(&num_episodes)->default_value(2), "number of episodes")
+        ("recording_time", po::value<double>(&recording_time)->default_value(10.0), "recording time per episode (seconds)")
+        ("warmup_time", po::value<double>(&warmup_time)->default_value(5.0), "warmup time for the robot arms (seconds)")
+        ("reset_time", po::value<double>(&reset_time)->default_value(2.0), "reset time between episodes (seconds)")
+        ("num_image_writer_threads_per_camera", po::value<int>(&num_image_writer_threads_per_camera)->default_value(4), "number of threads for image writer per camera")
+        ("root", po::value<std::string>(&root)->default_value(""), "root directory for dataset")
+        ("video",po::value<bool>(&video)->default_value(true), "flag to encode frames to video after each episode");
+        ("run_compute_stats",po::value<bool>(&run_compute_stats)->default_value(false), "flag to compute statistics after all episodes");
+        ("num_image_writer_processes", po::value<int>(&num_image_writer_processes)->default_value(1), "number of processes for image writer");
+        ("display_cameras", po::value<bool>(&display_cameras)->default_value(true), "flag to display camera feeds during recording");
+        ("overwrite", po::value<bool>(&overwrite)->default_value(false), "flag to overwrite existing dataset");
+
+
+```bash
+./control --robot trossen_ai_stationary \
+--recording_time 10 \
+--num_episodes 1 --fps 30 \
+--display_cameras true \
+--tags test \
+--overwrite true \
+--dataset test_dataset \
+--root ~/.cache/huggingface/lerobot/ \
+--repo_id trossen-ai/trossen-widowx \
+--single_task pick_place \
+--num_image_writer_threads_per_camera 4 \
+--num_image_writer_processes 1 \
+--video true \
+--run_compute_stats true

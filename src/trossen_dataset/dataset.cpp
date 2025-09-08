@@ -17,34 +17,51 @@ namespace trossen_dataset
         return buffer_;
     }
 
-    TrossenAIDataset::TrossenAIDataset(const std::string &dataset_name, const std::string &task_name, const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> &robot) : dataset_name_(dataset_name), task_name_(task_name), robot_(robot)
+    TrossenAIDataset::TrossenAIDataset(const std::string &dataset_name,
+                                       const std::string &task_name,
+                                       const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> &robot,
+                                       std::filesystem::path root,
+                                       bool run_compute_stats,
+                                       bool overwrite,
+                                       double fps) : dataset_name_(dataset_name), task_name_(task_name), robot_(robot), root_(root), run_compute_stats_(run_compute_stats), overwrite_(overwrite), fps_(fps)
     {
         spdlog::info("TrossenAIDataset : {}", dataset_name_);
 
         // Create dataset folder structure: <dataset_name>/data, <dataset_name>/meta, <dataset_name>/videos
         // Set dataset root directory under ~/.cache/trossen_dataset_collection_sdk/
         // TODO: Make this configurable
-        std::filesystem::path cache_root = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk";
-        std::filesystem::path dataset_dir = cache_root / dataset_name_;
+        
+        std::filesystem::path dataset_dir = root_ / dataset_name_;
         if (dataset_dir.has_extension())
         {
             dataset_dir = dataset_dir.parent_path();
         }
         if (std::filesystem::exists(dataset_dir))
-        {
-            metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, true);
-            if (!verify())
+        {   if (overwrite_)
             {
-                throw std::runtime_error("Dataset verification failed: metadata does not match or is incomplete.");
+                spdlog::warn("Overwriting existing dataset: {}", dataset_name_);
+                std::filesystem::remove_all(dataset_dir);
+                std::filesystem::create_directories(dataset_dir / "data" / "chunk-000");
+                std::filesystem::create_directories(dataset_dir / "meta");
+                std::filesystem::create_directories(dataset_dir / "videos" / "chunk-000");
+                std::filesystem::create_directories(dataset_dir / "images");
+                metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, root_, false);
             }
-            // If the dataset directory already exists, we assume it is an existing dataset
-            int existing_episodes = get_existing_episodes();
-            for (int i = 0; i < existing_episodes; ++i)
-            {
-                // Load each episode and add it to the buffer
-                EpisodeData episode_data(i);
-                // TODO: Implement loading of episode data
-                episodes_buffer_.push_back(episode_data);
+            else {
+                metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, root_, true);
+                if (!verify())
+                {
+                    throw std::runtime_error("Dataset verification failed: metadata does not match or is incomplete.");
+                }
+                // If the dataset directory already exists, we assume it is an existing dataset
+                int existing_episodes = get_existing_episodes();
+                for (int i = 0; i < existing_episodes; ++i)
+                {
+                    // Load each episode and add it to the buffer
+                    EpisodeData episode_data(i);
+                    // TODO: Implement loading of episode data
+                    episodes_buffer_.push_back(episode_data);
+                }
             }
         }
         else
@@ -53,7 +70,7 @@ namespace trossen_dataset
             std::filesystem::create_directories(dataset_dir / "meta");
             std::filesystem::create_directories(dataset_dir / "videos" / "chunk-000");
             std::filesystem::create_directories(dataset_dir / "images");
-            metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, false);
+            metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, root_, false);
         }
 
         metadata_->set_info_entry("robot_name", robot_->name());
@@ -200,7 +217,7 @@ namespace trossen_dataset
 
         std::shared_ptr<arrow::io::FileOutputStream> outfile;
         // Set output path for the episode in the dataset's data directory under cache root
-        std::filesystem::path cache_root = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk";
+        std::filesystem::path cache_root = root_;
         int chunk_index = episodes_buffer_.size() / 1000; // Assuming 1000 episodes per chunk
         int episode_index = episodes_buffer_.size();
         std::ostringstream oss;
@@ -235,26 +252,7 @@ namespace trossen_dataset
         {
             spdlog::info("Successfully wrote dataset.");
         }
-        spdlog::info("Computing dataset statistics...");
-        nlohmann::json stats;
-        // Compute statistics for each column in the table
-        for (const auto &field : table->schema()->fields())
-        {
-            auto column = table->GetColumnByName(field->name());
-            if (!column)
-                continue;
-
-            if (field->type()->id() == arrow::Type::LIST)
-            {
-                auto list_array = std::static_pointer_cast<arrow::ListArray>(column->chunk(0));
-                stats[field->name()] = compute_list_stats(list_array);
-            }
-            else
-            {
-                auto array = column->chunk(0);
-                stats[field->name()] = compute_flat_stats(array);
-            }
-        }
+        
 
         episodes_buffer_.push_back(episode_data);
 
@@ -265,13 +263,7 @@ namespace trossen_dataset
         episode_metadata["length"] = episode_data.get_frames().size();
         metadata_->add_episode(episode_metadata);
 
-        // Add episode statistics to the metadata object
-        nlohmann::json episode_stats;
-        episode_stats["episode_index"] = episode_data.get_episode_idx();
-        episode_stats["stats"] = stats;
-
-        // Save episode statistics
-        metadata_->add_episode_stats(episode_stats);
+        
 
         // Add task metadata to the metadata object
         nlohmann::json task_metadata;
@@ -281,6 +273,9 @@ namespace trossen_dataset
 
         // Increment total frames
         metadata_->update_info(episode_data.get_frames().size());
+
+        if(run_compute_stats_)
+            compute_statistics(table, episode_data.get_episode_idx());
         // Save the metadata to the info.json file
         metadata_->save_all();
     }
@@ -370,27 +365,45 @@ namespace trossen_dataset
         }
         return true; // Placeholder for actual verification logic
     }
-    void TrossenAIDataset::compute_statistics()
+    void TrossenAIDataset::compute_statistics(std::shared_ptr<arrow::Table> table, int episode_index)
     {
-        // Implement statistics computation logic here
-        // Load parquet files and compute statistics
         spdlog::info("Computing dataset statistics...");
-        // Get the total number of episodes
-        size_t num_episodes = get_num_episodes();
-        // Print all the metadata entries
-        // Add it to metadata
-        metadata_->set_info_entry("total_episodes", std::to_string(num_episodes));
-        // Save metadata to file
-        metadata_->save_info_file();
+        nlohmann::json stats;
+        // Compute statistics for each column in the table
+        for (const auto &field : table->schema()->fields())
+        {
+            auto column = table->GetColumnByName(field->name());
+            if (!column)
+                continue;
+
+            if (field->type()->id() == arrow::Type::LIST)
+            {
+                auto list_array = std::static_pointer_cast<arrow::ListArray>(column->chunk(0));
+                stats[field->name()] = compute_list_stats(list_array);
+            }
+            else
+            {
+                auto array = column->chunk(0);
+                stats[field->name()] = compute_flat_stats(array);
+            }
+        }
+
+        // Add episode statistics to the metadata object
+        nlohmann::json episode_stats;
+        episode_stats["episode_index"] = episode_index;
+        episode_stats["stats"] = stats;
+
+        // Save episode statistics
+        metadata_->add_episode_stats(episode_stats);
     }
 
     void TrossenAIDataset::convert_to_videos() const
     {
-        int fps = 30;
+        int fps = static_cast<int>(fps_);
         int episode_chunk = 0;
         std::string images_path = metadata_->get_info_entry("image_path");
         std::string dataset_name = metadata_->get_info_entry("dataset_name");
-        std::filesystem::path base_path = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name;
+        std::filesystem::path base_path = root_ / dataset_name;
 
         std::vector<std::thread> threads;
         std::mutex log_mutex;
@@ -419,12 +432,12 @@ namespace trossen_dataset
                 if (fs::exists(output_video_path))
                 {
                     std::lock_guard<std::mutex> lock(log_mutex);
-                    spdlog::info("Skipping existing video: {}", output_video_path.string());
+                    spdlog::debug("Skipping existing video: {}", output_video_path.string());
                     continue;
                 }
 
                 threads.emplace_back([=, &log_mutex]() {
-                    spdlog::info("Started encoding {}", output_video_path.string());
+                    spdlog::debug("Started encoding {}", output_video_path.string());
                     // Collect image files
                     std::vector<fs::path> image_paths;
                     for (const auto &file : fs::directory_iterator(episode_dir.path()))
@@ -459,7 +472,7 @@ namespace trossen_dataset
                     auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
                     {
                         std::lock_guard<std::mutex> lock(log_mutex);
-                        spdlog::info("FFmpeg command for {} took {} ms", episode_name, duration_ms);
+                        spdlog::debug("FFmpeg command for {} took {} ms", episode_name, duration_ms);
                     }
                     std::lock_guard<std::mutex> lock(log_mutex);
                     if (ret_code != 0)
@@ -468,7 +481,7 @@ namespace trossen_dataset
                     }
                     else
                     {
-                        spdlog::info("Created video: {}", output_video_path.string());
+                        spdlog::debug("Created video: {}", output_video_path.string());
                     }
                 });
             }
@@ -485,7 +498,7 @@ namespace trossen_dataset
     int TrossenAIDataset::get_existing_episodes() const
     {
         // Count the number of existing episodes by checking the data directory
-        std::string data_path = metadata_->get_info_entry("data_path");
+        std::string data_path = root_.string() + "/" + dataset_name_ + "/data/chunk-000";
 
         if (!std::filesystem::exists(data_path))
         {
@@ -568,11 +581,11 @@ namespace trossen_dataset
         return joint_positions_list;
     }
 
-    Metadata::Metadata(const std::string &dataset_name, const std::string &task_name, bool existing)
-        : dataset_name_(dataset_name), task_name_(task_name)
+    Metadata::Metadata(const std::string &dataset_name, const std::string &task_name, std::filesystem::path root, bool existing)
+        : dataset_name_(dataset_name), task_name_(task_name), root_(std::move(root))
     {
 
-        std::filesystem::path base_path = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" / dataset_name_;
+        std::filesystem::path base_path = root_ / dataset_name_;
         std::filesystem::path meta_path = base_path / "meta";
         info_file_path_ = (meta_path / "info.json").string();
         if (existing)

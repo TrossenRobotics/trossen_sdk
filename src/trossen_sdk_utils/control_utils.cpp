@@ -5,12 +5,15 @@ namespace trossen_sdk {
 void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,
                                 std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader> teleop_robot,
                                 float control_time,
-                                trossen_dataset::TrossenAIDataset& dataset) {
+                                trossen_dataset::TrossenAIDataset& dataset,
+                                int num_image_writer_threads_per_camera,
+                                bool display_cameras,
+                                double fps) {
     using steady_clock = std::chrono::steady_clock;
     using time_point = std::chrono::steady_clock::time_point;
                         
     // TODO: Take this from a yaml file / command line argument
-    trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer(4);
+    trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer(num_image_writer_threads_per_camera);
 
     teleop_robot->configure(); // Configure the teleoperation robot
     robot->configure(); // Configure the robot arm
@@ -77,15 +80,17 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
             image_writer.push(image_data.image, image_file_path);
             image_writer.push(image_data.depth_map, depth_image_file_path);
         }
+        if (display_cameras) {
         // Display images/videos using OpenCV
         display_images(state.images);
+        }
         // TODO: Use FPS to control the loop frequency
-        busy_wait_until(loop_start_time, 30.0);  // 30 Hz loop 
+        busy_wait_until(loop_start_time, fps);  // Use the specified FPS
 
         auto loop_duration = std::chrono::duration_cast<std::chrono::duration<double>>(steady_clock::now() - loop_start_time).count();
         // TODO: Improve this logging to be more elegant and less verbose
         // TODO: Make FPS tolerance configurable/ constant
-        if (loop_duration > 1.0 / 29.0) {
+        if (loop_duration > 1.0 / fps * 0.85) {
             spdlog::warn("Loop duration: " + std::to_string(loop_duration) + " seconds"
                                     + " | Frequency: " + std::to_string(1.0 / loop_duration) + " Hz"
                                     + " | Episode: " + std::to_string(episode_idx)
@@ -106,13 +111,12 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
 
 void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,
                                 std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader> teleop_robot,
-                                float control_time) {
+                                float control_time,
+                                bool display_cameras,
+                                double fps) {
     using steady_clock = std::chrono::steady_clock;
     using time_point = std::chrono::steady_clock::time_point;
                         
-    // TODO: Take this from a yaml file / command line argument
-    trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer(4);
-
     teleop_robot->configure(); // Configure the teleoperation robot
     robot->configure(); // Configure the robot arm
     
@@ -131,15 +135,18 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
         state = robot->get_observation(); // Get the current state from the robot arm
         state.action = action; // Set the action in the state
 
-        // Display images/videos using OpenCV
-        display_images(state.images);
+        if (display_cameras) {
+            // Display images/videos using OpenCV
+            display_images(state.images);
+        }
+        
         // TODO: Use FPS to control the loop frequency
-        busy_wait_until(loop_start_time, 30.0);  // 30 Hz loop 
+        busy_wait_until(loop_start_time, fps);  // Use the specified FPS
 
         auto loop_duration = std::chrono::duration_cast<std::chrono::duration<double>>(steady_clock::now() - loop_start_time).count();
         // TODO: Improve this logging to be more elegant and less verbose
         // TODO: Make FPS tolerance configurable/ constant
-        if (loop_duration > 1.0 / 29.0) {
+        if (loop_duration > 1.0 / fps * 0.85) {
             spdlog::warn("Loop duration: " + std::to_string(loop_duration) + " seconds"
                                     + " | Frequency: " + std::to_string(1.0 / loop_duration) + " Hz");
         }

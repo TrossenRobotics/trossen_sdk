@@ -27,13 +27,13 @@ int main(int argc, char* argv[]) {
     std::vector<std::string> tags;
     bool display_cameras;
     bool overwrite;
-    int fps;
+    double fps;
     
     // Argument parsing
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help", "produce help message")
-        ("fps", po::value<int>(&fps)->default_value(30), "frames per second")
+        ("fps", po::value<double>(&fps)->default_value(30.0), "frames per second")
         ("single_task", po::value<std::string>(&single_task)->default_value("pick_place"), "single task name")
         ("repo_id", po::value<std::string>(&repo_id)->default_value("trossen-ai/trossen-widowx"), "HuggingFace repo ID for model")
         ("tags", po::value<std::vector<std::string>>(&tags)->multitoken(), "comma-separated list of tags")
@@ -45,12 +45,11 @@ int main(int argc, char* argv[]) {
         ("reset_time", po::value<double>(&reset_time)->default_value(2.0), "reset time between episodes (seconds)")
         ("num_image_writer_threads_per_camera", po::value<int>(&num_image_writer_threads_per_camera)->default_value(4), "number of threads for image writer per camera")
         ("root", po::value<std::string>(&root)->default_value(""), "root directory for dataset")
-        ("video",po::value<bool>(&video)->default_value(true), "flag to encode frames to video after each episode");
-        ("run_compute_stats",po::value<bool>(&run_compute_stats)->default_value(false), "flag to compute statistics after all episodes");
-        ("num_image_writer_processes", po::value<int>(&num_image_writer_processes)->default_value(1), "number of processes for image writer");
-        ("display_cameras", po::value<bool>(&display_cameras)->default_value(true), "flag to display camera feeds during recording");
+        ("video",po::value<bool>(&video)->default_value(true), "flag to encode frames to video after each episode")
+        ("run_compute_stats",po::value<bool>(&run_compute_stats)->default_value(false), "flag to compute statistics after all episodes")
+        ("num_image_writer_processes", po::value<int>(&num_image_writer_processes)->default_value(1), "number of processes for image writer")
+        ("display_cameras", po::value<bool>(&display_cameras)->default_value(true), "flag to display camera feeds during recording")
         ("overwrite", po::value<bool>(&overwrite)->default_value(false), "flag to overwrite existing dataset");
-
 
     po::variables_map vm;
     try {
@@ -71,6 +70,7 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
+
     trossen_sdk::ControlUtils control_utils;
 
     std::string foll_config_file = "../config/" + robot_name + ".json";
@@ -89,25 +89,29 @@ int main(int argc, char* argv[]) {
     auto teleop_config = trossen_sdk_config::load_leader_config(lead_config_file);
     auto teleop_robot = trossen_sdk_config::create_leader_from_config(*teleop_config);
 
+
+    std::filesystem::path root_path = root.empty() ? std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" : std::filesystem::path(root);
+
     spdlog::info("Initializing dataset [control_script.cpp]: {}", dataset_name);
-    trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_controller);
+    trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_controller, root_path, run_compute_stats, overwrite);
 
     spdlog::info("Connecting to robot: {}", robot_name);
     robot_controller->connect();
     teleop_robot->connect();
 
     spdlog::info("Warming up the robot arms...");
-    control_utils.control_loop(robot_controller, teleop_robot, warmup_time);
+    control_utils.control_loop(robot_controller, teleop_robot, warmup_time, display_cameras, fps);
 
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
         spdlog::info("Starting episode {}", dataset.get_num_episodes());
-        control_utils.control_loop(robot_controller, teleop_robot, recording_time, dataset);
+        control_utils.control_loop(robot_controller, teleop_robot, recording_time, dataset, num_image_writer_threads_per_camera, display_cameras, fps);
         spdlog::info("Episode {} completed.", dataset.get_num_episodes()-1);
         // Allow operator to move the robots in teleop mode while the robot resets
-        control_utils.control_loop(robot_controller, teleop_robot, reset_time);
+        spdlog::info("Resetting the robot arms...");
+        control_utils.control_loop(robot_controller, teleop_robot, reset_time, display_cameras, fps);
     }
-    
-    dataset.convert_to_videos();
+    if(video)
+        dataset.convert_to_videos();
 
     robot_controller->disconnect(); // Sleep the arms at the end of the control script
     teleop_robot->disconnect(); // Disconnect the teleoperation robot
