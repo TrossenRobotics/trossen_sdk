@@ -61,8 +61,10 @@ target_link_libraries(trossen_data_collection_sdk
 add_executable(sleep main.cpp)
 add_executable(replay replay.cpp)
 add_executable(control control_script.cpp)
+add_executable(teleop teleop.cpp)
 
 
 target_link_libraries(control  PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
 target_link_libraries(sleep trossen_data_collection_sdk)
 target_link_libraries(replay PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
+target_link_libraries(teleop PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)

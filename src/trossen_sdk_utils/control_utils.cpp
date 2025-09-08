@@ -5,8 +5,7 @@ namespace trossen_sdk {
 void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,
                                 std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader> teleop_robot,
                                 float control_time,
-                                trossen_dataset::TrossenAIDataset& dataset,
-                                bool teleop_mode) {
+                                trossen_dataset::TrossenAIDataset& dataset) {
     using steady_clock = std::chrono::steady_clock;
     using time_point = std::chrono::steady_clock::time_point;
                         
@@ -66,19 +65,17 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
         frame_data.episode_idx = episode_idx;
         frame_data.frame_idx = episode_data.get_frames().size();
         episode_data.add_frame(frame_data);
-        if(!teleop_mode) {
         
-            for (const auto& image_data : state.images) {
-                const std::string& camera_name = image_data.camera_name;
-                std::string filename = image_data.file_path + std::to_string(frame_data.frame_idx) + ".jpg";
-                std::string image_file_path = (camera_folder_map[camera_name] / filename).string();
+        for (const auto& image_data : state.images) {
+            const std::string& camera_name = image_data.camera_name;
+            std::string filename = image_data.file_path + std::to_string(frame_data.frame_idx) + ".jpg";
+            std::string image_file_path = (camera_folder_map[camera_name] / filename).string();
 
-                std::string depth_filename = image_data.file_path + std::to_string(frame_data.frame_idx) + ".jpg";
-                std::string depth_image_file_path = (depth_camera_folder_map[camera_name] / depth_filename).string();
+            std::string depth_filename = image_data.file_path + std::to_string(frame_data.frame_idx) + ".jpg";
+            std::string depth_image_file_path = (depth_camera_folder_map[camera_name] / depth_filename).string();
 
-                image_writer.push(image_data.image, image_file_path);
-                image_writer.push(image_data.depth_map, depth_image_file_path);
-            }
+            image_writer.push(image_data.image, image_file_path);
+            image_writer.push(image_data.depth_map, depth_image_file_path);
         }
         // Display images/videos using OpenCV
         display_images(state.images);
@@ -101,9 +98,56 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
                                     + " | Frame: " + std::to_string(frame_data.frame_idx));
         }
     }
-    if (!teleop_mode) {
-         dataset.save_episode(episode_data);
-    }   
+    
+    dataset.save_episode(episode_data);
+    
+}
+
+
+void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,
+                                std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader> teleop_robot,
+                                float control_time) {
+    using steady_clock = std::chrono::steady_clock;
+    using time_point = std::chrono::steady_clock::time_point;
+                        
+    // TODO: Take this from a yaml file / command line argument
+    trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer(4);
+
+    teleop_robot->configure(); // Configure the teleoperation robot
+    robot->configure(); // Configure the robot arm
+    
+    trossen_ai_robot_devices::State state;
+
+
+    auto start_time = steady_clock::now();
+    auto end_time = start_time + std::chrono::duration<float>(control_time);
+    while (steady_clock::now() < end_time) {
+        auto loop_start_time = steady_clock::now();
+        trossen_dataset::FrameData frame_data;
+        frame_data.timestamp_ms = std::chrono::duration<float>(steady_clock::now() - start_time).count();
+
+        std::vector<double> action = teleop_robot->get_action(); // Get action from the teleoperation robot
+        robot->send_action(action); // Send action to the robot arm
+        state = robot->get_observation(); // Get the current state from the robot arm
+        state.action = action; // Set the action in the state
+
+        // Display images/videos using OpenCV
+        display_images(state.images);
+        // TODO: Use FPS to control the loop frequency
+        busy_wait_until(loop_start_time, 30.0);  // 30 Hz loop 
+
+        auto loop_duration = std::chrono::duration_cast<std::chrono::duration<double>>(steady_clock::now() - loop_start_time).count();
+        // TODO: Improve this logging to be more elegant and less verbose
+        // TODO: Make FPS tolerance configurable/ constant
+        if (loop_duration > 1.0 / 29.0) {
+            spdlog::warn("Loop duration: " + std::to_string(loop_duration) + " seconds"
+                                    + " | Frequency: " + std::to_string(1.0 / loop_duration) + " Hz");
+        }
+        else {
+            spdlog::info("Loop duration: " + std::to_string(loop_duration) + " seconds"
+                                    + " | Frequency: " + std::to_string(1.0 / loop_duration) + " Hz");
+        }
+    }
 }
 
 
