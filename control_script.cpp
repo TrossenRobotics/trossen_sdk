@@ -103,8 +103,8 @@ int main(int argc, char* argv[]) {
         spdlog::info("Starting episode {}", dataset.get_num_episodes());
         control_utils.control_loop(robot_controller, teleop_robot, recording_time, dataset);
         spdlog::info("Episode {} completed.", dataset.get_num_episodes()-1);
-        // Reset time
-        std::this_thread::sleep_for(std::chrono::duration<double>(reset_time));
+        // Allow operator to move the robots in teleop mode while the robot resets
+        control_utils.control_loop(robot_controller, teleop_robot, reset_time);
     }
     
     dataset.convert_to_videos();
