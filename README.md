@@ -120,7 +120,7 @@ sudo ubuntu-drivers autoinstall
 --num_episodes 1 --fps 30 \
 --display_cameras true \
 --tags test \
---overwrite true \
+--overwrite false \
 --dataset test_dataset \
 --root ~/.cache/huggingface/lerobot/ \
 --repo_id trossen-ai/trossen-widowx \

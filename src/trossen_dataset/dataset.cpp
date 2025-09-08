@@ -437,58 +437,67 @@ namespace trossen_dataset
                 }
 
                 threads.emplace_back([=, &log_mutex]() {
-                    spdlog::debug("Started encoding {}", output_video_path.string());
-                    // Collect image files
-                    std::vector<fs::path> image_paths;
-                    for (const auto &file : fs::directory_iterator(episode_dir.path()))
-                    {
-                        std::string ext = file.path().extension().string();
-                        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-                        if (file.is_regular_file() && (ext == ".jpg" || ext == ".jpeg"))
+                    try {
+                        spdlog::debug("Started encoding {}", output_video_path.string());
+                        // Collect image files
+                        std::vector<fs::path> image_paths;
+                        for (const auto &file : fs::directory_iterator(episode_dir.path()))
                         {
-                            image_paths.push_back(file.path());
+                            std::string ext = file.path().extension().string();
+                            std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                            if (file.is_regular_file() && (ext == ".jpg" || ext == ".jpeg"))
+                            {
+                                image_paths.push_back(file.path());
+                            }
                         }
-                    }
 
-                    if (image_paths.empty())
-                    {
+                        if (image_paths.empty())
+                        {
+                            std::lock_guard<std::mutex> lock(log_mutex);
+                            spdlog::warn("No images found in episode folder: {}", episode_name);
+                            return;
+                        }
+                        // Assuming you renamed images to image_cam_head_%d.jpg
+                        fs::path input_pattern = episode_dir.path() / "image_%d.jpg";
+
+                        std::ostringstream ffmpeg_cmd;
+                        ffmpeg_cmd << "ffmpeg -y -framerate " << fps
+                                << " -i " << input_pattern.string()
+                                << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p "
+                                << output_video_path.string()
+                                << " > /dev/null 2>&1";
+
+                        auto start_time = std::chrono::steady_clock::now();
+                        int ret_code = std::system(ffmpeg_cmd.str().c_str());
+                        auto end_time = std::chrono::steady_clock::now();
+                        auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
+                        {
+                            std::lock_guard<std::mutex> lock(log_mutex);
+                            spdlog::debug("FFmpeg command for {} took {} ms", episode_name, duration_ms);
+                        }
                         std::lock_guard<std::mutex> lock(log_mutex);
-                        spdlog::warn("No images found in episode folder: {}", episode_name);
-                        return;
-                    }
-                    // Assuming you renamed images to image_cam_head_%d.jpg
-                    fs::path input_pattern = episode_dir.path() / "image_%d.jpg";
-
-                    std::ostringstream ffmpeg_cmd;
-                    ffmpeg_cmd << "ffmpeg -y -framerate " << fps
-                            << " -i " << input_pattern.string()
-                            << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p "
-                            << output_video_path.string()
-                            << " > /dev/null 2>&1";
-
-                    auto start_time = std::chrono::steady_clock::now();
-                    int ret_code = std::system(ffmpeg_cmd.str().c_str());
-                    auto end_time = std::chrono::steady_clock::now();
-                    auto duration_ms = std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count();
-                    {
+                        if (ret_code != 0)
+                        {
+                            spdlog::error("FFmpeg failed for {}: exit code {}", episode_name, ret_code);
+                        }
+                        else
+                        {
+                            spdlog::debug("Created video: {}", output_video_path.string());
+                        }
+                    } catch (const std::exception& e) {
                         std::lock_guard<std::mutex> lock(log_mutex);
-                        spdlog::debug("FFmpeg command for {} took {} ms", episode_name, duration_ms);
-                    }
-                    std::lock_guard<std::mutex> lock(log_mutex);
-                    if (ret_code != 0)
-                    {
-                        spdlog::error("FFmpeg failed for {}: exit code {}", episode_name, ret_code);
-                    }
-                    else
-                    {
-                        spdlog::debug("Created video: {}", output_video_path.string());
+                        spdlog::error("Exception in video thread for {}: {}", episode_name, e.what());
                     }
                 });
             }
         }
 
+        // Ensure all threads are joined before continuing
         for (auto &t : threads)
-            t.join();
+        {
+            if (t.joinable())
+                t.join();
+        }
 
         auto end_time = std::chrono::steady_clock::now();
         auto duration_sec = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
