@@ -20,7 +20,6 @@ public:
                     std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader> teleop_robot,
                     float control_time,
                     trossen_dataset::TrossenAIDataset& dataset,
-                    int num_image_writer_threads_per_camera,
                     bool display_cameras,
                     double fps);
 

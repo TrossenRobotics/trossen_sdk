@@ -24,14 +24,12 @@ struct ImageData {
     std::string camera_name; // Name of the camera that captured the image
     cv::Mat image; // OpenCV Mat to hold the image data
     cv::Mat depth_map; // OpenCV Mat to hold the depth information
-    std::string file_path; // File path where the image will be saved
 };
 
 class TrossenAICamera {
 public:
-    
         explicit TrossenAICamera(const std::string& name, const std::string& serial_number, 
-                                 int capture_width = 640, int capture_height = 480, int fps = 30, bool use_depth = false);
+                             int capture_width = 640, int capture_height = 480, int fps = 30, bool use_depth = false);
 
         void connect() ;
         void disconnect() ;
@@ -39,6 +37,7 @@ public:
         trossen_ai_robot_devices::ImageData async_read();
 
         const std::string& name() const { return name_; }
+        const bool is_using_depth() const { return use_depth_; }
         int width() const { return capture_width_; }
         int height() const { return capture_height_; }
         int fps() const { return fps_; }

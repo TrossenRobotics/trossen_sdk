@@ -51,6 +51,8 @@ int main(int argc, char* argv[]) {
         ("display_cameras", po::value<bool>(&display_cameras)->default_value(true), "flag to display camera feeds during recording")
         ("overwrite", po::value<bool>(&overwrite)->default_value(false), "flag to overwrite existing dataset");
 
+
+
     po::variables_map vm;
     try {
         po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -93,7 +95,7 @@ int main(int argc, char* argv[]) {
     std::filesystem::path root_path = root.empty() ? std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" : std::filesystem::path(root);
 
     spdlog::info("Initializing dataset [control_script.cpp]: {}", dataset_name);
-    trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_controller, root_path, run_compute_stats, overwrite);
+    trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_controller, root_path, run_compute_stats, overwrite, num_image_writer_threads_per_camera, fps);
 
     spdlog::info("Connecting to robot: {}", robot_name);
     robot_controller->connect();
@@ -104,7 +106,7 @@ int main(int argc, char* argv[]) {
 
     for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
         spdlog::info("Starting episode {}", dataset.get_num_episodes());
-        control_utils.control_loop(robot_controller, teleop_robot, recording_time, dataset, num_image_writer_threads_per_camera, display_cameras, fps);
+        control_utils.control_loop(robot_controller, teleop_robot, recording_time, dataset,  display_cameras, fps);
         spdlog::info("Episode {} completed.", dataset.get_num_episodes()-1);
         // Allow operator to move the robots in teleop mode while the robot resets
         spdlog::info("Resetting the robot arms...");

@@ -121,7 +121,7 @@ sudo ubuntu-drivers autoinstall
 --display_cameras true \
 --tags test \
 --overwrite false \
---dataset test_dataset \
+--dataset test_dataset_00 \
 --root ~/.cache/huggingface/lerobot/ \
 --repo_id trossen-ai/trossen-widowx \
 --single_task pick_place \

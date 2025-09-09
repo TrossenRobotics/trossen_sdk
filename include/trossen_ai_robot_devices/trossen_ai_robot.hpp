@@ -102,7 +102,7 @@ namespace robot {
             virtual std::string name() const = 0;
             virtual std::vector<std::string> get_joint_features() const = 0;
             virtual std::vector<std::string> get_observation_features() const = 0;
-            virtual std::vector<std::string> get_camera_names() const = 0;
+            virtual std::vector<std::pair<std::string, std::string>> get_camera_names() const = 0;
     };
 
     class TrossenAIWidowXRobot : public TrossenRobot {
@@ -117,7 +117,7 @@ namespace robot {
         void send_action(const std::vector<double>& action) override;
         std::vector<std::string> get_joint_features() const override;
         std::vector<std::string> get_observation_features() const override;
-        std::vector<std::string> get_camera_names() const override;
+        std::vector<std::pair<std::string, std::string>> get_camera_names() const override;
 
     private:
         std::string name_;
@@ -139,7 +139,7 @@ namespace robot {
         void send_action(const std::vector<double>& action) override;
         std::vector<std::string> get_joint_features() const override;
         std::vector<std::string> get_observation_features() const override;
-        std::vector<std::string> get_camera_names() const override;
+        std::vector<std::pair<std::string, std::string>> get_camera_names() const override;
     private:
         std::string name_;
         std::string left_ip_address_;

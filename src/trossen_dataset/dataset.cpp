@@ -11,10 +11,15 @@ namespace trossen_dataset
     void EpisodeData::add_frame(const FrameData &frame)
     {
         buffer_.push_back(frame);
+        
     }
     const std::vector<FrameData> &EpisodeData::get_frames() const
     {
         return buffer_;
+    }
+    void EpisodeData::clear()
+    {
+        buffer_.clear();
     }
 
     TrossenAIDataset::TrossenAIDataset(const std::string &dataset_name,
@@ -23,6 +28,7 @@ namespace trossen_dataset
                                        std::filesystem::path root,
                                        bool run_compute_stats,
                                        bool overwrite,
+                                       int num_image_writer_threads_per_camera,
                                        double fps) : dataset_name_(dataset_name), task_name_(task_name), robot_(robot), root_(root), run_compute_stats_(run_compute_stats), overwrite_(overwrite), fps_(fps)
     {
         spdlog::info("TrossenAIDataset : {}", dataset_name_);
@@ -58,9 +64,9 @@ namespace trossen_dataset
                 for (int i = 0; i < existing_episodes; ++i)
                 {
                     // Load each episode and add it to the buffer
-                    EpisodeData episode_data(i);
+                    auto episode_data = std::make_unique<EpisodeData>(i);
                     // TODO: Implement loading of episode data
-                    episodes_buffer_.push_back(episode_data);
+                    episodes_buffer_.push_back(std::move(episode_data));
                 }
             }
         }
@@ -75,9 +81,68 @@ namespace trossen_dataset
 
         metadata_->set_info_entry("robot_name", robot_->name());
         metadata_->add_features(*robot_);
+
+        // Start image writer threads for each camera
+        // TODO: Take this from a yaml file / command line argument
+        trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer_(num_image_writer_threads_per_camera);
+    }
+    
+    void TrossenAIDataset::add_frame(FrameData &frame)
+    {   
+        if(current_episode_ == nullptr)
+        {
+            int episode_idx = get_num_episodes();
+            current_episode_ = std::make_unique<EpisodeData>(episode_idx);
+        }
+        frame.frame_idx = current_episode_->get_frames().size();
+
+        current_episode_->add_frame(frame);
+
+        // Save images asynchronously using the image writer
+        std::string image_folder_path = get_image_path();
+        std::ostringstream oss;
+        oss << "episode_" << std::setw(6) << std::setfill('0') << current_episode_->get_episode_idx();
+        std::string episode_folder_name = oss.str();
+        std::vector<std::pair<std::string, std::string>> camera_names = robot_->get_camera_names();
+        if (camera_names.empty()) {
+            spdlog::warn("No cameras found on the robot.");
+        }
+        // Create a map from camera name to its folder path
+        std::unordered_map<std::string, std::filesystem::path> camera_folder_map;
+        for (const auto& camera_name : camera_names) {
+            std::filesystem::path camera_folder = std::filesystem::path(image_folder_path) / camera_name.first / episode_folder_name;
+            if (!std::filesystem::exists(camera_folder)) {
+                std::filesystem::create_directories(camera_folder);
+            }
+            camera_folder_map[camera_name.first] = camera_folder;
+            if(camera_name.second == "depth") {
+                std::filesystem::path depth_folder = std::filesystem::path(image_folder_path) / (camera_name.first + "_depth") / episode_folder_name;
+                if (!std::filesystem::exists(depth_folder)) {
+                    std::filesystem::create_directories(depth_folder);
+                }
+                camera_folder_map[camera_name.first + "_depth"] = depth_folder;
+            }
+        }
+        for (const auto& image_data : frame.images) {
+            const std::string& camera_name = image_data.camera_name;
+            std::string filename = "image_" + std::to_string(frame.frame_idx) + ".jpg";
+            std::string image_file_path = (camera_folder_map[camera_name] / filename).string();
+            // Push the image to the writer
+            image_writer_.push(image_data.image, image_file_path);
+
+            if(!image_data.depth_map.empty()) {
+                std::string depth_filename = "image_" + std::to_string(frame.frame_idx) + ".jpg";
+                std::string depth_file_path = (camera_folder_map[camera_name + "_depth"] / depth_filename).string();
+                // Push the depth map to the writer
+                image_writer_.push(image_data.depth_map, depth_file_path);
+            }
+        }
+
+
     }
 
-    void TrossenAIDataset::save_episode(const trossen_dataset::EpisodeData &episode_data)
+
+    void TrossenAIDataset::save_episode()
     {
         // Finalize the episode data if needed
         using namespace arrow;
@@ -94,7 +159,7 @@ namespace trossen_dataset
         auto *observation_value_builder = static_cast<DoubleBuilder *>(observation_builder.value_builder());
         auto *action_value_builder = static_cast<DoubleBuilder *>(action_builder.value_builder());
 
-        for (const auto &sample : episode_data.get_frames())
+        for (const auto &sample : current_episode_->get_frames())
         {
             auto st = timestamp_builder.Append(sample.timestamp_ms);
             if (!st.ok())
@@ -254,13 +319,12 @@ namespace trossen_dataset
         }
         
 
-        episodes_buffer_.push_back(episode_data);
-
+        
         // Add episode metadata to the metadata object
         nlohmann::json episode_metadata;
-        episode_metadata["episode_index"] = episode_data.get_episode_idx();
+        episode_metadata["episode_index"] = current_episode_->get_episode_idx();
         episode_metadata["tasks"] = {metadata_->get_info_entry("tasks")};
-        episode_metadata["length"] = episode_data.get_frames().size();
+        episode_metadata["length"] = current_episode_->get_frames().size();
         metadata_->add_episode(episode_metadata);
 
         
@@ -268,16 +332,23 @@ namespace trossen_dataset
         // Add task metadata to the metadata object
         nlohmann::json task_metadata;
         task_metadata["task"] = metadata_->get_info_entry("tasks");
-        task_metadata["task_index"] = episode_data.get_episode_idx();
+        task_metadata["task_index"] = current_episode_->get_episode_idx();
         metadata_->add_task(task_metadata);
 
         // Increment total frames
-        metadata_->update_info(episode_data.get_frames().size());
+        metadata_->update_info(current_episode_->get_frames().size());
 
         if(run_compute_stats_)
-            compute_statistics(table, episode_data.get_episode_idx());
+            compute_statistics(table, current_episode_->get_episode_idx());
         // Save the metadata to the info.json file
         metadata_->save_all();
+
+        episodes_buffer_.push_back(std::move(current_episode_));
+
+        spdlog::debug("Moved current episode to buffer. Total episodes: {}", episodes_buffer_.size());
+
+        spdlog::debug("Saved episode {}", episode_index);
+
     }
 
     nlohmann::json TrossenAIDataset::compute_flat_stats(const std::shared_ptr<arrow::Array> &array)
@@ -693,7 +764,7 @@ namespace trossen_dataset
         // Assuming robot.get_camera_names() returns a list of camera identifiers
         for (const auto &camera_name : robot.get_camera_names())
         {
-            features["observation.images." + camera_name] = camera_feature;
+            features["observation.images." + camera_name.first] = camera_feature;
         }
 
         info_["features"] = features;

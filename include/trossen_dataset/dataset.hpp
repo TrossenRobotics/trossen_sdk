@@ -28,6 +28,7 @@ struct FrameData {
     std::vector<double> action;             // Action to be taken
     int64_t episode_idx;                    // Episode index
     int64_t frame_idx;                      // Frame index
+    std::vector<trossen_ai_robot_devices::ImageData> images; // Images from cameras
 
 };
 
@@ -81,6 +82,7 @@ public:
     void close();
     const std::vector<FrameData>& get_frames() const;
     const int64_t& get_episode_idx() const { return episode_idx_; }
+    void clear();
 
 private:
     int64_t episode_idx_;
@@ -98,15 +100,17 @@ public:
                               std::filesystem::path root,
                               bool run_compute_stats = true,
                               bool overwrite = false,
+                              int num_image_writer_threads_per_camera = 4,
                               double fps = 30.0);
 
     // Verify the dataset structure
     bool verify() const;
 
     
-
+    // Add a new frame to the current episode
+    void add_frame(FrameData& frame);
     // Save the current episode data to the dataset
-    void save_episode(const EpisodeData& episode_data);
+    void save_episode();
 
     // Get number of episodes in the dataset
     size_t get_num_episodes() const {
@@ -142,7 +146,9 @@ private:
     double fps_ = 30.0;
     std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot_;
     std::unique_ptr<trossen_dataset::Metadata> metadata_;
-    std::vector<EpisodeData> episodes_buffer_;  // Store episodes in a vector
+    std::vector<std::unique_ptr<trossen_dataset::EpisodeData>> episodes_buffer_;  // Store episodes in a vector
+    std::unique_ptr<trossen_dataset::EpisodeData> current_episode_; // Current episode being recorded
+    trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer_;
 };
 
 }  // namespace trossen_dataset

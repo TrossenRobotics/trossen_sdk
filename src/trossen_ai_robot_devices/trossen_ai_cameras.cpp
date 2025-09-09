@@ -105,13 +105,12 @@ trossen_ai_robot_devices::ImageData TrossenAICamera::async_read() {
             depth_map = cv::Mat(cv::Size(capture_width_, capture_height_), CV_16UC1, (void*)color_and_depth.depth_map.get_data(), cv::Mat::AUTO_STEP);
         }
         int64_t timestamp = color_and_depth.color_image.get_timestamp();
-        std::string file_path = "image_";
         {
             std::lock_guard<std::mutex> lock(mtx);
             if(use_depth_) {
-                result = trossen_ai_robot_devices::ImageData{name_, image, depth_map, file_path};
+                result = trossen_ai_robot_devices::ImageData{name_, image, depth_map};
             } else {
-                result = trossen_ai_robot_devices::ImageData{name_, image, cv::Mat(), file_path};
+                result = trossen_ai_robot_devices::ImageData{name_, image, cv::Mat()};
             }
             done = true;
         }
