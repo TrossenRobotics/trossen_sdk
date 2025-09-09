@@ -29,7 +29,7 @@ int main(int argc, char* argv[]) {
     bool overwrite;
     double fps;
     
-    // Argument parsing
+    // Add command line options
     po::options_description desc("Allowed options");
     desc.add_options()
         ("help", "produce help message")
@@ -52,7 +52,7 @@ int main(int argc, char* argv[]) {
         ("overwrite", po::value<bool>(&overwrite)->default_value(false), "flag to overwrite existing dataset");
 
 
-
+    // Parse command line arguments
     po::variables_map vm;
     try {
         po::store(po::parse_command_line(argc, argv, desc), vm);
@@ -72,12 +72,14 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-
+    // Initialize control utilities
     trossen_sdk::ControlUtils control_utils;
 
-    std::string foll_config_file = "../config/" + robot_name + ".json";
-    std::string lead_config_file = "../config/" + robot_name + "_leader.json";
+    // Load robot and teleoperation configurations
+    std::string foll_config_file = fmt::format(trossen_sdk::FOLLOWER_ROBOT_CONFIG_FORMAT, robot_name);
+    std::string lead_config_file = fmt::format(trossen_sdk::LEADER_ROBOT_CONFIG_FORMAT, robot_name);
 
+    // Check if config files exist
     std::ifstream foll_file_check(foll_config_file);
     std::ifstream lead_file_check(lead_config_file);
     if (!foll_file_check.good() || !lead_file_check.good()) {
@@ -85,17 +87,18 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
+    // Create robot and teleoperation instances
     auto follower_config = trossen_sdk_config::load_follower_config(foll_config_file);
     auto robot_controller = trossen_sdk_config::create_robot_from_config(*follower_config);
 
     auto teleop_config = trossen_sdk_config::load_leader_config(lead_config_file);
     auto teleop_robot = trossen_sdk_config::create_leader_from_config(*teleop_config);
 
-
-    std::filesystem::path root_path = root.empty() ? std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk" : std::filesystem::path(root);
+    // Initialize the root path for dataset. If empty, use default path
+    std::filesystem::path root_path = root.empty() ? trossen_sdk::DEFAULT_ROOT_PATH : std::filesystem::path(root);
 
     spdlog::info("Initializing dataset [control_script.cpp]: {}", dataset_name);
-    trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_controller, root_path, run_compute_stats, overwrite, num_image_writer_threads_per_camera, fps);
+    trossen_dataset::TrossenAIDataset dataset(dataset_name, "test_task", robot_controller, root_path, repo_id, run_compute_stats, overwrite, num_image_writer_threads_per_camera, fps);
 
     spdlog::info("Connecting to robot: {}", robot_name);
     robot_controller->connect();

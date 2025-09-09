@@ -26,18 +26,15 @@ namespace trossen_dataset
                                        const std::string &task_name,
                                        const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> &robot,
                                        std::filesystem::path root,
+                                       std::string repo_id,
                                        bool run_compute_stats,
                                        bool overwrite,
                                        int num_image_writer_threads_per_camera,
-                                       double fps) : dataset_name_(dataset_name), task_name_(task_name), robot_(robot), root_(root), run_compute_stats_(run_compute_stats), overwrite_(overwrite), fps_(fps)
+                                       double fps) : dataset_name_(dataset_name), task_name_(task_name), robot_(robot), root_(root), repo_id_(repo_id), run_compute_stats_(run_compute_stats), overwrite_(overwrite), fps_(fps)
     {
         spdlog::info("TrossenAIDataset : {}", dataset_name_);
 
-        // Create dataset folder structure: <dataset_name>/data, <dataset_name>/meta, <dataset_name>/videos
-        // Set dataset root directory under ~/.cache/trossen_dataset_collection_sdk/
-        // TODO: Make this configurable
-        
-        std::filesystem::path dataset_dir = root_ / dataset_name_;
+        std::filesystem::path dataset_dir = root_ / repo_id_ / dataset_name_;
         if (dataset_dir.has_extension())
         {
             dataset_dir = dataset_dir.parent_path();
@@ -51,10 +48,10 @@ namespace trossen_dataset
                 std::filesystem::create_directories(dataset_dir / "meta");
                 std::filesystem::create_directories(dataset_dir / "videos" / "chunk-000");
                 std::filesystem::create_directories(dataset_dir / "images");
-                metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, root_, false);
+                metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_, task_name_, root_, false);
             }
             else {
-                metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, root_, true);
+                metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_, task_name_, root_, true);
                 if (!verify())
                 {
                     throw std::runtime_error("Dataset verification failed: metadata does not match or is incomplete.");
@@ -76,7 +73,7 @@ namespace trossen_dataset
             std::filesystem::create_directories(dataset_dir / "meta");
             std::filesystem::create_directories(dataset_dir / "videos" / "chunk-000");
             std::filesystem::create_directories(dataset_dir / "images");
-            metadata_ = std::make_unique<Metadata>(dataset_name_, task_name_, root_, false);
+            metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_, task_name_, root_, false);
         }
 
         metadata_->set_info_entry("robot_name", robot_->name());
@@ -289,7 +286,7 @@ namespace trossen_dataset
         oss << "data/chunk-" << std::setw(3) << std::setfill('0') << chunk_index
             << "/episode_" << std::setw(6) << std::setfill('0') << episode_index << ".parquet";
         std::string episode_file_str = oss.str();
-        std::string output_path_ = (cache_root / dataset_name_ / episode_file_str).string();
+        std::string output_path_ = (cache_root / repo_id_ / dataset_name_ / episode_file_str).string();
 
         // Ensure the directory exists
         std::error_code ec;
@@ -474,7 +471,7 @@ namespace trossen_dataset
         int episode_chunk = 0;
         std::string images_path = metadata_->get_info_entry("image_path");
         std::string dataset_name = metadata_->get_info_entry("dataset_name");
-        std::filesystem::path base_path = root_ / dataset_name;
+        std::filesystem::path base_path = root_ / repo_id_ / dataset_name;
 
         std::vector<std::thread> threads;
         std::mutex log_mutex;
@@ -578,7 +575,7 @@ namespace trossen_dataset
     int TrossenAIDataset::get_existing_episodes() const
     {
         // Count the number of existing episodes by checking the data directory
-        std::string data_path = root_.string() + "/" + dataset_name_ + "/data/chunk-000";
+        std::string data_path = root_.string() + "/" + repo_id_ + "/" + dataset_name_ + "/data/chunk-000";
 
         if (!std::filesystem::exists(data_path))
         {
@@ -661,11 +658,11 @@ namespace trossen_dataset
         return joint_positions_list;
     }
 
-    Metadata::Metadata(const std::string &dataset_name, const std::string &task_name, std::filesystem::path root, bool existing)
-        : dataset_name_(dataset_name), task_name_(task_name), root_(std::move(root))
+    Metadata::Metadata(const std::string &dataset_name, const std::string &repo_id, const std::string &task_name, std::filesystem::path root, bool existing)
+        : dataset_name_(dataset_name), repo_id_(repo_id), task_name_(task_name), root_(std::move(root))
     {
 
-        std::filesystem::path base_path = root_ / dataset_name_;
+        std::filesystem::path base_path = root_ / repo_id_ / dataset_name_;
         std::filesystem::path meta_path = base_path / "meta";
         info_file_path_ = (meta_path / "info.json").string();
         if (existing)
@@ -678,6 +675,7 @@ namespace trossen_dataset
         else
         {
             set_info_entry("dataset_name", dataset_name_);
+            set_info_entry("repo_id", repo_id_);
             set_info_entry("codebase_version", "v2.1");
             set_info_entry("trossen_subversion", "v1.0");
             set_info_entry("tasks", task_name_);

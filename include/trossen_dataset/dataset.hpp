@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <nlohmann/json.hpp>
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
+#include "trossen_sdk_utils/constants.hpp"
 #include <spdlog/spdlog.h>
 #include <format>
 #include <thread>
@@ -34,7 +35,7 @@ struct FrameData {
 
 class Metadata {
 public:
-    explicit Metadata(const std::string& dataset_name, const std::string& task_name, std::filesystem::path root, bool existing = false);
+    explicit Metadata(const std::string& dataset_name, const std::string& repo_id, const std::string& task_name, std::filesystem::path root, bool existing = false);
 
     // Info.json key-value manipulation
     void set_info_entry(const std::string& key, const std::string& value);
@@ -60,6 +61,7 @@ public:
 
 private:
     std::string dataset_name_;
+    std::string repo_id_;
     std::string task_name_;
     nlohmann::json info_;
     std::filesystem::path root_;
@@ -98,6 +100,7 @@ public:
                               const std::string& task_name,
                               const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot>& robot,
                               std::filesystem::path root,
+                              std::string repo_id,
                               bool run_compute_stats = true,
                               bool overwrite = false,
                               int num_image_writer_threads_per_camera = 4,
@@ -141,6 +144,7 @@ private:
     std::string dataset_name_;
     std::string task_name_;
     std::filesystem::path root_;
+    std::string repo_id_;
     bool run_compute_stats_;
     bool overwrite_;
     double fps_ = 30.0;
