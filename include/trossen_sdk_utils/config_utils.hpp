@@ -16,13 +16,14 @@ struct CameraConfig {
     int fps;
     int width;
     int height;
+    bool use_depth;
 };
 
 struct BaseConfig {
     std::string name;
 };
 
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name, serial, fps, width, height)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name, serial, fps, width, height, use_depth)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BaseConfig, name)
 
 

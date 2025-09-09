@@ -29,8 +29,7 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
 
     std::vector<std::string> camera_names = robot->get_camera_names();
     if (camera_names.empty()) {
-        spdlog::error("No cameras found on the robot.");
-        return;
+        spdlog::warn("No cameras found on the robot.");
     }
     // Create a map from camera name to its folder path
     std::unordered_map<std::string, std::filesystem::path> camera_folder_map;
@@ -81,8 +80,8 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
             image_writer.push(image_data.depth_map, depth_image_file_path);
         }
         if (display_cameras) {
-        // Display images/videos using OpenCV
-        display_images(state.images);
+            // Display images/videos using OpenCV
+            display_images(state.images);
         }
         // TODO: Use FPS to control the loop frequency
         busy_wait_until(loop_start_time, fps);  // Use the specified FPS

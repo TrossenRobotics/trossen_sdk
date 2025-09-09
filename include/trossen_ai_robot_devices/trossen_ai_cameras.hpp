@@ -31,7 +31,7 @@ class TrossenAICamera {
 public:
     
         explicit TrossenAICamera(const std::string& name, const std::string& serial_number, 
-                                 int capture_width = 640, int capture_height = 480, int fps = 30);
+                                 int capture_width = 640, int capture_height = 480, int fps = 30, bool use_depth = false);
 
         void connect() ;
         void disconnect() ;
@@ -51,6 +51,7 @@ public:
         int capture_width_ {640}; // Default width
         int capture_height_ {480}; // Default height
         int fps_ {30}; // Default frames per second
+        bool use_depth_ {false}; // Default depth usage
         rs2::pipeline camera_; // RealSense camera pipeline
     };
 
