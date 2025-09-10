@@ -92,6 +92,8 @@ namespace trossen_dataset
             current_episode_ = std::make_unique<EpisodeData>(episode_idx);
         }
         frame.frame_idx = current_episode_->get_frames().size();
+        // Synthetic time stamp in ms
+        frame.timestamp_ms = static_cast<float>(frame.frame_idx / fps_);
         frame.episode_idx = current_episode_->get_episode_idx();
 
         current_episode_->add_frame(frame);

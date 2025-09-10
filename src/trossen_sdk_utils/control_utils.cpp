@@ -23,7 +23,6 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
     while (steady_clock::now() < end_time) {
         auto loop_start_time = steady_clock::now();
         trossen_dataset::FrameData frame_data;
-        frame_data.timestamp_ms = std::chrono::duration<float>(steady_clock::now() - start_time).count();
         std::vector<double> action = teleop_robot->get_action(); // Get action from the teleoperation robot
         robot->send_action(action); // Send action to the robot arm
         state = robot->get_observation(); // Get the current state from the robot arm
