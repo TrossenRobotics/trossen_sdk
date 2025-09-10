@@ -21,6 +21,14 @@
 namespace trossen_dataset
 {
 
+    struct FeatureStats {
+        std::vector<float> min;   // size 3
+        std::vector<float> max;
+        std::vector<float> mean;
+        std::vector<float> std;
+        int count = 0;
+    };
+
     /// @brief Data structure to hold the data for a single frame in an episode
     struct FrameData
     {
@@ -129,6 +137,10 @@ namespace trossen_dataset
          * @param total_frames Total number of frames to be updated
          */
         void update_info(int total_frames);
+
+
+
+        
 
     private:
         std::string dataset_name_; // Name of the dataset
@@ -253,6 +265,12 @@ namespace trossen_dataset
 
         // Compute statistics of the dataset
         void compute_statistics(std::shared_ptr<arrow::Table> table, int episode_index);
+
+        nlohmann::json convert_stats_to_json(const FeatureStats& stats);
+        FeatureStats compute_image_stats(const std::vector<cv::Mat>& images);
+        std::vector<cv::Mat> sample_images(const std::vector<std::filesystem::path>& image_paths);
+        cv::Mat auto_downsample(const cv::Mat& img, int target_size = 150, int max_threshold = 300);
+        std::vector<int> sample_indices(int dataset_len, int min_samples = 100, int max_samples = 10000, float power = 0.75f);
 
     private:
         std::string dataset_name_;

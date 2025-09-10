@@ -380,12 +380,6 @@ namespace trossen_dataset
 
         double mean = count > 0 ? sum / count : 0;
         double stddev = 0;
-        spdlog::debug("MEAN is : {}", mean);
-        spdlog::debug("COUNT is : {}", count);
-        spdlog::debug("MIN is : {}", min_val);
-        spdlog::debug("MAX is : {}", max_val);
-        spdlog::debug("SUM is : {}", sum);
-        spdlog::debug("SUM SQ is : {}", sum_sq);
         if (count > 0) {
             if (min_val == 0.0 && max_val == 0.0) {
             stddev = 0.0;
@@ -393,7 +387,6 @@ namespace trossen_dataset
             stddev = std::sqrt((sum_sq / count) - (mean * mean));
             }
         }
-        spdlog::debug("STD DEV is : {}", stddev);
         return {
             {"min", {min_val}}, {"max", {max_val}}, {"mean", {mean}}, {"std", {stddev}}, {"count", {count}}};
     }
@@ -421,9 +414,10 @@ namespace trossen_dataset
         for (int d = 0; d < dim; ++d)
         {
             mean[d] = sum[d] / list_count;
-            stddev[d] = std::sqrt((sum_sq[d] / list_count) - (mean[d] * mean[d]));
+            // stddev[d] can be NaN if list_count == 0 (division by zero), or if sum_sq[d]/list_count < mean[d]*mean[d] due to floating point errors.
+            double variance = (sum_sq[d] / list_count) - (mean[d] * mean[d]);
+            stddev[d] = (list_count > 0 && variance >= 0.0) ? std::sqrt(variance) : 0.0;
         }
-        spdlog::debug("STD DEV is : {}", stddev[0]);
         return {
             {"min", min_val}, {"max", max_val}, {"mean", mean}, {"std", stddev}, {"count", {list_count}}};
     }
@@ -447,6 +441,117 @@ namespace trossen_dataset
         }
         return true; // Placeholder for actual verification logic
     }
+
+
+    std::vector<int> TrossenAIDataset::sample_indices(int dataset_len, int min_samples, int max_samples, float power) {
+        int num_samples = std::clamp(static_cast<int>(std::pow(dataset_len, power)), min_samples, max_samples);
+        std::vector<int> indices(num_samples);
+        float step = static_cast<float>(dataset_len - 1) / (num_samples - 1);
+        for (int i = 0; i < num_samples; ++i)
+            indices[i] = std::round(i * step);
+        return indices;
+    }
+
+    cv::Mat TrossenAIDataset::auto_downsample(const cv::Mat& img, int target_size, int max_threshold) {
+        int h = img.rows;
+        int w = img.cols;
+        if (std::max(w, h) < max_threshold) return img;
+        float factor = (w > h) ? (w / static_cast<float>(target_size)) : (h / static_cast<float>(target_size));
+        cv::Mat downsampled;
+        cv::resize(img, downsampled, {}, 1.0 / factor, 1.0 / factor, cv::INTER_AREA);
+        return downsampled;
+    }
+
+    std::vector<cv::Mat> TrossenAIDataset::sample_images(const std::vector<std::filesystem::path>& image_paths) {
+            auto indices = sample_indices(image_paths.size());
+            std::vector<cv::Mat> images;
+
+            for (int idx : indices) {
+                cv::Mat img = cv::imread(image_paths[idx].string(), cv::IMREAD_COLOR);
+                if (img.empty()) continue;
+
+                cv::Mat img_downsampled = auto_downsample(img);  // same size logic
+                cv::Mat img_float;
+                img_downsampled.convertTo(img_float, CV_32F, 1.0 / 255.0);  // normalize to [0,1]
+
+                if (img_float.channels() == 3) {
+                    images.push_back(img_float);  // Preserve shape (H, W, 3)
+                } else {
+                    spdlog::warn("Unexpected channel count: {}", img_float.channels());
+                }
+            }
+
+            return images;
+        }
+    
+
+    FeatureStats TrossenAIDataset::compute_image_stats(const std::vector<cv::Mat>& images) {
+        FeatureStats stats;
+        if (images.empty()) {
+            spdlog::warn("No images provided.");
+            return stats;
+        }
+
+        int num_channels = images[0].channels();
+        stats.count = static_cast<int>(images.size());
+
+        // Create a vector for each channel
+        std::vector<std::vector<float>> channel_values(num_channels);
+
+        for (const auto& img_bgr : images) {
+            cv::Mat img;
+            img_bgr.convertTo(img, CV_32F, 1.0 / 255.0);  // Normalize to [0, 1]
+
+            std::vector<cv::Mat> channels;
+            cv::split(img, channels);
+
+            for (int c = 0; c < num_channels; ++c) {
+                // Flatten and push pixels into channel_values[c]
+                channel_values[c].insert(channel_values[c].end(),
+                    (float*)channels[c].datastart,
+                    (float*)channels[c].dataend);
+            }
+        }
+
+        for (int c = 0; c < num_channels; ++c) {
+            cv::Mat channel_mat(channel_values[c]);
+            cv::Scalar mean, stddev;
+            cv::meanStdDev(channel_mat, mean, stddev);
+
+            double min_val, max_val;
+            cv::minMaxLoc(channel_mat, &min_val, &max_val);
+
+            stats.min.push_back(static_cast<float>(min_val));
+            stats.max.push_back(static_cast<float>(max_val));
+            stats.mean.push_back(static_cast<float>(mean[0]));
+            stats.std.push_back(static_cast<float>(stddev[0]));
+        }
+
+        return stats;
+    }
+
+
+    nlohmann::json TrossenAIDataset::convert_stats_to_json(const FeatureStats& stats) {
+        auto to_nested = [](const std::vector<float>& vec) {
+            nlohmann::json result = nlohmann::json::array();
+            for (float v : vec) {
+                result.push_back({ {v} });  // [[[value]]]
+            }
+            return result;  // shape (3,1,1)
+        };
+
+        nlohmann::json j;
+        j["min"] = to_nested(stats.min);
+        j["max"] = to_nested(stats.max);
+        j["mean"] = to_nested(stats.mean);
+        j["std"] = to_nested(stats.std);
+        j["count"] = { stats.count };
+
+        return j;
+    }
+
+    
+
     void TrossenAIDataset::compute_statistics(std::shared_ptr<arrow::Table> table, int episode_index)
     {
         spdlog::info("Computing dataset statistics...");
@@ -455,19 +560,16 @@ namespace trossen_dataset
         for (const auto &field : table->schema()->fields())
         {
             auto column = table->GetColumnByName(field->name());
-            spdlog::debug("Computing stats for column: {}", field->name());
             if (!column)
                 continue;
 
             if (field->type()->id() == arrow::Type::LIST)
-            {   
-                spdlog::debug("Column {} is a list type.", field->name());
+            {
                 auto list_array = std::static_pointer_cast<arrow::ListArray>(column->chunk(0));
                 stats[field->name()] = compute_list_stats(list_array);
             }
             else
             {
-                spdlog::debug("Column {} is a flat type.", field->name());
                 auto array = column->chunk(0);
                 stats[field->name()] = compute_flat_stats(array);
             }
@@ -478,27 +580,29 @@ namespace trossen_dataset
         {
             std::string image_key = "observation.images." + camera_name.first;
 
-            // Simulate 3 channels (e.g., RGB), each with shape (1, 1)
-            nlohmann::json stat_entry;
-            int num_channels = 3;
-            double dummy_mean = 0.45;
-            double dummy_std = 0.17;
-
-            auto make_nested = [](double value, int channels) {
-                nlohmann::json arr = nlohmann::json::array();
-                for (int i = 0; i < channels; ++i) {
-                    arr.push_back({{value}});
+            //Get image paths for the current episode and camera
+            std::string image_folder_path = get_image_path();
+            std::ostringstream oss;
+            oss << "episode_" << std::setw(6) << std::setfill('0') << episode_index;
+            std::string episode_folder_name = oss.str();
+            std::filesystem::path episode_image_dir = std::filesystem::path(image_folder_path) / camera_name.first / episode_folder_name;
+            if (!std::filesystem::exists(episode_image_dir)) {
+                spdlog::warn("Image directory does not exist: {}", episode_image_dir.string());
+                continue;
+            }
+            std::vector<std::filesystem::path> paths;
+            for (const auto& entry : std::filesystem::directory_iterator(episode_image_dir)) {
+                if (entry.is_regular_file()) {
+                    std::string ext = entry.path().extension().string();
+                    std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+                    if (ext == ".jpg" || ext == ".png") {
+                        paths.push_back(entry.path());
+                    }
                 }
-                return arr;
-            };
-
-            stat_entry["min"]   = make_nested(0.0, num_channels);
-            stat_entry["max"]   = make_nested(1.0, num_channels);
-            stat_entry["mean"]  = make_nested(dummy_mean, num_channels);
-            stat_entry["std"]   = make_nested(dummy_std, num_channels);
-            stat_entry["count"] = {100};
-
-            stats[image_key] = stat_entry;
+            }
+            auto images = sample_images(paths);
+            auto image_stats = compute_image_stats(images);
+            stats[image_key] = convert_stats_to_json(image_stats);
         }
         // Add episode statistics to the metadata object
         nlohmann::json episode_stats;
