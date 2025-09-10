@@ -154,10 +154,10 @@ namespace trossen_ai_robot_devices {
             std::vector<std::string> left_features_raw = left_robot_driver_->get_joint_names();
             std::vector<std::string> right_features, left_features;
             for (const auto& name : right_features_raw) {
-                right_features.push_back("right_" + name);
+                right_features.push_back("right_" + name + ".pos");
             }
             for (const auto& name : left_features_raw) {
-                left_features.push_back("left_" + name);
+                left_features.push_back("left_" + name + ".pos");
             }
             right_features.insert(right_features.end(), left_features.begin(), left_features.end());
             return right_features;
@@ -168,10 +168,10 @@ namespace trossen_ai_robot_devices {
             std::vector<std::string> left_features_raw = left_robot_driver_->get_joint_names();
             std::vector<std::string> right_features, left_features;
             for (const auto& name : right_features_raw) {
-                right_features.push_back("right_" + name);
+                right_features.push_back("right_" + name + ".pos");
             }
             for (const auto& name : left_features_raw) {
-                left_features.push_back("left_" + name);
+                left_features.push_back("left_" + name + ".pos");
             }
             right_features.insert(right_features.end(), left_features.begin(), left_features.end());
             return right_features;
