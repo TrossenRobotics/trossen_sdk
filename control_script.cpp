@@ -51,7 +51,8 @@ int main(int argc, char* argv[]) {
         ("display_cameras", po::value<bool>(&display_cameras)->default_value(true), "flag to display camera feeds during recording")
         ("overwrite", po::value<bool>(&overwrite)->default_value(false), "flag to overwrite existing dataset");
 
-
+    // Set logging level to debug for detailed output
+    spdlog::set_level(spdlog::level::debug); // Set global log level to debug
     // Parse command line arguments
     po::variables_map vm;
     try {

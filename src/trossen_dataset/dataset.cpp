@@ -88,10 +88,11 @@ namespace trossen_dataset
     {   
         if(current_episode_ == nullptr)
         {
-            int episode_idx = get_num_episodes();
+            int episode_idx = episodes_buffer_.size();
             current_episode_ = std::make_unique<EpisodeData>(episode_idx);
         }
         frame.frame_idx = current_episode_->get_frames().size();
+        frame.episode_idx = current_episode_->get_episode_idx();
 
         current_episode_->add_frame(frame);
 
@@ -378,8 +379,21 @@ namespace trossen_dataset
         }
 
         double mean = count > 0 ? sum / count : 0;
-        double stddev = count > 0 ? std::sqrt((sum_sq / count) - (mean * mean)) : 0;
-
+        double stddev = 0;
+        spdlog::debug("MEAN is : {}", mean);
+        spdlog::debug("COUNT is : {}", count);
+        spdlog::debug("MIN is : {}", min_val);
+        spdlog::debug("MAX is : {}", max_val);
+        spdlog::debug("SUM is : {}", sum);
+        spdlog::debug("SUM SQ is : {}", sum_sq);
+        if (count > 0) {
+            if (min_val == 0.0 && max_val == 0.0) {
+            stddev = 0.0;
+            } else {
+            stddev = std::sqrt((sum_sq / count) - (mean * mean));
+            }
+        }
+        spdlog::debug("STD DEV is : {}", stddev);
         return {
             {"min", {min_val}}, {"max", {max_val}}, {"mean", {mean}}, {"std", {stddev}}, {"count", {count}}};
     }
@@ -409,7 +423,7 @@ namespace trossen_dataset
             mean[d] = sum[d] / list_count;
             stddev[d] = std::sqrt((sum_sq[d] / list_count) - (mean[d] * mean[d]));
         }
-
+        spdlog::debug("STD DEV is : {}", stddev[0]);
         return {
             {"min", min_val}, {"max", max_val}, {"mean", mean}, {"std", stddev}, {"count", {list_count}}};
     }
@@ -441,16 +455,19 @@ namespace trossen_dataset
         for (const auto &field : table->schema()->fields())
         {
             auto column = table->GetColumnByName(field->name());
+            spdlog::debug("Computing stats for column: {}", field->name());
             if (!column)
                 continue;
 
             if (field->type()->id() == arrow::Type::LIST)
-            {
+            {   
+                spdlog::debug("Column {} is a list type.", field->name());
                 auto list_array = std::static_pointer_cast<arrow::ListArray>(column->chunk(0));
                 stats[field->name()] = compute_list_stats(list_array);
             }
             else
             {
+                spdlog::debug("Column {} is a flat type.", field->name());
                 auto array = column->chunk(0);
                 stats[field->name()] = compute_flat_stats(array);
             }
