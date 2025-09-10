@@ -455,7 +455,34 @@ namespace trossen_dataset
                 stats[field->name()] = compute_flat_stats(array);
             }
         }
+        //TODO: Compute statistics for image features
+        // Dummy Image Feature Statistics
+        for (const auto& camera_name : robot_->get_camera_names())
+        {
+            std::string image_key = "observation.images." + camera_name.first;
 
+            // Simulate 3 channels (e.g., RGB), each with shape (1, 1)
+            nlohmann::json stat_entry;
+            int num_channels = 3;
+            double dummy_mean = 0.45;
+            double dummy_std = 0.17;
+
+            auto make_nested = [](double value, int channels) {
+                nlohmann::json arr = nlohmann::json::array();
+                for (int i = 0; i < channels; ++i) {
+                    arr.push_back({{value}});
+                }
+                return arr;
+            };
+
+            stat_entry["min"]   = make_nested(0.0, num_channels);
+            stat_entry["max"]   = make_nested(1.0, num_channels);
+            stat_entry["mean"]  = make_nested(dummy_mean, num_channels);
+            stat_entry["std"]   = make_nested(dummy_std, num_channels);
+            stat_entry["count"] = {100};
+
+            stats[image_key] = stat_entry;
+        }
         // Add episode statistics to the metadata object
         nlohmann::json episode_stats;
         episode_stats["episode_index"] = episode_index;
@@ -476,7 +503,7 @@ namespace trossen_dataset
         std::vector<std::thread> threads;
         std::mutex log_mutex;
         auto start_time = std::chrono::steady_clock::now();
-        for (const auto &cam_dir : fs::directory_iterator(images_path))
+        for (const auto &cam_dir : std::filesystem::directory_iterator(images_path))
         {
             if (!cam_dir.is_directory())
                 continue;
@@ -486,18 +513,18 @@ namespace trossen_dataset
             oss << "videos/chunk-" << std::setw(3) << std::setfill('0') << episode_chunk
                 << "/" << video_key;
             std::string episode_subdir = oss.str();
-            fs::path videos_cam_dir = base_path / episode_subdir;
-            fs::create_directories(videos_cam_dir);
+            std::filesystem::path videos_cam_dir = base_path / episode_subdir;
+            std::filesystem::create_directories(videos_cam_dir);
 
-            for (const auto &episode_dir : fs::directory_iterator(cam_dir.path()))
+            for (const auto &episode_dir : std::filesystem::directory_iterator(cam_dir.path()))
             {
                 if (!episode_dir.is_directory())
                     continue;
 
                 std::string episode_name = episode_dir.path().filename().string();
-                fs::path output_video_path = videos_cam_dir / (episode_name + ".mp4");
+                std::filesystem::path output_video_path = videos_cam_dir / (episode_name + ".mp4");
 
-                if (fs::exists(output_video_path))
+                if (std::filesystem::exists(output_video_path))
                 {
                     std::lock_guard<std::mutex> lock(log_mutex);
                     spdlog::debug("Skipping existing video: {}", output_video_path.string());
@@ -508,8 +535,8 @@ namespace trossen_dataset
                     try {
                         spdlog::debug("Started encoding {}", output_video_path.string());
                         // Collect image files
-                        std::vector<fs::path> image_paths;
-                        for (const auto &file : fs::directory_iterator(episode_dir.path()))
+                        std::vector<std::filesystem::path> image_paths;
+                        for (const auto &file : std::filesystem::directory_iterator(episode_dir.path()))
                         {
                             std::string ext = file.path().extension().string();
                             std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
@@ -526,7 +553,7 @@ namespace trossen_dataset
                             return;
                         }
                         // Assuming you renamed images to image_cam_head_%d.jpg
-                        fs::path input_pattern = episode_dir.path() / "image_%d.jpg";
+                        std::filesystem::path input_pattern = episode_dir.path() / "image_%d.jpg";
 
                         std::ostringstream ffmpeg_cmd;
                         ffmpeg_cmd << "ffmpeg -y -framerate " << fps
