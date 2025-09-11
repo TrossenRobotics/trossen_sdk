@@ -75,8 +75,8 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
             driver_.set_all_modes(trossen_arm::Mode::position);
         }
         // Check if the data size is correct for positions
-        if (data.size() != 7) {
-            spdlog::error("Invalid data size for positions. Expected 7 values.");
+        if (data.size() != driver_.get_num_joints()) {
+            spdlog::error("Invalid data size for positions. Expected {} values.", driver_.get_num_joints());
             return;
         }
         driver_.set_all_positions(data, time_to_move_, false);
@@ -88,8 +88,8 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
             driver_.set_all_modes(trossen_arm::Mode::velocity);
         }
         // Check if the data size is correct for velocities
-        if (data.size() != 7) {
-            spdlog::error("Invalid data size for velocities. Expected 7 values.");
+        if (data.size() != driver_.get_num_joints()) {
+            spdlog::error("Invalid data size for velocities. Expected {} values.", driver_.get_num_joints());
             return;
         }
         driver_.set_all_velocities(data, time_to_move_, false);
@@ -101,8 +101,8 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
             driver_.set_all_modes(trossen_arm::Mode::external_effort);
         }
         // Check if the data size is correct for external efforts
-        if (data.size() != 7) {
-            spdlog::error("Invalid data size for external_efforts. Expected 7 values.");
+        if (data.size() != driver_.get_num_joints()) {
+            spdlog::error("Invalid data size for external_efforts. Expected {} values.", driver_.get_num_joints());
             return;
         }
         driver_.set_all_external_efforts(data, time_to_move_, false);

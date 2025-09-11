@@ -127,12 +127,12 @@ namespace trossen_ai_robot_devices {
 
         void TrossenAIBimanualWidowXRobot::send_action(const std::vector<double>& action) {
             // Assuming action is split between the two arms
-            if (action.size() < 14) {
-                spdlog::error("Error: Expected at least 14 joint positions, got {}", action.size());
+            if (action.size() < right_robot_driver_->get_joint_names().size() + left_robot_driver_->get_joint_names().size()) {
+                spdlog::error("Error: Expected at least {} joint positions, got {}", right_robot_driver_->get_joint_names().size() + left_robot_driver_->get_joint_names().size(), action.size());
                 return;
             }
-            std::vector<double> right_action(action.begin(), action.begin() + 7);
-            std::vector<double> left_action(action.begin() + 7, action.end());
+            std::vector<double> right_action(action.begin(), action.begin() + right_robot_driver_->get_joint_names().size());
+            std::vector<double> left_action(action.begin() + left_robot_driver_->get_joint_names().size(), action.end());
             right_robot_driver_->write(trossen_sdk::POSITION, right_action);
             left_robot_driver_->write(trossen_sdk::POSITION, left_action);
         }
@@ -208,7 +208,7 @@ namespace trossen_ai_robot_devices {
 
         void TrossenAIWidowXLeader::configure() {
             robot_driver_->stage_arm(); // Stage the arm to a safe position
-            robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(7, 0.0));
+            robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(robot_driver_->get_joint_names().size(), 0.0));
         }
 
         std::vector<double> TrossenAIWidowXLeader::get_action() const {
@@ -242,12 +242,13 @@ namespace trossen_ai_robot_devices {
             left_robot_driver_->connect();
         }
         void TrossenAIBimanualWidowXLeader::calibrate() {
+            //TODO Implement calibration logic if needed
         }
         void TrossenAIBimanualWidowXLeader::configure() {
             right_robot_driver_->stage_arm(); // Stage the right arm to a safe position
             left_robot_driver_->stage_arm(); // Stage the left arm to a safe position
-            right_robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(7, 0.0));
-            left_robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(7, 0.0));
+            right_robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(right_robot_driver_->get_joint_names().size(), 0.0));
+            left_robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(left_robot_driver_->get_joint_names().size(), 0.0));
         }
         std::vector<double> TrossenAIBimanualWidowXLeader::get_action() const {
             std::vector<double> right_positions = right_robot_driver_->read(trossen_sdk::POSITION);
