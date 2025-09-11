@@ -349,7 +349,7 @@ namespace trossen_dataset
          * @param output_file Path to the Parquet file
          * @return Vector of vectors of doubles representing the data in the Parquet file
          */
-        static std::vector<std::vector<double>> read(const std::string &output_file);
+        std::vector<std::vector<double>> read(int episode_index) const;
 
         /**
          * @brief Compute statistics for a ListArray

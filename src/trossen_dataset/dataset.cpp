@@ -45,10 +45,11 @@ namespace trossen_dataset
             {
                 spdlog::warn("Overwriting existing dataset: {}", dataset_name_);
                 std::filesystem::remove_all(dataset_dir);
-                std::filesystem::create_directories(dataset_dir / "data" / "chunk-000");
-                std::filesystem::create_directories(dataset_dir / "meta");
-                std::filesystem::create_directories(dataset_dir / "videos" / "chunk-000");
-                std::filesystem::create_directories(dataset_dir / "images");
+                //TODO Use chunk size to decide the chunk numbering
+                std::filesystem::create_directories(dataset_dir / trossen_sdk::DATA_PATH_DIR / "chunk-000");
+                std::filesystem::create_directories(dataset_dir / trossen_sdk::METADATA_DIR);
+                std::filesystem::create_directories(dataset_dir / trossen_sdk::VIDEO_DIR / "chunk-000");
+                std::filesystem::create_directories(dataset_dir / trossen_sdk::IMAGES_DIR);
                 metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_, task_name_, root_, false);
             }
             // If overwrite is false, load existing metadata and verify the dataset
@@ -424,8 +425,7 @@ namespace trossen_dataset
         }
         // Check is the dataset name , robot name, and task name match the metadata
         if (metadata_->get_info_entry("dataset_name") != dataset_name_ ||
-            metadata_->get_info_entry("robot_name") != robot_->name() ||
-            metadata_->get_info_entry("tasks") != task_name_)
+            metadata_->get_info_entry("robot_name") != robot_->name())
         {
             spdlog::error("Dataset metadata does not match the dataset name, robot name, or task name.");
             return false;
@@ -773,10 +773,18 @@ namespace trossen_dataset
         return count;
     }
 
-    std::vector<std::vector<double>> TrossenAIDataset::read(const std::string &output_file)
-    {
-        spdlog::info("Replaying joint data from: {}", output_file);
+    std::vector<std::vector<double>> TrossenAIDataset::read(int episode_index) const
+    {   
 
+        std::filesystem::path dataset_path = root_ / repo_id_ / dataset_name_ / trossen_sdk::DATA_PATH_DIR / ("episode_" + std::to_string(episode_index) + ".parquet");
+        // Construct the file path for the specified episode index
+        std::ostringstream oss;
+        int chunk_index = episode_index / 1000; // Assuming 1000 episodes per chunk
+        int episode_idx_in_chunk = episode_index % 1000;
+        oss << "data/chunk-" << std::setw(3) << std::setfill('0') << chunk_index
+            << "/episode_" << std::setw(6) << std::setfill('0') << episode_idx_in_chunk << ".parquet";
+        std::string output_file = (root_ / repo_id_ / dataset_name_ / oss.str()).string();
+    
         // Open the file and handle errors
         auto infile_result = arrow::io::ReadableFile::Open(output_file);
         if (!infile_result.ok())
@@ -784,6 +792,7 @@ namespace trossen_dataset
             spdlog::error("Failed to open Arrow file: {}", infile_result.status().ToString());
             return std::vector<std::vector<double>>{};
         }
+
         std::shared_ptr<arrow::io::ReadableFile> infile = infile_result.ValueOrDie();
 
         // Open the Parquet file reader and handle errors
@@ -803,19 +812,12 @@ namespace trossen_dataset
             spdlog::error("Failed to read Parquet table: {}", status.ToString());
             return std::vector<std::vector<double>>{};
         }
+
         // Extract relevant columns from the table
-        auto timestamp_array = std::static_pointer_cast<arrow::Int64Array>(
-            parquet_table->GetColumnByName("timestamp_s")->chunk(0));
         auto joints_array = std::static_pointer_cast<arrow::ListArray>(
             parquet_table->GetColumnByName("observation.state")->chunk(0));
         auto values_array = std::static_pointer_cast<arrow::DoubleArray>(
             joints_array->values());
-        auto action_array = std::static_pointer_cast<arrow::ListArray>(
-            parquet_table->GetColumnByName("action")->chunk(0));
-        auto episode_idx_array = std::static_pointer_cast<arrow::Int64Array>(
-            parquet_table->GetColumnByName("episode_idx")->chunk(0));
-        auto frame_idx_array = std::static_pointer_cast<arrow::Int64Array>(
-            parquet_table->GetColumnByName("frame_idx")->chunk(0));
 
         // Iterate over the rows and extract joint positions
         std::vector<std::vector<double>> joint_positions_list;

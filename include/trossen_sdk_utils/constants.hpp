@@ -33,8 +33,11 @@ namespace trossen_sdk {
     const std::string EPISODES_JSONL = "episodes.jsonl";
     const std::string EPISODE_STATS_JSONL = "episode_stats.jsonl";
     const std::string TASKS_JSONL = "tasks.jsonl";
+
     const std::string METADATA_DIR = "meta";
     const std::string IMAGES_DIR = "images";
+    const std::string VIDEO_DIR = "videos";
+    const std::string DATA_PATH_DIR = "data";
 
     const std::string CODEBASE_VERSION = "v2.1";
     const std::string TROSSEN_SUBVERSION = "v1.0";
