@@ -960,7 +960,7 @@ namespace trossen_dataset
         info_["splits"]["train"] = std::to_string(start) + ":" + std::to_string(end);
 
         // Update the readme file
-        const std::string output_path = "README.md";
+        const std::string output_path = root_.string() + "/" + repo_id_ + "/" + dataset_name_ + "/README.md";
         std::string readme_content = generate_readme(info_);
         std::ofstream out(output_path);
         if (!out) {
