@@ -118,12 +118,13 @@ struct BimanualWidowXRobotConfig : public RobotConfigBase {
 
 
 // JSON serialization/deserialization using nlohmann::json
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name, serial, fps, width, height, use_depth)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BaseConfig, name)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXLeaderConfig, name, left_ip_address, right_ip_address)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXRobotConfig, name, left_ip_address, right_ip_address, cameras)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXLeaderConfig, name, ip_address)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXRobotConfig, name, ip_address, cameras)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name, serial, fps, width, height, use_depth)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BaseConfig, name)
+
 
 }  // namespace trossen_sdk_config
     
