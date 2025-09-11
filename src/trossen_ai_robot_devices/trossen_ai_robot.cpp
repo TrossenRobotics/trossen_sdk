@@ -9,8 +9,8 @@ namespace trossen_ai_robot_devices {
 
         TrossenAIWidowXRobot::TrossenAIWidowXRobot(const trossen_sdk_config::WidowXRobotConfig& config)
             : name_(config.name), ip_address_(config.ip_address) {
-            
-            robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, "follower");
+
+            robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, trossen_sdk::FOLLOWER_MODEL);
             for (const auto& cam_config : config.cameras) {
                 cameras_.emplace_back(cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps, cam_config.use_depth);
             }
@@ -19,6 +19,7 @@ namespace trossen_ai_robot_devices {
         }
 
         void TrossenAIWidowXRobot::connect() {
+            // Connect to the robot arm and cameras
             if (is_connected_) {
                 std::cout << "Already connected to robot: " << name_ << std::endl;
                 return;
@@ -31,6 +32,7 @@ namespace trossen_ai_robot_devices {
         }
 
         void TrossenAIWidowXRobot::disconnect() {
+            // Disconnect from the robot arm and cameras
             std::cout << "Disconnecting from robot: " << name_ << std::endl;
             robot_driver_->disconnect();
             for (auto& camera : cameras_) {
@@ -40,18 +42,19 @@ namespace trossen_ai_robot_devices {
         }
 
         void TrossenAIWidowXRobot::calibrate() {
+            //TODO Implement calibration logic if needed
         }
 
         void TrossenAIWidowXRobot::configure() {
-            robot_driver_->stage_arm(); // Stage the arm to a safe position
+            // Stage the arm to a safe position
+            robot_driver_->stage_arm();
         }
 
         trossen_ai_robot_devices::State TrossenAIWidowXRobot::get_observation() {
             trossen_ai_robot_devices::State state;
-            std::vector<double> positions = robot_driver_->read(trossen_sdk::POSITION);
-            state.observation_state = positions;
-            state.action = robot_driver_->read(trossen_sdk::POSITION); // Assuming action is read from the robot driver
-            // Add camera logic here
+            // Read joint positions from the robot arm
+            state.observation_state = robot_driver_->read(trossen_sdk::POSITION);
+            // Read camera images 
             for (auto& camera : cameras_) {
                 state.images.push_back(camera.async_read());
             }
@@ -59,19 +62,23 @@ namespace trossen_ai_robot_devices {
         }
 
         void TrossenAIWidowXRobot::send_action(const std::vector<double>& action) {
+            // Send joint position commands to the robot arm
             robot_driver_->write(trossen_sdk::POSITION, action);
         }
 
+        // TODO Improve this logic or delete the function if not needed
         std::vector<std::string> TrossenAIWidowXRobot::get_joint_features() const{
             return robot_driver_->get_joint_names();
         }
 
-        
+        // TODO Improve this logic or delete the function if not needed
         std::vector<std::string> TrossenAIWidowXRobot::get_observation_features() const{
             std::vector<std::string> features = get_joint_features();
             return features;
         }
 
+
+        // TODO Rename function for clarity
         std::vector<std::pair<std::string, std::string>> TrossenAIWidowXRobot::get_camera_names() const {
             std::vector<std::pair<std::string, std::string>> camera_names;
             for (const auto& camera : cameras_) {
@@ -82,8 +89,8 @@ namespace trossen_ai_robot_devices {
 
         TrossenAIBimanualWidowXRobot::TrossenAIBimanualWidowXRobot(const trossen_sdk_config::BimanualWidowXRobotConfig& config)
             : name_(config.name), right_ip_address_(config.right_ip_address), left_ip_address_(config.left_ip_address) {
-            right_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.right_ip_address, "follower");
-            left_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.left_ip_address, "follower");
+            right_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.right_ip_address, trossen_sdk::FOLLOWER_MODEL);
+            left_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.left_ip_address, trossen_sdk::FOLLOWER_MODEL);
             for (const auto& cam_config : config.cameras) {
                 cameras_.emplace_back(cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps, cam_config.use_depth);
             }
@@ -104,21 +111,23 @@ namespace trossen_ai_robot_devices {
         }
 
         void TrossenAIBimanualWidowXRobot::calibrate() {
+            //TODO Implement calibration logic if needed
         }
 
         void TrossenAIBimanualWidowXRobot::configure() {
-            right_robot_driver_->stage_arm(); // Stage the right arm to a safe position
-            left_robot_driver_->stage_arm(); // Stage the left arm to a safe position
+            // Stage both arms to safe positions
+            right_robot_driver_->stage_arm();
+            left_robot_driver_->stage_arm();
         }
 
         trossen_ai_robot_devices::State TrossenAIBimanualWidowXRobot::get_observation() {
             trossen_ai_robot_devices::State state;
+            // Read joint positions from both robot arms and combine them
             std::vector<double> right_positions = right_robot_driver_->read(trossen_sdk::POSITION);
             std::vector<double> left_positions = left_robot_driver_->read(trossen_sdk::POSITION);
             state.observation_state.insert(state.observation_state.end(), right_positions.begin(), right_positions.end());
             state.observation_state.insert(state.observation_state.end(), left_positions.begin(), left_positions.end());
-            state.action = right_positions; // Assuming action is read from the right robot driver
-            // Add camera logic here
+            // Read camera images
             for (auto& camera : cameras_) {
                 state.images.push_back(camera.async_read());
             }
@@ -126,7 +135,7 @@ namespace trossen_ai_robot_devices {
         }
 
         void TrossenAIBimanualWidowXRobot::send_action(const std::vector<double>& action) {
-            // Assuming action is split between the two arms
+            // Split the action vector and send commands to both robot arms
             if (action.size() < right_robot_driver_->get_joint_names().size() + left_robot_driver_->get_joint_names().size()) {
                 spdlog::error("Error: Expected at least {} joint positions, got {}", right_robot_driver_->get_joint_names().size() + left_robot_driver_->get_joint_names().size(), action.size());
                 return;
@@ -138,8 +147,9 @@ namespace trossen_ai_robot_devices {
         }
 
         void TrossenAIBimanualWidowXRobot::disconnect() {
-            right_robot_driver_->stage_arm(); // Stop the right arm
-            left_robot_driver_->stage_arm(); // Stop the left arm
+            // Stage both arms to safe positions and disconnect
+            right_robot_driver_->stage_arm();
+            left_robot_driver_->stage_arm();
             right_robot_driver_->disconnect();
             left_robot_driver_->disconnect();
             for (auto& camera : cameras_) {
@@ -153,6 +163,8 @@ namespace trossen_ai_robot_devices {
             std::vector<std::string> right_features_raw = right_robot_driver_->get_joint_names();
             std::vector<std::string> left_features_raw = left_robot_driver_->get_joint_names();
             std::vector<std::string> right_features, left_features;
+            // Prefix joint names with "right_" and "left_" and suffix with ".pos"
+            // This is to allow compatibility with LeRobot replay and visualization tools
             for (const auto& name : right_features_raw) {
                 right_features.push_back("right_" + name + ".pos");
             }
@@ -163,6 +175,7 @@ namespace trossen_ai_robot_devices {
             return right_features;
         }
 
+        //TODO Improve this logic or delete the function if not needed
         std::vector<std::string> TrossenAIBimanualWidowXRobot::get_observation_features() const {
             std::vector<std::string> right_features_raw = right_robot_driver_->get_joint_names();
             std::vector<std::string> left_features_raw = left_robot_driver_->get_joint_names();
@@ -177,6 +190,7 @@ namespace trossen_ai_robot_devices {
             return right_features;
         }
 
+        //TODO Rename function for clarity
         std::vector<std::pair<std::string, std::string>> TrossenAIBimanualWidowXRobot::get_camera_names() const {
             std::vector<std::pair<std::string, std::string>> camera_names;
             for (const auto& camera : cameras_) {
@@ -191,7 +205,7 @@ namespace trossen_ai_robot_devices {
         
         TrossenAIWidowXLeader::TrossenAIWidowXLeader(const trossen_sdk_config::WidowXLeaderConfig& config)
             : name_(config.name), ip_address_(config.ip_address) {
-            robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, "leader");
+            robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, trossen_sdk::LEADER_MODEL);
         }
 
         void TrossenAIWidowXLeader::connect() {
@@ -230,8 +244,8 @@ namespace trossen_ai_robot_devices {
 
         TrossenAIBimanualWidowXLeader::TrossenAIBimanualWidowXLeader(const trossen_sdk_config::BimanualWidowXLeaderConfig& config)
             : name_(config.name), left_ip_address_(config.left_ip_address), right_ip_address_(config.right_ip_address) {
-            right_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, right_ip_address_, "leader");
-            left_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, left_ip_address_, "leader");
+            right_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, right_ip_address_, trossen_sdk::LEADER_MODEL);
+            left_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, left_ip_address_, trossen_sdk::LEADER_MODEL);
         }
         void TrossenAIBimanualWidowXLeader::connect() {
             if (is_connected_) {

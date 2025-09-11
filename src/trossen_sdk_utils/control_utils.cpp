@@ -23,10 +23,15 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
     while (steady_clock::now() < end_time) {
         auto loop_start_time = steady_clock::now();
         trossen_dataset::FrameData frame_data;
-        std::vector<double> action = teleop_robot->get_action(); // Get action from the teleoperation robot
-        robot->send_action(action); // Send action to the robot arm
-        state = robot->get_observation(); // Get the current state from the robot arm
-        state.action = action; // Set the action in the state
+        // Get action from the teleoperation robot and send to the robot arm
+        std::vector<double> action = teleop_robot->get_action();
+        robot->send_action(action);
+
+        // Get the current state from the robot arm
+        state = robot->get_observation();
+
+        // Set the action in the state
+        state.action = action;
 
         frame_data.observation_state = state.observation_state;
         frame_data.action = state.action;
@@ -34,6 +39,7 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
             frame_data.images.push_back(image_data);
         }
         
+        // Add frame to the dataset
         dataset.add_frame(frame_data);
 
         if (display_cameras) {
