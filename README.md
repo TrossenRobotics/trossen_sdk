@@ -129,3 +129,19 @@ sudo ubuntu-drivers autoinstall
 --num_image_writer_processes 1 \
 --video true \
 --run_compute_stats true
+```
+
+### Uploading the dataset to HuggingFace
+
+```bash
+ huggingface-cli upload TrossenRoboticsCommunity/record-test ~/.cache/huggingface/lerobot/TrossenRoboticsCommunity/test_dataset_03 --repo-type dataset --revision v2.1 --exclude *.jpg
+```
+
+The `--exclude *.jpg` flag is used to avoid uploading large image files.
+The revision tag is important for passing the version checks in the online dataset viewer.
+
+```bash
+ huggingface-cli upload TrossenRoboticsCommunity/record-test ~/.cache/huggingface/lerobot/TrossenRoboticsCommunity/test_dataset_03 --repo-type dataset --revision v2.1
+```
+
+The above command uploads all files including images.
