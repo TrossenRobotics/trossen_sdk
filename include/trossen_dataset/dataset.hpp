@@ -138,6 +138,13 @@ namespace trossen_dataset
          */
         void update_info(int total_frames);
 
+        /**
+         * @brief Generate a README string for the dataset
+         * @param info_json JSON object containing dataset information
+         * @return README string
+         */
+        std::string generate_readme(const nlohmann::json& info_json) const;
+
 
 
         

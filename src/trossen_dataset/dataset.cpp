@@ -958,6 +958,18 @@ namespace trossen_dataset
         int end = std::stoi(train_range.substr(colon_pos + 1));
         end += 1; // Increment the end of the range
         info_["splits"]["train"] = std::to_string(start) + ":" + std::to_string(end);
+
+        // Update the readme file
+        const std::string output_path = "README.md";
+        std::string readme_content = generate_readme(info_);
+        std::ofstream out(output_path);
+        if (!out) {
+            spdlog::error("Failed to write {}", output_path);
+        }
+        out << readme_content;
+        out.close();
+        spdlog::info("README.md successfully generated.");
+
     }
     void Metadata::set_info_entry(const std::string &key, const std::string &value)
     {
@@ -1069,6 +1081,45 @@ namespace trossen_dataset
         save_jsonl_file((meta_path / "episodes.jsonl").string(), episode_data_);
         save_jsonl_file((meta_path / "episodes_stats.jsonl").string(), episode_stats_data_);
         save_jsonl_file((meta_path / "tasks.jsonl").string(), task_data_);
+    }
+
+
+
+    std::string Metadata::generate_readme(const nlohmann::json& info_json) const {
+        std::ostringstream out;
+
+        out << "---\n";
+        out << "license: apache-2.0\n";
+        out << "task_categories:\n";
+        out << "- robotics\n";
+        out << "tags:\n";
+        out << "- LeRobot\n";
+        out << "configs:\n";
+        out << "- config_name: default\n";
+        out << "  data_files: data/*/*.parquet\n";
+        out << "---\n";
+
+        out << "This dataset was created using [LeRobot](https://github.com/huggingface/lerobot).\n\n";
+
+        out << "## Dataset Description\n\n";
+
+        out << "- **Homepage:** [More Information Needed]\n";
+        out << "- **Paper:** [More Information Needed]\n";
+        out << "- **License:** apache-2.0\n\n";
+
+        out << "## Dataset Structure\n\n";
+        out << "[meta/info.json](meta/info.json):\n";
+        out << "```json\n";
+        out << std::setw(4) << info_json << "\n";
+        out << "```\n\n";
+
+        out << "## Citation\n\n";
+        out << "**BibTeX:**\n\n";
+        out << "```bibtex\n";
+        out << "[More Information Needed]\n";
+        out << "```\n";
+
+        return out.str();
     }
 
 } // namespace trossen_dataset
