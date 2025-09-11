@@ -1,7 +1,8 @@
 #include "trossen_ai_robot_devices/trossen_ai_driver.hpp"
 #include <iostream>
 #include <algorithm>
-#define PI 3.14159265358979323846
+#include <cmath>
+
 
 namespace trossen_ai_robot_devices {
 
@@ -12,10 +13,10 @@ void TrossenAIArm::connect() {
     }
     try
     {
-        if (model_ == "leader") {
+        if (model_ == trossen_sdk::LEADER_MODEL) {
         driver_.configure(trossen_arm::Model::wxai_v0, trossen_arm::StandardEndEffector::wxai_v0_leader, ip_address_, true);
     }
-    else if (model_ == "follower") {
+    else if (model_ == trossen_sdk::FOLLOWER_MODEL) {
         driver_.configure(trossen_arm::Model::wxai_v0, trossen_arm::StandardEndEffector::wxai_v0_follower, ip_address_, true);
     } else {
         spdlog::error("Unknown model: {}", model_);
@@ -28,7 +29,7 @@ void TrossenAIArm::connect() {
     }
     // Stage the arm
     driver_.set_all_modes(trossen_arm::Mode::position);
-    driver_.set_all_positions({0.0, PI/3, PI/6, PI/5, 0.0, 0.0, 0.0}, 2.0, true);
+    driver_.set_all_positions({0.0, M_PI/3, M_PI/6, M_PI/5, 0.0, 0.0, 0.0}, 2.0, true);
 
     is_connected_ = true;
 }
@@ -50,11 +51,11 @@ std::vector<double> TrossenAIArm::read(std::string data_name) {
         spdlog::error("Not connected to {}. Cannot read data.", name_);
         return {};
     }
-    if (data_name == "positions") {
+    if (data_name == trossen_sdk::POSITION) {
         return driver_.get_all_positions();
-    } else if (data_name == "velocities") {
+    } else if (data_name == trossen_sdk::VELOCITY) {
         return driver_.get_all_velocities();
-    } else if (data_name == "external_efforts") {
+    } else if (data_name == trossen_sdk::EXTERNAL_EFFORT) {
         return driver_.get_all_external_efforts();
     } else {
         spdlog::error("Unknown data name: {}", data_name);
@@ -67,7 +68,7 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
         spdlog::error("Not connected to {}. Cannot write data.", name_);
         return;
     }
-    if (data_name == "positions") {
+    if (data_name == trossen_sdk::POSITION) {
         // Check if any mode is not set to position
         const auto& modes = driver_.get_modes();
         if (!std::all_of(modes.begin(), modes.end(), [](const auto& mode){ return mode == trossen_arm::Mode::position; })) {
@@ -79,7 +80,7 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
             return;
         }
         driver_.set_all_positions(data, time_to_move_, false);
-    } else if (data_name == "velocities") {
+    } else if (data_name == trossen_sdk::VELOCITY) {
         // Check if any mode is not set to velocity
         const auto& modes = driver_.get_modes();
         bool all_velocity = std::all_of(modes.begin(), modes.end(), [](const auto& mode){ return mode == trossen_arm::Mode::velocity; });   
@@ -92,7 +93,7 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
             return;
         }
         driver_.set_all_velocities(data, time_to_move_, false);
-    } else if (data_name == "external_efforts") {
+    } else if (data_name == trossen_sdk::EXTERNAL_EFFORT) {
         // Check if any mode is not set to external_effort
         const auto& modes = driver_.get_modes();
         bool all_efforts = std::all_of(modes.begin(), modes.end(), [](const auto& mode){ return mode == trossen_arm::Mode::external_effort; });
@@ -120,7 +121,7 @@ void TrossenAIArm::stage_arm() {
     }
     // Stage the arm to a default position
     driver_.set_all_modes(trossen_arm::Mode::position);
-    driver_.set_all_positions({0.0, PI/3, PI/6, PI/5, 0.0, 0.0, 0.0}, 2.0, true);
+    driver_.set_all_positions({0.0, M_PI/3, M_PI/6, M_PI/5, 0.0, 0.0, 0.0}, 2.0, true);
 
 }
 

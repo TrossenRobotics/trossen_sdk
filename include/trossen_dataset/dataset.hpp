@@ -20,7 +20,9 @@
 
 namespace trossen_dataset
 {
-
+    /** @brief Data structure to hold statistics for a single feature
+     * This structure holds the min, max, mean, and standard deviation values for a specific feature
+     */
     struct FeatureStats {
         std::vector<float> min;   // size 3
         std::vector<float> max;
@@ -29,7 +31,9 @@ namespace trossen_dataset
         int count = 0;
     };
 
-    /// @brief Data structure to hold the data for a single frame in an episode
+    /** @brief Data structure to hold the data for a single frame in an episode
+     * This structure holds the timestamp, observation state, action, and other relevant information for a single frame
+     */
     struct FrameData
     {
         float timestamp_ms;                                      // Timestamp in milliseconds
@@ -40,6 +44,11 @@ namespace trossen_dataset
         std::vector<trossen_ai_robot_devices::ImageData> images; // Images from cameras
     };
 
+    /**
+     * @brief Class to manage metadata for the dataset
+     * This class handles loading, saving, and updating metadata information such as dataset info, episodes, tasks, and statistics
+     * It uses JSON format for storing metadata and provides methods to manipulate the data
+     */
     class Metadata
     {
     public:
@@ -182,6 +191,11 @@ namespace trossen_dataset
         void save_jsonl_file(const std::string &path, const std::vector<nlohmann::json> &data) const;
     };
 
+    /**
+     * @brief Class to manage data for a single episode
+     * This class handles adding frames to the episode, closing the episode, and retrieving frames
+     * It maintains a buffer of frames and the episode index
+     */
     class EpisodeData
     {
     public:
@@ -220,13 +234,33 @@ namespace trossen_dataset
         void clear();
 
     private:
-        int64_t episode_idx_;
-        std::vector<FrameData> buffer_;
+        int64_t episode_idx_; // Index of the episode
+        std::vector<FrameData> buffer_; // Buffer to hold frames in the episode
     };
 
+    /**
+     * @brief Class to manage the dataset
+     * This class handles adding frames, saving episodes, verifying the dataset structure,
+     * computing statistics, and converting images to videos
+     * It maintains metadata, a buffer of episodes, and an image writer for asynchronous image saving
+     */
     class TrossenAIDataset
     {
     public:
+        /**
+         * @brief Constructor for TrossenAIDataset
+         * @param name Name of the dataset
+         * @param task_name Name of the task
+         * @param robot Shared pointer to the robot object
+         * @param root Root directory for the dataset
+         * @param repo_id Repository ID
+         * @param run_compute_stats Flag indicating if statistics should be computed
+         * @param overwrite Flag indicating if existing dataset should be overwritten
+         * @param num_image_writer_threads_per_camera Number of threads for image writing per camera
+         * @param fps Frames per second for video conversion
+         * Initializes the dataset with the provided parameters and sets up metadata and image writer
+         * If the dataset already exists and overwrite is false, it will load existing metadata
+         */
         explicit TrossenAIDataset(const std::string &name,
                                   const std::string &task_name,
                                   const std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> &robot,
@@ -237,61 +271,143 @@ namespace trossen_dataset
                                   int num_image_writer_threads_per_camera = 4,
                                   double fps = 30.0);
 
-        // Verify the dataset structure
+        /**
+         * @brief Verify the dataset structure and metadata
+         * @return True if the dataset structure and metadata are valid, false otherwise
+         */
         bool verify() const;
 
-        // Add a new frame to the current episode
+        /** @brief Add a frame to the current episode
+         * @param frame FrameData object representing the frame to be added
+         * If there is no current episode, a new episode will be created
+         */
         void add_frame(FrameData &frame);
-        // Save the current episode data to the dataset
+
+        /**
+         * @brief Save the current episode data to the dataset
+         */
         void save_episode();
 
-        // Get number of episodes in the dataset
+        /**
+         * @brief Get number of episodes in the dataset
+         * @return Number of episodes as a size_t
+         */
         size_t get_num_episodes() const
         {
             return episodes_buffer_.size();
         }
 
+        /**
+         * @brief Get the image path for the dataset
+         * @return Image path as a string
+         */
         std::string get_image_path() const
         {
             return metadata_->get_info_entry("image_path");
         }
 
+        /**
+         * @brief Get the video path for the dataset
+         * @return Video path as a string
+         */
         std::string get_videos_path() const
         {
             return metadata_->get_info_entry("videos_path");
         }
 
+        /**
+         * @brief Convert saved images to videos for each episode
+         * This function processes the images saved in the dataset and converts them into video files
+         */
         void convert_to_videos() const;
 
+        /**
+         * @brief Get the number of existing episodes in the dataset
+         * @return Number of existing episodes as an int
+         */
         int get_existing_episodes() const;
 
+        /**
+         * @brief Static method to read a Parquet file and return its contents as a vector of vectors of doubles
+         * @param output_file Path to the Parquet file
+         * @return Vector of vectors of doubles representing the data in the Parquet file
+         */
         static std::vector<std::vector<double>> read(const std::string &output_file);
 
+        /**
+         * @brief Compute statistics for a ListArray
+         * @param list_array Shared pointer to the ListArray
+         * @return JSON object containing the computed statistics
+         */
         nlohmann::json compute_list_stats(const std::shared_ptr<arrow::ListArray> &list_array);
+
+        /**
+         * @brief Compute statistics for a flat array
+         * @param array Shared pointer to the flat array
+         * @return JSON object containing the computed statistics
+         */
         nlohmann::json compute_flat_stats(const std::shared_ptr<arrow::Array> &array);
 
-        // Compute statistics of the dataset
+        /**
+         * @brief Compute statistics for the entire dataset
+         * @param table Shared pointer to the Arrow Table representing the dataset
+         * @param episode_index Index of the episode for which statistics are being computed
+         */
         void compute_statistics(std::shared_ptr<arrow::Table> table, int episode_index);
 
+        /**
+         * @brief Convert FeatureStats to a JSON object
+         * @param stats FeatureStats object containing the statistics
+         * @return JSON object representing the statistics
+         */
         nlohmann::json convert_stats_to_json(const FeatureStats& stats);
+
+        /**
+         * @brief Compute statistics for a set of images
+         * @param images Vector of OpenCV Mat objects representing the images
+         * @return FeatureStats object containing the computed statistics
+         */
         FeatureStats compute_image_stats(const std::vector<cv::Mat>& images);
+
+        /**
+         * @brief Sample a set of images from a list of image paths
+         * @param image_paths Vector of filesystem paths to the images
+         * @return Vector of OpenCV Mat objects representing the sampled images
+         */
         std::vector<cv::Mat> sample_images(const std::vector<std::filesystem::path>& image_paths);
+
+        /**
+         * @brief Automatically downsample an image to a target size
+         * @param img OpenCV Mat object representing the image
+         * @param target_size Target size for the downsampled image (default is 150)
+         * @param max_threshold Maximum threshold for downsampling (default is 300)
+         * @return Downsampled OpenCV Mat object
+         */
         cv::Mat auto_downsample(const cv::Mat& img, int target_size = 150, int max_threshold = 300);
+
+        /**
+         * @brief Sample indices for selecting images from a dataset
+         * @param dataset_len Length of the dataset
+         * @param min_samples Minimum number of samples to select (default is 100)
+         * @param max_samples Maximum number of samples to select (default is 10000)
+         * @param power Power factor for sampling distribution (default is 0.75)
+         * @return Vector of sampled indices
+         */
         std::vector<int> sample_indices(int dataset_len, int min_samples = 100, int max_samples = 10000, float power = 0.75f);
 
     private:
-        std::string dataset_name_;
-        std::string task_name_;
-        std::filesystem::path root_;
-        std::string repo_id_;
-        bool run_compute_stats_;
-        bool overwrite_;
-        double fps_ = 30.0;
-        std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot_;
-        std::unique_ptr<trossen_dataset::Metadata> metadata_;
+        std::string dataset_name_; // Name of the dataset
+        std::string task_name_; // Name of the task
+        std::filesystem::path root_; // Root directory of the dataset
+        std::string repo_id_; // Repository ID for the dataset
+        bool run_compute_stats_; // Flag to indicate whether to compute statistics
+        bool overwrite_; // Flag to indicate whether to overwrite existing data
+        double fps_ = 30.0; // Frames per second for video conversion
+        std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot_; // Shared pointer to the robot object
+        std::unique_ptr<trossen_dataset::Metadata> metadata_; // Unique pointer to the metadata object
         std::vector<std::unique_ptr<trossen_dataset::EpisodeData>> episodes_buffer_; // Store episodes in a vector
         std::unique_ptr<trossen_dataset::EpisodeData> current_episode_;              // Current episode being recorded
-        trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer_;
+        trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer_; // Image writer for asynchronous image saving
     };
 
 } // namespace trossen_dataset

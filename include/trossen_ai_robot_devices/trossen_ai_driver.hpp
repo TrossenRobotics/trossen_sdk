@@ -5,11 +5,17 @@
 #include <vector>
 #include "libtrossen_arm/trossen_arm.hpp"
 #include <spdlog/spdlog.h>
-
+#include "trossen_sdk_utils/constants.hpp"
 
 
 namespace trossen_ai_robot_devices {
-
+    /**
+     * @brief Class representing a Trossen AI Robotic Arm
+     * This is used as a wrapper around the TrossenArmDriver from the libtrossen_arm library
+     * to provide a simplified interface for connecting, disconnecting, reading, writing,
+     * and staging the robotic arm.
+     * This was designed to be friendly for use in the LeRobot framework.
+     */
     class TrossenAIArm {
     public:
 

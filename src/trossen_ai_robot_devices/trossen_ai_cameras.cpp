@@ -9,44 +9,54 @@ TrossenAICamera::TrossenAICamera(const std::string& name, const std::string& ser
     spdlog::info("TrossenAICamera initialized: name={}, serial={}, width={}, height={}, fps={}, use_depth={}", 
                  name_, serial_number_, capture_width_, capture_height_, fps_, use_depth_);
 }
+
 void TrossenAICamera::connect() {
-    // Connect to the camera
-   // Add connection logic here
+    
+    // Create a realsense config
     rs2::config cfg;
+
+    // Enable the device using the serial number
     if (!serial_number_.empty()) {
         cfg.enable_device(serial_number_);
     }
 
+    // Enable the color stream as default
     cfg.enable_stream(
                 RS2_STREAM_COLOR, capture_width_, capture_height_, RS2_FORMAT_RGB8, fps_
             );
+    
+    // Enable depth stream if use_depth_ is true
     if (use_depth_) {
         cfg.enable_stream(
             RS2_STREAM_DEPTH, capture_width_, capture_height_, RS2_FORMAT_Z16, fps_
         );
     }
-    rs2::pipeline_profile profile = camera_.start(cfg);
-    // Add more configuration options as needed
-    // Start the camera pipeline
 
+    // Start the camera pipeline with the configuration
+    rs2::pipeline_profile profile = camera_.start(cfg);
 }
 
+
 void TrossenAICamera::disconnect() {
-    // Disconnect from the camera
+    // TODO: Properly stop the camera pipeline if needed
+    // Log disconnection
     spdlog::info("Disconnecting from camera: {}", name_);
-    // Add disconnection logic here
 }
 
 trossen_ai_robot_devices::ColorDepthData TrossenAICamera::read() {
-    // Read a frame from the camera
+
+    // Initialize frameset
     rs2::frameset frames;
+
+    // Wait for the next set of frames from the camera with a timeout of 3000 ms
     try {
-        frames = camera_.wait_for_frames(3000); // Wait for a frame for up to 5000 ms
+        frames = camera_.wait_for_frames(3000); 
     } catch (const rs2::error& e) {
         spdlog::error("Failed to get frameset from camera: {}. Error: {}", name_, e.what());
         return trossen_ai_robot_devices::ColorDepthData{};
     }
 
+    // Extract color and depth frames
     trossen_ai_robot_devices::ColorDepthData data;
     if (frames && frames.size() > 0) {
         // Try to get color frame
@@ -82,29 +92,33 @@ trossen_ai_robot_devices::ColorDepthData TrossenAICamera::read() {
 
 
 trossen_ai_robot_devices::ImageData TrossenAICamera::async_read() {
-    // Start an asynchronous read thread
-    // Note: In a real implementation, you would use a separate thread to read frames asynchronously
-    // For simplicity, we will use the synchronous read method here.
+    
     trossen_ai_robot_devices::ImageData result;
     std::mutex mtx;
     std::condition_variable cv;
     bool done = false;
 
+    // Launch a thread to read the image asynchronously
     std::thread([this, &result, &mtx, &cv, &done]() {
-        trossen_ai_robot_devices::ColorDepthData color_and_depth = read();  // Use the synchronous read for simplicity
-        //If image or depth is empty raise an error
+        // Read color and depth frames
+        trossen_ai_robot_devices::ColorDepthData color_and_depth = read();
+        //If color frame is empty, raise an error
         if (!color_and_depth.color_image) {
             throw std::runtime_error("Failed to read color frame from camera: " + name_);
         }
+        // If depth is required but missing, raise an error
         if (use_depth_ && !color_and_depth.depth_map) {
             throw std::runtime_error("Failed to read depth frame from camera: " + name_);
         }
+        // Convert rs2::frame to cv::Mat
         cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3, (void*)color_and_depth.color_image.get_data(), cv::Mat::AUTO_STEP);
         cv::Mat depth_map;
         if (use_depth_) {
             depth_map = cv::Mat(cv::Size(capture_width_, capture_height_), CV_16UC1, (void*)color_and_depth.depth_map.get_data(), cv::Mat::AUTO_STEP);
         }
+        // Get the timestamp for the frame
         int64_t timestamp = color_and_depth.color_image.get_timestamp();
+        // Lock and set the result
         {
             std::lock_guard<std::mutex> lock(mtx);
             if(use_depth_) {
@@ -114,9 +128,11 @@ trossen_ai_robot_devices::ImageData TrossenAICamera::async_read() {
             }
             done = true;
         }
+        // Notify the waiting thread
         cv.notify_one();
     }).detach();
 
+    // Wait for the image to be read or timeout after 5 seconds
     std::unique_lock<std::mutex> lock(mtx);
     if (!cv.wait_for(lock, std::chrono::seconds(5), [&done]{ return done; })) {
         spdlog::error("Timeout: Failed to receive image within 5 seconds.");
@@ -131,23 +147,27 @@ trossen_ai_robot_devices::ImageData TrossenAICamera::async_read() {
 
 TrossenAsyncImageWriter::TrossenAsyncImageWriter(int num_threads)
     : stop_flag_(false), num_threads_(num_threads) {
+    // Create worker threads
     for (int i = 0; i < num_threads_; ++i) {
         worker_threads_.emplace_back(&TrossenAsyncImageWriter::worker_loop, this);
     }
 }
 
 TrossenAsyncImageWriter::~TrossenAsyncImageWriter() {
+    // Signal all threads to stop
     {
         std::lock_guard<std::mutex> lock(mtx_);
         stop_flag_ = true;
     }
     cv_.notify_all();
+    // Join all threads
     for (auto& thread : worker_threads_) {
         if (thread.joinable()) thread.join();
     }
 }
 
 void TrossenAsyncImageWriter::push(const cv::Mat& image, const std::string& filename) {
+    // Add image and filename to the queue
     {
         std::lock_guard<std::mutex> lock(mtx_);
         image_queue_.emplace(image.clone(), filename);  // ensure data safety
@@ -156,7 +176,9 @@ void TrossenAsyncImageWriter::push(const cv::Mat& image, const std::string& file
 }
 
 void TrossenAsyncImageWriter::worker_loop() {
+    // Worker thread loop
     while (true) {
+        // Wait for an image to be available or stop signal
         std::unique_lock<std::mutex> lock(mtx_);
         cv_.wait(lock, [this]() {
             return stop_flag_ || !image_queue_.empty();
@@ -165,6 +187,7 @@ void TrossenAsyncImageWriter::worker_loop() {
         if (stop_flag_ && image_queue_.empty())
             break;
 
+        // Get the next image and filename from the queue
         auto [image, filename] = std::move(image_queue_.front());
         image_queue_.pop();
         lock.unlock();
@@ -177,7 +200,9 @@ void TrossenAsyncImageWriter::worker_loop() {
             cv::Mat depth_image;
             // If the image is already CV_16UC1, no need to convert
             if (image.type() != CV_16UC1) {
-                image.convertTo(depth_image, CV_16UC1, 1000); // Convert depth to 16-bit for saving
+                // TODO [TDS-36]: Handle different depth formats if necessary
+                // Convert to CV_16UC1 assuming the input is in meters (float) and we want millimeters (int)
+                image.convertTo(depth_image, CV_16UC1, 1000);
             } else {
                 depth_image = image;
             }
@@ -189,11 +214,13 @@ void TrossenAsyncImageWriter::worker_loop() {
                 spdlog::error("Exception while writing depth image to {}: {}", filename, e.what());
             }
         } else {
-            // Save color image (assume RGB, convert to BGR for OpenCV)
+            // Save color image
             cv::Mat bgr_image;
             if (image.channels() == 3) {
+                // Convert RGB to BGR for OpenCV
                 cv::cvtColor(image, bgr_image, cv::COLOR_RGB2BGR);
             } else if (image.channels() == 4) {
+                // Convert RGBA to BGR for OpenCV
                 cv::cvtColor(image, bgr_image, cv::COLOR_RGBA2BGR);
             } else {
                 // Unexpected, but save as is

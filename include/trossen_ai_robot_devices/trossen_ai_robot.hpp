@@ -120,7 +120,12 @@ namespace teleoperator {
 }
 
 namespace robot {
-
+    /** 
+     * @brief Abstract base class representing a generic robot
+     * This class defines the interface for connecting, disconnecting, calibrating,
+     * configuring, and interacting with a robot. It also provides methods to retrieve
+     * the robot's name, observation state, joint features, observation features, and camera names.
+     */
     class TrossenRobot {
 
         public:

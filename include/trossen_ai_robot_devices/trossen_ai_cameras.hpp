@@ -29,6 +29,12 @@ struct ImageData {
     cv::Mat depth_map; // OpenCV Mat to hold the depth information
 };
 
+
+/**
+ * @brief Class representing a Trossen AI Camera using Intel RealSense
+ * This class provides methods to connect to the camera, disconnect, and read frames
+ * It supports both color images and depth maps, and can be configured for resolution and frame rate
+ */
 class TrossenAICamera {
 public:
         /**
