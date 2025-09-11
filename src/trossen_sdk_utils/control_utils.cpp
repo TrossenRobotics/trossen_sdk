@@ -82,21 +82,26 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
     while (steady_clock::now() < end_time) {
         auto loop_start_time = steady_clock::now();
         trossen_dataset::FrameData frame_data;
-        frame_data.timestamp_ms = std::chrono::duration<float>(steady_clock::now() - start_time).count();
+        frame_data.timestamp_s = std::chrono::duration<float>(steady_clock::now() - start_time).count();
+        
+        // Get action from the teleoperation robot and send to the robot arm
+        std::vector<double> action = teleop_robot->get_action();
+        robot->send_action(action);
+        // Get the current state from the robot arm
+        state = robot->get_observation();
+        // Set the action in the state
+        state.action = action;
 
-        std::vector<double> action = teleop_robot->get_action(); // Get action from the teleoperation robot
-        robot->send_action(action); // Send action to the robot arm
-        state = robot->get_observation(); // Get the current state from the robot arm
-        state.action = action; // Set the action in the state
 
+        // Display images/videos using OpenCV if enabled
         if (display_cameras) {
-            // Display images/videos using OpenCV
             display_images(state.images);
         }
         
-        // TODO: Use FPS to control the loop frequency
-        busy_wait_until(loop_start_time, fps);  // Use the specified FPS
+        // Wait until the next loop iteration based on the desired frequency
+        busy_wait_until(loop_start_time, fps); 
 
+        // Check the loop duration and log warnings if it exceeds the expected time
         auto loop_duration = std::chrono::duration_cast<std::chrono::duration<double>>(steady_clock::now() - loop_start_time).count();
         // TODO: Improve this logging to be more elegant and less verbose
         // TODO: Make FPS tolerance configurable/ constant
@@ -113,7 +118,7 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
 
 
 void ControlUtils::display_images(const std::vector<trossen_ai_robot_devices::ImageData>& images) const {
-    // Display all images together in a grid format using OpenCV
+        // Display all images together in a grid format using OpenCV
         if (!images.empty()) {
             // Determine grid size (rows x cols)
             int num_images = images.size();

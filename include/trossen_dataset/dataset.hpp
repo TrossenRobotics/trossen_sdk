@@ -35,13 +35,19 @@ namespace trossen_dataset
      * This structure holds the timestamp, observation state, action, and other relevant information for a single frame
      */
     struct FrameData
-    {
-        float timestamp_ms;                                      // Timestamp in milliseconds
-        std::vector<double> observation_state;                   // Joint positions
-        std::vector<double> action;                              // Action to be taken
-        int64_t episode_idx;                                     // Episode index
-        int64_t frame_idx;                                       // Frame index
-        std::vector<trossen_ai_robot_devices::ImageData> images; // Images from cameras
+    {   
+        /// @brief Timestamp in seconds
+        float timestamp_s;         
+        /// @brief Observation state (e.g., joint positions)
+        std::vector<double> observation_state;              
+        /// @brief Action to be taken
+        std::vector<double> action;                              
+        /// @brief Episode index
+        int64_t episode_idx;                                     
+        /// @brief Frame index within the episode
+        int64_t frame_idx;                                       
+        /// @brief Images from cameras
+        std::vector<trossen_ai_robot_devices::ImageData> images; 
     };
 
     /**
@@ -159,17 +165,26 @@ namespace trossen_dataset
         
 
     private:
-        std::string dataset_name_; // Name of the dataset
-        std::string repo_id_; // Repository ID
-        std::string task_name_; // Task name
-        nlohmann::json info_; // Info JSON object
-        std::filesystem::path root_; // Root directory
-        std::vector<nlohmann::json> episode_data_; // Episode data JSON array
-        std::vector<nlohmann::json> episode_stats_data_; // Episode statistics JSON array
-        std::vector<nlohmann::json> task_data_; // Task data JSON array
+        /// @brief Name of the dataset
+        std::string dataset_name_;
+        /// @brief Repository ID
+        std::string repo_id_;
+        /// @brief Task name
+        std::string task_name_;
+        /// @brief Info JSON object
+        nlohmann::json info_;
+        /// @brief Root directory
+        std::filesystem::path root_;
+        /// @brief Episode data JSON array
+        std::vector<nlohmann::json> episode_data_;
+        /// @brief Episode statistics JSON array
+        std::vector<nlohmann::json> episode_stats_data_;
+        /// @brief Task data JSON array
+        std::vector<nlohmann::json> task_data_;
 
-        std::string info_file_path_; // Path to the info JSON file
-        
+        /// @brief Path to the info JSON file
+        std::string info_file_path_;
+
         /**
          * @brief Load the info JSON object from a file
          * @param path Path to the info JSON file
@@ -234,8 +249,10 @@ namespace trossen_dataset
         void clear();
 
     private:
-        int64_t episode_idx_; // Index of the episode
-        std::vector<FrameData> buffer_; // Buffer to hold frames in the episode
+        /// @brief Index of the episode
+        int64_t episode_idx_; 
+        /// @brief Buffer to hold frames in the episode
+        std::vector<FrameData> buffer_;
     };
 
     /**
@@ -396,18 +413,30 @@ namespace trossen_dataset
         std::vector<int> sample_indices(int dataset_len, int min_samples = 100, int max_samples = 10000, float power = 0.75f);
 
     private:
-        std::string dataset_name_; // Name of the dataset
-        std::string task_name_; // Name of the task
-        std::filesystem::path root_; // Root directory of the dataset
-        std::string repo_id_; // Repository ID for the dataset
-        bool run_compute_stats_; // Flag to indicate whether to compute statistics
-        bool overwrite_; // Flag to indicate whether to overwrite existing data
-        double fps_ = 30.0; // Frames per second for video conversion
-        std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot_; // Shared pointer to the robot object
-        std::unique_ptr<trossen_dataset::Metadata> metadata_; // Unique pointer to the metadata object
-        std::vector<std::unique_ptr<trossen_dataset::EpisodeData>> episodes_buffer_; // Store episodes in a vector
-        std::unique_ptr<trossen_dataset::EpisodeData> current_episode_;              // Current episode being recorded
-        trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer_; // Image writer for asynchronous image saving
+        /// @brief Name of dataset
+        std::string dataset_name_;
+        /// @brief Name of the task
+        std::string task_name_;
+        /// @brief Root directory of the dataset
+        std::filesystem::path root_;
+        /// @brief Repository ID for the dataset
+        std::string repo_id_;
+        /// @brief Flag to indicate if statistics should be computed
+        bool run_compute_stats_;
+        /// @brief Flag to indicate if existing dataset should be overwritten
+        bool overwrite_;
+        /// @brief Frames per second for video conversion
+        double fps_ = 30.0;
+        /// @brief Shared pointer to the robot object
+        std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot_;
+        /// @brief Shared pointer to the metadata object
+        std::unique_ptr<trossen_dataset::Metadata> metadata_;
+        /// @brief Buffer to hold episodes
+        std::vector<std::unique_ptr<trossen_dataset::EpisodeData>> episodes_buffer_;
+        /// @brief Pointer to the current episode being recorded
+        std::unique_ptr<trossen_dataset::EpisodeData> current_episode_;
+        /// @brief Asynchronous image writer for saving images
+        trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer_;
     };
 
 } // namespace trossen_dataset

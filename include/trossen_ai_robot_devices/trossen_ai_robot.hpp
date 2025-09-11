@@ -17,6 +17,7 @@
 #include "trossen_ai_robot_devices/trossen_ai_driver.hpp"
 #include "trossen_ai_robot_devices/trossen_ai_cameras.hpp"
 #include "trossen_sdk_utils/config_utils.hpp"
+#include "trossen_sdk_utils/constants.hpp"
 #include <any>
 #include <spdlog/spdlog.h>
 
@@ -24,9 +25,12 @@ namespace trossen_ai_robot_devices {
 
 /// @brief Data structure to hold the robot state including joint positions, action, and images for each frame
 struct State{
-    std::vector<double> observation_state;  // Joint positions
-    std::vector<double> action;             // Action to be taken
-    std::vector<ImageData> images; // Images captured for the frame
+    /// @brief Observation state of the robot (e.g., joint positions)
+    std::vector<double> observation_state;
+    /// @brief Action to be taken by the robot
+    std::vector<double> action;
+    /// @brief Images captured for the frame
+    std::vector<ImageData> images;
 };
 
 namespace teleoperator {
@@ -77,11 +81,15 @@ namespace teleoperator {
             std::string name() const override { return name_; }
 
         private:
-            std::string name_; // Name of the robot leader
-            std::string ip_address_; // IP address of the robot leader
-            std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> robot_driver_;  // Driver to control the robot arm
+            /// @brief Name of the robot leader
+            std::string name_;
+            /// @brief IP address of the robot leader
+            std::string ip_address_;
+            /// @brief Driver to control the robot arm
+            std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> robot_driver_;
 
-            bool is_connected_ = false;  // Track connection status
+            /// @brief Track connection status
+            bool is_connected_ = false;
     };
 
     class TrossenAIBimanualWidowXLeader : public TrossenLeader {
@@ -108,13 +116,18 @@ namespace teleoperator {
             std::string name() const override { return name_; }
 
         private:
-            std::string name_; // Name of the bimanual robot leader
-            std::string left_ip_address_; // IP address of the left robot arm
-            std::string right_ip_address_; // IP address of the right robot arm
-            std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> right_robot_driver_;  // Driver to control the right robot arm
-            std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> left_robot_driver_;  // Driver to control the left robot arm
-
-            bool is_connected_ = false;  // Track connection status
+            /// @brief Name of the bimanual robot leader
+            std::string name_;
+            /// @brief IP address of the left robot arm
+            std::string left_ip_address_;
+            /// @brief IP address of the right robot arm
+            std::string right_ip_address_;
+            /// @brief Driver to control the right robot arm
+            std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> right_robot_driver_;
+            /// @brief Driver to control the left robot arm
+            std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> left_robot_driver_;
+            /// @brief Track connection status
+            bool is_connected_ = false;
     };
 
 }
@@ -222,11 +235,16 @@ namespace robot {
         std::vector<std::pair<std::string, std::string>> get_camera_names() const override;
 
     private:
-        std::string name_; // Name of the robot
-        std::string ip_address_; // IP address of the robot
-        std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> robot_driver_; // Driver to control the robot arm
-        bool is_connected_ = false;  // Track connection status
-        std::vector<trossen_ai_robot_devices::TrossenAICamera> cameras_; // Cameras attached to the robot
+        /// @brief Name of the robot
+        std::string name_;
+        /// @brief IP address of the robot
+        std::string ip_address_;
+        /// @brief Driver to control the robot arm
+        std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> robot_driver_;
+        /// @brief Track connection status
+        bool is_connected_ = false;
+        /// @brief Cameras attached to the robot
+        std::vector<trossen_ai_robot_devices::TrossenAICamera> cameras_;
     };
 
     class TrossenAIBimanualWidowXRobot : public TrossenRobot  {
@@ -281,19 +299,29 @@ namespace robot {
         std::vector<std::pair<std::string, std::string>> get_camera_names() const override;
 
     private:
-        std::string name_; // Name of the bimanual robot
-        std::string left_ip_address_; // IP address of the left robot arm
-        std::string right_ip_address_; // IP address of the right robot arm
-        std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> right_robot_driver_; // Driver to control the right robot arm
-        std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> left_robot_driver_; // Driver to control the left robot arm
-        bool is_connected_ = false;  // Track connection status
-        std::vector<trossen_ai_robot_devices::TrossenAICamera> cameras_; // Cameras attached to the bimanual robot
+
+        /// @brief Name of the bimanual robot
+        std::string name_;
+
+        /// @brief IP address of the left robot arm
+        std::string left_ip_address_;
+
+        /// @brief IP address of the right robot arm
+        std::string right_ip_address_;
+
+        /// @brief Driver to control the right robot arm
+        std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> right_robot_driver_;
+
+        /// @brief Driver to control the left robot arm
+        std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> left_robot_driver_;
+
+        /// @brief Track connection status
+        bool is_connected_ = false;
+
+        /// @brief Cameras attached to the bimanual robot
+        std::vector<trossen_ai_robot_devices::TrossenAICamera> cameras_;
     };
-
 }
-
-
-
 } // namespace trossen_ai_robot_devices
 
 #endif // TROSSEN_AI_ROBOT_HPP

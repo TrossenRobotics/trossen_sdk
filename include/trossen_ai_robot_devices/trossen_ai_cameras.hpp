@@ -18,15 +18,20 @@ namespace trossen_ai_robot_devices {
 
 /// @brief Data structure to hold color and depth raw frames from realsense camera
 struct ColorDepthData {
-    rs2::frame color_image; // Color image captured by the camera
-    rs2::frame depth_map;   // Depth map corresponding to the color image
+    /// @brief Color image frame from realsense camera
+    rs2::frame color_image;
+    /// @brief Depth map frame from realsense camera
+    rs2::frame depth_map;
 };
 
 /// @brief Data structure to hold image data from the camera including depth map if available in OpenCV Mat format
 struct ImageData {
-    std::string camera_name; // Name of the camera that captured the image
-    cv::Mat image; // OpenCV Mat to hold the image data
-    cv::Mat depth_map; // OpenCV Mat to hold the depth information
+    /// @brief Name of the camera that captured the image
+    std::string camera_name;
+    /// @brief OpenCV Mat to hold the image data
+    cv::Mat image;
+    /// @brief OpenCV Mat to hold the depth information
+    cv::Mat depth_map;
 };
 
 
@@ -98,13 +103,20 @@ public:
 
 
     private:
-        std::string name_; // Name of the camera
-        std::string serial_number_; // Serial number of the camera
-        int capture_width_ {640}; // Default width
-        int capture_height_ {480}; // Default height
-        int fps_ {30}; // Default frames per second
-        bool use_depth_ {false}; // Default depth usage
-        rs2::pipeline camera_; // RealSense camera pipeline
+        /// @brief Name of the camera
+        std::string name_;
+        /// @brief Serial number of the camera
+        std::string serial_number_;
+        /// @brief Width of the captured images
+        int capture_width_ {640};
+        /// @brief Height of the captured images
+        int capture_height_ {480};
+        /// @brief Frames per second for image capture
+        int fps_ {30};
+        /// @brief Flag to indicate if depth map should be captured
+        bool use_depth_ {false};
+        /// @brief Realsense camera pipeline
+        rs2::pipeline camera_;
     };
 
 
@@ -135,12 +147,18 @@ public:
     void push(const cv::Mat& image, const std::string& filename);
 
 private:
-    std::queue<std::pair<cv::Mat, std::string>> image_queue_; // Queue to hold images and their filenames
-    std::mutex mtx_; // Mutex for thread-safe access to the queue
-    std::condition_variable cv_; // Condition variable for notifying worker threads
-    std::vector<std::thread> worker_threads_; // Vector to hold worker threads
-    std::atomic<bool> stop_flag_; // Flag to signal worker threads to stop
-    int num_threads_; // Number of worker threads
+    /// @brief Queue to hold images and their filenames
+    std::queue<std::pair<cv::Mat, std::string>> image_queue_;
+    /// @brief Mutex for thread-safe access to the queue
+    std::mutex mtx_;
+    /// @brief Condition variable for notifying worker threads
+    std::condition_variable cv_;
+    /// @brief Vector to hold worker threads
+    std::vector<std::thread> worker_threads_;
+    /// @brief Flag to signal worker threads to stop
+    std::atomic<bool> stop_flag_;
+    /// @brief Number of worker threads
+    int num_threads_;
 
     /**
      * @brief Worker loop for processing image writing tasks

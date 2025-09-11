@@ -4,23 +4,44 @@
     
 namespace trossen_sdk {
 
-    // Default root path for dataset storage
+    /// @brief Default root path for dataset storage
     const std::filesystem::path DEFAULT_ROOT_PATH = std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk";
 
-    // Configuration file path formats
+    /// @brief Format string for leader robot configuration file path
     const std::string LEADER_ROBOT_CONFIG_FORMAT = "../config/{}_leader.json";
+
+    /// @brief Format string for follower robot configuration file path
     const std::string FOLLOWER_ROBOT_CONFIG_FORMAT = "../config/{}.json";
 
 
-    // Read and write data names
+    /// @brief Position data name
     const std::string POSITION = "position";
+    /// @brief Velocity data name
     const std::string VELOCITY = "velocity";
+    /// @brief External effort data name
     const std::string EXTERNAL_EFFORT = "external_effort";
 
 
-    // Robot models
+    /// @brief Leader model identifier
     const std::string LEADER_MODEL = "leader";
+
+    /// @brief Follower model identifier
     const std::string FOLLOWER_MODEL = "follower";
+    
+
+    const std::string INFO_JSON = "info.json";
+    const std::string EPISODES_JSONL = "episodes.jsonl";
+    const std::string EPISODE_STATS_JSONL = "episode_stats.jsonl";
+    const std::string TASKS_JSONL = "tasks.jsonl";
+    const std::string METADATA_DIR = "meta";
+    const std::string IMAGES_DIR = "images";
+
+    const std::string CODEBASE_VERSION = "v2.1";
+    const std::string TROSSEN_SUBVERSION = "v1.0";
+
+    const std::string DATA_PATH = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet";
+    const std::string VIDEO_PATH = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4";
+    
 } // namespace trossen_sdk
 
 #endif // TROSSEN_SDK_UTILS_CONSTANTS_HPP

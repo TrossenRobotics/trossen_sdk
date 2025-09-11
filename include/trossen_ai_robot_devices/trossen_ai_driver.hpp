@@ -63,7 +63,7 @@ namespace trossen_ai_robot_devices {
 
         /**
          * @brief Read data from the robotic arm
-         * @param data_name Name of the data to read (e.g., "positions", "velocities", "external_efforts")
+         * @param data_name Name of the data to read (e.g., trossen_sdk::POSITION, "trossen_sdk::VELOCITY", trossen_sdk::EXTERNAL_EFFORT)
          * @return Vector of doubles containing the requested data
          * Reads the specified data from the arm and returns it as a vector of doubles
          */
@@ -71,7 +71,7 @@ namespace trossen_ai_robot_devices {
 
         /**
          * @brief Write data to the robotic arm
-         * @param data_name Name of the data to write (e.g., "positions", "velocities", "external_efforts")
+         * @param data_name Name of the data to write (e.g., trossen_sdk::POSITION, "trossen_sdk::VELOCITY", trossen_sdk::EXTERNAL_EFFORT)
          * @param data Vector of doubles containing the data to write
          * Writes the specified data to the arm
          */
@@ -96,14 +96,25 @@ namespace trossen_ai_robot_devices {
         std::vector<std::string> get_joint_names() const;
         
     private:
-        std::string name_; // Name of the TrossenAIArm
-        std::string ip_address_; // IP address of the robotic arm
-        std::string model_; // Model of the robotic arm (e.g., "leader", "follower")
-        trossen_arm::TrossenArmDriver driver_;  // The underlying TrossenArmDriver instance
+    
+        /// @brief Name of the TrossenAIArm
+        std::string name_;
 
-        bool is_connected_ = false;  // Track connection status
+        /// @brief IP address of the robotic arm
+        std::string ip_address_;
+
+        /// @brief Model of the robotic arm (e.g., "leader", "follower")
+        std::string model_;
+
+        /// @brief The underlying TrossenArmDriver instance
+        trossen_arm::TrossenArmDriver driver_;
+
+        /// @brief Track connection status
+        bool is_connected_ = false;
+
         //TODO [TDS-32] Make time_to_move_ configurable
-        float time_to_move_ = 0.1;  // Default time to move in seconds
+        /// @brief Time to move for position/velocity/effort commands
+        float time_to_move_ = 0.1;
     };
 
 } // namespace trossen_ai_robot_devices

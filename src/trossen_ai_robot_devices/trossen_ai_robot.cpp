@@ -48,9 +48,9 @@ namespace trossen_ai_robot_devices {
 
         trossen_ai_robot_devices::State TrossenAIWidowXRobot::get_observation() {
             trossen_ai_robot_devices::State state;
-            std::vector<double> positions = robot_driver_->read("positions");
+            std::vector<double> positions = robot_driver_->read(trossen_sdk::POSITION);
             state.observation_state = positions;
-            state.action = robot_driver_->read("positions"); // Assuming action is read from the robot driver
+            state.action = robot_driver_->read(trossen_sdk::POSITION); // Assuming action is read from the robot driver
             // Add camera logic here
             for (auto& camera : cameras_) {
                 state.images.push_back(camera.async_read());
@@ -59,7 +59,7 @@ namespace trossen_ai_robot_devices {
         }
 
         void TrossenAIWidowXRobot::send_action(const std::vector<double>& action) {
-            robot_driver_->write("positions", action);
+            robot_driver_->write(trossen_sdk::POSITION, action);
         }
 
         std::vector<std::string> TrossenAIWidowXRobot::get_joint_features() const{
@@ -113,8 +113,8 @@ namespace trossen_ai_robot_devices {
 
         trossen_ai_robot_devices::State TrossenAIBimanualWidowXRobot::get_observation() {
             trossen_ai_robot_devices::State state;
-            std::vector<double> right_positions = right_robot_driver_->read("positions");
-            std::vector<double> left_positions = left_robot_driver_->read("positions");
+            std::vector<double> right_positions = right_robot_driver_->read(trossen_sdk::POSITION);
+            std::vector<double> left_positions = left_robot_driver_->read(trossen_sdk::POSITION);
             state.observation_state.insert(state.observation_state.end(), right_positions.begin(), right_positions.end());
             state.observation_state.insert(state.observation_state.end(), left_positions.begin(), left_positions.end());
             state.action = right_positions; // Assuming action is read from the right robot driver
@@ -133,8 +133,8 @@ namespace trossen_ai_robot_devices {
             }
             std::vector<double> right_action(action.begin(), action.begin() + 7);
             std::vector<double> left_action(action.begin() + 7, action.end());
-            right_robot_driver_->write("positions", right_action);
-            left_robot_driver_->write("positions", left_action);
+            right_robot_driver_->write(trossen_sdk::POSITION, right_action);
+            left_robot_driver_->write(trossen_sdk::POSITION, left_action);
         }
 
         void TrossenAIBimanualWidowXRobot::disconnect() {
@@ -208,11 +208,11 @@ namespace trossen_ai_robot_devices {
 
         void TrossenAIWidowXLeader::configure() {
             robot_driver_->stage_arm(); // Stage the arm to a safe position
-            robot_driver_->write("external_efforts", std::vector<double>(7, 0.0));
+            robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(7, 0.0));
         }
 
         std::vector<double> TrossenAIWidowXLeader::get_action() const {
-            std::vector<double> positions = robot_driver_->read("positions");
+            std::vector<double> positions = robot_driver_->read(trossen_sdk::POSITION);
             return positions;
         }
 
@@ -246,12 +246,12 @@ namespace trossen_ai_robot_devices {
         void TrossenAIBimanualWidowXLeader::configure() {
             right_robot_driver_->stage_arm(); // Stage the right arm to a safe position
             left_robot_driver_->stage_arm(); // Stage the left arm to a safe position
-            right_robot_driver_->write("external_efforts", std::vector<double>(7, 0.0));
-            left_robot_driver_->write("external_efforts", std::vector<double>(7, 0.0));
+            right_robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(7, 0.0));
+            left_robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(7, 0.0));
         }
         std::vector<double> TrossenAIBimanualWidowXLeader::get_action() const {
-            std::vector<double> right_positions = right_robot_driver_->read("positions");
-            std::vector<double> left_positions = left_robot_driver_->read("positions");
+            std::vector<double> right_positions = right_robot_driver_->read(trossen_sdk::POSITION);
+            std::vector<double> left_positions = left_robot_driver_->read(trossen_sdk::POSITION);
             std::vector<double> action;
             action.insert(action.end(), right_positions.begin(), right_positions.end());
             action.insert(action.end(), left_positions.begin(), left_positions.end());

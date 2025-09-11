@@ -16,11 +16,17 @@ namespace trossen_sdk_config {
  * frames per second, resolution, and whether to use depth.
  */
 struct CameraConfig {
+    /// @brief Name of the camera
     std::string name;
+    /// @brief Serial number of the camera
     std::string serial;
+    /// @brief Frames per second for image capture
     int fps;
+    /// @brief Width of the camera images
     int width;
+    /// @brief Height of the camera images
     int height;
+    /// @brief Whether to use depth information
     bool use_depth;
 };
 
@@ -30,6 +36,7 @@ struct CameraConfig {
  * This structure holds the base configuration parameters including the name.
  */
 struct BaseConfig {
+    /// @brief Name of the configuration
     std::string name;
 };
 
@@ -40,7 +47,14 @@ struct BaseConfig {
  * and a method to get the robot's name.
  */
 struct RobotConfigBase {
+    /**
+     * @brief Virtual destructor
+     */
     virtual ~RobotConfigBase() = default;
+    /**
+     * @brief Get the name of the robot
+     * @return Name of the robot as a string
+     */
     virtual std::string get_name() const = 0;
 };
 
@@ -50,7 +64,15 @@ struct RobotConfigBase {
  * and a method to get the leader robot's name.
  */
 struct LeaderConfigBase {
+
+    /** @brief Virtual destructor
+     *  This is a virtual destructor for the leader configuration base class.
+    */
     virtual ~LeaderConfigBase() = default;
+
+    /** @brief Get the name of the leader robot
+     * @return Name of the leader robot as a string
+    */
     virtual std::string get_name() const = 0;
 };
 
@@ -61,9 +83,14 @@ struct LeaderConfigBase {
  * It inherits from LeaderConfigBase.
  */
 struct WidowXLeaderConfig : public LeaderConfigBase {
+    /// @brief Name of the leader robot
     std::string name;
+    /// @brief IP address of the leader robot
     std::string ip_address;
 
+    /** @brief Get the name of the leader robot 
+     * @return Name of the leader robot as a string
+    */
     std::string get_name() const override {
         return name;
     }
@@ -76,9 +103,16 @@ struct WidowXLeaderConfig : public LeaderConfigBase {
  * IP addresses for both arms, and camera configurations. It inherits from RobotConfigBase.
  */
 struct WidowXRobotConfig : public RobotConfigBase {
+    /// @brief Name of the robot
     std::string name;
+    /// @brief IP address of the robot
     std::string ip_address;
+    /// @brief Camera configurations for the robot
     std::vector<CameraConfig> cameras;  // Camera configuration for the follower arm
+
+    /** @brief Get the name of the robot
+     * @return Name of the robot as a string
+     */
     std::string get_name() const override {
         return name;
     }
@@ -91,10 +125,17 @@ struct WidowXRobotConfig : public RobotConfigBase {
  * including its name, IP addresses for both arms, and camera configurations. It inherits from LeaderConfigBase.
  */
 struct BimanualWidowXLeaderConfig : public LeaderConfigBase {
+    /// @brief Name of the bimanual robot leader
     std::string name;
+    /// @brief IP address of the left arm
     std::string left_ip_address;
+    /// @brief IP address of the right arm
     std::string right_ip_address;
 
+    /**
+     * @brief Get the name of the bimanual robot leader
+     * @return Name of the bimanual robot leader as a string
+     */
     std::string get_name() const override {
         return name;
     }
@@ -107,12 +148,21 @@ struct BimanualWidowXLeaderConfig : public LeaderConfigBase {
  * IP addresses for both arms, and camera configurations. It inherits from RobotConfigBase.
  */
 struct BimanualWidowXRobotConfig : public RobotConfigBase {
+    /// @brief Name of the bimanual robot
     std::string name;
+    /// @brief IP address of the left arm
     std::string left_ip_address;
+    /// @brief IP address of the right arm
     std::string right_ip_address;
+
+    /** @brief Get the name of the bimanual robot
+     * @return Name of the bimanual robot as a string
+     */
     std::string get_name() const override {
         return name;
     }
+
+    /// @brief Camera configurations for the bimanual robot
     std::vector<CameraConfig> cameras;  // Camera configuration for the follower arm
 };
 
