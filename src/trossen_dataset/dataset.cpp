@@ -1111,9 +1111,9 @@ namespace trossen_dataset
     {
         std::filesystem::path meta_path = info_.at("meta_path").get<std::string>();
         save_info_file();
-        save_jsonl_file((meta_path / "episodes.jsonl").string(), episode_data_);
-        save_jsonl_file((meta_path / "episodes_stats.jsonl").string(), episode_stats_data_);
-        save_jsonl_file((meta_path / "tasks.jsonl").string(), task_data_);
+        save_jsonl_file((meta_path / trossen_sdk::EPISODES_JSONL).string(), episode_data_);
+        save_jsonl_file((meta_path / trossen_sdk::EPISODE_STATS_JSONL).string(), episode_stats_data_);
+        save_jsonl_file((meta_path / trossen_sdk::TASKS_JSONL).string(), task_data_);
     }
 
 
