@@ -119,34 +119,18 @@ namespace trossen_dataset
         if (camera_names.empty()) {
             spdlog::warn("No cameras found on the robot.");
         }
-        // Create a map from camera name to its folder path
-        std::unordered_map<std::string, std::filesystem::path> camera_folder_map;
-        for (const auto& camera_name : camera_names) {
-            std::filesystem::path camera_folder = std::filesystem::path(image_folder_path) / camera_name.first / episode_folder_name;
-            if (!std::filesystem::exists(camera_folder)) {
-                std::filesystem::create_directories(camera_folder);
-            }
-            camera_folder_map[camera_name.first] = camera_folder;
-            // If the camera has a depth map, create a separate folder for depth images
-            if(camera_name.second == "depth") {
-                std::filesystem::path depth_folder = std::filesystem::path(image_folder_path) / (camera_name.first + "_depth") / episode_folder_name;
-                if (!std::filesystem::exists(depth_folder)) {
-                    std::filesystem::create_directories(depth_folder);
-                }
-                camera_folder_map[camera_name.first + "_depth"] = depth_folder;
-            }
-        }
+
         // Push images to the image writer for asynchronous writing with appropriate filenames using frame index
         for (const auto& image_data : frame.images) {
             const std::string& camera_name = image_data.camera_name;
-            std::string filename = "image_" + std::to_string(frame.frame_idx) + ".jpg";
-            std::string image_file_path = (camera_folder_map[camera_name] / filename).string();
+            std::string image_path = fmt::format(trossen_sdk::IMAGE_PATH, 0,camera_name,current_episode_->get_episode_idx(), frame.frame_idx);
+            std::string image_file_path = (root_ / repo_id_ / dataset_name_ / image_path).string();
             // Push the image to the writer
             image_writer_.push(image_data.image, image_file_path);
 
             if(!image_data.depth_map.empty()) {
-                std::string depth_filename = "image_" + std::to_string(frame.frame_idx) + ".jpg";
-                std::string depth_file_path = (camera_folder_map[camera_name + "_depth"] / depth_filename).string();
+                std::string depth_path = fmt::format(trossen_sdk::IMAGE_PATH, 0,camera_name + "_depth",current_episode_->get_episode_idx(), frame.frame_idx);
+                std::string depth_file_path = (root_ / repo_id_ / dataset_name_ / depth_path).string();
                 // Push the depth map to the writer
                 image_writer_.push(image_data.depth_map, depth_file_path);
             }
@@ -580,7 +564,6 @@ namespace trossen_dataset
         for (const auto& camera_name : robot_->get_camera_names())
         {
             std::string image_key = "observation.images." + camera_name.first;
-
             //Get image paths for the current episode and camera
             std::string image_folder_path = get_image_path();
 
@@ -589,7 +572,7 @@ namespace trossen_dataset
             std::string episode_folder_name = fmt::format("episode_{:06}", episode_index);
 
             // Construct the full path to the episode's image directory for the current camera
-            std::filesystem::path episode_image_dir = std::filesystem::path(image_folder_path) / camera_name.first / episode_folder_name;
+            std::filesystem::path episode_image_dir = std::filesystem::path(image_folder_path)/"chunk-000" / camera_name.first / episode_folder_name;
             if (!std::filesystem::exists(episode_image_dir)) {
                 spdlog::warn("Image directory does not exist: {}", episode_image_dir.string());
                 continue;
@@ -627,7 +610,7 @@ namespace trossen_dataset
         int episode_chunk = 0;
 
         // Construct the file path for the videos
-        std::string images_path = metadata_->get_info_entry("image_path");
+        std::string images_path = metadata_->get_info_entry("image_path") + "/chunk-000";
         std::string dataset_name = metadata_->get_info_entry("dataset_name");
         std::filesystem::path base_path = root_ / repo_id_ / dataset_name;
 
@@ -638,7 +621,7 @@ namespace trossen_dataset
 
         // Iterate over each camera directory in the images path
         for (const auto &cam_dir : std::filesystem::directory_iterator(images_path))
-        {
+        {   
             if (!cam_dir.is_directory())
                 continue;
             // Create output directory for the camera videos based on camera directory name
@@ -694,7 +677,7 @@ namespace trossen_dataset
                         // Use a pattern for FFmpeg input to match image files with sequential numbering
                         // e.g. image_0.jpg, image_1.jpg, ..., image_N.jpg
                         // This allows FFmpeg to read the images in order without the need for sorting
-                        std::filesystem::path input_pattern = episode_dir.path() / "image_%d.jpg";
+                        std::filesystem::path input_pattern = episode_dir.path() / "image_%06d.jpg";
 
                         //TODO Construct this command using configuration parameters from user
                         // Construct the FFmpeg command to create the video

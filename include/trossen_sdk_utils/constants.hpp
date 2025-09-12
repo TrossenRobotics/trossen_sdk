@@ -48,8 +48,8 @@ namespace trossen_sdk {
     // Dataset paths
 
     const std::string DATA_PATH = "data/chunk-{:03d}/episode_{:06d}.parquet";
-    const std::string VIDEO_PATH = "videos/chunk-{:03d}/{2}/episode_{:06d}.mp4";
-    const std::string IMAGE_PATH = "images/{}/episode_{:06d}/frame_{:06d}.jpg";
+    const std::string VIDEO_PATH = "videos/chunk-{:03d}/{}/episode_{:06d}.mp4";
+    const std::string IMAGE_PATH = "images/chunk-{:03d}/{}/episode_{:06d}/image_{:06d}.jpg";
 
 } // namespace trossen_sdk
 

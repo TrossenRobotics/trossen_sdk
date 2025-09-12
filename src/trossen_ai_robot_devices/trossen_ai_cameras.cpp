@@ -207,6 +207,12 @@ void TrossenAsyncImageWriter::worker_loop() {
                 depth_image = image;
             }
             try {
+                // Check if the parent directory exists, if not create it
+                std::filesystem::path file_path(filename);
+                std::filesystem::path parent_dir = file_path.parent_path();
+                if (!std::filesystem::exists(parent_dir)) {
+                    std::filesystem::create_directories(parent_dir);
+                }
                 if (!cv::imwrite(filename, depth_image)) {
                     spdlog::error("Failed to write depth image to: {}", filename);
                 }
@@ -227,6 +233,12 @@ void TrossenAsyncImageWriter::worker_loop() {
                 bgr_image = image;
             }
             try {
+                // Check if the parent directory exists, if not create it
+                std::filesystem::path file_path(filename);
+                std::filesystem::path parent_dir = file_path.parent_path();
+                if (!std::filesystem::exists(parent_dir)) {
+                    std::filesystem::create_directories(parent_dir);
+                }
                 if (!cv::imwrite(filename, bgr_image)) {
                     spdlog::error("Failed to write color image to: {}", filename);
                 }

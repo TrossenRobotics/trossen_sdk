@@ -12,6 +12,8 @@
 #include <queue>
 #include <atomic>
 #include <spdlog/spdlog.h>
+#include <filesystem>
+
 
 namespace trossen_ai_robot_devices {
 
