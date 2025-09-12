@@ -1,8 +1,37 @@
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 #include "trossen_sdk_utils/config_parser_utils.hpp"
+#include <boost/program_options.hpp>
+#include <spdlog/spdlog.h>
 
-int main() {
-    std::string robot_name = "trossen_ai_stationary"; // Example robot name
+
+namespace po = boost::program_options;
+
+int main(int argc, char* argv[]) {
+    std::string robot_name;
+    po::options_description desc("Allowed options");
+    desc.add_options()
+        ("help,h", "produce help message")
+        ("robot,r", po::value<std::string>(&robot_name)->default_value("trossen_ai_solo"), "robot name");
+
+    po::variables_map vm;
+    try {
+        po::store(po::parse_command_line(argc, argv, desc), vm);
+        po::notify(vm);
+    } catch (const std::exception& ex) {
+        spdlog::error("Error parsing arguments: {}", ex.what());
+        std::stringstream ss;
+        ss << desc;
+        spdlog::info("Available options: {}", ss.str());
+        return 1;
+    }
+
+    if (vm.count("help")) {
+        std::stringstream ss;
+        ss << desc;
+        spdlog::info("{}", ss.str());
+        return 0;
+    }
+
     std::string foll_config_file = "../config/" + robot_name + ".json";
 
     std::ifstream foll_file_check(foll_config_file);
