@@ -72,10 +72,10 @@ namespace trossen_dataset
         // If the dataset directory does not exist, create it and initialize metadata
         else
         {
-            std::filesystem::create_directories(dataset_dir / "data" / "chunk-000");
-            std::filesystem::create_directories(dataset_dir / "meta");
-            std::filesystem::create_directories(dataset_dir / "videos" / "chunk-000");
-            std::filesystem::create_directories(dataset_dir / "images");
+            std::filesystem::create_directories(dataset_dir / trossen_sdk::DATA_PATH_DIR / "chunk-000");
+            std::filesystem::create_directories(dataset_dir / trossen_sdk::METADATA_DIR);
+            std::filesystem::create_directories(dataset_dir / trossen_sdk::VIDEO_DIR / "chunk-000");
+            std::filesystem::create_directories(dataset_dir / trossen_sdk::IMAGES_DIR);
             metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_, task_name_, root_, false);
         }
         // Set robot name and features in metadata
@@ -99,6 +99,7 @@ namespace trossen_dataset
         // Set frame index
         frame.frame_idx = current_episode_->get_frames().size();
 
+        //TODO [TDS-39] Allow use of real timestamps from robot
         // Use a fixed fps to compute timestamp in seconds
         // Timestamp is calculated as frame index divided by fps
         // This allows us to have compatibility with LeRobot for replaying and visualization
@@ -108,13 +109,10 @@ namespace trossen_dataset
         // Add the frame to the current episode
         current_episode_->add_frame(frame);
 
-        // Get the image path from metadata
-        std::string image_folder_path = get_image_path();
 
         // Create episode folder name with zero-padded episode index
-        std::ostringstream oss;
-        oss << "episode_" << std::setw(6) << std::setfill('0') << current_episode_->get_episode_idx();
-        std::string episode_folder_name = oss.str();
+        // TODO Use string formatting utility
+        std::string episode_folder_name = fmt::format("episode_{:06}", current_episode_->get_episode_idx());
 
         // For each camera, create a folder for the episode if it doesn't exist
         std::vector<std::pair<std::string, std::string>> camera_names = robot_->get_camera_names();
@@ -160,21 +158,21 @@ namespace trossen_dataset
 
     void TrossenAIDataset::save_episode()
     {
-        /// @brief Timestamp (Float32) column builder
+        // Timestamp (Float32) column builder
         arrow::FloatBuilder timestamp_builder;
-        /// @brief Observation state (List of Float64) column builder
+        // Observation state (List of Float64) column builder
         arrow::ListBuilder observation_builder(arrow::default_memory_pool(),
                                         std::make_shared<arrow::DoubleBuilder>());
-        /// @brief Action (List of Float64) column builder
+        // Action (List of Float64) column builder
         arrow::ListBuilder action_builder(arrow::default_memory_pool(),
                                    std::make_shared<arrow::DoubleBuilder>());
-        /// @brief Episode index (Int64) column builder
+        // Episode index (Int64) column builder
         arrow::Int64Builder episode_idx_builder;
-        /// @brief Frame index (Int64) column builder
+        // Frame index (Int64) column builder
         arrow::Int64Builder frame_idx_builder;
-        /// @brief Global index (Int64) column builder
+        // Global index (Int64) column builder
         arrow::Int64Builder index_builder;
-        /// @brief Task index (Int64) column builder
+        // Task index (Int64) column builder
         arrow::Int64Builder task_index_builder;
 
         // Get the value builders for observation and action lists
@@ -249,11 +247,10 @@ namespace trossen_dataset
         int chunk_index = episodes_buffer_.size() / 1000; // Assuming 1000 episodes per chunk
         int episode_index = episodes_buffer_.size();
 
-        // Contruct the output file path for the Parquet file
-        std::ostringstream oss;
-        oss << "data/chunk-" << std::setw(3) << std::setfill('0') << chunk_index
-            << "/episode_" << std::setw(6) << std::setfill('0') << episode_index << ".parquet";
-        std::string episode_file_str = oss.str();
+        // Construct the output file path for the Parquet file
+        // TODO [TDS-40] Use config or metadata for chunk size and naming convention
+        // TODO Use string formatting utility
+        std::string episode_file_str = fmt::format(trossen_sdk::DATA_PATH, chunk_index, episode_index);
         std::string output_path_ = (root_ / repo_id_ / dataset_name_ / episode_file_str).string();
 
         // Ensure the directory exists
@@ -588,9 +585,8 @@ namespace trossen_dataset
             std::string image_folder_path = get_image_path();
 
             // Create episode folder name with zero-padded episode index
-            std::ostringstream oss;
-            oss << "episode_" << std::setw(6) << std::setfill('0') << episode_index;
-            std::string episode_folder_name = oss.str();
+            // TODO Use string formatting utility
+            std::string episode_folder_name = fmt::format("episode_{:06}", episode_index);
 
             // Construct the full path to the episode's image directory for the current camera
             std::filesystem::path episode_image_dir = std::filesystem::path(image_folder_path) / camera_name.first / episode_folder_name;

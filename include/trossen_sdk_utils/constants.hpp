@@ -28,6 +28,7 @@ namespace trossen_sdk {
     /// @brief Follower model identifier
     const std::string FOLLOWER_MODEL = "follower";
     
+    // Metadata related files
 
     const std::string INFO_JSON = "info.json";
     const std::string EPISODES_JSONL = "episodes.jsonl";
@@ -39,12 +40,17 @@ namespace trossen_sdk {
     const std::string VIDEO_DIR = "videos";
     const std::string DATA_PATH_DIR = "data";
 
+    // Versioning
+
     const std::string CODEBASE_VERSION = "v2.1";
     const std::string TROSSEN_SUBVERSION = "v1.0";
 
-    const std::string DATA_PATH = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet";
-    const std::string VIDEO_PATH = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4";
-    
+    // Dataset paths
+
+    const std::string DATA_PATH = "data/chunk-{:03d}/episode_{:06d}.parquet";
+    const std::string VIDEO_PATH = "videos/chunk-{:03d}/{2}/episode_{:06d}.mp4";
+    const std::string IMAGE_PATH = "images/{}/episode_{:06d}/frame_{:06d}.jpg";
+
 } // namespace trossen_sdk
 
 #endif // TROSSEN_SDK_UTILS_CONSTANTS_HPP

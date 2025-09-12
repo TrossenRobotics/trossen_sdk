@@ -32,8 +32,9 @@ int main(int argc, char* argv[]) {
         return 0;
     }
 
-    std::string foll_config_file = "../config/" + robot_name + ".json";
-
+    // Load robot  configurations
+    std::string foll_config_file = fmt::format(trossen_sdk::FOLLOWER_ROBOT_CONFIG_FORMAT, robot_name);
+    
     std::ifstream foll_file_check(foll_config_file);
     if (!foll_file_check.good()) {
         spdlog::error("Config file not found for robot: {}", robot_name);

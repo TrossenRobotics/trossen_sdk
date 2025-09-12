@@ -23,6 +23,7 @@ int main(int argc, char* argv[]) {
         ("help", "produce help message")
         ("fps", po::value<double>(&fps)->default_value(30.0), "frames per second")
         ("robot", po::value<std::string>(&robot_name)->default_value("trossen_ai_solo"), "robot name")
+        // TODO [TDS-38]: Allow having infinite teleop time until user interrupts
         ("teleop_time", po::value<double>(&teleop_time)->default_value(10.0), "teleoperation time per episode (seconds)")
         ("display_cameras", po::value<bool>(&display_cameras)->default_value(true), "flag to display camera feeds during recording");
 
@@ -47,8 +48,9 @@ int main(int argc, char* argv[]) {
 
     trossen_sdk::ControlUtils control_utils;
 
-    std::string foll_config_file = "../config/" + robot_name + ".json";
-    std::string lead_config_file = "../config/" + robot_name + "_leader.json";
+   // Load robot and teleoperation configurations
+    std::string foll_config_file = fmt::format(trossen_sdk::FOLLOWER_ROBOT_CONFIG_FORMAT, robot_name);
+    std::string lead_config_file = fmt::format(trossen_sdk::LEADER_ROBOT_CONFIG_FORMAT, robot_name);
 
     std::ifstream foll_file_check(foll_config_file);
     std::ifstream lead_file_check(lead_config_file);

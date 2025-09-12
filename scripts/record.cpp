@@ -114,11 +114,15 @@ int main(int argc, char* argv[]) {
         spdlog::info("Resetting the robot arms...");
         control_utils.control_loop(robot_controller, teleop_robot, reset_time, display_cameras, fps);
     }
+
+    // If enabled, convert images to videos after all episodes are done
     if(video)
         dataset.convert_to_videos();
 
-    robot_controller->disconnect(); // Sleep the arms at the end of the control script
-    teleop_robot->disconnect(); // Disconnect the teleoperation robot
+    // Sleep the arms and disconnect at the end of the control script
+    robot_controller->disconnect();
+    teleop_robot->disconnect();
+    
     spdlog::info("Control script finished.");
     return 0;
 }
