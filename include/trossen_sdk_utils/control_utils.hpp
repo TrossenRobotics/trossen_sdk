@@ -37,7 +37,7 @@ public:
      * @param teleop_robot Shared pointer to the teleoperation robot object
      * @param control_time Control loop time in seconds
      * @param display_cameras Flag to indicate if camera images should be displayed
-     * @param fps Frames per second for video conversion
+     * @param fps Frames per second for control loop
      * This function runs a control loop for a teleoperated robot, capturing images. It also optionally displays camera images.
      */
     void control_loop(std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,

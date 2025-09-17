@@ -178,7 +178,7 @@ namespace robot {
             */
             virtual std::vector<std::string> get_observation_features() const = 0;
 
-            /** @brief Get the camera names of the robot 
+            /** @brief Get the camera names of the robot
              * @return Vector of pairs containing camera name and type (e.g., "depth" or "color")
             */
             virtual std::vector<std::pair<std::string, std::string>> get_camera_names() const = 0;
@@ -186,7 +186,7 @@ namespace robot {
 
     class TrossenAIWidowXRobot : public TrossenRobot {
     public:
-        /** 
+        /**
          * @brief Constructor for TrossenAIWidowXRobot
          * @param config Configuration parameters for the robot
          */

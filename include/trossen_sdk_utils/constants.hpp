@@ -32,7 +32,7 @@ namespace trossen_sdk {
 
     const std::string INFO_JSON = "info.json";
     const std::string EPISODES_JSONL = "episodes.jsonl";
-    const std::string EPISODE_STATS_JSONL = "episode_stats.jsonl";
+    const std::string EPISODE_STATS_JSONL = "episodes_stats.jsonl";
     const std::string TASKS_JSONL = "tasks.jsonl";
 
     const std::string METADATA_DIR = "meta";
@@ -50,6 +50,10 @@ namespace trossen_sdk {
     const std::string DATA_PATH = "data/chunk-{:03d}/episode_{:06d}.parquet";
     const std::string VIDEO_PATH = "videos/chunk-{:03d}/{}/episode_{:06d}.mp4";
     const std::string IMAGE_PATH = "images/chunk-{:03d}/{}/episode_{:06d}/image_{:06d}.jpg";
+
+    // Metadata Path Formats (For Compatibility with LeRobot)
+    const std::string DATA_PATH_META = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet";
+    const std::string VIDEO_PATH_META = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4";
 
 } // namespace trossen_sdk
 

@@ -18,6 +18,7 @@ void TrossenAIArm::connect() {
     }
     else if (model_ == trossen_sdk::FOLLOWER_MODEL) {
         driver_.configure(trossen_arm::Model::wxai_v0, trossen_arm::StandardEndEffector::wxai_v0_follower, ip_address_, true);
+
     } else {
         spdlog::error("Unknown model: {}", model_);
         return;
@@ -27,6 +28,8 @@ void TrossenAIArm::connect() {
     {
         spdlog::error("Exception occurred: {}", e.what());
     }
+
+    
     // Stage the arm
     driver_.set_all_modes(trossen_arm::Mode::position);
     driver_.set_all_positions({0.0, M_PI/3, M_PI/6, M_PI/5, 0.0, 0.0, 0.0}, 2.0, true);
@@ -79,6 +82,7 @@ void TrossenAIArm::write(const std::string& data_name, const std::vector<double>
             spdlog::error("Invalid data size for positions. Expected {} values.", driver_.get_num_joints());
             return;
         }
+        spdlog::debug("Setting gripper position to {}", data.back());
         driver_.set_all_positions(data, time_to_move_, false);
     } else if (data_name == trossen_sdk::VELOCITY) {
         // Check if any mode is not set to velocity

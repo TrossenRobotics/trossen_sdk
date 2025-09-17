@@ -108,7 +108,7 @@ struct WidowXRobotConfig : public RobotConfigBase {
     /// @brief IP address of the robot
     std::string ip_address;
     /// @brief Camera configurations for the robot
-    std::vector<CameraConfig> cameras;  // Camera configuration for the follower arm
+    std::vector<CameraConfig> cameras;
 
     /** @brief Get the name of the robot
      * @return Name of the robot as a string

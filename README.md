@@ -1,6 +1,6 @@
 # Trossen Robotics Data Collection SDK
 
-This software was tested on Ubuntu 24.04 and the installation instructions were teseted on the TOTL PC fresh ISO image.
+This software was tested on Ubuntu 24.04 and the installation instructions were tested on the TOTL PC fresh ISO image.
 It provides tools for recording and replaying datasets using Trossen Robotics arms, specifically the WidowXAI series arms and kits.
 The goal of this SDK is to facilitate data collection for robotics research and development using C++. We made the datasets compatible with HuggingFace(LeRobot) dataset. This allows user to train models using the datasets recorded with this SDK.
 
@@ -36,19 +36,20 @@ sudo apt install -y -V ca-certificates lsb-release wget
 wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 sudo apt install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 sudo apt update
-sudo apt install -y -V libarrow-dev # For C++
-sudo apt install -y -V libarrow-glib-dev # For GLib (C)
-sudo apt install -y -V libarrow-dataset-dev # For Apache Arrow Dataset C++
-sudo apt install -y -V libarrow-dataset-glib-dev # For Apache Arrow Dataset GLib (C)
-sudo apt install -y -V libarrow-acero-dev # For Apache Arrow Acero
-sudo apt install -y -V libarrow-flight-dev # For Apache Arrow Flight C++
-sudo apt install -y -V libarrow-flight-glib-dev # For Apache Arrow Flight GLib (C)
-sudo apt install -y -V libarrow-flight-sql-dev # For Apache Arrow Flight SQL C++
-sudo apt install -y -V libarrow-flight-sql-glib-dev # For Apache Arrow Flight SQL GLib (C)
-sudo apt install -y -V libgandiva-dev # For Gandiva C++
-sudo apt install -y -V libgandiva-glib-dev # For Gandiva GLib (C)
-sudo apt install -y -V libparquet-dev # For Apache Parquet C++
-sudo apt install -y -V libparquet-glib-dev # For Apache Parquet GLib (C)
+sudo apt install -y -V \
+libarrow-dev \
+libarrow-glib-dev \
+libarrow-dataset-dev \
+libarrow-dataset-glib-dev \
+libarrow-acero-dev \
+libarrow-flight-dev \
+libarrow-flight-glib-dev \
+libarrow-flight-sql-dev \
+libarrow-flight-sql-glib-dev \
+libgandiva-dev \
+libgandiva-glib-dev \
+libparquet-dev \
+libparquet-glib-dev
 ```
 
 
@@ -156,6 +157,33 @@ Fri Sep 12 10:49:47 2025
 +-----------------------------------------------------------------------------------------+
 ```
 
+## Build the SDK
+
+Clone the repo if you haven't already
+
+```bash
+git clone https://github.com/TrossenRobotics/trossen_sdk.git
+cd trossen_sdk
+```
+
+Create a build directory and navigate to it
+
+```bash
+mkdir build
+cd build
+```
+
+Run cmake to configure the project
+
+```bash
+cmake ..
+```
+
+Build the project using make
+
+```bash
+make
+```
 
 
 # Usage
@@ -164,21 +192,45 @@ Fri Sep 12 10:49:47 2025
 
 ```bash
 ./record \
---robot_name trossen_ai_stationary \
---recording_time 10 \
---num_episodes 1 --fps 30 \
---display_cameras true \
---tags test \
---overwrite false \
---dataset test_dataset_00 \
---root ~/.cache/huggingface/lerobot/ \
---repo_id trossen-ai/trossen-widowx \
---single_task pick_place \
---num_image_writer_threads_per_camera 4 \
---num_image_writer_processes 1 \
---video true \
---run_compute_stats true
+  --robot_name trossen_ai_stationary \
+  --recording_time 10 \
+  --num_episodes 1 --fps 30 \
+  --display_cameras true \
+  --tags test \
+  --overwrite false \
+  --dataset test_dataset_00 \
+  --root ~/.cache/huggingface/lerobot/ \
+  --repo_id trossen-ai/trossen-widowx \
+  --single_task pick_place \
+  --num_image_writer_threads_per_camera 4 \
+  --num_image_writer_processes 1 \
+  --video true \
+  --run_compute_stats true
 ```
+
+## Replaying a dataset
+
+```bash
+./replay -d test_dataset_01 --robot trossen_ai_stationary --episode 0 --repo TrossenRoboticsCommunity --root ~/.cache/huggingface/lerobot/ --fps 30
+```
+
+## Put Arms to Sleep
+
+To ensure the robotic arms are safely positioned prior to system shutdown, use the following command. This procedure helps prevent unintended movements and safely powers down the actuators:
+
+```bash
+./sleep --robot trossen_ai_stationary
+```
+
+## Teleoperation
+
+If you want to do a dry run of your experiment without recording, you can use the teleop script to control the robot.
+
+```bash
+./teleop --robot trossen_ai_stationary --fps 30
+```
+
+# LeRobot Compatibility
 
 ## Uploading the dataset to HuggingFace
 
@@ -206,18 +258,14 @@ In case you want to upload all files including images, you can omit the `--exclu
 The above command uploads all files including images.
 
 
-## Replaying a dataset
-
-```bash
-./replay -d test_dataset_01 --robot trossen_ai_stationary --episode 0 --repo TrossenRoboticsCommunity --root ~/.cache/huggingface/lerobot/ --fps 30
-```
+## Replaying using LeRobot
 
 If you have `LeRobot` frame work installed, you can also replay using the replay scripts.
 Note: This was tested using the new api integration for Trossen Arms with LeRobot.
 
 ```bash
 python -m lerobot.replay
---robot.type=bi_widowxai_follower     
+--robot.type=bi_widowxai_follower
 --robot.left_arm_ip_address=192.168.1.5
 --robot.right_arm_ip_address=192.168.1.4
 --robot.id=bimanual_follower
@@ -227,7 +275,7 @@ python -m lerobot.replay
 
 ## Visualizing the dataset
 
-You can visualize the recorded dataset using the `lerobot` dataset viewer. This requires you to have the `lerobot` package installed. 
+You can visualize the recorded dataset using the `lerobot` dataset viewer. This requires you to have the `lerobot` package installed.
 
 ```bash
  python src/lerobot/scripts/visualize_dataset_html.py  --repo-id TrossenRoboticsCommunity/test_dataset_03
@@ -238,20 +286,3 @@ To view the dataset online in the HuggingFace dataset viewer, you can use the fo
 [LeRobot Dataset Viewer](https://huggingface.co/spaces/lerobot/visualize_dataset)
 
 Just dataset name and repo id in the input box and click on "Go".
-
-
-## Put Arms to Sleep
-
-In any case where the system crashes or you need to quickly disable the motors, you can use the `sleep` script to safely disconnect from the robot.
-
-```bash
-./sleep --robot trossen_ai_stationary
-```
-
-## Teleoperation
-
-If you want to do a dry run of your experiment without recording, you can use the teleop script to control the robot.
-
-```bash
-./teleop --robot trossen_ai_stationary --fps 30
-```

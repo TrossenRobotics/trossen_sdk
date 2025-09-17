@@ -14,7 +14,7 @@ int main(int argc, char* argv[]) {
 
     std::string robot_name;
     double teleop_time;
-    double fps;
+    double fps; 
     bool display_cameras;
     
     // Argument parsing

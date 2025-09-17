@@ -124,21 +124,21 @@ public:
 
 
 
-class TrossenAsyncImageWriter {
+class AsyncImageWriter {
 
 public:
     /**
-     * @brief Constructor for TrossenAsyncImageWriter
+     * @brief Constructor for AsyncImageWriter
      * @param num_threads Number of threads to use for writing images
      * Initializes worker threads to process image writing tasks
      */
-    explicit TrossenAsyncImageWriter(int num_threads = 4);
+    explicit AsyncImageWriter(int num_threads = 4);
 
     /**
-     * @brief Destructor for TrossenAsyncImageWriter
+     * @brief Destructor for AsyncImageWriter
      * Signals all worker threads to stop and joins them
      */
-    ~TrossenAsyncImageWriter();
+    ~AsyncImageWriter();
 
     /**
      * @brief Push an image to be written asynchronously

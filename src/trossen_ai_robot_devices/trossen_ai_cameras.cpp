@@ -22,14 +22,12 @@ void TrossenAICamera::connect() {
 
     // Enable the color stream as default
     cfg.enable_stream(
-                RS2_STREAM_COLOR, capture_width_, capture_height_, RS2_FORMAT_RGB8, fps_
-            );
-    
+        RS2_STREAM_COLOR, capture_width_, capture_height_, RS2_FORMAT_RGB8, fps_);
+
     // Enable depth stream if use_depth_ is true
     if (use_depth_) {
         cfg.enable_stream(
-            RS2_STREAM_DEPTH, capture_width_, capture_height_, RS2_FORMAT_Z16, fps_
-        );
+            RS2_STREAM_DEPTH, capture_width_, capture_height_, RS2_FORMAT_Z16, fps_);
     }
 
     // Start the camera pipeline with the configuration
@@ -92,7 +90,7 @@ trossen_ai_robot_devices::ColorDepthData TrossenAICamera::read() {
 
 
 trossen_ai_robot_devices::ImageData TrossenAICamera::async_read() {
-    
+
     trossen_ai_robot_devices::ImageData result;
     std::mutex mtx;
     std::condition_variable cv;
@@ -121,11 +119,7 @@ trossen_ai_robot_devices::ImageData TrossenAICamera::async_read() {
         // Lock and set the result
         {
             std::lock_guard<std::mutex> lock(mtx);
-            if(use_depth_) {
-                result = trossen_ai_robot_devices::ImageData{name_, image, depth_map};
-            } else {
-                result = trossen_ai_robot_devices::ImageData{name_, image, cv::Mat()};
-            }
+            result = trossen_ai_robot_devices::ImageData{name_, image, depth_map};
             done = true;
         }
         // Notify the waiting thread
@@ -145,15 +139,15 @@ trossen_ai_robot_devices::ImageData TrossenAICamera::async_read() {
 
 
 
-TrossenAsyncImageWriter::TrossenAsyncImageWriter(int num_threads)
+AsyncImageWriter::AsyncImageWriter(int num_threads)
     : stop_flag_(false), num_threads_(num_threads) {
     // Create worker threads
     for (int i = 0; i < num_threads_; ++i) {
-        worker_threads_.emplace_back(&TrossenAsyncImageWriter::worker_loop, this);
+        worker_threads_.emplace_back(&AsyncImageWriter::worker_loop, this);
     }
 }
 
-TrossenAsyncImageWriter::~TrossenAsyncImageWriter() {
+AsyncImageWriter::~AsyncImageWriter() {
     // Signal all threads to stop
     {
         std::lock_guard<std::mutex> lock(mtx_);
@@ -166,7 +160,7 @@ TrossenAsyncImageWriter::~TrossenAsyncImageWriter() {
     }
 }
 
-void TrossenAsyncImageWriter::push(const cv::Mat& image, const std::string& filename) {
+void AsyncImageWriter::push(const cv::Mat& image, const std::string& filename) {
     // Add image and filename to the queue
     {
         std::lock_guard<std::mutex> lock(mtx_);
@@ -175,7 +169,7 @@ void TrossenAsyncImageWriter::push(const cv::Mat& image, const std::string& file
     cv_.notify_one();
 }
 
-void TrossenAsyncImageWriter::worker_loop() {
+void AsyncImageWriter::worker_loop() {
     // Worker thread loop
     while (true) {
         // Wait for an image to be available or stop signal
@@ -195,57 +189,43 @@ void TrossenAsyncImageWriter::worker_loop() {
             spdlog::debug("Depth image is empty, skipping: {}", filename);
             continue;
         }
+
+        cv::Mat image_to_write;
         // Check the channel count to distinguish depth from color
         if (image.channels() == 1) {
-            cv::Mat depth_image;
             // If the image is already CV_16UC1, no need to convert
             if (image.type() != CV_16UC1) {
                 // TODO [TDS-36]: Handle different depth formats if necessary
                 // Convert to CV_16UC1 assuming the input is in meters (float) and we want millimeters (int)
-                image.convertTo(depth_image, CV_16UC1, 1000);
+                image.convertTo(image_to_write, CV_16UC1, 1000);
             } else {
-                depth_image = image;
-            }
-            try {
-                // Check if the parent directory exists, if not create it
-                std::filesystem::path file_path(filename);
-                std::filesystem::path parent_dir = file_path.parent_path();
-                if (!std::filesystem::exists(parent_dir)) {
-                    std::filesystem::create_directories(parent_dir);
-                }
-                if (!cv::imwrite(filename, depth_image)) {
-                    spdlog::error("Failed to write depth image to: {}", filename);
-                }
-            } catch (const cv::Exception& e) {
-                spdlog::error("Exception while writing depth image to {}: {}", filename, e.what());
+                image_to_write = image;
             }
         } else {
-            // Save color image
-            cv::Mat bgr_image;
             if (image.channels() == 3) {
                 // Convert RGB to BGR for OpenCV
-                cv::cvtColor(image, bgr_image, cv::COLOR_RGB2BGR);
+                cv::cvtColor(image, image_to_write, cv::COLOR_RGB2BGR);
             } else if (image.channels() == 4) {
                 // Convert RGBA to BGR for OpenCV
-                cv::cvtColor(image, bgr_image, cv::COLOR_RGBA2BGR);
+                cv::cvtColor(image, image_to_write, cv::COLOR_RGBA2BGR);
             } else {
                 // Unexpected, but save as is
-                bgr_image = image;
+                image_to_write = image;
             }
-            try {
+        }
+        try {
                 // Check if the parent directory exists, if not create it
                 std::filesystem::path file_path(filename);
                 std::filesystem::path parent_dir = file_path.parent_path();
                 if (!std::filesystem::exists(parent_dir)) {
                     std::filesystem::create_directories(parent_dir);
                 }
-                if (!cv::imwrite(filename, bgr_image)) {
-                    spdlog::error("Failed to write color image to: {}", filename);
+                if (!cv::imwrite(filename, image_to_write)) {
+                    spdlog::error("Failed to write image to: {}", filename);
                 }
             } catch (const cv::Exception& e) {
-                spdlog::error("Exception while writing color image to {}: {}", filename, e.what());
+                spdlog::error("Exception while writing image to {}: {}", filename, e.what());
             }
-        }
     }
 }
 

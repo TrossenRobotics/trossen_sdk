@@ -11,7 +11,6 @@ namespace trossen_dataset
     void EpisodeData::add_frame(const FrameData &frame)
     {
         buffer_.push_back(frame);
-        
     }
     const std::vector<FrameData> &EpisodeData::get_frames() const
     {
@@ -83,7 +82,7 @@ namespace trossen_dataset
         metadata_->add_features(*robot_);
 
         // Start image writer threads for each camera
-        trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer_(num_image_writer_threads_per_camera);
+        trossen_ai_robot_devices::AsyncImageWriter image_writer_(num_image_writer_threads_per_camera);
     }
     
     void TrossenAIDataset::add_frame(FrameData &frame)
@@ -844,9 +843,9 @@ namespace trossen_dataset
             std::strftime(buf, sizeof(buf), "%m-%d-%Y", &tm);
             set_info_entry("date_created", buf);
 
-            set_info_entry("data_path", trossen_sdk::DATA_PATH);
+            set_info_entry("data_path", trossen_sdk::DATA_PATH_META);
             set_info_entry("meta_path", meta_path.string());
-            set_info_entry("video_path", trossen_sdk::VIDEO_PATH);
+            set_info_entry("video_path", trossen_sdk::VIDEO_PATH_META);
             set_info_entry("image_path", (base_path / trossen_sdk::IMAGES_DIR).string());
             save_all();
         }

@@ -89,15 +89,15 @@ Datasets are stored in a structured folder format to ensure easy loading and sha
 
 ### 5.1 Asynchronous Image Writing
 
-To maintain a consistent control frequency and prevent blocking operations in the control loop, the SDK uses an `TrossenAsyncImageWriter` component that runs in the background.
+To maintain a consistent control frequency and prevent blocking operations in the control loop, the SDK uses an `AsyncImageWriter` component that runs in the background.
 
 - **Controller** captures images in real-time from multiple cameras during the control loop.
-- Each captured image is pushed to an **internal queue** managed by `TrossenAsyncImageWriter`.
+- Each captured image is pushed to an **internal queue** managed by `AsyncImageWriter`.
 - The queue item includes:
   - The `cv2::Mat` object (or raw bytes)
   - The target **file path** (e.g., `images/cam_low/image_cam_low_<timestamp>.jpg`)
 
-**TrossenAsyncImageWriter** is designed to:
+**AsyncImageWriter** is designed to:
 - Run multiple background threads
 - Continuously poll the queue
 - Write images to disk asynchronously (e.g., using OpenCV or PIL)

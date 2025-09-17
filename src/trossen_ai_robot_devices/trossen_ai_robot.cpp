@@ -10,18 +10,17 @@ namespace trossen_ai_robot_devices {
         TrossenAIWidowXRobot::TrossenAIWidowXRobot(const trossen_sdk_config::WidowXRobotConfig& config)
             : name_(config.name), ip_address_(config.ip_address) {
 
-            robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, trossen_sdk::FOLLOWER_MODEL);
+            robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, trossen_sdk::LEADER_MODEL);
             for (const auto& cam_config : config.cameras) {
                 cameras_.emplace_back(cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps, cam_config.use_depth);
             }
-            std::cout << "TrossenAIWidowXRobot initialized with name: " << name_
-                      << ", IP address: " << ip_address_ << std::endl;
+            spdlog::info("TrossenAIWidowXRobot initialized with name: {}, IP address: {}", name_, ip_address_);
         }
 
         void TrossenAIWidowXRobot::connect() {
             // Connect to the robot arm and cameras
             if (is_connected_) {
-                std::cout << "Already connected to robot: " << name_ << std::endl;
+                spdlog::info("Already connected to robot: {}", name_);
                 return;
             }
             robot_driver_->connect();
@@ -33,7 +32,7 @@ namespace trossen_ai_robot_devices {
 
         void TrossenAIWidowXRobot::disconnect() {
             // Disconnect from the robot arm and cameras
-            std::cout << "Disconnecting from robot: " << name_ << std::endl;
+            spdlog::info("Disconnecting from robot: {}", name_);
             robot_driver_->disconnect();
             for (auto& camera : cameras_) {
                 camera.disconnect();
@@ -54,7 +53,7 @@ namespace trossen_ai_robot_devices {
             trossen_ai_robot_devices::State state;
             // Read joint positions from the robot arm
             state.observation_state = robot_driver_->read(trossen_sdk::POSITION);
-            // Read camera images 
+            // Read camera images
             for (auto& camera : cameras_) {
                 state.images.push_back(camera.async_read());
             }
@@ -62,7 +61,6 @@ namespace trossen_ai_robot_devices {
         }
 
         void TrossenAIWidowXRobot::send_action(const std::vector<double>& action) {
-            // Send joint position commands to the robot arm
             robot_driver_->write(trossen_sdk::POSITION, action);
         }
 
@@ -112,6 +110,7 @@ namespace trossen_ai_robot_devices {
 
         void TrossenAIBimanualWidowXRobot::calibrate() {
             //TODO Implement calibration logic if needed
+            //Compliant Gripper Calibration
         }
 
         void TrossenAIBimanualWidowXRobot::configure() {
@@ -142,6 +141,7 @@ namespace trossen_ai_robot_devices {
             }
             std::vector<double> right_action(action.begin(), action.begin() + right_robot_driver_->get_joint_names().size());
             std::vector<double> left_action(action.begin() + left_robot_driver_->get_joint_names().size(), action.end());
+            spdlog::info("Sending right arm gripper position: {}", right_action.back());
             right_robot_driver_->write(trossen_sdk::POSITION, right_action);
             left_robot_driver_->write(trossen_sdk::POSITION, left_action);
         }
@@ -221,7 +221,7 @@ namespace trossen_ai_robot_devices {
         }
 
         void TrossenAIWidowXLeader::configure() {
-            robot_driver_->stage_arm(); // Stage the arm to a safe position
+            robot_driver_->stage_arm();
             robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(robot_driver_->get_joint_names().size(), 0.0));
         }
 
@@ -235,7 +235,7 @@ namespace trossen_ai_robot_devices {
         }
 
         void TrossenAIWidowXLeader::disconnect() {
-            robot_driver_->stage_arm(); // Stop the arm
+            robot_driver_->stage_arm();
             robot_driver_->disconnect();
             is_connected_ = false;
             spdlog::info("Disconnected from leader: {}", name_);

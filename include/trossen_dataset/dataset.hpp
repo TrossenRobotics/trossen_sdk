@@ -35,19 +35,19 @@ namespace trossen_dataset
      * This structure holds the timestamp, observation state, action, and other relevant information for a single frame
      */
     struct FrameData
-    {   
+    {
         /// @brief Timestamp in seconds
-        float timestamp_s;         
+        float timestamp_s;
         /// @brief Observation state (e.g., joint positions)
-        std::vector<double> observation_state;              
+        std::vector<double> observation_state;
         /// @brief Action to be taken
-        std::vector<double> action;                              
+        std::vector<double> action;
         /// @brief Episode index
-        int64_t episode_idx;                                     
+        int64_t episode_idx;
         /// @brief Frame index within the episode
-        int64_t frame_idx;                                       
+        int64_t frame_idx;
         /// @brief Images from cameras
-        std::vector<trossen_ai_robot_devices::ImageData> images; 
+        std::vector<trossen_ai_robot_devices::ImageData> images;
     };
 
     /**
@@ -436,7 +436,7 @@ namespace trossen_dataset
         /// @brief Pointer to the current episode being recorded
         std::unique_ptr<trossen_dataset::EpisodeData> current_episode_;
         /// @brief Asynchronous image writer for saving images
-        trossen_ai_robot_devices::TrossenAsyncImageWriter image_writer_;
+        trossen_ai_robot_devices::AsyncImageWriter image_writer_;
     };
 
 } // namespace trossen_dataset
