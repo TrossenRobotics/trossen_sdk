@@ -41,7 +41,7 @@ void TrossenAICamera::disconnect() {
     spdlog::info("Disconnecting from camera: {}", name_);
 }
 
-trossen_ai_robot_devices::ColorDepthData TrossenAICamera::read() {
+trossen_ai_robot_devices::ImageData TrossenAICamera::read() {
 
     // Initialize frameset
     rs2::frameset frames;
@@ -51,17 +51,21 @@ trossen_ai_robot_devices::ColorDepthData TrossenAICamera::read() {
         frames = camera_.wait_for_frames(3000); 
     } catch (const rs2::error& e) {
         spdlog::error("Failed to get frameset from camera: {}. Error: {}", name_, e.what());
-        return trossen_ai_robot_devices::ColorDepthData{};
+        return trossen_ai_robot_devices::ImageData{};
     }
 
     // Extract color and depth frames
-    trossen_ai_robot_devices::ColorDepthData data;
+    trossen_ai_robot_devices::ImageData data;
+    data.camera_name = name_;
     if (frames && frames.size() > 0) {
         // Try to get color frame
         try {
             rs2::frame color_frame = frames.get_color_frame();
+
             if (color_frame) {
-                data.color_image = color_frame;
+                // Convert rs2::frame to cv::Mat
+                cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3, (void*)color_frame.get_data(), cv::Mat::AUTO_STEP);
+                data.image = image;
             } else {
                 spdlog::error("Failed to read color frame from camera: {}", name_);
             }
@@ -73,7 +77,8 @@ trossen_ai_robot_devices::ColorDepthData TrossenAICamera::read() {
             try {
                 rs2::frame depth_frame = frames.get_depth_frame();
                 if (depth_frame) {
-                    data.depth_map = depth_frame;
+                    cv::Mat depth_map = cv::Mat(cv::Size(capture_width_, capture_height_), CV_16UC1, (void*)depth_frame.get_data(), cv::Mat::AUTO_STEP);
+                    data.depth_map = depth_map;
                 } else {
                     spdlog::error("Failed to read depth frame from camera: {}", name_);
                 }
@@ -81,6 +86,7 @@ trossen_ai_robot_devices::ColorDepthData TrossenAICamera::read() {
                 spdlog::error("Error retrieving depth frame from camera: {}. Error: {}", name_, e.what());
             }
         }
+        data.timestamp_ms = static_cast<int64_t>(frames.get_timestamp());
     } else {
         spdlog::error("Frameset is empty for camera: {}", name_);
     }
@@ -99,27 +105,11 @@ trossen_ai_robot_devices::ImageData TrossenAICamera::async_read() {
     // Launch a thread to read the image asynchronously
     std::thread([this, &result, &mtx, &cv, &done]() {
         // Read color and depth frames
-        trossen_ai_robot_devices::ColorDepthData color_and_depth = read();
-        //If color frame is empty, raise an error
-        if (!color_and_depth.color_image) {
-            throw std::runtime_error("Failed to read color frame from camera: " + name_);
-        }
-        // If depth is required but missing, raise an error
-        if (use_depth_ && !color_and_depth.depth_map) {
-            throw std::runtime_error("Failed to read depth frame from camera: " + name_);
-        }
-        // Convert rs2::frame to cv::Mat
-        cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3, (void*)color_and_depth.color_image.get_data(), cv::Mat::AUTO_STEP);
-        cv::Mat depth_map;
-        if (use_depth_) {
-            depth_map = cv::Mat(cv::Size(capture_width_, capture_height_), CV_16UC1, (void*)color_and_depth.depth_map.get_data(), cv::Mat::AUTO_STEP);
-        }
-        // Get the timestamp for the frame
-        int64_t timestamp = color_and_depth.color_image.get_timestamp();
+        trossen_ai_robot_devices::ImageData image_data = read();
         // Lock and set the result
         {
             std::lock_guard<std::mutex> lock(mtx);
-            result = trossen_ai_robot_devices::ImageData{name_, image, depth_map};
+            result = image_data;
             done = true;
         }
         // Notify the waiting thread

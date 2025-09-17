@@ -17,15 +17,6 @@
 
 namespace trossen_ai_robot_devices {
 
-
-/// @brief Data structure to hold color and depth raw frames from realsense camera
-struct ColorDepthData {
-    /// @brief Color image frame from realsense camera
-    rs2::frame color_image;
-    /// @brief Depth map frame from realsense camera
-    rs2::frame depth_map;
-};
-
 /// @brief Data structure to hold image data from the camera including depth map if available in OpenCV Mat format
 struct ImageData {
     /// @brief Name of the camera that captured the image
@@ -34,6 +25,8 @@ struct ImageData {
     cv::Mat image;
     /// @brief OpenCV Mat to hold the depth information
     cv::Mat depth_map;
+    /// @brief Timestamp for the image capture in milliseconds
+    int64_t timestamp_ms;
 };
 
 
@@ -72,9 +65,9 @@ public:
         /**
          * @brief Read a frame from the camera
          * Waits for a new frameset and extracts color and depth frames
-         * @return ColorDepthData structure containing color image and depth map frames
+         * @return ImageData structure containing color image and depth map frames
          */
-        trossen_ai_robot_devices::ColorDepthData read() ;
+        trossen_ai_robot_devices::ImageData read() ;
 
         /**
          * @brief Asynchronously read a frame from the camera

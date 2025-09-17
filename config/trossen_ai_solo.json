@@ -9,7 +9,7 @@
       "fps": 30,
       "width": 640,
       "height": 480,
-      "use_depth": false
+      "use_depth": true
     },
     {
       "name": "cam_wrist",
@@ -17,7 +17,7 @@
       "fps": 30,
       "width": 640,
       "height": 480,
-      "use_depth": false
+      "use_depth": true
     }
   ]
 }
