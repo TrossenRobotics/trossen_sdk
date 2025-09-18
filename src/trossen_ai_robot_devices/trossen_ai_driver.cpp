@@ -6,6 +6,13 @@
 
 namespace trossen_ai_robot_devices {
 
+
+
+TrossenAIArm::TrossenAIArm(const std::string& name, const std::string& ip_address, const std::string& model)
+    : name_(name), ip_address_(ip_address), model_(model) {
+    spdlog::info("TrossenAIArm initialized with name: {}, IP address: {}, model: {}", name_, ip_address_, model_);
+}
+
 void TrossenAIArm::connect() {
     if (is_connected_) {
         spdlog::info("Already connected to {}", name_);
@@ -31,8 +38,7 @@ void TrossenAIArm::connect() {
 
     
     // Stage the arm
-    driver_.set_all_modes(trossen_arm::Mode::position);
-    driver_.set_all_positions({0.0, M_PI/3, M_PI/6, M_PI/5, 0.0, 0.0, 0.0}, 2.0, true);
+    stage_arm();
 
     is_connected_ = true;
 }

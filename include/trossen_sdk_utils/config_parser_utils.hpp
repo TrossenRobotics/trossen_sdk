@@ -114,7 +114,7 @@ inline std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader> cr
         auto leader_config = dynamic_cast<const trossen_sdk_config::BimanualWidowXLeaderConfig&>(config);
         return std::make_shared<trossen_ai_robot_devices::teleoperator::TrossenAIBimanualWidowXLeader>(leader_config);
     } else {
-        throw std::runtime_error("Unknown leader type in configuration");
+        throw std::runtime_error("Unknown leader type in configuration: " + config.get_name());
     }
 }
 }  // namespace trossen_sdk_config

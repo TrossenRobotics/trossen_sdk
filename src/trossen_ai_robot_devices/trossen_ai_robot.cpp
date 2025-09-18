@@ -9,7 +9,7 @@ namespace trossen_ai_robot_devices {
 
         TrossenAIWidowXRobot::TrossenAIWidowXRobot(const trossen_sdk_config::WidowXRobotConfig& config)
             : name_(config.name), ip_address_(config.ip_address) {
-
+            // TODO [TDS-41] Change the model to FOLLOWER_MODEL once the gripper is changed
             robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, trossen_sdk::LEADER_MODEL);
             // Check the camera interfaces and create camera objects
             if (config.camera_interface == "realsense") {

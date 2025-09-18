@@ -14,7 +14,6 @@ namespace trossen_ai_robot_devices {
      * This is used as a wrapper around the TrossenArmDriver from the libtrossen_arm library
      * to provide a simplified interface for connecting, disconnecting, reading, writing,
      * and staging the robotic arm.
-     * This was designed to be friendly for use in the LeRobot framework.
      */
     class TrossenAIArm {
     public:
@@ -27,7 +26,7 @@ namespace trossen_ai_robot_devices {
          * Initializes the TrossenAIArm with the given parameters
          * 
          */
-        TrossenAIArm(const std::string& name, const std::string& ip_address, const std::string& model) : name_(name), ip_address_(ip_address), model_(model) {}
+        TrossenAIArm(const std::string& name, const std::string& ip_address, const std::string& model);
         
         /**
          * @brief Move constructor and move assignment operator
