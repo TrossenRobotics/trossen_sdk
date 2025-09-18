@@ -277,3 +277,80 @@ struct UserCustomRecord : public RecordBase {
 | Shared Ptr Buffers | Image bytes shared across sinks/backends | Zero-copy fan-out | Ref-count overhead |
 | Slab + Indices | Pre-allocated slabs; queue stores indices | Predictable latency | Complexity, fixed upper bounds |
 | Arena per Batch | Allocate batch lifetime, encode then free | Low fragmentation | Batch lifetime coupling |
+
+## Hardware Producers (Wrappers)
+
+### Goals
+
+Provide a unified, low-latency API for polling / streaming hardware sources (robots, cameras) into the logging pipeline as typed `RecordBase` derivatives while:
+
+- Preserving highest fidelity timing (prefer device / driver monotonic time if exposed).
+- Avoiding unnecessary data copies (zero-copy handoff for image buffers; shallow conversion for joint arrays).
+- Allowing both pull (scheduler-driven periodic poll) and push (device callback / capture thread) models.
+- Keeping hardware-specific code isolated from sinks/backends so new devices can be added modularly.
+
+### Categories
+
+1. Robot Producers (e.g., Trossen Arm)
+   - Emit `JointStateRecord` at a deterministic rate (configured Hz).
+   - Provide sequence numbering (internal counter) and mapping from driver joint order to record order.
+   - Optionally expose latency metrics (driver timestamp vs SDK monotonic snapshot).
+
+2. Camera Producers (OpenCV initial implementation)
+   - Color-only (RGB/BGR) or Color + Depth (future extension).
+   - May run at independent frame rate(s) for color and depth.
+   - Provide per-frame device timestamp if available (V4L2, camera intrinsic clock); fallback to SDK `now_mono_ns()`.
+   - Convert pixel format into standard encodings ("rgb8", "bgr8", etc.).
+
+### Core Interfaces
+
+```cpp
+namespace trossen::hw {
+
+class PolledProducer {
+public:
+  virtual ~PolledProducer() = default;
+  virtual void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) = 0;
+};
+
+class PushProducer {
+public:
+  virtual ~PushProducer() = default;
+  virtual void start(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) = 0;
+  virtual void stop() = 0;
+};
+
+} // namespace trossen::hw
+```
+
+### Trossen Arm Producer (Robot)
+
+`TrossenArmProducer` (polled):
+- Params: driver ref, stream id, dof, optional transform functor.
+- Steps: read driver -> timestamp -> convert doubles -> fill record -> emit.
+- Metrics: produced, jitter, convert time.
+
+### OpenCV Camera Producer
+
+`OpenCvCameraProducer` (push thread): open device, capture loop, convert frame, timestamp, emit.
+Depth extension later via secondary capture or composite record.
+
+### Timestamp Strategy
+
+Priority: hardware monotonic > driver capture time > SDK monotonic.
+
+### Directory / Namespace
+
+```
+include/trossen_sdk/hw/
+  producer_base.hpp
+  arm/arm_producer.hpp
+  camera/opencv_producer.hpp
+src/hw/arm/arm_producer.cpp
+src/hw/camera/opencv_producer.cpp
+```
+
+Namespaces: `trossen::hw`, `trossen::hw::arm`, `trossen::hw::camera`.
+
+### Future
+- GPU camera path, calibration records, adaptive polling.

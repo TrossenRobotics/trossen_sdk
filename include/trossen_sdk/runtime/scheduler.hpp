@@ -61,7 +61,7 @@ public:
    * @param period Interval duration
    */
   template <class Rep, class Period>
-  void add_task(Callback cb, std::chrono::duration<Rep, Period> period) {
+  void add_task(std::chrono::duration<Rep, Period> period, Callback cb) {
     auto period_ms = static_cast<uint32_t>(
       std::chrono::duration_cast<std::chrono::milliseconds>(period).count());
     add_task(std::move(cb), period_ms);

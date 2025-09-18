@@ -1,6 +1,6 @@
 add_executable(mock_producers mock_producers.cpp)
 target_link_libraries(mock_producers PRIVATE trossen_sdk)
 
-find_package(trossen_arm)
+find_package(libtrossen_arm)
 add_executable(trossen_ai_solo trossen_ai_solo.cpp)
-target_link_libraries(trossen_ai_solo trossen_sdk trossen_arm)
+target_link_libraries(trossen_ai_solo trossen_sdk libtrossen_arm)

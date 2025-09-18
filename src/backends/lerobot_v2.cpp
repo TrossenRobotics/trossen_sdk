@@ -16,6 +16,10 @@ LeRobotV2Backend::LeRobotV2Backend(const std::string& uri)
 }
 
 bool LeRobotV2Backend::open() {
+  std::lock_guard<std::mutex> lock(open_mutex_);
+  if (opened_) {
+    return true; // idempotent
+  }
   root_ = fs::path(uri_);
   images_root_ = root_ / "observations" / "images";
   try {
@@ -30,10 +34,12 @@ bool LeRobotV2Backend::open() {
     return false;
   }
   header_written_ = false;
+  opened_ = true;
   return true;
 }
 
 void LeRobotV2Backend::write(const data::RecordBase& record) {
+  std::lock_guard<std::mutex> lock(write_mutex_);
   // Decide type by RTTI (simple approach for now)
   if (auto js = dynamic_cast<const data::JointStateRecord*>(&record)) {
     writeJointState(*js);
@@ -45,8 +51,16 @@ void LeRobotV2Backend::write(const data::RecordBase& record) {
 }
 
 void LeRobotV2Backend::writeBatch(std::span<const data::RecordBase* const> records) {
+  std::lock_guard<std::mutex> lock(write_mutex_);
   for (auto* r : records) {
-    if (r) write(*r);
+    if (!r) {
+      continue;
+    }
+    if (auto js = dynamic_cast<const data::JointStateRecord*>(r)) {
+      writeJointState(*js);
+    } else if (auto img = dynamic_cast<const data::ImageRecord*>(r)) {
+      writeImage(*img);
+    }
   }
 }
 
@@ -55,7 +69,10 @@ void LeRobotV2Backend::flush() {
 }
 
 void LeRobotV2Backend::close() {
+  std::lock_guard<std::mutex> lock(open_mutex_);
+  if (!opened_) return;
   if (joint_csv_.is_open()) joint_csv_.close();
+  opened_ = false;
 }
 
 void LeRobotV2Backend::writeJointState(const data::RecordBase& base) {
@@ -64,8 +81,16 @@ void LeRobotV2Backend::writeJointState(const data::RecordBase& base) {
     joint_csv_ << "monotonic_ns,realtime_ns,id,positions,velocities,efforts\n";
     header_written_ = true;
   }
-  auto vecToStr = [](const std::vector<float>& v){
-    std::ostringstream oss; for (size_t i=0;i<v.size();++i){ if(i) oss<<";"; oss<<std::setprecision(6)<<v[i]; } return oss.str(); };
+  auto vecToStr = [](const std::vector<float>& v) {
+    std::ostringstream oss;
+    for (size_t i=0;i<v.size();++i) {
+      if(i) {
+        oss<<";";
+      }
+      oss<<std::setprecision(6)<<v[i];
+    }
+    return oss.str();
+  };
   joint_csv_ << js.ts.monotonic_ns << ','
              << js.ts.realtime_ns << ','
              << js.id << ','
@@ -75,11 +100,17 @@ void LeRobotV2Backend::writeJointState(const data::RecordBase& base) {
 }
 
 void LeRobotV2Backend::writeImage(const data::RecordBase& base) {
+  // TODO: Implement
   auto& img = static_cast<const data::ImageRecord&>(base);
-  // Directory per camera id
-  fs::path camera_dir = images_root_ / img.id;
-  std::error_code ec;
-  fs::create_directories(camera_dir, ec);
+  // Directory per camera id (cached)
+  auto it = image_dir_cache_.find(img.id);
+  if (it == image_dir_cache_.end()) {
+    fs::path camera_dir = images_root_ / img.id;
+    std::error_code ec;
+    fs::create_directories(camera_dir, ec);
+    it = image_dir_cache_.emplace(img.id, std::move(camera_dir)).first;
+  }
+  const fs::path& camera_dir = it->second;
   // Filename uses monotonic ns
   fs::path file_path = camera_dir / (std::to_string(img.ts.monotonic_ns) + ".png");
   // Placeholder: simply dump raw bytes (not valid PNG). Future: real PNG encoder.

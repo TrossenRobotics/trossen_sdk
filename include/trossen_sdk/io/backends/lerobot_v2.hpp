@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <unordered_map>
+#include <mutex>
 
 #include "trossen_sdk/io/backend.hpp"
 
@@ -42,6 +43,10 @@ private:
   std::filesystem::path images_root_;
   std::ofstream joint_csv_;
   bool header_written_{false};
+  std::mutex write_mutex_;
+  std::mutex open_mutex_;
+  bool opened_{false};
+  std::unordered_map<std::string, std::filesystem::path> image_dir_cache_;
 };
 
 } // namespace trossen::io::backends

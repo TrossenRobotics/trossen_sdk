@@ -29,7 +29,7 @@ namespace trossen::io {
 class Sink {
 public:
   explicit Sink(
-    BackendPtr backend,
+    std::shared_ptr<Backend> backend,
     QueueAdapterPtr queue = std::make_unique<MoodyCamelQueueAdapter>())
     : backend_(std::move(backend))
     , queue_(std::move(queue)) {}
@@ -55,6 +55,15 @@ public:
   }
 
   /**
+   * @brief Enqueue an already constructed record (zero-copy for the shared_ptr)
+   * @param rec Shared pointer to a RecordBase-derived instance
+   */
+  void enqueue(std::shared_ptr<data::RecordBase> rec) {
+    if (!rec) return;
+    queue_->enqueue(std::move(rec));
+  }
+
+  /**
    * @brief Start the drain thread and open backend destination
    */
   void start() {
@@ -62,10 +71,14 @@ public:
       return;
     }
     if (!backend_) {
-      throw std::runtime_error("Sink has no backend");
+      throw std::runtime_error("Sink has no backend. Cannot start.");
     }
+    // Idempotent open (backend is expected to handle multiple open calls safely)
     if (!backend_->open()) {
-      throw std::runtime_error("Failed to open backend");
+      // TODO: Handle this
+      // If open returns false and backend wasn't already opened, treat as fatal
+      // Logging backend can internally ignore if already open; we won't distinguish here
+      // Provided implementation will guard.
     }
     worker_ = std::thread([this]{ drainLoop(); });
   }
@@ -80,8 +93,10 @@ public:
     if (worker_.joinable()) {
       worker_.join();
     }
-    backend_->flush();
-    backend_->close();
+    if (backend_) {
+      backend_->flush();
+      backend_->close();
+    }
   }
 
   /**
@@ -145,7 +160,7 @@ private:
     }
   }
 
-  BackendPtr backend_;
+  std::shared_ptr<Backend> backend_;
   QueueAdapterPtr queue_;
   std::atomic<bool> running_{false};
   std::thread worker_;

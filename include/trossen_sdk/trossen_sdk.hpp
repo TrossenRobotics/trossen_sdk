@@ -6,6 +6,10 @@
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
 
+#include "trossen_sdk/hw/producer_base.hpp"
+#include "trossen_sdk/hw/arm/arm_producer.hpp"
+#include "trossen_sdk/hw/camera/opencv_producer.hpp"
+
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2.hpp"
 #include "trossen_sdk/io/backends/null_backend.hpp"

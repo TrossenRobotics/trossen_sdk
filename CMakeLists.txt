@@ -7,7 +7,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # Glob all *.cpp files in src/
 add_library(trossen_sdk
   src/backends/lerobot_v2.cpp
+  src/hw/arm/arm_producer.cpp
+  src/hw/camera/opencv_producer.cpp
 )
+
+# Required OpenCV dependency for camera producer
+find_package(OpenCV REQUIRED)
+target_include_directories(trossen_sdk PUBLIC ${OpenCV_INCLUDE_DIRS})
+target_link_libraries(trossen_sdk PUBLIC ${OpenCV_LIBS})
 
 target_include_directories(trossen_sdk PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
