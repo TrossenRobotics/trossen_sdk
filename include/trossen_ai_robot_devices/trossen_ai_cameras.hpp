@@ -45,71 +45,80 @@ struct ImageSaveTask {
  */
 class TrossenAICamera {
 public:
-        /**
-         * @brief Constructor for TrossenAICamera
-         * @param name Name of the camera
-         * @param serial_number Serial number of the camera
-         * @param capture_width Width of the captured images
-         * @param capture_height Height of the captured images
-         * @param fps Frames per second for image capture
-         * @param use_depth Flag to indicate if depth map should be captured
-         */
-        explicit TrossenAICamera(const std::string& name, const std::string& serial_number, 
-                             int capture_width = 640, int capture_height = 480, int fps = 30, bool use_depth = false);
-        
-        /**
-         * @brief Connect to the RealSense camera and start the pipeline
-         * Enables color and depth streams based on configuration
-         * Starts the camera pipeline
-         */
-        void connect() ;
+    /**
+     * @brief Constructor for TrossenAICamera
+     * @param name Name of the camera
+     * @param unique_id Unique identifier of the camera
+     * @param capture_width Width of the captured images
+     * @param capture_height Height of the captured images
+     * @param fps Frames per second for image capture
+     * @param use_depth Flag to indicate if depth map should be captured
+     */
+    TrossenAICamera(const std::string& name, const std::string& unique_id,
+                    int capture_width = 640, int capture_height = 480, int fps = 30, bool use_depth = false)
+        : name_(name), unique_id_(unique_id), capture_width_(capture_width), capture_height_(capture_height), fps_(fps), use_depth_(use_depth){};
 
-        /**
-         * @brief Disconnect from the camera
-         * Logs that the camera is being disconnected
-         */
-        void disconnect() ;
+    virtual ~TrossenAICamera() = default;
 
-        /**
-         * @brief Read a frame from the camera
-         * Waits for a new frameset and extracts color and depth frames
-         * @return ImageData structure containing color image and depth map frames
-         */
-        trossen_ai_robot_devices::ImageData read() ;
+    /**
+     * @brief Connect to the RealSense camera and start the pipeline
+     * Enables color and depth streams based on configuration
+     * Starts the camera pipeline
+     */
+    virtual void connect() = 0;
 
-        /**
-         * @brief Asynchronously read a frame from the camera
-         * @return ImageData structure containing color image and depth map
-         */
-        trossen_ai_robot_devices::ImageData async_read();
-        
-        // Getters
+    /**
+     * @brief Disconnect from the camera
+     * Logs that the camera is being disconnected
+     */
+    virtual void disconnect() = 0;
 
-        /// @brief Get the name of the camera
-        const std::string& name() const { return name_; }
+    /**
+     * @brief Read a frame from the camera
+     * Waits for a new frameset and extracts color and depth frames
+     * @return ImageData structure containing color image and depth map frames
+     */
+    virtual trossen_ai_robot_devices::ImageData read() = 0;
 
-        /// @brief Check if depth map is being used
-        const bool is_using_depth() const { return use_depth_; }
+    /**
+     * @brief Asynchronously read a frame from the camera
+     * @return ImageData structure containing color image and depth map
+     */
+    virtual ImageData async_read() = 0;
 
-        /// @brief Get the width of the captured images
-        int width() const { return capture_width_; }
+    /**
+     * @brief Find the cameras connected to the system.
+     * Save 1 image from each camera with the unique_id as the filename.
+     */
+    virtual void find_cameras() = 0;
 
-        /// @brief Get the height of the captured images
-        int height() const { return capture_height_; }
+    // Getters
 
-        /// @brief Get the frames per second for image capture
-        int fps() const { return fps_; }
+    /// @brief Get the name of the camera
+    const std::string& name() const { return name_; }
 
-        //TODO [TDS-31] Define channels based on image format
-        /// @brief Get the number of channels in the captured images
-        int channels() const { return 3; } // Assuming RGB images
+    /// @brief Check if depth map is being used
+    const bool is_using_depth() const { return use_depth_; }
+
+    /// @brief Get the width of the captured images
+    int width() const { return capture_width_; }
+
+    /// @brief Get the height of the captured images
+    int height() const { return capture_height_; }
+
+    /// @brief Get the frames per second for image capture
+    int fps() const { return fps_; }
+
+    //TODO [TDS-31] Define channels based on image format
+    /// @brief Get the number of channels in the captured images
+    int channels() const { return 3; } // Assuming RGB images
 
 
-    private:
+    protected:
         /// @brief Name of the camera
         std::string name_;
-        /// @brief Serial number of the camera
-        std::string serial_number_;
+        /// @brief Unique identifier of the camera
+        std::string unique_id_;
         /// @brief Width of the captured images
         int capture_width_ {640};
         /// @brief Height of the captured images
@@ -118,12 +127,43 @@ public:
         int fps_ {30};
         /// @brief Flag to indicate if depth map should be captured
         bool use_depth_ {false};
-        /// @brief Realsense camera pipeline
-        rs2::pipeline camera_;
+
     };
 
 
+class RealsenseCamera : public TrossenAICamera {
+    public:
+        RealsenseCamera(const std::string& name, const std::string& unique_id,
+                        int capture_width = 640, int capture_height = 480, int fps = 30, bool use_depth = false);
 
+        void connect() override ;
+        void disconnect() override;
+        trossen_ai_robot_devices::ImageData read() override;
+        trossen_ai_robot_devices::ImageData async_read() override;
+        void find_cameras() override;
+
+    private:
+        /// @brief RealSense camera pipeline
+        rs2::pipeline camera_;
+
+};
+
+class OpenCVCamera : public TrossenAICamera {
+    public:
+        OpenCVCamera(const std::string& name, const std::string& unique_id,
+                     int capture_width = 640, int capture_height = 480, int fps = 30, bool use_depth = false);
+
+        void connect() override ;
+        void disconnect() override;
+        trossen_ai_robot_devices::ImageData read() override;
+        trossen_ai_robot_devices::ImageData async_read() override;
+        void find_cameras() override;
+    
+    private:
+        /// @brief OpenCV VideoCapture object
+        cv::VideoCapture video_capture_;
+
+};
 
 class AsyncImageWriter {
 

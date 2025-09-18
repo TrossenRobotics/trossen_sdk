@@ -2,6 +2,7 @@
   "type": "widowx",
   "name": "widowxai",
   "ip_address": "192.168.1.4",
+  "camera_interface": "realsense",
   "cameras": [
     {
       "name": "cam_main",

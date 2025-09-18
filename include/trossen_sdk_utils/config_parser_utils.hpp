@@ -92,7 +92,7 @@ inline std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> create_rob
         auto robot_config = dynamic_cast<const trossen_sdk_config::BimanualWidowXRobotConfig&>(config);
         return std::make_shared<trossen_ai_robot_devices::robot::TrossenAIBimanualWidowXRobot>(robot_config);
     } else {
-        throw std::runtime_error("Unknown robot type in configuration");
+        throw std::runtime_error("Unknown robot type in configuration: " + config.get_name());
     }
 }
 

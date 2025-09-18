@@ -244,7 +244,7 @@ namespace robot {
         /// @brief Track connection status
         bool is_connected_ = false;
         /// @brief Cameras attached to the robot
-        std::vector<trossen_ai_robot_devices::TrossenAICamera> cameras_;
+        std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAICamera>> cameras_;
     };
 
     class TrossenAIBimanualWidowXRobot : public TrossenRobot  {
@@ -319,7 +319,7 @@ namespace robot {
         bool is_connected_ = false;
 
         /// @brief Cameras attached to the bimanual robot
-        std::vector<trossen_ai_robot_devices::TrossenAICamera> cameras_;
+        std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAICamera>> cameras_;
     };
 }
 } // namespace trossen_ai_robot_devices

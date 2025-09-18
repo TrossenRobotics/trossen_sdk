@@ -109,6 +109,8 @@ struct WidowXRobotConfig : public RobotConfigBase {
     std::string ip_address;
     /// @brief Camera configurations for the robot
     std::vector<CameraConfig> cameras;
+    // @brief Camera interface to use (e.g., "realsense", "opencv")
+    std::string camera_interface = "realsense"; // Default to realsense
 
     /** @brief Get the name of the robot
      * @return Name of the robot as a string
@@ -162,6 +164,9 @@ struct BimanualWidowXRobotConfig : public RobotConfigBase {
         return name;
     }
 
+    /// @brief Camera interface to use (e.g., "realsense", "opencv")
+    std::string camera_interface = "realsense"; // Default to realsense
+
     /// @brief Camera configurations for the bimanual robot
     std::vector<CameraConfig> cameras;  // Camera configuration for the follower arm
 };
@@ -171,9 +176,9 @@ struct BimanualWidowXRobotConfig : public RobotConfigBase {
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name, serial, fps, width, height, use_depth)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BaseConfig, name)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXLeaderConfig, name, left_ip_address, right_ip_address)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXRobotConfig, name, left_ip_address, right_ip_address, cameras)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXRobotConfig, name, left_ip_address, right_ip_address, camera_interface, cameras)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXLeaderConfig, name, ip_address)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXRobotConfig, name, ip_address, cameras)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXRobotConfig, name, ip_address, camera_interface, cameras)
 
 
 }  // namespace trossen_sdk_config

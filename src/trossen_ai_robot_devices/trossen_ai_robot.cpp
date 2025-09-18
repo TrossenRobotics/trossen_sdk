@@ -11,8 +11,20 @@ namespace trossen_ai_robot_devices {
             : name_(config.name), ip_address_(config.ip_address) {
 
             robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, trossen_sdk::LEADER_MODEL);
-            for (const auto& cam_config : config.cameras) {
-                cameras_.emplace_back(cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps, cam_config.use_depth);
+            // Check the camera interfaces and create camera objects
+            if (config.camera_interface == "realsense") {
+                for (const auto& cam_config : config.cameras) {
+                    cameras_.emplace_back(std::make_unique<trossen_ai_robot_devices::RealsenseCamera>(
+                        cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps, cam_config.use_depth));
+                }
+            } else if (config.camera_interface == "opencv") {
+                for (const auto& cam_config : config.cameras) {
+                    cameras_.emplace_back(std::make_unique<trossen_ai_robot_devices::OpenCVCamera>(
+                        cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps, cam_config.use_depth));
+                }
+            } else {
+                spdlog::error("Unknown camera interface: {}. Supported interfaces are 'realsense' and 'opencv'.", config.camera_interface);
+                throw std::runtime_error("Unknown camera interface: " + config.camera_interface);
             }
             spdlog::info("TrossenAIWidowXRobot initialized with name: {}, IP address: {}", name_, ip_address_);
         }
@@ -25,7 +37,7 @@ namespace trossen_ai_robot_devices {
             }
             robot_driver_->connect();
             for (auto& camera : cameras_) {
-                camera.connect();
+                camera->connect();
             }
             is_connected_ = true;
         }
@@ -35,7 +47,7 @@ namespace trossen_ai_robot_devices {
             spdlog::info("Disconnecting from robot: {}", name_);
             robot_driver_->disconnect();
             for (auto& camera : cameras_) {
-                camera.disconnect();
+                camera->disconnect();
             }
             is_connected_ = false;
         }
@@ -55,7 +67,7 @@ namespace trossen_ai_robot_devices {
             state.observation_state = robot_driver_->read(trossen_sdk::POSITION);
             // Read camera images
             for (auto& camera : cameras_) {
-                state.images.push_back(camera.async_read());
+                state.images.push_back(camera->async_read());
             }
             return state;
         }
@@ -80,7 +92,7 @@ namespace trossen_ai_robot_devices {
         std::vector<std::pair<std::string, std::string>> TrossenAIWidowXRobot::get_camera_names() const {
             std::vector<std::pair<std::string, std::string>> camera_names;
             for (const auto& camera : cameras_) {
-                camera_names.emplace_back(camera.name(), camera.is_using_depth() ? "depth" : "color");
+                camera_names.emplace_back(camera->name(), camera->is_using_depth() ? "depth" : "color");
             }
             return camera_names;
         }
@@ -89,8 +101,20 @@ namespace trossen_ai_robot_devices {
             : name_(config.name), right_ip_address_(config.right_ip_address), left_ip_address_(config.left_ip_address) {
             right_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.right_ip_address, trossen_sdk::FOLLOWER_MODEL);
             left_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.left_ip_address, trossen_sdk::FOLLOWER_MODEL);
-            for (const auto& cam_config : config.cameras) {
-                cameras_.emplace_back(cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps, cam_config.use_depth);
+            // Check the camera interfaces and create camera objects
+            if (config.camera_interface == "realsense") {
+                for (const auto& cam_config : config.cameras) {
+                    cameras_.emplace_back(std::make_unique<trossen_ai_robot_devices::RealsenseCamera>(
+                        cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps, cam_config.use_depth));
+                }
+            } else if (config.camera_interface == "opencv") {
+                for (const auto& cam_config : config.cameras) {
+                    cameras_.emplace_back(std::make_unique<trossen_ai_robot_devices::OpenCVCamera>(
+                        cam_config.name, cam_config.serial, cam_config.width, cam_config.height, cam_config.fps, cam_config.use_depth));
+                }
+            } else {
+                spdlog::error("Unknown camera interface: {}. Supported interfaces are 'realsense' and 'opencv'.", config.camera_interface);
+                throw std::runtime_error("Unknown camera interface: " + config.camera_interface);
             }
             spdlog::info("TrossenAIBimanualWidowXRobot initialized with name: {}, Right IP address: {}, Left IP address: {}", name_, right_ip_address_, left_ip_address_);
         }
@@ -103,7 +127,7 @@ namespace trossen_ai_robot_devices {
             right_robot_driver_->connect();
             left_robot_driver_->connect();
             for (auto& camera : cameras_) {
-                camera.connect();
+                camera->connect();
             }
             is_connected_ = true;
         }
@@ -128,7 +152,7 @@ namespace trossen_ai_robot_devices {
             state.observation_state.insert(state.observation_state.end(), left_positions.begin(), left_positions.end());
             // Read camera images
             for (auto& camera : cameras_) {
-                state.images.push_back(camera.async_read());
+                state.images.push_back(camera->async_read());
             }
             return state;
         }
@@ -153,7 +177,7 @@ namespace trossen_ai_robot_devices {
             right_robot_driver_->disconnect();
             left_robot_driver_->disconnect();
             for (auto& camera : cameras_) {
-                camera.disconnect();
+                camera->disconnect();
             }
             is_connected_ = false;
             spdlog::info("Disconnected from bimanual robot: {}", name_);
@@ -162,17 +186,16 @@ namespace trossen_ai_robot_devices {
         std::vector<std::string> TrossenAIBimanualWidowXRobot::get_joint_features() const{
             std::vector<std::string> right_features_raw = right_robot_driver_->get_joint_names();
             std::vector<std::string> left_features_raw = left_robot_driver_->get_joint_names();
-            std::vector<std::string> right_features, left_features;
+            std::vector<std::string> features;
             // Prefix joint names with "right_" and "left_" and suffix with ".pos"
             // This is to allow compatibility with LeRobot replay and visualization tools
             for (const auto& name : right_features_raw) {
-                right_features.push_back("right_" + name + ".pos");
+                features.push_back("right_" + name + ".pos");
             }
             for (const auto& name : left_features_raw) {
-                left_features.push_back("left_" + name + ".pos");
+                features.push_back("left_" + name + ".pos");
             }
-            right_features.insert(right_features.end(), left_features.begin(), left_features.end());
-            return right_features;
+            return features;
         }
 
         //TODO Improve this logic or delete the function if not needed
@@ -194,7 +217,7 @@ namespace trossen_ai_robot_devices {
         std::vector<std::pair<std::string, std::string>> TrossenAIBimanualWidowXRobot::get_camera_names() const {
             std::vector<std::pair<std::string, std::string>> camera_names;
             for (const auto& camera : cameras_) {
-                camera_names.emplace_back(camera.name(), camera.is_using_depth() ? "depth" : "color");
+                camera_names.emplace_back(camera->name(), camera->is_using_depth() ? "depth" : "color");
             }
             return camera_names;
         }
@@ -206,6 +229,8 @@ namespace trossen_ai_robot_devices {
         TrossenAIWidowXLeader::TrossenAIWidowXLeader(const trossen_sdk_config::WidowXLeaderConfig& config)
             : name_(config.name), ip_address_(config.ip_address) {
             robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, trossen_sdk::LEADER_MODEL);
+
+            spdlog::info("TrossenAIWidowXLeader initialized with name: {}, IP address: {}", name_, ip_address_);
         }
 
         void TrossenAIWidowXLeader::connect() {
@@ -246,6 +271,8 @@ namespace trossen_ai_robot_devices {
             : name_(config.name), left_ip_address_(config.left_ip_address), right_ip_address_(config.right_ip_address) {
             right_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, right_ip_address_, trossen_sdk::LEADER_MODEL);
             left_robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, left_ip_address_, trossen_sdk::LEADER_MODEL);
+                
+            spdlog::info("TrossenAIBimanualWidowXLeader initialized with name: {}, Right IP address: {}, Left IP address: {}", name_, right_ip_address_, left_ip_address_);
         }
         void TrossenAIBimanualWidowXLeader::connect() {
             if (is_connected_) {
