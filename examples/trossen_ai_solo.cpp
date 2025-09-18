@@ -18,6 +18,8 @@ const float CAPTURE_RATE_JOINT_STATES_HZ = 200.0f;
 const float CAPTURE_RATE_IMAGES_HZ = 30.0f;
 
 int main(int argc, char** argv) {
+  std::cout << "Using Trossen SDK version '" << trossen::core::version() << "'." << std::endl;
+
   // Shared backend with two type-specific sinks (joint states, images)
   auto backend = std::make_shared<trossen::io::backends::LeRobotV2Backend>(OUTPUT_DIR);
   // trossen::io::Sink joint_sink(backend);
@@ -53,8 +55,12 @@ int main(int argc, char** argv) {
   cam_cfg.device_index = 0; // "/dev/video0"
   cam_cfg.stream_id = "cam_high";
   cam_cfg.encoding = "bgr8";
-  cam_cfg.width = 640;
-  cam_cfg.height = 480;
+  // // 480p
+  // cam_cfg.width = 640;
+  // cam_cfg.height = 480;
+  // 1080p
+  cam_cfg.width = 1920;
+  cam_cfg.height = 1080;
   cam_cfg.fps = static_cast<int>(CAPTURE_RATE_IMAGES_HZ);
   cam_cfg.use_device_time = false; // TODO: set true if device provides timestamps
   cam_cfg.warmup_seconds = 2.0; // Discard first 2 seconds of frames
@@ -157,6 +163,17 @@ int main(int argc, char** argv) {
             << " dropped=" << cam_stats.dropped
             << " warmup_discarded=" << cam_stats.warmup_discarded
             << std::endl;
+  if (auto lerobot = std::dynamic_pointer_cast<trossen::io::backends::LeRobotV2Backend>(backend)) {
+    auto enc = lerobot->image_encode_stats();
+    std::cout << "Image encode stats:"
+              << " enqueued=" << enc.enqueued
+              << " encoded=" << enc.encoded
+              << " dropped=" << enc.dropped
+              << " avg_ms=" << enc.avg_encode_ms()
+              << " max_ms=" << (enc.encode_time_ns_max / 1e6)
+              << " q_high_water=" << enc.queue_high_water
+              << std::endl;
+  }
   return 0;
   // std::cout << "Saved joint states: " << joints_saved << " (~" << expected_joint_records << ")\n"
   //           << "Saved images:      " << images_saved << " (~" << expected_image_records << ")\n"

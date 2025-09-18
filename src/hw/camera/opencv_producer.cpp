@@ -22,6 +22,37 @@ bool OpenCvCameraProducer::open_if_needed() {
     std::cerr << "Failed to open camera index " << cfg_.device_index << std::endl;
     return false;
   }
+  // Attempt pixel format (FOURCC) negotiation if a preference list was provided.
+  // We do this immediately after opening and before setting resolution/FPS so driver
+  // can reconfigure cleanly.
+  if (!cfg_.preferred_fourcc.empty()) {
+    for (size_t i = 0; i < cfg_.preferred_fourcc.size(); ++i) {
+      int32_t code = cfg_.preferred_fourcc[i];
+      // Break out early if already in desired format (avoid redundant set calls)
+      double current_fourcc = cap_.get(cv::CAP_PROP_FOURCC);
+      if (static_cast<int32_t>(current_fourcc) == code) {
+        break; // already negotiated
+      }
+      if (!cap_.set(cv::CAP_PROP_FOURCC, static_cast<double>(code))) {
+        char c0 = static_cast<char>(code & 0xFF);
+        char c1 = static_cast<char>((code >> 8) & 0xFF);
+        char c2 = static_cast<char>((code >> 16) & 0xFF);
+        char c3 = static_cast<char>((code >> 24) & 0xFF);
+        std::cerr << "Failed to set FOURCC=" << c0 << c1 << c2 << c3 << " (index " << i << ")" << std::endl;
+        continue;
+      }
+      // Re-read to verify which format we actually got.
+      double after = cap_.get(cv::CAP_PROP_FOURCC);
+      if (static_cast<int32_t>(after) == code) {
+        char c0 = static_cast<char>(code & 0xFF);
+        char c1 = static_cast<char>((code >> 8) & 0xFF);
+        char c2 = static_cast<char>((code >> 16) & 0xFF);
+        char c3 = static_cast<char>((code >> 24) & 0xFF);
+        std::cout << "Negotiated FOURCC=" << c0 << c1 << c2 << c3 << " (preference " << i << ")" << std::endl;
+        break; // stop after first successful preference
+      }
+    }
+  }
   if (cfg_.width > 0 && !cap_.set(cv::CAP_PROP_FRAME_WIDTH, cfg_.width)) {
     std::cerr << "Failed to set width=" << cfg_.width << std::endl; return false; }
   if (cfg_.height > 0 && !cap_.set(cv::CAP_PROP_FRAME_HEIGHT, cfg_.height)) {
@@ -41,6 +72,9 @@ bool OpenCvCameraProducer::open_if_needed() {
     '\0'};
   std::cout << "Camera opened: " << eff_w << "x" << eff_h << " @ " << eff_fps
             << " FPS FOURCC=" << fourcc_chars << std::endl;
+  if (cfg_.fps > 0 && static_cast<int>(eff_fps) != cfg_.fps) {
+    std::cerr << "Warning: requested fps=" << cfg_.fps << " but device reports " << eff_fps << std::endl;
+  }
   opened_ = true;
   return true;
 }

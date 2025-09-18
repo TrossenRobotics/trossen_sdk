@@ -4,9 +4,11 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <vector>
+#include <cstdint>
 
-#include <opencv2/core.hpp>
-#include <opencv2/videoio.hpp>
+#include "opencv2/core.hpp"
+#include "opencv2/videoio.hpp"
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
@@ -40,7 +42,16 @@ public:
 
     /// @brief Seconds to warm up (discard frames) after device open before emitting
     double warmup_seconds = 0.0;
-  };
+
+    /// @brief Preferred FOURCC pixel formats (in order). Default: MJPG, YUYV
+    std::vector<int32_t> preferred_fourcc = {
+      cv::VideoWriter::fourcc('M','J','P','G'),
+      cv::VideoWriter::fourcc('Y','U','Y','V')
+    };
+
+    /// @brief Whether to enforce the requested fps (may reduce if device cannot keep up)
+    bool enforce_requested_fps = true;
+};
 
   /**
    * @brief Construct an OpenCvCameraProducer
