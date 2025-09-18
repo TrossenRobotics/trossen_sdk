@@ -87,11 +87,22 @@ void run_mock_session(
   int image_hz = 10,
   int runtime_ms = 500)
 {
-  trossen::io::Sink sink(std::make_unique<trossen::io::backends::LeRobotV2Backend>());
-  sink.start(output_dir);
+  trossen::io::BackendPtr backend = std::make_unique<trossen::io::backends::LeRobotV2Backend>(output_dir);
+  trossen::io::Sink sink(std::move(backend));
+  sink.start();
 
   MockJointStateGenerator joint_gen;
   MockImageGenerator image_gen;
+
+  size_t expected_records = (joint_hz * runtime_ms / 1000) + (image_hz * runtime_ms / 1000);
+  std::cout << "Expecting ~"
+            << expected_records
+            << " total records ("
+            << (joint_hz * runtime_ms / 1000)
+            << " joint states, "
+            << (image_hz * runtime_ms / 1000)
+            << " images)"
+            << std::endl;
 
   auto start = steady_clock::now();
   auto next_joint = start;
@@ -113,12 +124,18 @@ void run_mock_session(
   }
   sink.stop();
   std::cout << "Mock session complete. Output at: " << output_dir << std::endl;
+  std::cout << "Saved "
+            << sink.processed_count()
+            << " records ("
+            << (100.0f * sink.processed_count() / expected_records)
+            << "% of expected)"
+            << std::endl;
 }
 
 int main(int argc, char** argv) {
   std::string output_dir = "output";
   // Optional output directory and runtime_ms arguments
-  int runtime_ms = 1000;
+  int runtime_ms = 10000;
   if (argc > 1) {
     output_dir = argv[1];
   }

@@ -27,7 +27,8 @@ namespace trossen::io::backends {
  */
 class LeRobotV2Backend : public io::Backend {
 public:
-  bool open(const std::string& uri) override;
+  LeRobotV2Backend(const std::string& uri);
+  bool open() override;
   void write(const data::RecordBase& record) override;
   void writeBatch(std::span<const data::RecordBase* const> records) override;
   void flush() override;

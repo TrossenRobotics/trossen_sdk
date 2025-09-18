@@ -1,6 +1,6 @@
 /**
  * @file trossen_ai_solo.cpp
- * @brief Example program that logs joint states from a Trossen AI-Solo robot
+ * @brief Example program that logs joint states from a Trossen AI Solo robot
  */
 
 #include <chrono>
@@ -12,15 +12,11 @@
 
 using namespace std::chrono;
 
-const int DURATION_S = 10; // seconds
+const int DURATION_S = 10;
+const std::string OUTPUT_DIR = "output";
+float CAPTURE_RATE_HZ = 200.0f;
 
 int main(int argc, char** argv) {
-  std::string output_dir = "output";
-  // Optional output directory argument
-  if (argc > 1) {
-    output_dir = argv[1];
-  }
-
   trossen_arm::TrossenArmDriver leader;
   try {
     leader.configure(
@@ -44,31 +40,32 @@ int main(int argc, char** argv) {
     std::cerr << "Failed to configure follower: " << e.what() << "\n";
     return 1;
   }
+
+  // TODO: Fix for changed gripper fingers
   auto joint_limits = follower.get_joint_limits();
   joint_limits[follower.get_num_joints() - 1].position_tolerance = 0.01;
   follower.set_joint_limits(joint_limits);
 
-  // Configure the sink and scheduler
-  trossen::io::Sink sink(std::make_unique<trossen::io::backends::LeRobotV2Backend>());
+  // Configure the backend, sink, and scheduler
+  trossen::io::BackendPtr backend = std::make_unique<trossen::io::backends::LeRobotV2Backend>(OUTPUT_DIR);
+  trossen::io::Sink sink(std::move(backend));
   trossen::runtime::Scheduler scheduler;
 
-  // Set capture task at 200 Hz
-  float capture_rate_hz = 200.0f;
-  std::chrono::milliseconds capture_period_ms(static_cast<int>(1000.0f / capture_rate_hz));
+  std::chrono::milliseconds capture_period_ms(static_cast<int>(1000.0f / CAPTURE_RATE_HZ));
 
-  scheduler.add_task([&leader, &sink]{
+  scheduler.add_task([&follower, &sink]{
     static uint64_t seq = 0;
-    auto output = leader.get_robot_output();
+    auto output = follower.get_robot_output();
     sink.emplace<trossen::data::JointStateRecord>(
       trossen::data::make_timestamp_now(),
       seq++,
-      "leader/joint_states",
+      "follower/joint_states",
       output.joint.all.positions,
       output.joint.all.velocities,
       output.joint.all.efforts);
-  }, capture_period_ms); // 5 ms
+  }, capture_period_ms);
 
-  sink.start(output_dir);
+  sink.start();
 
   // Set both arms to position control mode and stage them
   leader.set_all_modes(trossen_arm::Mode::position);
@@ -79,6 +76,9 @@ int main(int argc, char** argv) {
   leader.set_all_positions(starting_positions, moving_time, false);
   follower.set_all_positions(starting_positions, moving_time, false);
   std::this_thread::sleep_for(std::chrono::duration<float>(moving_time + 0.1f));
+
+  int expected_records = static_cast<int>(CAPTURE_RATE_HZ * DURATION_S);
+  std::cout << "Expecting ~" << expected_records << " joint state records from follower" << std::endl;
 
   auto start = steady_clock::now();
   auto end_time = start + seconds(DURATION_S);
@@ -108,6 +108,7 @@ int main(int argc, char** argv) {
   follower.set_all_positions(starting_positions, moving_time, false);
   std::this_thread::sleep_for(std::chrono::duration<float>(moving_time + 0.1f));
 
-  std::cout << "Logging complete. Output at: " << output_dir << std::endl;
+  std::cout << "Logging complete. Output at: " << OUTPUT_DIR << std::endl;
+  std::cout << "Saved " << sink.processed_count() << " records (" << (100.0f * sink.processed_count() / expected_records) << "% of expected)" << std::endl;
   return 0;
 }

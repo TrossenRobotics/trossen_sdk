@@ -11,8 +11,12 @@ namespace trossen::io::backends {
 
 namespace fs = std::filesystem;
 
-bool LeRobotV2Backend::open(const std::string& uri) {
-  root_ = fs::path(uri);
+LeRobotV2Backend::LeRobotV2Backend(const std::string& uri)
+  : Backend(uri) {
+}
+
+bool LeRobotV2Backend::open() {
+  root_ = fs::path(uri_);
   images_root_ = root_ / "observations" / "images";
   try {
     fs::create_directories(images_root_);

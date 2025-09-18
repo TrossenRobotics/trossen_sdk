@@ -56,11 +56,17 @@ public:
 
   /**
    * @brief Start the drain thread and open backend destination
-   * @param uri Destination identifier (file path, etc.)
    */
-  void start(const std::string& uri) {
-    if (running_.exchange(true)) return;
-    backend_->open(uri);
+  void start() {
+    if (running_.exchange(true)) {
+      return;
+    }
+    if (!backend_) {
+      throw std::runtime_error("Sink has no backend");
+    }
+    if (!backend_->open()) {
+      throw std::runtime_error("Failed to open backend");
+    }
     worker_ = std::thread([this]{ drainLoop(); });
   }
 
@@ -68,10 +74,21 @@ public:
    * @brief Stop draining, flush, and close backend
    */
   void stop() {
-    if (!running_.exchange(false)) return;
-    if (worker_.joinable()) worker_.join();
+    if (!running_.exchange(false)) {
+      return;
+    }
+    if (worker_.joinable()) {
+      worker_.join();
+    }
     backend_->flush();
     backend_->close();
+  }
+
+  /**
+   * @brief Get count of records processed
+   */
+  size_t processed_count() const noexcept {
+    return num_records_processed_.load(std::memory_order_relaxed);
   }
 
 private:
@@ -99,6 +116,7 @@ private:
       }
       if (count > 0) {
         backend_->writeBatch(std::span<const data::RecordBase* const>(batch_ptrs.data(), count));
+        num_records_processed_.fetch_add(count, std::memory_order_relaxed);
         batch_storage_.clear();
       } else {
         // TODO: adaptive timing strategy; simple sleep for now
@@ -115,12 +133,14 @@ private:
       rec2.reset();
       if (count2 == kMaxBatch) {
         backend_->writeBatch(std::span<const data::RecordBase* const>(tail_batch.data(), count2));
+        num_records_processed_.fetch_add(count2, std::memory_order_relaxed);
         batch_storage_.clear();
         count2 = 0;
       }
     }
     if (count2 > 0) {
       backend_->writeBatch(std::span<const data::RecordBase* const>(tail_batch.data(), count2));
+      num_records_processed_.fetch_add(count2, std::memory_order_relaxed);
       batch_storage_.clear();
     }
   }
@@ -129,7 +149,11 @@ private:
   QueueAdapterPtr queue_;
   std::atomic<bool> running_{false};
   std::thread worker_;
-  // Holds shared_ptrs for current batch to ensure lifetime until backend consumes them
+
+  /// Count of records processed
+  std::atomic<size_t> num_records_processed_{0};
+
+  /// Holds shared_ptrs for current batch to ensure lifetime until backend consumes them
   std::vector<std::shared_ptr<data::RecordBase>> batch_storage_;
 };
 

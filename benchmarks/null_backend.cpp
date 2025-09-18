@@ -68,8 +68,9 @@ Args parse(int argc, char** argv) {
 
 int main(int argc, char** argv) {
   auto args = parse(argc, argv);
-  trossen::io::Sink sink(std::make_unique<trossen::io::backends::NullBackend>());
-  sink.start("null://benchmark");
+  trossen::io::BackendPtr backend = std::make_unique<trossen::io::backends::NullBackend>("null://");
+  trossen::io::Sink sink(std::move(backend));
+  sink.start();
 
   auto start = steady_clock::now();
   auto end_time = start + milliseconds(args.duration_ms);

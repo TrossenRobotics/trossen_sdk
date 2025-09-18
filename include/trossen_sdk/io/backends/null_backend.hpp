@@ -18,14 +18,14 @@ namespace trossen::io::backends {
  */
 class NullBackend : public io::Backend {
 public:
+  explicit NullBackend(const std::string& uri = "null://") : Backend(uri) {}
   /**
    * @brief Open a null logging destination
    *
    * @param uri Voided backend uri
    * @return true on success
    */
-  bool open(const std::string& uri) override {
-    (void)uri;
+  bool open() override {
     opened_ = true;
     return true;
   }

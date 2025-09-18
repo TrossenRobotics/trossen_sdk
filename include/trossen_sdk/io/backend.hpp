@@ -23,13 +23,24 @@ namespace trossen::io {
  */
 class Backend {
 public:
+  /**
+   * @brief Construct a backend with the given destination URI
+   *
+   * @param uri Path or logical destination identifier
+   */
+  Backend(const std::string& uri) : uri_(uri) {};
+
+  /**
+   * @brief Virtual destructor
+   */
   virtual ~Backend() = default;
+
   /**
    * @brief Open a logging destination
    * @param uri Path or logical destination identifier
    * @return true on success
    */
-  virtual bool open(const std::string& uri) = 0;
+  virtual bool open() = 0;
 
   /**
    * @brief Serialize & persist a single record
@@ -61,6 +72,10 @@ public:
    * @brief Close the backend
    */
   virtual void close() = 0;
+
+protected:
+  /// Destination identifier (file path, etc.)
+  std::string uri_{""};
 };
 
 /** @brief Unique owning pointer for a backend implementation. */
