@@ -29,6 +29,14 @@ struct ImageData {
     int64_t timestamp_ms;
 };
 
+/// @brief Data structure to hold the image(cv::Mat) and the filename where it should be saved
+struct ImageSaveTask {
+    /// @brief OpenCV Mat containing the image data
+    cv::Mat image;
+    /// @brief Filename where the image should be saved
+    std::string filename;
+};
+
 
 /**
  * @brief Class representing a Trossen AI Camera using Intel RealSense
@@ -139,11 +147,11 @@ public:
      * @param filename Path where the image should be saved
      * Adds the image and filename to the queue for asynchronous writing
      */
-    void push(const cv::Mat& image, const std::string& filename);
+    void push(ImageSaveTask task);
 
 private:
     /// @brief Queue to hold images and their filenames
-    std::queue<std::pair<cv::Mat, std::string>> image_queue_;
+    std::queue<ImageSaveTask> image_queue_;
     /// @brief Mutex for thread-safe access to the queue
     std::mutex mtx_;
     /// @brief Condition variable for notifying worker threads

@@ -113,11 +113,6 @@ namespace trossen_dataset
         // TODO Use string formatting utility
         std::string episode_folder_name = fmt::format("episode_{:06}", current_episode_->get_episode_idx());
 
-        // For each camera, create a folder for the episode if it doesn't exist
-        std::vector<std::pair<std::string, std::string>> camera_names = robot_->get_camera_names();
-        if (camera_names.empty()) {
-            spdlog::warn("No cameras found on the robot.");
-        }
 
         // Push images to the image writer for asynchronous writing with appropriate filenames using frame index
         for (const auto& image_data : frame.images) {
@@ -125,13 +120,13 @@ namespace trossen_dataset
             std::string image_path = fmt::format(trossen_sdk::IMAGE_PATH, 0,camera_name,current_episode_->get_episode_idx(), frame.frame_idx);
             std::string image_file_path = (root_ / repo_id_ / dataset_name_ / image_path).string();
             // Push the image to the writer
-            image_writer_.push(image_data.image, image_file_path);
+            image_writer_.push(trossen_ai_robot_devices::ImageSaveTask{image_data.image, image_file_path});
 
             if(!image_data.depth_map.empty()) {
                 std::string depth_path = fmt::format(trossen_sdk::IMAGE_PATH, 0,camera_name + "_depth",current_episode_->get_episode_idx(), frame.frame_idx);
                 std::string depth_file_path = (root_ / repo_id_ / dataset_name_ / depth_path).string();
                 // Push the depth map to the writer
-                image_writer_.push(image_data.depth_map, depth_file_path);
+                image_writer_.push(trossen_ai_robot_devices::ImageSaveTask{image_data.depth_map, depth_file_path});
             }
         }
 

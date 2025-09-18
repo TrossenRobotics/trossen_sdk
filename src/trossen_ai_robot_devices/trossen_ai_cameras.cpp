@@ -150,11 +150,11 @@ AsyncImageWriter::~AsyncImageWriter() {
     }
 }
 
-void AsyncImageWriter::push(const cv::Mat& image, const std::string& filename) {
+void AsyncImageWriter::push(ImageSaveTask task) {
     // Add image and filename to the queue
     {
         std::lock_guard<std::mutex> lock(mtx_);
-        image_queue_.emplace(image.clone(), filename);  // ensure data safety
+        image_queue_.emplace(std::move(task));  // ensure data safety
     }
     cv_.notify_one();
 }
@@ -172,51 +172,51 @@ void AsyncImageWriter::worker_loop() {
             break;
 
         // Get the next image and filename from the queue
-        auto [image, filename] = std::move(image_queue_.front());
+        ImageSaveTask task = std::move(image_queue_.front());
         image_queue_.pop();
         lock.unlock();
-        if(image.empty()) {
-            spdlog::debug("Depth image is empty, skipping: {}", filename);
+        if(task.image.empty()) {
+            spdlog::debug("Image is empty, skipping: {}", task.filename);
             continue;
         }
 
         cv::Mat image_to_write;
         // Check the channel count to distinguish depth from color
-        if (image.channels() == 1) {
+        if (task.image.channels() == 1) {
             // If the image is already CV_16UC1, no need to convert
-            if (image.type() != CV_16UC1) {
+            if (task.image.type() != CV_16UC1) {
                 // TODO [TDS-36]: Handle different depth formats if necessary
                 // Convert to CV_16UC1 assuming the input is in meters (float) and we want millimeters (int)
-                image.convertTo(image_to_write, CV_16UC1, 1000);
+                task.image.convertTo(image_to_write, CV_16UC1, 1000);
             } else {
-                image_to_write = image;
+                image_to_write = task.image;
             }
         } else {
-            if (image.channels() == 3) {
+            if (task.image.channels() == 3) {
                 // Convert RGB to BGR for OpenCV
-                cv::cvtColor(image, image_to_write, cv::COLOR_RGB2BGR);
-            } else if (image.channels() == 4) {
+                cv::cvtColor(task.image, image_to_write, cv::COLOR_RGB2BGR);
+            } else if (task.image.channels() == 4) {
                 // Convert RGBA to BGR for OpenCV
-                cv::cvtColor(image, image_to_write, cv::COLOR_RGBA2BGR);
+                cv::cvtColor(task.image, image_to_write, cv::COLOR_RGBA2BGR);
             } else {
                 // Unexpected, but save as is
-                image_to_write = image;
+                image_to_write = task.image;
             }
         }
         try {
                 // Check if the parent directory exists, if not create it
-                std::filesystem::path file_path(filename);
+                std::filesystem::path file_path(task.filename);
                 std::filesystem::path parent_dir = file_path.parent_path();
                 if (!std::filesystem::exists(parent_dir)) {
                     std::filesystem::create_directories(parent_dir);
                 }
-                if (!cv::imwrite(filename, image_to_write)) {
-                    spdlog::error("Failed to write image to: {}", filename);
+                if (!cv::imwrite(task.filename, image_to_write)) {
+                    spdlog::error("Failed to write image to: {}", task.filename);
                 }
             } catch (const cv::Exception& e) {
-                spdlog::error("Exception while writing image to {}: {}", filename, e.what());
+                spdlog::error("Exception while writing image to {}: {}", task.filename, e.what());
             }
     }
 }
 
-} // namespace trossen_data_collection_sdk
+} // namespace trossen_ai_robot_devices
