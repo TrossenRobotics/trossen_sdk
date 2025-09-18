@@ -11,6 +11,8 @@
 #include <string>
 #include <vector>
 
+#include "opencv2/core.hpp"
+
 #include "trossen_sdk/data/timestamp.hpp"
 
 namespace trossen::data {
@@ -75,8 +77,8 @@ struct ImageRecord : public RecordBase {
   // Encoding string (e.g., "rgb8")
   std::string encoding;
 
-  // Image bytes
-  std::shared_ptr<std::vector<uint8_t>> data;
+  // Image data stored as OpenCV matrix (reference-counted internally)
+  cv::Mat image;
 };
 
 } // namespace trossen::data

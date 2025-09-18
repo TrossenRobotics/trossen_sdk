@@ -64,27 +64,21 @@ bool OpenCvCameraProducer::warmup() {
 
 void OpenCvCameraProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
   if (!open_if_needed()) return; // silent fail if cannot open
-  cv::Mat frame;
-  if (!cap_.read(frame)) { ++stats_.dropped; return; }
+  auto img = std::make_shared<data::ImageRecord>();
+  if (!cap_.read(img->image)) { ++stats_.dropped; return; }
 
   data::Timestamp ts;
   uint64_t mono_now = data::now_mono_ns();
   ts.monotonic_ns = mono_now;
   ts.realtime_ns = data::now_real_ns();
 
-  auto img = std::make_shared<data::ImageRecord>();
   img->ts = ts;
   img->seq = seq_++;
   img->id = cfg_.stream_id;
-  img->width = static_cast<uint32_t>(frame.cols);
-  img->height = static_cast<uint32_t>(frame.rows);
+  img->width = static_cast<uint32_t>(img->image.cols);
+  img->height = static_cast<uint32_t>(img->image.rows);
   img->encoding = cfg_.encoding;
-  img->channels = static_cast<uint32_t>(frame.channels());
-
-  size_t bytes = frame.total() * frame.elemSize();
-  auto buffer = std::make_shared<std::vector<uint8_t>>(bytes);
-  std::memcpy(buffer->data(), frame.data, bytes);
-  img->data = buffer;
+  img->channels = static_cast<uint32_t>(img->image.channels());
 
   emit(img);
   ++stats_.produced;

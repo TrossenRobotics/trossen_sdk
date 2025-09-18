@@ -4,10 +4,15 @@
 #include <sstream>
 #include <iomanip>
 
+#include "opencv2/imgcodecs.hpp"
+
 #include "trossen_sdk/data/record.hpp"
 
 // For PNG writing we stub out with raw dump placeholder (future: integrate stb_image_write or libpng)
 namespace trossen::io::backends {
+
+// OpenCV PNG compression level (0-9)
+const int PNG_COMPRESSION_LEVEL = 3;
 
 namespace fs = std::filesystem;
 
@@ -100,9 +105,15 @@ void LeRobotV2Backend::writeJointState(const data::RecordBase& base) {
 }
 
 void LeRobotV2Backend::writeImage(const data::RecordBase& base) {
-  // TODO: Implement
-  auto& img = static_cast<const data::ImageRecord&>(base);
+  const auto& img = static_cast<const data::ImageRecord&>(base);
+
+  // exit early if nothing to write
+  if (img.image.empty()) {
+    return;
+  }
+
   // Directory per camera id (cached)
+  // TODO: this could be moved to a pre-processing step if desired
   auto it = image_dir_cache_.find(img.id);
   if (it == image_dir_cache_.end()) {
     fs::path camera_dir = images_root_ / img.id;
@@ -111,15 +122,17 @@ void LeRobotV2Backend::writeImage(const data::RecordBase& base) {
     it = image_dir_cache_.emplace(img.id, std::move(camera_dir)).first;
   }
   const fs::path& camera_dir = it->second;
-  // Filename uses monotonic ns
+
   fs::path file_path = camera_dir / (std::to_string(img.ts.monotonic_ns) + ".png");
-  // Placeholder: simply dump raw bytes (not valid PNG). Future: real PNG encoder.
-  std::ofstream ofs(file_path.string(), std::ios::binary | std::ios::out | std::ios::trunc);
-  if (!ofs) return;
-  // Minimal pseudo header to signal placeholder
-  ofs << "FAKEPNG";
-  if (img.data && !img.data->empty()) {
-    ofs.write(reinterpret_cast<const char*>(img.data->data()), static_cast<std::streamsize>(img.data->size()));
+
+  // PNG compression params: 3 is moderate balance size/speed
+  static const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, PNG_COMPRESSION_LEVEL };
+  try {
+    if (!cv::imwrite(file_path.string(), img.image, params)) {
+      std::cerr << "Failed to write PNG: " << file_path << std::endl;
+    }
+  } catch (const cv::Exception& e) {
+    std::cerr << "OpenCV exception writing PNG (" << file_path << "): " << e.what() << std::endl;
   }
 }
 
