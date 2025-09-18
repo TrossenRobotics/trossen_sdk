@@ -55,7 +55,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     // Create a robot instance from the configuration
-    auto follower_config = trossen_sdk_config::load_follower_config(foll_config_file);
+    auto follower_config = trossen_sdk_config::load_robot_config(foll_config_file);
     auto robot_controller = trossen_sdk_config::create_robot_from_config(*follower_config);
 
     std::filesystem::path root_path = root.empty() ? trossen_sdk::DEFAULT_ROOT_PATH : std::filesystem::path(root);

@@ -59,7 +59,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     
-    auto follower_config = trossen_sdk_config::load_follower_config(foll_config_file);
+    auto follower_config = trossen_sdk_config::load_robot_config(foll_config_file);
     auto robot_controller = trossen_sdk_config::create_robot_from_config(*follower_config);
 
     auto teleop_config = trossen_sdk_config::load_leader_config(lead_config_file);

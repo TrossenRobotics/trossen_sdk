@@ -50,7 +50,7 @@ inline std::shared_ptr<trossen_sdk_config::LeaderConfigBase> load_leader_config(
  * This function reads the JSON file, determines the type of follower robot configuration,
  * and deserializes it into the appropriate derived class of RobotConfigBase.
  */
-inline std::shared_ptr<trossen_sdk_config::RobotConfigBase> load_follower_config(const std::string& json_path) {
+inline std::shared_ptr<trossen_sdk_config::RobotConfigBase> load_robot_config(const std::string& json_path) {
 
     // Read the JSON file
     std::ifstream file(json_path);

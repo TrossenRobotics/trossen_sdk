@@ -555,9 +555,9 @@ namespace trossen_dataset
             }
         }
         // Compute image statistics for each camera
-        for (const auto& camera_name : robot_->get_camera_names())
+        for (const auto& camera_info : robot_->get_camera_names_and_types())
         {
-            std::string image_key = "observation.images." + camera_name.first;
+            std::string image_key = "observation.images." + camera_info.name;
             //Get image paths for the current episode and camera
             std::string image_folder_path = get_image_path();
 
@@ -566,7 +566,7 @@ namespace trossen_dataset
             std::string episode_folder_name = fmt::format("episode_{:06}", episode_index);
 
             // Construct the full path to the episode's image directory for the current camera
-            std::filesystem::path episode_image_dir = std::filesystem::path(image_folder_path)/"chunk-000" / camera_name.first / episode_folder_name;
+            std::filesystem::path episode_image_dir = std::filesystem::path(image_folder_path)/"chunk-000" / camera_info.name / episode_folder_name;
             if (!std::filesystem::exists(episode_image_dir)) {
                 spdlog::warn("Image directory does not exist: {}", episode_image_dir.string());
                 continue;
@@ -911,15 +911,15 @@ namespace trossen_dataset
         features["index"] = index_feature;
         features["task_index"] = task_index_feature;
 
-        // Assuming robot.get_camera_names() returns a list of camera identifiers
-        for (const auto &camera_name : robot.get_camera_names())
+        // Assuming robot.get_camera_names_and_types() returns a list of camera identifiers
+        for (const auto &cam_info : robot.get_camera_names_and_types())
         {
-            features["observation.images." + camera_name.first] = camera_feature;
+            features["observation.images." + cam_info.name] = camera_feature;
         }
 
         info_["features"] = features;
 
-        // Miscallaneous Feature
+        // Miscellaneous Feature
         info_["total_episodes"] = 0;
         info_["total_frames"] = 0;
         // TODO [TDS-25]: Update chunks based on total number of unique tasks

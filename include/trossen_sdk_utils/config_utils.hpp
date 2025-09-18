@@ -47,6 +47,8 @@ struct BaseConfig {
  * and a method to get the robot's name.
  */
 struct RobotConfigBase {
+    /// @brief Name of the robot
+    std::string name;
     /**
      * @brief Virtual destructor
      */
@@ -55,7 +57,12 @@ struct RobotConfigBase {
      * @brief Get the name of the robot
      * @return Name of the robot as a string
      */
-    virtual std::string get_name() const = 0;
+    /** @brief Get the name of the robot
+     * @return Name of the robot as a string
+     */
+    std::string get_name() const {
+        return name;
+    }
 };
 
 /**
@@ -64,7 +71,8 @@ struct RobotConfigBase {
  * and a method to get the leader robot's name.
  */
 struct LeaderConfigBase {
-
+    /// @brief Name of the leader robot
+    std::string name;
     /** @brief Virtual destructor
      *  This is a virtual destructor for the leader configuration base class.
     */
@@ -73,7 +81,9 @@ struct LeaderConfigBase {
     /** @brief Get the name of the leader robot
      * @return Name of the leader robot as a string
     */
-    virtual std::string get_name() const = 0;
+    std::string get_name() const {
+        return name;
+    }
 };
 
 
@@ -83,17 +93,8 @@ struct LeaderConfigBase {
  * It inherits from LeaderConfigBase.
  */
 struct WidowXLeaderConfig : public LeaderConfigBase {
-    /// @brief Name of the leader robot
-    std::string name;
     /// @brief IP address of the leader robot
     std::string ip_address;
-
-    /** @brief Get the name of the leader robot 
-     * @return Name of the leader robot as a string
-    */
-    std::string get_name() const override {
-        return name;
-    }
 };
 
 
@@ -103,21 +104,12 @@ struct WidowXLeaderConfig : public LeaderConfigBase {
  * IP addresses for both arms, and camera configurations. It inherits from RobotConfigBase.
  */
 struct WidowXRobotConfig : public RobotConfigBase {
-    /// @brief Name of the robot
-    std::string name;
     /// @brief IP address of the robot
     std::string ip_address;
     /// @brief Camera configurations for the robot
     std::vector<CameraConfig> cameras;
     // @brief Camera interface to use (e.g., "realsense", "opencv")
     std::string camera_interface = "realsense"; // Default to realsense
-
-    /** @brief Get the name of the robot
-     * @return Name of the robot as a string
-     */
-    std::string get_name() const override {
-        return name;
-    }
 };
 
 
@@ -127,20 +119,12 @@ struct WidowXRobotConfig : public RobotConfigBase {
  * including its name, IP addresses for both arms, and camera configurations. It inherits from LeaderConfigBase.
  */
 struct BimanualWidowXLeaderConfig : public LeaderConfigBase {
-    /// @brief Name of the bimanual robot leader
-    std::string name;
+
     /// @brief IP address of the left arm
     std::string left_ip_address;
     /// @brief IP address of the right arm
     std::string right_ip_address;
 
-    /**
-     * @brief Get the name of the bimanual robot leader
-     * @return Name of the bimanual robot leader as a string
-     */
-    std::string get_name() const override {
-        return name;
-    }
 };
 
 
@@ -150,19 +134,10 @@ struct BimanualWidowXLeaderConfig : public LeaderConfigBase {
  * IP addresses for both arms, and camera configurations. It inherits from RobotConfigBase.
  */
 struct BimanualWidowXRobotConfig : public RobotConfigBase {
-    /// @brief Name of the bimanual robot
-    std::string name;
     /// @brief IP address of the left arm
     std::string left_ip_address;
     /// @brief IP address of the right arm
     std::string right_ip_address;
-
-    /** @brief Get the name of the bimanual robot
-     * @return Name of the bimanual robot as a string
-     */
-    std::string get_name() const override {
-        return name;
-    }
 
     /// @brief Camera interface to use (e.g., "realsense", "opencv")
     std::string camera_interface = "realsense"; // Default to realsense

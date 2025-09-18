@@ -89,10 +89,10 @@ namespace trossen_ai_robot_devices {
 
 
         // TODO Rename function for clarity
-        std::vector<std::pair<std::string, std::string>> TrossenAIWidowXRobot::get_camera_names() const {
-            std::vector<std::pair<std::string, std::string>> camera_names;
+        std::vector<trossen_ai_robot_devices::CameraType> TrossenAIWidowXRobot::get_camera_names_and_types() const {
+            std::vector<trossen_ai_robot_devices::CameraType> camera_names;
             for (const auto& camera : cameras_) {
-                camera_names.emplace_back(camera->name(), camera->is_using_depth() ? "depth" : "color");
+                camera_names.push_back({camera->name(), camera->is_using_depth() ? "depth" : "color"});
             }
             return camera_names;
         }
@@ -214,10 +214,10 @@ namespace trossen_ai_robot_devices {
         }
 
         //TODO Rename function for clarity
-        std::vector<std::pair<std::string, std::string>> TrossenAIBimanualWidowXRobot::get_camera_names() const {
-            std::vector<std::pair<std::string, std::string>> camera_names;
+        std::vector<trossen_ai_robot_devices::CameraType> TrossenAIBimanualWidowXRobot::get_camera_names_and_types() const {
+            std::vector<trossen_ai_robot_devices::CameraType> camera_names;
             for (const auto& camera : cameras_) {
-                camera_names.emplace_back(camera->name(), camera->is_using_depth() ? "depth" : "color");
+                camera_names.push_back({camera->name(), camera->is_using_depth() ? "depth" : "color"});
             }
             return camera_names;
         }

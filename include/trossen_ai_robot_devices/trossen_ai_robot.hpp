@@ -33,6 +33,13 @@ struct State{
     std::vector<ImageData> images;
 };
 
+struct CameraType {
+    /// @brief Name of the camera
+    std::string name;
+    /// @brief Type of the camera (e.g., "color", "depth")
+    std::string type;
+};
+
 namespace teleoperator {
 
     class TrossenLeader{
@@ -178,10 +185,11 @@ namespace robot {
             */
             virtual std::vector<std::string> get_observation_features() const = 0;
 
+            // TODO Delete this function as it might no longer be needed
             /** @brief Get the camera names of the robot
              * @return Vector of pairs containing camera name and type (e.g., "depth" or "color")
             */
-            virtual std::vector<std::pair<std::string, std::string>> get_camera_names() const = 0;
+            virtual std::vector<trossen_ai_robot_devices::CameraType> get_camera_names_and_types() const = 0;
     };
 
     class TrossenAIWidowXRobot : public TrossenRobot {
@@ -232,7 +240,7 @@ namespace robot {
         /** @brief Get the camera names of the robot
          * @return Vector of pairs containing camera name and type (e.g., "depth" or "color")
         */
-        std::vector<std::pair<std::string, std::string>> get_camera_names() const override;
+        std::vector<trossen_ai_robot_devices::CameraType> get_camera_names_and_types() const override;
 
     private:
         /// @brief Name of the robot
@@ -296,7 +304,7 @@ namespace robot {
         /** @brief Get the camera names of the bimanual robot
          * @return Vector of pairs containing camera name and type (e.g., "depth" or "color")
         */
-        std::vector<std::pair<std::string, std::string>> get_camera_names() const override;
+        std::vector<trossen_ai_robot_devices::CameraType> get_camera_names_and_types() const override;
 
     private:
 

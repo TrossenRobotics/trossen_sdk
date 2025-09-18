@@ -36,11 +36,11 @@ void TrossenAIArm::connect() {
         spdlog::error("Exception occurred: {}", e.what());
     }
 
-    
+    is_connected_ = true;
+
     // Stage the arm
     stage_arm();
 
-    is_connected_ = true;
 }
 
 void TrossenAIArm::disconnect() {
