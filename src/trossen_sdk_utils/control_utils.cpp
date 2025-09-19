@@ -9,7 +9,7 @@ void ControlUtils::control_loop(
     std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader>
         teleop_robot,
     float control_time, trossen_dataset::TrossenAIDataset* dataset,
-    bool display_cameras, double fps) {
+    bool display_cameras, double fps, double fps_tolerance) {
   using steady_clock = std::chrono::steady_clock;
   using time_point = std::chrono::steady_clock::time_point;
 
@@ -58,7 +58,7 @@ void ControlUtils::control_loop(
     // TODO(shantanuparab-tr): Improve this logging to be more elegant and less
     // verbose
     // TODO(shantanuparab-tr): Make FPS tolerance configurable/ constant
-    if (loop_duration > 1.0 / fps * 0.85) {
+    if (loop_duration > 1.0 / fps * (1+fps_tolerance)) {
       spdlog::warn("Loop duration: " + std::to_string(loop_duration) +
                    " seconds" +
                    " | Frequency: " + std::to_string(1.0 / loop_duration) +
@@ -78,7 +78,7 @@ void ControlUtils::control_loop(
     std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,
     std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader>
         teleop_robot,
-    float control_time, bool display_cameras, double fps) {
+    float control_time, bool display_cameras, double fps, double fps_tolerance) {
   using steady_clock = std::chrono::steady_clock;
   using time_point = std::chrono::steady_clock::time_point;
 
@@ -121,8 +121,7 @@ void ControlUtils::control_loop(
             .count();
     // TODO(shantanuparab-tr): Improve this logging to be more elegant and less
     // verbose
-    // TODO(shantanuparab-tr): Make FPS tolerance configurable/ constant
-    if (loop_duration > 1.0 / fps * 0.85) {
+    if (loop_duration > 1.0 / fps * (1+fps_tolerance)) {
       spdlog::warn(
           "Loop duration: " + std::to_string(loop_duration) + " seconds" +
           " | Frequency: " + std::to_string(1.0 / loop_duration) + " Hz");

@@ -21,10 +21,8 @@ std::vector<trossen_ai_robot_devices::CameraType> TrossenRobot::get_camera_featu
 TrossenAIWidowXRobot::TrossenAIWidowXRobot(
     const trossen_sdk_config::WidowXRobotConfig& config)
     : name_(config.name), ip_address_(config.ip_address) {
-  // TODO(shantanuparab-tr) [TDS-41] Change the model to FOLLOWER_MODEL once the
-  // gripper is changed
   robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(
-      config.name, config.ip_address, trossen_sdk::LEADER_MODEL);
+      config.name, config.ip_address, trossen_sdk::FOLLOWER_MODEL);
   // Check the camera interfaces and create camera objects
   if (config.camera_interface == "realsense") {
     for (const auto& cam_config : config.cameras) {
@@ -209,7 +207,6 @@ void TrossenAIBimanualWidowXRobot::send_action(
       action.begin(), action.begin() + right_robot_driver_->get_num_joints());
   std::vector<double> left_action(
       action.begin() + left_robot_driver_->get_num_joints(), action.end());
-  spdlog::info("Sending right arm gripper position: {}", right_action.back());
   right_robot_driver_->write(trossen_sdk::POSITION, right_action);
   left_robot_driver_->write(trossen_sdk::POSITION, left_action);
 }

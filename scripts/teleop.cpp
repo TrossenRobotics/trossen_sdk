@@ -17,6 +17,7 @@ int main(int argc, char* argv[]) {
   double teleop_time;
   double fps;
   bool display_cameras;
+  double fps_tolerance;
 
   // Argument parsing
   po::options_description desc("Allowed options");
@@ -29,9 +30,12 @@ int main(int argc, char* argv[]) {
       // until user interrupts
       ("teleop_time", po::value<double>(&teleop_time)->default_value(10.0),
        "teleoperation time per episode (seconds)")(
-          "display_cameras",
+        "display_cameras",
           po::value<bool>(&display_cameras)->default_value(true),
-          "flag to display camera feeds during recording");
+          "flag to display camera feeds during recording")(
+        "fps_tolerance",
+            po::value<double>(&fps_tolerance)->default_value(0.05),
+          "tolerance for FPS deviation warning (only for warning)");
 
   po::variables_map vm;
   try {
@@ -82,7 +86,7 @@ int main(int argc, char* argv[]) {
 
   spdlog::info("Teleoperating the robot arms...");
   control_utils.control_loop(robot_controller, teleop_robot, teleop_time,
-                             display_cameras, fps);
+                             display_cameras, fps, fps_tolerance);
 
   robot_controller
       ->disconnect();  // Sleep the arms at the end of the control script

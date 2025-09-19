@@ -30,6 +30,7 @@ int main(int argc, char* argv[]) {
   bool display_cameras;
   bool overwrite;
   double fps;
+  double fps_tolerance;
 
   // Add command line options
   po::options_description desc("Allowed options");
@@ -73,10 +74,11 @@ int main(int argc, char* argv[]) {
       "display_cameras", po::value<bool>(&display_cameras)->default_value(true),
       "flag to display camera feeds during recording")(
       "overwrite", po::value<bool>(&overwrite)->default_value(false),
-      "flag to overwrite existing dataset");
+      "flag to overwrite existing dataset")(
+      "fps_tolerance",
+      po::value<double>(&fps_tolerance)->default_value(0.05),
+      "tolerance for FPS deviation (only for warning)");
 
-  // Start debug logging
-  spdlog::set_level(spdlog::level::debug);
   // Parse command line arguments
   po::variables_map vm;
   try {
@@ -138,19 +140,23 @@ int main(int argc, char* argv[]) {
   robot_controller->connect();
   teleop_robot->connect();
 
-  spdlog::info("Warming up the robot arms...");
-  control_utils.control_loop(robot_controller, teleop_robot, warmup_time,
-                             display_cameras, fps);
+  if (warmup_time > 0) {
+    spdlog::info("Warming up the robot arms...");
+    control_utils.control_loop(robot_controller, teleop_robot, warmup_time,
+                               display_cameras, fps, fps_tolerance);
+  }
 
   for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
     spdlog::info("Starting episode {}", dataset.get_num_episodes());
     control_utils.control_loop(robot_controller, teleop_robot, recording_time,
-                               &dataset, display_cameras, fps);
+                               &dataset, display_cameras, fps, fps_tolerance);
     spdlog::info("Episode {} completed.", dataset.get_num_episodes() - 1);
     // Allow operator to move the robots in teleop mode while the robot resets
-    spdlog::info("Resetting the robot arms...");
-    control_utils.control_loop(robot_controller, teleop_robot, reset_time,
-                               display_cameras, fps);
+    if (reset_time > 0) {
+      spdlog::info("Resetting the robot arms...");
+      control_utils.control_loop(robot_controller, teleop_robot, reset_time,
+                                 display_cameras, fps, fps_tolerance);
+    }
   }
 
   // If enabled, convert images to videos after all episodes are done

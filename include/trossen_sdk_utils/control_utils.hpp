@@ -26,6 +26,7 @@ class ControlUtils {
    * @param display_cameras Flag to indicate if camera images should be
    * displayed
    * @param fps Frames per second for video conversion
+   * @param tolerance Tolerance for FPS deviation warning (0 < tolerance <= 1)
    * This function runs a control loop for a teleoperated robot, capturing
    * images and recording data to the dataset. It also optionally displays
    * camera images.
@@ -35,7 +36,7 @@ class ControlUtils {
       std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader>
           teleop_robot,
       float control_time, trossen_dataset::TrossenAIDataset* dataset,
-      bool display_cameras, double fps);
+      bool display_cameras, double fps, double fps_tolerance = 0.05);
   /**
    * @brief Control loop for teleoperated robot without dataset recording for
    * teleoperation only
@@ -45,6 +46,7 @@ class ControlUtils {
    * @param display_cameras Flag to indicate if camera images should be
    * displayed
    * @param fps Frames per second for control loop
+   * @param tolerance Tolerance for FPS deviation warning (0 < tolerance <= 1)
    * This function runs a control loop for a teleoperated robot, capturing
    * images. It also optionally displays camera images.
    */
@@ -52,7 +54,7 @@ class ControlUtils {
       std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,
       std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader>
           teleop_robot,
-      float control_time, bool display_cameras, double fps);
+      float control_time, bool display_cameras, double fps, double fps_tolerance = 0.05);
   /**
    * @brief Busy-wait until the next loop iteration based on the desired
    * frequency
