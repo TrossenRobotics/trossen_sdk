@@ -28,7 +28,7 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
         robot->send_action(action);
 
         // Get the current state from the robot arm
-        state = robot->get_observation();
+        robot->get_observation(state);
 
         // Set the action in the state
         state.action = action;
@@ -46,7 +46,6 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
             // Display images/videos using OpenCV
             display_images(state.images);
         }
-        // TODO: Use FPS to control the loop frequency
         busy_wait_until(loop_start_time, fps);  // Use the specified FPS
 
         auto loop_duration = std::chrono::duration_cast<std::chrono::duration<double>>(steady_clock::now() - loop_start_time).count();
@@ -94,7 +93,7 @@ void ControlUtils::control_loop(std::shared_ptr<trossen_ai_robot_devices::robot:
         std::vector<double> action = teleop_robot->get_action();
         robot->send_action(action);
         // Get the current state from the robot arm
-        state = robot->get_observation();
+        robot->get_observation(state);
         // Set the action in the state
         state.action = action;
 

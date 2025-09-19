@@ -61,15 +61,13 @@ namespace trossen_ai_robot_devices {
             robot_driver_->stage_arm();
         }
 
-        trossen_ai_robot_devices::State TrossenAIWidowXRobot::get_observation() {
-            trossen_ai_robot_devices::State state;
+        void TrossenAIWidowXRobot::get_observation(trossen_ai_robot_devices::State& state) {
             // Read joint positions from the robot arm
             state.observation_state = robot_driver_->read(trossen_sdk::POSITION);
             // Read camera images
             for (auto& camera : cameras_) {
                 state.images.push_back(camera->async_read());
             }
-            return state;
         }
 
         void TrossenAIWidowXRobot::send_action(const std::vector<double>& action) {
@@ -89,7 +87,7 @@ namespace trossen_ai_robot_devices {
 
 
         // TODO Rename function for clarity
-        std::vector<trossen_ai_robot_devices::CameraType> TrossenAIWidowXRobot::get_camera_names_and_types() const {
+        std::vector<trossen_ai_robot_devices::CameraType> TrossenAIWidowXRobot::get_camera_features() const {
             std::vector<trossen_ai_robot_devices::CameraType> camera_names;
             for (const auto& camera : cameras_) {
                 camera_names.push_back({camera->name(), camera->is_using_depth() ? "depth" : "color"});
@@ -143,8 +141,7 @@ namespace trossen_ai_robot_devices {
             left_robot_driver_->stage_arm();
         }
 
-        trossen_ai_robot_devices::State TrossenAIBimanualWidowXRobot::get_observation() {
-            trossen_ai_robot_devices::State state;
+        void TrossenAIBimanualWidowXRobot::get_observation(trossen_ai_robot_devices::State& state) {
             // Read joint positions from both robot arms and combine them
             std::vector<double> right_positions = right_robot_driver_->read(trossen_sdk::POSITION);
             std::vector<double> left_positions = left_robot_driver_->read(trossen_sdk::POSITION);
@@ -154,17 +151,16 @@ namespace trossen_ai_robot_devices {
             for (auto& camera : cameras_) {
                 state.images.push_back(camera->async_read());
             }
-            return state;
         }
 
         void TrossenAIBimanualWidowXRobot::send_action(const std::vector<double>& action) {
             // Split the action vector and send commands to both robot arms
-            if (action.size() < right_robot_driver_->get_joint_names().size() + left_robot_driver_->get_joint_names().size()) {
-                spdlog::error("Error: Expected at least {} joint positions, got {}", right_robot_driver_->get_joint_names().size() + left_robot_driver_->get_joint_names().size(), action.size());
+            if (action.size() < right_robot_driver_->get_num_joints() + left_robot_driver_->get_num_joints()) {
+                spdlog::error("Error: Expected at least {} joint positions, got {}", right_robot_driver_->get_num_joints() + left_robot_driver_->get_num_joints(), action.size());
                 return;
             }
-            std::vector<double> right_action(action.begin(), action.begin() + right_robot_driver_->get_joint_names().size());
-            std::vector<double> left_action(action.begin() + left_robot_driver_->get_joint_names().size(), action.end());
+            std::vector<double> right_action(action.begin(), action.begin() + right_robot_driver_->get_num_joints());
+            std::vector<double> left_action(action.begin() + left_robot_driver_->get_num_joints(), action.end());
             spdlog::info("Sending right arm gripper position: {}", right_action.back());
             right_robot_driver_->write(trossen_sdk::POSITION, right_action);
             left_robot_driver_->write(trossen_sdk::POSITION, left_action);
@@ -214,7 +210,7 @@ namespace trossen_ai_robot_devices {
         }
 
         //TODO Rename function for clarity
-        std::vector<trossen_ai_robot_devices::CameraType> TrossenAIBimanualWidowXRobot::get_camera_names_and_types() const {
+        std::vector<trossen_ai_robot_devices::CameraType> TrossenAIBimanualWidowXRobot::get_camera_features() const {
             std::vector<trossen_ai_robot_devices::CameraType> camera_names;
             for (const auto& camera : cameras_) {
                 camera_names.push_back({camera->name(), camera->is_using_depth() ? "depth" : "color"});
@@ -225,7 +221,7 @@ namespace trossen_ai_robot_devices {
     }
 
     namespace teleoperator {
-        
+
         TrossenAIWidowXLeader::TrossenAIWidowXLeader(const trossen_sdk_config::WidowXLeaderConfig& config)
             : name_(config.name), ip_address_(config.ip_address) {
             robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(config.name, config.ip_address, trossen_sdk::LEADER_MODEL);
@@ -247,7 +243,7 @@ namespace trossen_ai_robot_devices {
 
         void TrossenAIWidowXLeader::configure() {
             robot_driver_->stage_arm();
-            robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(robot_driver_->get_joint_names().size(), 0.0));
+            robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(robot_driver_->get_num_joints(), 0.0));
         }
 
         std::vector<double> TrossenAIWidowXLeader::get_action() const {
@@ -288,8 +284,8 @@ namespace trossen_ai_robot_devices {
         void TrossenAIBimanualWidowXLeader::configure() {
             right_robot_driver_->stage_arm(); // Stage the right arm to a safe position
             left_robot_driver_->stage_arm(); // Stage the left arm to a safe position
-            right_robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(right_robot_driver_->get_joint_names().size(), 0.0));
-            left_robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(left_robot_driver_->get_joint_names().size(), 0.0));
+            right_robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(right_robot_driver_->get_num_joints(), 0.0));
+            left_robot_driver_->write(trossen_sdk::EXTERNAL_EFFORT, std::vector<double>(left_robot_driver_->get_num_joints(), 0.0));
         }
         std::vector<double> TrossenAIBimanualWidowXLeader::get_action() const {
             std::vector<double> right_positions = right_robot_driver_->read(trossen_sdk::POSITION);

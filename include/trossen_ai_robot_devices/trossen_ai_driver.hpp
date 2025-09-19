@@ -93,7 +93,11 @@ namespace trossen_ai_robot_devices {
          * @return Vector of strings containing the joint names
          */
         std::vector<std::string> get_joint_names() const;
-        
+
+        /// @brief Get the number of joints in the robotic arm
+        /// @return Number of joints as an integer
+        int get_num_joints() const { return num_joints_; }
+
     private:
     
         /// @brief Name of the TrossenAIArm
@@ -114,6 +118,9 @@ namespace trossen_ai_robot_devices {
         //TODO [TDS-32] Make time_to_move_ configurable
         /// @brief Time to move for position/velocity/effort commands
         float time_to_move_ = 0.1;
+
+        /// @brief Number of joints in the robotic arm
+        int num_joints_ ;
     };
 
 } // namespace trossen_ai_robot_devices

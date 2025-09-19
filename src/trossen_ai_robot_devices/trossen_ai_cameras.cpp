@@ -57,39 +57,39 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
     // Extract color and depth frames
     trossen_ai_robot_devices::ImageData data;
     data.camera_name = name_;
-    if (frames && frames.size() > 0) {
-        // Try to get color frame
-        try {
-            rs2::frame color_frame = frames.get_color_frame();
+    if (frames && frames.size() < 0) {
+        spdlog::error("No frames received from camera: {}", name_);
+        return data;
+    }
+    // Try to get color frame
+    try {
+        rs2::frame color_frame = frames.get_color_frame();
 
-            if (color_frame) {
-                // Convert rs2::frame to cv::Mat
-                cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3, (void*)color_frame.get_data(), cv::Mat::AUTO_STEP);
-                data.image = image;
+        if (color_frame) {
+            // Convert rs2::frame to cv::Mat
+            cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3, (void*)color_frame.get_data(), cv::Mat::AUTO_STEP);
+            data.image = image;
+        } else {
+            spdlog::error("Failed to read color frame from camera: {}", name_);
+        }
+    } catch (const rs2::error& e) {
+        spdlog::error("Error retrieving color frame from camera: {}. Error: {}", name_, e.what());
+    }
+    if (use_depth_){
+        // Try to get depth frame
+        try {
+            rs2::frame depth_frame = frames.get_depth_frame();
+            if (depth_frame) {
+                cv::Mat depth_map = cv::Mat(cv::Size(capture_width_, capture_height_), CV_16UC1, (void*)depth_frame.get_data(), cv::Mat::AUTO_STEP);
+                data.depth_map = depth_map;
             } else {
-                spdlog::error("Failed to read color frame from camera: {}", name_);
+                spdlog::error("Failed to read depth frame from camera: {}", name_);
             }
         } catch (const rs2::error& e) {
-            spdlog::error("Error retrieving color frame from camera: {}. Error: {}", name_, e.what());
+            spdlog::error("Error retrieving depth frame from camera: {}. Error: {}", name_, e.what());
         }
-        if (use_depth_){
-            // Try to get depth frame
-            try {
-                rs2::frame depth_frame = frames.get_depth_frame();
-                if (depth_frame) {
-                    cv::Mat depth_map = cv::Mat(cv::Size(capture_width_, capture_height_), CV_16UC1, (void*)depth_frame.get_data(), cv::Mat::AUTO_STEP);
-                    data.depth_map = depth_map;
-                } else {
-                    spdlog::error("Failed to read depth frame from camera: {}", name_);
-                }
-            } catch (const rs2::error& e) {
-                spdlog::error("Error retrieving depth frame from camera: {}. Error: {}", name_, e.what());
-            }
-        }
-        data.timestamp_ms = static_cast<int64_t>(frames.get_timestamp());
-    } else {
-        spdlog::error("Frameset is empty for camera: {}", name_);
     }
+    data.timestamp_ms = static_cast<int64_t>(frames.get_timestamp());
     return data;
 }
 

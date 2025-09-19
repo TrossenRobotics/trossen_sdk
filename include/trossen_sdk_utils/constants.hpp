@@ -27,13 +27,13 @@ namespace trossen_sdk {
 
     /// @brief Follower model identifier
     const std::string FOLLOWER_MODEL = "follower";
-    
+
     // Metadata related files
 
-    const std::string INFO_JSON = "info.json";
-    const std::string EPISODES_JSONL = "episodes.jsonl";
-    const std::string EPISODE_STATS_JSONL = "episodes_stats.jsonl";
-    const std::string TASKS_JSONL = "tasks.jsonl";
+    const std::string JSON_INFO = "info.json";
+    const std::string JSONL_EPISODES = "episodes.jsonl";
+    const std::string JSONL_EPISODE_STATS = "episodes_stats.jsonl";
+    const std::string JSONL_TASKS = "tasks.jsonl";
 
     const std::string METADATA_DIR = "meta";
     const std::string IMAGES_DIR = "images";

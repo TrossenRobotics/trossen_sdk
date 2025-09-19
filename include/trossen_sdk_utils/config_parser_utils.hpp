@@ -21,6 +21,10 @@ namespace trossen_sdk_config {
  */
 inline std::shared_ptr<trossen_sdk_config::LeaderConfigBase> load_leader_config(const std::string& json_path) {
 
+    // Check if file exists
+    if (!std::filesystem::exists(json_path)) {
+        throw std::runtime_error("Configuration file does not exist: " + json_path);
+    }
     // Read the JSON file
     std::ifstream file(json_path);
     if (!file.is_open()) {
@@ -31,6 +35,10 @@ inline std::shared_ptr<trossen_sdk_config::LeaderConfigBase> load_leader_config(
     nlohmann::json j;
     file >> j;
 
+    // Check if "type" exists in the JSON
+    if (!j.contains("type")) {
+        throw std::runtime_error("Missing 'type' field in leader config JSON: " + json_path);
+    }
     // Extract the type and create the appropriate config object
     const std::string& type = j.at("type");
 
@@ -52,6 +60,11 @@ inline std::shared_ptr<trossen_sdk_config::LeaderConfigBase> load_leader_config(
  */
 inline std::shared_ptr<trossen_sdk_config::RobotConfigBase> load_robot_config(const std::string& json_path) {
 
+    // Check if file exists
+    if (!std::filesystem::exists(json_path)) {
+        throw std::runtime_error("Configuration file does not exist: " + json_path);
+    }
+
     // Read the JSON file
     std::ifstream file(json_path);
     if (!file.is_open()) {
@@ -62,6 +75,10 @@ inline std::shared_ptr<trossen_sdk_config::RobotConfigBase> load_robot_config(co
     nlohmann::json j;
     file >> j;
 
+    // Check if "type" exists in the JSON
+    if (!j.contains("type")) {
+        throw std::runtime_error("Missing 'type' field in leader config JSON: " + json_path);
+    }
     // Extract the type and create the appropriate config object
     const std::string& type = j.at("type");
 

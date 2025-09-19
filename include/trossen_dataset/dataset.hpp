@@ -36,7 +36,7 @@ namespace trossen_dataset
      */
     struct FrameData
     {
-        /// @brief Timestamp in seconds
+        /// @brief Timestamp in seconds from beginning of episode
         float timestamp_s;
         /// @brief Observation state (e.g., joint positions)
         std::vector<double> observation_state;
@@ -294,7 +294,8 @@ namespace trossen_dataset
          */
         bool verify() const;
 
-        /** @brief Add a frame to the current episode
+        /** 
+         * @brief Add a frame to the current episode
          * @param frame FrameData object representing the frame to be added
          * If there is no current episode, a new episode will be created
          */
@@ -315,7 +316,7 @@ namespace trossen_dataset
         }
 
         /**
-         * @brief Get the image path for the dataset
+         * @brief Get the absoluteimage path for the dataset
          * @return Image path as a string
          */
         std::string get_image_path() const
@@ -342,7 +343,7 @@ namespace trossen_dataset
          * @brief Get the number of existing episodes in the dataset
          * @return Number of existing episodes as an int
          */
-        int get_existing_episodes() const;
+        int get_num_existing_episodes() const;
 
         /**
          * @brief Static method to read a Parquet file and return its contents as a vector of vectors of doubles

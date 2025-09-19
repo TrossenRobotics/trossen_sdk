@@ -38,6 +38,9 @@ void TrossenAIArm::connect() {
 
     is_connected_ = true;
 
+    // Set number of joints
+    num_joints_ = driver_.get_num_joints();
+    
     // Stage the arm
     stage_arm();
 

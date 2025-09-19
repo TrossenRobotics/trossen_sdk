@@ -168,7 +168,7 @@ namespace robot {
             /** @brief Get the current observation state of the robot 
              * @return State structure containing the current observation state
             */
-            virtual trossen_ai_robot_devices::State get_observation() = 0;
+            virtual void get_observation(trossen_ai_robot_devices::State& state) = 0;
             
             /** @brief Send an action command to the robot 
              * @param action Vector of doubles representing the action to be sent
@@ -185,11 +185,11 @@ namespace robot {
             */
             virtual std::vector<std::string> get_observation_features() const = 0;
 
-            // TODO Delete this function as it might no longer be needed
-            /** @brief Get the camera names of the robot
+            /** @brief Get the camera names of the robot 
              * @return Vector of pairs containing camera name and type (e.g., "depth" or "color")
             */
-            virtual std::vector<trossen_ai_robot_devices::CameraType> get_camera_names_and_types() const = 0;
+            virtual std::vector<trossen_ai_robot_devices::CameraType> get_camera_features() const = 0;
+
     };
 
     class TrossenAIWidowXRobot : public TrossenRobot {
@@ -220,7 +220,7 @@ namespace robot {
         /** @brief Get the current observation state of the robot
          * @return State structure containing the current observation state
         */
-        trossen_ai_robot_devices::State get_observation() override;
+        void get_observation(trossen_ai_robot_devices::State& state) override;
 
         /** @brief Send an action command to the robot
          * @param action Vector of doubles representing the action to be sent
@@ -240,7 +240,7 @@ namespace robot {
         /** @brief Get the camera names of the robot
          * @return Vector of pairs containing camera name and type (e.g., "depth" or "color")
         */
-        std::vector<trossen_ai_robot_devices::CameraType> get_camera_names_and_types() const override;
+        std::vector<trossen_ai_robot_devices::CameraType> get_camera_features() const override;
 
     private:
         /// @brief Name of the robot
@@ -284,7 +284,7 @@ namespace robot {
         /** @brief Get the current observation state of the bimanual robot
          * @return State structure containing the current observation state
         */
-        trossen_ai_robot_devices::State get_observation() override;
+        void get_observation(trossen_ai_robot_devices::State& state) override;
 
         /** @brief Send an action command to the bimanual robot
          * @param action Vector of doubles representing the action to be sent
@@ -304,7 +304,7 @@ namespace robot {
         /** @brief Get the camera names of the bimanual robot
          * @return Vector of pairs containing camera name and type (e.g., "depth" or "color")
         */
-        std::vector<trossen_ai_robot_devices::CameraType> get_camera_names_and_types() const override;
+        std::vector<trossen_ai_robot_devices::CameraType> get_camera_features() const override;
 
     private:
 

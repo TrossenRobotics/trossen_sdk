@@ -59,7 +59,7 @@ namespace trossen_dataset
                     throw std::runtime_error("Dataset verification failed: metadata does not match or is incomplete.");
                 }
                 // If the dataset directory already exists, we assume it is an existing dataset
-                int existing_episodes = get_existing_episodes();
+                int existing_episodes = get_num_existing_episodes();
                 for (int i = 0; i < existing_episodes; ++i)
                 {
                     // Load each episode and add it to the buffer
@@ -555,7 +555,7 @@ namespace trossen_dataset
             }
         }
         // Compute image statistics for each camera
-        for (const auto& camera_info : robot_->get_camera_names_and_types())
+        for (const auto& camera_info : robot_->get_camera_features())
         {
             std::string image_key = "observation.images." + camera_info.name;
             //Get image paths for the current episode and camera
@@ -724,7 +724,7 @@ namespace trossen_dataset
         spdlog::info("Video encoding took {} seconds", duration_sec);
     }
 
-    int TrossenAIDataset::get_existing_episodes() const
+    int TrossenAIDataset::get_num_existing_episodes() const
     {
         // Count the number of existing episodes by checking the data directory
         std::string data_path = root_.string() + "/" + repo_id_ + "/" + dataset_name_ + "/data/chunk-000";
@@ -816,13 +816,13 @@ namespace trossen_dataset
         // Construct paths for metadata files
         std::filesystem::path base_path = root_ / repo_id_ / dataset_name_;
         std::filesystem::path meta_path = base_path / trossen_sdk::METADATA_DIR;
-        info_file_path_ = (meta_path / trossen_sdk::INFO_JSON).string();
+        info_file_path_ = (meta_path / trossen_sdk::JSON_INFO).string();
         if (existing)
         {
-            load_info_file(meta_path / trossen_sdk::INFO_JSON);
-            load_jsonl_file(meta_path / trossen_sdk::EPISODES_JSONL, episode_data_);
-            load_jsonl_file(meta_path / trossen_sdk::EPISODE_STATS_JSONL, episode_stats_data_);
-            load_jsonl_file(meta_path / trossen_sdk::TASKS_JSONL, task_data_);
+            load_info_file(meta_path / trossen_sdk::JSON_INFO);
+            load_jsonl_file(meta_path / trossen_sdk::JSONL_EPISODES, episode_data_);
+            load_jsonl_file(meta_path / trossen_sdk::JSONL_EPISODE_STATS, episode_stats_data_);
+            load_jsonl_file(meta_path / trossen_sdk::JSONL_TASKS, task_data_);
         }
         else
         {
@@ -911,8 +911,8 @@ namespace trossen_dataset
         features["index"] = index_feature;
         features["task_index"] = task_index_feature;
 
-        // Assuming robot.get_camera_names_and_types() returns a list of camera identifiers
-        for (const auto &cam_info : robot.get_camera_names_and_types())
+        // Assuming robot.get_camera_features() returns a list of camera identifiers
+        for (const auto &cam_info : robot.get_camera_features())
         {
             features["observation.images." + cam_info.name] = camera_feature;
         }
@@ -1084,9 +1084,9 @@ namespace trossen_dataset
     {
         std::filesystem::path meta_path = info_.at("meta_path").get<std::string>();
         save_info_file();
-        save_jsonl_file((meta_path / trossen_sdk::EPISODES_JSONL).string(), episode_data_);
-        save_jsonl_file((meta_path / trossen_sdk::EPISODE_STATS_JSONL).string(), episode_stats_data_);
-        save_jsonl_file((meta_path / trossen_sdk::TASKS_JSONL).string(), task_data_);
+        save_jsonl_file((meta_path / trossen_sdk::JSONL_EPISODES).string(), episode_data_);
+        save_jsonl_file((meta_path / trossen_sdk::JSONL_EPISODE_STATS).string(), episode_stats_data_);
+        save_jsonl_file((meta_path / trossen_sdk::JSONL_TASKS).string(), task_data_);
     }
 
 
