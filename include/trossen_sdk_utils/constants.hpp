@@ -11,10 +11,10 @@ const std::filesystem::path DEFAULT_ROOT_PATH =
     "trossen_dataset_collection_sdk";
 
 /// @brief Format string for leader robot configuration file path
-const char LEADER_ROBOT_CONFIG_FORMAT[] = "../config/{}_leader.json";
+const char LEADER_ROBOT_CONFIG_FORMAT[] = "config/{}_leader.json";
 
 /// @brief Format string for follower robot configuration file path
-const char FOLLOWER_ROBOT_CONFIG_FORMAT[] = "../config/{}.json";
+const char FOLLOWER_ROBOT_CONFIG_FORMAT[] = "config/{}.json";
 
 /// @brief Position data name
 const char POSITION[] = "position";
