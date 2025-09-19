@@ -6,7 +6,8 @@ namespace trossen_sdk {
 
 /// @brief Default root path for dataset storage
 const std::filesystem::path DEFAULT_ROOT_PATH =
-    std::filesystem::path(std::getenv("HOME")) / ".cache" / "trossen_dataset_collection_sdk";
+    std::filesystem::path(std::getenv("HOME")) / ".cache" /
+    "trossen_dataset_collection_sdk";
 
 /// @brief Format string for leader robot configuration file path
 const std::string LEADER_ROBOT_CONFIG_FORMAT = "../config/{}_leader.json";
@@ -48,13 +49,15 @@ const std::string TROSSEN_SUBVERSION = "v1.0";
 
 const std::string DATA_PATH = "data/chunk-{:03d}/episode_{:06d}.parquet";
 const std::string VIDEO_PATH = "videos/chunk-{:03d}/{}/episode_{:06d}.mp4";
-const std::string IMAGE_PATH = "images/chunk-{:03d}/{}/episode_{:06d}/image_{:06d}.jpg";
+const std::string IMAGE_PATH =
+    "images/chunk-{:03d}/{}/episode_{:06d}/image_{:06d}.jpg";
 
 // Metadata Path Formats (For Compatibility with LeRobot)
 const std::string DATA_PATH_META =
     "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet";
 const std::string VIDEO_PATH_META =
-    "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4";
+    "videos/chunk-{episode_chunk:03d}/{video_key}/"
+    "episode_{episode_index:06d}.mp4";
 
 }  // namespace trossen_sdk
 
