@@ -9,6 +9,15 @@ namespace trossen_ai_robot_devices {
 
 namespace robot {
 
+std::vector<trossen_ai_robot_devices::CameraType> TrossenRobot::get_camera_features() const {
+  std::vector<trossen_ai_robot_devices::CameraType> camera_names;
+  for (const auto& camera : cameras_) {
+    camera_names.push_back(
+        {camera->name(), camera->is_using_depth() ? "depth" : "color"});
+  }
+  return camera_names;
+}
+
 TrossenAIWidowXRobot::TrossenAIWidowXRobot(
     const trossen_sdk_config::WidowXRobotConfig& config)
     : name_(config.name), ip_address_(config.ip_address) {
@@ -101,17 +110,6 @@ std::vector<std::string> TrossenAIWidowXRobot::get_observation_features()
     const {
   std::vector<std::string> features = get_joint_features();
   return features;
-}
-
-// TODO(shantanuparab-tr) Rename function for clarity
-std::vector<trossen_ai_robot_devices::CameraType>
-TrossenAIWidowXRobot::get_camera_features() const {
-  std::vector<trossen_ai_robot_devices::CameraType> camera_names;
-  for (const auto& camera : cameras_) {
-    camera_names.push_back(
-        {camera->name(), camera->is_using_depth() ? "depth" : "color"});
-  }
-  return camera_names;
 }
 
 TrossenAIBimanualWidowXRobot::TrossenAIBimanualWidowXRobot(
@@ -265,17 +263,6 @@ TrossenAIBimanualWidowXRobot::get_observation_features() const {
   right_features.insert(right_features.end(), left_features.begin(),
                         left_features.end());
   return right_features;
-}
-
-// TODO(shantanuparab-tr) Rename function for clarity
-std::vector<trossen_ai_robot_devices::CameraType>
-TrossenAIBimanualWidowXRobot::get_camera_features() const {
-  std::vector<trossen_ai_robot_devices::CameraType> camera_names;
-  for (const auto& camera : cameras_) {
-    camera_names.push_back(
-        {camera->name(), camera->is_using_depth() ? "depth" : "color"});
-  }
-  return camera_names;
 }
 
 }  // namespace robot

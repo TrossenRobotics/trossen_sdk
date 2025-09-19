@@ -1,7 +1,6 @@
 # Trossen Robotics Data Collection SDK
 
-This software was tested on Ubuntu 24.04 and the installation instructions were tested on the TOTL PC fresh ISO image.
-It provides tools for recording and replaying datasets using Trossen Robotics arms, specifically the WidowXAI series arms and kits.
+This SDK provides tools for recording and replaying datasets using Trossen Robotics arms, specifically the WidowXAI series arms and kits.
 The goal of this SDK is to facilitate data collection for robotics research and development using C++. We made the datasets compatible with HuggingFace(LeRobot) dataset. This allows user to train models using the datasets recorded with this SDK.
 
 
@@ -9,8 +8,6 @@ The goal of this SDK is to facilitate data collection for robotics research and 
 
 
 ## Trossen Arm Lib
-
-Note: The TOTL PC image does not have Trossen Arm Lib installed. The repo is cloned but not built and installed.
 
 If the repo is not already cloned, clone it using the following command:
 ```bash
@@ -55,7 +52,6 @@ libparquet-glib-dev
 
 ## RealSense2 (2.55.1) 
 
-The TOTL PC image has the correct librealsense2 version installed. The following instructions are for reference only.
 If for any reason you need to reinstall or upgrade/downgrade librealsense2, follow these steps.
 
 Note:

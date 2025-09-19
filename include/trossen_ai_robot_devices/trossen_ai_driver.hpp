@@ -32,19 +32,27 @@ class TrossenAIArm {
 
   /**
    * @brief Move constructor and move assignment operator
-   * Defaulted to allow moving of TrossenAIArm instances
-   * This is safe and efficient as it transfers ownership of resources
+   *
+   * Enables safe and efficient transfer of ownership for resources like
+   * ROS nodes, unique_ptr drivers, or file handles. Moving is allowed,
+   * as it ensures only one object instance manages the underlying resources.
+   *
+   * noexcept ensures STL containers (like std::vector) can optimize moves.
    */
   TrossenAIArm(TrossenAIArm&&) noexcept = default;
+
+  /** Move assignment operator */
   TrossenAIArm& operator=(TrossenAIArm&&) noexcept = default;
 
   /**
-   * @brief Copy constructor and copy assignment operator
-   * Deleted to prevent copying of TrossenAIArm instances
-   * This is to ensure unique ownership of the underlying driver resources like
-   * ROS nodes, hardware pointers, file handles, std::unique_ptr, etc.
-   * which cannot be shared or duplicated safely.
-   * Copying would result in double deletion or undefined behavior.
+   * @brief Copy constructor and copy assignment operator (deleted)
+   *
+   * Copying is explicitly disabled to prevent issues like:
+   * - Double deletion of unique resources (e.g., std::unique_ptr)
+   * - Multiple ROS nodes accessing the same hardware
+   * - Undefined behavior from duplicating file handles or hardware states
+   *
+   * This enforces unique ownership and avoids resource mismanagement.
    */
   TrossenAIArm(const TrossenAIArm&) = delete;
   TrossenAIArm& operator=(const TrossenAIArm&) = delete;

@@ -194,7 +194,12 @@ class TrossenRobot {
    * "color")
    */
   virtual std::vector<trossen_ai_robot_devices::CameraType>
-  get_camera_features() const = 0;
+  get_camera_features() const;
+
+ protected:
+  /// @brief Cameras attached to the robot
+  std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAICamera>>
+      cameras_;
 };
 
 class TrossenAIWidowXRobot : public TrossenRobot {
@@ -243,13 +248,6 @@ class TrossenAIWidowXRobot : public TrossenRobot {
    */
   std::vector<std::string> get_observation_features() const override;
 
-  /** @brief Get the camera names of the robot
-   * @return Vector of pairs containing camera name and type (e.g., "depth" or
-   * "color")
-   */
-  std::vector<trossen_ai_robot_devices::CameraType> get_camera_features()
-      const override;
-
  private:
   /// @brief Name of the robot
   std::string name_;
@@ -259,9 +257,6 @@ class TrossenAIWidowXRobot : public TrossenRobot {
   std::unique_ptr<trossen_ai_robot_devices::TrossenAIArm> robot_driver_;
   /// @brief Track connection status
   bool is_connected_ = false;
-  /// @brief Cameras attached to the robot
-  std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAICamera>>
-      cameras_;
 };
 
 class TrossenAIBimanualWidowXRobot : public TrossenRobot {
@@ -310,13 +305,6 @@ class TrossenAIBimanualWidowXRobot : public TrossenRobot {
    */
   std::vector<std::string> get_observation_features() const override;
 
-  /** @brief Get the camera names of the bimanual robot
-   * @return Vector of pairs containing camera name and type (e.g., "depth" or
-   * "color")
-   */
-  std::vector<trossen_ai_robot_devices::CameraType> get_camera_features()
-      const override;
-
  private:
   /// @brief Name of the bimanual robot
   std::string name_;
@@ -335,10 +323,6 @@ class TrossenAIBimanualWidowXRobot : public TrossenRobot {
 
   /// @brief Track connection status
   bool is_connected_ = false;
-
-  /// @brief Cameras attached to the bimanual robot
-  std::vector<std::unique_ptr<trossen_ai_robot_devices::TrossenAICamera>>
-      cameras_;
 };
 }  // namespace robot
 }  // namespace trossen_ai_robot_devices
