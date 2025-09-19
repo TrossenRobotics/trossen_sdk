@@ -1,23 +1,23 @@
 #ifndef TROSSEN_AI_CAMERAS_HPP
 #define TROSSEN_AI_CAMERAS_HPP
-#include <iostream>
-#include <string>
-#include <librealsense2/rs.hpp>     // RealSense SDK
-#include <opencv2/opencv.hpp>       // OpenCV
-#include <iostream>
-#include <vector>
-#include <thread>
-#include <mutex>
-#include <condition_variable>
-#include <queue>
-#include <atomic>
 #include <spdlog/spdlog.h>
-#include <filesystem>
 
+#include <atomic>
+#include <condition_variable>
+#include <filesystem>
+#include <iostream>
+#include <librealsense2/rs.hpp>  // RealSense SDK
+#include <mutex>
+#include <opencv2/opencv.hpp>  // OpenCV
+#include <queue>
+#include <string>
+#include <thread>
+#include <vector>
 
 namespace trossen_ai_robot_devices {
 
-/// @brief Data structure to hold image data from the camera including depth map if available in OpenCV Mat format
+/// @brief Data structure to hold image data from the camera including depth map if available in
+/// OpenCV Mat format
 struct ImageData {
     /// @brief Name of the camera that captured the image
     std::string camera_name;
@@ -37,14 +37,13 @@ struct ImageSaveTask {
     std::string filename;
 };
 
-
 /**
  * @brief Class representing a Trossen AI Camera using Intel RealSense
  * This class provides methods to connect to the camera, disconnect, and read frames
  * It supports both color images and depth maps, and can be configured for resolution and frame rate
  */
 class TrossenAICamera {
-public:
+   public:
     /**
      * @brief Constructor for TrossenAICamera
      * @param name Name of the camera
@@ -54,9 +53,14 @@ public:
      * @param fps Frames per second for image capture
      * @param use_depth Flag to indicate if depth map should be captured
      */
-    TrossenAICamera(const std::string& name, const std::string& unique_id,
-                    int capture_width = 640, int capture_height = 480, int fps = 30, bool use_depth = false)
-        : name_(name), unique_id_(unique_id), capture_width_(capture_width), capture_height_(capture_height), fps_(fps), use_depth_(use_depth){};
+    TrossenAICamera(const std::string& name, const std::string& unique_id, int capture_width = 640,
+                    int capture_height = 480, int fps = 30, bool use_depth = false)
+        : name_(name),
+          unique_id_(unique_id),
+          capture_width_(capture_width),
+          capture_height_(capture_height),
+          fps_(fps),
+          use_depth_(use_depth){};
 
     virtual ~TrossenAICamera() = default;
 
@@ -109,65 +113,59 @@ public:
     /// @brief Get the frames per second for image capture
     int fps() const { return fps_; }
 
-    //TODO [TDS-31] Define channels based on image format
+    // TODO [TDS-31] Define channels based on image format
     /// @brief Get the number of channels in the captured images
-    int channels() const { return 3; } // Assuming RGB images
+    int channels() const { return 3; }  // Assuming RGB images
 
-
-    protected:
-        /// @brief Name of the camera
-        std::string name_;
-        /// @brief Unique identifier of the camera
-        std::string unique_id_;
-        /// @brief Width of the captured images
-        int capture_width_ {640};
-        /// @brief Height of the captured images
-        int capture_height_ {480};
-        /// @brief Frames per second for image capture
-        int fps_ {30};
-        /// @brief Flag to indicate if depth map should be captured
-        bool use_depth_ {false};
-
-    };
-
+   protected:
+    /// @brief Name of the camera
+    std::string name_;
+    /// @brief Unique identifier of the camera
+    std::string unique_id_;
+    /// @brief Width of the captured images
+    int capture_width_{640};
+    /// @brief Height of the captured images
+    int capture_height_{480};
+    /// @brief Frames per second for image capture
+    int fps_{30};
+    /// @brief Flag to indicate if depth map should be captured
+    bool use_depth_{false};
+};
 
 class RealsenseCamera : public TrossenAICamera {
-    public:
-        RealsenseCamera(const std::string& name, const std::string& unique_id,
-                        int capture_width = 640, int capture_height = 480, int fps = 30, bool use_depth = false);
+   public:
+    RealsenseCamera(const std::string& name, const std::string& unique_id, int capture_width = 640,
+                    int capture_height = 480, int fps = 30, bool use_depth = false);
 
-        void connect() override ;
-        void disconnect() override;
-        trossen_ai_robot_devices::ImageData read() override;
-        trossen_ai_robot_devices::ImageData async_read() override;
-        void find_cameras() override;
+    void connect() override;
+    void disconnect() override;
+    trossen_ai_robot_devices::ImageData read() override;
+    trossen_ai_robot_devices::ImageData async_read() override;
+    void find_cameras() override;
 
-    private:
-        /// @brief RealSense camera pipeline
-        rs2::pipeline camera_;
-
+   private:
+    /// @brief RealSense camera pipeline
+    rs2::pipeline camera_;
 };
 
 class OpenCVCamera : public TrossenAICamera {
-    public:
-        OpenCVCamera(const std::string& name, const std::string& unique_id,
-                     int capture_width = 640, int capture_height = 480, int fps = 30, bool use_depth = false);
+   public:
+    OpenCVCamera(const std::string& name, const std::string& unique_id, int capture_width = 640,
+                 int capture_height = 480, int fps = 30, bool use_depth = false);
 
-        void connect() override ;
-        void disconnect() override;
-        trossen_ai_robot_devices::ImageData read() override;
-        trossen_ai_robot_devices::ImageData async_read() override;
-        void find_cameras() override;
-    
-    private:
-        /// @brief OpenCV VideoCapture object
-        cv::VideoCapture video_capture_;
+    void connect() override;
+    void disconnect() override;
+    trossen_ai_robot_devices::ImageData read() override;
+    trossen_ai_robot_devices::ImageData async_read() override;
+    void find_cameras() override;
 
+   private:
+    /// @brief OpenCV VideoCapture object
+    cv::VideoCapture video_capture_;
 };
 
 class AsyncImageWriter {
-
-public:
+   public:
     /**
      * @brief Constructor for AsyncImageWriter
      * @param num_threads Number of threads to use for writing images
@@ -189,7 +187,7 @@ public:
      */
     void push(ImageSaveTask task);
 
-private:
+   private:
     /// @brief Queue to hold images and their filenames
     std::queue<ImageSaveTask> image_queue_;
     /// @brief Mutex for thread-safe access to the queue
@@ -210,6 +208,6 @@ private:
      */
     void worker_loop();
 };
-} // namespace trossen_data_collection_sdk
+}  // namespace trossen_ai_robot_devices
 
-#endif // TROSSEN_AI_CAMERAS_HPP
+#endif  // TROSSEN_AI_CAMERAS_HPP

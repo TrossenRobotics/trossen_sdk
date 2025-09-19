@@ -1,12 +1,12 @@
 #ifndef TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP
 #define TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP
-#include <string>
-#include <nlohmann/json.hpp>
 #include <fstream>
-#include <vector>
 #include <iostream>
-#include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
+#include <nlohmann/json.hpp>
+#include <string>
+#include <vector>
 
+#include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 
 namespace trossen_sdk_config {
 
@@ -40,7 +40,6 @@ struct BaseConfig {
     std::string name;
 };
 
-
 /**
  * @brief Base class for robot configuration
  * This class serves as a base for specific robot configurations, providing a virtual destructor
@@ -60,43 +59,37 @@ struct RobotConfigBase {
     /** @brief Get the name of the robot
      * @return Name of the robot as a string
      */
-    std::string get_name() const {
-        return name;
-    }
+    std::string get_name() const { return name; }
 };
 
 /**
  * @brief Base class for leader robot configuration
- * This class serves as a base for specific leader robot configurations, providing a virtual destructor
- * and a method to get the leader robot's name.
+ * This class serves as a base for specific leader robot configurations, providing a virtual
+ * destructor and a method to get the leader robot's name.
  */
 struct LeaderConfigBase {
     /// @brief Name of the leader robot
     std::string name;
     /** @brief Virtual destructor
      *  This is a virtual destructor for the leader configuration base class.
-    */
+     */
     virtual ~LeaderConfigBase() = default;
 
     /** @brief Get the name of the leader robot
      * @return Name of the leader robot as a string
-    */
-    std::string get_name() const {
-        return name;
-    }
+     */
+    std::string get_name() const { return name; }
 };
-
 
 /**
  * @brief Configuration structure for WidowX robot
- * This structure holds the configuration parameters for a WidowX robot including its name and IP address.
- * It inherits from LeaderConfigBase.
+ * This structure holds the configuration parameters for a WidowX robot including its name and IP
+ * address. It inherits from LeaderConfigBase.
  */
 struct WidowXLeaderConfig : public LeaderConfigBase {
     /// @brief IP address of the leader robot
     std::string ip_address;
 };
-
 
 /**
  * @brief Configuration structure for Bimanual WidowX robot
@@ -109,24 +102,21 @@ struct WidowXRobotConfig : public RobotConfigBase {
     /// @brief Camera configurations for the robot
     std::vector<CameraConfig> cameras;
     // @brief Camera interface to use (e.g., "realsense", "opencv")
-    std::string camera_interface = "realsense"; // Default to realsense
+    std::string camera_interface = "realsense";  // Default to realsense
 };
-
 
 /**
  * @brief Configuration structure for Bimanual WidowX leader and follower robots
- * This structure holds the configuration parameters for a Bimanual WidowX leader and follower robots
- * including its name, IP addresses for both arms, and camera configurations. It inherits from LeaderConfigBase.
+ * This structure holds the configuration parameters for a Bimanual WidowX leader and follower
+ * robots including its name, IP addresses for both arms, and camera configurations. It inherits
+ * from LeaderConfigBase.
  */
 struct BimanualWidowXLeaderConfig : public LeaderConfigBase {
-
     /// @brief IP address of the left arm
     std::string left_ip_address;
     /// @brief IP address of the right arm
     std::string right_ip_address;
-
 };
-
 
 /**
  * @brief Configuration structure for Bimanual WidowX robot
@@ -140,23 +130,22 @@ struct BimanualWidowXRobotConfig : public RobotConfigBase {
     std::string right_ip_address;
 
     /// @brief Camera interface to use (e.g., "realsense", "opencv")
-    std::string camera_interface = "realsense"; // Default to realsense
+    std::string camera_interface = "realsense";  // Default to realsense
 
     /// @brief Camera configurations for the bimanual robot
     std::vector<CameraConfig> cameras;  // Camera configuration for the follower arm
 };
 
-
 // JSON serialization/deserialization using nlohmann::json
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name, serial, fps, width, height, use_depth)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BaseConfig, name)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXLeaderConfig, name, left_ip_address, right_ip_address)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXRobotConfig, name, left_ip_address, right_ip_address, camera_interface, cameras)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXLeaderConfig, name, left_ip_address,
+                                   right_ip_address)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXRobotConfig, name, left_ip_address,
+                                   right_ip_address, camera_interface, cameras)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXLeaderConfig, name, ip_address)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXRobotConfig, name, ip_address, camera_interface, cameras)
 
-
 }  // namespace trossen_sdk_config
-    
 
-#endif // TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP
+#endif  // TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP

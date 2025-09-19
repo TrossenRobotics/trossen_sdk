@@ -2,16 +2,17 @@
 
 namespace trossen_ai_robot_devices {
 
-RealsenseCamera::RealsenseCamera(const std::string& name, const std::string& unique_id, 
-                                 int capture_width, int capture_height, int fps, bool use_depth):
-                                 TrossenAICamera(name, unique_id, capture_width, capture_height, fps, use_depth) {
+RealsenseCamera::RealsenseCamera(const std::string& name, const std::string& unique_id,
+                                 int capture_width, int capture_height, int fps, bool use_depth)
+    : TrossenAICamera(name, unique_id, capture_width, capture_height, fps, use_depth) {
     // Initialize camera settings if needed
-    spdlog::info("RealsenseCamera initialized: name={}, unique_id={}, width={}, height={}, fps={}, use_depth={}", 
-                 name_, unique_id_, capture_width_, capture_height_, fps_, use_depth_);
+    spdlog::info(
+        "RealsenseCamera initialized: name={}, unique_id={}, width={}, height={}, fps={}, "
+        "use_depth={}",
+        name_, unique_id_, capture_width_, capture_height_, fps_, use_depth_);
 }
 
 void RealsenseCamera::connect() {
-
     // Create a realsense config
     rs2::config cfg;
 
@@ -21,19 +22,16 @@ void RealsenseCamera::connect() {
     }
 
     // Enable the color stream as default
-    cfg.enable_stream(
-        RS2_STREAM_COLOR, capture_width_, capture_height_, RS2_FORMAT_RGB8, fps_);
+    cfg.enable_stream(RS2_STREAM_COLOR, capture_width_, capture_height_, RS2_FORMAT_RGB8, fps_);
 
     // Enable depth stream if use_depth_ is true
     if (use_depth_) {
-        cfg.enable_stream(
-            RS2_STREAM_DEPTH, capture_width_, capture_height_, RS2_FORMAT_Z16, fps_);
+        cfg.enable_stream(RS2_STREAM_DEPTH, capture_width_, capture_height_, RS2_FORMAT_Z16, fps_);
     }
 
     // Start the camera pipeline with the configuration
     rs2::pipeline_profile profile = camera_.start(cfg);
 }
-
 
 void RealsenseCamera::disconnect() {
     // TODO: Properly stop the camera pipeline if needed
@@ -42,13 +40,12 @@ void RealsenseCamera::disconnect() {
 }
 
 trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
-
     // Initialize frameset
     rs2::frameset frames;
 
     // Wait for the next set of frames from the camera with a timeout of 3000 ms
     try {
-        frames = camera_.wait_for_frames(3000); 
+        frames = camera_.wait_for_frames(3000);
     } catch (const rs2::error& e) {
         spdlog::error("Failed to get frameset from camera: {}. Error: {}", name_, e.what());
         return trossen_ai_robot_devices::ImageData{};
@@ -67,7 +64,8 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
 
         if (color_frame) {
             // Convert rs2::frame to cv::Mat
-            cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3, (void*)color_frame.get_data(), cv::Mat::AUTO_STEP);
+            cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3,
+                          (void*)color_frame.get_data(), cv::Mat::AUTO_STEP);
             data.image = image;
         } else {
             spdlog::error("Failed to read color frame from camera: {}", name_);
@@ -75,18 +73,20 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
     } catch (const rs2::error& e) {
         spdlog::error("Error retrieving color frame from camera: {}. Error: {}", name_, e.what());
     }
-    if (use_depth_){
+    if (use_depth_) {
         // Try to get depth frame
         try {
             rs2::frame depth_frame = frames.get_depth_frame();
             if (depth_frame) {
-                cv::Mat depth_map = cv::Mat(cv::Size(capture_width_, capture_height_), CV_16UC1, (void*)depth_frame.get_data(), cv::Mat::AUTO_STEP);
+                cv::Mat depth_map = cv::Mat(cv::Size(capture_width_, capture_height_), CV_16UC1,
+                                            (void*)depth_frame.get_data(), cv::Mat::AUTO_STEP);
                 data.depth_map = depth_map;
             } else {
                 spdlog::error("Failed to read depth frame from camera: {}", name_);
             }
         } catch (const rs2::error& e) {
-            spdlog::error("Error retrieving depth frame from camera: {}. Error: {}", name_, e.what());
+            spdlog::error("Error retrieving depth frame from camera: {}. Error: {}", name_,
+                          e.what());
         }
     }
     data.timestamp_ms = static_cast<int64_t>(frames.get_timestamp());
@@ -96,14 +96,14 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
 void RealsenseCamera::find_cameras() {
     // Create a context object. This object owns the handles to all connected realsense devices.
     rs2::context ctx;
-    auto devices = ctx.query_devices(); // Get a snapshot of currently connected devices
+    auto devices = ctx.query_devices();  // Get a snapshot of currently connected devices
     if (devices.size() == 0) {
         spdlog::warn("No RealSense cameras found.");
         return;
     }
 
     // Create a thread pool for asynchronous image saving
-    AsyncImageWriter image_writer(4); // Using 4 threads for image saving
+    AsyncImageWriter image_writer(4);  // Using 4 threads for image saving
 
     for (const auto& dev : devices) {
         std::string serial = dev.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER);
@@ -111,7 +111,8 @@ void RealsenseCamera::find_cameras() {
         spdlog::info("Found camera: {} with Serial Number: {}", name, serial);
 
         // Create a temporary camera instance to capture an image
-        RealsenseCamera temp_camera(name, serial, capture_width_, capture_height_, fps_, use_depth_);
+        RealsenseCamera temp_camera(name, serial, capture_width_, capture_height_, fps_,
+                                    use_depth_);
         temp_camera.connect();
         auto image_data = temp_camera.read();
         temp_camera.disconnect();
@@ -127,16 +128,16 @@ void RealsenseCamera::find_cameras() {
             spdlog::error("Failed to capture image from camera: {}", name);
         }
     }
-
 }
 
-
-OpenCVCamera::OpenCVCamera(const std::string& name, const std::string& unique_id,
-                        int capture_width, int capture_height, int fps, bool use_depth):
-                                 TrossenAICamera(name, unique_id, capture_width, capture_height, fps, use_depth) {
+OpenCVCamera::OpenCVCamera(const std::string& name, const std::string& unique_id, int capture_width,
+                           int capture_height, int fps, bool use_depth)
+    : TrossenAICamera(name, unique_id, capture_width, capture_height, fps, use_depth) {
     // Initialize camera settings if needed
-    spdlog::info("OpenCVCamera initialized: name={}, unique_id={}, width={}, height={}, fps={}, use_depth={}", 
-                 name_, unique_id_, capture_width_, capture_height_, fps_, use_depth_);
+    spdlog::info(
+        "OpenCVCamera initialized: name={}, unique_id={}, width={}, height={}, fps={}, "
+        "use_depth={}",
+        name_, unique_id_, capture_width_, capture_height_, fps_, use_depth_);
 }
 
 void OpenCVCamera::connect() {
@@ -145,18 +146,22 @@ void OpenCVCamera::connect() {
     try {
         device_index = std::stoi(unique_id_);
     } catch (const std::invalid_argument& e) {
-        spdlog::error("Invalid unique_id for OpenCVCamera: {}. Must be an integer index.", unique_id_);
+        spdlog::error("Invalid unique_id for OpenCVCamera: {}. Must be an integer index.",
+                      unique_id_);
         return;
     }
 
     cv::VideoCapture cap(device_index);
     if (!cap.isOpened()) {
         spdlog::error("Failed to open camera with index: {}", device_index);
-        //Run find_cameras to list available cameras
+        // Run find_cameras to list available cameras
         find_cameras();
         // TODO Store the output images in a known location and inform the user
-        spdlog::info("Available cameras listed above. Please check outputs folder to get images associated with each camera.");
-        throw std::runtime_error("Failed to open camera with index: " + std::to_string(device_index));
+        spdlog::info(
+            "Available cameras listed above. Please check outputs folder to get images associated "
+            "with each camera.");
+        throw std::runtime_error("Failed to open camera with index: " +
+                                 std::to_string(device_index));
     }
 
     // Set camera properties
@@ -196,7 +201,8 @@ trossen_ai_robot_devices::ImageData OpenCVCamera::read() {
     // Convert BGR to RGB
     cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
     data.image = frame;
-    data.timestamp_ms = static_cast<int64_t>(cv::getTickCount() / cv::getTickFrequency() * 1000); // Approximate timestamp in ms
+    data.timestamp_ms = static_cast<int64_t>(cv::getTickCount() / cv::getTickFrequency() *
+                                             1000);  // Approximate timestamp in ms
 
     // Note: OpenCV does not natively support depth maps, so this is left empty
     if (use_depth_) {
@@ -207,7 +213,6 @@ trossen_ai_robot_devices::ImageData OpenCVCamera::read() {
 }
 
 trossen_ai_robot_devices::ImageData OpenCVCamera::async_read() {
-
     trossen_ai_robot_devices::ImageData result;
     std::mutex mtx;
     std::condition_variable cv;
@@ -229,7 +234,7 @@ trossen_ai_robot_devices::ImageData OpenCVCamera::async_read() {
 
     // Wait for the image to be read or timeout after 5 seconds
     std::unique_lock<std::mutex> lock(mtx);
-    if (!cv.wait_for(lock, std::chrono::seconds(5), [&done]{ return done; })) {
+    if (!cv.wait_for(lock, std::chrono::seconds(5), [&done] { return done; })) {
         spdlog::error("Timeout: Failed to receive image within 5 seconds.");
         // Optionally, set result to an empty image or error state
         result = trossen_ai_robot_devices::ImageData{};
@@ -237,9 +242,7 @@ trossen_ai_robot_devices::ImageData OpenCVCamera::async_read() {
     return result;
 }
 
-
 void OpenCVCamera::find_cameras() {
-
     std::vector<std::string> targets_to_scan;
 
     // Scan /dev for video devices
@@ -261,7 +264,8 @@ void OpenCVCamera::find_cameras() {
             double format = cap.get(cv::CAP_PROP_FORMAT);
 
             if (width > 0 && height > 0) {
-                spdlog::info("Found camera at {}: {}x{} @ {} FPS, format={}", path, width, height, fps, format);
+                spdlog::info("Found camera at {}: {}x{} @ {} FPS, format={}", path, width, height,
+                             fps, format);
                 // Save 1 image from each camera with the unique_id as the filename.
                 // Warm up the camera by reading 50 frames
                 cv::Mat frame;
@@ -286,12 +290,10 @@ void OpenCVCamera::find_cameras() {
                 cap.release();
             }
         }
-
     }
 }
 
 trossen_ai_robot_devices::ImageData RealsenseCamera::async_read() {
-
     trossen_ai_robot_devices::ImageData result;
     std::mutex mtx;
     std::condition_variable cv;
@@ -313,7 +315,7 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::async_read() {
 
     // Wait for the image to be read or timeout after 5 seconds
     std::unique_lock<std::mutex> lock(mtx);
-    if (!cv.wait_for(lock, std::chrono::seconds(5), [&done]{ return done; })) {
+    if (!cv.wait_for(lock, std::chrono::seconds(5), [&done] { return done; })) {
         spdlog::error("Timeout: Failed to receive image within 5 seconds.");
         // Optionally, set result to an empty image or error state
         result = trossen_ai_robot_devices::ImageData{};
@@ -321,16 +323,12 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::async_read() {
     return result;
 }
 
-
-
-
-AsyncImageWriter::AsyncImageWriter(int num_threads)
-    : stop_flag_(false), num_threads_(num_threads) {
+AsyncImageWriter::AsyncImageWriter(int num_threads) : stop_flag_(false), num_threads_(num_threads) {
     // Create worker threads
     for (int i = 0; i < num_threads_; ++i) {
         worker_threads_.emplace_back(&AsyncImageWriter::worker_loop, this);
     }
-    }
+}
 
 AsyncImageWriter::~AsyncImageWriter() {
     // Signal all threads to stop
@@ -359,18 +357,15 @@ void AsyncImageWriter::worker_loop() {
     while (true) {
         // Wait for an image to be available or stop signal
         std::unique_lock<std::mutex> lock(mtx_);
-        cv_.wait(lock, [this]() {
-            return stop_flag_ || !image_queue_.empty();
-        });
+        cv_.wait(lock, [this]() { return stop_flag_ || !image_queue_.empty(); });
 
-        if (stop_flag_ && image_queue_.empty())
-            break;
+        if (stop_flag_ && image_queue_.empty()) break;
 
         // Get the next image and filename from the queue
         ImageSaveTask task = std::move(image_queue_.front());
         image_queue_.pop();
         lock.unlock();
-        if(task.image.empty()) {
+        if (task.image.empty()) {
             spdlog::debug("Image is empty, skipping: {}", task.filename);
             continue;
         }
@@ -381,7 +376,8 @@ void AsyncImageWriter::worker_loop() {
             // If the image is already CV_16UC1, no need to convert
             if (task.image.type() != CV_16UC1) {
                 // TODO [TDS-36]: Handle different depth formats if necessary
-                // Convert to CV_16UC1 assuming the input is in meters (float) and we want millimeters (int)
+                // Convert to CV_16UC1 assuming the input is in meters (float) and we want
+                // millimeters (int)
                 task.image.convertTo(image_to_write, CV_16UC1, 1000);
             } else {
                 image_to_write = task.image;
@@ -399,19 +395,19 @@ void AsyncImageWriter::worker_loop() {
             }
         }
         try {
-                // Check if the parent directory exists, if not create it
-                std::filesystem::path file_path(task.filename);
-                std::filesystem::path parent_dir = file_path.parent_path();
-                if (!std::filesystem::exists(parent_dir)) {
-                    std::filesystem::create_directories(parent_dir);
-                }
-                if (!cv::imwrite(task.filename, image_to_write)) {
-                    spdlog::error("Failed to write image to: {}", task.filename);
-                }
-            } catch (const cv::Exception& e) {
-                spdlog::error("Exception while writing image to {}: {}", task.filename, e.what());
+            // Check if the parent directory exists, if not create it
+            std::filesystem::path file_path(task.filename);
+            std::filesystem::path parent_dir = file_path.parent_path();
+            if (!std::filesystem::exists(parent_dir)) {
+                std::filesystem::create_directories(parent_dir);
             }
+            if (!cv::imwrite(task.filename, image_to_write)) {
+                spdlog::error("Failed to write image to: {}", task.filename);
+            }
+        } catch (const cv::Exception& e) {
+            spdlog::error("Exception while writing image to {}: {}", task.filename, e.what());
+        }
     }
 }
 
-} // namespace trossen_ai_robot_devices
+}  // namespace trossen_ai_robot_devices
