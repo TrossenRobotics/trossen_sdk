@@ -10,3 +10,7 @@ install: build
 clean:
 	rm -rf build
 .PHONY: clean
+
+run_example: build
+	./build/examples/trossen_ai_solo
+.PHONY: run_example

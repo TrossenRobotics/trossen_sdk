@@ -12,7 +12,7 @@
 
 using namespace std::chrono;
 
-const int DURATION_S = 10;
+const int DURATION_S = 25;
 const std::string OUTPUT_DIR = "output";
 const float CAPTURE_RATE_JOINT_STATES_HZ = 200.0f;
 const float CAPTURE_RATE_IMAGES_HZ = 30.0f;
@@ -20,8 +20,15 @@ const float CAPTURE_RATE_IMAGES_HZ = 30.0f;
 int main(int argc, char** argv) {
   std::cout << "Using Trossen SDK version '" << trossen::core::version() << "'." << std::endl;
 
-  // Shared backend with two type-specific sinks (joint states, images)
-  auto backend = std::make_shared<trossen::io::backends::LeRobotV2Backend>(OUTPUT_DIR);
+  // Create and configure backend and sinks
+  trossen::io::backends::LeRobotV2Backend::Config backend_cfg;
+  backend_cfg.output_dir = OUTPUT_DIR;
+  backend_cfg.encoder_threads = 2; // tune as needed
+  backend_cfg.max_image_queue = 0; // unbounded
+  backend_cfg.drop_policy = trossen::io::backends::LeRobotV2Backend::DropPolicy::DropNewest;
+  backend_cfg.png_compression_level = 3; // existing default
+  auto backend = std::make_shared<trossen::io::backends::LeRobotV2Backend>(backend_cfg);
+
   // trossen::io::Sink joint_sink(backend);
   trossen::io::Sink image_sink(backend);
   trossen::runtime::Scheduler scheduler;
@@ -52,7 +59,7 @@ int main(int argc, char** argv) {
 
   // Create and configure OpenCV camera producer
   trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
-  cam_cfg.device_index = 0; // "/dev/video0"
+  cam_cfg.device_index = 2; // "/dev/video0"
   cam_cfg.stream_id = "cam_high";
   cam_cfg.encoding = "bgr8";
   // // 480p
@@ -70,7 +77,8 @@ int main(int argc, char** argv) {
   // joint_sink.start();
   image_sink.start();
 
-  // Warmup camera (opens device and discards frames internally)
+  // Warmup camera - opens device and discards frames internally to make sure we can receive
+  // at the requested frame rate before starting to emit records.
   if (!camera.warmup()) {
     std::cerr << "Failed to warmup camera" << std::endl;
     image_sink.stop();
@@ -114,10 +122,11 @@ int main(int argc, char** argv) {
   // follower.set_all_positions(starting_positions, moving_time, false);
   // std::this_thread::sleep_for(std::chrono::duration<float>(moving_time + 0.1f));
 
-  int expected_joint_records = static_cast<int>(CAPTURE_RATE_JOINT_STATES_HZ * DURATION_S);
+  // int expected_joint_records = static_cast<int>(CAPTURE_RATE_JOINT_STATES_HZ * DURATION_S);
   int expected_image_records = static_cast<int>(CAPTURE_RATE_IMAGES_HZ * DURATION_S);
-  std::cout << "Expecting ~" << expected_joint_records << " joint state records and ~"
-            << expected_image_records << " images" << std::endl;
+  std::cout << "Expecting "
+            // << "~" << expected_joint_records << " joint state records and "
+            << "~" << expected_image_records << " images" << std::endl;
 
   // // Put the leader into gravity compensation mode for teleop
   // std::cout << "!! Starting teleop !!" << std::endl;
@@ -131,9 +140,9 @@ int main(int argc, char** argv) {
   auto end_time = start + seconds(DURATION_S);
   scheduler.start();
   while (steady_clock::now() < end_time) {
-    // Teleop loop: get joint states from leader, set on follower
-  //   auto leader_js = leader.get_all_positions();
-  //   follower.set_all_positions(leader_js, 0.0f, false);
+    // // Teleop loop: get joint states from leader, set on follower
+    // auto leader_js = leader.get_all_positions();
+    // follower.set_all_positions(leader_js, 0.0f, false);
 
     // Small sleep to avoid maxing a single core
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -167,7 +176,7 @@ int main(int argc, char** argv) {
     auto enc = lerobot->image_encode_stats();
     std::cout << "Image encode stats:"
               << " enqueued=" << enc.enqueued
-              << " encoded=" << enc.encoded
+              << " written=" << enc.written
               << " dropped=" << enc.dropped
               << " avg_ms=" << enc.avg_encode_ms()
               << " max_ms=" << (enc.encode_time_ns_max / 1e6)

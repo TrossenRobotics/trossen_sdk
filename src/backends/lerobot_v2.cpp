@@ -11,14 +11,59 @@
 // For PNG writing we stub out with raw dump placeholder (future: integrate stb_image_write or libpng)
 namespace trossen::io::backends {
 
-// OpenCV PNG compression level (0-9)
-// TODO: Make this configurable
-const int PNG_COMPRESSION_LEVEL = 3;
+// OpenCV PNG compression level now driven by cfg_.png_compression_level
 
 namespace fs = std::filesystem;
 
-LeRobotV2Backend::LeRobotV2Backend(const std::string& uri)
-  : Backend(uri) {
+LeRobotV2Backend::LeRobotV2Backend(Config cfg)
+  : Backend(cfg.output_dir), cfg_(std::move(cfg)) {
+
+  // Validate encoder threads
+  if (cfg_.encoder_threads <= 0) {
+    cfg_.encoder_threads = 1;
+  }
+  // Validate PNG compression level
+  if (cfg_.png_compression_level < 0 || cfg_.png_compression_level > 9) {
+    cfg_.png_compression_level = 3;
+  }
+
+  // URI is absolute path to output directory. Set to absolute path and check write access.
+  // Validate output directory path
+  try {
+    uri_ = fs::absolute(cfg_.output_dir).string();
+  } catch (const std::exception& e) {
+    throw std::runtime_error("Failed to resolve absolute path of output directory: " + std::string(e.what()));
+  }
+  // Validate non-empty path
+  if (uri_.empty()) {
+    throw std::runtime_error("Output directory path is empty");
+  }
+  // Check that we can write to the output directory
+  try {
+    if (!fs::exists(uri_)) {
+      fs::create_directories(uri_);
+    }
+  } catch (const std::exception& e) {
+    throw std::runtime_error("Failed to create output directory: " + std::string(e.what()));
+  }
+  fs::path test_path = fs::path(uri_) / "trossen_sdk_lerobot_v2_test.tmp";
+  std::ofstream test_file(test_path.string(), std::ios::out | std::ios::trunc);
+  if (!test_file) {
+    throw std::runtime_error("Failed to open test file for writing: " + test_path.string());
+  }
+  test_file.close();
+  fs::remove(test_path);
+
+  // Print off configuration
+  std::cout << "LeRobotV2Backend configuration:\n"
+            << "  Output dir: " << uri_ << "\n"
+            << "  Encoder threads: " << cfg_.encoder_threads << "\n"
+            << "  Max image queue: " << (cfg_.max_image_queue == 0 ? "unbounded" : std::to_string(cfg_.max_image_queue)) << "\n"
+            << "  Drop policy: "
+            << (cfg_.drop_policy == DropPolicy::DropNewest ? "DropNewest" :
+                (cfg_.drop_policy == DropPolicy::DropOldest ? "DropOldest" : "Block"))
+            << "\n"
+            << "  PNG compression level: " << cfg_.png_compression_level << "\n";
 }
 
 bool LeRobotV2Backend::open() {
@@ -40,9 +85,16 @@ bool LeRobotV2Backend::open() {
     return false;
   }
   header_written_ = false;
-  // Start image worker
+  // Cache queue policy derived members
+  max_image_queue_cached_ = cfg_.max_image_queue;
+
+  // Start image worker threads
   image_worker_running_ = true;
-  image_worker_ = std::thread(&LeRobotV2Backend::imageWorkerLoop, this);
+  size_t nthreads = cfg_.encoder_threads == 0 ? 1 : cfg_.encoder_threads;
+  image_workers_.reserve(nthreads);
+  for (size_t i = 0; i < nthreads; ++i) {
+    image_workers_.emplace_back(&LeRobotV2Backend::imageWorkerLoop, this);
+  }
   opened_ = true;
   return true;
 }
@@ -84,9 +136,10 @@ void LeRobotV2Backend::close() {
   // Stop image worker
   image_worker_running_ = false;
   image_queue_cv_.notify_all();
-  if (image_worker_.joinable()) {
-    image_worker_.join();
+  for (auto &t : image_workers_) {
+    if (t.joinable()) t.join();
   }
+  image_workers_.clear();
   opened_ = false;
 }
 
@@ -121,7 +174,7 @@ void LeRobotV2Backend::writeImage(const data::RecordBase& base) {
   }
 
   // Directory per camera id (cached)
-  // TODO: this could be moved to a pre-processing step if desired
+  // TODO: this could be moved to a pre-processing step?
   auto it = image_dir_cache_.find(img.id);
   if (it == image_dir_cache_.end()) {
     fs::path camera_dir = images_root_ / img.id;
@@ -134,23 +187,50 @@ void LeRobotV2Backend::writeImage(const data::RecordBase& base) {
   fs::path file_path = camera_dir / (std::to_string(img.ts.monotonic_ns) + ".png");
 
   // Enqueue job (clone image to ensure safety if producer overwrites buffer later)
-  auto job = ImageJob{
-    .file_path=file_path,
-    .image=img.image.clone()
-  };
+  //
+  // Zero-copy enqueue: we rely on cv::Mat's internal ref counting. The producer will have its own
+  // shared_ptr to the ImageRecord; backend stores another cv::Mat header referencing same data.
+  // When encoding finishes and job.image goes out of scope, the buffer will be released if no
+  // other references remain.
+  auto job = ImageJob{ file_path, img.image };
   {
     std::lock_guard<std::mutex> lk(image_queue_mutex_);
+    // Enforce queue policy if max_image_queue_ is set
+    if (max_image_queue_cached_ > 0 && image_queue_.size() >= max_image_queue_cached_) {
+      switch (cfg_.drop_policy) {
+        case DropPolicy::DropNewest: {
+          // Silently drop newest by not adding it to the queue
+          img_dropped_.fetch_add(1, std::memory_order_relaxed);
+          return;
+        }
+        case DropPolicy::DropOldest: {
+          // Drop the oldest in the queue to make room for the new one
+          if (!image_queue_.empty()) {
+            image_queue_.pop_front();
+            img_dropped_.fetch_add(1, std::memory_order_relaxed);
+          }
+          // Break to add the new job
+          break;
+        }
+        // case DropPolicy::Block:
+        //   // Wait until space is available (not implemented)
+        //   image_queue_cv_.wait(lk, [&]{ return image_queue_.size() < max_image_queue_cached_; });
+        //   break;
+      }
+    }
     image_queue_.push_back(std::move(job));
     auto qsize = image_queue_.size();
     img_enqueued_.fetch_add(1, std::memory_order_relaxed);
     size_t prev = img_queue_high_water_.load(std::memory_order_relaxed);
     while (qsize > prev && !img_queue_high_water_.compare_exchange_weak(prev, qsize)) {}
+    img_queue_backlog_sum_.fetch_add(qsize, std::memory_order_relaxed);
+    img_queue_backlog_samples_.fetch_add(1, std::memory_order_relaxed);
   }
   image_queue_cv_.notify_one();
 }
 
 void LeRobotV2Backend::imageWorkerLoop() {
-  const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, PNG_COMPRESSION_LEVEL };
+  const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_.png_compression_level };
   while (image_worker_running_) {
     ImageJob job;
     {

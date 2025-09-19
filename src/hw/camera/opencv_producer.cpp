@@ -80,10 +80,14 @@ bool OpenCvCameraProducer::open_if_needed() {
 }
 
 bool OpenCvCameraProducer::warmup() {
-  if (!open_if_needed()) return false;
-  if (cfg_.warmup_seconds <= 0.0) return true;
-  auto warmup_end = std::chrono::steady_clock::now() +
-    std::chrono::duration<double>(cfg_.warmup_seconds);
+  // TODO: check that received frames are valid and match the requested configuration
+  if (!open_if_needed()) {
+    return false;
+  }
+  if (cfg_.warmup_seconds <= 0.0) {
+    return true;
+  }
+  auto warmup_end = std::chrono::steady_clock::now() + std::chrono::duration<double>(cfg_.warmup_seconds);
   cv::Mat frame;
   while (std::chrono::steady_clock::now() < warmup_end) {
     if (!cap_.read(frame)) {
@@ -91,20 +95,37 @@ bool OpenCvCameraProducer::warmup() {
       continue;
     }
     ++stats_.warmup_discarded;
-    std::this_thread::sleep_for(std::chrono::milliseconds(1)); // avoid tight busy loop
+    // Sleep a bit to avoid tight busy loop
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
   return true;
 }
 
 void OpenCvCameraProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
-  if (!open_if_needed()) return; // silent fail if cannot open
+  // TODO: silently fails if cannot open
+  if (!open_if_needed()) {
+    return;
+  }
   auto img = std::make_shared<data::ImageRecord>();
-  if (!cap_.read(img->image)) { ++stats_.dropped; return; }
+  if (!cap_.read(img->image)) {
+    ++stats_.dropped;
+    return;
+  }
 
   data::Timestamp ts;
+  // TODO: use device timestamp if available and cfg_.use_device_time
   uint64_t mono_now = data::now_mono_ns();
   ts.monotonic_ns = mono_now;
   ts.realtime_ns = data::now_real_ns();
+
+  // Inter-frame timing instrumentation
+  if (last_capture_mono_ != 0) {
+    uint64_t dt = mono_now - last_capture_mono_;
+    if_accum_ns_ += dt;
+    if (dt > if_max_ns_) if_max_ns_ = dt;
+    ++if_samples_;
+  }
+  last_capture_mono_ = mono_now;
 
   img->ts = ts;
   img->seq = seq_++;
@@ -116,6 +137,32 @@ void OpenCvCameraProducer::poll(const std::function<void(std::shared_ptr<data::R
 
   emit(img);
   ++stats_.produced;
+
+  // Periodic FPS health report every approx requested_fps * 10 frames (or default 300) if requested fps set
+  // TODO: make this all configurable via config
+  if (cfg_.fps > 0 && stats_.produced >= next_health_report_frame_) {
+    double avg_if_ms = 0.0;
+    double max_if_ms = 0.0;
+    if (if_samples_ > 0) {
+      avg_if_ms = (if_accum_ns_ / 1e6) / static_cast<double>(if_samples_);
+      max_if_ms = if_max_ns_ / 1e6;
+    }
+    double produced_fps = 0.0;
+    if (if_samples_ > 0 && if_accum_ns_ > 0) {
+      produced_fps = 1e9 / (static_cast<double>(if_accum_ns_) / static_cast<double>(if_samples_));
+    }
+    if (produced_fps > 0 && (produced_fps + 0.5) < cfg_.fps) {
+      std::cerr << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps
+                << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
+    } else {
+      std::cout << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps
+                << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
+    }
+    // schedule next report
+    uint64_t interval = static_cast<uint64_t>(cfg_.fps) * 10; // ~10 seconds
+    if (interval == 0) interval = 300;
+    next_health_report_frame_ += interval;
+  }
 }
 
 } // namespace trossen::hw::camera
