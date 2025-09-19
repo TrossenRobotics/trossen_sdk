@@ -8,7 +8,7 @@ void ControlUtils::control_loop(
     std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,
     std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader>
         teleop_robot,
-    float control_time, trossen_dataset::TrossenAIDataset& dataset,
+    float control_time, trossen_dataset::TrossenAIDataset* dataset,
     bool display_cameras, double fps) {
   using steady_clock = std::chrono::steady_clock;
   using time_point = std::chrono::steady_clock::time_point;
@@ -39,7 +39,7 @@ void ControlUtils::control_loop(
       frame_data.images.push_back(image_data);
     }
     // Add frame to the dataset
-    dataset.add_frame(frame_data);
+    dataset->add_frame(&frame_data);
 
     if (display_cameras) {
       // Display images/videos using OpenCV
@@ -71,7 +71,7 @@ void ControlUtils::control_loop(
     }
   }
 
-  dataset.save_episode();
+  dataset->save_episode();
 }
 
 void ControlUtils::control_loop(

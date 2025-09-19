@@ -198,7 +198,7 @@ class Metadata {
    * @param target Vector to store the loaded JSON objects
    */
   void load_jsonl_file(const std::string &path,
-                       std::vector<nlohmann::json> &target);
+                       std::vector<nlohmann::json> *target);
 
   /**
    * @brief Save a vector of JSON objects to a JSONL file
@@ -302,7 +302,7 @@ class TrossenAIDataset {
    * @param frame FrameData object representing the frame to be added
    * If there is no current episode, a new episode will be created
    */
-  void add_frame(FrameData &frame);
+  void add_frame(FrameData *frame);
 
   /**
    * @brief Save the current episode data to the dataset

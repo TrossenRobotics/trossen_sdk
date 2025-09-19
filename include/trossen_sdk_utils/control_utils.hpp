@@ -34,7 +34,7 @@ class ControlUtils {
       std::shared_ptr<trossen_ai_robot_devices::robot::TrossenRobot> robot,
       std::shared_ptr<trossen_ai_robot_devices::teleoperator::TrossenLeader>
           teleop_robot,
-      float control_time, trossen_dataset::TrossenAIDataset& dataset,
+      float control_time, trossen_dataset::TrossenAIDataset* dataset,
       bool display_cameras, double fps);
   /**
    * @brief Control loop for teleoperated robot without dataset recording for

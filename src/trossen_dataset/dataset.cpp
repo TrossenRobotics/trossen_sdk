@@ -92,7 +92,7 @@ TrossenAIDataset::TrossenAIDataset(
       num_image_writer_threads_per_camera);
 }
 
-void TrossenAIDataset::add_frame(FrameData &frame) {
+void TrossenAIDataset::add_frame(FrameData *frame) {
   // If there is no current episode, create a new one,
   // this indicates that its the first frame of a new episode
   if (current_episode_ == nullptr) {
@@ -101,18 +101,18 @@ void TrossenAIDataset::add_frame(FrameData &frame) {
     current_episode_ = std::make_unique<EpisodeData>(episode_idx);
   }
   // Set frame index
-  frame.frame_idx = current_episode_->get_frames().size();
+  frame->frame_idx = current_episode_->get_frames().size();
 
   // TODO(shantanuparab-tr) [TDS-39] Allow use of real timestamps from robot
   //  Use a fixed fps to compute timestamp in seconds
   //  Timestamp is calculated as frame index divided by fps
   //  This allows us to have compatibility with LeRobot for replaying and
   //  visualization
-  frame.timestamp_s = static_cast<float>(frame.frame_idx) / fps_;
-  frame.episode_idx = current_episode_->get_episode_idx();
+  frame->timestamp_s = static_cast<float>(frame->frame_idx) / fps_;
+  frame->episode_idx = current_episode_->get_episode_idx();
 
   // Add the frame to the current episode
-  current_episode_->add_frame(frame);
+  current_episode_->add_frame(*frame);
 
   // Create episode folder name with zero-padded episode index
   // TODO(shantanuparab-tr) Use string formatting utility
@@ -121,11 +121,11 @@ void TrossenAIDataset::add_frame(FrameData &frame) {
 
   // Push images to the image writer for asynchronous writing with appropriate
   // filenames using frame index
-  for (const auto &image_data : frame.images) {
+  for (const auto &image_data : frame->images) {
     const std::string &camera_name = image_data.camera_name;
     std::string image_path =
         fmt::format(trossen_sdk::IMAGE_PATH, 0, camera_name,
-                    current_episode_->get_episode_idx(), frame.frame_idx);
+                    current_episode_->get_episode_idx(), frame->frame_idx);
     std::string image_file_path =
         (root_ / repo_id_ / dataset_name_ / image_path).string();
     // Push the image to the writer
@@ -135,7 +135,7 @@ void TrossenAIDataset::add_frame(FrameData &frame) {
     if (!image_data.depth_map.empty()) {
       std::string depth_path =
           fmt::format(trossen_sdk::IMAGE_PATH, 0, camera_name + "_depth",
-                      current_episode_->get_episode_idx(), frame.frame_idx);
+                      current_episode_->get_episode_idx(), frame->frame_idx);
       std::string depth_file_path =
           (root_ / repo_id_ / dataset_name_ / depth_path).string();
       // Push the depth map to the writer
@@ -520,9 +520,10 @@ FeatureStats TrossenAIDataset::compute_image_stats(
 
     for (int c = 0; c < num_channels; ++c) {
       // Flatten and push pixels into channel_values[c]
-      channel_values[c].insert(channel_values[c].end(),
-                               (float *)channels[c].datastart,
-                               (float *)channels[c].dataend);
+      channel_values[c].insert(
+          channel_values[c].end(),
+          reinterpret_cast<float *>(const_cast<uchar *>(channels[c].datastart)),
+          reinterpret_cast<float *>(const_cast<uchar *>(channels[c].dataend)));
     }
   }
   // Compute statistics for each channel
@@ -860,10 +861,10 @@ Metadata::Metadata(const std::string &dataset_name, const std::string &repo_id,
   info_file_path_ = (meta_path / trossen_sdk::JSON_INFO).string();
   if (existing) {
     load_info_file(meta_path / trossen_sdk::JSON_INFO);
-    load_jsonl_file(meta_path / trossen_sdk::JSONL_EPISODES, episode_data_);
+    load_jsonl_file(meta_path / trossen_sdk::JSONL_EPISODES, &episode_data_);
     load_jsonl_file(meta_path / trossen_sdk::JSONL_EPISODE_STATS,
-                    episode_stats_data_);
-    load_jsonl_file(meta_path / trossen_sdk::JSONL_TASKS, task_data_);
+                    &episode_stats_data_);
+    load_jsonl_file(meta_path / trossen_sdk::JSONL_TASKS, &task_data_);
   } else {
     set_info_entry("dataset_name", dataset_name_);
     set_info_entry("repo_id", repo_id_);
@@ -1074,12 +1075,12 @@ void Metadata::load_info_file(const std::string &path) {
 }
 
 void Metadata::load_jsonl_file(const std::string &path,
-                               std::vector<nlohmann::json> &target) {
+                               std::vector<nlohmann::json> *target) {
   std::ifstream file(path);
   std::string line;
-  target.clear();
+  target->clear();
   while (std::getline(file, line)) {
-    if (!line.empty()) target.emplace_back(nlohmann::json::parse(line));
+    if (!line.empty()) target->emplace_back(nlohmann::json::parse(line));
   }
 }
 

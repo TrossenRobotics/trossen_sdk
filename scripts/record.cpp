@@ -145,7 +145,7 @@ int main(int argc, char* argv[]) {
   for (int episode_idx = 0; episode_idx < num_episodes; ++episode_idx) {
     spdlog::info("Starting episode {}", dataset.get_num_episodes());
     control_utils.control_loop(robot_controller, teleop_robot, recording_time,
-                               dataset, display_cameras, fps);
+                               &dataset, display_cameras, fps);
     spdlog::info("Episode {} completed.", dataset.get_num_episodes() - 1);
     // Allow operator to move the robots in teleop mode while the robot resets
     spdlog::info("Resetting the robot arms...");

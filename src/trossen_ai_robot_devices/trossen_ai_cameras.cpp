@@ -72,8 +72,9 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
 
     if (color_frame) {
       // Convert rs2::frame to cv::Mat
+      const void* data_ptr = static_cast<const void*>(color_frame.get_data());
       cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3,
-                    (void*)color_frame.get_data(), cv::Mat::AUTO_STEP);
+                    const_cast<void*>(data_ptr), cv::Mat::AUTO_STEP);
       data.image = image;
     } else {
       spdlog::error("Failed to read color frame from camera: {}", name_);
@@ -87,9 +88,11 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
     try {
       rs2::frame depth_frame = frames.get_depth_frame();
       if (depth_frame) {
-        cv::Mat depth_map =
-            cv::Mat(cv::Size(capture_width_, capture_height_), CV_16UC1,
-                    (void*)depth_frame.get_data(), cv::Mat::AUTO_STEP);
+        const void* depth_data_ptr =
+            static_cast<const void*>(depth_frame.get_data());
+        cv::Mat depth_map(cv::Size(capture_width_, capture_height_), CV_16UC1,
+                          const_cast<void*>(depth_data_ptr),
+                          cv::Mat::AUTO_STEP);
         data.depth_map = depth_map;
       } else {
         spdlog::error("Failed to read depth frame from camera: {}", name_);
