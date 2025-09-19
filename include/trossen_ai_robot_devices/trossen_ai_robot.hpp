@@ -1,5 +1,6 @@
-#ifndef TROSSEN_AI_ROBOT_HPP
-#define TROSSEN_AI_ROBOT_HPP
+// Copyright 2025 Trossen Robotics
+#ifndef INCLUDE_TROSSEN_AI_ROBOT_DEVICES_TROSSEN_AI_ROBOT_HPP_
+#define INCLUDE_TROSSEN_AI_ROBOT_DEVICES_TROSSEN_AI_ROBOT_HPP_
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <arrow/io/file.h>
@@ -13,6 +14,7 @@
 #include <chrono>
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include <string>
 #include <thread>
 #include <vector>
@@ -58,7 +60,7 @@ class TrossenLeader {
   /** @brief Get the current action from the robot leader */
   virtual std::vector<double> get_action() const = 0;
 
-  // TODO [TDS-33] Implement Force Feedback
+  // TODO(shantanuparab-tr) [TDS-33] Implement Force Feedback
   /** @brief Send feedback to the robot leader */
   virtual void send_feedback() = 0;
   /** @brief Get the name of the robot leader */
@@ -71,7 +73,8 @@ class TrossenAIWidowXLeader : public TrossenLeader {
    * @brief Constructor for TrossenAIWidowXLeader
    * @param config Configuration parameters for the robot leader
    */
-  TrossenAIWidowXLeader(const trossen_sdk_config::WidowXLeaderConfig& config);
+  explicit TrossenAIWidowXLeader(
+      const trossen_sdk_config::WidowXLeaderConfig& config);
 
   /** @brief Connect to the robot leader */
   void connect() override;
@@ -169,7 +172,7 @@ class TrossenRobot {
   /** @brief Get the current observation state of the robot
    * @return State structure containing the current observation state
    */
-  virtual void get_observation(trossen_ai_robot_devices::State& state) = 0;
+  virtual void get_observation(trossen_ai_robot_devices::State* state) = 0;
 
   /** @brief Send an action command to the robot
    * @param action Vector of doubles representing the action to be sent
@@ -200,7 +203,8 @@ class TrossenAIWidowXRobot : public TrossenRobot {
    * @brief Constructor for TrossenAIWidowXRobot
    * @param config Configuration parameters for the robot
    */
-  TrossenAIWidowXRobot(const trossen_sdk_config::WidowXRobotConfig& config);
+  explicit TrossenAIWidowXRobot(
+      const trossen_sdk_config::WidowXRobotConfig& config);
 
   /** @brief Connect to the robot */
   void connect() override;
@@ -222,7 +226,7 @@ class TrossenAIWidowXRobot : public TrossenRobot {
   /** @brief Get the current observation state of the robot
    * @return State structure containing the current observation state
    */
-  void get_observation(trossen_ai_robot_devices::State& state) override;
+  void get_observation(trossen_ai_robot_devices::State* state) override;
 
   /** @brief Send an action command to the robot
    * @param action Vector of doubles representing the action to be sent
@@ -289,7 +293,7 @@ class TrossenAIBimanualWidowXRobot : public TrossenRobot {
   /** @brief Get the current observation state of the bimanual robot
    * @return State structure containing the current observation state
    */
-  void get_observation(trossen_ai_robot_devices::State& state) override;
+  void get_observation(trossen_ai_robot_devices::State* state) override;
 
   /** @brief Send an action command to the bimanual robot
    * @param action Vector of doubles representing the action to be sent
@@ -339,4 +343,4 @@ class TrossenAIBimanualWidowXRobot : public TrossenRobot {
 }  // namespace robot
 }  // namespace trossen_ai_robot_devices
 
-#endif  // TROSSEN_AI_ROBOT_HPP
+#endif  // INCLUDE_TROSSEN_AI_ROBOT_DEVICES_TROSSEN_AI_ROBOT_HPP_

@@ -1,5 +1,6 @@
-#ifndef TROSSEN_DATASET_HPP
-#define TROSSEN_DATASET_HPP
+// Copyright 2025 Trossen Robotics
+#ifndef INCLUDE_TROSSEN_DATASET_DATASET_HPP_
+#define INCLUDE_TROSSEN_DATASET_DATASET_HPP_
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <parquet/arrow/writer.h>
@@ -72,7 +73,7 @@ class Metadata {
                     const std::string &task_name, std::filesystem::path root,
                     bool existing = false);
 
-  // TODO [TDS-34] Remove unnecessary JSON helper functions
+  // TODO(shantanuparab-tr) [TDS-34] Remove unnecessary JSON helper functions
   /**
    * @brief Set an entry in the info JSON object
    * @param key Key of the entry
@@ -448,4 +449,4 @@ class TrossenAIDataset {
 
 }  // namespace trossen_dataset
 
-#endif  // TROSSEN_DATASET_HPP
+#endif  // INCLUDE_TROSSEN_DATASET_DATASET_HPP_

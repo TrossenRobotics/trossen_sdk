@@ -1,3 +1,4 @@
+// Copyright 2025 Trossen Robotics
 #include "trossen_ai_robot_devices/trossen_ai_robot.hpp"
 
 #include <iostream>
@@ -11,8 +12,8 @@ namespace robot {
 TrossenAIWidowXRobot::TrossenAIWidowXRobot(
     const trossen_sdk_config::WidowXRobotConfig& config)
     : name_(config.name), ip_address_(config.ip_address) {
-  // TODO [TDS-41] Change the model to FOLLOWER_MODEL once the gripper is
-  // changed
+  // TODO(shantanuparab-tr) [TDS-41] Change the model to FOLLOWER_MODEL once the
+  // gripper is changed
   robot_driver_ = std::make_unique<trossen_ai_robot_devices::TrossenAIArm>(
       config.name, config.ip_address, trossen_sdk::LEADER_MODEL);
   // Check the camera interfaces and create camera objects
@@ -66,7 +67,7 @@ void TrossenAIWidowXRobot::disconnect() {
 }
 
 void TrossenAIWidowXRobot::calibrate() {
-  // TODO Implement calibration logic if needed
+  // TODO(shantanuparab-tr) Implement calibration logic if needed
 }
 
 void TrossenAIWidowXRobot::configure() {
@@ -75,12 +76,12 @@ void TrossenAIWidowXRobot::configure() {
 }
 
 void TrossenAIWidowXRobot::get_observation(
-    trossen_ai_robot_devices::State& state) {
+    trossen_ai_robot_devices::State* state) {
   // Read joint positions from the robot arm
-  state.observation_state = robot_driver_->read(trossen_sdk::POSITION);
+  state->observation_state = robot_driver_->read(trossen_sdk::POSITION);
   // Read camera images
   for (auto& camera : cameras_) {
-    state.images.push_back(camera->async_read());
+    state->images.push_back(camera->async_read());
   }
 }
 
@@ -88,19 +89,21 @@ void TrossenAIWidowXRobot::send_action(const std::vector<double>& action) {
   robot_driver_->write(trossen_sdk::POSITION, action);
 }
 
-// TODO Improve this logic or delete the function if not needed
+// TODO(shantanuparab-tr) Improve this logic or delete the function if not
+// needed
 std::vector<std::string> TrossenAIWidowXRobot::get_joint_features() const {
   return robot_driver_->get_joint_names();
 }
 
-// TODO Improve this logic or delete the function if not needed
+// TODO(shantanuparab-tr) Improve this logic or delete the function if not
+// needed
 std::vector<std::string> TrossenAIWidowXRobot::get_observation_features()
     const {
   std::vector<std::string> features = get_joint_features();
   return features;
 }
 
-// TODO Rename function for clarity
+// TODO(shantanuparab-tr) Rename function for clarity
 std::vector<trossen_ai_robot_devices::CameraType>
 TrossenAIWidowXRobot::get_camera_features() const {
   std::vector<trossen_ai_robot_devices::CameraType> camera_names;
@@ -165,7 +168,7 @@ void TrossenAIBimanualWidowXRobot::connect() {
 }
 
 void TrossenAIBimanualWidowXRobot::calibrate() {
-  // TODO Implement calibration logic if needed
+  // TODO(shantanuparab-tr) Implement calibration logic if needed
   // Compliant Gripper Calibration
 }
 
@@ -176,20 +179,20 @@ void TrossenAIBimanualWidowXRobot::configure() {
 }
 
 void TrossenAIBimanualWidowXRobot::get_observation(
-    trossen_ai_robot_devices::State& state) {
+    trossen_ai_robot_devices::State* state) {
   // Read joint positions from both robot arms and combine them
   std::vector<double> right_positions =
       right_robot_driver_->read(trossen_sdk::POSITION);
   std::vector<double> left_positions =
       left_robot_driver_->read(trossen_sdk::POSITION);
-  state.observation_state.insert(state.observation_state.end(),
-                                 right_positions.begin(),
-                                 right_positions.end());
-  state.observation_state.insert(state.observation_state.end(),
-                                 left_positions.begin(), left_positions.end());
+  state->observation_state.insert(state->observation_state.end(),
+                                  right_positions.begin(),
+                                  right_positions.end());
+  state->observation_state.insert(state->observation_state.end(),
+                                  left_positions.begin(), left_positions.end());
   // Read camera images
   for (auto& camera : cameras_) {
-    state.images.push_back(camera->async_read());
+    state->images.push_back(camera->async_read());
   }
 }
 
@@ -244,7 +247,8 @@ std::vector<std::string> TrossenAIBimanualWidowXRobot::get_joint_features()
   return features;
 }
 
-// TODO Improve this logic or delete the function if not needed
+// TODO(shantanuparab-tr) Improve this logic or delete the function if not
+// needed
 std::vector<std::string>
 TrossenAIBimanualWidowXRobot::get_observation_features() const {
   std::vector<std::string> right_features_raw =
@@ -263,7 +267,7 @@ TrossenAIBimanualWidowXRobot::get_observation_features() const {
   return right_features;
 }
 
-// TODO Rename function for clarity
+// TODO(shantanuparab-tr) Rename function for clarity
 std::vector<trossen_ai_robot_devices::CameraType>
 TrossenAIBimanualWidowXRobot::get_camera_features() const {
   std::vector<trossen_ai_robot_devices::CameraType> camera_names;
@@ -346,7 +350,7 @@ void TrossenAIBimanualWidowXLeader::connect() {
   left_robot_driver_->connect();
 }
 void TrossenAIBimanualWidowXLeader::calibrate() {
-  // TODO Implement calibration logic if needed
+  // TODO(shantanuparab-tr) Implement calibration logic if needed
 }
 void TrossenAIBimanualWidowXLeader::configure() {
   right_robot_driver_->stage_arm();  // Stage the right arm to a safe position

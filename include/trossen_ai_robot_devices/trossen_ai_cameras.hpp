@@ -1,5 +1,7 @@
-#ifndef TROSSEN_AI_CAMERAS_HPP
-#define TROSSEN_AI_CAMERAS_HPP
+// Copyright (c) 2025 Trossen Robotics
+
+#ifndef INCLUDE_TROSSEN_AI_ROBOT_DEVICES_TROSSEN_AI_CAMERAS_HPP_
+#define INCLUDE_TROSSEN_AI_ROBOT_DEVICES_TROSSEN_AI_CAMERAS_HPP_
 #include <spdlog/spdlog.h>
 
 #include <atomic>
@@ -63,7 +65,7 @@ class TrossenAICamera {
         capture_width_(capture_width),
         capture_height_(capture_height),
         fps_(fps),
-        use_depth_(use_depth){};
+        use_depth_(use_depth) {}
 
   virtual ~TrossenAICamera() = default;
 
@@ -116,7 +118,7 @@ class TrossenAICamera {
   /// @brief Get the frames per second for image capture
   int fps() const { return fps_; }
 
-  // TODO [TDS-31] Define channels based on image format
+  // TODO(shantanuparab-tr) [TDS-31] Define channels based on image format
   /// @brief Get the number of channels in the captured images
   int channels() const { return 3; }  // Assuming RGB images
 
@@ -215,4 +217,4 @@ class AsyncImageWriter {
 };
 }  // namespace trossen_ai_robot_devices
 
-#endif  // TROSSEN_AI_CAMERAS_HPP
+#endif  // INCLUDE_TROSSEN_AI_ROBOT_DEVICES_TROSSEN_AI_CAMERAS_HPP_

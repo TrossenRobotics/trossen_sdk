@@ -1,9 +1,11 @@
-#ifndef TROSSEN_SDK_UTILS_CONTROL_UTILS_HPP
-#define TROSSEN_SDK_UTILS_CONTROL_UTILS_HPP
+// Copyright 2025 Trossen Robotics
+#ifndef INCLUDE_TROSSEN_SDK_UTILS_CONTROL_UTILS_HPP_
+#define INCLUDE_TROSSEN_SDK_UTILS_CONTROL_UTILS_HPP_
 
 #include <spdlog/spdlog.h>
 
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -83,4 +85,4 @@ class ControlUtils {
 
 }  // namespace trossen_sdk
 
-#endif  // TROSSEN_SDK_UTILS_CONTROL_UTILS_HPP
+#endif  // INCLUDE_TROSSEN_SDK_UTILS_CONTROL_UTILS_HPP_

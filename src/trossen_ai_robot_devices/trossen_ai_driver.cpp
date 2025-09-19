@@ -1,3 +1,5 @@
+// Copyright 2025 Trossen Robotics
+
 #include "trossen_ai_robot_devices/trossen_ai_driver.hpp"
 
 #include <algorithm>

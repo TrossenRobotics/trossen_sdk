@@ -1,9 +1,11 @@
-#ifndef TROSSEN_SDK_UTILS_CONFIG_PARSER_UTILS_HPP
-#define TROSSEN_SDK_UTILS_CONFIG_PARSER_UTILS_HPP
+// Copyright 2024 Trossen Robotics
+#ifndef INCLUDE_TROSSEN_SDK_UTILS_CONFIG_PARSER_UTILS_HPP_
+#define INCLUDE_TROSSEN_SDK_UTILS_CONFIG_PARSER_UTILS_HPP_
 #include <spdlog/spdlog.h>
 
 #include <fstream>
 #include <iostream>
+#include <memory>
 #include <nlohmann/json.hpp>
 #include <string>
 #include <vector>
@@ -158,4 +160,4 @@ create_leader_from_config(const trossen_sdk_config::LeaderConfigBase& config) {
 }
 }  // namespace trossen_sdk_config
 
-#endif  // TROSSEN_SDK_UTILS_CONFIG_PARSER_UTILS_HPP
+#endif  // INCLUDE_TROSSEN_SDK_UTILS_CONFIG_PARSER_UTILS_HPP_

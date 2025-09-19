@@ -1,3 +1,5 @@
+// Copyright 2025 Trossen Robotics
+
 #include "trossen_sdk_utils/control_utils.hpp"
 
 namespace trossen_sdk {
@@ -26,7 +28,7 @@ void ControlUtils::control_loop(
     robot->send_action(action);
 
     // Get the current state from the robot arm
-    robot->get_observation(state);
+    robot->get_observation(&state);
 
     // Set the action in the state
     state.action = action;
@@ -36,7 +38,6 @@ void ControlUtils::control_loop(
     for (auto& image_data : state.images) {
       frame_data.images.push_back(image_data);
     }
-
     // Add frame to the dataset
     dataset.add_frame(frame_data);
 
@@ -44,14 +45,19 @@ void ControlUtils::control_loop(
       // Display images/videos using OpenCV
       display_images(state.images);
     }
+
+    // Clear images to save memory
+    state.images.clear();
+
     busy_wait_until(loop_start_time, fps);  // Use the specified FPS
 
     auto loop_duration =
         std::chrono::duration_cast<std::chrono::duration<double>>(
             steady_clock::now() - loop_start_time)
             .count();
-    // TODO: Improve this logging to be more elegant and less verbose
-    // TODO: Make FPS tolerance configurable/ constant
+    // TODO(shantanuparab-tr): Improve this logging to be more elegant and less
+    // verbose
+    // TODO(shantanuparab-tr): Make FPS tolerance configurable/ constant
     if (loop_duration > 1.0 / fps * 0.85) {
       spdlog::warn("Loop duration: " + std::to_string(loop_duration) +
                    " seconds" +
@@ -93,7 +99,7 @@ void ControlUtils::control_loop(
     std::vector<double> action = teleop_robot->get_action();
     robot->send_action(action);
     // Get the current state from the robot arm
-    robot->get_observation(state);
+    robot->get_observation(&state);
     // Set the action in the state
     state.action = action;
 
@@ -101,6 +107,9 @@ void ControlUtils::control_loop(
     if (display_cameras) {
       display_images(state.images);
     }
+
+    // Clear images to save memory
+    state.images.clear();
 
     // Wait until the next loop iteration based on the desired frequency
     busy_wait_until(loop_start_time, fps);
@@ -110,8 +119,9 @@ void ControlUtils::control_loop(
         std::chrono::duration_cast<std::chrono::duration<double>>(
             steady_clock::now() - loop_start_time)
             .count();
-    // TODO: Improve this logging to be more elegant and less verbose
-    // TODO: Make FPS tolerance configurable/ constant
+    // TODO(shantanuparab-tr): Improve this logging to be more elegant and less
+    // verbose
+    // TODO(shantanuparab-tr): Make FPS tolerance configurable/ constant
     if (loop_duration > 1.0 / fps * 0.85) {
       spdlog::warn(
           "Loop duration: " + std::to_string(loop_duration) + " seconds" +

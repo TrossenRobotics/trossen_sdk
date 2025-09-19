@@ -1,9 +1,10 @@
+// Copyright (c) 2025, Trossen Robotics.
 #include "trossen_dataset/dataset.hpp"
 
 namespace trossen_dataset {
 
 EpisodeData::EpisodeData(int64_t episode_idx) : episode_idx_(episode_idx) {
-  // TODO: Change the buffer size to match episode length
+  // TODO(shantanuparab-tr): Change the buffer size to match episode length
   buffer_.reserve(100);  // Reserve space for 100 frames initially can be
                          // adjusted based on the episode length
 }
@@ -40,7 +41,7 @@ TrossenAIDataset::TrossenAIDataset(
     if (overwrite_) {
       spdlog::warn("Overwriting existing dataset: {}", dataset_name_);
       std::filesystem::remove_all(dataset_dir);
-      // TODO Use chunk size to decide the chunk numbering
+      // TODO(shantanuparab-tr) Use chunk size to decide the chunk numbering
       std::filesystem::create_directories(
           dataset_dir / trossen_sdk::DATA_PATH_DIR / "chunk-000");
       std::filesystem::create_directories(dataset_dir /
@@ -51,9 +52,8 @@ TrossenAIDataset::TrossenAIDataset(
                                           trossen_sdk::IMAGES_DIR);
       metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_,
                                              task_name_, root_, false);
-    }
-    // If overwrite is false, load existing metadata and verify the dataset
-    else {
+    } else {
+      // If overwrite is false, load existing metadata and verify the dataset
       metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_,
                                              task_name_, root_, true);
       if (!verify()) {
@@ -70,9 +70,9 @@ TrossenAIDataset::TrossenAIDataset(
         episodes_buffer_.push_back(std::move(episode_data));
       }
     }
-  }
-  // If the dataset directory does not exist, create it and initialize metadata
-  else {
+  } else {
+    // If the dataset directory does not exist,
+    // create it and initialize metadata
     std::filesystem::create_directories(
         dataset_dir / trossen_sdk::DATA_PATH_DIR / "chunk-000");
     std::filesystem::create_directories(dataset_dir /
@@ -103,7 +103,7 @@ void TrossenAIDataset::add_frame(FrameData &frame) {
   // Set frame index
   frame.frame_idx = current_episode_->get_frames().size();
 
-  // TODO [TDS-39] Allow use of real timestamps from robot
+  // TODO(shantanuparab-tr) [TDS-39] Allow use of real timestamps from robot
   //  Use a fixed fps to compute timestamp in seconds
   //  Timestamp is calculated as frame index divided by fps
   //  This allows us to have compatibility with LeRobot for replaying and
@@ -115,7 +115,7 @@ void TrossenAIDataset::add_frame(FrameData &frame) {
   current_episode_->add_frame(frame);
 
   // Create episode folder name with zero-padded episode index
-  // TODO Use string formatting utility
+  // TODO(shantanuparab-tr) Use string formatting utility
   std::string episode_folder_name =
       fmt::format("episode_{:06}", current_episode_->get_episode_idx());
 
@@ -249,14 +249,15 @@ void TrossenAIDataset::save_episode() {
       {timestamp_array, observation_array, action_array, episode_idx_array,
        frame_idx_array, index_array, task_index_array});
 
-  // TODO Use chunk size from metadata or config
+  // TODO(shantanuparab-tr): Use chunk size from metadata or config
   int chunk_index =
       episodes_buffer_.size() / 1000;  // Assuming 1000 episodes per chunk
   int episode_index = episodes_buffer_.size();
 
   // Construct the output file path for the Parquet file
-  // TODO [TDS-40] Use config or metadata for chunk size and naming convention
-  // TODO Use string formatting utility
+  // TODO(shantanuparab-tr): Use config or metadata for chunk size and naming
+  // convention
+  // TODO(shantanuparab-tr): Use string formatting utility
   std::string episode_file_str =
       fmt::format(trossen_sdk::DATA_PATH, chunk_index, episode_index);
   std::string output_path_ =
@@ -423,7 +424,7 @@ nlohmann::json TrossenAIDataset::compute_list_stats(
 }
 
 bool TrossenAIDataset::verify() const {
-  // TODO Implement a more robust verification logic
+  // TODO(shantanuparab-tr): Implement a more robust verification logic
   // Load metadata and check if all required fields are present
   if (!metadata_) {
     spdlog::error("Metadata is not initialized.");
@@ -578,9 +579,8 @@ void TrossenAIDataset::compute_statistics(std::shared_ptr<arrow::Table> table,
       auto list_array =
           std::static_pointer_cast<arrow::ListArray>(column->chunk(0));
       stats[field->name()] = compute_list_stats(list_array);
-    }
-    // If the column is a primitive type, compute flat statistics
-    else {
+    } else {
+      // If the column is a primitive type, compute flat statistics
       auto array = column->chunk(0);
       stats[field->name()] = compute_flat_stats(array);
     }
@@ -592,7 +592,7 @@ void TrossenAIDataset::compute_statistics(std::shared_ptr<arrow::Table> table,
     std::string image_folder_path = get_image_path();
 
     // Create episode folder name with zero-padded episode index
-    // TODO Use string formatting utility
+    // TODO(shantanuparab-tr): Use string formatting utility
     std::string episode_folder_name =
         fmt::format("episode_{:06}", episode_index);
 
@@ -707,8 +707,8 @@ void TrossenAIDataset::convert_to_videos() const {
           std::filesystem::path input_pattern =
               episode_dir.path() / "image_%06d.jpg";
 
-          // TODO Construct this command using configuration parameters from
-          // user
+          // TODO(shantanuparab-tr): Construct this command using configuration
+          // parameters from user
           //  Construct the FFmpeg command to create the video
           //  Using libsvtav1 codec for AV1 encoding
           //  -crf 30 for quality, -g 30 for keyframe interval, -preset 6 for
@@ -888,10 +888,10 @@ Metadata::Metadata(const std::string &dataset_name, const std::string &repo_id,
 
 void Metadata::add_features(
     const trossen_ai_robot_devices::robot::TrossenRobot &robot) {
-  // TODO [TDS-15]: Extract features from the robot's observation space and
-  // action space
-  // TODO [TDS-16]: Get feature specifications from a configuration file or
-  // constant definitions
+  // TODO(shantanuparab-tr): [TDS-15]: Extract features from the robot's
+  // observation space and action space
+  // TODO(shantanuparab-tr): [TDS-16]: Get feature specifications from a
+  // configuration file or constant definitions
   //  Action
   nlohmann::json action;
   action["dtype"] = "float32";
@@ -905,8 +905,8 @@ void Metadata::add_features(
   observation_state["names"] = robot.get_observation_features();
 
   // Add camera features
-  // TODO [TDS-16]: Get camera specifications from a configuration file or
-  // constant definitions
+  // TODO(shantanuparab-tr): [TDS-16]: Get camera specifications from a
+  // configuration file or constant definitions
   nlohmann::json camera_feature;
   camera_feature["dtype"] = "video";
   camera_feature["shape"] = {480, 640, 3};
@@ -961,13 +961,16 @@ void Metadata::add_features(
   // Miscellaneous Feature
   info_["total_episodes"] = 0;
   info_["total_frames"] = 0;
-  // TODO [TDS-25]: Update chunks based on total number of unique tasks
+  // TODO(shantanuparab-tr): [TDS-25]: Update total tasks based on total number
+  // of unique tasks
   info_["total_tasks"] = 1;
-  // TODO [TDS-26] Update chunks based on total number of episodes
+  // TODO(shantanuparab-tr): [TDS-26] Update chunks based on total number of
+  // episodes
   info_["total_chunks"] = 1;
-  // TODO [TDS-27] Add appropriate logic to decide chunk size
+  // TODO(shantanuparab-tr): [TDS-27] Add appropriate logic to decide chunk size
   info_["chunks_size"] = 1000;
-  // TODO [TDS-27]: Update fps based on robot/control configuration
+  // TODO(shantanuparab-tr): [TDS-28] Update fps based on robot/control
+  // configuration
   info_["fps"] = 30;
   info_["splits"]["train"] = "0:0";
 }
@@ -990,8 +993,8 @@ void Metadata::update_info(int additional_frames) {
   // now)
   int total_videos =
       info_.contains("total_videos") ? info_["total_videos"].get<int>() : 0;
-  // TODO [TDS-17]: Determine the correct number of videos to add based on
-  // cameras
+  // TODO(shantanuparab-tr): [TDS-17]: Determine the correct number of videos to
+  // add based on cameras
   total_videos += 4;
   info_["total_videos"] = total_videos;
 

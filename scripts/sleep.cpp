@@ -1,3 +1,4 @@
+// Copyright 2025 Trossen Robotics
 #include <spdlog/spdlog.h>
 
 #include <boost/program_options.hpp>

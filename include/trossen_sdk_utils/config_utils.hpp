@@ -1,5 +1,6 @@
-#ifndef TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP
-#define TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP
+// Copyright 2025 Trossen Robotics
+#ifndef INCLUDE_TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP_
+#define INCLUDE_TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP_
 #include <fstream>
 #include <iostream>
 #include <nlohmann/json.hpp>
@@ -30,7 +31,8 @@ struct CameraConfig {
   bool use_depth;
 };
 
-// TODO [TDS-35] Implement and use Base configuration for mobile base robots
+// TODO(shantanuparab-tr) [TDS-35] Implement and use Base configuration for
+// mobile base robots
 /**
  * @brief Base configuration structure
  * This structure holds the base configuration parameters including the name.
@@ -154,4 +156,4 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(WidowXRobotConfig, name, ip_address,
 
 }  // namespace trossen_sdk_config
 
-#endif  // TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP
+#endif  // INCLUDE_TROSSEN_SDK_UTILS_CONFIG_UTILS_HPP_

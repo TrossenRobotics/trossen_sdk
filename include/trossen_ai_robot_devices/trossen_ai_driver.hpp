@@ -1,5 +1,6 @@
-#ifndef TROSSEN_AI_DRIVER_HPP
-#define TROSSEN_AI_DRIVER_HPP
+// Copyright 2025 Trossen Robotics
+#ifndef INCLUDE_TROSSEN_AI_ROBOT_DEVICES_TROSSEN_AI_DRIVER_HPP_
+#define INCLUDE_TROSSEN_AI_ROBOT_DEVICES_TROSSEN_AI_DRIVER_HPP_
 #include <spdlog/spdlog.h>
 
 #include <iostream>
@@ -116,7 +117,7 @@ class TrossenAIArm {
   /// @brief Track connection status
   bool is_connected_ = false;
 
-  // TODO [TDS-32] Make time_to_move_ configurable
+  // TODO(shantanuparab-tr) [TDS-32] Make time_to_move_ configurable
   /// @brief Time to move for position/velocity/effort commands
   float time_to_move_ = 0.1;
 
@@ -126,4 +127,4 @@ class TrossenAIArm {
 
 }  // namespace trossen_ai_robot_devices
 
-#endif  // TROSSEN_AI_DRIVER_HPP
+#endif  // INCLUDE_TROSSEN_AI_ROBOT_DEVICES_TROSSEN_AI_DRIVER_HPP_

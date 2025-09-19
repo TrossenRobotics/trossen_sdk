@@ -1,3 +1,4 @@
+// Copyright 2025 Trossen Robotics
 #include "trossen_ai_robot_devices/trossen_ai_cameras.hpp"
 
 namespace trossen_ai_robot_devices {
@@ -40,7 +41,7 @@ void RealsenseCamera::connect() {
 }
 
 void RealsenseCamera::disconnect() {
-  // TODO: Properly stop the camera pipeline if needed
+  // TODO(shantanuparab-tr): Properly stop the camera pipeline if needed
   // Log disconnection
   spdlog::info("Disconnecting from camera: {}", name_);
 }
@@ -172,7 +173,8 @@ void OpenCVCamera::connect() {
     spdlog::error("Failed to open camera with index: {}", device_index);
     // Run find_cameras to list available cameras
     find_cameras();
-    // TODO Store the output images in a known location and inform the user
+    // TODO(shantanuparab-tr) Store the output images in a
+    // known location and inform the user
     spdlog::info(
         "Available cameras listed above. Please check outputs folder to get "
         "images associated "
@@ -396,9 +398,9 @@ void AsyncImageWriter::worker_loop() {
     if (task.image.channels() == 1) {
       // If the image is already CV_16UC1, no need to convert
       if (task.image.type() != CV_16UC1) {
-        // TODO [TDS-36]: Handle different depth formats if necessary
-        // Convert to CV_16UC1 assuming the input is in meters (float) and we
-        // want millimeters (int)
+        // TODO(shantanuparab-tr) [TDS-36]: Handle different depth formats
+        // if necessary. Convert to CV_16UC1 assuming the input is
+        // in meters (float) and we want millimeters (int)
         task.image.convertTo(image_to_write, CV_16UC1, 1000);
       } else {
         image_to_write = task.image;

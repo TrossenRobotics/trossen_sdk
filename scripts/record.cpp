@@ -1,3 +1,4 @@
+// Copyright 2025 Trossen Robotics
 #include <boost/program_options.hpp>
 #include <fstream>
 #include <iostream>

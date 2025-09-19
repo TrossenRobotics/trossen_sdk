@@ -1,3 +1,4 @@
+// Copyright 2025 Trossen Robotics
 #include <boost/program_options.hpp>
 #include <fstream>
 #include <iostream>
@@ -24,7 +25,8 @@ int main(int argc, char* argv[]) {
       "robot",
       po::value<std::string>(&robot_name)->default_value("trossen_ai_solo"),
       "robot name")
-      // TODO [TDS-38]: Allow having infinite teleop time until user interrupts
+      // TODO(shantanuparab-tr) [TDS-38]: Allow having infinite teleop time
+      // until user interrupts
       ("teleop_time", po::value<double>(&teleop_time)->default_value(10.0),
        "teleoperation time per episode (seconds)")(
           "display_cameras",

@@ -1,3 +1,4 @@
+// Copyright 2025 Trossen Robotics
 #include <boost/program_options.hpp>
 #include <filesystem>
 #include <trossen_sdk_utils/control_utils.hpp>
