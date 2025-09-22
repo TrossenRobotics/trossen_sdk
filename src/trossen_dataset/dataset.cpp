@@ -4,7 +4,7 @@
 namespace trossen_dataset {
 
 EpisodeData::EpisodeData(int64_t episode_idx) : episode_idx_(episode_idx) {
-  // TODO(shantanuparab-tr): Change the buffer size to match episode length
+  // TODO(shantanuparab-tr) [TDS-45]: Change the buffer size to match episode length
   buffer_.reserve(100);  // Reserve space for 100 frames initially can be
                          // adjusted based on the episode length
 }
@@ -41,7 +41,7 @@ TrossenAIDataset::TrossenAIDataset(
     if (overwrite_) {
       spdlog::warn("Overwriting existing dataset: {}", dataset_name_);
       std::filesystem::remove_all(dataset_dir);
-      // TODO(shantanuparab-tr) Use chunk size to decide the chunk numbering
+      // TODO(shantanuparab-tr) [TDS-46]: Use chunk size to decide the chunk numbering
       std::filesystem::create_directories(
           dataset_dir / trossen_sdk::DATA_PATH_DIR / "chunk-000");
       std::filesystem::create_directories(dataset_dir /

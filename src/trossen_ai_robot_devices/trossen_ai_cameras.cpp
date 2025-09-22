@@ -41,7 +41,7 @@ void RealsenseCamera::connect() {
 }
 
 void RealsenseCamera::disconnect() {
-  // TODO(shantanuparab-tr): Properly stop the camera pipeline if needed
+  // TODO(shantanuparab-tr) [TDS-43]: Properly stop the camera pipeline if needed
   // Log disconnection
   spdlog::info("Disconnecting from camera: {}", name_);
 }
@@ -176,7 +176,7 @@ void OpenCVCamera::connect() {
     spdlog::error("Failed to open camera with index: {}", device_index);
     // Run find_cameras to list available cameras
     find_cameras();
-    // TODO(shantanuparab-tr) Store the output images in a
+    // TODO(shantanuparab-tr) [TDS-44]: Store the output images in a
     // known location and inform the user
     spdlog::info(
         "Available cameras listed above. Please check outputs folder to get "

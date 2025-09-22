@@ -184,6 +184,8 @@ make
 
 # Usage
 
+TODO [TDS-42](shantanuparab-tr): Add instructions for configuring up the robot arms and cameras.
+
 ## Recording a dataset
 
 ```bash

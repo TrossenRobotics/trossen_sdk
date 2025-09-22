@@ -57,7 +57,6 @@ void ControlUtils::control_loop(
             .count();
     // TODO(shantanuparab-tr): Improve this logging to be more elegant and less
     // verbose
-    // TODO(shantanuparab-tr): Make FPS tolerance configurable/ constant
     if (loop_duration > 1.0 / fps * (1+fps_tolerance)) {
       spdlog::warn("Loop duration: " + std::to_string(loop_duration) +
                    " seconds" +
