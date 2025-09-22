@@ -98,7 +98,6 @@ void TrossenAIArm::write(const std::string& data_name,
                     driver_.get_num_joints());
       return;
     }
-    spdlog::debug("Setting gripper position to {}", data.back());
     driver_.set_all_positions(data, time_to_move_, false);
   } else if (data_name == trossen_sdk::VELOCITY) {
     // Check if any mode is not set to velocity

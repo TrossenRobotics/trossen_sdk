@@ -194,6 +194,8 @@ void TrossenAIDataset::save_episode() {
                  "Failed to append episode index: {}");
     check_status(frame_idx_builder.Append(sample.frame_idx),
                  "Failed to append frame index: {}");
+    // TODO(shantanuparab-tr): Update global index based on actual data
+    // For now, we use frame index as a placeholder for global index
     check_status(index_builder.Append(sample.frame_idx),
                  "Failed to append global index: {}");
     check_status(task_index_builder.Append(0),
@@ -307,6 +309,7 @@ void TrossenAIDataset::save_episode() {
   // meta/tasks.jsonl
   nlohmann::json task_metadata;
   task_metadata["task"] = metadata_->get_info_entry("tasks");
+  // TODO(shantanuparab-tr): Update task index based on actual tasks
   task_metadata["task_index"] = current_episode_->get_episode_idx();
   metadata_->add_task(task_metadata);
 

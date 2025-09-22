@@ -85,7 +85,7 @@ inline std::shared_ptr<trossen_sdk_config::RobotConfigBase> load_robot_config(
 
   // Check if "type" exists in the JSON
   if (!j.contains("type")) {
-    throw std::runtime_error("Missing 'type' field in leader config JSON: " +
+    throw std::runtime_error("Missing 'type' field in follower config JSON: " +
                              json_path);
   }
   // Extract the type and create the appropriate config object
