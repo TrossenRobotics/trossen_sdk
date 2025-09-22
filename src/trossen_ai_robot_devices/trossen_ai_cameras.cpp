@@ -62,7 +62,7 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
   // Extract color and depth frames
   trossen_ai_robot_devices::ImageData data;
   data.camera_name = name_;
-  if (frames && frames.size() < 0) {
+  if (frames && frames.size() == 0) {
     spdlog::error("No frames received from camera: {}", name_);
     return data;
   }
