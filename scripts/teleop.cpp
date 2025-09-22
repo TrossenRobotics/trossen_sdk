@@ -25,10 +25,8 @@ int main(int argc, char* argv[]) {
       "fps", po::value<double>(&fps)->default_value(30.0), "frames per second")(
       "robot",
       po::value<std::string>(&robot_name)->default_value("trossen_ai_solo"),
-      "robot name")
-      // TODO(shantanuparab-tr) [TDS-38]: Allow having infinite teleop time
-      // until user interrupts
-      ("teleop_time", po::value<double>(&teleop_time)->default_value(10.0),
+      "robot name")(
+      "teleop_time", po::value<double>(&teleop_time)->default_value(-1.0),
        "teleoperation time per episode (seconds)")(
         "display_cameras",
           po::value<bool>(&display_cameras)->default_value(true),

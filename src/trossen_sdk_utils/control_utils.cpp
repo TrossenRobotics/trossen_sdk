@@ -89,7 +89,9 @@ void ControlUtils::control_loop(
 
   auto start_time = steady_clock::now();
   auto end_time = start_time + std::chrono::duration<float>(control_time);
-  while (steady_clock::now() < end_time) {
+
+  bool run_forever = control_time < 0.0f;
+  while (run_forever || steady_clock::now() < end_time) {
     auto loop_start_time = steady_clock::now();
     trossen_dataset::FrameData frame_data;
     frame_data.timestamp_s =
