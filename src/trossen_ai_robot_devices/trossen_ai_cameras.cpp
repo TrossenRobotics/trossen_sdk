@@ -53,8 +53,9 @@ void RealsenseCamera::connect() {
   if (!unique_id_.empty()) {
     cfg.enable_device(unique_id_);
   } else {
-    throw std::runtime_error(
-        "Unique ID (serial number) is required to connect to RealSense camera");
+    spdlog::error(
+        "Unique ID is empty. Cannot connect to RealSense camera: {}", name_);
+    throw std::runtime_error("Unique ID is empty for camera: " + name_);
   }
 
   // Enable the color stream as default
@@ -67,8 +68,22 @@ void RealsenseCamera::connect() {
                       RS2_FORMAT_Z16, fps_);
   }
 
-  // Start the camera pipeline with the configuration
-  rs2::pipeline_profile profile = camera_.start(cfg);
+  try {
+    // Start the camera pipeline
+    rs2::pipeline_profile profile = camera_.start(cfg);
+  } catch (const rs2::error& e) {
+    spdlog::error(
+        "Failed to enable device with Unique ID: {}. Error: {}. Listing all "
+        "available cameras.",
+        unique_id_, e.what());
+    find_cameras();
+    spdlog::info(
+        "Available cameras listed above. Please check outputs folder to get "
+        "images associated "
+        "with each camera.");
+    throw std::runtime_error(
+        "Unique ID (serial number) is required to connect to RealSense camera");
+  }
 }
 
 void RealsenseCamera::disconnect() {
@@ -162,13 +177,14 @@ void RealsenseCamera::find_cameras() {
     temp_camera.disconnect();
 
     if (!img_data.image.empty()) {
-      // Prepare filename using the serial number
-      std::string filename = serial + ".png";
+      std::string filename =
+              "outputs/realsense/" + serial + ".png";
+      // Ensure the outputs directory exists
+      std::filesystem::create_directories("outputs/realsense");
 
       // Enqueue the image saving task
       image_writer.push(ImageSaveTask{img_data.image, filename});
-      spdlog::info("Enqueued image saving for camera: {} to file: {}", name,
-                   filename);
+
     } else {
       spdlog::error("Failed to capture image from camera: {}", name);
     }
@@ -183,9 +199,8 @@ OpenCVCamera::OpenCVCamera(const std::string& name,
   // Initialize camera settings if needed
   spdlog::info(
       "OpenCVCamera initialized: name={}, unique_id={}, width={}, height={}, "
-      "fps={}, "
-      "use_depth={}",
-      name_, unique_id_, capture_width_, capture_height_, fps_, use_depth_);
+      "fps={}, ",
+      name_, unique_id_, capture_width_, capture_height_, fps_);
 }
 
 void OpenCVCamera::connect() {
@@ -193,14 +208,19 @@ void OpenCVCamera::connect() {
   int device_index = -1;
   try {
     device_index = std::stoi(unique_id_);
-  } catch (const std::invalid_argument& e) {
+  }
+  catch (const std::exception& e) {
     spdlog::error(
-        "Invalid unique_id for OpenCVCamera: {}. Must be an integer index.",
+        "Invalid unique_id for OpenCVCamera: {}. Must be a valid index.",
         unique_id_);
-    return;
+    find_cameras();
+    spdlog::info(
+      "Use the index from the available cameras listed above as the unique_id."
+      "Please check outputs folder to get images associated with each camera.");
+    throw std::runtime_error("Invalid unique_id for OpenCVCamera: " + unique_id_);
   }
 
-  cv::VideoCapture cap(device_index);
+  cv::VideoCapture cap(device_index, cv::CAP_V4L2);  // Using V4L2 backend on Linux
   if (!cap.isOpened()) {
     spdlog::error("Failed to open camera with index: {}", device_index);
     // Run find_cameras to list available cameras
@@ -216,9 +236,9 @@ void OpenCVCamera::connect() {
   }
 
   // Set camera properties
-  cap.set(cv::CAP_PROP_FRAME_WIDTH, capture_width_);
-  cap.set(cv::CAP_PROP_FRAME_HEIGHT, capture_height_);
-  cap.set(cv::CAP_PROP_FPS, fps_);
+  cap.set(cv::CAP_PROP_FRAME_WIDTH, static_cast<double>(capture_width_));
+  cap.set(cv::CAP_PROP_FRAME_HEIGHT, static_cast<double>(capture_height_));
+  cap.set(cv::CAP_PROP_FPS, static_cast<double>(fps_));
 
   // Store the VideoCapture object in a member variable
   video_capture_ = std::move(cap);
@@ -248,6 +268,7 @@ void OpenCVCamera::read(ImageData* img_data) {
   }
   // Convert BGR to RGB
   cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
+  img_data->camera_name = name_;
   img_data->image = std::move(frame);
   img_data->timestamp_ms =
       static_cast<int64_t>(cv::getTickCount() / cv::getTickFrequency() *
@@ -280,7 +301,6 @@ void OpenCVCamera::find_cameras() {
       double height = cap.get(cv::CAP_PROP_FRAME_HEIGHT);
       double fps = cap.get(cv::CAP_PROP_FPS);
       double format = cap.get(cv::CAP_PROP_FORMAT);
-
       if (width > 0 && height > 0) {
         spdlog::info("Found camera at {}: {}x{} @ {} FPS, format={}", path,
                      width, height, fps, format);
@@ -295,8 +315,10 @@ void OpenCVCamera::find_cameras() {
         }
         // Save the 50th frame if successfully read
         if (!frame.empty()) {
-          std::string filename =
-              path.substr(path.find_last_of('/') + 1) + ".png";
+            std::string filename =
+              "outputs/opencv/" + path.substr(path.find_last_of('/') + 1) + ".png";
+            // Ensure the outputs directory exists
+            std::filesystem::create_directories("outputs/opencv");
           if (cv::imwrite(filename, frame)) {
             spdlog::debug("Saved image from {} to {}", path, filename);
           } else {

@@ -9,13 +9,14 @@ namespace trossen_ai_robot_devices {
 
 namespace robot {
 
-std::vector<trossen_ai_robot_devices::CameraType> TrossenRobot::get_camera_features() const {
-  std::vector<trossen_ai_robot_devices::CameraType> camera_names;
+std::vector<trossen_ai_robot_devices::CamerFeatureInfo> TrossenRobot::get_camera_features() const {
+  std::vector<trossen_ai_robot_devices::CamerFeatureInfo> camera_info;
   for (const auto& camera : cameras_) {
-    camera_names.push_back(
-        {camera->name(), camera->is_using_depth() ? "depth" : "color"});
+    camera_info.push_back(
+        {camera->name(), camera->is_using_depth() ? "depth" : "color",
+         camera->height(), camera->width(), camera->fps()});
   }
-  return camera_names;
+  return camera_info;
 }
 
 TrossenAIWidowXRobot::TrossenAIWidowXRobot(
@@ -28,14 +29,14 @@ TrossenAIWidowXRobot::TrossenAIWidowXRobot(
     for (const auto& cam_config : config.cameras) {
       cameras_.emplace_back(
           std::make_unique<trossen_ai_robot_devices::RealsenseCamera>(
-              cam_config.name, cam_config.serial, cam_config.width,
+              cam_config.name, cam_config.unique_identifier, cam_config.width,
               cam_config.height, cam_config.fps, cam_config.use_depth));
     }
   } else if (config.camera_interface == "opencv") {
     for (const auto& cam_config : config.cameras) {
       cameras_.emplace_back(
           std::make_unique<trossen_ai_robot_devices::OpenCVCamera>(
-              cam_config.name, cam_config.serial, cam_config.width,
+              cam_config.name, cam_config.unique_identifier, cam_config.width,
               cam_config.height, cam_config.fps, cam_config.use_depth));
     }
   } else {
@@ -127,14 +128,14 @@ TrossenAIBimanualWidowXRobot::TrossenAIBimanualWidowXRobot(
     for (const auto& cam_config : config.cameras) {
       cameras_.emplace_back(
           std::make_unique<trossen_ai_robot_devices::RealsenseCamera>(
-              cam_config.name, cam_config.serial, cam_config.width,
+              cam_config.name, cam_config.unique_identifier, cam_config.width,
               cam_config.height, cam_config.fps, cam_config.use_depth));
     }
   } else if (config.camera_interface == "opencv") {
     for (const auto& cam_config : config.cameras) {
       cameras_.emplace_back(
           std::make_unique<trossen_ai_robot_devices::OpenCVCamera>(
-              cam_config.name, cam_config.serial, cam_config.width,
+              cam_config.name, cam_config.unique_identifier, cam_config.width,
               cam_config.height, cam_config.fps, cam_config.use_depth));
     }
   } else {

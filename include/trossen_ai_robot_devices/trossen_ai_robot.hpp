@@ -40,11 +40,17 @@ struct State {
 
 /// @brief Data structure to hold camera type information
 /// This is used to specify the type of each camera (e.g., color, depth)
-struct CameraType {
+struct CamerFeatureInfo {
   /// @brief Name of the camera
   std::string name;
   /// @brief Type of the camera (e.g., "color", "depth")
   std::string type;
+  /// @brief Height of the camera image
+  int height;
+  /// @brief Width of the camera image
+  int width;
+  /// @brief Frames per second of the camera
+  int fps;
 };
 
 namespace teleoperator {
@@ -195,7 +201,7 @@ class TrossenRobot {
    * @return Vector of pairs containing camera name and type (e.g., "depth" or
    * "color")
    */
-  virtual std::vector<trossen_ai_robot_devices::CameraType>
+  virtual std::vector<trossen_ai_robot_devices::CamerFeatureInfo>
   get_camera_features() const;
 
  protected:

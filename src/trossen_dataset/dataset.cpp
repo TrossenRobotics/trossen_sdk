@@ -908,19 +908,6 @@ void Metadata::add_features(
       static_cast<int>(robot.get_observation_features().size())};
   observation_state["names"] = robot.get_observation_features();
 
-  // Add camera features
-  // TODO(shantanuparab-tr): [TDS-16]: Get camera specifications from a
-  // configuration file or constant definitions
-  nlohmann::json camera_feature;
-  camera_feature["dtype"] = "video";
-  camera_feature["shape"] = {480, 640, 3};
-  camera_feature["names"] = {"height", "width", "channels"};
-  camera_feature["info"] = {
-      {"video.fps", 30.0},           {"video.height", 480},
-      {"video.width", 640},          {"video.channels", 3},
-      {"video.codec", "av1"},        {"video.pix_fmt", "yuv420p"},
-      {"video.is_depth_map", false}, {"has_audio", false}};
-
   nlohmann::json timestamp_feature;
   timestamp_feature["dtype"] = "float32";
   timestamp_feature["shape"] = {1};
@@ -957,6 +944,19 @@ void Metadata::add_features(
 
   // Assuming robot.get_camera_features() returns a list of camera identifiers
   for (const auto &cam_info : robot.get_camera_features()) {
+    // Add camera features
+    // TODO(shantanuparab-tr): [TDS-16]: Get camera specifications from a
+    // configuration file or constant definitions
+
+    nlohmann::json camera_feature;
+    camera_feature["dtype"] = "video";
+    camera_feature["shape"] = {cam_info.height, cam_info.width, 3};
+    camera_feature["names"] = {"height", "width", "channels"};
+    camera_feature["info"] = {
+        {"video.fps", cam_info.fps},           {"video.height", cam_info.height},
+        {"video.width", cam_info.width},       {"video.channels", 3},
+        {"video.codec", "av1"},                {"video.pix_fmt", "yuv420p"},
+        {"video.is_depth_map", (cam_info.type == "depth")}, {"has_audio", false}};
     features["observation.images." + cam_info.name] = camera_feature;
   }
 

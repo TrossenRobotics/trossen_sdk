@@ -128,9 +128,9 @@ class TrossenAICamera {
   /// @brief Unique identifier of the camera
   std::string unique_id_;
   /// @brief Width of the captured images
-  int capture_width_{640};
+  int capture_width_;
   /// @brief Height of the captured images
-  int capture_height_{480};
+  int capture_height_;
   /// @brief Frames per second for image capture
   int fps_{30};
   /// @brief Flag to indicate if depth map should be captured
@@ -140,7 +140,7 @@ class TrossenAICamera {
 class RealsenseCamera : public TrossenAICamera {
  public:
   RealsenseCamera(const std::string& name, const std::string& unique_id,
-                  int capture_width = 640, int capture_height = 480,
+                  int capture_width, int capture_height,
                   int fps = 30, bool use_depth = false);
 
   void connect() override;
@@ -156,7 +156,7 @@ class RealsenseCamera : public TrossenAICamera {
 class OpenCVCamera : public TrossenAICamera {
  public:
   OpenCVCamera(const std::string& name, const std::string& unique_id,
-               int capture_width = 640, int capture_height = 480, int fps = 30,
+               int capture_width, int capture_height, int fps = 30,
                bool use_depth = false);
 
   void connect() override;

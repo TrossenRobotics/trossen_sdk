@@ -60,6 +60,10 @@ const char VIDEO_PATH_META[] =
     "videos/chunk-{episode_chunk:03d}/{video_key}/"
     "episode_{episode_index:06d}.mp4";
 
+// Display Images Target Size
+const int DISPLAY_IMAGE_WIDTH = 640;
+const int DISPLAY_IMAGE_HEIGHT = 480;
+
 }  // namespace trossen_sdk
 
 #endif  // INCLUDE_TROSSEN_SDK_UTILS_CONSTANTS_HPP_

@@ -19,8 +19,8 @@ namespace trossen_sdk_config {
 struct CameraConfig {
   /// @brief Name of the camera
   std::string name;
-  /// @brief Serial number of the camera
-  std::string serial;
+  /// @brief Unique identifier of the camera (e.g., serial number, index)
+  std::string unique_identifier;
   /// @brief Frames per second for image capture
   int fps;
   /// @brief Width of the camera images
@@ -142,7 +142,8 @@ struct BimanualWidowXRobotConfig : public RobotConfigBase {
 };
 
 // JSON serialization/deserialization using nlohmann::json
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name, serial, fps, width,
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(CameraConfig, name,
+                                   unique_identifier, fps, width,
                                    height, use_depth)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BaseConfig, name)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(BimanualWidowXLeaderConfig, name,

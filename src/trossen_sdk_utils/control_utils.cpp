@@ -142,7 +142,7 @@ void ControlUtils::display_images(
         static_cast<int>(std::ceil(static_cast<float>(num_images) / grid_cols));
 
     // Resize all images to the same size (use the first image's size)
-    cv::Size target_size = images[0].image.size();
+    static const cv::Size target_size(DISPLAY_IMAGE_WIDTH, DISPLAY_IMAGE_HEIGHT);
     std::vector<cv::Mat> resized_images;
     for (const auto& image_data : images) {
       cv::Mat resized;
