@@ -88,8 +88,8 @@ void TrossenAIWidowXRobot::get_observation(
   // Read joint positions from the robot arm
   state->observation_state = robot_driver_->read(trossen_sdk::POSITION);
   // Read camera images
+  trossen_ai_robot_devices::ImageData img_data;
   for (auto& camera : cameras_) {
-    trossen_ai_robot_devices::ImageData img_data;
     camera->async_read(&img_data);
     state->images.push_back(img_data);
   }
@@ -192,8 +192,8 @@ void TrossenAIBimanualWidowXRobot::get_observation(
   state->observation_state.insert(state->observation_state.end(),
                                   left_positions.begin(), left_positions.end());
   // Read camera images
+  trossen_ai_robot_devices::ImageData img_data;
   for (auto& camera : cameras_) {
-    trossen_ai_robot_devices::ImageData img_data;
     camera->async_read(&img_data);
     state->images.push_back(img_data);
   }

@@ -40,7 +40,7 @@ int main(int argc, char* argv[]) {
       po::value<std::string>(&single_task)->default_value("pick_place"),
       "single task name")("repo_id",
                           po::value<std::string>(&repo_id)->default_value(
-                              "trossen-ai/trossen-widowx"),
+                              "TrossenRoboticsCommunity"),
                           "HuggingFace repo ID for model")(
       "tags", po::value<std::vector<std::string>>(&tags)->multitoken(),
       "comma-separated list of tags")(

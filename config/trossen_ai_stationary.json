@@ -7,7 +7,7 @@
   "cameras": [
     {
       "name": "cam_head",
-      "serial": "218622270304",
+      "unique_identifier": "218622270304",
       "fps": 30,
       "width": 640,
       "height": 480,
@@ -15,7 +15,7 @@
     },
     {
       "name": "cam_right_wrist",
-      "serial": "130322272628",
+      "unique_identifier": "130322272628",
       "fps": 30,
       "width": 640,
       "height": 480,
@@ -23,7 +23,7 @@
     },
     {
       "name": "cam_left_wrist",
-      "serial": "128422271347",
+      "unique_identifier": "128422271347",
       "fps": 30,
       "width": 640,
       "height": 480,
@@ -31,7 +31,7 @@
     },
    {
       "name": "cam_low",
-      "serial": "218622274938",
+      "unique_identifier": "218622274938",
       "fps": 30,
       "width": 640,
       "height": 480,

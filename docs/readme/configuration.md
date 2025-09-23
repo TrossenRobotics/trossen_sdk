@@ -89,10 +89,10 @@ For OpenCV Cameras:
 
 ## Leader Robot Configuration
 
-Below is an example configuration for a `bimanual WidowXAI Leader` robot using  `RealSense` cameras:
+Below is an example configuration for a `bimanual WidowXAI Leader` robot:
 
 ```json
-{ 
+{
   "type": "bimanual",
   "name": "bimanual_widowxai_leader",
   "left_ip_address": "192.168.1.3",

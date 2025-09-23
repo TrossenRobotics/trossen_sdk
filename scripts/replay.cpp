@@ -23,9 +23,9 @@ int main(int argc, char* argv[]) {
       "dataset name")(
       "robot,r", po::value<std::string>(&robot_name)->required(), "robot name")(
       "episode,e", po::value<int>(&episode_number)->required(),
-      "episode number")("repo,r", po::value<std::string>(&repo_id)->required(),
+      "episode number")("repo_id,r", po::value<std::string>(&repo_id)->required(),
                         "repository id")(
-      "root,R", po::value<std::string>(&root)->required(), "root directory")(
+      "root,R", po::value<std::string>(&root)->default_value(""), "root directory")(
       "fps,f", po::value<int>(&fps)->default_value(30), "frames per second");
 
   po::variables_map vm;

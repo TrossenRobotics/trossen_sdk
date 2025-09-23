@@ -6,7 +6,7 @@ You can run the following commands from the root of the repository after buildin
 ## Recording a dataset
 
 ```bash
-make run-record ARGS="\
+./build/record \
   --robot trossen_ai_stationary \
   --recording_time 10 \
   --num_episodes 1 --fps 30 \
@@ -14,13 +14,12 @@ make run-record ARGS="\
   --tags test \
   --overwrite true \
   --dataset test_dataset_00 \
-  --root ~/.cache/huggingface/lerobot/ \
   --repo_id TrossenRoboticsCommunity \
   --single_task pick_place \
   --num_image_writer_threads_per_camera 4 \
   --num_image_writer_processes 1 \
   --video true \
-  --run_compute_stats true"
+  --run_compute_stats true
 ```
 
 Arguments:
@@ -36,7 +35,7 @@ Arguments:
 - `--tags`: Comma-separated tags to associate with the dataset
 - `--overwrite`: Whether to overwrite existing datasets (true/false)
 - `--dataset`: The name of the dataset to create
-- `--root`: The root directory where datasets will be stored (recommended a HuggingFace cache directory)
+- `--root`: The root directory where datasets will be stored (default: `~/.cache/trossen_dataset_collection_sdk/`)
 - `--repo_id`: The HuggingFace repository ID where the dataset will be uploaded
 - `--single_task`: The task being performed during the recording (e.g., `pick_place`, `stack_blocks`, etc.)
 - `--num_image_writer_threads_per_camera`: Number of threads per camera for asynchronous image writing
@@ -48,25 +47,22 @@ Arguments:
 ## Replaying a dataset
 
 ```bash
-make run-replay ARGS="\
+./build/replay \
   --robot trossen_ai_stationary \
   --dataset test_dataset_00 \
-  --root ~/.cache/huggingface/lerobot/ \
   --repo_id TrossenRoboticsCommunity \
   --episode 0 \
-  --fps 30 \
-  --display_cameras true"
+  --fps 30
 ```
 
 Arguments:
 
 - `--robot`: The robot configuration to use. This should be one of the following: `trossen_ai_stationary` or `trossen_ai_solo`
 - `--dataset`: The name of the dataset to replay
-- `--root`: The root directory where datasets are stored (recommended a HuggingFace cache directory)
+- `--root`: The root directory where datasets are stored (default: `~/.cache/trossen_dataset_collection_sdk/`)
 - `--repo_id`: The HuggingFace repository ID where the dataset will be uploaded
 - `--episode`: The episode number to replay
 - `--fps`: The frames per second for the replay
-- `--display_cameras`: Whether to display the camera feeds in a window (true/false)
 
 
 ## Put Arms to Sleep
@@ -74,8 +70,7 @@ Arguments:
 To ensure the robotic arms are safely positioned prior to system shutdown, use the following command. This procedure helps prevent unintended movements and safely powers down the actuators:
 
 ```bash
-make run-sleep ARGS="\
-  --robot trossen_ai_stationary"
+./build/sleep --robot trossen_ai_stationary
 ```
 
 Arguments:
@@ -86,9 +81,9 @@ Arguments:
 If you want to do a dry run of your experiment without recording, you can use the teleop script to control the robot.
 
 ```bash
-make run-teleop ARGS="\
-  --robot trossen_ai_stationary \
-  --fps 30"
+./build/teleop --robot trossen_ai_stationary \
+  --fps 30 \
+  --teleop_time 10
 ```
 
 Arguments:

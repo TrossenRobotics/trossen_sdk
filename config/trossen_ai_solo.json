@@ -6,7 +6,7 @@
   "cameras": [
     {
       "name": "cam_main",
-      "serial": "218622270304",
+      "unique_identifier": "218622270304",
       "fps": 30,
       "width": 640,
       "height": 480,
@@ -14,7 +14,7 @@
     },
     {
       "name": "cam_wrist",
-      "serial": "130322272628",
+      "unique_identifier": "130322272628",
       "fps": 30,
       "width": 640,
       "height": 480,

@@ -28,7 +28,7 @@ The above command uploads all files including images.
 
 ## Replaying using LeRobot
 
-If you have `LeRobot` frame work installed, you can also replay using the replay scripts.
+If you have the `LeRobot` framework installed, you can also replay using the replay scripts.
 Note: This was tested using the new api integration for Trossen Arms with LeRobot.
 
 ```bash
