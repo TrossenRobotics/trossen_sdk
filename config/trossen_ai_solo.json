@@ -1,0 +1,24 @@
+{
+  "type": "widowx",
+  "name": "widowxai",
+  "ip_address": "192.168.1.4",
+  "camera_interface": "realsense",
+  "cameras": [
+    {
+      "name": "cam_main",
+      "unique_identifier": "218622270304",
+      "fps": 30,
+      "width": 640,
+      "height": 480,
+      "use_depth": true
+    },
+    {
+      "name": "cam_wrist",
+      "unique_identifier": "130322272628",
+      "fps": 30,
+      "width": 640,
+      "height": 480,
+      "use_depth": true
+    }
+  ]
+}
