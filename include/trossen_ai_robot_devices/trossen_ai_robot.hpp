@@ -38,6 +38,8 @@ struct State {
   std::vector<ImageData> images;
 };
 
+/// @brief Data structure to hold camera type information
+/// This is used to specify the type of each camera (e.g., color, depth)
 struct CameraType {
   /// @brief Name of the camera
   std::string name;

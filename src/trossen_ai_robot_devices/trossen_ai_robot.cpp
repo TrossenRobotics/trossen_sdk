@@ -88,7 +88,9 @@ void TrossenAIWidowXRobot::get_observation(
   state->observation_state = robot_driver_->read(trossen_sdk::POSITION);
   // Read camera images
   for (auto& camera : cameras_) {
-    state->images.push_back(camera->async_read());
+    trossen_ai_robot_devices::ImageData img_data;
+    camera->async_read(&img_data);
+    state->images.push_back(img_data);
   }
 }
 
@@ -165,7 +167,6 @@ void TrossenAIBimanualWidowXRobot::connect() {
 
 void TrossenAIBimanualWidowXRobot::calibrate() {
   // TODO(shantanuparab-tr) Implement calibration logic if needed
-  // Compliant Gripper Calibration
 }
 
 void TrossenAIBimanualWidowXRobot::configure() {
@@ -176,6 +177,9 @@ void TrossenAIBimanualWidowXRobot::configure() {
 
 void TrossenAIBimanualWidowXRobot::get_observation(
     trossen_ai_robot_devices::State* state) {
+  // Clear previous state
+  state->observation_state.clear();
+  state->images.clear();
   // Read joint positions from both robot arms and combine them
   std::vector<double> right_positions =
       right_robot_driver_->read(trossen_sdk::POSITION);
@@ -188,7 +192,9 @@ void TrossenAIBimanualWidowXRobot::get_observation(
                                   left_positions.begin(), left_positions.end());
   // Read camera images
   for (auto& camera : cameras_) {
-    state->images.push_back(camera->async_read());
+    trossen_ai_robot_devices::ImageData img_data;
+    camera->async_read(&img_data);
+    state->images.push_back(img_data);
   }
 }
 

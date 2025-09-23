@@ -87,13 +87,13 @@ class TrossenAICamera {
    * Waits for a new frameset and extracts color and depth frames
    * @return ImageData structure containing color image and depth map frames
    */
-  virtual trossen_ai_robot_devices::ImageData read() = 0;
+  virtual void read(ImageData* img_data) = 0;
 
   /**
    * @brief Asynchronously read a frame from the camera
-   * @return ImageData structure containing color image and depth map
+   * Spawns a thread to read the frame and returns the result
    */
-  virtual ImageData async_read() = 0;
+  virtual void async_read(ImageData* img_data);
 
   /**
    * @brief Find the cameras connected to the system.
@@ -145,8 +145,7 @@ class RealsenseCamera : public TrossenAICamera {
 
   void connect() override;
   void disconnect() override;
-  trossen_ai_robot_devices::ImageData read() override;
-  trossen_ai_robot_devices::ImageData async_read() override;
+  void read(ImageData* img_data) override;
   void find_cameras() override;
 
  private:
@@ -162,8 +161,7 @@ class OpenCVCamera : public TrossenAICamera {
 
   void connect() override;
   void disconnect() override;
-  trossen_ai_robot_devices::ImageData read() override;
-  trossen_ai_robot_devices::ImageData async_read() override;
+  void read(ImageData* img_data) override;
   void find_cameras() override;
 
  private:

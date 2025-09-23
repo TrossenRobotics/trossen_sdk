@@ -3,6 +3,34 @@
 
 namespace trossen_ai_robot_devices {
 
+
+void TrossenAICamera::async_read(ImageData* img_data) {
+  std::mutex mtx;
+  std::condition_variable cv;
+  bool done = false;
+
+  // Launch a thread to read the image asynchronously
+  std::thread([this, img_data, &mtx, &cv, &done]() {
+    // Read color and depth frames
+    read(img_data);
+    // Lock and set the result
+    {
+      std::lock_guard<std::mutex> lock(mtx);
+      done = true;
+    }
+    // Notify the waiting thread
+    cv.notify_one();
+  }).detach();
+
+  // Wait for the image to be read or timeout after 5 seconds
+  std::unique_lock<std::mutex> lock(mtx);
+  if (!cv.wait_for(lock, std::chrono::seconds(5), [&done] { return done; })) {
+    spdlog::error("Timeout: Failed to receive image within 5 seconds.");
+    // Optionally, set result to an empty image or error state
+  }
+}
+
+
 RealsenseCamera::RealsenseCamera(const std::string& name,
                                  const std::string& unique_id,
                                  int capture_width, int capture_height, int fps,
@@ -24,6 +52,9 @@ void RealsenseCamera::connect() {
   // Enable the device using the unique ID
   if (!unique_id_.empty()) {
     cfg.enable_device(unique_id_);
+  } else {
+    throw std::runtime_error(
+        "Unique ID (serial number) is required to connect to RealSense camera");
   }
 
   // Enable the color stream as default
@@ -46,7 +77,7 @@ void RealsenseCamera::disconnect() {
   spdlog::info("Disconnecting from camera: {}", name_);
 }
 
-trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
+void RealsenseCamera::read(ImageData* img_data) {
   // Initialize frameset
   rs2::frameset frames;
 
@@ -56,15 +87,13 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
   } catch (const rs2::error& e) {
     spdlog::error("Failed to get frameset from camera: {}. Error: {}", name_,
                   e.what());
-    return trossen_ai_robot_devices::ImageData{};
+    return;
   }
 
-  // Extract color and depth frames
-  trossen_ai_robot_devices::ImageData data;
-  data.camera_name = name_;
+  img_data->camera_name = name_;
   if (frames && frames.size() == 0) {
     spdlog::error("No frames received from camera: {}", name_);
-    return data;
+    return;
   }
   // Try to get color frame
   try {
@@ -75,7 +104,7 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
       const void* data_ptr = static_cast<const void*>(color_frame.get_data());
       cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3,
                     const_cast<void*>(data_ptr), cv::Mat::AUTO_STEP);
-      data.image = image;
+      img_data->image = std::move(image);
     } else {
       spdlog::error("Failed to read color frame from camera: {}", name_);
     }
@@ -93,7 +122,7 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
         cv::Mat depth_map(cv::Size(capture_width_, capture_height_), CV_16UC1,
                           const_cast<void*>(depth_data_ptr),
                           cv::Mat::AUTO_STEP);
-        data.depth_map = depth_map;
+        img_data->depth_map = std::move(depth_map);
       } else {
         spdlog::error("Failed to read depth frame from camera: {}", name_);
       }
@@ -102,8 +131,7 @@ trossen_ai_robot_devices::ImageData RealsenseCamera::read() {
                     name_, e.what());
     }
   }
-  data.timestamp_ms = static_cast<int64_t>(frames.get_timestamp());
-  return data;
+  img_data->timestamp_ms = static_cast<int64_t>(frames.get_timestamp());
 }
 
 void RealsenseCamera::find_cameras() {
@@ -128,16 +156,17 @@ void RealsenseCamera::find_cameras() {
     // Create a temporary camera instance to capture an image
     RealsenseCamera temp_camera(name, serial, capture_width_, capture_height_,
                                 fps_, use_depth_);
+    ImageData img_data;
     temp_camera.connect();
-    auto image_data = temp_camera.read();
+    temp_camera.read(&img_data);
     temp_camera.disconnect();
 
-    if (!image_data.image.empty()) {
+    if (!img_data.image.empty()) {
       // Prepare filename using the serial number
       std::string filename = serial + ".png";
 
       // Enqueue the image saving task
-      image_writer.push(ImageSaveTask{image_data.image, filename});
+      image_writer.push(ImageSaveTask{img_data.image, filename});
       spdlog::info("Enqueued image saving for camera: {} to file: {}", name,
                    filename);
     } else {
@@ -206,24 +235,21 @@ void OpenCVCamera::disconnect() {
   }
 }
 
-trossen_ai_robot_devices::ImageData OpenCVCamera::read() {
-  trossen_ai_robot_devices::ImageData data;
-  data.camera_name = name_;
-
+void OpenCVCamera::read(ImageData* img_data) {
   if (!video_capture_.isOpened()) {
     spdlog::error("Camera not connected: {}", name_);
-    return data;
+    return;
   }
 
   cv::Mat frame;
   if (!video_capture_.read(frame)) {
     spdlog::error("Failed to read frame from camera: {}", name_);
-    return data;
+    return;
   }
   // Convert BGR to RGB
   cv::cvtColor(frame, frame, cv::COLOR_BGR2RGB);
-  data.image = frame;
-  data.timestamp_ms =
+  img_data->image = std::move(frame);
+  img_data->timestamp_ms =
       static_cast<int64_t>(cv::getTickCount() / cv::getTickFrequency() *
                            1000);  // Approximate timestamp in ms
 
@@ -232,38 +258,6 @@ trossen_ai_robot_devices::ImageData OpenCVCamera::read() {
     spdlog::warn("Depth map requested but not supported in OpenCVCamera: {}",
                  name_);
   }
-
-  return data;
-}
-
-trossen_ai_robot_devices::ImageData OpenCVCamera::async_read() {
-  trossen_ai_robot_devices::ImageData result;
-  std::mutex mtx;
-  std::condition_variable cv;
-  bool done = false;
-
-  // Launch a thread to read the image asynchronously
-  std::thread([this, &result, &mtx, &cv, &done]() {
-    // Read color frame
-    trossen_ai_robot_devices::ImageData image_data = read();
-    // Lock and set the result
-    {
-      std::lock_guard<std::mutex> lock(mtx);
-      result = image_data;
-      done = true;
-    }
-    // Notify the waiting thread
-    cv.notify_one();
-  }).detach();
-
-  // Wait for the image to be read or timeout after 5 seconds
-  std::unique_lock<std::mutex> lock(mtx);
-  if (!cv.wait_for(lock, std::chrono::seconds(5), [&done] { return done; })) {
-    spdlog::error("Timeout: Failed to receive image within 5 seconds.");
-    // Optionally, set result to an empty image or error state
-    result = trossen_ai_robot_devices::ImageData{};
-  }
-  return result;
 }
 
 void OpenCVCamera::find_cameras() {
@@ -316,36 +310,6 @@ void OpenCVCamera::find_cameras() {
       }
     }
   }
-}
-
-trossen_ai_robot_devices::ImageData RealsenseCamera::async_read() {
-  trossen_ai_robot_devices::ImageData result;
-  std::mutex mtx;
-  std::condition_variable cv;
-  bool done = false;
-
-  // Launch a thread to read the image asynchronously
-  std::thread([this, &result, &mtx, &cv, &done]() {
-    // Read color and depth frames
-    trossen_ai_robot_devices::ImageData image_data = read();
-    // Lock and set the result
-    {
-      std::lock_guard<std::mutex> lock(mtx);
-      result = image_data;
-      done = true;
-    }
-    // Notify the waiting thread
-    cv.notify_one();
-  }).detach();
-
-  // Wait for the image to be read or timeout after 5 seconds
-  std::unique_lock<std::mutex> lock(mtx);
-  if (!cv.wait_for(lock, std::chrono::seconds(5), [&done] { return done; })) {
-    spdlog::error("Timeout: Failed to receive image within 5 seconds.");
-    // Optionally, set result to an empty image or error state
-    result = trossen_ai_robot_devices::ImageData{};
-  }
-  return result;
 }
 
 AsyncImageWriter::AsyncImageWriter(int num_threads)

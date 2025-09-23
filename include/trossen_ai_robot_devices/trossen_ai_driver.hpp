@@ -25,7 +25,6 @@ class TrossenAIArm {
    * @param ip_address IP address of the robotic arm
    * @param model Model of the robotic arm (e.g., "leader", "follower")
    * Initializes the TrossenAIArm with the given parameters
-   *
    */
   TrossenAIArm(const std::string& name, const std::string& ip_address,
                const std::string& model);

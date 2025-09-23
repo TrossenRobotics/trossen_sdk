@@ -46,9 +46,6 @@ void ControlUtils::control_loop(
       display_images(state.images);
     }
 
-    // Clear images to save memory
-    state.images.clear();
-
     busy_wait_until(loop_start_time, fps);  // Use the specified FPS
 
     auto loop_duration =

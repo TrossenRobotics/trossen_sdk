@@ -190,7 +190,8 @@ TODO [TDS-42](shantanuparab-tr): Add instructions for configuring up the robot a
 
 ```bash
 ./record \
-  --robot_name trossen_ai_stationary \
+make run-record ARGS="\
+  --robot trossen_ai_stationary \
   --recording_time 10 \
   --num_episodes 1 --fps 30 \
   --display_cameras true \
@@ -198,12 +199,12 @@ TODO [TDS-42](shantanuparab-tr): Add instructions for configuring up the robot a
   --overwrite false \
   --dataset test_dataset_00 \
   --root ~/.cache/huggingface/lerobot/ \
-  --repo_id trossen-ai/trossen-widowx \
+  --repo_id TrossenAI \
   --single_task pick_place \
   --num_image_writer_threads_per_camera 4 \
   --num_image_writer_processes 1 \
   --video true \
-  --run_compute_stats true
+  --run_compute_stats true"
 ```
 
 ## Replaying a dataset
