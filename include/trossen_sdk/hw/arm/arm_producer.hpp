@@ -44,25 +44,12 @@ public:
    */
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
-  /**
-   * @brief Get producer statistics
-   *
-   * @return const reference to ProducerStats
-   */
-  const ProducerStats& stats() const override { return stats_; }
-
 private:
   /// @brief Shared pointer to the TrossenArmDriver instance
   std::shared_ptr<trossen_arm::TrossenArmDriver> driver_;
 
   /// @brief Configuration parameters
   Config cfg_;
-
-  /// @brief Statistics
-  ProducerStats stats_{};
-
-  /// @brief Monotonic sequence number for emitted records
-  uint64_t seq_{0};
 
   /// @brief Reusable joint state buffers to avoid reallocation each poll
   std::vector<double> pos_d_, vel_d_, eff_d_;

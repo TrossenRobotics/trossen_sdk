@@ -74,14 +74,7 @@ public:
 
   /// Poll for a single frame; emits 0 or 1 records.
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
-
-  /// Stats accessor
-  const ProducerStats& stats() const override { return stats_; }
-
-  /// Whether device is opened
-  bool is_open() const { return opened_; }
-
-private:
+protected:
   /**
    * @brief Open the device if not already opened
    *
@@ -92,28 +85,8 @@ private:
   /// @brief Configuration parameters
   Config cfg_;
 
-  /// @brief Statistics
-  ProducerStats stats_{};
-
-  /// @brief Last capture monotonic timestamp for inter-frame delta
-  uint64_t last_capture_mono_{0};
-  /// @brief Accumulated inter-frame delta nanoseconds
-  uint64_t if_accum_ns_{0};
-  /// @brief Max inter-frame delta nanoseconds
-  uint64_t if_max_ns_{0};
-  /// @brief Sample count for inter-frame delta
-  uint64_t if_samples_{0};
-  /// @brief Next frame count threshold for FPS health log
-  uint64_t next_health_report_frame_{300};
-
-  /// @brief Monotonic sequence number for emitted records
-  uint64_t seq_ = 0;
-
-  /// @brief Persistent capture handle (opened in start, released in stop)
+  /// @brief Capture handle
   cv::VideoCapture cap_;
-
-  /// @brief Whether we've opened the device
-  bool opened_{false};
 };
 
 } // namespace trossen::hw::camera
