@@ -641,6 +641,9 @@ void TrossenAIDataset::compute_statistics(std::shared_ptr<arrow::Table> table,
 }
 
 void TrossenAIDataset::convert_to_videos() const {
+
+  spdlog::info("Encoding images to videos...");
+
   int fps = static_cast<int>(fps_);
   int episode_chunk = 0;
 

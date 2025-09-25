@@ -159,12 +159,12 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  // If enabled, convert images to videos after all episodes are done
-  if (video) dataset.convert_to_videos();
-
   // Sleep the arms and disconnect at the end of the control script
   robot_controller->disconnect();
   teleop_robot->disconnect();
+
+  // If enabled, convert images to videos after all episodes are done
+  if (video) dataset.convert_to_videos();
 
   spdlog::info("Control script finished.");
   return 0;
