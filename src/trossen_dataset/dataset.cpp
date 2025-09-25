@@ -53,6 +53,7 @@ TrossenAIDataset::TrossenAIDataset(
       metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_,
                                              task_name_, root_, false);
     } else {
+      spdlog::info("Loading existing dataset: {}", dataset_name_);
       // If overwrite is false, load existing metadata and verify the dataset
       metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_,
                                              task_name_, root_, true);
@@ -64,6 +65,7 @@ TrossenAIDataset::TrossenAIDataset(
       // If the dataset directory already exists, we assume it is an existing
       // dataset
       int existing_episodes = get_num_existing_episodes();
+      spdlog::info("Existing episodes found: {}", existing_episodes);
       for (int i = 0; i < existing_episodes; ++i) {
         // Load each episode and add it to the buffer
         auto episode_data = std::make_unique<EpisodeData>(i);
@@ -653,6 +655,10 @@ void TrossenAIDataset::convert_to_videos() const {
   auto start_time = std::chrono::steady_clock::now();
 
   // Iterate over each camera directory in the images path
+  // Limit the number of concurrent threads to avoid CPU overload
+  const size_t max_concurrent_threads = std::thread::hardware_concurrency();
+  std::atomic<size_t> active_threads{0};
+
   for (const auto &cam_dir : std::filesystem::directory_iterator(images_path)) {
     if (!cam_dir.is_directory()) continue;
     // Create output directory for the camera videos based on camera directory
@@ -681,8 +687,15 @@ void TrossenAIDataset::convert_to_videos() const {
                       output_video_path.string());
         continue;
       }
-      // Launch a thread to encode the video using FFmpeg
-      threads.emplace_back([=, &log_mutex]() {
+
+      // Wait if too many threads are running
+      while (active_threads >= max_concurrent_threads) {
+        // Yield to allow other threads to finish
+        std::this_thread::yield();
+      }
+
+      active_threads++;
+      threads.emplace_back([=, &log_mutex, &active_threads]() {
         try {
           spdlog::debug("Started encoding {}", output_video_path.string());
           // Collect image files
@@ -702,6 +715,7 @@ void TrossenAIDataset::convert_to_videos() const {
           if (image_paths.empty()) {
             std::lock_guard<std::mutex> lock(log_mutex);
             spdlog::warn("No images found in episode folder: {}", episode_name);
+            active_threads--;
             return;
           }
           // Use a pattern for FFmpeg input to match image files with sequential
@@ -750,6 +764,7 @@ void TrossenAIDataset::convert_to_videos() const {
           spdlog::error("Exception in video thread for {}: {}", episode_name,
                         e.what());
         }
+        active_threads--;
       });
     }
   }
