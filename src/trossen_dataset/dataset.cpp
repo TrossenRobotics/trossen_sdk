@@ -84,10 +84,11 @@ TrossenAIDataset::TrossenAIDataset(
     std::filesystem::create_directories(dataset_dir / trossen_sdk::IMAGES_DIR);
     metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_, task_name_,
                                            root_, false);
+    // Set robot name and features in metadata
+    metadata_->set_info_entry("robot_name", robot_->name());
+    metadata_->add_features(*robot_);
   }
-  // Set robot name and features in metadata
-  metadata_->set_info_entry("robot_name", robot_->name());
-  metadata_->add_features(*robot_);
+
 
   // Start image writer threads for each camera
   trossen_ai_robot_devices::AsyncImageWriter image_writer_(
