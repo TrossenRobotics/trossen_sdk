@@ -663,6 +663,10 @@ void TrossenAIDataset::convert_to_videos() const {
   const size_t max_concurrent_threads = std::thread::hardware_concurrency();
   std::atomic<size_t> active_threads{0};
 
+
+  // Atomic counter for the number of videos processed
+  std::atomic<int> video_count{0};
+
   // Condition variable and mutex for thread synchronization
   std::condition_variable cv;
 
@@ -689,6 +693,7 @@ void TrossenAIDataset::convert_to_videos() const {
           videos_cam_dir / (episode_name + ".mp4");
       // Skip if the video already exists
       if (std::filesystem::exists(output_video_path)) {
+        video_count++;
         std::lock_guard<std::mutex> lock(log_mutex);
         spdlog::debug("Skipping existing video: {}",
                       output_video_path.string());
@@ -702,7 +707,7 @@ void TrossenAIDataset::convert_to_videos() const {
         active_threads++;
       }
 
-      threads.emplace_back([=, &log_mutex, &active_threads, &cv]() {
+      threads.emplace_back([=, &log_mutex, &active_threads, &cv, &video_count]() {
         try {
           spdlog::debug("Started encoding {}", output_video_path.string());
           // Collect image files
@@ -769,6 +774,7 @@ void TrossenAIDataset::convert_to_videos() const {
                           ret_code);
           } else {
             spdlog::debug("Created video: {}", output_video_path.string());
+            video_count++;
           }
         } catch (const std::exception &e) {
           std::lock_guard<std::mutex> lock(log_mutex);
@@ -788,6 +794,11 @@ void TrossenAIDataset::convert_to_videos() const {
   for (auto &t : threads) {
     if (t.joinable()) t.join();
   }
+
+  // Set the total videos in metadata after processing each camera directory
+  int total_videos = video_count.load();
+  metadata_->set_info_entry("total_videos", std::to_string(total_videos));
+  metadata_->save_info_file();
 
   auto end_time = std::chrono::steady_clock::now();
   auto duration_sec =
@@ -1022,15 +1033,6 @@ void Metadata::update_info(int additional_frames) {
       info_.contains("total_episodes") ? info_["total_episodes"].get<int>() : 0;
   total_episodes += 1;
   info_["total_episodes"] = total_episodes;
-
-  // Increment the total videos by the number of cameras (assuming 4 cameras for
-  // now)
-  int total_videos =
-      info_.contains("total_videos") ? info_["total_videos"].get<int>() : 0;
-  // TODO(shantanuparab-tr): [TDS-17]: Determine the correct number of videos to
-  // add based on cameras
-  total_videos += 4;
-  info_["total_videos"] = total_videos;
 
   // Update training split range
   if (!info_.contains("splits")) {
