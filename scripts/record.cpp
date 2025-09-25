@@ -133,7 +133,7 @@ int main(int argc, char* argv[]) {
 
   spdlog::info("Initializing dataset [control_script.cpp]: {}", dataset_name);
   trossen_dataset::TrossenAIDataset dataset(
-      dataset_name, "test_task", robot_controller, root_path, repo_id,
+      dataset_name, single_task, robot_controller, root_path, repo_id,
       run_compute_stats, overwrite, num_image_writer_threads_per_camera, fps);
 
   spdlog::info("Connecting to robot: {}", robot_name);
