@@ -660,6 +660,9 @@ void TrossenAIDataset::convert_to_videos() const {
   const size_t max_concurrent_threads = std::thread::hardware_concurrency();
   std::atomic<size_t> active_threads{0};
 
+  // Condition variable and mutex for thread synchronization
+  std::condition_variable cv;
+
   for (const auto &cam_dir : std::filesystem::directory_iterator(images_path)) {
     if (!cam_dir.is_directory()) continue;
     // Create output directory for the camera videos based on camera directory
@@ -690,13 +693,13 @@ void TrossenAIDataset::convert_to_videos() const {
       }
 
       // Wait if too many threads are running
-      while (active_threads >= max_concurrent_threads) {
-        // Yield to allow other threads to finish
-        std::this_thread::yield();
+      {
+        std::unique_lock<std::mutex> cv_lock(log_mutex);
+        cv.wait(cv_lock, [&] { return active_threads < max_concurrent_threads; });
+        active_threads++;
       }
 
-      active_threads++;
-      threads.emplace_back([=, &log_mutex, &active_threads]() {
+      threads.emplace_back([=, &log_mutex, &active_threads, &cv]() {
         try {
           spdlog::debug("Started encoding {}", output_video_path.string());
           // Collect image files
@@ -716,7 +719,11 @@ void TrossenAIDataset::convert_to_videos() const {
           if (image_paths.empty()) {
             std::lock_guard<std::mutex> lock(log_mutex);
             spdlog::warn("No images found in episode folder: {}", episode_name);
-            active_threads--;
+            {
+              std::lock_guard<std::mutex> cv_lock(log_mutex);
+              active_threads--;
+            }
+            cv.notify_one();
             return;
           }
           // Use a pattern for FFmpeg input to match image files with sequential
@@ -765,7 +772,11 @@ void TrossenAIDataset::convert_to_videos() const {
           spdlog::error("Exception in video thread for {}: {}", episode_name,
                         e.what());
         }
-        active_threads--;
+        {
+          std::lock_guard<std::mutex> cv_lock(log_mutex);
+          active_threads--;
+        }
+        cv.notify_one();
       });
     }
   }
