@@ -53,6 +53,7 @@ TrossenAIDataset::TrossenAIDataset(
       metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_,
                                              task_name_, root_, false);
     } else {
+      spdlog::info("Loading existing dataset: {}", dataset_name_);
       // If overwrite is false, load existing metadata and verify the dataset
       metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_,
                                              task_name_, root_, true);
@@ -64,6 +65,7 @@ TrossenAIDataset::TrossenAIDataset(
       // If the dataset directory already exists, we assume it is an existing
       // dataset
       int existing_episodes = get_num_existing_episodes();
+      spdlog::info("Existing episodes found: {}", existing_episodes);
       for (int i = 0; i < existing_episodes; ++i) {
         // Load each episode and add it to the buffer
         auto episode_data = std::make_unique<EpisodeData>(i);
@@ -82,10 +84,11 @@ TrossenAIDataset::TrossenAIDataset(
     std::filesystem::create_directories(dataset_dir / trossen_sdk::IMAGES_DIR);
     metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_, task_name_,
                                            root_, false);
+    // Set robot name and features in metadata
+    metadata_->set_info_entry("robot_name", robot_->name());
+    metadata_->add_features(*robot_);
   }
-  // Set robot name and features in metadata
-  metadata_->set_info_entry("robot_name", robot_->name());
-  metadata_->add_features(*robot_);
+
 
   // Start image writer threads for each camera
   trossen_ai_robot_devices::AsyncImageWriter image_writer_(
@@ -638,6 +641,9 @@ void TrossenAIDataset::compute_statistics(std::shared_ptr<arrow::Table> table,
 }
 
 void TrossenAIDataset::convert_to_videos() const {
+
+  spdlog::info("Encoding images to videos...");
+
   int fps = static_cast<int>(fps_);
   int episode_chunk = 0;
 
@@ -653,6 +659,17 @@ void TrossenAIDataset::convert_to_videos() const {
   auto start_time = std::chrono::steady_clock::now();
 
   // Iterate over each camera directory in the images path
+  // Limit the number of concurrent threads to avoid CPU overload
+  const size_t max_concurrent_threads = std::thread::hardware_concurrency();
+  std::atomic<size_t> active_threads{0};
+
+
+  // Atomic counter for the number of videos processed
+  std::atomic<int> video_count{0};
+
+  // Condition variable and mutex for thread synchronization
+  std::condition_variable cv;
+
   for (const auto &cam_dir : std::filesystem::directory_iterator(images_path)) {
     if (!cam_dir.is_directory()) continue;
     // Create output directory for the camera videos based on camera directory
@@ -676,13 +693,21 @@ void TrossenAIDataset::convert_to_videos() const {
           videos_cam_dir / (episode_name + ".mp4");
       // Skip if the video already exists
       if (std::filesystem::exists(output_video_path)) {
+        video_count++;
         std::lock_guard<std::mutex> lock(log_mutex);
         spdlog::debug("Skipping existing video: {}",
                       output_video_path.string());
         continue;
       }
-      // Launch a thread to encode the video using FFmpeg
-      threads.emplace_back([=, &log_mutex]() {
+
+      // Wait if too many threads are running
+      {
+        std::unique_lock<std::mutex> cv_lock(log_mutex);
+        cv.wait(cv_lock, [&] { return active_threads < max_concurrent_threads; });
+        active_threads++;
+      }
+
+      threads.emplace_back([=, &log_mutex, &active_threads, &cv, &video_count]() {
         try {
           spdlog::debug("Started encoding {}", output_video_path.string());
           // Collect image files
@@ -702,6 +727,11 @@ void TrossenAIDataset::convert_to_videos() const {
           if (image_paths.empty()) {
             std::lock_guard<std::mutex> lock(log_mutex);
             spdlog::warn("No images found in episode folder: {}", episode_name);
+            {
+              std::lock_guard<std::mutex> cv_lock(log_mutex);
+              active_threads--;
+            }
+            cv.notify_one();
             return;
           }
           // Use a pattern for FFmpeg input to match image files with sequential
@@ -744,12 +774,18 @@ void TrossenAIDataset::convert_to_videos() const {
                           ret_code);
           } else {
             spdlog::debug("Created video: {}", output_video_path.string());
+            video_count++;
           }
         } catch (const std::exception &e) {
           std::lock_guard<std::mutex> lock(log_mutex);
           spdlog::error("Exception in video thread for {}: {}", episode_name,
                         e.what());
         }
+        {
+          std::lock_guard<std::mutex> cv_lock(log_mutex);
+          active_threads--;
+        }
+        cv.notify_one();
       });
     }
   }
@@ -758,6 +794,11 @@ void TrossenAIDataset::convert_to_videos() const {
   for (auto &t : threads) {
     if (t.joinable()) t.join();
   }
+
+  // Set the total videos in metadata after processing each camera directory
+  int total_videos = video_count.load();
+  metadata_->set_info_entry("total_videos", std::to_string(total_videos));
+  metadata_->save_info_file();
 
   auto end_time = std::chrono::steady_clock::now();
   auto duration_sec =
@@ -992,15 +1033,6 @@ void Metadata::update_info(int additional_frames) {
       info_.contains("total_episodes") ? info_["total_episodes"].get<int>() : 0;
   total_episodes += 1;
   info_["total_episodes"] = total_episodes;
-
-  // Increment the total videos by the number of cameras (assuming 4 cameras for
-  // now)
-  int total_videos =
-      info_.contains("total_videos") ? info_["total_videos"].get<int>() : 0;
-  // TODO(shantanuparab-tr): [TDS-17]: Determine the correct number of videos to
-  // add based on cameras
-  total_videos += 4;
-  info_["total_videos"] = total_videos;
 
   // Update training split range
   if (!info_.contains("splits")) {
