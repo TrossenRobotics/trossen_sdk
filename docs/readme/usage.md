@@ -7,21 +7,19 @@ You can run the following commands from the root of the repository after buildin
 
 ```bash
 ./build/record \
-  --robot trossen_ai_stationary\
+  --robot trossen_ai_stationary \
   --recording_time 10 \
   --num_episodes 1 --fps 30 \
   --display_cameras true \
   --tags test \
-  --overwrite false \
-  --dataset trossen_ai_stationary_coffee_cup \
+  --overwrite true \
+  --dataset test_dataset_00 \
   --repo_id TrossenRoboticsCommunity \
-  --single_task Put the spoon in the coffee cup \
+  --single_task pick_place \
   --num_image_writer_threads_per_camera 4 \
   --num_image_writer_processes 1 \
   --video true \
-  --run_compute_stats true \
-  --warmup_time 2 \
-  --reset_time 2
+  --run_compute_stats true
 ```
 
 Arguments:
