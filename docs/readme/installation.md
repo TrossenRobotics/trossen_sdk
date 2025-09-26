@@ -99,6 +99,24 @@ sudo apt update
 sudo apt install libopencv-dev
 ```
 
+## FFMPEG
+
+If FFMPEG is not installed, install it using the following command:
+
+```bash
+sudo apt update
+sudo apt install ffmpeg
+```
+
+## Program Options
+
+If you want to use the program options library, you need to install the Boost libraries. You can do this by running the following command:
+
+```bash
+sudo apt update
+sudo apt install libboost-program-options-dev
+```
+
 ## Nvidia Driver
 
 If you are using a system with an Nvidia GPU, you may need to install the appropriate Nvidia driver for your GPU model.
