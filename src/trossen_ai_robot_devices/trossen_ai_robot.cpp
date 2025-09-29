@@ -187,10 +187,10 @@ void TrossenAIBimanualWidowXRobot::get_observation(
   std::vector<double> left_positions =
       left_robot_driver_->read(trossen_sdk::POSITION);
   state->observation_state.insert(state->observation_state.end(),
-                                  right_positions.begin(),
-                                  right_positions.end());
+                                  left_positions.begin(),
+                                  left_positions.end());
   state->observation_state.insert(state->observation_state.end(),
-                                  left_positions.begin(), left_positions.end());
+                                  right_positions.begin(), right_positions.end());
   // Read camera images
   trossen_ai_robot_devices::ImageData img_data;
   for (auto& camera : cameras_) {
@@ -264,9 +264,9 @@ TrossenAIBimanualWidowXRobot::get_observation_features() const {
   for (const auto& name : left_features_raw) {
     left_features.push_back("left_" + name + ".pos");
   }
-  right_features.insert(right_features.end(), left_features.begin(),
-                        left_features.end());
-  return right_features;
+  left_features.insert(left_features.end(), right_features.begin(),
+                        right_features.end());
+  return left_features;
 }
 
 }  // namespace robot
