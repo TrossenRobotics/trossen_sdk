@@ -210,10 +210,10 @@ void TrossenAIBimanualWidowXRobot::send_action(
                   action.size());
     return;
   }
-  std::vector<double> right_action(
-      action.begin(), action.begin() + right_robot_driver_->get_num_joints());
   std::vector<double> left_action(
-      action.begin() + left_robot_driver_->get_num_joints(), action.end());
+      action.begin(), action.begin() + left_robot_driver_->get_num_joints());
+  std::vector<double> right_action(
+      action.begin() + right_robot_driver_->get_num_joints(), action.end());
   right_robot_driver_->write(trossen_sdk::POSITION, right_action);
   left_robot_driver_->write(trossen_sdk::POSITION, left_action);
 }
