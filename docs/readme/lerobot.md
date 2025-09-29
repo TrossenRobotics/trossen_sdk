@@ -37,7 +37,7 @@ python -m lerobot.replay
 --robot.left_arm_ip_address=192.168.1.5
 --robot.right_arm_ip_address=192.168.1.4
 --robot.id=bimanual_follower
---dataset.repo_id=TrossenRoboticsCommunity/test_dataset_03
+--dataset.repo_id=TrossenRoboticsCommunity/test_dataset_00
 --dataset.episode=0
 ```
 
@@ -54,3 +54,47 @@ To view the dataset online in the HuggingFace dataset viewer, you can use the fo
 [LeRobot Dataset Viewer](https://huggingface.co/spaces/lerobot/visualize_dataset)
 
 Just dataset name and repo id in the input box and click on "Go".
+
+
+## Train a model using LeRobot
+
+For this example you will need to have `lerobot` installed with the `smolvla` extra dependencies.
+
+### SmolVLA
+
+
+Install the `smolvla` extra dependencies for `lerobot`:
+
+```bash
+pip install -e ".[smolvla]"
+```
+
+Run the training command:
+
+```bash
+cd lerobot && lerobot-train \
+  --policy.path=lerobot/smolvla_base \
+  --dataset.repo_id=TrossenRoboticsCommunity/test_dataset_00 \
+  --batch_size=4\
+  --steps=20000 \
+  --output_dir=outputs/train/smolvla_trossen_ai_stationary_test_training \
+  --job_name=smolvla_training_trossen_ai_stationary_test_training \
+  --policy.device=cuda \
+  --wandb.enable=true \
+  --policy.repo_id TrossenRoboticsCommunity/smolvla_trossen_ai_stationary_test_training
+```
+
+### ACT
+
+```bash
+lerobot-train \
+  --dataset.repo_id=TrossenRoboticsCommunity/test_dataset_00 \
+  --policy.type=act \
+  --output_dir=outputs/train/act_trossen_ai_stationary_test_training \
+  --job_name=act_trossen_ai_stationary_test_training \
+  --policy.device=cuda \
+  --wandb.enable=true \
+  --policy.repo_id=TrossenRoboticsCommunity/act_trossen_ai_stationary_test_training \
+  --steps=20000 \
+  --batch_size=4
+```

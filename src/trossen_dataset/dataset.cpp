@@ -40,6 +40,17 @@ TrossenAIDataset::TrossenAIDataset(
     // If overwrite is true, remove the existing directory and create a new one
     if (overwrite_) {
       spdlog::warn("Overwriting existing dataset: {}", dataset_name_);
+
+      // Stop the process and ask user for confirmation
+      char user_input;
+      spdlog::warn(
+          "Are you sure you want to overwrite the existing dataset? (y/n): ");
+      std::cin >> user_input;
+      if (user_input != 'y' && user_input != 'Y') {
+        spdlog::info("Aborting dataset creation.");
+        throw std::runtime_error("Dataset creation aborted by user.");
+      }
+
       std::filesystem::remove_all(dataset_dir);
       // TODO(shantanuparab-tr) [TDS-46]: Use chunk size to decide the chunk numbering
       std::filesystem::create_directories(
@@ -52,6 +63,11 @@ TrossenAIDataset::TrossenAIDataset(
                                           trossen_sdk::IMAGES_DIR);
       metadata_ = std::make_unique<Metadata>(dataset_name_, repo_id_,
                                              task_name_, root_, false);
+
+      // Set robot name and features in metadata
+      metadata_->set_info_entry("robot_name", robot_->name());
+      metadata_->add_features(*robot_);
+
     } else {
       spdlog::info("Loading existing dataset: {}", dataset_name_);
       // If overwrite is false, load existing metadata and verify the dataset
