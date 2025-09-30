@@ -187,10 +187,10 @@ void TrossenAIBimanualWidowXRobot::get_observation(
   std::vector<double> left_positions =
       left_robot_driver_->read(trossen_sdk::POSITION);
   state->observation_state.insert(state->observation_state.end(),
-                                  right_positions.begin(),
-                                  right_positions.end());
+                                  left_positions.begin(),
+                                  left_positions.end());
   state->observation_state.insert(state->observation_state.end(),
-                                  left_positions.begin(), left_positions.end());
+                                  right_positions.begin(), right_positions.end());
   // Read camera images
   trossen_ai_robot_devices::ImageData img_data;
   for (auto& camera : cameras_) {
@@ -210,10 +210,10 @@ void TrossenAIBimanualWidowXRobot::send_action(
                   action.size());
     return;
   }
-  std::vector<double> right_action(
-      action.begin(), action.begin() + right_robot_driver_->get_num_joints());
   std::vector<double> left_action(
-      action.begin() + left_robot_driver_->get_num_joints(), action.end());
+      action.begin(), action.begin() + left_robot_driver_->get_num_joints());
+  std::vector<double> right_action(
+      action.begin() + right_robot_driver_->get_num_joints(), action.end());
   right_robot_driver_->write(trossen_sdk::POSITION, right_action);
   left_robot_driver_->write(trossen_sdk::POSITION, left_action);
 }
@@ -264,9 +264,9 @@ TrossenAIBimanualWidowXRobot::get_observation_features() const {
   for (const auto& name : left_features_raw) {
     left_features.push_back("left_" + name + ".pos");
   }
-  right_features.insert(right_features.end(), left_features.begin(),
-                        left_features.end());
-  return right_features;
+  left_features.insert(left_features.end(), right_features.begin(),
+                        right_features.end());
+  return left_features;
 }
 
 }  // namespace robot
@@ -359,8 +359,8 @@ std::vector<double> TrossenAIBimanualWidowXLeader::get_action() const {
   std::vector<double> left_positions =
       left_robot_driver_->read(trossen_sdk::POSITION);
   std::vector<double> action;
-  action.insert(action.end(), right_positions.begin(), right_positions.end());
   action.insert(action.end(), left_positions.begin(), left_positions.end());
+  action.insert(action.end(), right_positions.begin(), right_positions.end());
   return action;
 }
 void TrossenAIBimanualWidowXLeader::send_feedback() {
