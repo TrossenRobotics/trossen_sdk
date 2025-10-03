@@ -165,6 +165,11 @@ void TrossenAIDataset::add_frame(FrameData *frame) {
 }
 
 void TrossenAIDataset::save_episode() {
+
+  if (current_episode_ == nullptr) {
+    spdlog::debug("No current episode to save.");
+    return;
+  }
   // Timestamp (Float32) column builder
   arrow::FloatBuilder timestamp_builder;
   // Observation state (List of Float64) column builder
@@ -349,6 +354,36 @@ void TrossenAIDataset::save_episode() {
   episodes_buffer_.push_back(std::move(current_episode_));
 
   spdlog::debug("Saved episode {}", episode_index);
+}
+
+void TrossenAIDataset::discard_episode() {
+  if (current_episode_ == nullptr) {
+    spdlog::debug("No current episode to discard.");
+    return;
+  }
+  // Remove images associated with the current episode
+  // Get the episode index
+  int64_t episode_idx = current_episode_->get_episode_idx();
+  // Get the image path from metadata
+  std::string image_path = metadata_->get_info_entry("image_path");
+  // Get all the camera names from the robot
+  std::vector<trossen_ai_robot_devices::CameraFeatureInfo> camera_info = robot_->get_camera_features();
+  // Construct the episode directory path
+  for (const auto &camera : camera_info) {
+    std::string camera_image_path = fmt::format(trossen_sdk::IMAGE_PATH, 0, camera.name,
+                                                current_episode_->get_episode_idx(), 0);
+    // Get the parent directory of the first image (episode directory)
+    camera_image_path = (root_ / repo_id_ / dataset_name_ / camera_image_path)
+                            .parent_path().string();
+    // Remove the entire episode directory for the camera
+    if (std::filesystem::exists(camera_image_path)) {
+      spdlog::info("Removing images at path: {}", camera_image_path);
+      std::filesystem::remove_all(camera_image_path);
+    }
+  }
+  current_episode_.reset();
+  spdlog::info("Current episode discarded.");
+
 }
 
 nlohmann::json TrossenAIDataset::compute_flat_stats(

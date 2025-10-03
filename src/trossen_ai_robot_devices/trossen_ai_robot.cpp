@@ -9,8 +9,8 @@ namespace trossen_ai_robot_devices {
 
 namespace robot {
 
-std::vector<trossen_ai_robot_devices::CamerFeatureInfo> TrossenRobot::get_camera_features() const {
-  std::vector<trossen_ai_robot_devices::CamerFeatureInfo> camera_info;
+std::vector<trossen_ai_robot_devices::CameraFeatureInfo> TrossenRobot::get_camera_features() const {
+  std::vector<trossen_ai_robot_devices::CameraFeatureInfo> camera_info;
   for (const auto& camera : cameras_) {
     camera_info.push_back(
         {camera->name(), camera->is_using_depth() ? "depth" : "color",

@@ -310,6 +310,14 @@ class TrossenAIDataset {
   void save_episode();
 
   /**
+   * @brief Discard the current episode before saving
+   * This function clears the current episode data without saving it to the
+   * dataset
+   * Also removes the images associated with the discarded episode
+   */
+  void discard_episode();
+
+  /**
    * @brief Get number of episodes in the dataset
    * @return Number of episodes as a size_t
    */
