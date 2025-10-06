@@ -12,9 +12,9 @@ void ControlUtils::control_loop(
     bool display_cameras, double fps, double fps_tolerance) {
   using steady_clock = std::chrono::steady_clock;
   using time_point = std::chrono::steady_clock::time_point;
-
-  teleop_robot->configure();  // Configure the teleoperation robot
+  
   robot->configure();         // Configure the robot arm
+  teleop_robot->configure();  // Configure the teleoperation robot
 
   trossen_ai_robot_devices::State state;
 
@@ -77,9 +77,9 @@ void ControlUtils::control_loop(
     float control_time, bool display_cameras, double fps, double fps_tolerance) {
   using steady_clock = std::chrono::steady_clock;
   using time_point = std::chrono::steady_clock::time_point;
-
-  teleop_robot->configure();  // Configure the teleoperation robot
+  
   robot->configure();         // Configure the robot arm
+  teleop_robot->configure();  // Configure the teleoperation robot
 
   trossen_ai_robot_devices::State state;
 
