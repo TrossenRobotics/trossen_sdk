@@ -68,8 +68,8 @@ int main(int argc, char* argv[]) {
                                         : std::filesystem::path(root);
 
   robot_controller->connect();  // Connect to the robot arms
-  // Sleep for 2 seconds to ensure connection is stable
-  std::this_thread::sleep_for(std::chrono::seconds(3));
+  // Sleep for 2 seconds to ensure connection is stable and robot is staged
+  std::this_thread::sleep_for(std::chrono::seconds(2));
   trossen_dataset::TrossenAIDataset dataset(dataset_name, "replay_task",
                                             robot_controller, root_path,
                                             repo_id, false, false, 0, fps);

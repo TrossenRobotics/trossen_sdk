@@ -80,12 +80,15 @@ export(EXPORT TrossenDataCollectionSDKTargets
 )
 
 # Ensure spdlog is exported if it's a dependency
-install(TARGETS spdlog
-  EXPORT TrossenDataCollectionSDKTargets
-  ARCHIVE DESTINATION lib
-  LIBRARY DESTINATION lib
-  RUNTIME DESTINATION bin
-)
+get_target_property(_spdlog_imported spdlog IMPORTED)
+if(NOT _spdlog_imported)
+  install(TARGETS spdlog
+    EXPORT TrossenDataCollectionSDKTargets
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+  )
+endif()
 
 # Generate and install a config file
 configure_package_config_file(
