@@ -146,8 +146,10 @@ void TrossenAIArm::stage_arm() {
   }
   // Stage the arm to a default position
   driver_.set_all_modes(trossen_arm::Mode::position);
+  // Non-blocking call to move to the staged position this reduces the wait time
+  // during connect and configure
   driver_.set_all_positions({0.0, M_PI / 3, M_PI / 6, M_PI / 5, 0.0, 0.0, 0.0},
-                            2.0, true);
+                            2.0, false);
 }
 
 std::vector<std::string> TrossenAIArm::get_joint_names() const {

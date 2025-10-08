@@ -1,0 +1,5 @@
+# trossen_data_collection_sdkConfig.cmake.in
+
+@PACKAGE_INIT@
+
+include("${CMAKE_CURRENT_LIST_DIR}/TrossenDataCollectionSDKTargets.cmake")

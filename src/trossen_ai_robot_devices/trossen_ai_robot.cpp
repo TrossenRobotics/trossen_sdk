@@ -9,8 +9,8 @@ namespace trossen_ai_robot_devices {
 
 namespace robot {
 
-std::vector<trossen_ai_robot_devices::CamerFeatureInfo> TrossenRobot::get_camera_features() const {
-  std::vector<trossen_ai_robot_devices::CamerFeatureInfo> camera_info;
+std::vector<trossen_ai_robot_devices::CameraFeatureInfo> TrossenRobot::get_camera_features() const {
+  std::vector<trossen_ai_robot_devices::CameraFeatureInfo> camera_info;
   for (const auto& camera : cameras_) {
     camera_info.push_back(
         {camera->name(), camera->is_using_depth() ? "depth" : "color",
@@ -81,6 +81,8 @@ void TrossenAIWidowXRobot::calibrate() {
 void TrossenAIWidowXRobot::configure() {
   // Stage the arm to a safe position
   robot_driver_->stage_arm();
+  // Sleep for 2 seconds to ensure arm is stable
+  std::this_thread::sleep_for(std::chrono::seconds(2));
 }
 
 void TrossenAIWidowXRobot::get_observation(
@@ -174,6 +176,8 @@ void TrossenAIBimanualWidowXRobot::configure() {
   // Stage both arms to safe positions
   right_robot_driver_->stage_arm();
   left_robot_driver_->stage_arm();
+  // Sleep for 2 seconds to ensure arms are stable
+  std::this_thread::sleep_for(std::chrono::seconds(2));
 }
 
 void TrossenAIBimanualWidowXRobot::get_observation(
@@ -296,6 +300,8 @@ void TrossenAIWidowXLeader::calibrate() {}
 
 void TrossenAIWidowXLeader::configure() {
   robot_driver_->stage_arm();
+  // Sleep for 2 seconds to ensure arm is stable
+  std::this_thread::sleep_for(std::chrono::seconds(2));
   robot_driver_->write(
       trossen_sdk::EXTERNAL_EFFORT,
       std::vector<double>(robot_driver_->get_num_joints(), 0.0));
@@ -346,6 +352,8 @@ void TrossenAIBimanualWidowXLeader::calibrate() {
 void TrossenAIBimanualWidowXLeader::configure() {
   right_robot_driver_->stage_arm();  // Stage the right arm to a safe position
   left_robot_driver_->stage_arm();   // Stage the left arm to a safe position
+  // Sleep for 2 seconds to ensure arms are stable
+  std::this_thread::sleep_for(std::chrono::seconds(2));
   right_robot_driver_->write(
       trossen_sdk::EXTERNAL_EFFORT,
       std::vector<double>(right_robot_driver_->get_num_joints(), 0.0));

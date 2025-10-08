@@ -40,7 +40,7 @@ struct State {
 
 /// @brief Data structure to hold camera type information
 /// This is used to specify the type of each camera (e.g., color, depth)
-struct CamerFeatureInfo {
+struct CameraFeatureInfo {
   /// @brief Name of the camera
   std::string name;
   /// @brief Type of the camera (e.g., "color", "depth")
@@ -201,7 +201,7 @@ class TrossenRobot {
    * @return Vector of pairs containing camera name and type (e.g., "depth" or
    * "color")
    */
-  virtual std::vector<trossen_ai_robot_devices::CamerFeatureInfo>
+  virtual std::vector<trossen_ai_robot_devices::CameraFeatureInfo>
   get_camera_features() const;
 
  protected:

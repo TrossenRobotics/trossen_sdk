@@ -18,7 +18,6 @@ find_package(realsense2 REQUIRED)
 find_package(OpenCV REQUIRED)
 
 
-include_directories(include)
 include_directories(${Boost_INCLUDE_DIRS})
 
 FetchContent_Declare(
@@ -42,7 +41,11 @@ set( SOURCE_FILES
 # Build library
 add_library(trossen_data_collection_sdk SHARED ${SOURCE_FILES})
 
-target_include_directories(trossen_data_collection_sdk PUBLIC include)
+target_include_directories(trossen_data_collection_sdk
+  PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+)
 
 
 # Link Arrow and libtrossen_arm to the library target
@@ -58,6 +61,50 @@ target_link_libraries(trossen_data_collection_sdk
 )
 
 # Main executable
+include(CMakePackageConfigHelpers)
+
+# Install library and headers
+install(TARGETS trossen_data_collection_sdk
+  EXPORT TrossenDataCollectionSDKTargets
+  LIBRARY DESTINATION lib
+  ARCHIVE DESTINATION lib
+  RUNTIME DESTINATION bin
+  INCLUDES DESTINATION include
+)
+install(DIRECTORY include/ DESTINATION include)
+
+# Export targets for use from the build tree
+export(EXPORT TrossenDataCollectionSDKTargets
+  FILE "${CMAKE_CURRENT_BINARY_DIR}/TrossenDataCollectionSDKTargets.cmake"
+  NAMESPACE TrossenDataCollectionSDK::
+)
+
+# Ensure spdlog is exported if it's a dependency
+get_target_property(_spdlog_imported spdlog IMPORTED)
+if(NOT _spdlog_imported)
+  install(TARGETS spdlog
+    EXPORT TrossenDataCollectionSDKTargets
+    ARCHIVE DESTINATION lib
+    LIBRARY DESTINATION lib
+    RUNTIME DESTINATION bin
+  )
+endif()
+
+# Generate and install a config file
+configure_package_config_file(
+  "${CMAKE_CURRENT_SOURCE_DIR}/trossen_data_collection_sdkConfig.cmake.in"
+  "${CMAKE_CURRENT_BINARY_DIR}/trossen_data_collection_sdkConfig.cmake"
+  INSTALL_DESTINATION lib/cmake/trossen_data_collection_sdk
+)
+install(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/trossen_data_collection_sdkConfig.cmake"
+  DESTINATION lib/cmake/trossen_data_collection_sdk
+)
+install(EXPORT TrossenDataCollectionSDKTargets
+  FILE TrossenDataCollectionSDKTargets.cmake
+  NAMESPACE TrossenDataCollectionSDK::
+  DESTINATION lib/cmake/trossen_data_collection_sdk
+)
 add_executable(sleep scripts/sleep.cpp)
 add_executable(replay scripts/replay.cpp)
 add_executable(record scripts/record.cpp)
@@ -68,3 +115,4 @@ target_link_libraries(record  PRIVATE ${Boost_LIBRARIES} trossen_data_collection
 target_link_libraries(sleep  PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
 target_link_libraries(replay PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
 target_link_libraries(teleop PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
+
