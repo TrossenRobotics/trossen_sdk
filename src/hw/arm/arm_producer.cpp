@@ -34,7 +34,7 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   // Create record with appropriate timestamp
   data::Timestamp ts;
   uint64_t mono_now = data::now_mono().to_ns();
-  ts.monotonic = (cfg_.use_device_time && device_ts != 0) ? 
+  ts.monotonic = (cfg_.use_device_time && device_ts != 0) ?
     data::Timespec::from_ns(device_ts) : data::now_mono();
   ts.realtime = data::now_real();
 
