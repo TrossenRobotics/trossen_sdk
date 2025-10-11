@@ -48,16 +48,37 @@ struct JointStateRecord : public RecordBase {
   JointStateRecord() = default;
 
   // Convenience constructor used by examples where source vectors are double
-  JointStateRecord(const Timestamp& ts_, uint64_t seq_, std::string id_,
-                   const std::vector<double>& pos_d,
-                   const std::vector<double>& vel_d,
-                   const std::vector<double>& eff_d) {
+  JointStateRecord(
+    const Timestamp& ts_,
+    uint64_t seq_,
+    std::string id_,
+    const std::vector<double>& pos_d,
+    const std::vector<double>& vel_d,
+    const std::vector<double>& eff_d)
+  {
     ts = ts_;
     seq = seq_;
     id = std::move(id_);
     positions.assign(pos_d.begin(), pos_d.end());
     velocities.assign(vel_d.begin(), vel_d.end());
     efforts.assign(eff_d.begin(), eff_d.end());
+  }
+
+  // Overload taking float vectors directly (avoids reallocations in synthetic producers)
+  JointStateRecord(
+    const Timestamp& ts_,
+    uint64_t seq_,
+    std::string id_,
+    const std::vector<float>& pos_f,
+    const std::vector<float>& vel_f,
+    const std::vector<float>& eff_f)
+  {
+    ts = ts_;
+    seq = seq_;
+    id = std::move(id_);
+    positions = pos_f;
+    velocities = vel_f;
+    efforts = eff_f;
   }
 };
 

@@ -1,10 +1,10 @@
 /**
- * @file lerobot_v2.hpp
- * @brief LeRobot V2 backend: writes joint states to CSV and images to directory tree.
+ * @file trossen.hpp
+ * @brief Trossen backend: writes joint states to CSV and images to directory tree.
  */
 
-#ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2_HPP
-#define TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2_HPP
+#ifndef TROSSEN_SDK__IO__BACKENDS__TROSSEN_BACKEND_HPP
+#define TROSSEN_SDK__IO__BACKENDS__TROSSEN_BACKEND_HPP
 
 #include <atomic>
 #include <condition_variable>
@@ -20,7 +20,7 @@
 namespace trossen::io::backends {
 
 /**
- * @brief Backend producing a simple on-disk layout for LeRobot-style datasets.
+ * @brief Backend producing a simple on-disk layout for datasets.
  *
  * Layout (root = uri provided to open()):
  *   root/
@@ -30,7 +30,7 @@ namespace trossen::io::backends {
  *         <camera_id>/
  *           <ts_monotonic_ns>.png
  */
-class LeRobotV2Backend : public io::Backend {
+class TrossenBackend : public io::Backend {
 public:
   /// @brief Image queue drop policy when full
   enum class DropPolicy {
@@ -64,11 +64,11 @@ public:
   };
 
   /**
-   * @brief Construct a LeRobotV2Backend
+   * @brief Construct a TrossenBackend
    *
    * @param cfg Configuration parameters
    */
-  explicit LeRobotV2Backend(Config cfg);
+  explicit TrossenBackend(Config cfg);
 
   /**
    * @brief Open a LeRobot V2 logging destination
@@ -119,6 +119,12 @@ public:
     /// @brief Maximum single image encode time (ns)
     uint64_t encode_time_ns_max{0};
 
+    /// @brief Accumulated queue wait time before encode (ns)
+    uint64_t queue_wait_ns_acc{0};
+
+    /// @brief Max queue wait time (ns)
+    uint64_t queue_wait_ns_max{0};
+
     /// @brief High water mark of image queue length
     size_t queue_high_water{0};
 
@@ -132,6 +138,25 @@ public:
         return 0.0;
       }
       return (encode_time_ns_acc / 1e6) / static_cast<double>(written);
+    }
+
+    /// @brief Average queue wait time (ms)
+    double avg_queue_wait_ms() const {
+      if (written == 0) return 0.0;
+      return (queue_wait_ns_acc / 1e6) / static_cast<double>(written);
+    }
+
+    /// @brief Estimated per-thread encode throughput (fps) = threads * written / total_encode_wall
+    /// NOTE: This is approximate; actual parallel overlap may differ.
+    double est_per_thread_fps(size_t threads) const {
+      if (threads == 0 || encode_time_ns_acc == 0) return 0.0;
+      double total_s = encode_time_ns_acc / 1e9; // sum of per-frame times across all threads
+      double frames = static_cast<double>(written);
+      // Each frame's encode time counted once; so average frame time = total_s / frames.
+      double avg_frame_s = total_s / frames;
+      if (avg_frame_s <= 0) return 0.0;
+      double single_thread_capacity = 1.0 / avg_frame_s;
+      return single_thread_capacity;
     }
   };
 
@@ -147,6 +172,8 @@ public:
     s.dropped = img_dropped_.load(std::memory_order_relaxed);
     s.encode_time_ns_acc = img_encode_time_ns_acc_.load(std::memory_order_relaxed);
     s.encode_time_ns_max = img_encode_time_ns_max_.load(std::memory_order_relaxed);
+    s.queue_wait_ns_acc = img_queue_wait_time_ns_acc_.load(std::memory_order_relaxed);
+    s.queue_wait_ns_max = img_queue_wait_time_ns_max_.load(std::memory_order_relaxed);
     s.queue_high_water = img_queue_high_water_.load(std::memory_order_relaxed);
     uint64_t backlog_samples = img_queue_backlog_samples_.load(std::memory_order_relaxed);
     uint64_t backlog_sum = img_queue_backlog_sum_.load(std::memory_order_relaxed);
@@ -194,6 +221,8 @@ private:
 
   // Async image encoding members
   std::deque<ImageJob> image_queue_;
+  // Parallel deque storing enqueue steady_clock timestamps for wait time measurement
+  std::deque<std::chrono::steady_clock::time_point> image_queue_enqueue_times_;
   std::mutex image_queue_mutex_;
   std::condition_variable image_queue_cv_;
   // Encoder workers (multi-threaded encoding support)
@@ -208,6 +237,8 @@ private:
   std::atomic<uint64_t> img_dropped_{0};
   std::atomic<uint64_t> img_encode_time_ns_acc_{0};
   std::atomic<uint64_t> img_encode_time_ns_max_{0};
+  std::atomic<uint64_t> img_queue_wait_time_ns_acc_{0};
+  std::atomic<uint64_t> img_queue_wait_time_ns_max_{0};
   std::atomic<size_t> img_queue_high_water_{0};
   std::atomic<uint64_t> img_queue_backlog_sum_{0};
   std::atomic<uint64_t> img_queue_backlog_samples_{0};
@@ -227,4 +258,4 @@ private:
 
 } // namespace trossen::io::backends
 
-#endif // TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2_HPP
+#endif // TROSSEN_SDK__IO__BACKENDS__TROSSEN_HPP

@@ -37,8 +37,8 @@ public:
 
   /**
    * @brief Open a logging destination
-   * @param uri Path or logical destination identifier
-   * @return true on success
+   * @return true on success, false otherwise
+   * @note Must be called before data can be written
    */
   virtual bool open() = 0;
 
@@ -54,8 +54,8 @@ public:
    * @brief Serialize & persist a contiguous batch of records
    * @param records Span of record pointers (non-owning); lifetime must cover call
    *
-   * Implementations may override for more efficient encoding (e.g. shared compression
-   * window). Default implementation will loop and call write(record) if not overridden.
+   * Implementations may override for more efficient encoding (e.g. shared compression window).
+   * Default implementation will loop and call write(record) if not overridden.
    */
   virtual void writeBatch(std::span<const data::RecordBase* const> records) {
     for (auto* r : records) {
@@ -74,12 +74,12 @@ public:
   virtual void close() = 0;
 
 protected:
-  /// Destination identifier (file path, etc.)
+  /// @brief Destination identifier (file path, etc.)
   std::string uri_{""};
-};
 
-/** @brief Unique owning pointer for a backend implementation. */
-using BackendPtr = std::unique_ptr<Backend>;
+  /// @brief Whether the backend is opened
+  bool opened_{false};
+};
 
 } // namespace trossen::io
 

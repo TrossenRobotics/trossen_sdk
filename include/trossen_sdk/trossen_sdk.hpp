@@ -11,8 +11,10 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 
 #include "trossen_sdk/io/backend.hpp"
-#include "trossen_sdk/io/backends/lerobot_v2.hpp"
-#include "trossen_sdk/io/backends/null_backend.hpp"
+#include "trossen_sdk/io/backends/trossen/trossen_backend.hpp"
+#include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
+#include "trossen_sdk/io/backends/mcap/mcap_schemas.hpp"
+#include "trossen_sdk/io/backends/null/null_backend.hpp"
 #include "trossen_sdk/io/queue_adapter.hpp"
 #include "trossen_sdk/io/sink.hpp"
 

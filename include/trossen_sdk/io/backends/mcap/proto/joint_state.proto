@@ -1,0 +1,22 @@
+syntax = "proto3";
+package trossen_sdk.msg;
+
+import "timestamp.proto";
+
+// Joint state message containing robot positions, velocities, and efforts
+message JointState {
+  // Timestamp of the joint state record
+  trossen_sdk.Timestamp ts = 1;
+
+  // Sequence number of the joint state record
+  uint64 seq = 2;
+
+  // Joint positions in rad or m
+  repeated float positions = 3;
+
+  // Joint velocities in rad/s or m/s
+  repeated float velocities = 4;
+
+  // Joint efforts in Nm or N
+  repeated float efforts = 5;
+}

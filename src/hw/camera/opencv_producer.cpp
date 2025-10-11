@@ -114,9 +114,9 @@ void OpenCvCameraProducer::poll(const std::function<void(std::shared_ptr<data::R
 
   data::Timestamp ts;
   // TODO: use device timestamp if available and cfg_.use_device_time
-  uint64_t mono_now = data::now_mono_ns();
-  ts.monotonic_ns = mono_now;
-  ts.realtime_ns = data::now_real_ns();
+  uint64_t mono_now = data::now_mono().to_ns();
+  ts.monotonic = data::now_mono();
+  ts.realtime = data::now_real();
 
   // Inter-frame timing instrumentation
   if (last_capture_mono_ != 0) {

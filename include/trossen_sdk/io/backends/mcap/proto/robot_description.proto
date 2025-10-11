@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package trossen_sdk;
+
+// Robot description message containing the URDF string
+message RobotDescription {
+  string robot_description = 1;
+}

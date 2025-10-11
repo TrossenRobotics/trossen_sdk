@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package trossen_sdk.msg;
+
+// Metadata about the recording session
+message SessionMetadata {
+  // Timestamp of session metadata
+  google.protobuf.Timestamp timestamp = 1;
+
+  // A unique identifier for the recording session
+  string run_id = 2;
+
+  // Version of the Trossen SDK used to create the recording
+  string tool_version = 3;
+}

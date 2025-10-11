@@ -1,0 +1,13 @@
+syntax = "proto3";
+package trossen_sdk;
+
+import "google/protobuf/timestamp.proto";
+
+// Timestamp message containing both monotonic and realtime timestamps
+message Timestamp {
+  // Monotonic clock timestamp (steady_clock)
+  google.protobuf.Timestamp monotonic = 1;
+
+  // Realtime clock timestamp (system_clock UTC)
+  google.protobuf.Timestamp realtime = 2;
+}

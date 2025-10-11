@@ -1,4 +1,3 @@
-#include "trossen_sdk/io/backends/lerobot_v2.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -7,6 +6,7 @@
 #include "opencv2/imgcodecs.hpp"
 
 #include "trossen_sdk/data/record.hpp"
+#include "trossen_sdk/io/backends/trossen/trossen_backend.hpp"
 
 // For PNG writing we stub out with raw dump placeholder (future: integrate stb_image_write or libpng)
 namespace trossen::io::backends {
@@ -15,7 +15,7 @@ namespace trossen::io::backends {
 
 namespace fs = std::filesystem;
 
-LeRobotV2Backend::LeRobotV2Backend(Config cfg)
+TrossenBackend::TrossenBackend(Config cfg)
   : Backend(cfg.output_dir), cfg_(std::move(cfg)) {
 
   // Validate encoder threads
@@ -55,7 +55,7 @@ LeRobotV2Backend::LeRobotV2Backend(Config cfg)
   fs::remove(test_path);
 
   // Print off configuration
-  std::cout << "LeRobotV2Backend configuration:\n"
+  std::cout << "TrossenBackend configuration:\n"
             << "  Output dir: " << uri_ << "\n"
             << "  Encoder threads: " << cfg_.encoder_threads << "\n"
             << "  Max image queue: " << (cfg_.max_image_queue == 0 ? "unbounded" : std::to_string(cfg_.max_image_queue)) << "\n"
@@ -66,7 +66,7 @@ LeRobotV2Backend::LeRobotV2Backend(Config cfg)
             << "  PNG compression level: " << cfg_.png_compression_level << "\n";
 }
 
-bool LeRobotV2Backend::open() {
+bool TrossenBackend::open() {
   std::lock_guard<std::mutex> lock(open_mutex_);
   if (opened_) {
     return true; // idempotent
@@ -93,13 +93,13 @@ bool LeRobotV2Backend::open() {
   size_t nthreads = cfg_.encoder_threads == 0 ? 1 : cfg_.encoder_threads;
   image_workers_.reserve(nthreads);
   for (size_t i = 0; i < nthreads; ++i) {
-    image_workers_.emplace_back(&LeRobotV2Backend::imageWorkerLoop, this);
+    image_workers_.emplace_back(&TrossenBackend::imageWorkerLoop, this);
   }
   opened_ = true;
   return true;
 }
 
-void LeRobotV2Backend::write(const data::RecordBase& record) {
+void TrossenBackend::write(const data::RecordBase& record) {
   std::lock_guard<std::mutex> lock(write_mutex_);
   // Decide type by RTTI (simple approach for now)
   if (auto js = dynamic_cast<const data::JointStateRecord*>(&record)) {
@@ -111,7 +111,7 @@ void LeRobotV2Backend::write(const data::RecordBase& record) {
   }
 }
 
-void LeRobotV2Backend::writeBatch(std::span<const data::RecordBase* const> records) {
+void TrossenBackend::writeBatch(std::span<const data::RecordBase* const> records) {
   std::lock_guard<std::mutex> lock(write_mutex_);
   for (auto* r : records) {
     if (!r) {
@@ -125,11 +125,11 @@ void LeRobotV2Backend::writeBatch(std::span<const data::RecordBase* const> recor
   }
 }
 
-void LeRobotV2Backend::flush() {
+void TrossenBackend::flush() {
   if (joint_csv_) joint_csv_.flush();
 }
 
-void LeRobotV2Backend::close() {
+void TrossenBackend::close() {
   std::lock_guard<std::mutex> lock(open_mutex_);
   if (!opened_) return;
   if (joint_csv_.is_open()) joint_csv_.close();
@@ -143,7 +143,7 @@ void LeRobotV2Backend::close() {
   opened_ = false;
 }
 
-void LeRobotV2Backend::writeJointState(const data::RecordBase& base) {
+void TrossenBackend::writeJointState(const data::RecordBase& base) {
   const auto& js = static_cast<const data::JointStateRecord&>(base);
   if (!header_written_) {
     joint_csv_ << "monotonic_ns,realtime_ns,id,positions,velocities,efforts\n";
@@ -157,15 +157,15 @@ void LeRobotV2Backend::writeJointState(const data::RecordBase& base) {
     }
     return oss.str();
   };
-  joint_csv_ << js.ts.monotonic_ns << ','
-             << js.ts.realtime_ns << ','
+  joint_csv_ << js.ts.monotonic.to_ns() << ','
+             << js.ts.realtime.to_ns() << ','
              << js.id << ','
              << vecToStr(js.positions) << ','
              << vecToStr(js.velocities) << ','
              << vecToStr(js.efforts) << '\n';
 }
 
-void LeRobotV2Backend::writeImage(const data::RecordBase& base) {
+void TrossenBackend::writeImage(const data::RecordBase& base) {
   const auto& img = static_cast<const data::ImageRecord&>(base);
 
   // exit early if nothing to write
@@ -184,7 +184,7 @@ void LeRobotV2Backend::writeImage(const data::RecordBase& base) {
   }
   const fs::path& camera_dir = it->second;
 
-  fs::path file_path = camera_dir / (std::to_string(img.ts.monotonic_ns) + ".png");
+  fs::path file_path = camera_dir / (std::to_string(img.ts.monotonic.to_ns()) + ".png");
 
   // Enqueue job (clone image to ensure safety if producer overwrites buffer later)
   //
@@ -193,6 +193,7 @@ void LeRobotV2Backend::writeImage(const data::RecordBase& base) {
   // When encoding finishes and job.image goes out of scope, the buffer will be released if no
   // other references remain.
   auto job = ImageJob{ file_path, img.image };
+  auto enqueue_time = std::chrono::steady_clock::now();
   {
     std::lock_guard<std::mutex> lk(image_queue_mutex_);
     // Enforce queue policy if max_image_queue_ is set
@@ -218,7 +219,10 @@ void LeRobotV2Backend::writeImage(const data::RecordBase& base) {
         //   break;
       }
     }
-    image_queue_.push_back(std::move(job));
+  // Extend job by storing enqueue steady time via file_path metadata hack? Better: expand struct.
+  image_queue_.push_back(std::move(job));
+  // Store enqueue timestamp in parallel deque
+  image_queue_enqueue_times_.push_back(enqueue_time);
     auto qsize = image_queue_.size();
     img_enqueued_.fetch_add(1, std::memory_order_relaxed);
     size_t prev = img_queue_high_water_.load(std::memory_order_relaxed);
@@ -229,7 +233,7 @@ void LeRobotV2Backend::writeImage(const data::RecordBase& base) {
   image_queue_cv_.notify_one();
 }
 
-void LeRobotV2Backend::imageWorkerLoop() {
+void TrossenBackend::imageWorkerLoop() {
   const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_.png_compression_level };
   while (image_worker_running_) {
     ImageJob job;
@@ -240,7 +244,15 @@ void LeRobotV2Backend::imageWorkerLoop() {
         break;
       }
       job = std::move(image_queue_.front());
+      auto enq_time = image_queue_enqueue_times_.front();
+      image_queue_enqueue_times_.pop_front();
       image_queue_.pop_front();
+      // queue wait time
+      auto start_steady = std::chrono::steady_clock::now();
+      uint64_t wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(start_steady - enq_time).count();
+      img_queue_wait_time_ns_acc_.fetch_add(wait_ns, std::memory_order_relaxed);
+      uint64_t prev_qw_max = img_queue_wait_time_ns_max_.load(std::memory_order_relaxed);
+      while (wait_ns > prev_qw_max && !img_queue_wait_time_ns_max_.compare_exchange_weak(prev_qw_max, wait_ns)) {}
     }
     auto t0 = std::chrono::steady_clock::now();
     try {
