@@ -8,12 +8,12 @@ You can run the following commands from the root of the repository after buildin
 ```bash
 ./build/record \
   --robot trossen_ai_stationary \
-  --recording_time 10 \
+  --recording_time 20 \
   --num_episodes 1 --fps 30 \
   --display_cameras true \
   --tags test \
   --overwrite true \
-  --dataset test_dataset_00 \
+  --dataset test_dataset_resolution \
   --repo_id TrossenRoboticsCommunity \
   --single_task pick_place \
   --num_image_writer_threads_per_camera 4 \

@@ -9,33 +9,33 @@
       "name": "cam_head",
       "unique_identifier": "218622270304",
       "fps": 30,
-      "width": 640,
-      "height": 480,
-      "use_depth": false
+      "width": 1280,
+      "height": 720,
+      "use_depth": true
     },
     {
       "name": "cam_right_wrist",
       "unique_identifier": "130322272628",
       "fps": 30,
-      "width": 640,
-      "height": 480,
-      "use_depth": false
+      "width": 1280,
+      "height": 720,
+      "use_depth": true
     },
     {
       "name": "cam_left_wrist",
       "unique_identifier": "128422271347",
       "fps": 30,
-      "width": 640,
-      "height": 480,
-      "use_depth": false
+      "width": 1280,
+      "height": 720,
+      "use_depth": true
     },
    {
       "name": "cam_low",
       "unique_identifier": "218622274938",
       "fps": 30,
-      "width": 640,
-      "height": 480,
-      "use_depth": false
+      "width": 1280,
+      "height": 720,
+      "use_depth": true
     }
   ]
 }

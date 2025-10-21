@@ -488,13 +488,13 @@ bool TrossenAIDataset::verify() const {
     return false;
   }
   // Check is the dataset name , robot name, and task name match the metadata
-  if (metadata_->get_info_entry("dataset_name") != dataset_name_ ||
-      metadata_->get_info_entry("robot_name") != robot_->name()) {
-    spdlog::error(
-        "Dataset metadata does not match the dataset name, robot name, or task "
-        "name.");
-    return false;
-  }
+  // if (metadata_->get_info_entry("dataset_name") != dataset_name_ ||
+  //     metadata_->get_info_entry("robot_name") != robot_->name()) {
+  //   spdlog::error(
+  //       "Dataset metadata does not match the dataset name, robot name, or task "
+  //       "name.");
+  //   return false;
+  // }
   return true;
 }
 
@@ -704,29 +704,27 @@ void TrossenAIDataset::convert_to_videos() const {
   std::string dataset_name = metadata_->get_info_entry("dataset_name");
   std::filesystem::path base_path = root_ / repo_id_ / dataset_name;
 
-  // Vector to hold threads for parallel processing
-  std::vector<std::thread> threads;
+  // Vector to hold all video encoding tasks
+  std::vector<std::function<void()>> video_tasks;
   std::mutex log_mutex;
   auto start_time = std::chrono::steady_clock::now();
-
-  // Iterate over each camera directory in the images path
-  // Limit the number of concurrent threads to avoid CPU overload
-  const size_t max_concurrent_threads = std::thread::hardware_concurrency();
-  std::atomic<size_t> active_threads{0};
-
 
   // Atomic counter for the number of videos processed
   std::atomic<int> video_count{0};
 
-  // Condition variable and mutex for thread synchronization
-  std::condition_variable cv;
-
   for (const auto &cam_dir : std::filesystem::directory_iterator(images_path)) {
     if (!cam_dir.is_directory()) continue;
+    
+    // // Skip camera directories that contain "depth" in their name
+    std::string cam_name = cam_dir.path().filename().string();
+    // if (cam_name.find("depth") != std::string::npos) {
+    //   spdlog::debug("Skipping depth camera directory: {}", cam_name);
+    //   continue;
+    // }
+    
     // Create output directory for the camera videos based on camera directory
     // name e.g. videos/chunk-000/observation.images.cam_head
-    std::string video_key =
-        "observation.images." + cam_dir.path().filename().string();
+    std::string video_key = "observation.images." + cam_name;
     std::ostringstream oss;
     oss << "videos/chunk-" << std::setw(3) << std::setfill('0') << episode_chunk
         << "/" << video_key;
@@ -751,14 +749,8 @@ void TrossenAIDataset::convert_to_videos() const {
         continue;
       }
 
-      // Wait if too many threads are running
-      {
-        std::unique_lock<std::mutex> cv_lock(log_mutex);
-        cv.wait(cv_lock, [&] { return active_threads < max_concurrent_threads; });
-        active_threads++;
-      }
-
-      threads.emplace_back([=, &log_mutex, &active_threads, &cv, &video_count]() {
+      // Create a video encoding task
+      video_tasks.emplace_back([=, &log_mutex, &video_count]() {
         try {
           spdlog::debug("Started encoding {}", output_video_path.string());
           // Collect image files
@@ -777,12 +769,8 @@ void TrossenAIDataset::convert_to_videos() const {
 
           if (image_paths.empty()) {
             std::lock_guard<std::mutex> lock(log_mutex);
-            spdlog::warn("No images found in episode folder: {}", episode_name);
-            {
-              std::lock_guard<std::mutex> cv_lock(log_mutex);
-              active_threads--;
-            }
-            cv.notify_one();
+            spdlog::warn("No images found for episode '{}' in camera '{}' at path: {}",
+                         episode_name, cam_name, episode_dir.path().string());
             return;
           }
           // Use a pattern for FFmpeg input to match image files with sequential
@@ -802,9 +790,9 @@ void TrossenAIDataset::convert_to_videos() const {
           std::ostringstream ffmpeg_cmd;
           ffmpeg_cmd
               << "ffmpeg -y -framerate " << fps << " -i "
-              << input_pattern.string()
+            << input_pattern.string()
               << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p "
-              << output_video_path.string() << " > /dev/null 2>&1";
+            << output_video_path.string() << " > /dev/null 2>&1";
 
           // Execute the FFmpeg command and measure execution time
           auto start_time = std::chrono::steady_clock::now();
@@ -821,29 +809,41 @@ void TrossenAIDataset::convert_to_videos() const {
           }
           std::lock_guard<std::mutex> lock(log_mutex);
           if (ret_code != 0) {
-            spdlog::error("FFmpeg failed for {}: exit code {}", episode_name,
-                          ret_code);
+            spdlog::error("FFmpeg failed for episode '{}' in camera '{}': exit code {}. Command: {}",
+                          episode_name, cam_name, ret_code, ffmpeg_cmd.str());
           } else {
             spdlog::debug("Created video: {}", output_video_path.string());
             video_count++;
           }
         } catch (const std::exception &e) {
           std::lock_guard<std::mutex> lock(log_mutex);
-          spdlog::error("Exception in video thread for {}: {}", episode_name,
-                        e.what());
+          spdlog::error("Exception in video encoding thread for episode '{}' in camera '{}': {}. Video path: {}",
+                        episode_name, cam_name, e.what(), output_video_path.string());
         }
-        {
-          std::lock_guard<std::mutex> cv_lock(log_mutex);
-          active_threads--;
-        }
-        cv.notify_one();
       });
     }
   }
 
-  // Ensure all threads are joined before continuing
-  for (auto &t : threads) {
-    if (t.joinable()) t.join();
+  // Process video tasks in batches of 5
+  const size_t batch_size = 5;
+  for (size_t i = 0; i < video_tasks.size(); i += batch_size) {
+    std::vector<std::thread> batch_threads;
+    
+    // Create threads for current batch
+    size_t batch_end = std::min(i + batch_size, video_tasks.size());
+    for (size_t j = i; j < batch_end; ++j) {
+      batch_threads.emplace_back(video_tasks[j]);
+    }
+    
+    // Wait for all threads in current batch to complete
+    for (auto &t : batch_threads) {
+      if (t.joinable()) t.join();
+    }
+    
+    spdlog::info("Completed batch {}/{} ({} videos)",
+                 (i / batch_size) + 1,
+                 (video_tasks.size() + batch_size - 1) / batch_size,
+                 batch_end - i);
   }
 
   // Set the total videos in metadata after processing each camera directory

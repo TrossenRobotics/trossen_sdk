@@ -109,10 +109,12 @@ add_executable(sleep scripts/sleep.cpp)
 add_executable(replay scripts/replay.cpp)
 add_executable(record scripts/record.cpp)
 add_executable(teleop scripts/teleop.cpp)
+add_executable(video_conversion scripts/video_conversion.cpp)
 
 
 target_link_libraries(record  PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
 target_link_libraries(sleep  PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
 target_link_libraries(replay PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
 target_link_libraries(teleop PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
+target_link_libraries(video_conversion PRIVATE ${Boost_LIBRARIES} trossen_data_collection_sdk)
 

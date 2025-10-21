@@ -9,7 +9,7 @@ Uploading the dataset allows you to visualize it in the online dataset viewer an
 As the LeRobot dataset does not expect you to upload large image files, you can exclude them using the `--exclude` flag. This does not delete the files locally, it just prevents them from being uploaded to HuggingFace. This will not affect the usability of the dataset for training models as the LeRobot models use video files instead of individual images.
 
 ```bash
- huggingface-cli upload TrossenRoboticsCommunity/record-test ~/.cache/huggingface/lerobot/TrossenRoboticsCommunity/test_dataset_03 --repo-type dataset --revision v2.1 --exclude *.jpg
+ huggingface-cli upload TrossenRoboticsCommunity/trossen_ai_stationary_organize_tools TrossenRoboticsCommunity/organzize_tools --repo-type dataset --revision v2.1 --exclude *.jpg
 ```
 
 Note:
@@ -74,14 +74,14 @@ Run the training command:
 ```bash
 cd lerobot && lerobot-train \
   --policy.path=lerobot/smolvla_base \
-  --dataset.repo_id=TrossenRoboticsCommunity/test_dataset_00 \
-  --batch_size=4\
-  --steps=20000 \
+  --dataset.repo_id=TrossenRoboticsCommunity/trossen_ai_stationary_stack_wooden_block \
+  --batch_size=8\
+  --steps=100000 \
   --output_dir=outputs/train/smolvla_trossen_ai_stationary_test_training \
   --job_name=smolvla_training_trossen_ai_stationary_test_training \
   --policy.device=cuda \
-  --wandb.enable=true \
-  --policy.repo_id TrossenRoboticsCommunity/smolvla_trossen_ai_stationary_test_training
+  --wandb.enable=false \
+  --policy.repo_id TrossenRoboticsCommunity/smolvla_trossen_ai_stationary_stack_wooden_block
 ```
 
 ### ACT
