@@ -55,8 +55,10 @@ int main(int argc, char* argv[]) {
   trossen_sdk::ControlUtils control_utils;
 
   // Load robot and teleoperation configurations
+  // TODO(user): Replace fmt::format with C++17 compatible alternative
   std::string foll_config_file =
       fmt::format(trossen_sdk::FOLLOWER_ROBOT_CONFIG_FORMAT, robot_name);
+  // TODO(user): Replace fmt::format with C++17 compatible alternative
   std::string lead_config_file =
       fmt::format(trossen_sdk::LEADER_ROBOT_CONFIG_FORMAT, robot_name);
 

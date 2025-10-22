@@ -1,5 +1,5 @@
 # TODO [TDS-17] Cleanup and organize CMake
-cmake_minimum_required(VERSION 3.25.0)
+cmake_minimum_required(VERSION 3.22.0)
 project(TrossenDataCollectionSDK)
 
 set(CMAKE_CXX_STANDARD 17)

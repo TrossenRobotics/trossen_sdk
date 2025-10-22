@@ -2,8 +2,14 @@
 #ifndef INCLUDE_TROSSEN_SDK_UTILS_CONSTANTS_HPP_
 #define INCLUDE_TROSSEN_SDK_UTILS_CONSTANTS_HPP_
 #include <filesystem>
+#include <string>
+#include <sstream>
+#include <iomanip>
 
 namespace trossen_sdk {
+
+
+
 
 /// @brief Default root path for dataset storage
 const std::filesystem::path DEFAULT_ROOT_PATH =
@@ -63,6 +69,58 @@ const char VIDEO_PATH_META[] =
 // Display Images Target Size
 const int DISPLAY_IMAGE_WIDTH = 640;
 const int DISPLAY_IMAGE_HEIGHT = 480;
+
+
+
+/// @brief Simple string replacement function for config file paths
+/// @param format_str The format string with {} placeholder
+/// @param arg The string to replace {} with
+/// @return Formatted string
+inline std::string format_string(const std::string& format_str, const std::string& arg) {
+    std::string result = format_str;
+    size_t pos = result.find("{}");
+    if (pos != std::string::npos) {
+        result.replace(pos, 2, arg);
+    }
+    return result;
+}
+
+/// @brief Format episode name with zero-padded index
+/// @param prefix The prefix string (e.g., "episode_")
+/// @param episode_idx The episode index to format
+/// @return Formatted episode string
+inline std::string format_episode(const std::string& prefix, int episode_idx) {
+    std::ostringstream oss;
+    oss << prefix << std::setfill('0') << std::setw(6) << episode_idx;
+    return oss.str();
+}
+
+/// @brief Format data path for parquet files
+/// @param chunk_index The chunk index
+/// @param episode_index The episode index
+/// @return Formatted data path string
+inline std::string format_data_path(int chunk_index, int episode_index) {
+    std::ostringstream oss;
+    oss << "data/chunk-" << std::setfill('0') << std::setw(3) << chunk_index
+        << "/episode_" << std::setfill('0') << std::setw(6) << episode_index << ".parquet";
+    return oss.str();
+}
+
+/// @brief Format image path for camera images
+/// @param chunk_index The chunk index
+/// @param camera_name The camera name
+/// @param episode_index The episode index
+/// @param frame_index The frame index
+/// @return Formatted image path string
+inline std::string format_image_path(int chunk_index, const std::string& camera_name,
+                                   int episode_index, int frame_index) {
+    std::ostringstream oss;
+    oss << "images/chunk-" << std::setfill('0') << std::setw(3) << chunk_index
+        << "/" << camera_name << "/episode_" << std::setfill('0') << std::setw(6) << episode_index
+        << "/image_" << std::setfill('0') << std::setw(6) << frame_index << ".jpg";
+    return oss.str();
+}
+
 
 }  // namespace trossen_sdk
 

@@ -136,14 +136,14 @@ void TrossenAIDataset::add_frame(FrameData *frame) {
   // Create episode folder name with zero-padded episode index
   // TODO(shantanuparab-tr) Use string formatting utility
   std::string episode_folder_name =
-      fmt::format("episode_{:06}", current_episode_->get_episode_idx());
+      trossen_sdk::format_episode("episode_", current_episode_->get_episode_idx());
 
   // Push images to the image writer for asynchronous writing with appropriate
   // filenames using frame index
   for (const auto &image_data : frame->images) {
     const std::string &camera_name = image_data.camera_name;
     std::string image_path =
-        fmt::format(trossen_sdk::IMAGE_PATH, 0, camera_name,
+        trossen_sdk::format_image_path(0, camera_name,
                     current_episode_->get_episode_idx(), frame->frame_idx);
     std::string image_file_path =
         (root_ / repo_id_ / dataset_name_ / image_path).string();
@@ -153,7 +153,7 @@ void TrossenAIDataset::add_frame(FrameData *frame) {
 
     if (!image_data.depth_map.empty()) {
       std::string depth_path =
-          fmt::format(trossen_sdk::IMAGE_PATH, 0, camera_name + "_depth",
+          trossen_sdk::format_image_path(0, camera_name + "_depth",
                       current_episode_->get_episode_idx(), frame->frame_idx);
       std::string depth_file_path =
           (root_ / repo_id_ / dataset_name_ / depth_path).string();
@@ -285,7 +285,7 @@ void TrossenAIDataset::save_episode() {
   // convention
   // TODO(shantanuparab-tr): Use string formatting utility
   std::string episode_file_str =
-      fmt::format(trossen_sdk::DATA_PATH, chunk_index, episode_index);
+      trossen_sdk::format_data_path(chunk_index, episode_index);
   std::string output_path_ =
       (root_ / repo_id_ / dataset_name_ / episode_file_str).string();
 
@@ -370,7 +370,7 @@ void TrossenAIDataset::discard_episode() {
   std::vector<trossen_ai_robot_devices::CameraFeatureInfo> camera_info = robot_->get_camera_features();
   // Construct the episode directory path
   for (const auto &camera : camera_info) {
-    std::string camera_image_path = fmt::format(trossen_sdk::IMAGE_PATH, 0, camera.name,
+    std::string camera_image_path = trossen_sdk::format_image_path(0, camera.name,
                                                 current_episode_->get_episode_idx(), 0);
     // Get the parent directory of the first image (episode directory)
     camera_image_path = (root_ / repo_id_ / dataset_name_ / camera_image_path)
@@ -652,7 +652,7 @@ void TrossenAIDataset::compute_statistics(std::shared_ptr<arrow::Table> table,
     // Create episode folder name with zero-padded episode index
     // TODO(shantanuparab-tr): Use string formatting utility
     std::string episode_folder_name =
-        fmt::format("episode_{:06}", episode_index);
+        trossen_sdk::format_episode("episode_", episode_index);
 
     // Construct the full path to the episode's image directory for the current
     // camera
