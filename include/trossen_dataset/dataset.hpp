@@ -164,7 +164,18 @@ class Metadata {
    * @return README string
    */
   std::string generate_readme(const nlohmann::json &info_json) const;
-
+  
+  /**
+   * @brief Add operator metadata to the info JSON object as a nested array
+   * @param operators Vector of JSON objects, each containing operator metadata (e.g., email, name)
+   * Example:
+   * [
+   *   { "email": "alice@example.com", "name": "Alice Smith" },
+   *   { "email": "bob@example.com", "name": "Bob Johnson" }
+   * ]
+   */
+  void add_operators(const nlohmann::json &operator_metadata);
+  
  private:
   /// @brief Name of the dataset
   std::string dataset_name_;
@@ -427,6 +438,10 @@ class TrossenAIDataset {
    */
   std::vector<int> sample_indices(int dataset_len, int min_samples = 100,
                                   int max_samples = 10000, float power = 0.75f);
+
+  // Create a function to take operator metadata and write it to the info.json
+  void add_operator_metadata(const std::string &name,
+                             const std::string &email);
 
  private:
   /// @brief Name of dataset

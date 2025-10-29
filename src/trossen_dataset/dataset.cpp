@@ -164,6 +164,15 @@ void TrossenAIDataset::add_frame(FrameData *frame) {
   }
 }
 
+void TrossenAIDataset::add_operator_metadata(const std::string &name,
+                                        const std::string &email) {
+  // Make into a nlohmann json object
+  nlohmann::json operator_metadata;
+  operator_metadata["name"] = name;
+  operator_metadata["email"] = email;
+  metadata_->add_operators(operator_metadata);
+}
+
 void TrossenAIDataset::save_episode() {
 
   if (current_episode_ == nullptr) {
@@ -1071,6 +1080,8 @@ void Metadata::add_features(
   info_["splits"]["train"] = "0:0";
 }
 
+
+
 void Metadata::update_info(int additional_frames) {
   // Get the current total frames and episodes, defaulting to 0 if not present
   int total_frames =
@@ -1109,6 +1120,7 @@ void Metadata::update_info(int additional_frames) {
   out.close();
   spdlog::debug("README.md successfully generated.");
 }
+
 void Metadata::set_info_entry(const std::string &key,
                               const std::string &value) {
   info_[key] = value;
@@ -1140,6 +1152,22 @@ std::vector<std::string> Metadata::get_info_values() const {
     values.push_back(it.value());
   }
   return values;
+}
+
+
+void Metadata::add_operators(const nlohmann::json &operator_metadata) {
+  if (!info_.contains("operators")) {
+    info_["operators"] = nlohmann::json::array();
+  }
+  // Check for duplicates before adding
+  for (const auto& op : info_["operators"]) {
+    if (op == operator_metadata) {
+      // Duplicate found, do not add
+      return;
+    }
+  }
+  info_["operators"].push_back(operator_metadata);
+  save_info_file();
 }
 
 void Metadata::save_info_file() const {
