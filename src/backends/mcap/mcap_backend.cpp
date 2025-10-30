@@ -139,6 +139,8 @@ void McapBackend::write_sessionmetadata_once() {
   ts->set_seconds(now.sec);
   ts->set_nanos(now.nsec);
   sm.set_tool_version(trossen::core::version());
+  sm.set_dataset_id(cfg_.dataset_id);
+  sm.set_episode_index(cfg_.episode_index);
   std::string payload;
   sm.SerializeToString(&payload);
   mcap::Message msg;

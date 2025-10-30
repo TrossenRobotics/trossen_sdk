@@ -35,6 +35,9 @@ public:
     size_t chunk_size_bytes{4 * 1024 * 1024};
     std::string compression; // "" (none) or "zstd" (if library was built with it)
     bool write_image_meta_raw{false}; // future: raw mode
+    // Episode context (for session metadata)
+    std::string dataset_id;           // Dataset identifier (user-provided or auto-generated UUID)
+    uint32_t episode_index{0};        // Episode index within the dataset (zero-based)
   };
 
   struct Stats {

@@ -14,4 +14,10 @@ message SessionMetadata {
 
   // Version of the Trossen SDK used to create the recording
   string tool_version = 3;
+
+  // Dataset identifier (user-provided or auto-generated UUID)
+  string dataset_id = 4;
+
+  // Episode index within the dataset (zero-based)
+  uint32 episode_index = 5;
 }
