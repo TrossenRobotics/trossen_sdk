@@ -13,7 +13,7 @@ add_library(trossen_sdk
   src/hw/camera/opencv_producer.cpp
   src/hw/camera/mock_producer.cpp
   src/hw/camera/mock_synced_producer.cpp
-  src/runtime/episode_manager.cpp
+  src/runtime/session_manager.cpp
 )
 
 include(FetchContent)

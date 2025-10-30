@@ -1,9 +1,9 @@
 /**
- * @file episode_manager.cpp
- * @brief Implementation of Episode Manager
+ * @file session_manager.cpp
+ * @brief Implementation of Session Manager
  */
 
-#include "trossen_sdk/runtime/episode_manager.hpp"
+#include "trossen_sdk/runtime/session_manager.hpp"
 
 #include <algorithm>
 #include <iomanip>
@@ -13,12 +13,12 @@
 
 namespace trossen::runtime {
 
-EpisodeManager::EpisodeManager(const EpisodeConfig& config)
+SessionManager::SessionManager(const SessionConfig& config)
   : config_(config) {
 
   // Validate required configuration
   if (config_.base_path.empty()) {
-    throw std::invalid_argument("EpisodeConfig::base_path cannot be empty");
+    throw std::invalid_argument("SessionConfig::base_path cannot be empty");
   }
 
   // Create base directory if it doesn't exist
@@ -47,7 +47,7 @@ EpisodeManager::EpisodeManager(const EpisodeConfig& config)
   }
 }
 
-EpisodeManager::~EpisodeManager() {
+SessionManager::~SessionManager() {
   // Ensure monitoring thread is stopped
   monitoring_active_ = false;
   if (monitor_thread_.joinable()) {
@@ -56,11 +56,11 @@ EpisodeManager::~EpisodeManager() {
   shutdown();
 }
 
-void EpisodeManager::shutdown() {
+void SessionManager::shutdown() {
   stop_episode();
 }
 
-void EpisodeManager::add_producer(
+void SessionManager::add_producer(
   std::shared_ptr<hw::PolledProducer> producer,
   std::chrono::milliseconds poll_period,
   const Scheduler::TaskOptions& opts) {
@@ -82,7 +82,7 @@ void EpisodeManager::add_producer(
     });
 }
 
-bool EpisodeManager::start_episode() {
+bool SessionManager::start_episode() {
   // Guard: already active
   if (episode_active_) {
     std::cerr << "Episode already active. Call stop_episode() first." << std::endl;
@@ -125,11 +125,11 @@ bool EpisodeManager::start_episode() {
 
   // Create and configure scheduler
   scheduler_ = std::make_unique<Scheduler>();
-  // TODO: Expose Scheduler::Config in EpisodeConfig if needed
+  // TODO: Expose Scheduler::Config in SessionConfig if needed
 
   // Register producer tasks with scheduler
   for (const auto& pt : producer_tasks_) {
-    // Capture raw pointer to sink (safe: sink lifetime managed by Episode Manager)
+    // Capture raw pointer to sink (safe: sink lifetime managed by Session Manager)
     auto* sink_ptr = current_sink_.get();
 
     // Add task that polls producer and enqueues records
@@ -172,7 +172,7 @@ bool EpisodeManager::start_episode() {
   return true;
 }
 
-void EpisodeManager::stop_episode() {
+void SessionManager::stop_episode() {
   // First, signal monitoring thread to stop (if any)
   monitoring_active_ = false;
 
@@ -231,11 +231,11 @@ void EpisodeManager::stop_episode() {
   auto_stop_cv_.notify_all();
 }
 
-bool EpisodeManager::is_episode_active() const {
+bool SessionManager::is_episode_active() const {
   return episode_active_;
 }
 
-bool EpisodeManager::wait_for_auto_stop(std::chrono::milliseconds timeout) {
+bool SessionManager::wait_for_auto_stop(std::chrono::milliseconds timeout) {
   std::unique_lock<std::mutex> lock(auto_stop_mutex_);
 
   // If timeout is max (default), wait indefinitely
@@ -261,7 +261,7 @@ bool EpisodeManager::wait_for_auto_stop(std::chrono::milliseconds timeout) {
   return was_auto_stopped;
 }
 
-EpisodeManager::Stats EpisodeManager::stats() const {
+SessionManager::Stats SessionManager::stats() const {
   std::lock_guard<std::mutex> lock(episode_mutex_);
 
   Stats s;
@@ -301,7 +301,7 @@ EpisodeManager::Stats EpisodeManager::stats() const {
   return s;
 }
 
-uint32_t EpisodeManager::scan_existing_episodes(const std::filesystem::path& base_path) {
+uint32_t SessionManager::scan_existing_episodes(const std::filesystem::path& base_path) {
   // If directory doesn't exist, return 0
   if (!std::filesystem::exists(base_path)) {
     return 0;
@@ -357,7 +357,7 @@ uint32_t EpisodeManager::scan_existing_episodes(const std::filesystem::path& bas
   return found_any ? (max_index + 1) : 0;
 }
 
-std::filesystem::path EpisodeManager::build_episode_path(uint32_t index) const {
+std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
   // Generate filename: episode_NNNNNN.mcap (6-digit zero-padded)
   // TODO(lukeschmitt-tr): This is specific to MCAP files; consider making more generic
   std::ostringstream oss;
@@ -365,7 +365,7 @@ std::filesystem::path EpisodeManager::build_episode_path(uint32_t index) const {
   return config_.base_path / oss.str();
 }
 
-std::shared_ptr<io::backends::McapBackend> EpisodeManager::create_backend(
+std::shared_ptr<io::backends::McapBackend> SessionManager::create_backend(
   const std::string& output_path,
   uint32_t episode_index) {
 
@@ -378,7 +378,7 @@ std::shared_ptr<io::backends::McapBackend> EpisodeManager::create_backend(
   return std::make_shared<io::backends::McapBackend>(cfg);
 }
 
-void EpisodeManager::monitor_duration() {
+void SessionManager::monitor_duration() {
   while (monitoring_active_ && episode_active_) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
 

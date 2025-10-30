@@ -1,15 +1,15 @@
 /**
- * @file episode_manager.hpp
- * @brief Episode Manager orchestrates discrete recording sessions (episodes).
+ * @file session_manager.hpp
+ * @brief Session Manager orchestrates discrete recording sessions (episodes).
  *
- * The Episode Manager controls the lifecycle of individual episode recordings,
+ * The Session Manager controls the lifecycle of individual episode recordings,
  * each producing a separate output file (e.g., episode_000000.mcap).
  * It manages Scheduler, Sink, and Backend instances per episode, ensuring clean
  * separation between recording sessions.
  */
 
-#ifndef TROSSEN_SDK__RUNTIME__EPISODE_MANAGER_HPP
-#define TROSSEN_SDK__RUNTIME__EPISODE_MANAGER_HPP
+#ifndef TROSSEN_SDK__RUNTIME__SESSION_MANAGER_HPP
+#define TROSSEN_SDK__RUNTIME__SESSION_MANAGER_HPP
 
 #include <atomic>
 #include <chrono>
@@ -30,9 +30,9 @@
 namespace trossen::runtime {
 
 /**
- * @brief Configuration for the Episode Manager
+ * @brief Configuration for the Session Manager
  */
-struct EpisodeConfig {
+struct SessionConfig {
   /// Required: base directory for episode files
   std::filesystem::path base_path;
 
@@ -51,10 +51,10 @@ struct EpisodeConfig {
 };
 
 /**
- * @brief Episode Manager orchestrates discrete recording sessions
+ * @brief Session Manager orchestrates discrete recording sessions
  *
  * Episodes are NOT continuous streams being sliced—they are distinct recording
- * sessions separated by breaks. The Episode Manager handles:
+ * sessions separated by breaks. The Session Manager handles:
  * - Creating and managing individual episode files
  * - Controlling Scheduler lifecycle (start/stop producers)
  * - Managing Sink and Backend instances per episode
@@ -62,18 +62,18 @@ struct EpisodeConfig {
  * - Auto-stopping episodes when duration limits are reached
  * - Draining queued records before closing episodes
  */
-class EpisodeManager {
+class SessionManager {
 public:
   /**
-   * @brief Construct Episode Manager with configuration
-   * @param config Episode configuration
+   * @brief Construct Session Manager with configuration
+   * @param config Session configuration
    */
-  explicit EpisodeManager(const EpisodeConfig& config);
+  explicit SessionManager(const SessionConfig& config);
 
   /**
    * @brief Destructor ensures current episode is closed
    */
-  ~EpisodeManager();
+  ~SessionManager();
 
   // ──────────────────────────────────────────────────────────
   // Producer Registration (before starting episodes)
@@ -88,7 +88,7 @@ public:
    * Must be called before start_episode(). Producers are registered once
    * and used for all episodes in the session.
    *
-   * Episode Manager stores producer info and registers Scheduler tasks
+   * Session Manager stores producer info and registers Scheduler tasks
    * during each start_episode() call. Tasks poll producers and enqueue
    * records to the current episode's Sink.
    */
@@ -182,7 +182,7 @@ private:
   // ──────────────────────────────────────────────────────────
 
   /// Configuration
-  EpisodeConfig config_;
+  SessionConfig config_;
 
   /// Next episode index to use
   uint32_t next_episode_index_{0};
@@ -273,4 +273,4 @@ private:
 
 } // namespace trossen::runtime
 
-#endif // TROSSEN_SDK__RUNTIME__EPISODE_MANAGER_HPP
+#endif // TROSSEN_SDK__RUNTIME__SESSION_MANAGER_HPP
