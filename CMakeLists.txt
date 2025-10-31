@@ -1,28 +1,11 @@
 cmake_minimum_required(VERSION 3.16)
-project(trossen_sdk VERSION 0.1.0 LANGUAGES CXX)
+project(trossen_sdk
+  VERSION 0.1.0
+  LANGUAGES CXX
+)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-
-# -------------------------------------------------------------
-# Debug / Sanitizer configuration
-# -------------------------------------------------------------
-if (NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
-endif()
-
-if (CMAKE_BUILD_TYPE STREQUAL "Debug")
-  message(STATUS "Configuring Debug build flags (-O0 -g -fno-omit-frame-pointer)")
-  set(CMAKE_CXX_FLAGS_DEBUG "-O0 -g -fno-omit-frame-pointer" CACHE STRING "" FORCE)
-  set(CMAKE_C_FLAGS_DEBUG   "-O0 -g -fno-omit-frame-pointer" CACHE STRING "" FORCE)
-endif()
-
-option(ENABLE_ASAN "Enable Address/Undefined Sanitizers" OFF)
-if (ENABLE_ASAN)
-  message(STATUS "Building with Address + Undefined Behavior Sanitizers")
-  add_compile_options(-O1 -g -fno-omit-frame-pointer -fsanitize=address,undefined -fsanitize-address-use-after-scope)
-  add_link_options(-fsanitize=address,undefined)
-endif()
 
 add_library(trossen_sdk
   src/backends/trossen/trossen_backend.cpp
@@ -113,5 +96,15 @@ target_include_directories(trossen_sdk PUBLIC
 # Examples
 add_subdirectory(examples)
 
+# Testing
+option(BUILD_TESTING "Build the testing tree" ON)
+if(BUILD_TESTING)
+  enable_testing()
+  add_subdirectory(tests)
+endif()
+
 # Benchmarks
-add_subdirectory(benchmarks)
+option(BUILD_BENCHMARKS "Build the benchmarking tree" OFF)
+if(BUILD_BENCHMARKS)
+  add_subdirectory(benchmarks)
+endif()
