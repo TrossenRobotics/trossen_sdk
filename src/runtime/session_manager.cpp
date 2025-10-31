@@ -216,7 +216,7 @@ void SessionManager::stop_episode() {
   ++total_episodes_completed_;
   ++next_episode_index_;
 
-  std::cout << "Episode stopped. Total completed: " << total_episodes_completed_
+  std::cout << "\nEpisode stopped. Total completed: " << total_episodes_completed_
             << ", Next index: " << next_episode_index_ << std::endl;
 
   // Notify any threads waiting for auto-stop
@@ -386,7 +386,7 @@ void SessionManager::monitor_duration() {
     auto elapsed = now - episode_start_time_;
 
     if (config_.max_duration.has_value() && elapsed >= *config_.max_duration) {
-      std::cout << "Max duration (" << config_.max_duration->count()
+      std::cout << "\nMax duration (" << config_.max_duration->count()
                 << "s) reached, stopping episode automatically" << std::endl;
 
       // Stop monitoring first

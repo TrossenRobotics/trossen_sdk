@@ -1,0 +1,569 @@
+/**
+ * @file stationary_ai_kit_complete.cpp
+ * @brief Complete Stationary AI Kit demo with Session Manager, MCAP backend, and multi-camera
+ *
+ * This demo is designed for the full stationary AI kit configuration:
+ * - 4 Trossen AI arms (2 leaders for teleop, 2 followers recorded)
+ * - Session Manager for multi-episode recording
+ * - MCAP backend for data storage
+ * - 4 OpenCV camera producers for image capture
+ * - Configurable episode count and duration
+ *
+ * Hardware Configuration:
+ *   Leader Left:    192.168.1.3 (teleop control, not recorded)
+ *   Leader Right:   192.168.1.2 (teleop control, not recorded)
+ *   Follower Left:  192.168.1.5 (mirrors leader left, recorded)
+ *   Follower Right: 192.168.1.4 (mirrors leader right, recorded)
+ *   Cameras:        4x 720p @ 30fps (indices 0, 2, 4, 6)
+ *
+ * Usage:
+ *   ./stationary_ai_kit_complete --episodes 5 --duration 10
+ *   ./stationary_ai_kit_complete --episodes 3 --duration 5 --output-dir /data/recordings
+ *   ./stationary_ai_kit_complete --mock  # Use mock producers for testing without hardware
+ */
+
+#include <chrono>
+#include <filesystem>
+#include <iomanip>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include "demo_utils.hpp"
+#include "libtrossen_arm/trossen_arm.hpp"
+#include "trossen_sdk/runtime/session_manager.hpp"
+#include "trossen_sdk/hw/arm/arm_producer.hpp"
+#include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
+#include "trossen_sdk/hw/camera/opencv_producer.hpp"
+#include "trossen_sdk/hw/camera/mock_producer.hpp"
+
+using namespace std::chrono_literals;
+using namespace trossen::demo;
+
+struct Config {
+  int duration_s = 10;
+  int episodes = 3;
+  std::string dataset_id = "";  // empty = auto-generate
+  std::string output_dir = "output/episodes";
+  bool use_mock = false;
+  bool show_help = false;
+
+  // Camera settings
+  std::vector<int> camera_indices = {4, 10, 16, 22};
+  int camera_width = 1280;   // 720p
+  int camera_height = 720;
+  int camera_fps = 30;
+
+  // Arm settings
+  float joint_rate_hz = 200.0f;
+  std::string leader_left_ip = "192.168.1.3";
+  std::string leader_right_ip = "192.168.1.2";
+  std::string follower_left_ip = "192.168.1.5";
+  std::string follower_right_ip = "192.168.1.4";
+};
+
+void print_usage(const char* prog_name) {
+  std::cout << "Usage: " << prog_name << " [options]\n\n"
+            << "Options:\n"
+            << "  --duration <seconds>     Duration per episode (default: 10)\n"
+            << "  --episodes <count>       Number of episodes to record (default: 3)\n"
+            << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
+            << "  --output-dir <path>      Output directory for episodes (default: output/episodes)\n"
+            << "  --mock                   Use mock producers instead of real hardware\n"
+            << "  --camera-width <pixels>  Camera width (default: 1280 for 720p)\n"
+            << "  --camera-height <pixels> Camera height (default: 720)\n"
+            << "  --camera-fps <fps>       Camera frame rate (default: 30)\n"
+            << "  --joint-rate <hz>        Joint state capture rate (default: 200)\n"
+            << "  --help                   Show this help message\n\n"
+            << "Hardware Configuration:\n"
+            << "  Leader Left:    192.168.1.3 (teleop, not recorded)\n"
+            << "  Leader Right:   192.168.1.2 (teleop, not recorded)\n"
+            << "  Follower Left:  192.168.1.5 (recorded)\n"
+            << "  Follower Right: 192.168.1.4 (recorded)\n"
+            << "  Cameras:        /dev/video0, /dev/video2, /dev/video4, /dev/video6\n\n"
+            << "Examples:\n"
+            << "  " << prog_name << " --duration 10 --episodes 5\n"
+            << "  " << prog_name << " --mock --duration 5 --episodes 3\n"
+            << "  " << prog_name << " --dataset-id stationary_demo_001 --output-dir /data/recordings\n";
+}
+
+Config parse_args(int argc, char** argv) {
+  Config cfg;
+  for (int i = 1; i < argc; ++i) {
+    std::string arg(argv[i]);
+    if (arg == "--help" || arg == "-h") {
+      cfg.show_help = true;
+      return cfg;
+    } else if (arg == "--duration" && i + 1 < argc) {
+      cfg.duration_s = std::max(1, std::atoi(argv[++i]));
+    } else if (arg == "--episodes" && i + 1 < argc) {
+      cfg.episodes = std::max(1, std::atoi(argv[++i]));
+    } else if (arg == "--dataset-id" && i + 1 < argc) {
+      cfg.dataset_id = argv[++i];
+    } else if (arg == "--output-dir" && i + 1 < argc) {
+      cfg.output_dir = argv[++i];
+    } else if (arg == "--mock") {
+      cfg.use_mock = true;
+    } else if (arg == "--camera-width" && i + 1 < argc) {
+      cfg.camera_width = std::max(1, std::atoi(argv[++i]));
+    } else if (arg == "--camera-height" && i + 1 < argc) {
+      cfg.camera_height = std::max(1, std::atoi(argv[++i]));
+    } else if (arg == "--camera-fps" && i + 1 < argc) {
+      cfg.camera_fps = std::max(1, std::atoi(argv[++i]));
+    } else if (arg == "--joint-rate" && i + 1 < argc) {
+      cfg.joint_rate_hz = std::max(1.0f, static_cast<float>(std::atof(argv[++i])));
+    } else {
+      std::cerr << "Warning: Unknown argument '" << arg << "' (use --help for usage)\n";
+    }
+  }
+  return cfg;
+}
+
+int main(int argc, char** argv) {
+  // Parse command-line arguments
+  auto cfg = parse_args(argc, argv);
+  if (cfg.show_help) {
+    print_usage(argv[0]);
+    return 0;
+  }
+
+  // Print configuration
+  std::vector<std::string> config_lines = {
+    "Mode:                 " + std::string(cfg.use_mock ? "Mock (no hardware)" : "Hardware"),
+    "Duration per episode: " + std::to_string(cfg.duration_s) + "s",
+    "Number of episodes:   " + std::to_string(cfg.episodes),
+    "Dataset ID:           " + (cfg.dataset_id.empty() ? "<auto-generate>" : cfg.dataset_id),
+    "Output directory:     " + cfg.output_dir
+  };
+
+  if (!cfg.use_mock) {
+    config_lines.push_back("Leader Left IP:       " + cfg.leader_left_ip + " (teleop, not recorded)");
+    config_lines.push_back("Leader Right IP:      " + cfg.leader_right_ip + " (teleop, not recorded)");
+    config_lines.push_back("Follower Left IP:     " + cfg.follower_left_ip + " (recorded)");
+    config_lines.push_back("Follower Right IP:    " + cfg.follower_right_ip + " (recorded)");
+  }
+
+  config_lines.push_back("Joint rate:           " + std::to_string(cfg.joint_rate_hz) + " Hz (followers only)");
+  config_lines.push_back("Cameras:              " + std::to_string(cfg.camera_indices.size()) + " cameras @ " +
+                        std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
+                        " @ " + std::to_string(cfg.camera_fps) + " fps");
+
+  std::string camera_list = "Camera indices:       ";
+  for (size_t i = 0; i < cfg.camera_indices.size(); ++i) {
+    camera_list += "/dev/video" + std::to_string(cfg.camera_indices[i]);
+    if (i < cfg.camera_indices.size() - 1) camera_list += ", ";
+  }
+  config_lines.push_back(camera_list);
+
+  print_config_banner("Stationary AI Kit Complete Demo", config_lines);
+
+  // Install signal handler for graceful shutdown
+  install_signal_handler();
+
+  // Create output directory
+  std::filesystem::create_directories(cfg.output_dir);
+
+  std::unique_ptr<trossen_arm::TrossenArmDriver> leader_left_driver;
+  std::unique_ptr<trossen_arm::TrossenArmDriver> leader_right_driver;
+  std::unique_ptr<trossen_arm::TrossenArmDriver> follower_left_driver;
+  std::unique_ptr<trossen_arm::TrossenArmDriver> follower_right_driver;
+
+  std::vector<double> leader_left_starting_pos;
+  std::vector<double> leader_right_starting_pos;
+  std::vector<double> follower_left_starting_pos;
+  std::vector<double> follower_right_starting_pos;
+
+  const float moving_time_s = 2.0f;
+
+  if (!cfg.use_mock) {
+    std::cout << "Initializing hardware...\n";
+
+    // Initialize all 4 arms
+    leader_left_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
+    leader_right_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
+    follower_left_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
+    follower_right_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
+
+    // Configure Leader Left
+    try {
+      leader_left_driver->configure(
+        trossen_arm::Model::wxai_v0,
+        trossen_arm::StandardEndEffector::wxai_v0_leader,
+        cfg.leader_left_ip,
+        true);
+      std::cout << "  ✓ Leader Left configured (" << cfg.leader_left_ip << ")\n";
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to configure Leader Left: " << e.what() << "\n";
+      return 1;
+    }
+
+    // Configure Leader Right
+    try {
+      leader_right_driver->configure(
+        trossen_arm::Model::wxai_v0,
+        trossen_arm::StandardEndEffector::wxai_v0_leader,
+        cfg.leader_right_ip,
+        true);
+      std::cout << "  ✓ Leader Right configured (" << cfg.leader_right_ip << ")\n";
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to configure Leader Right: " << e.what() << "\n";
+      return 1;
+    }
+
+    // Configure Follower Left
+    try {
+      follower_left_driver->configure(
+        trossen_arm::Model::wxai_v0,
+        trossen_arm::StandardEndEffector::wxai_v0_follower,
+        cfg.follower_left_ip,
+        true);
+      std::cout << "  ✓ Follower Left configured (" << cfg.follower_left_ip << ")\n";
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to configure Follower Left: " << e.what() << "\n";
+      return 1;
+    }
+
+    // Configure Follower Right
+    try {
+      follower_right_driver->configure(
+        trossen_arm::Model::wxai_v0,
+        trossen_arm::StandardEndEffector::wxai_v0_follower,
+        cfg.follower_right_ip,
+        true);
+      std::cout << "  ✓ Follower Right configured (" << cfg.follower_right_ip << ")\n";
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to configure Follower Right: " << e.what() << "\n";
+      return 1;
+    }
+
+    // Adjust follower joint limits for gripper tolerance
+    auto left_limits = follower_left_driver->get_joint_limits();
+    left_limits[follower_left_driver->get_num_joints() - 1].position_tolerance = 0.01;
+    follower_left_driver->set_joint_limits(left_limits);
+
+    auto right_limits = follower_right_driver->get_joint_limits();
+    right_limits[follower_right_driver->get_num_joints() - 1].position_tolerance = 0.01;
+    follower_right_driver->set_joint_limits(right_limits);
+
+    // Set all arms to position mode and stage them
+    leader_left_driver->set_all_modes(trossen_arm::Mode::position);
+    leader_right_driver->set_all_modes(trossen_arm::Mode::position);
+    follower_left_driver->set_all_modes(trossen_arm::Mode::position);
+    follower_right_driver->set_all_modes(trossen_arm::Mode::position);
+
+    // Stage all arms to their starting positions
+    leader_left_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    leader_right_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    follower_left_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    follower_right_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+
+    std::cout << "  ✓ All arms staged to starting positions\n";
+  }
+
+  trossen::runtime::SessionConfig session_cfg;
+  session_cfg.base_path = cfg.output_dir;
+  session_cfg.dataset_id = cfg.dataset_id;
+  session_cfg.max_duration = std::chrono::seconds(cfg.duration_s);
+  session_cfg.max_episodes = cfg.episodes;
+
+  // Backend configuration (MCAP with compression)
+  session_cfg.backend_config.compression = "zstd";
+  session_cfg.backend_config.chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
+  session_cfg.backend_config.robot_name = "/robots/bi_widowxai";
+
+  trossen::runtime::SessionManager mgr(session_cfg);
+
+  std::cout << "\nInitialized Session Manager\n";
+  std::cout << "  Starting episode index: " << mgr.stats().current_episode_index << "\n";
+  if (mgr.stats().current_episode_index > 0) {
+    std::cout << "  (Resuming from existing episodes in directory)\n";
+  }
+  std::cout << "\n";
+
+  std::cout << "Creating producers...\n";
+
+  auto joint_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.joint_rate_hz));
+
+  // Joint state producers for follower arms
+  std::vector<std::shared_ptr<trossen::hw::PolledProducer>> joint_producers;
+
+  if (cfg.use_mock) {
+    // Mock follower left
+    trossen::hw::arm::MockJointStateProducer::Config left_cfg{
+      6,                              // num_joints
+      cfg.joint_rate_hz,              // rate_hz
+      "follower_left/joint_states",   // stream_id
+      1.0                             // motion_scale
+    };
+    auto left_prod = std::make_shared<trossen::hw::arm::MockJointStateProducer>(left_cfg);
+    joint_producers.push_back(left_prod);
+    mgr.add_producer(left_prod, joint_period);
+    std::cout << "  ✓ Mock follower left producer (" << cfg.joint_rate_hz << " Hz)\n";
+
+    // Mock follower right
+    trossen::hw::arm::MockJointStateProducer::Config right_cfg{
+      6,                              // num_joints
+      cfg.joint_rate_hz,              // rate_hz
+      "follower_right/joint_states",  // stream_id
+      1.0                             // motion_scale
+    };
+    auto right_prod = std::make_shared<trossen::hw::arm::MockJointStateProducer>(right_cfg);
+    joint_producers.push_back(right_prod);
+    mgr.add_producer(right_prod, joint_period);
+    std::cout << "  ✓ Mock follower right producer (" << cfg.joint_rate_hz << " Hz)\n";
+  } else {
+    // Real follower left producer
+    trossen::hw::arm::TrossenArmProducer::Config left_cfg;
+    left_cfg.stream_id = "follower_left/joint_states";
+    left_cfg.use_device_time = false;
+
+    auto follower_left_shared = std::shared_ptr<trossen_arm::TrossenArmDriver>(
+      follower_left_driver.get(), [](trossen_arm::TrossenArmDriver*){});
+
+    auto left_prod = std::make_shared<trossen::hw::arm::TrossenArmProducer>(
+      follower_left_shared, left_cfg);
+    joint_producers.push_back(left_prod);
+    mgr.add_producer(left_prod, joint_period);
+    std::cout << "  ✓ Follower Left producer (" << cfg.joint_rate_hz << " Hz)\n";
+
+    // Real follower right producer
+    trossen::hw::arm::TrossenArmProducer::Config right_cfg;
+    right_cfg.stream_id = "follower_right/joint_states";
+    right_cfg.use_device_time = false;
+
+    auto follower_right_shared = std::shared_ptr<trossen_arm::TrossenArmDriver>(
+      follower_right_driver.get(), [](trossen_arm::TrossenArmDriver*){});
+
+    auto right_prod = std::make_shared<trossen::hw::arm::TrossenArmProducer>(
+      follower_right_shared, right_cfg);
+    joint_producers.push_back(right_prod);
+    mgr.add_producer(right_prod, joint_period);
+    std::cout << "  ✓ Follower Right producer (" << cfg.joint_rate_hz << " Hz)\n";
+  }
+
+  // Camera producers (4 cameras)
+  std::vector<std::shared_ptr<trossen::hw::PolledProducer>> camera_producers;
+  auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
+
+  for (size_t i = 0; i < cfg.camera_indices.size(); ++i) {
+    if (cfg.use_mock) {
+      trossen::hw::camera::MockCameraProducer::Config cam_cfg;
+      cam_cfg.width = cfg.camera_width;
+      cam_cfg.height = cfg.camera_height;
+      cam_cfg.fps = cfg.camera_fps;
+      cam_cfg.stream_id = "camera_" + std::to_string(i) + "/image";
+      cam_cfg.encoding = "bgr8";
+      cam_cfg.pattern = trossen::hw::camera::MockCameraProducer::Pattern::Gradient;
+      cam_cfg.seed = 1000 + i;
+      cam_cfg.warmup_frames = 3;
+
+      auto cam_prod = std::make_shared<trossen::hw::camera::MockCameraProducer>(cam_cfg);
+      camera_producers.push_back(cam_prod);
+      mgr.add_producer(cam_prod, camera_period);
+      std::cout << "  ✓ Mock camera " << i << " producer (" << cfg.camera_fps << " Hz, "
+                << cfg.camera_width << "x" << cfg.camera_height << ")\n";
+    } else {
+      trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
+      cam_cfg.device_index = cfg.camera_indices[i];
+      cam_cfg.stream_id = "camera_" + std::to_string(i) + "/image";
+      cam_cfg.encoding = "bgr8";
+      cam_cfg.width = cfg.camera_width;
+      cam_cfg.height = cfg.camera_height;
+      cam_cfg.fps = cfg.camera_fps;
+      cam_cfg.use_device_time = false;
+      cam_cfg.warmup_seconds = 2.0;
+
+      auto cam_prod = std::make_shared<trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
+
+      // Warmup camera before registering
+      std::cout << "  ⏳ Warming up camera " << i << " (/dev/video" << cfg.camera_indices[i] << ")...\n";
+      if (!cam_prod->warmup()) {
+        std::cerr << "Failed to warmup camera " << i << "\n";
+        return 1;
+      }
+
+      camera_producers.push_back(cam_prod);
+      mgr.add_producer(cam_prod, camera_period);
+      std::cout << "  ✓ Camera " << i << " producer (" << cfg.camera_fps << " Hz, "
+                << cfg.camera_width << "x" << cfg.camera_height << ")\n";
+    }
+  }
+
+  std::cout << "\nProducers registered. Ready to record.\n";
+  std::cout << "  Recording: 2 follower arms + 4 cameras = 6 data streams\n";
+
+  for (int ep = 0; ep < cfg.episodes; ++ep) {
+    if (g_stop_requested) {
+      std::cout << "\n\nStopping at user request (Ctrl+C).\n";
+      break;
+    }
+
+    // Lock the leader arms, move followers to match
+    if (!cfg.use_mock && leader_left_driver && leader_right_driver &&
+        follower_left_driver && follower_right_driver) {
+      std::cout << "\nLocking leader arms and moving followers to match...\n";
+
+      // Lock leaders in position mode
+      leader_left_driver->set_all_modes(trossen_arm::Mode::position);
+      leader_right_driver->set_all_modes(trossen_arm::Mode::position);
+
+      // Get current leader positions
+      auto leader_left_positions = leader_left_driver->get_all_positions();
+      auto leader_right_positions = leader_right_driver->get_all_positions();
+
+      // Move followers to match
+      follower_left_driver->set_all_modes(trossen_arm::Mode::position);
+      follower_right_driver->set_all_modes(trossen_arm::Mode::position);
+      follower_left_driver->set_all_positions(leader_left_positions, moving_time_s, false);
+      follower_right_driver->set_all_positions(leader_right_positions, moving_time_s, false);
+      std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+      std::cout << "  ✓ Followers moved to match leaders\n";
+
+      // Re-enable teleop on leaders
+      std::cout << "\n!! Enabling teleop mode !!\n";
+      std::cout << "   Leader Left & Right: gravity compensation (external_effort mode)\n";
+      std::cout << "   Follower Left: will mirror Leader Left\n";
+      std::cout << "   Follower Right: will mirror Leader Right\n\n";
+      leader_left_driver->set_all_modes(trossen_arm::Mode::external_effort);
+      leader_left_driver->set_all_external_efforts(
+        std::vector<double>(leader_left_driver->get_num_joints(), 0.0),
+        0.0,
+        false);
+      leader_right_driver->set_all_modes(trossen_arm::Mode::external_effort);
+      leader_right_driver->set_all_external_efforts(
+        std::vector<double>(leader_right_driver->get_num_joints(), 0.0),
+        0.0,
+        false);
+    }
+
+    // Display episode header
+    print_episode_header(mgr.stats().current_episode_index, cfg.duration_s);
+
+    // Start episode
+    if (!mgr.start_episode()) {
+      std::cerr << "✗ Failed to start episode " << mgr.stats().current_episode_index << "\n";
+      break;
+    }
+
+    // Capture the episode index that's currently recording
+    uint32_t recording_episode_index = mgr.stats().current_episode_index;
+
+    // Track episode start time for actual duration calculation
+    auto episode_start_time = std::chrono::steady_clock::now();
+
+    std::cout << "Recording...\n";
+
+    // Teleop loop (if using hardware) - mirror leader positions to followers
+    std::thread teleop_thread;
+    if (!cfg.use_mock) {
+      teleop_thread = std::thread([&]() {
+        while (mgr.is_episode_active() && !g_stop_requested) {
+          // Mirror left side
+          auto leader_left_js = leader_left_driver->get_all_positions();
+          follower_left_driver->set_all_positions(leader_left_js, 0.0f, false);
+
+          // Mirror right side
+          auto leader_right_js = leader_right_driver->get_all_positions();
+          follower_right_driver->set_all_positions(leader_right_js, 0.0f, false);
+
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        }
+      });
+    }
+
+    // Monitor loop: display stats while episode is active
+    uint64_t last_record_count = monitor_episode(mgr);
+
+    // Stop episode and wait for teleop thread
+    if (mgr.is_episode_active()) {
+      mgr.stop_episode();
+    }
+
+    if (!cfg.use_mock && teleop_thread.joinable()) {
+      teleop_thread.join();
+    }
+
+    // Calculate actual episode duration
+    auto episode_end_time = std::chrono::steady_clock::now();
+    double actual_duration = std::chrono::duration<double>(episode_end_time - episode_start_time).count();
+
+    // Build the file path and print summary
+    std::string file_path = generate_episode_path(cfg.output_dir, recording_episode_index);
+    print_episode_summary(file_path, last_record_count);
+
+    SanityCheckConfig sanity_cfg{
+      actual_duration,
+      2,  // 2 joint producers (follower left + follower right)
+      cfg.joint_rate_hz,
+      static_cast<int>(cfg.camera_indices.size()),  // 4 cameras
+      cfg.camera_fps,
+      5.0  // 5% tolerance
+    };
+    perform_sanity_check(recording_episode_index, last_record_count, sanity_cfg);
+
+    // Check if user requested stop
+    if (g_stop_requested) {
+      std::cout << "\nStopping at user request (Ctrl+C).\n";
+      break;
+    }
+
+    // Pause between episodes (unless this was the last one)
+    if (ep < cfg.episodes - 1) {
+      std::cout << "\nPausing for 1 second before next episode...\n";
+      if (!interruptible_sleep(1s)) {
+        // Stop requested during pause
+        break;
+      }
+    }
+  }
+
+  mgr.shutdown();
+
+  // Return arms to starting position (if using hardware)
+  if (!cfg.use_mock && leader_left_driver && leader_right_driver &&
+      follower_left_driver && follower_right_driver) {
+    std::cout << "\nReturning arms to starting positions...\n";
+
+    leader_left_driver->set_all_modes(trossen_arm::Mode::position);
+    leader_right_driver->set_all_modes(trossen_arm::Mode::position);
+
+    leader_left_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    leader_right_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    follower_left_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    follower_right_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+
+    // Move to sleep positions
+    std::cout << "Moving arms to sleep positions...\n";
+    leader_left_driver->set_all_positions(
+      std::vector<double>(leader_left_driver->get_num_joints(), 0.0),
+      moving_time_s,
+      false);
+    leader_right_driver->set_all_positions(
+      std::vector<double>(leader_right_driver->get_num_joints(), 0.0),
+      moving_time_s,
+      false);
+    follower_left_driver->set_all_positions(
+      std::vector<double>(follower_left_driver->get_num_joints(), 0.0),
+      moving_time_s,
+      false);
+    follower_right_driver->set_all_positions(
+      std::vector<double>(follower_right_driver->get_num_joints(), 0.0),
+      moving_time_s,
+      false);
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+  }
+
+  auto final_stats = mgr.stats();
+  std::vector<std::string> extra_info = {
+    "Data streams:         2 follower arms + " + std::to_string(cfg.camera_indices.size()) + " cameras"
+  };
+  print_final_summary(final_stats.total_episodes_completed, cfg.output_dir, extra_info);
+
+  return 0;
+}
