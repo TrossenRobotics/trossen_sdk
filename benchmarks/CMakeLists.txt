@@ -1,2 +1,0 @@
-# add_executable(null_backend null_backend.cpp)
-# target_link_libraries(null_backend PRIVATE trossen_sdk)
