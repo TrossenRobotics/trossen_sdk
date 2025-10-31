@@ -78,7 +78,6 @@ set(TROSSEN_PROTO_FILES
   ${TROSSEN_PROTO_PATH}/JointState.proto
   ${TROSSEN_PROTO_PATH}/RawImage.proto
   ${TROSSEN_PROTO_PATH}/RobotDescription.proto
-  ${TROSSEN_PROTO_PATH}/SessionMetadata.proto
   ${TROSSEN_PROTO_PATH}/Timestamp.proto
 )
 

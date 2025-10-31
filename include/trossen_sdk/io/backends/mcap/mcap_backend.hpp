@@ -149,11 +149,6 @@ private:
   void ensure_jointstate_channel();
 
   /**
-   * @brief Ensure a session metadata channel exists
-   */
-  void ensure_sessionmetadata_channel();
-
-  /**
    * @brief Write an image record
    *
    * @param img Image record to write
@@ -168,11 +163,6 @@ private:
   void write_jointstate_record(const data::JointStateRecord& js);
 
   /**
-   * @brief Write session metadata once (on first record write)
-   */
-  void write_sessionmetadata_once();
-
-  /**
    * @brief Register protobuf schemas once
    */
   void register_schemas_once();
@@ -182,9 +172,6 @@ private:
 
   /// @brief Joint state schema ID
   mcap::SchemaId schema_joint_{0};
-
-  /// @brief Session metadata schema ID
-  mcap::SchemaId schema_session_{0};
 
   // TODO(lukeschmitt-tr): camera calibration, robot description support
   /// @brief Camera calibration schema ID
@@ -201,9 +188,6 @@ private:
 
   /// @brief Output file path
   std::filesystem::path path_;
-
-  /// @brief Flag indicating if schemas have been registered
-  bool session_meta_written_{false};
 
   /// @brief Configuration options
   Config cfg_;
@@ -222,9 +206,6 @@ private:
 
   /// @brief Joint state channel info
   ChannelInfo joint_channel_{};
-
-  /// @brief Session metadata channel info
-  ChannelInfo session_meta_channel_{};
 
   /// @brief Statistics about written records
   Stats stats_{};

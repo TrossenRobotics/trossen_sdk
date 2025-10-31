@@ -13,7 +13,6 @@
 #include "trossen_sdk/version.hpp"
 #include "JointState.pb.h"
 #include "RawImage.pb.h"
-#include "SessionMetadata.pb.h"
 
 
 namespace trossen::io::backends {
@@ -53,7 +52,21 @@ bool McapBackend::open() {
   opened_ = true;
 
   register_schemas_once();
-  write_sessionmetadata_once();
+
+  // Write MCAP file-level metadata
+  mcap::Metadata metadata;
+  metadata.name = "trossen_sdk_recording";
+  metadata.metadata["tool_version"] = trossen::core::version();
+  metadata.metadata["dataset_id"] = cfg_.dataset_id;
+  metadata.metadata["episode_index"] = std::to_string(cfg_.episode_index);
+  auto now = trossen::data::now_real();
+  metadata.metadata["recording_start_time"] = std::to_string(now.to_ns());
+
+  auto st = writer_.write(metadata);
+  if (!st.ok()) {
+    std::cerr << "Failed to write metadata: " << st.message << "\n";
+  }
+
   return true;
 }
 
@@ -104,58 +117,6 @@ void McapBackend::writeBatch(std::span<const data::RecordBase* const> records) {
       continue;
     }
   }
-}
-
-void McapBackend::ensure_sessionmetadata_channel() {
-  // Check if the channel already exists
-  if (session_meta_channel_.id != 0) {
-    return;
-  }
-
-  // Create a new channel
-  mcap::Channel ch;
-  ch.topic = mcapdefs::session_meta_topic();
-  ch.messageEncoding = "protobuf";
-  ch.schemaId = schema_session_;
-  writer_.addChannel(ch);
-  session_meta_channel_.id = ch.id;
-  session_meta_channel_.topic = ch.topic;
-  session_meta_channel_.encoding = ch.messageEncoding;
-  session_meta_channel_.schema_id = ch.schemaId;
-}
-
-void McapBackend::write_sessionmetadata_once() {
-  // Early return if already written
-  if (session_meta_written_) {
-    return;
-  }
-
-  // Create and write session metadata
-  ensure_sessionmetadata_channel();
-  trossen_sdk::msg::SessionMetadata sm;
-  sm.set_run_id("RUN"); // TODO(lukeschmitt-tr): Generate UUID
-  auto* ts = sm.mutable_timestamp();
-  auto now = trossen::data::now_real();
-  ts->set_seconds(now.sec);
-  ts->set_nanos(now.nsec);
-  sm.set_tool_version(trossen::core::version());
-  sm.set_dataset_id(cfg_.dataset_id);
-  sm.set_episode_index(cfg_.episode_index);
-  std::string payload;
-  sm.SerializeToString(&payload);
-  mcap::Message msg;
-  msg.channelId = session_meta_channel_.id;
-  msg.sequence = 0;
-  msg.logTime = now.to_ns();
-  msg.publishTime = msg.logTime;
-  msg.data = reinterpret_cast<const std::byte*>(payload.data());
-  msg.dataSize = payload.size();
-  auto st = writer_.write(msg);
-  if (!st.ok()) {
-    std::cerr << "Failed to write session meta: " << st.message << "\n";
-  }
-  // We have written the session metadata
-  session_meta_written_ = true;
 }
 
 void McapBackend::ensure_jointstate_channel() {
@@ -306,7 +267,6 @@ void McapBackend::register_schemas_once() {
   const char* roots[] = {
     "trossen_sdk/io/backends/mcap/proto/JointState.proto",
     "trossen_sdk/io/backends/mcap/proto/Rawimage.proto",
-    "trossen_sdk/io/backends/mcap/proto/SessionMetadata.proto",
     "trossen_sdk/io/backends/mcap/proto/Timestamp.proto"
   };
 
@@ -347,7 +307,6 @@ void McapBackend::register_schemas_once() {
     writer_.addSchema(s);
     return s.id;
   };
-  schema_session_ = addSchema("trossen_sdk.msg.SessionMetadata");
   schema_joint_   = addSchema("trossen_sdk.msg.JointState");
   schema_image_   = addSchema("foxglove.RawImage");
 }
