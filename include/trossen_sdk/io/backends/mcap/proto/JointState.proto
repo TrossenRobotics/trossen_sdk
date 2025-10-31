@@ -1,7 +1,7 @@
 syntax = "proto3";
 package trossen_sdk.msg;
 
-import "timestamp.proto";
+import "Timestamp.proto";
 
 // Joint state message containing robot positions, velocities, and efforts
 message JointState {

@@ -18,6 +18,7 @@
 #include "trossen_sdk/io/queue_adapter.hpp"
 #include "trossen_sdk/io/sink.hpp"
 
+#include "trossen_sdk/runtime/session_manager.hpp"
 #include "trossen_sdk/runtime/scheduler.hpp"
 
 #endif // TROSSEN_SDK__TROSSEN_SDK_HPP

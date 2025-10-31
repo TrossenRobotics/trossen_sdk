@@ -70,20 +70,36 @@ if(NOT Protobuf_FOUND)
   endif()
 endif()
 message(STATUS "Found Protobuf: ${Protobuf_VERSION}")
-set(PROTOBUF_IMPORT_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/include)
 
 # List proto files
 set(TROSSEN_PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include/trossen_sdk/io/backends/mcap/proto)
+set(PROTOBUF_IMPORT_DIRS ${TROSSEN_PROTO_PATH})
 set(TROSSEN_PROTO_FILES
-  ${TROSSEN_PROTO_PATH}/timestamp.proto
-  ${TROSSEN_PROTO_PATH}/joint_state.proto
+  ${TROSSEN_PROTO_PATH}/JointState.proto
   ${TROSSEN_PROTO_PATH}/RawImage.proto
-  ${TROSSEN_PROTO_PATH}/session_metadata.proto
-  ${TROSSEN_PROTO_PATH}/robot_description.proto
+  ${TROSSEN_PROTO_PATH}/RobotDescription.proto
+  ${TROSSEN_PROTO_PATH}/SessionMetadata.proto
+  ${TROSSEN_PROTO_PATH}/Timestamp.proto
 )
 
-set(PROTOBUF_GENERATE_CPP_APPEND_PATH ON)
-protobuf_generate_cpp(TROSSEN_PROTO_SRCS TROSSEN_PROTO_HDRS ${TROSSEN_PROTO_FILES})
+# Generate protobuf files with proper import paths
+foreach(PROTO_FILE ${TROSSEN_PROTO_FILES})
+  get_filename_component(PROTO_NAME ${PROTO_FILE} NAME_WE)
+  set(PROTO_SRC ${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.pb.cc)
+  set(PROTO_HDR ${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.pb.h)
+  add_custom_command(
+    OUTPUT ${PROTO_SRC} ${PROTO_HDR}
+    COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+    ARGS --cpp_out=${CMAKE_CURRENT_BINARY_DIR}
+         --proto_path=${TROSSEN_PROTO_PATH}
+         ${PROTO_FILE}
+    DEPENDS ${PROTO_FILE}
+    COMMENT "Running cpp protocol buffer compiler on ${PROTO_FILE}"
+  )
+  list(APPEND TROSSEN_PROTO_SRCS ${PROTO_SRC})
+  list(APPEND TROSSEN_PROTO_HDRS ${PROTO_HDR})
+endforeach()
+
 target_sources(trossen_sdk PRIVATE ${TROSSEN_PROTO_SRCS} ${TROSSEN_PROTO_HDRS})
 target_link_libraries(trossen_sdk PUBLIC ${Protobuf_LIBRARIES})
 target_include_directories(trossen_sdk PUBLIC ${Protobuf_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})

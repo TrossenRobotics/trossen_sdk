@@ -11,9 +11,9 @@
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
 #include "trossen_sdk/version.hpp"
-#include "joint_state.pb.h"
+#include "JointState.pb.h"
 #include "RawImage.pb.h"
-#include "session_metadata.pb.h"
+#include "SessionMetadata.pb.h"
 
 
 namespace trossen::io::backends {
@@ -304,10 +304,10 @@ void McapBackend::register_schemas_once() {
   google::protobuf::FileDescriptorSet set;
 
   const char* roots[] = {
-    "trossen_sdk/io/backends/mcap/proto/joint_state.proto",
-    "trossen_sdk/io/backends/mcap/proto/RawImage.proto",
-    "trossen_sdk/io/backends/mcap/proto/session_metadata.proto",
-    "trossen_sdk/io/backends/mcap/proto/timestamp.proto"
+    "trossen_sdk/io/backends/mcap/proto/JointState.proto",
+    "trossen_sdk/io/backends/mcap/proto/Rawimage.proto",
+    "trossen_sdk/io/backends/mcap/proto/SessionMetadata.proto",
+    "trossen_sdk/io/backends/mcap/proto/Timestamp.proto"
   };
 
   std::unordered_set<std::string> visited;
