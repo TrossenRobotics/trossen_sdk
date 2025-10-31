@@ -23,7 +23,7 @@ This document outlines the planned features and improvements for the Trossen Dat
 ### Backends
 
 - [ ] LeRobot Backend
-- [ ] MCAP Backend
+- [x] MCAP Backend
 - [ ] Trossen Backend
 - [ ] Basic Custom Backend
 - [x] Mock/Null Backend
@@ -35,11 +35,20 @@ This document outlines the planned features and improvements for the Trossen Dat
 
 ### Producers
 
-- [ ] Image Source
-- [ ] Joint State Source
+- [x] Image Source
+- [x] Joint State Source
 - [ ] Session Metadata Source
 - [ ] Calibration Source
-- [ ] Mock Sources
+- [x] Mock Sources
+  - [x] Mock Image Source
+  - [x] Mock Joint State Source
+
+## Introspection & Metrics
+
+- [ ] Data throughput metrics
+- [ ] Latency measurements
+- [ ] System resource usage (CPU, memory)
+- [ ] Extensive and configurable logging
 
 ## Improvements
 
