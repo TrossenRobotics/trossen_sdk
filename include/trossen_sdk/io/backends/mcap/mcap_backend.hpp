@@ -22,45 +22,106 @@
 namespace trossen::io::backends {
 
 /**
- * McapBackend writes records into an MCAP file using topic conventions defined in
- * mcap_schemas.hpp. Images are written either as PNG bytes (encoded on the fly) or as raw pixel
- * data accompanied by JSON ImageMeta on a side channel (future).
+ * McapBackend writes records into an MCAP file.
  */
 class McapBackend : public io::Backend {
 public:
+  /// @brief Configuration options for McapBackend
   struct Config {
-    std::string output_path;          // .mcap file path
-    std::string robot_name{"/robots/default"}; // prefix used for joint states
-    // Chunking / compression options (applied when opening)
+    /// @brief .mcap file path
+    std::string output_path;
+
+    /// @brief prefix used for joint states
+    std::string robot_name{"/robots/default"};
+
+    /// @brief Chunking / compression options (applied when opening)
     size_t chunk_size_bytes{4 * 1024 * 1024};
-    std::string compression; // "" (none) or "zstd" (if library was built with it)
-    bool write_image_meta_raw{false}; // future: raw mode
-    // Episode context (for session metadata)
-    std::string dataset_id;           // Dataset identifier (user-provided or auto-generated UUID)
-    uint32_t episode_index{0};        // Episode index within the dataset (zero-based)
+
+    /// @brief "" (none) or "zstd" (if library was built with it)
+    std::string compression;
+
+    /// @brief Dataset identifier (user-provided or auto-generated UUID)
+    std::string dataset_id;
+
+    /// @brief Episode index within the dataset (zero-based)
+    uint32_t episode_index{0};
   };
 
+  /// @brief Statistics about written records
   struct Stats {
+    /// @brief Number of joint state records written
     uint64_t joint_states_written{0};
+
+    /// @brief Number of image records written
     uint64_t images_written{0};
+
+    /// @brief Number of depth images written
     uint64_t depth_images_written{0};
   };
 
+  /**
+   * @brief Construct an McapBackend with the given configuration
+   *
+   * @param cfg Configuration options
+   */
   explicit McapBackend(Config cfg);
+
+  /**
+   * @brief Destructor
+   */
   ~McapBackend() override;
 
-  bool open() override;              // open MCAP writer
-  void write(const data::RecordBase& record) override; // dispatch single
-  void writeBatch(std::span<const data::RecordBase* const> records) override; // batch
+  /**
+   * @brief Open the MCAP writer
+   *
+   * @return true on success, false otherwise
+   */
+  bool open() override;
+
+  /**
+   * @brief Serialize and persist a single record
+   *
+   * @param record Record to write
+   */
+  void write(const data::RecordBase& record) override;
+
+  /**
+   * @brief Serialize and persist a batch of records
+   *
+   * @param records Span of record pointers (non-owning); lifetime must cover call
+   */
+  void writeBatch(std::span<const data::RecordBase* const> records) override;
+
+  /**
+   * @brief Flush any buffered data
+   */
+  void flush() override;
+
+  /**
+   * @brief Close the backend
+   */
+  void close() override;
+
+  /**
+   * @brief Get statistics about written records
+   *
+   * @return Stats structure with counts
+   */
   Stats stats() const { return stats_; }
-  void flush() override;             // flush writer
-  void close() override;             // finalize file
 
 private:
+  /// @brief Information about a registered MCAP channel
   struct ChannelInfo {
+    /// @brief MCAP channel ID and associated info
     mcap::ChannelId id{0};
+
+    /// @brief Stream ID (e.g., camera name or joint state topic)
     std::string topic;
-    std::string encoding; // protobuf
+
+    /// @brief Data encoding (e.g., "rgb8", "protobuf", etc.)
+    std::string encoding;
+
+    /// @brief Associated schema ID
     mcap::SchemaId schema_id{0};
   };
 
@@ -140,16 +201,31 @@ private:
   /// @brief Output file path
   std::filesystem::path path_;
 
+  /// @brief Flag indicating if schemas have been registered
   bool session_meta_written_{false};
-  Config cfg_;
-  std::mutex writer_mutex_;
-  std::unordered_map<std::string, ChannelInfo> image_channels_; // key: camera name
 
-  // Helpers to classify depth vs color by topic or encoding
+  /// @brief Configuration options
+  Config cfg_;
+
+  /// @brief Mutex to protect writer access
+  std::mutex writer_mutex_;
+
+  /// @brief Map of image channels by camera name
+  std::unordered_map<std::string, ChannelInfo> image_channels_;
+
+  /// @brief Helper to identify depth topics
   static bool is_depth_topic(const std::string& topic);
+
+  /// @brief Helper to identify depth encodings
   static bool is_depth_encoding(const std::string& enc);
+
+  /// @brief Joint state channel info
   ChannelInfo joint_channel_{};
+
+  /// @brief Session metadata channel info
   ChannelInfo session_meta_channel_{};
+
+  /// @brief Statistics about written records
   Stats stats_{};
 };
 
