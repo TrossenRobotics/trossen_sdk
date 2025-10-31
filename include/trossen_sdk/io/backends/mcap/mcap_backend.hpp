@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -32,13 +33,13 @@ public:
     std::string output_path;
 
     /// @brief prefix used for joint states
-    std::string robot_name{"/robots/default"};
+    std::string robot_name{"/robot/joint_states"};
 
     /// @brief Chunking / compression options (applied when opening)
     size_t chunk_size_bytes{4 * 1024 * 1024};
 
     /// @brief "" (none) or "zstd" (if library was built with it)
-    std::string compression;
+    std::string compression{""};
 
     /// @brief Dataset identifier (user-provided or auto-generated UUID)
     std::string dataset_id;
@@ -119,7 +120,7 @@ private:
     std::string topic;
 
     /// @brief Data encoding (e.g., "rgb8", "protobuf", etc.)
-    std::string encoding;
+    std::string encoding{"protobuf"};
 
     /// @brief Associated schema ID
     mcap::SchemaId schema_id{0};
