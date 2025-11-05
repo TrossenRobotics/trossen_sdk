@@ -9,6 +9,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 add_library(trossen_sdk
   src/backends/trossen/trossen_backend.cpp
+  src/backends/lerobot/lerobot_backend.cpp
   src/backends/mcap/mcap_backend.cpp
   src/hw/arm/arm_producer.cpp
   src/hw/arm/mock_joint_producer.cpp
@@ -16,7 +17,11 @@ add_library(trossen_sdk
   src/hw/camera/mock_producer.cpp
   src/hw/camera/mock_synced_producer.cpp
   src/runtime/session_manager.cpp
+
 )
+
+find_package(Arrow REQUIRED)
+find_package(Parquet REQUIRED)
 
 include(FetchContent)
 FetchContent_Declare(
@@ -26,6 +31,8 @@ FetchContent_Declare(
 )
 message(STATUS "Fetching MCAP (mcap_builder)...")
 FetchContent_MakeAvailable(mcap_builder)
+
+
 # mcap_builder provides an imported target named "mcap"
 target_link_libraries(trossen_sdk PUBLIC mcap)
 target_compile_definitions(trossen_sdk PUBLIC TROSSEN_WITH_MCAP=1)
@@ -46,7 +53,7 @@ if(NOT OpenCV_FOUND)
 endif()
 message(STATUS "Found OpenCV: ${OpenCV_VERSION}")
 target_include_directories(trossen_sdk PUBLIC ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(trossen_sdk PUBLIC ${OpenCV_LIBS})
+target_link_libraries(trossen_sdk PUBLIC ${OpenCV_LIBS} Arrow::arrow_shared Parquet::parquet_shared)
 
 # Protobuf schemas for MCAP backend
 # Try modern CMake config first, then fall back to FindProtobuf module
@@ -123,3 +130,4 @@ option(BUILD_BENCHMARKS "Build the benchmarking tree" OFF)
 if(BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
+

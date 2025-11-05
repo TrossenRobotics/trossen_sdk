@@ -361,7 +361,7 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
   // Generate filename: episode_NNNNNN.mcap (6-digit zero-padded)
   // TODO(lukeschmitt-tr): This is specific to MCAP files; consider making more generic
   std::ostringstream oss;
-  oss << "episode_" << std::setfill('0') << std::setw(6) << index << ".mcap";
+  oss << "episode_" << std::setfill('0') << std::setw(6) << index;
   return config_.base_path / oss.str();
 }
 

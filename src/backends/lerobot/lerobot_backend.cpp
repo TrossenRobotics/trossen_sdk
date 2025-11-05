@@ -6,7 +6,7 @@
 #include "opencv2/imgcodecs.hpp"
 
 #include "trossen_sdk/data/record.hpp"
-#include "trossen_sdk/io/backends/trossen/trossen_backend.hpp"
+#include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
 
 // For PNG writing we stub out with raw dump placeholder (future: integrate stb_image_write or libpng)
 namespace trossen::io::backends {
@@ -15,8 +15,8 @@ namespace trossen::io::backends {
 
 namespace fs = std::filesystem;
 
-TrossenBackend::TrossenBackend(Config cfg)
-  : Backend(cfg.output_dir), cfg_(std::move(cfg)) {
+LeRobotBackend::LeRobotBackend(Config cfg)
+  : io::Backend(cfg.output_dir), cfg_(std::move(cfg)) {
 
   // Validate encoder threads
   if (cfg_.encoder_threads <= 0) {
@@ -26,11 +26,12 @@ TrossenBackend::TrossenBackend(Config cfg)
   if (cfg_.png_compression_level < 0 || cfg_.png_compression_level > 9) {
     cfg_.png_compression_level = 3;
   }
-
+  // Create a root folder for dataset using repo-id and dataset-name and default root
+  
   // URI is absolute path to output directory. Set to absolute path and check write access.
   // Validate output directory path
   try {
-    uri_ = fs::absolute(cfg_.output_dir).string();
+    uri_ = (fs::path(cfg_.root_path) / cfg_.repository_id / cfg_.dataset_name).string();
   } catch (const std::exception& e) {
     throw std::runtime_error("Failed to resolve absolute path of output directory: " + std::string(e.what()));
   }
@@ -55,7 +56,7 @@ TrossenBackend::TrossenBackend(Config cfg)
   fs::remove(test_path);
 
   // Print off configuration
-  std::cout << "TrossenBackend configuration:\n"
+  std::cout << "LeRobotBackend configuration:\n"
             << "  Output dir: " << uri_ << "\n"
             << "  Encoder threads: " << cfg_.encoder_threads << "\n"
             << "  Max image queue: " << (cfg_.max_image_queue == 0 ? "unbounded" : std::to_string(cfg_.max_image_queue)) << "\n"
@@ -66,20 +67,53 @@ TrossenBackend::TrossenBackend(Config cfg)
             << "  PNG compression level: " << cfg_.png_compression_level << "\n";
 }
 
-bool TrossenBackend::open() {
+bool LeRobotBackend::open() {
   std::lock_guard<std::mutex> lock(open_mutex_);
   if (opened_) {
     return true; // idempotent
   }
   root_ = fs::path(uri_);
-  images_root_ = root_ / "observations" / "images";
+
+  std::ostringstream oss;
+  oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index;
+
+  // Create images root directory from camera names
+  images_root_ = root_ / "images" / "chunk_000000" ;
   try {
     fs::create_directories(images_root_);
   } catch (const std::exception& e) {
     std::cerr << "Failed to create directories: " << e.what() << "\n";
     return false;
   }
-  joint_csv_.open((root_ / "joint_states.csv").string(), std::ios::out | std::ios::trunc);
+
+  // Create Video Directories
+  videos_root_ = root_ / "videos" / "chunk_000000" / oss.str();
+  try {
+    fs::create_directories(videos_root_);
+  } catch (const std::exception& e) {
+    std::cerr << "Failed to create video directories: " << e.what() << "\n";
+    return false;
+  }
+
+  // Create metadata directory
+  meta_root_ = root_ / "meta";
+  try {
+    fs::create_directories(meta_root_);
+  } catch (const std::exception& e) {
+    std::cerr << "Failed to create metadata directories: " << e.what() << "\n";
+    return false;
+  }
+
+  // Create data directory
+  data_root_ = root_ / "data" / "chunk_000000";
+  try {
+    fs::create_directories(data_root_);
+  } catch (const std::exception& e) {
+    std::cerr << "Failed to create data directories: " << e.what() << "\n";
+    return false;
+  }
+
+  joint_csv_.open((data_root_ / "joint_states.csv").string(), std::ios::out | std::ios::trunc);
   if (!joint_csv_) {
     std::cerr << "Failed to open joint_states.csv\n";
     return false;
@@ -93,13 +127,59 @@ bool TrossenBackend::open() {
   size_t nthreads = cfg_.encoder_threads == 0 ? 1 : cfg_.encoder_threads;
   image_workers_.reserve(nthreads);
   for (size_t i = 0; i < nthreads; ++i) {
-    image_workers_.emplace_back(&TrossenBackend::imageWorkerLoop, this);
+    image_workers_.emplace_back(&LeRobotBackend::imageWorkerLoop, this);
   }
+
+
+  // Open a Parquet file for joint states and frame data
+
+  // Define schema once (Can move this to constants if needed)
+  schema_ = arrow::schema({
+      arrow::field("timestamp", arrow::float32()),
+      arrow::field("observation.state", arrow::list(arrow::float64())),
+      arrow::field("action", arrow::list(arrow::float64())),
+      arrow::field("episode_index", arrow::int64()),
+      arrow::field("frame_index", arrow::int64()),
+      arrow::field("index", arrow::int64()),
+      arrow::field("task_index", arrow::int64()),
+  });
+
+  std::cerr << "Schema: " << schema_->ToString() << std::endl;
+
+  oss << ".parquet";
+  fs::path episode_path = data_root_ / oss.str();
+  auto outfile_result = arrow::io::FileOutputStream::Open(episode_path.string());
+  if (!outfile_result.ok()) {
+    throw std::runtime_error(std::string("Failed to open parquet file: ") + episode_path.string());
+  }
+  outfile_ = *outfile_result;
+
+  // Writer properties
+  auto writer_props = parquet::WriterProperties::Builder()
+                        .compression(parquet::Compression::SNAPPY)
+                        ->build();
+  auto arrow_props = parquet::default_arrow_writer_properties();
+
+  auto result = parquet::arrow::FileWriter::Open(
+      *schema_,                    // Arrow schema
+      arrow::default_memory_pool(), // Memory pool
+      outfile_,                    // Output stream
+      writer_props,                // Writer properties
+      arrow_props);                // Arrow writer props
+
+  if (!result.ok()) {
+    throw std::runtime_error("Failed to create Parquet writer: " +
+                            result.status().ToString());
+  }
+
+  writer_ = std::move(result).ValueUnsafe();  // store unique_ptr<FileWriter>
+  std::cerr << "Opened Parquet writer successfully." << std::endl;
+
   opened_ = true;
   return true;
 }
 
-void TrossenBackend::write(const data::RecordBase& record) {
+void LeRobotBackend::write(const data::RecordBase& record) {
   std::lock_guard<std::mutex> lock(write_mutex_);
   // Decide type by RTTI (simple approach for now)
   if (auto js = dynamic_cast<const data::JointStateRecord*>(&record)) {
@@ -111,7 +191,7 @@ void TrossenBackend::write(const data::RecordBase& record) {
   }
 }
 
-void TrossenBackend::writeBatch(std::span<const data::RecordBase* const> records) {
+void LeRobotBackend::writeBatch(std::span<const data::RecordBase* const> records) {
   std::lock_guard<std::mutex> lock(write_mutex_);
   for (auto* r : records) {
     if (!r) {
@@ -125,14 +205,42 @@ void TrossenBackend::writeBatch(std::span<const data::RecordBase* const> records
   }
 }
 
-void TrossenBackend::flush() {
+void LeRobotBackend::flush() {
   if (joint_csv_) joint_csv_.flush();
 }
 
-void TrossenBackend::close() {
+void LeRobotBackend::close() {
   std::lock_guard<std::mutex> lock(open_mutex_);
   if (!opened_) return;
-  if (joint_csv_.is_open()) joint_csv_.close();
+  
+  try {
+    // 1. Flush and close writer if initialized
+    if (writer_) {
+      auto st = writer_->Close();
+      if (!st.ok()) {
+        std::cerr << "[Parquet] Warning: Failed to close writer cleanly: "
+                  << st.ToString() << std::endl;
+      } else {
+        std::cerr << "[Parquet] Writer closed successfully." << std::endl;
+      }
+      writer_.reset();
+    }
+
+    // 2. Close output stream (very important!)
+    if (outfile_) {
+      auto st = outfile_->Close();
+      if (!st.ok()) {
+        std::cerr << "[Parquet] Warning: Failed to close file stream: "
+                  << st.ToString() << std::endl;
+      } else {
+        std::cerr << "[Parquet] File stream closed successfully." << std::endl;
+      }
+      outfile_.reset();
+    }
+  } catch (const std::exception &e) {
+    std::cerr << "[Parquet] Exception while closing: " << e.what() << std::endl;
+  }
+
   // Stop image worker
   image_worker_running_ = false;
   image_queue_cv_.notify_all();
@@ -143,29 +251,86 @@ void TrossenBackend::close() {
   opened_ = false;
 }
 
-void TrossenBackend::writeJointState(const data::RecordBase& base) {
+void LeRobotBackend::writeJointState(const data::RecordBase& base) {
+
   const auto& js = static_cast<const data::JointStateRecord&>(base);
-  if (!header_written_) {
-    joint_csv_ << "monotonic_ns,realtime_ns,id,positions,velocities,efforts\n";
-    header_written_ = true;
-  }
-  auto vecToStr = [](const std::vector<float>& v) {
-    std::ostringstream oss;
-    for (size_t i=0; i<v.size(); ++i) {
-      if (i) oss << ';';
-      oss << std::setprecision(6) << v[i];
+
+  // Create builders for one frame
+  arrow::FloatBuilder ts_builder;
+  arrow::ListBuilder obs_builder(arrow::default_memory_pool(),
+                                 std::make_shared<arrow::DoubleBuilder>());
+  arrow::ListBuilder act_builder(arrow::default_memory_pool(),
+                                 std::make_shared<arrow::DoubleBuilder>());
+  arrow::Int64Builder epi_idx_builder, frame_idx_builder, index_builder,
+      task_idx_builder;
+
+  auto* obs_val = static_cast<arrow::DoubleBuilder*>(obs_builder.value_builder());
+  auto* act_val = static_cast<arrow::DoubleBuilder*>(act_builder.value_builder());
+
+  auto check_status = [](const arrow::Status &st, const char *msg) {
+    if (!st.ok()) {
+      std::cerr << "[Arrow Error] " << msg << ": " << st.ToString() << std::endl;
     }
-    return oss.str();
   };
-  joint_csv_ << js.ts.monotonic.to_ns() << ','
-             << js.ts.realtime.to_ns() << ','
-             << js.id << ','
-             << vecToStr(js.observations) << ','
-             << vecToStr(js.velocities) << ','
-             << vecToStr(js.efforts) << '\n';
+
+
+  // Append timestamp
+  check_status(
+      ts_builder.Append(static_cast<float>(js.ts.monotonic.to_ns()) / 1e9f),
+      "Failed to append timestamp");
+
+  // Observation list
+  check_status(obs_builder.Append(), "Failed to append observation list");
+  for (auto v : js.observations)
+    check_status(obs_val->Append(v), "Failed to append observation value");
+
+  // Action list
+  check_status(act_builder.Append(), "Failed to append action list");
+  for (auto v : js.actions)
+    check_status(act_val->Append(v), "Failed to append action value");
+
+  // Scalar columns
+  check_status(epi_idx_builder.Append(10), "Failed to append episode index");
+  check_status(frame_idx_builder.Append(0), "Failed to append frame index");
+  check_status(index_builder.Append(0), "Failed to append global index");
+  check_status(task_idx_builder.Append(0), "Failed to append task index");
+
+  std::shared_ptr<arrow::Array> ts_arr, obs_arr, act_arr, epi_arr, frame_arr, idx_arr, task_arr;
+
+  // Helper lambda to finish builders and handle errors (no spdlog)
+  auto finish_builder = [](auto &builder, std::shared_ptr<arrow::Array> &array,
+                          const char *name) -> bool {
+    auto status = builder.Finish(&array);
+    if (!status.ok()) {
+      std::cerr << "[Arrow Error] Failed to finish " << name
+                << " builder: " << status.ToString() << std::endl;
+      return false;
+    }
+    return true;
+  };
+
+  // Use helper for all builders
+  if (!finish_builder(ts_builder, ts_arr, "timestamp")) return;
+  if (!finish_builder(obs_builder, obs_arr, "observation")) return;
+  if (!finish_builder(act_builder, act_arr, "action")) return;
+  if (!finish_builder(epi_idx_builder, epi_arr, "episode index")) return;
+  if (!finish_builder(frame_idx_builder, frame_arr, "frame index")) return;
+  if (!finish_builder(index_builder, idx_arr, "index")) return;
+  if (!finish_builder(task_idx_builder, task_arr, "task index")) return;
+
+  // Create single-row batch
+  auto batch = arrow::RecordBatch::Make(schema_, 1,
+      {ts_arr, obs_arr, act_arr, epi_arr, frame_arr, idx_arr, task_arr});
+
+  auto status = writer_->WriteRecordBatch(*batch);
+
+  if (!status.ok()) {
+    throw std::runtime_error("Failed to write Parquet record batch: " +
+                             status.ToString());
+  }
 }
 
-void TrossenBackend::writeImage(const data::RecordBase& base) {
+void LeRobotBackend::writeImage(const data::RecordBase& base) {
   const auto& img = static_cast<const data::ImageRecord&>(base);
 
   // exit early if nothing to write
@@ -177,7 +342,9 @@ void TrossenBackend::writeImage(const data::RecordBase& base) {
   // TODO: this could be moved to a pre-processing step?
   auto it = image_dir_cache_.find(img.id);
   if (it == image_dir_cache_.end()) {
-    fs::path camera_dir = images_root_ / img.id;
+    std::ostringstream oss;
+    oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index;
+    fs::path camera_dir = images_root_ / img.id / oss.str();
     std::error_code ec;
     fs::create_directories(camera_dir, ec);
     it = image_dir_cache_.emplace(img.id, std::move(camera_dir)).first;
@@ -233,7 +400,7 @@ void TrossenBackend::writeImage(const data::RecordBase& base) {
   image_queue_cv_.notify_one();
 }
 
-void TrossenBackend::imageWorkerLoop() {
+void LeRobotBackend::imageWorkerLoop() {
   const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_.png_compression_level };
   while (image_worker_running_) {
     ImageJob job;

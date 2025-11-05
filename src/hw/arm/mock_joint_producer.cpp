@@ -32,11 +32,12 @@ void MockJointStateProducer::poll(const std::function<void(std::shared_ptr<data:
   }
 
   // Generate synthetic joint state
-  std::vector<float> pos(cfg_.num_joints), vel(cfg_.num_joints), eff(cfg_.num_joints);
+  std::vector<float> act(cfg_.num_joints), obs(cfg_.num_joints), vel(cfg_.num_joints), eff(cfg_.num_joints);
   double t = (cfg_.rate_hz > 0.0) ? (static_cast<double>(stats_.produced) / cfg_.rate_hz) : static_cast<double>(stats_.produced);
   for (size_t i = 0; i < cfg_.num_joints; ++i) {
     double phase = t * 0.5 + static_cast<double>(i) * 0.1;
-    pos[i] = static_cast<float>(cfg_.amplitude * std::sin(phase));
+    act[i] = static_cast<float>(cfg_.amplitude * 0.2 * std::sin(phase));
+    obs[i] = static_cast<float>(cfg_.amplitude * std::sin(phase));
     vel[i] = static_cast<float>(cfg_.amplitude * 0.5 * std::cos(phase));
     eff[i] = 0.0f;
   }
@@ -52,7 +53,7 @@ void MockJointStateProducer::poll(const std::function<void(std::shared_ptr<data:
     data::make_timestamp_now(),
     seq,
     cfg_.id,
-    pos, vel, eff);
+    act, obs, vel, eff);
   emit(rec);
 
   stats_.produced++;

@@ -182,8 +182,8 @@ void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
   real->set_nanos(js.ts.realtime.nsec);
 
   out.set_seq(js.seq);
-  out.mutable_positions()->Reserve(js.positions.size());
-  for (auto v : js.positions) out.add_positions(v);
+  out.mutable_positions()->Reserve(js.observations.size());
+  for (auto v : js.observations) out.add_positions(v);
   out.mutable_velocities()->Reserve(js.velocities.size());
   for (auto v : js.velocities) out.add_velocities(v);
   out.mutable_efforts()->Reserve(js.efforts.size());
