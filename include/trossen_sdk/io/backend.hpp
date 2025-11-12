@@ -39,10 +39,10 @@ public:
    * @brief Configuration struct for backend.
    */
   struct Config {
-  // Base config options for all backends can be added here
-  std::string type{"mcap"};    // Config type (can be overridden by child classes)
-  // Example: bool enable_logging = false;
-  virtual ~Config() = default;
+    // Base config options for all backends can be added here
+    std::string type{"mcap"};    // Config type (can be overridden by child classes)
+    // Example: bool enable_logging = false;
+    virtual ~Config() = default;
   };
 
   /**
@@ -84,7 +84,6 @@ public:
   virtual void close() = 0;
 
 protected:
-
   /// @brief Destination identifier (file path, etc.)
   std::string uri_{""};
 

@@ -21,7 +21,7 @@ add_library(trossen_sdk
 include(FetchContent)
 FetchContent_Declare(
   mcap_builder
-  GIT_REPOSITORY https://github.com/marc-medley/mcap_builder.git
+  GIT_REPOSITORY https://github.com/TrossenRobotics/mcap_builder.git
   GIT_TAG 31b70b3ea3121ef44f7a2f9e94b0c8e8325525fe
 )
 message(STATUS "Fetching MCAP (mcap_builder)...")
