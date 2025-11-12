@@ -31,7 +31,7 @@ LeRobotBackend::LeRobotBackend(Config cfg, Metadata md)
   // URI is absolute path to output directory. Set to absolute path and check write access.
   // Validate output directory path
   try {
-    uri_ = (fs::path(cfg_.root_path) / cfg_.repository_id / cfg_.dataset_name).string();
+    uri_ = (fs::path(cfg_.root_path) / cfg_.repository_id / cfg_.dataset_id).string();
   } catch (const std::exception& e) {
     throw std::runtime_error("Failed to resolve absolute path of output directory: " + std::string(e.what()));
   }
@@ -190,6 +190,7 @@ bool LeRobotBackend::open() {
 
 void LeRobotBackend::write(const data::RecordBase& record) {
   std::lock_guard<std::mutex> lock(write_mutex_);
+
   // Decide type by RTTI (simple approach for now)
   if (auto js = dynamic_cast<const data::TeleopJointStateRecord*>(&record)) {
     writeJointState(*js);
@@ -212,6 +213,129 @@ void LeRobotBackend::writeBatch(std::span<const data::RecordBase* const> records
       writeImage(*img);
     }
   }
+}
+
+void LeRobotBackend::convert_to_videos() const {
+  std::cout << "Encoding images to videos..." << std::endl;
+
+  const int fps = static_cast<int>(std::round(30.0)); // Use recorded fps if available
+  const int episode_chunk = 0;
+  const size_t max_concurrent_encoders = std::max<size_t>(2, std::thread::hardware_concurrency() / 2);
+
+  const std::string images_path = images_root_.string();
+  std::cout << "Images path: " << images_path << std::endl;
+  const fs::path base_path = fs::path(this->config().root_path) / this->config().repository_id / this->config().dataset_id;
+
+  std::atomic<int> video_count{0};
+  std::mutex log_mutex;
+
+  auto start_time = std::chrono::steady_clock::now();
+
+  // Collect all (camera, episode) directories first — reduces directory I/O inside threads
+  struct EpisodeTask {
+    fs::path episode_dir;
+    fs::path output_path;
+    std::string episode_name;
+  };
+
+  std::vector<EpisodeTask> tasks;
+  for (const auto &cam_dir : fs::directory_iterator(images_path)) {
+    if (!cam_dir.is_directory()) continue;
+
+    const std::string video_key = "observation.images." + cam_dir.path().filename().string();
+    std::ostringstream oss;
+    oss << "videos/chunk_" << std::setw(6) << std::setfill('0') << episode_chunk
+        << "/" << video_key;
+    const fs::path videos_cam_dir = base_path / oss.str();
+    fs::create_directories(videos_cam_dir);
+
+    for (const auto &episode_dir : fs::directory_iterator(cam_dir.path())) {
+      if (!episode_dir.is_directory()) continue;
+
+      const std::string episode_name = episode_dir.path().filename().string();
+      const fs::path output_video_path = videos_cam_dir / (episode_name + ".mp4");
+
+      if (fs::exists(output_video_path)) {
+        std::cout << "Skipping existing video: " << output_video_path.string() << std::endl;
+        video_count++;
+        continue;
+      }
+      tasks.push_back({episode_dir.path(), output_video_path, episode_name});
+    }
+  }
+
+  // Thread pool setup
+  std::atomic<size_t> next_task{0};
+  std::vector<std::thread> workers;
+  workers.reserve(max_concurrent_encoders);
+
+  auto encode_task = [&](int worker_id) {
+    while (true) {
+      size_t idx = next_task.fetch_add(1);
+      if (idx >= tasks.size()) break;
+
+      const auto &task = tasks[idx];
+      try {
+        // Gather all JPG files
+        std::vector<fs::path> image_paths;
+        image_paths.reserve(512);
+        for (const auto &file : fs::directory_iterator(task.episode_dir)) {
+          if (!file.is_regular_file()) continue;
+          std::string ext = file.path().extension().string();
+          std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+          if (ext == ".jpg" || ext == ".jpeg" || ext == ".png") image_paths.push_back(file.path());
+        }
+
+        if (image_paths.empty()) {
+          std::lock_guard<std::mutex> lk(log_mutex);
+          std::cout << "No images found in episode folder: " << task.episode_name << std::endl;
+          continue;
+        }
+
+        // Ensure sorted order by filename (just in case)
+        std::sort(image_paths.begin(), image_paths.end());
+
+        const fs::path input_pattern = task.episode_dir / "image_%06d.jpg";
+        std::ostringstream ffmpeg_cmd;
+        ffmpeg_cmd
+            << "ffmpeg -y -loglevel error -framerate " << fps
+            << " -i " << input_pattern.string()
+            << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p "
+            << task.output_path.string();
+
+        auto t0 = std::chrono::steady_clock::now();
+        int ret = std::system(ffmpeg_cmd.str().c_str());
+        auto t1 = std::chrono::steady_clock::now();
+        auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+
+        std::lock_guard<std::mutex> lk(log_mutex);
+        if (ret == 0) {
+          std::cout << "[Worker " << worker_id << "] Encoded " << task.output_path.string() << " in " << ms << " ms" << std::endl;
+          video_count++;
+        } else {
+          std::cout << "[Worker " << worker_id << "] FFmpeg failed for " << task.output_path.string() << " (code " << ret << ")" << std::endl;
+        }
+
+      } catch (const std::exception &e) {
+        std::lock_guard<std::mutex> lk(log_mutex);
+        std::cout << "[Worker " << worker_id << "] Exception for " << task.episode_name << ": " << e.what() << std::endl;
+      }
+    }
+  };
+
+  // Spawn worker threads
+  for (size_t i = 0; i < max_concurrent_encoders; ++i) {
+    workers.emplace_back(encode_task, static_cast<int>(i));
+  }
+
+  for (auto &t : workers) {
+    if (t.joinable()) t.join();
+  }
+
+  
+  auto end_time = std::chrono::steady_clock::now();
+  auto secs = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
+  std::cout << "Encoded videos in " << secs << " seconds using " << max_concurrent_encoders << " threads" << std::endl;
 }
 
 void LeRobotBackend::flush() {
@@ -257,12 +381,24 @@ void LeRobotBackend::close() {
     if (t.joinable()) t.join();
   }
   image_workers_.clear();
+
+  // Encode any remaining images to videos
+  convert_to_videos();
+
+  //  Clear frame indices map
+  source_frame_indices_.clear();
+
   opened_ = false;
 }
 
 void LeRobotBackend::writeJointState(const data::RecordBase& base) {
 
   const auto& js = static_cast<const data::TeleopJointStateRecord&>(base);
+
+  if (source_frame_indices_.find(js.id) == source_frame_indices_.end()) {
+    source_frame_indices_[js.id] = js.seq;
+  }
+  int frame_id = js.seq - source_frame_indices_[js.id];
 
   // Create builders for one frame
   arrow::FloatBuilder ts_builder;
@@ -299,9 +435,9 @@ void LeRobotBackend::writeJointState(const data::RecordBase& base) {
     check_status(act_val->Append(v), "Failed to append action value");
 
   // Scalar columns
-  check_status(epi_idx_builder.Append(10), "Failed to append episode index");
-  check_status(frame_idx_builder.Append(js.seq), "Failed to append frame index");
-  check_status(index_builder.Append(0), "Failed to append global index");
+  check_status(epi_idx_builder.Append(0), "Failed to append episode index");
+  check_status(frame_idx_builder.Append(frame_id), "Failed to append frame index");
+  check_status(index_builder.Append(js.seq), "Failed to append global index");
   check_status(task_idx_builder.Append(0), "Failed to append task index");
 
   std::shared_ptr<arrow::Array> ts_arr, obs_arr, act_arr, epi_arr, frame_arr, idx_arr, task_arr;
@@ -342,11 +478,18 @@ void LeRobotBackend::writeJointState(const data::RecordBase& base) {
 void LeRobotBackend::writeImage(const data::RecordBase& base) {
   const auto& img = static_cast<const data::ImageRecord&>(base);
 
+  
   // exit early if nothing to write
   if (img.image.empty()) {
     return;
   }
 
+  if(source_frame_indices_.find(img.id) == source_frame_indices_.end()){
+    source_frame_indices_[img.id] = img.seq;
+    std::cout << "Initialized frame index for image id '" << img.id << "' to " << img.seq << std::endl;
+  }
+  int frame_index = img.seq - source_frame_indices_[img.id];
+  
   // Directory per camera id (cached)
   // TODO: this could be moved to a pre-processing step?
   auto it = image_dir_cache_.find(img.id);
@@ -360,7 +503,9 @@ void LeRobotBackend::writeImage(const data::RecordBase& base) {
   }
   const fs::path& camera_dir = it->second;
 
-  fs::path file_path = camera_dir / (std::to_string(img.ts.monotonic.to_ns()) + ".png");
+  fs::path file_path = camera_dir / (std::string("image_") + 
+                     (std::ostringstream() << std::setw(6) << std::setfill('0') << frame_index).str() +
+                     ".jpg");
 
   // Enqueue job (clone image to ensure safety if producer overwrites buffer later)
   //
