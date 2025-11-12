@@ -141,7 +141,8 @@ int main(int argc, char** argv) {
     "Duration per episode: " + std::to_string(cfg.duration_s) + "s",
     "Number of episodes:   " + std::to_string(cfg.episodes),
     "Dataset ID:           " + (cfg.dataset_id.empty() ? "<auto-generate>" : cfg.dataset_id),
-    "Output directory:     " + cfg.output_dir
+    "Output directory:     " + cfg.output_dir,
+    "Backend:              " + cfg.backend_type
   };
 
   if (!cfg.use_mock) {
@@ -281,7 +282,19 @@ int main(int argc, char** argv) {
     mcap_cfg->compression = "zstd";
     mcap_cfg->chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
     mcap_cfg->robot_name = "/robots/bi_widowxai";
+    mcap_cfg->type = "mcap";
     session_cfg.backend_config = std::move(mcap_cfg);
+  } else if (cfg.backend_type == "lerobot") {
+    auto lerobot_cfg = std::make_unique<trossen::io::backends::LeRobotBackend::Config>();
+    lerobot_cfg->output_dir = cfg.output_dir;
+    lerobot_cfg->task_name = "trossen_ai_solo_demo";
+    lerobot_cfg->repository_id = "TrossenRoboticsCommunity";
+    lerobot_cfg->dataset_name = "trossen_ai_bimanual_dataset";
+    lerobot_cfg->overwrite_existing = false;
+    lerobot_cfg->encode_videos = true;
+    lerobot_cfg->type = "lerobot";
+    // Set other fields as needed
+    session_cfg.backend_config = std::move(lerobot_cfg);
   } else {
     std::cerr << "Unsupported backend type: " << cfg.backend_type << "\n";
     return 1;

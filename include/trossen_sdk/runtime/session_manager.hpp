@@ -24,6 +24,7 @@
 
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
+#include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
 #include "trossen_sdk/io/sink.hpp"
 #include "trossen_sdk/runtime/scheduler.hpp"
 

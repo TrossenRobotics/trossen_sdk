@@ -36,8 +36,11 @@ struct RecordBase {
  * @brief Joint state sample (positions, velocities, efforts).
  */
 struct JointStateRecord : public RecordBase {
-  // Joint positions (rad or m)
-  std::vector<float> positions;
+  // Joint actions (rad or m)
+  std::vector<float> actions;
+
+  // Joint observations (rad or m)
+  std::vector<float> observations;
 
   // Joint velocities in rad/s or m/s
   std::vector<float> velocities;
@@ -52,14 +55,16 @@ struct JointStateRecord : public RecordBase {
     const Timestamp& ts_,
     uint64_t seq_,
     std::string id_,
-    const std::vector<double>& pos_d,
+    const std::vector<double>& act_d,
+    const std::vector<double>& obs_d,
     const std::vector<double>& vel_d,
     const std::vector<double>& eff_d)
   {
     ts = ts_;
     seq = seq_;
     id = std::move(id_);
-    positions.assign(pos_d.begin(), pos_d.end());
+    actions.assign(act_d.begin(), act_d.end());
+    observations.assign(obs_d.begin(), obs_d.end());
     velocities.assign(vel_d.begin(), vel_d.end());
     efforts.assign(eff_d.begin(), eff_d.end());
   }
@@ -69,14 +74,16 @@ struct JointStateRecord : public RecordBase {
     const Timestamp& ts_,
     uint64_t seq_,
     std::string id_,
-    const std::vector<float>& pos_f,
+    const std::vector<float>& act_f,
+    const std::vector<float>& obs_f,
     const std::vector<float>& vel_f,
     const std::vector<float>& eff_f)
   {
     ts = ts_;
     seq = seq_;
     id = std::move(id_);
-    positions = pos_f;
+    actions = act_f;
+    observations = obs_f;
     velocities = vel_f;
     efforts = eff_f;
   }

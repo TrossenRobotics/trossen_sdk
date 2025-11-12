@@ -18,7 +18,7 @@
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <parquet/arrow/writer.h>
-
+#include <nlohmann/json.hpp>
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_constants.hpp"
 
@@ -63,7 +63,7 @@ public:
   };
 
   /// @brief Configuration parameters
-  struct Config {
+  struct Config : public io::Backend::Config {
     // Root output directory
     std::string output_dir;
 
@@ -102,12 +102,33 @@ public:
 
   };
 
+  struct Metadata {
+
+    std::string robot_name;
+    std::string task_name;
+    std::string codebase_version;
+    std::string trossen_subversion;
+
+    int num_cameras;
+    int num_action_features;
+    int num_observation_features;
+    int camera_width;
+    int camera_height;
+    bool is_depth_camera;
+    int fps;
+
+    std::vector<std::string> camera_names;
+    std::vector<std::string> action_feature_names;
+    std::vector<std::string> observation_feature_names;
+
+  };
+
   /**
    * @brief Construct a LeRobotBackend
    *
    * @param cfg Configuration parameters
    */
-  explicit LeRobotBackend(Config cfg);
+  explicit LeRobotBackend(Config cfg, Metadata md);
 
   /**
    * @brief Open a LeRobot V2 logging destination
@@ -139,6 +160,9 @@ public:
    * @brief Close the backend
    */
   void close() override;
+
+
+  void addMetadata(const Metadata& md);
 
   /// @brief Image encoding statistics
   struct ImageEncodeStats {
@@ -268,6 +292,8 @@ private:
   std::vector<std::thread> image_workers_;
   // Config for this backend
   Config cfg_;
+  // Metadata for this backend
+  Metadata md_;
   std::atomic<bool> image_worker_running_{false};
 
   // Basic stats

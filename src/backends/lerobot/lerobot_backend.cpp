@@ -15,8 +15,8 @@ namespace trossen::io::backends {
 
 namespace fs = std::filesystem;
 
-LeRobotBackend::LeRobotBackend(Config cfg)
-  : io::Backend(cfg.output_dir), cfg_(std::move(cfg)) {
+LeRobotBackend::LeRobotBackend(Config cfg, Metadata md)
+  : io::Backend(cfg.output_dir), cfg_(std::move(cfg)), md_(std::move(md)) {
 
   // Validate encoder threads
   if (cfg_.encoder_threads <= 0) {
@@ -54,6 +54,7 @@ LeRobotBackend::LeRobotBackend(Config cfg)
   }
   test_file.close();
   fs::remove(test_path);
+
 
   // Print off configuration
   std::cout << "LeRobotBackend configuration:\n"
@@ -103,6 +104,20 @@ bool LeRobotBackend::open() {
     std::cerr << "Failed to create metadata directories: " << e.what() << "\n";
     return false;
   }
+  // Create metadata files as needed (not implemented yet)
+  //info.json, stats.json, tasks.json, episode_stats.json
+
+  std::ofstream info_file(meta_root_ / JSON_INFO);
+  std::ofstream episode_file(meta_root_ / JSONL_EPISODES);
+  std::ofstream tasks_file(meta_root_ / JSONL_TASKS);
+  std::ofstream episode_stats_file(meta_root_ / JSONL_EPISODE_STATS);
+
+  if (!info_file || !episode_file || !tasks_file || !episode_stats_file) {
+    std::cerr << "Failed to create metadata files\n";
+    return false;
+  }
+
+  addMetadata(md_);
 
   // Create data directory
   data_root_ = root_ / "data" / "chunk_000000";
@@ -113,12 +128,6 @@ bool LeRobotBackend::open() {
     return false;
   }
 
-  joint_csv_.open((data_root_ / "joint_states.csv").string(), std::ios::out | std::ios::trunc);
-  if (!joint_csv_) {
-    std::cerr << "Failed to open joint_states.csv\n";
-    return false;
-  }
-  header_written_ = false;
   // Cache queue policy derived members
   max_image_queue_cached_ = cfg_.max_image_queue;
 
@@ -144,7 +153,6 @@ bool LeRobotBackend::open() {
       arrow::field("task_index", arrow::int64()),
   });
 
-  std::cerr << "Schema: " << schema_->ToString() << std::endl;
 
   oss << ".parquet";
   fs::path episode_path = data_root_ / oss.str();
@@ -291,7 +299,7 @@ void LeRobotBackend::writeJointState(const data::RecordBase& base) {
 
   // Scalar columns
   check_status(epi_idx_builder.Append(10), "Failed to append episode index");
-  check_status(frame_idx_builder.Append(0), "Failed to append frame index");
+  check_status(frame_idx_builder.Append(js.seq), "Failed to append frame index");
   check_status(index_builder.Append(0), "Failed to append global index");
   check_status(task_idx_builder.Append(0), "Failed to append task index");
 
@@ -453,6 +461,112 @@ void LeRobotBackend::imageWorkerLoop() {
       // ignore - we don't care to write images were shutting down anyway
     }
   }
+}
+
+
+void LeRobotBackend::addMetadata(const Metadata& md) {
+  
+  // TODO(shantanuparab-tr): [TDS-15]: Extract features from the robot's
+  // observation space and action space
+  // TODO(shantanuparab-tr): [TDS-16]: Get feature specifications from a
+  // configuration file or constant definitions
+  //  Action
+  nlohmann::json info_;
+
+  nlohmann::json action;
+  action["dtype"] = "float32";
+  action["shape"] = {static_cast<int>(md.num_action_features)};
+  action["names"] = md.action_feature_names;
+
+  nlohmann::json observation_state;
+  observation_state["dtype"] = "float32";
+  observation_state["shape"] = {
+      static_cast<int>(md.num_observation_features)};
+  observation_state["names"] = md.observation_feature_names;
+
+  nlohmann::json timestamp_feature;
+  timestamp_feature["dtype"] = "float32";
+  timestamp_feature["shape"] = {1};
+  timestamp_feature["names"] = {};
+
+  nlohmann::json frame_index_feature;
+  frame_index_feature["dtype"] = "int64";
+  frame_index_feature["shape"] = {1};
+  frame_index_feature["names"] = {};
+
+  nlohmann::json episode_index_feature;
+  episode_index_feature["dtype"] = "int64";
+  episode_index_feature["shape"] = {1};
+  episode_index_feature["names"] = {};
+
+  nlohmann::json index_feature;
+  index_feature["dtype"] = "int64";
+  index_feature["shape"] = {1};
+  index_feature["names"] = {};
+
+  nlohmann::json task_index_feature;
+  task_index_feature["dtype"] = "int64";
+  task_index_feature["shape"] = {1};
+  task_index_feature["names"] = {};
+
+  nlohmann::json features;
+  features["action"] = action;
+  features["observation.state"] = observation_state;
+  features["timestamp"] = timestamp_feature;
+  features["frame_index"] = frame_index_feature;
+  features["episode_index"] = episode_index_feature;
+  features["index"] = index_feature;
+  features["task_index"] = task_index_feature;
+
+  // Assuming robot.get_camera_features() returns a list of camera identifiers
+  for (const auto &cam_info : md.camera_names) {
+    // Add camera features
+    // TODO(shantanuparab-tr): [TDS-16]: Get camera specifications from a
+    // configuration file or constant definitions
+
+    nlohmann::json camera_feature;
+    camera_feature["dtype"] = "video";
+    camera_feature["shape"] = {md.camera_height, md.camera_width, 3};
+    camera_feature["names"] = {"height", "width", "channels"};
+    camera_feature["info"] = {
+        {"video.fps", md.fps},           {"video.height", md.camera_height},
+        {"video.width", md.camera_width},       {"video.channels", 3},
+        {"video.codec", "av1"},                {"video.pix_fmt", "yuv420p"},
+        {"video.is_depth_map", (md.is_depth_camera)}, {"has_audio", false}};
+    features["observation.images." + cam_info] = camera_feature;
+  }
+
+  info_["features"] = features;
+
+  // Miscellaneous Feature
+  info_["total_episodes"] = 0;
+  info_["total_frames"] = 0;
+  // TODO(shantanuparab-tr): [TDS-25]: Update total tasks based on total number
+  // of unique tasks
+  info_["total_tasks"] = 1;
+  // TODO(shantanuparab-tr): [TDS-26] Update chunks based on total number of
+  // episodes
+  info_["total_chunks"] = 1;
+  // TODO(shantanuparab-tr): [TDS-27] Add appropriate logic to decide chunk size
+  info_["chunks_size"] = 1000;
+  // TODO(shantanuparab-tr): [TDS-28] Update fps based on robot/control
+  // configuration
+  info_["fps"] = 30;
+  info_["splits"]["train"] = "0:0";
+
+
+  // Write to info.json
+  std::ofstream info_file(meta_root_ / JSON_INFO);
+  std::cout << "Writing metadata to info.json at: "
+            << (meta_root_ / JSON_INFO).string() << std::endl;
+  if (!info_file.is_open()) {
+    std::cerr << "Failed to open info.json for writing metadata." << std::endl;
+    return;
+  }
+  info_file << info_.dump(4);
+  info_file.close();
+  std::cout << "Metadata written to info.json successfully." << std::endl;
+
 }
 
 } // namespace trossen::io::backends
