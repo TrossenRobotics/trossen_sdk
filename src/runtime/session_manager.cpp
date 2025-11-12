@@ -372,33 +372,36 @@ std::shared_ptr<io::Backend> SessionManager::create_backend(
   
   if(config_.backend_config == nullptr) {
     throw std::runtime_error("SessionManager::create_backend: backend_config is null");
-  } else if (config_.backend_config->type == "lerobot") {
+  } 
+  // TODO: Uncomment and implement LeRobotBackend support
+  
+  // else if (config_.backend_config->type == "lerobot") {
     
-    // Copy backend config template and customize for this episode
-  auto* lerobot_cfg = dynamic_cast<io::backends::LeRobotBackend::Config*>(config_.backend_config.get());
-  if (!lerobot_cfg) {
-    throw std::runtime_error("SessionManager::create_backend: backend_config is not LeRobotBackend::Config");
-  }
-  lerobot_cfg->dataset_name = config_.dataset_id;
-  lerobot_cfg->episode_index = episode_index;
+  //   // Copy backend config template and customize for this episode
+  // auto* lerobot_cfg = dynamic_cast<io::backends::LeRobotBackend::Config*>(config_.backend_config.get());
+  // if (!lerobot_cfg) {
+  //   throw std::runtime_error("SessionManager::create_backend: backend_config is not LeRobotBackend::Config");
+  // }
+  // lerobot_cfg->dataset_name = config_.dataset_id;
+  // lerobot_cfg->episode_index = episode_index;
 
-  auto metadata = io::backends::LeRobotBackend::Metadata{};
-  metadata.task_name = lerobot_cfg->task_name;
-  metadata.robot_name = "TrossenRobot"; // TODO: Make configurable
-  metadata.codebase_version = "1.0.0";   // TODO: Extract from build system
-  metadata.trossen_subversion = "rev_1234"; // TODO: Extract from VCS 
-  metadata.num_cameras = 2; // TODO: Extract from registered producers
-  metadata.num_action_features = 7; // TODO: Extract from registered producers
-  metadata.num_observation_features = 7; // TODO: Extract from registered producers
-  metadata.camera_width = 640; // TODO: Extract from camera producers
-  metadata.camera_height = 480; // TODO: Extract from camera producers
-  metadata.is_depth_camera = false; // TODO: Extract from camera producers
-  metadata.camera_names = {"front_camera", "rear_camera"}; // TODO: Extract from camera producers
-  metadata.action_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
-  metadata.observation_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
+  // auto metadata = io::backends::LeRobotBackend::Metadata{};
+  // metadata.task_name = lerobot_cfg->task_name;
+  // metadata.robot_name = "TrossenRobot"; // TODO: Make configurable
+  // metadata.codebase_version = "1.0.0";   // TODO: Extract from build system
+  // metadata.trossen_subversion = "rev_1234"; // TODO: Extract from VCS 
+  // metadata.num_cameras = 2; // TODO: Extract from registered producers
+  // metadata.num_action_features = 7; // TODO: Extract from registered producers
+  // metadata.num_observation_features = 7; // TODO: Extract from registered producers
+  // metadata.camera_width = 640; // TODO: Extract from camera producers
+  // metadata.camera_height = 480; // TODO: Extract from camera producers
+  // metadata.is_depth_camera = false; // TODO: Extract from camera producers
+  // metadata.camera_names = {"front_camera", "rear_camera"}; // TODO: Extract from camera producers
+  // metadata.action_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
+  // metadata.observation_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
 
-  return std::make_shared<io::backends::LeRobotBackend>(*lerobot_cfg, metadata);
-  }
+  // return std::make_shared<io::backends::LeRobotBackend>(*lerobot_cfg, metadata);
+  // }
   else if (config_.backend_config->type == "mcap") {
     // Copy backend config template and customize for this episode
     auto* mcap_cfg = dynamic_cast<io::backends::McapBackend::Config*>(config_.backend_config.get());
