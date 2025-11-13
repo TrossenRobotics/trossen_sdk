@@ -225,6 +225,46 @@ public:
    * @return JSON object containing the computed statistics
    */
   nlohmann::json computeFlatStats(const std::shared_ptr<arrow::Array> &array) const;
+
+  /**
+   * @brief Compute statistics for a set of images
+   * @param images Vector of OpenCV Mat objects representing the images
+   * @return FeatureStats object containing the computed statistics
+   */
+  nlohmann::json compute_image_stats(const std::vector<cv::Mat> &images) const;
+
+  /**
+   * @brief Sample a set of images from a list of image paths
+   * @param image_paths Vector of filesystem paths to the images
+   * @return Vector of OpenCV Mat objects representing the sampled images
+   */
+  std::vector<cv::Mat> sample_images(
+      const std::vector<std::filesystem::path> &image_paths) const;
+
+  /**
+   * @brief Automatically downsample an image to a target size
+   * @param img OpenCV Mat object representing the image
+   * @param target_size Target size for the downsampled image (default is 150)
+   * @param max_threshold Maximum threshold for downsampling (default is 300)
+   * @return Downsampled OpenCV Mat object
+   */
+  cv::Mat auto_downsample(const cv::Mat &img, int target_size = 150,
+                          int max_threshold = 300) const;
+
+  /**
+   * @brief Sample indices for selecting images from a dataset
+   * @param dataset_len Length of the dataset
+   * @param min_samples Minimum number of samples to select (default is 100)
+   * @param max_samples Maximum number of samples to select (default is 10000)
+   * @param power Power factor for sampling distribution (default is 0.75)
+   * @return Vector of sampled indices
+   */
+  std::vector<int> sample_indices(int dataset_len, int min_samples = 100,
+                                  int max_samples = 10000, float power = 0.75f) const;
+
+
+
+
   /// @brief Image encoding statistics
   struct ImageEncodeStats {
 

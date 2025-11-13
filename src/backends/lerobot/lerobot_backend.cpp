@@ -223,6 +223,7 @@ void LeRobotBackend::convert_to_videos() const {
   const size_t max_concurrent_encoders = std::max<size_t>(2, std::thread::hardware_concurrency() / 2);
 
   const std::string images_path = images_root_.string();
+
   std::cout << "Images path: " << images_path << std::endl;
   const fs::path base_path = fs::path(this->config().root_path) / this->config().repository_id / this->config().dataset_id;
 
@@ -337,6 +338,129 @@ void LeRobotBackend::convert_to_videos() const {
   auto secs = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
   std::cout << "Encoded videos in " << secs << " seconds using " << max_concurrent_encoders << " threads" << std::endl;
 }
+
+
+  std::vector<int> LeRobotBackend::sample_indices(int dataset_len,
+                                                    int min_samples,
+                                                    int max_samples,
+                                                    float power) const {
+    // Calculate the number of samples based on the power law
+    // Clamp the number of samples between min_samples and max_samples
+    int num_samples = std::clamp(static_cast<int>(std::pow(dataset_len, power)),
+                                min_samples, max_samples);
+    std::vector<int> indices(num_samples);
+    float step = static_cast<float>(dataset_len - 1) / (num_samples - 1);
+    for (int i = 0; i < num_samples; ++i) indices[i] = std::round(i * step);
+    return indices;
+  }
+
+  cv::Mat LeRobotBackend::auto_downsample(const cv::Mat &img, int target_size,
+                                            int max_threshold) const{
+    int h = img.rows;
+    int w = img.cols;
+    // If the larger dimension is already below the max threshold, return the
+    // original image
+    if (std::max(w, h) < max_threshold) return img;
+    // Calculate the downsampling factor to make the larger dimension equal to
+    // target_size
+    float factor = (w > h) ? (w / static_cast<float>(target_size))
+                          : (h / static_cast<float>(target_size));
+    // Downsample the image using area interpolation for better quality
+    cv::Mat downsampled;
+    cv::resize(img, downsampled, {}, 1.0 / factor, 1.0 / factor, cv::INTER_AREA);
+    return downsampled;
+  }
+
+  std::vector<cv::Mat> LeRobotBackend::sample_images(
+      const std::vector<std::filesystem::path> &image_paths) const {
+    // Sample indices using power law distribution
+    auto indices = sample_indices(image_paths.size());
+
+    std::vector<cv::Mat> images;
+    // Load and process images at the sampled indices
+    for (int idx : indices) {
+      cv::Mat img = cv::imread(image_paths[idx].string(), cv::IMREAD_COLOR);
+      if (img.empty()) continue;
+      // Downsample the image if necessary and convert to float32
+      cv::Mat img_downsampled = auto_downsample(img);
+      cv::Mat img_float;
+      // Normalize pixel values to [0, 1]
+      img_downsampled.convertTo(img_float, CV_32F, 1.0 / 255.0);
+      // Ensure the image has 3 channels (BGR)
+      if (img_float.channels() == 3) {
+        images.push_back(img_float);
+      } else {
+        std::cout << "Unexpected channel count: " << img_float.channels() << std::endl;
+      }
+    }
+
+    return images;
+  }
+
+  nlohmann::json LeRobotBackend::compute_image_stats (
+    const std::vector<cv::Mat> &images) const{
+    nlohmann::json stats_json;
+    if (images.empty()) {
+      std::cout << "No images provided." << std::endl;
+      stats_json["min"] = {};
+      stats_json["max"] = {};
+      stats_json["mean"] = {};
+      stats_json["std"] = {};
+      stats_json["count"] = {0};
+    return stats_json;
+    }
+
+    int num_channels = images[0].channels();
+    int count = static_cast<int>(images.size());
+
+    // Create a vector for each channel
+    std::vector<std::vector<float>> channel_values(num_channels);
+
+    for (const auto &img : images) {
+    std::vector<cv::Mat> channels;
+    cv::split(img, channels);
+
+    for (int c = 0; c < num_channels; ++c) {
+      // Flatten and push pixels into channel_values[c]
+      channel_values[c].insert(
+        channel_values[c].end(),
+        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].datastart)),
+        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].dataend)));
+    }
+    }
+
+    // Helper lambda to convert a vector to a nested JSON array
+    auto to_nested = [](const std::vector<float> &vec) {
+    nlohmann::json result = nlohmann::json::array();
+    for (float v : vec) {
+      result.push_back({{v}});
+    }
+    return result;
+    };
+
+    std::vector<float> min_vals, max_vals, mean_vals, std_vals;
+    for (int c = 0; c < num_channels; ++c) {
+    cv::Mat channel_mat(channel_values[c]);
+    cv::Scalar mean, stddev;
+    cv::meanStdDev(channel_mat, mean, stddev);
+
+    double min_val, max_val;
+    cv::minMaxLoc(channel_mat, &min_val, &max_val);
+
+    min_vals.push_back(static_cast<float>(min_val));
+    max_vals.push_back(static_cast<float>(max_val));
+    mean_vals.push_back(static_cast<float>(mean[0]));
+    std_vals.push_back(static_cast<float>(stddev[0]));
+    }
+
+    stats_json["min"] = to_nested(min_vals);
+    stats_json["max"] = to_nested(max_vals);
+    stats_json["mean"] = to_nested(mean_vals);
+    stats_json["std"] = to_nested(std_vals);
+    stats_json["count"] = {count};
+
+    return stats_json;
+  }
 
 
 nlohmann::json LeRobotBackend::computeFlatStats(
@@ -480,6 +604,44 @@ void LeRobotBackend::computeStatistics() const {
       stats[field->name()] = computeFlatStats(array);
     }
   }
+
+  // Compute image statistics for each camera
+  for (const auto &camera_info : md_.camera_names) {
+    std::string image_key = "observation.images." + camera_info;
+    // Get image paths for the current episode and camera
+    std::string image_folder_path = images_root_.string();
+
+    std::ostringstream episode_folder_ss;
+    episode_folder_ss << "episode_" << std::setfill('0') << std::setw(6)
+                      << cfg_.episode_index;
+    std::string episode_folder_name = episode_folder_ss.str();
+
+    // Construct the full path to the episode's image directory for the current
+    // camera
+    std::filesystem::path episode_image_dir =
+        std::filesystem::path(image_folder_path) / camera_info/ episode_folder_name;
+    if (!std::filesystem::exists(episode_image_dir)) {
+      std::cout << "Image directory does not exist: "
+                << episode_image_dir.string() << std::endl;
+      continue;
+    }
+
+    // Collect all image file paths in the directory
+    std::vector<std::filesystem::path> paths;
+    for (const auto &entry :
+         std::filesystem::directory_iterator(episode_image_dir)) {
+      if (entry.is_regular_file()) {
+        std::string ext = entry.path().extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext == ".jpg" || ext == ".png") {
+          paths.push_back(entry.path());
+        }
+      }
+    }
+    // Sample and process images to compute statistics
+    auto images = sample_images(paths);
+    stats[image_key]  = compute_image_stats(images);
+  }
   // TODO (shantanuparab-tr): Add this to metadata file
   printStatsTable(stats);
   
@@ -519,6 +681,8 @@ void LeRobotBackend::printStatsTable(const nlohmann::json& stats) const {
   }
   std::cout << "=================================================================\n";
 }
+
+
 
 void LeRobotBackend::flush() {
   // TODO (shantanuparab-tr): flush parquet writer if needed
