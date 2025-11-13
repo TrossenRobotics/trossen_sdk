@@ -458,7 +458,7 @@ void LeRobotBackend::imageWorkerLoop() {
       cv::imwrite(job.file_path.string(), job.image);
       img_encoded_.fetch_add(1, std::memory_order_relaxed);
     } catch (...) {
-      // ignore - we don't care to write images were shutting down anyway
+      // ignore - we don't care to write images we're shutting down anyway
     }
   }
 }

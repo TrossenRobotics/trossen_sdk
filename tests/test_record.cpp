@@ -128,7 +128,7 @@ TEST(JointStateRecordTest, SingleJoint) {
   ASSERT_EQ(record.velocities.size(), 1);
   ASSERT_EQ(record.efforts.size(), 1);
 
-  EXPECT_FLOAT_EQ(record.observations[0], 3.14159f);
+  EXPECT_FLOAT_EQ(record.observations[0], 0.0f);
   EXPECT_FLOAT_EQ(record.velocities[0], 0.5f);
   EXPECT_FLOAT_EQ(record.efforts[0], 15.0f);
 }

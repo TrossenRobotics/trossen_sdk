@@ -17,7 +17,6 @@ add_library(trossen_sdk
   src/hw/camera/mock_producer.cpp
   src/hw/camera/mock_synced_producer.cpp
   src/runtime/session_manager.cpp
-
 )
 
 find_package(Arrow REQUIRED)
@@ -31,8 +30,6 @@ FetchContent_Declare(
 )
 message(STATUS "Fetching MCAP (mcap_builder)...")
 FetchContent_MakeAvailable(mcap_builder)
-
-
 # mcap_builder provides an imported target named "mcap"
 target_link_libraries(trossen_sdk PUBLIC mcap)
 target_compile_definitions(trossen_sdk PUBLIC TROSSEN_WITH_MCAP=1)

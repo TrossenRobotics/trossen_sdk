@@ -327,8 +327,6 @@ private:
   std::shared_ptr<arrow::Schema> schema_;
   std::shared_ptr<arrow::io::FileOutputStream> outfile_;
   std::unique_ptr<parquet::arrow::FileWriter> writer_;
-
-
 };
 
 } // namespace trossen::io::backends
