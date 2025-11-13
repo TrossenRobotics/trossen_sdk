@@ -361,7 +361,16 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
   // Generate filename: episode_NNNNNN.mcap (6-digit zero-padded)
   // TODO(lukeschmitt-tr): This is specific to MCAP files; consider making more generic
   std::ostringstream oss;
-  oss << "episode_" << std::setfill('0') << std::setw(6) << index;
+  if(config_.backend_config == nullptr) {
+    throw std::runtime_error("SessionManager::build_episode_path: backend_config is null");
+  } else if (config_.backend_config->type == "lerobot") {
+      oss << "episode_" << std::setfill('0') << std::setw(6) << index;
+  }
+  else if (config_.backend_config->type == "mcap") {
+      oss << "episode_" << std::setfill('0') << std::setw(6) << index << ".mcap";
+  } else {
+    throw std::runtime_error("SessionManager::build_episode_path: Unsupported backend type: " + config_.backend_config->type);
+  }
   return config_.base_path / oss.str();
 }
 
@@ -376,9 +385,6 @@ std::shared_ptr<io::Backend> SessionManager::create_backend(
       // Copy backend config template and customize for this episode
     auto* lerobot_cfg = static_cast<io::backends::LeRobotBackend::Config*>(config_.backend_config.get());
     lerobot_cfg->output_dir = output_path;
-    if (!lerobot_cfg) {
-      throw std::runtime_error("SessionManager::create_backend: backend_config is not LeRobotBackend::Config");
-    }
     lerobot_cfg->dataset_name = config_.dataset_id;
     lerobot_cfg->episode_index = episode_index;
 
@@ -402,7 +408,6 @@ std::shared_ptr<io::Backend> SessionManager::create_backend(
   else if (config_.backend_config->type == "mcap") {
     // Copy backend config template and customize for this episode
     auto* mcap_cfg = static_cast<io::backends::McapBackend::Config*>(config_.backend_config.get());
-
     mcap_cfg->output_path = output_path;
 
     return std::make_shared<io::backends::McapBackend>(*mcap_cfg);

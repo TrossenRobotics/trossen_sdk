@@ -7,6 +7,7 @@
 #ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_BACKEND_HPP
 #define TROSSEN_SDK__IO__BACKENDS__LEROBOT_BACKEND_HPP
 
+// Standard library headers
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -15,13 +16,16 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
+
+// Third-party library headers
 #include <arrow/api.h>
 #include <arrow/io/api.h>
-#include <parquet/arrow/writer.h>
 #include <nlohmann/json.hpp>
+#include <parquet/arrow/writer.h>
+
+// Internal headers
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_constants.hpp"
-
 
 namespace trossen::io::backends {
 
@@ -95,7 +99,7 @@ public:
     std::string dataset_name{"default_dataset"};
 
     // Root path
-    std::string root_path{trossen::io::backends::DEFAULT_ROOT_PATH};
+    std::string root_path{get_default_root_path().string()};
 
     // Episode index (for organizing output)
     uint32_t episode_index{0};
@@ -103,22 +107,48 @@ public:
   };
 
   struct Metadata {
+    // TODO (shantanuparab-tr): Add meaningful metadata fields with the Metadata PR
 
+    // Name of the robot
     std::string robot_name;
+
+    // Name of the task
     std::string task_name;
+
+    // Version information (LeRobot)
     std::string codebase_version;
+
+    // Trossen SDK subversion
     std::string trossen_subversion;
 
+    // Number of cameras
     int num_cameras;
+
+    // Number of action features
     int num_action_features;
+
+    // Number of observation features
     int num_observation_features;
+
+    // Camera Width
     int camera_width;
+
+    // Camera Height
     int camera_height;
+
+    // Is depth camera
     bool is_depth_camera;
+
+    // Frame rate
     int fps;
 
+    // Camera names
     std::vector<std::string> camera_names;
+
+    // Action feature names
     std::vector<std::string> action_feature_names;
+
+    // Observation feature names
     std::vector<std::string> observation_feature_names;
 
   };
@@ -316,8 +346,6 @@ private:
   std::filesystem::path videos_root_;
   std::filesystem::path meta_root_;
   std::filesystem::path data_root_;
-  std::ofstream joint_csv_;
-  bool header_written_{false};
   std::mutex write_mutex_;
   std::mutex open_mutex_;
   bool opened_{false};

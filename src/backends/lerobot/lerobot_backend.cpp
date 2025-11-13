@@ -214,7 +214,7 @@ void LeRobotBackend::writeBatch(std::span<const data::RecordBase* const> records
 }
 
 void LeRobotBackend::flush() {
-  if (joint_csv_) joint_csv_.flush();
+  // TODO (shantanuparab-tr): flush parquet writer if needed
 }
 
 void LeRobotBackend::close() {
