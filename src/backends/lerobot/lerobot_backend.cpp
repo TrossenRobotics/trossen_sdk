@@ -190,7 +190,7 @@ bool LeRobotBackend::open() {
 void LeRobotBackend::write(const data::RecordBase& record) {
   std::lock_guard<std::mutex> lock(write_mutex_);
   // Decide type by RTTI (simple approach for now)
-  if (auto js = dynamic_cast<const data::JointStateRecord*>(&record)) {
+  if (auto js = dynamic_cast<const data::TeleopJointStateRecord*>(&record)) {
     writeJointState(*js);
   } else if (auto img = dynamic_cast<const data::ImageRecord*>(&record)) {
     writeImage(*img);
@@ -205,7 +205,7 @@ void LeRobotBackend::writeBatch(std::span<const data::RecordBase* const> records
     if (!r) {
       continue;
     }
-    if (auto js = dynamic_cast<const data::JointStateRecord*>(r)) {
+    if (auto js = dynamic_cast<const data::TeleopJointStateRecord*>(r)) {
       writeJointState(*js);
     } else if (auto img = dynamic_cast<const data::ImageRecord*>(r)) {
       writeImage(*img);
@@ -261,7 +261,7 @@ void LeRobotBackend::close() {
 
 void LeRobotBackend::writeJointState(const data::RecordBase& base) {
 
-  const auto& js = static_cast<const data::JointStateRecord&>(base);
+  const auto& js = static_cast<const data::TeleopJointStateRecord&>(base);
 
   // Create builders for one frame
   arrow::FloatBuilder ts_builder;

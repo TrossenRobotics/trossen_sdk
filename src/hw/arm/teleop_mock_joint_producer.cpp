@@ -6,15 +6,15 @@
 #include <cmath>
 #include <utility>
 
-#include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
+#include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
 
 namespace trossen::hw::arm {
 
-MockJointStateProducer::MockJointStateProducer(Config cfg)
+TeleopMockJointStateProducer::TeleopMockJointStateProducer(Config cfg)
   : cfg_(std::move(cfg)) {}
 
-void MockJointStateProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
+void TeleopMockJointStateProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
   using clock = std::chrono::steady_clock;
   auto now = clock::now();
   if (!started_) {
@@ -32,13 +32,12 @@ void MockJointStateProducer::poll(const std::function<void(std::shared_ptr<data:
   }
 
   // Generate synthetic joint state
-  std::vector<float>  pos(cfg_.num_joints), vel(cfg_.num_joints), eff(cfg_.num_joints);
+  std::vector<float>  act(cfg_.num_joints), obs(cfg_.num_joints);
   double t = (cfg_.rate_hz > 0.0) ? (static_cast<double>(stats_.produced) / cfg_.rate_hz) : static_cast<double>(stats_.produced);
   for (size_t i = 0; i < cfg_.num_joints; ++i) {
     double phase = t * 0.5 + static_cast<double>(i) * 0.1;
-    pos[i] = static_cast<float>(cfg_.amplitude * std::sin(phase));
-    vel[i] = static_cast<float>(cfg_.amplitude * 0.5 * std::cos(phase));
-    eff[i] = 0.0f;
+    act[i] = static_cast<float>(cfg_.amplitude * std::sin(phase));
+    obs[i] = static_cast<float>(cfg_.amplitude * 0.5 * std::cos(phase));
   }
   uint64_t seq = stats_.produced; // sequential
   if (seq != (seq_)) { // seq_ tracks last emitted internally
@@ -48,11 +47,11 @@ void MockJointStateProducer::poll(const std::function<void(std::shared_ptr<data:
   }
   seq_ = seq;
 
-  auto rec = std::make_shared<data::JointStateRecord>(
+  auto rec = std::make_shared<data::TeleopJointStateRecord>(
     data::make_timestamp_now(),
     seq,
     cfg_.id,
-    pos, vel, eff);
+    act, obs);
   emit(rec);
 
   stats_.produced++;

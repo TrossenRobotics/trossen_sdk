@@ -52,7 +52,7 @@ private:
   Config cfg_;
 
   /// @brief Reusable joint state buffers to avoid reallocation each poll
-  std::vector<double> act_d_, obs_d_, vel_d_, eff_d_;
+  std::vector<double> pos_d_, vel_d_, eff_d_;
 
   /// @brief Reusable robot output to avoid reallocation each poll
   trossen_arm::RobotOutput robot_output_;

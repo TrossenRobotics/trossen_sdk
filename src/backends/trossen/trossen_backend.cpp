@@ -160,7 +160,7 @@ void TrossenBackend::writeJointState(const data::RecordBase& base) {
   joint_csv_ << js.ts.monotonic.to_ns() << ','
              << js.ts.realtime.to_ns() << ','
              << js.id << ','
-             << vecToStr(js.observations) << ','
+             << vecToStr(js.positions) << ','
              << vecToStr(js.velocities) << ','
              << vecToStr(js.efforts) << '\n';
 }

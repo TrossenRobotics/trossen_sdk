@@ -11,8 +11,7 @@ TrossenArmProducer::TrossenArmProducer(
 {
   if (driver_) {
     // Preallocate buffers based on number of joints
-    act_d_.resize(driver_->get_num_joints());
-    obs_d_.resize(driver_->get_num_joints());
+    pos_d_.resize(driver_->get_num_joints());
     vel_d_.resize(driver_->get_num_joints());
     eff_d_.resize(driver_->get_num_joints());
     // Initial read to populate robot_output state
@@ -29,8 +28,7 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   robot_output_ = driver_->get_robot_output();
   uint64_t device_ts = robot_output_.header.timestamp;
   // TODO [shantanuparab-tr]: Get actions from the leader arm
-  act_d_ = robot_output_.joint.all.positions;
-  obs_d_ = robot_output_.joint.all.positions;
+  pos_d_ = robot_output_.joint.all.positions;
   vel_d_ = robot_output_.joint.all.velocities;
   eff_d_ = robot_output_.joint.all.efforts;
 
@@ -47,19 +45,14 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   rec->seq = seq_++;
   rec->id = cfg_.stream_id;
   // Convert double->float
-  rec->actions.reserve(act_d_.size());
-  rec->observations.reserve(obs_d_.size());
+  rec->positions.reserve(pos_d_.size());
   rec->velocities.reserve(vel_d_.size());
   rec->efforts.reserve(eff_d_.size());
-  rec->actions.clear();
-  rec->observations.clear();
+  rec->positions.clear();
   rec->velocities.clear();
   rec->efforts.clear();
-  for (double v : act_d_) {
-    rec->actions.push_back(static_cast<float>(v));
-  }
-  for (double v : obs_d_) {
-    rec->observations.push_back(static_cast<float>(v));
+  for (double v : pos_d_) {
+    rec->positions.push_back(static_cast<float>(v));
   }
   for (double v : vel_d_) {
     rec->velocities.push_back(static_cast<float>(v));

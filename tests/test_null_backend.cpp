@@ -39,7 +39,7 @@ TEST(NullBackendTest, WriteSingleRecord) {
   JointStateRecord record;
   record.seq = 1;
   record.id = "test_joint";
-  record.observations = {1.0f, 2.0f, 3.0f};
+  record.positions = {1.0f, 2.0f, 3.0f};
 
   backend.write(record);
 
@@ -219,7 +219,7 @@ TEST(NullBackendTest, DifferentRecordTypes) {
   backend.open();
 
   JointStateRecord joint_record;
-  joint_record.observations = {1.0f, 2.0f};
+  joint_record.positions = {1.0f, 2.0f};
   backend.write(joint_record);
 
   ImageRecord image_record;
@@ -237,7 +237,7 @@ TEST(NullBackendTest, DataIsDiscarded) {
 
   // Create a record with large data
   JointStateRecord record;
-  record.observations.resize(10000, 1.0f);
+  record.positions.resize(10000, 1.0f);
   record.velocities.resize(10000, 2.0f);
   record.efforts.resize(10000, 3.0f);
 
