@@ -28,7 +28,7 @@ namespace trossen::io::backends {
 class McapBackend : public io::Backend {
 public:
   /// @brief Configuration options for McapBackend
-  struct Config {
+  struct Config : public io::Backend::Config {
     /// @brief .mcap file path
     std::string output_path;
 

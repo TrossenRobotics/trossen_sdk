@@ -57,6 +57,9 @@ struct Config {
   float joint_rate_hz = 200.0f;
   std::string leader_ip = "192.168.1.2";
   std::string follower_ip = "192.168.1.4";
+
+  // Dataset backend type
+  std::string backend_type = "mcap";
 };
 
 void print_usage(const char* prog_name) {
@@ -74,6 +77,7 @@ void print_usage(const char* prog_name) {
             << "  --joint-rate <hz>        Joint state capture rate (default: 200)\n"
             << "  --leader-ip <ip>         Leader arm IP (default: 192.168.1.2)\n"
             << "  --follower-ip <ip>       Follower arm IP (default: 192.168.1.4)\n"
+            << "  --backend <type>         Dataset backend type (default: mcap)\n"
             << "  --help                   Show this help message\n\n"
             << "Examples:\n"
             << "  " << prog_name << " --duration 10 --episodes 5\n"
@@ -112,6 +116,8 @@ Config parse_args(int argc, char** argv) {
       cfg.leader_ip = argv[++i];
     } else if (arg == "--follower-ip" && i + 1 < argc) {
       cfg.follower_ip = argv[++i];
+    } else if (arg == "--backend" && i + 1 < argc) {
+      cfg.backend_type = argv[++i];
     } else {
       std::cerr << "Warning: Unknown argument '" << arg << "' (use --help for usage)\n";
     }
@@ -221,12 +227,18 @@ int main(int argc, char** argv) {
   session_cfg.max_duration = std::chrono::seconds(cfg.duration_s);
   session_cfg.max_episodes = cfg.episodes;
 
-  // Backend configuration (MCAP with compression)
-  session_cfg.backend_config.compression = "zstd";
-  session_cfg.backend_config.chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
-  session_cfg.backend_config.robot_name = "/robots/widowxai";
+  if(cfg.backend_type == "mcap") {
+    auto mcap_cfg = std::make_unique<trossen::io::backends::McapBackend::Config>();
+    mcap_cfg->compression = "zstd";
+    mcap_cfg->chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
+    mcap_cfg->robot_name = "/robots/widowxai";
+    session_cfg.backend_config = std::move(mcap_cfg);
+  } else {
+    std::cerr << "Unsupported backend type: " << cfg.backend_type << "\n";
+    return 1;
+  }
 
-  trossen::runtime::SessionManager mgr(session_cfg);
+  trossen::runtime::SessionManager mgr(std::move(session_cfg));
 
   std::cout << "\nInitialized Session Manager\n";
   std::cout << "  Starting episode index: " << mgr.stats().current_episode_index << "\n";

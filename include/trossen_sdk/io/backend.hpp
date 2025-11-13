@@ -36,6 +36,16 @@ public:
   virtual ~Backend() = default;
 
   /**
+   * @brief Configuration struct for backend.
+   */
+  struct Config {
+    // Base config options for all backends can be added here
+    std::string type{""};    // Config type (can be overridden by child classes)
+    // Example: bool enable_logging = false;
+    virtual ~Config() = default;
+  };
+
+  /**
    * @brief Open a logging destination
    * @return true on success, false otherwise
    * @note Must be called before data can be written

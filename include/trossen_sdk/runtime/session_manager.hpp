@@ -47,7 +47,7 @@ struct SessionConfig {
   std::optional<uint32_t> max_episodes = std::nullopt;
 
   /// Backend configuration template (output_path will be overwritten per episode)
-  trossen::io::backends::McapBackend::Config backend_config;
+  std::unique_ptr<trossen::io::Backend::Config> backend_config;
 };
 
 /**
@@ -68,7 +68,7 @@ public:
    * @brief Construct Session Manager with configuration
    * @param config Session configuration
    */
-  explicit SessionManager(const SessionConfig& config);
+  explicit SessionManager(SessionConfig&& config);
 
   /**
    * @brief Destructor ensures current episode is closed
@@ -221,7 +221,7 @@ private:
   std::unique_ptr<io::Sink> current_sink_;
 
   /// Current backend instance (per episode)
-  std::shared_ptr<io::backends::McapBackend> current_backend_;
+  std::shared_ptr<io::Backend> current_backend_;
 
   /// Current scheduler instance (per episode)
   std::unique_ptr<Scheduler> scheduler_;
@@ -260,7 +260,7 @@ private:
    * @param episode_index Episode index for metadata
    * @return Shared pointer to backend instance
    */
-  std::shared_ptr<io::backends::McapBackend> create_backend(
+  std::shared_ptr<io::Backend> create_backend(
     const std::string& output_path,
     uint32_t episode_index);
 
