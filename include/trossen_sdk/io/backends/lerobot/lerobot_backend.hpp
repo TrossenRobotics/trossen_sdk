@@ -18,6 +18,7 @@
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <nlohmann/json.hpp>
+#include <parquet/arrow/reader.h>
 #include <parquet/arrow/writer.h>
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_constants.hpp"
@@ -197,6 +198,35 @@ public:
    * @brief Convert recorded images to videos using FFmpeg
    */
   void convert_to_videos() const;
+
+  /**
+   * @brief Compute and print statistics about the recorded data
+   */
+  void computeStatistics() const;
+
+  /**
+   * @brief Print statistics in a tabular format
+   *
+   * @param stats JSON object containing the statistics
+   */
+  void printStatsTable(const nlohmann::json& stats) const;
+
+  /**
+   * @brief Compute statistics for a ListArray
+   * @param list_array Shared pointer to the ListArray
+   * @return JSON object containing the computed statistics
+   */
+  nlohmann::json computeListStats(
+      const std::shared_ptr<arrow::ListArray> &list_array) const;
+
+  /**
+   * @brief Compute statistics for a flat array
+   * @param array Shared pointer to the flat array
+   * @return JSON object containing the computed statistics
+   */
+  nlohmann::json computeFlatStats(const std::shared_ptr<arrow::Array> &array) const;
+
+
 
   /// @brief Image encoding statistics
   struct ImageEncodeStats {
