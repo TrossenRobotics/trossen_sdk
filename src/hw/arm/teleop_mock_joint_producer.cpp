@@ -8,11 +8,29 @@
 
 #include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
+#include <iostream>
 
 namespace trossen::hw::arm {
 
 TeleopMockJointStateProducer::TeleopMockJointStateProducer(Config cfg)
-  : cfg_(std::move(cfg)) {}
+  : cfg_(std::move(cfg)) {
+  // Populate metadata
+  metadata_.id = cfg_.id;
+  metadata_.name = "Teleop Mock Joint State Producer";
+  metadata_.description = "Produces synthetic teleoperation joint states for testing and diagnostics";
+  metadata_.robot_name = "MOCK_TELEOP_ROBOT"; 
+  metadata_.leader_arm_model = "MOCK_LEADER_ARM";
+  metadata_.leader_firmware_version = "v0.0.1-mock";
+  metadata_.follower_arm_model = "MOCK_FOLLOWER_ARM";
+  metadata_.follower_firmware_version = "v0.0.1-mock";
+  metadata_.action_feature_names.resize(cfg_.num_joints);
+  metadata_.observation_feature_names.resize(cfg_.num_joints);
+  for (size_t i = 0; i < cfg_.num_joints; ++i) {
+    metadata_.action_feature_names[i] = "joint_" + std::to_string(i);
+    metadata_.observation_feature_names[i] = "joint_" + std::to_string(i);
+  }
+  metadata_.gripper_type = "MOCK_GRIPPER";
+}
 
 void TeleopMockJointStateProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
   using clock = std::chrono::steady_clock;

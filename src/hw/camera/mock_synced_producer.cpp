@@ -19,6 +19,22 @@ MockSyncedCameraProducer::MockSyncedCameraProducer(Config cfg) : cfg_(std::move(
   if (cfg_.seed) rng_.seed(static_cast<uint32_t>(cfg_.seed));
   warmup_remaining_ = cfg_.streams.warmup_frames;
   frame_period_ns_ = cfg_.streams.frame_period_ns();
+
+  // Populate metadata
+  metadata_.id = cfg_.camera_name;
+  metadata_.name = "Mock Synchronized Camera Producer";
+  metadata_.description = "Produces synthetic synchronized color and depth frames for testing and diagnostics";
+  metadata_.camera_name = cfg_.camera_name;
+  metadata_.color_width = cfg_.streams.color_width;
+  metadata_.color_height = cfg_.streams.color_height;
+  metadata_.color_encoding = cfg_.streams.color_encoding;
+  metadata_.depth_width = cfg_.streams.depth_width;
+  metadata_.depth_height = cfg_.streams.depth_height;
+  if (cfg_.streams.depth_format == DepthFormat::DEPTH16) {
+    metadata_.depth_encoding = "depth16";
+  } else {
+    metadata_.depth_encoding = "32FC1";
+  }
 }
 
 void MockSyncedCameraProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {

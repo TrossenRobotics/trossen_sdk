@@ -24,6 +24,23 @@ public:
     bool use_device_time{true};
   };
 
+  struct TrossenArmProducerMetadata : public PolledProducer::ProducerMetadata {
+    /// @brief Robot model
+    std::string arm_model;
+
+    /// @brief Firmware version
+    std::string firmware_version;
+
+    /// @brief Number of joints
+    size_t num_joints;
+
+    /// @brief Joint names
+    std::vector<std::string> joint_names;
+
+    /// @brief Gripper type
+    std::string gripper_type;
+  };
+
   /**
    * @brief Construct a TrossenArmProducer
    *
@@ -44,6 +61,9 @@ public:
    */
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
+  /// @brief Get producer metadata
+  const TrossenArmProducerMetadata& metadata() const override { return metadata_; }
+
 private:
   /// @brief Shared pointer to the TrossenArmDriver instance
   std::shared_ptr<trossen_arm::TrossenArmDriver> driver_;
@@ -56,6 +76,8 @@ private:
 
   /// @brief Reusable robot output to avoid reallocation each poll
   trossen_arm::RobotOutput robot_output_;
+
+  TrossenArmProducerMetadata metadata_;
 };
 
 } // namespace trossen::hw::arm

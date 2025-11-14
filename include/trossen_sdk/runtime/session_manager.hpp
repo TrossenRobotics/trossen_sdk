@@ -263,7 +263,9 @@ private:
    */
   std::shared_ptr<io::Backend> create_backend(
     const std::string& output_path,
-    uint32_t episode_index);
+    uint32_t episode_index,
+    const std::vector<hw::PolledProducer::ProducerMetadata>& producer_metadatas
+  );
 
   /**
    * @brief Background monitoring loop for auto-stop

@@ -53,6 +53,24 @@ public:
     bool enforce_requested_fps = true;
 };
 
+  struct OpenCvCameraProducerMetadata : public PolledProducer::ProducerMetadata {
+
+    /// @brief Camera name
+    std::string camera_name;
+
+    /// @brief Image width
+    int width;
+
+    /// @brief Image height
+    int height;
+
+    /// @brief Image encoding
+    std::string encoding;
+
+    /// @brief Target frames per second
+    int fps;
+  };
+
   /**
    * @brief Construct an OpenCvCameraProducer
    *
@@ -74,6 +92,10 @@ public:
 
   /// Poll for a single frame; emits 0 or 1 records.
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
+
+  /// @brief Get producer metadata
+  const OpenCvCameraProducerMetadata& metadata() const override { return metadata_; }
+
 protected:
   /**
    * @brief Open the device if not already opened
@@ -87,6 +109,11 @@ protected:
 
   /// @brief Capture handle
   cv::VideoCapture cap_;
+
+private:
+  /// @brief Metadata
+  OpenCvCameraProducerMetadata metadata_;
+  
 };
 
 } // namespace trossen::hw::camera

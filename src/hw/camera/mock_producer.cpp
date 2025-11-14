@@ -17,6 +17,15 @@ MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   if (cfg_.fps > 0) {
     frame_period_ns_ = static_cast<uint64_t>(1e9 / static_cast<double>(cfg_.fps));
   }
+
+  // Populate metadata
+  metadata_.id = cfg_.stream_id;
+  metadata_.name = "Mock Camera Producer";
+  metadata_.description = "Produces synthetic camera frames for testing and diagnostics";
+  metadata_.width = cfg_.width;
+  metadata_.height = cfg_.height;
+  metadata_.encoding = cfg_.encoding;
+  metadata_.fps = cfg_.fps;
 }
 
 void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
