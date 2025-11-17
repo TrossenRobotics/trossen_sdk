@@ -50,6 +50,7 @@ public:
   };
 
   struct MockCameraProducerMetadata : public PolledProducer::ProducerMetadata {
+
     /// @brief Image width
     int width;
 
@@ -61,7 +62,9 @@ public:
 
     /// @brief Target frames per second
     int fps;
-    
+
+    /// @brief Is this a depth camera?
+    bool is_depth_map{false};
   };
 
   explicit MockCameraProducer(Config cfg);
@@ -70,7 +73,9 @@ public:
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
   /// @brief Get producer metadata
-  const MockCameraProducerMetadata& metadata() const override { return metadata_; }
+  std::shared_ptr<ProducerMetadata> metadata() const override {
+    return std::make_shared<MockCameraProducerMetadata>(metadata_);
+  }
 
   struct JitterStats {
     double mean_ms{0};

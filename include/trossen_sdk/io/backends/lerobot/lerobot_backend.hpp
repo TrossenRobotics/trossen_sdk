@@ -11,7 +11,6 @@
 #include <condition_variable>
 #include <deque>
 #include <filesystem>
-#include <fstream>
 #include <mutex>
 #include <thread>
 #include <unordered_map>
@@ -22,6 +21,7 @@
 #include <parquet/arrow/writer.h>
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_constants.hpp"
+#include "trossen_sdk/hw/producer_base.hpp"
 
 namespace trossen::io::backends {
 
@@ -102,59 +102,12 @@ public:
 
   };
 
-  struct Metadata {
-    // TODO (shantanuparab-tr): Add meaningful metadata fields with the Metadata PR
-
-    // Name of the robot
-    std::string robot_name;
-
-    // Name of the task
-    std::string task_name;
-
-    // Version information (LeRobot)
-    std::string codebase_version;
-
-    // Trossen SDK subversion
-    std::string trossen_subversion;
-
-    // Number of cameras
-    int num_cameras;
-
-    // Number of action features
-    int num_action_features;
-
-    // Number of observation features
-    int num_observation_features;
-
-    // Camera Width
-    int camera_width;
-
-    // Camera Height
-    int camera_height;
-
-    // Is depth camera
-    bool is_depth_camera;
-
-    // Frame rate
-    int fps;
-
-    // Camera names
-    std::vector<std::string> camera_names;
-
-    // Action feature names
-    std::vector<std::string> action_feature_names;
-
-    // Observation feature names
-    std::vector<std::string> observation_feature_names;
-
-  };
-
   /**
    * @brief Construct a LeRobotBackend
    *
    * @param cfg Configuration parameters
    */
-  explicit LeRobotBackend(Config cfg, Metadata md);
+  explicit LeRobotBackend(Config cfg,std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata);
 
   /**
    * @brief Open a LeRobot V2 logging destination
@@ -192,7 +145,7 @@ public:
    *
    * @param md Metadata to add
    */
-  void addMetadata(const Metadata& md);
+  void writeMetadata();
 
   /**
    * @brief Convert recorded images to videos using FFmpeg
@@ -209,14 +162,14 @@ public:
    *
    * @param stats JSON object containing the statistics
    */
-  void printStatsTable(const nlohmann::json& stats) const;
+  void printStatsTable(const nlohmann::ordered_json& stats) const;
 
   /**
    * @brief Compute statistics for a ListArray
    * @param list_array Shared pointer to the ListArray
    * @return JSON object containing the computed statistics
    */
-  nlohmann::json computeListStats(
+  nlohmann::ordered_json computeListStats(
       const std::shared_ptr<arrow::ListArray> &list_array) const;
 
   /**
@@ -224,14 +177,14 @@ public:
    * @param array Shared pointer to the flat array
    * @return JSON object containing the computed statistics
    */
-  nlohmann::json computeFlatStats(const std::shared_ptr<arrow::Array> &array) const;
+  nlohmann::ordered_json computeFlatStats(const std::shared_ptr<arrow::Array> &array) const;
 
   /**
    * @brief Compute statistics for a set of images
    * @param images Vector of OpenCV Mat objects representing the images
    * @return FeatureStats object containing the computed statistics
    */
-  nlohmann::json compute_image_stats(const std::vector<cv::Mat> &images) const;
+  nlohmann::ordered_json compute_image_stats(const std::vector<cv::Mat> &images) const;
 
   /**
    * @brief Sample a set of images from a list of image paths
@@ -376,7 +329,7 @@ private:
    */
   void imageWorkerLoop();
 
-  /// @brief Image encoding job
+
   struct ImageJob {
     /// @brief Full file path to write
     std::filesystem::path file_path;
@@ -396,7 +349,7 @@ private:
   // Config for this backend
   Config cfg_;
   // Metadata for this backend
-  Metadata md_;
+  std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata_;
   std::atomic<bool> image_worker_running_{false};
 
   // Basic stats

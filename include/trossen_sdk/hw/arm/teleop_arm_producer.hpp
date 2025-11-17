@@ -79,7 +79,9 @@ public:
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
   /// @brief Get producer metadata
-  const TeleopTrossenArmProducerMetadata& metadata() const override { return metadata_; };
+  std::shared_ptr<ProducerMetadata> metadata() const override {
+    return std::make_shared<TeleopTrossenArmProducerMetadata>(metadata_);
+  }
 
 private:
   /// @brief Shared pointer to the TrossenArmDriver instance leader arm

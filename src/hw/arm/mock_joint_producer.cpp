@@ -15,6 +15,7 @@ MockJointStateProducer::MockJointStateProducer(Config cfg)
   : cfg_(std::move(cfg)) {
 
   // Populate metadata
+  metadata_.type = "arm";
   metadata_.id = cfg_.id;
   metadata_.name = "Mock Joint State Producer";
   metadata_.description = "Produces synthetic joint states for testing and diagnostics";

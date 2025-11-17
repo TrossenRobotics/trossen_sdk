@@ -19,6 +19,7 @@ TrossenArmProducer::TrossenArmProducer(
   }
 
   // Populate metadata
+  metadata_.type = "arm";
   metadata_.id = cfg_.stream_id;
   metadata_.name = "Trossen Arm Producer";
   metadata_.description = "Produces joint states from a Trossen Arm via TrossenArmDriver";

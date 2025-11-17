@@ -73,7 +73,9 @@ public:
   Diagnostics diagnostics() const { return diag_; }
   const Config& config() const { return cfg_; }
 
-  const TeleopMockJointStateProducerMetadata& metadata() const override { return metadata_; }
+  std::shared_ptr<ProducerMetadata> metadata() const override {
+    return std::make_shared<TeleopMockJointStateProducerMetadata>(metadata_);
+  }
 
 private:
   Config cfg_;

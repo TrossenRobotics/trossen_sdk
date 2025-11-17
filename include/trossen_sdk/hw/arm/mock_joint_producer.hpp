@@ -58,7 +58,9 @@ public:
   Diagnostics diagnostics() const { return diag_; }
   const Config& config() const { return cfg_; }
 
-  const MockJointStateProducerMetadata& metadata() const override { return metadata_; }
+  std::shared_ptr<ProducerMetadata> metadata() const override {
+    return std::make_shared<MockJointStateProducerMetadata>(metadata_);
+  }
 
 private:
   Config cfg_;

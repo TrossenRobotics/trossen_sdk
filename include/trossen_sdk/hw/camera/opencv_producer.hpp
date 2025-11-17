@@ -94,7 +94,9 @@ public:
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
   /// @brief Get producer metadata
-  const OpenCvCameraProducerMetadata& metadata() const override { return metadata_; }
+  std::shared_ptr<ProducerMetadata> metadata() const override {
+    return std::make_shared<OpenCvCameraProducerMetadata>(metadata_);
+  }
 
 protected:
   /**

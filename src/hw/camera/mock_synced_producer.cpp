@@ -21,6 +21,7 @@ MockSyncedCameraProducer::MockSyncedCameraProducer(Config cfg) : cfg_(std::move(
   frame_period_ns_ = cfg_.streams.frame_period_ns();
 
   // Populate metadata
+  metadata_.type = "camera";
   metadata_.id = cfg_.camera_name;
   metadata_.name = "Mock Synchronized Camera Producer";
   metadata_.description = "Produces synthetic synchronized color and depth frames for testing and diagnostics";

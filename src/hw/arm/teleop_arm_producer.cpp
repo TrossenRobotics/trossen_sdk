@@ -23,6 +23,7 @@ TeleopTrossenArmProducer::TeleopTrossenArmProducer(
   }
 
   // Populate metadata
+  metadata_.type = "teleop_arm";
   metadata_.id = cfg_.stream_id;
   metadata_.name = "Teleop Trossen Arm Producer";
   metadata_.description = "Produces teleoperation joint states from leader and follower Trossen Arms via TrossenArmDriver";
