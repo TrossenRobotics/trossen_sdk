@@ -1,6 +1,7 @@
 
 #include <iostream>
 #include <iomanip>
+#include <fstream>
 #include <sstream>
 #include "opencv2/imgcodecs.hpp"
 #include <opencv2/opencv.hpp>
@@ -105,11 +106,11 @@ bool LeRobotBackend::open() {
   //info.json, stats.json, tasks.json, episode_stats.json
 
   std::ofstream info_file(meta_root_ / JSON_INFO);
-  std::ofstream episode_file(meta_root_ / JSONL_EPISODES);
-  std::ofstream tasks_file(meta_root_ / JSONL_TASKS);
-  std::ofstream episode_stats_file(meta_root_ / JSONL_EPISODE_STATS);
+      // std::ofstream episode_file(meta_root_ / JSONL_EPISODES);
+      // std::ofstream tasks_file(meta_root_ / JSONL_TASKS);
+      // std::ofstream episode_stats_file(meta_root_ / JSONL_EPISODE_STATS);
 
-  if (!info_file || !episode_file || !tasks_file || !episode_stats_file) {
+  if (!info_file /*|| !episode_file || !tasks_file || !episode_stats_file*/) {
     std::cerr << "Failed to create metadata files\n";
     return false;
   }
@@ -599,43 +600,73 @@ void LeRobotBackend::computeStatistics() const {
     }
   }
 
-  // // Compute image statistics for each camera
-  // for (const auto &camera_info : md_.camera_names) {
-  //   std::string image_key = "observation.images." + camera_info;
-  //   // Get image paths for the current episode and camera
-  //   std::string image_folder_path = images_root_.string();
+  // Compute image statistics for each camera
+  for (const auto &camera_info : camera_names_) {
 
-  //   std::ostringstream episode_folder_ss;
-  //   episode_folder_ss << "episode_" << std::setfill('0') << std::setw(6)
-  //                     << cfg_.episode_index;
-  //   std::string episode_folder_name = episode_folder_ss.str();
+    std::string image_key = "observation.images." + camera_info;
+    // Get image paths for the current episode and camera
+    std::string image_folder_path = images_root_.string();
 
-  //   // Construct the full path to the episode's image directory for the current
-  //   // camera
-  //   std::filesystem::path episode_image_dir =
-  //       std::filesystem::path(image_folder_path) / camera_info/ episode_folder_name;
-  //   if (!std::filesystem::exists(episode_image_dir)) {
-  //     std::cout << "Image directory does not exist: "
-  //               << episode_image_dir.string() << std::endl;
-  //     continue;
-  //   }
+    std::ostringstream episode_folder_ss;
+    episode_folder_ss << "episode_" << std::setfill('0') << std::setw(6)
+                      << cfg_.episode_index;
+    std::string episode_folder_name = episode_folder_ss.str();
 
-  //   // Collect all image file paths in the directory
-  //   std::vector<std::filesystem::path> paths;
-  //   for (const auto &entry :
-  //        std::filesystem::directory_iterator(episode_image_dir)) {
-  //     if (entry.is_regular_file()) {
-  //       std::string ext = entry.path().extension().string();
-  //       std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-  //       if (ext == ".jpg" || ext == ".png") {
-  //         paths.push_back(entry.path());
-  //       }
-  //     }
-  //   }
-  //   // Sample and process images to compute statistics
-  //   auto images = sample_images(paths);
-  //   stats[image_key]  = compute_image_stats(images);
-  // }
+    // Construct the full path to the episode's image directory for the current
+    // camera
+    std::filesystem::path episode_image_dir =
+        std::filesystem::path(image_folder_path) / camera_info/ episode_folder_name;
+    if (!std::filesystem::exists(episode_image_dir)) {
+      std::cout << "Image directory does not exist: "
+                << episode_image_dir.string() << std::endl;
+      continue;
+    }
+
+    // Collect all image file paths in the directory
+    std::vector<std::filesystem::path> paths;
+    for (const auto &entry :
+         std::filesystem::directory_iterator(episode_image_dir)) {
+      if (entry.is_regular_file()) {
+        std::string ext = entry.path().extension().string();
+        std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+        if (ext == ".jpg" || ext == ".png") {
+          paths.push_back(entry.path());
+        }
+      }
+    }
+    // Sample and process images to compute statistics
+    auto images = sample_images(paths);
+    stats[image_key]  = compute_image_stats(images);
+  }
+
+  // // Write to info.json
+  std::ofstream episode_stats_file(meta_root_ / JSONL_EPISODE_STATS, std::ios::app);
+
+  if (!episode_stats_file.is_open()) {
+    std::cerr << "Failed to open episode stats file for writing." << std::endl;
+    return;
+  }
+  episode_stats_file << stats.dump() << "\n";
+  episode_stats_file.close();
+  std::cout << "Metadata written to info.json successfully." << std::endl;
+
+
+  nlohmann::ordered_json episode_metadata;
+  episode_metadata["episode_index"] = cfg_.episode_index;
+  episode_metadata["tasks"] = {cfg_.task_name};
+  episode_metadata["length"] = table->num_rows();
+
+  std::ofstream episodes_file(meta_root_ / JSONL_EPISODES, std::ios::app);
+
+  if (!episodes_file.is_open()) {
+    std::cerr << "Failed to open episode stats file for writing." << std::endl;
+    return;
+  }
+  episodes_file << episode_metadata.dump() << "\n";
+  episodes_file.close();
+  std::cout << "Metadata written to info.json successfully." << std::endl;
+
+
   // TODO (shantanuparab-tr): Add this to metadata file
   printStatsTable(stats);
   
@@ -675,9 +706,6 @@ void LeRobotBackend::printStatsTable(const nlohmann::json& stats) const {
   }
   std::cout << "=================================================================\n";
 }
-}
-
-
 
 void LeRobotBackend::flush() {
   // TODO (shantanuparab-tr): flush parquet writer if needed
@@ -787,7 +815,7 @@ void LeRobotBackend::writeJointState(const data::RecordBase& base) {
     check_status(act_val->Append(v), "Failed to append action value");
 
   // Scalar columns
-  check_status(epi_idx_builder.Append(0), "Failed to append episode index");
+  check_status(epi_idx_builder.Append(cfg_.episode_index), "Failed to append episode index");
   check_status(frame_idx_builder.Append(frame_id), "Failed to append frame index");
   check_status(index_builder.Append(js.seq), "Failed to append global index");
   check_status(task_idx_builder.Append(0), "Failed to append task index");
@@ -1019,6 +1047,7 @@ void LeRobotBackend::writeMetadata() {
           features["observation.state"] = observation_state;
         }      
     } else if (metadata->type == "camera"){
+        camera_names_.push_back(metadata->id);
         if(metadata->is_mock){
           const auto &camera_metadata = dynamic_cast<const hw::camera::MockCameraProducer::MockCameraProducerMetadata&>(*metadata);
           nlohmann::ordered_json camera_feature;

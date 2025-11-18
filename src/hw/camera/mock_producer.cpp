@@ -20,7 +20,7 @@ MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
 
   // Populate metadata
   metadata_.type = "camera";
-  metadata_.id = "mock_camera_" + std::to_string(cfg_.seed);
+  metadata_.id = cfg_.stream_id;
   metadata_.name = "Mock Camera Producer";
   metadata_.description = "Produces synthetic camera frames for testing and diagnostics";
   metadata_.width = cfg_.width;

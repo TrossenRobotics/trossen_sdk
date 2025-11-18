@@ -350,6 +350,10 @@ private:
   Config cfg_;
   // Metadata for this backend
   std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata_;
+
+  // Store camera names from metadata for easy access
+  std::vector<std::string> camera_names_;
+  
   std::atomic<bool> image_worker_running_{false};
 
   // Basic stats
@@ -375,6 +379,7 @@ private:
   std::mutex write_mutex_;
   std::mutex open_mutex_;
   bool opened_{false};
+
   std::unordered_map<std::string, std::filesystem::path> image_dir_cache_;
 
 
