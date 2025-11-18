@@ -218,6 +218,7 @@ void LeRobotBackend::writeBatch(std::span<const data::RecordBase* const> records
 void LeRobotBackend::convert_to_videos() const {
   std::cout << "Encoding images to videos..." << std::endl;
 
+  // TODO (shantanuparab-tr): Use recorded fps from metadata if available
   const int fps = static_cast<int>(std::round(30.0)); // Use recorded fps if available
   const int episode_chunk = 0;
   const size_t max_concurrent_encoders = std::max<size_t>(2, std::thread::hardware_concurrency() / 2);
@@ -397,6 +398,18 @@ void LeRobotBackend::writeJointState(const data::RecordBase& base) {
 
   const auto& js = static_cast<const data::TeleopJointStateRecord&>(base);
 
+
+  // Frame indexing strategy for multi-source data streams:
+  //
+  // PROBLEM: Each data source (camera, sensor, etc.) produces frames with global sequence IDs,
+  // but we need local frame indices that reset to 0 at the start of each recording episode.
+  //
+  // SOLUTION: Track the starting sequence ID for each source, then calculate:
+  // frame_index = current_sequence_id - starting_sequence_id_for_this_source
+  //
+  // ASSUMPTION: The first sequence ID we observe from a source marks the beginning
+  // of a new episode for that source.
+
   if (source_frame_indices_.find(js.id) == source_frame_indices_.end()) {
     source_frame_indices_[js.id] = js.seq;
   }
@@ -486,6 +499,17 @@ void LeRobotBackend::writeImage(const data::RecordBase& base) {
     return;
   }
 
+  // Frame indexing strategy for multi-source data streams:
+  //
+  // PROBLEM: Each data source (camera, sensor, etc.) produces frames with global sequence IDs,
+  // but we need local frame indices that reset to 0 at the start of each recording episode.
+  //
+  // SOLUTION: Track the starting sequence ID for each source, then calculate:
+  // frame_index = current_sequence_id - starting_sequence_id_for_this_source
+  //
+  // ASSUMPTION: The first sequence ID we observe from a source marks the beginning
+  // of a new episode for that source.
+  
   if(source_frame_indices_.find(img.id) == source_frame_indices_.end()){
     source_frame_indices_[img.id] = img.seq;
     std::cout << "Initialized frame index for image id '" << img.id << "' to " << img.seq << std::endl;

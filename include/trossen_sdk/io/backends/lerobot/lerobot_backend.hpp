@@ -193,6 +193,9 @@ public:
    */
   void addMetadata(const Metadata& md);
 
+  /**
+   * @brief Convert recorded images to videos using FFmpeg
+   */
   void convert_to_videos() const;
 
   /// @brief Image encoding statistics
