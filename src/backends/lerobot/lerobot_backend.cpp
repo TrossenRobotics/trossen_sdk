@@ -666,9 +666,22 @@ void LeRobotBackend::computeStatistics() const {
   episodes_file.close();
   std::cout << "Metadata written to info.json successfully." << std::endl;
 
+  // TODO (shantanuparab-tr): Implement logic to check for existing task entrys
+  nlohmann::ordered_json task_metadata;
+  task_metadata["task_index"] = cfg_.episode_index;
+  task_metadata["task"] = cfg_.task_name;
+
+  std::ofstream tasks_file(meta_root_ / JSONL_TASKS, std::ios::app);
+
+  if (!tasks_file.is_open()) {
+    std::cerr << "Failed to open tasks file for writing." << std::endl;
+    return;
+  }
+  tasks_file << task_metadata.dump() << "\n";
+  
 
   // TODO (shantanuparab-tr): Add this to metadata file
-  printStatsTable(stats);
+  // printStatsTable(stats);
   
 }
 
@@ -1006,9 +1019,30 @@ void LeRobotBackend::writeMetadata() {
   // observation space and action space
   // TODO(shantanuparab-tr): [TDS-16]: Get feature specifications from a
   // configuration file or constant definitions
-  //  Action
+  
 
   nlohmann::ordered_json info_;
+
+  // Miscellaneous Feature (Initialization with placeholder values)
+
+  info_["codebase_version"] = "v2.1"; // TODO(shantanuparab-tr): [TDS-24]: Update codebase version dynamically (Uses LeRobot version for now)
+  info_["robot_type"] = cfg_.robot_name;
+
+  info_["total_episodes"] = 0;
+  info_["total_frames"] = 0;
+  // TODO(shantanuparab-tr): [TDS-25]: Update total tasks based on total number
+  // of unique tasks
+  info_["total_tasks"] = 1;
+  // TODO(shantanuparab-tr): [TDS-26] Update chunks based on total number of
+  // episodes
+  info_["total_chunks"] = 1;
+  // TODO(shantanuparab-tr): [TDS-27] Add appropriate logic to decide chunk size
+  info_["chunks_size"] = 1000;
+  // TODO(shantanuparab-tr): [TDS-28] Update fps based on robot/control
+  // configuration
+  info_["fps"] = 30;
+  info_["splits"]["train"] = "0:0";
+
   nlohmann::ordered_json features;
 
   for(const auto &metadata : metadata_ ){
@@ -1111,23 +1145,6 @@ void LeRobotBackend::writeMetadata() {
   features["task_index"] = task_index_feature;  
 
   info_["features"] = features;
-
-  // Miscellaneous Feature (Initialization with placeholder values)
-  info_["total_episodes"] = 0;
-  info_["total_frames"] = 0;
-  // TODO(shantanuparab-tr): [TDS-25]: Update total tasks based on total number
-  // of unique tasks
-  info_["total_tasks"] = 1;
-  // TODO(shantanuparab-tr): [TDS-26] Update chunks based on total number of
-  // episodes
-  info_["total_chunks"] = 1;
-  // TODO(shantanuparab-tr): [TDS-27] Add appropriate logic to decide chunk size
-  info_["chunks_size"] = 1000;
-  // TODO(shantanuparab-tr): [TDS-28] Update fps based on robot/control
-  // configuration
-  info_["fps"] = 30;
-  info_["splits"]["train"] = "0:0";
-
 
   // // Write to info.json
   std::ofstream info_file(meta_root_ / JSON_INFO);

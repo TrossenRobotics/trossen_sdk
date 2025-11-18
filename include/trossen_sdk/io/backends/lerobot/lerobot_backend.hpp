@@ -100,6 +100,9 @@ public:
     // Episode index (for organizing output)
     uint32_t episode_index{0};
 
+    // Robot name
+    std::string robot_name{"trossen_ai_generic"};
+
   };
 
   /**
