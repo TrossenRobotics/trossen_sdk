@@ -88,6 +88,7 @@ bool LeRobotBackend::open() {
   }
 
   // Create Video Directories
+  // TODO (shantanuparab-tr): Use chunk size to create chunk folders
   videos_root_ = root_ / "videos" / "chunk_000000" / oss.str();
   try {
     fs::create_directories(videos_root_);

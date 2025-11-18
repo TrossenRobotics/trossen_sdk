@@ -7,7 +7,6 @@
 #ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_BACKEND_HPP
 #define TROSSEN_SDK__IO__BACKENDS__LEROBOT_BACKEND_HPP
 
-// Standard library headers
 #include <atomic>
 #include <condition_variable>
 #include <deque>
@@ -16,14 +15,10 @@
 #include <mutex>
 #include <thread>
 #include <unordered_map>
-
-// Third-party library headers
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <nlohmann/json.hpp>
 #include <parquet/arrow/writer.h>
-
-// Internal headers
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_constants.hpp"
 
@@ -191,7 +186,11 @@ public:
    */
   void close() override;
 
-
+  /**
+   * @brief Add metadata to be written to info.json
+   *
+   * @param md Metadata to add
+   */
   void addMetadata(const Metadata& md);
 
   /// @brief Image encoding statistics
