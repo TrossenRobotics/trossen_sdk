@@ -240,7 +240,6 @@ public:
    */
   std::vector<cv::Mat> sample_images(
     const std::vector<std::filesystem::path> &image_paths) const;
-      const std::vector<std::filesystem::path> &image_paths) const;
 
   /**
    * @brief Automatically downsample an image to a target size

@@ -3,6 +3,7 @@
 #include <iomanip>
 #include <sstream>
 #include "opencv2/imgcodecs.hpp"
+#include <opencv2/opencv.hpp>
 #include <parquet/arrow/reader.h>
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
@@ -685,6 +686,7 @@ void LeRobotBackend::printStatsTable(const nlohmann::json& stats) const {
   }
   std::cout << "=================================================================\n";
 }
+}
 
 
 
@@ -1088,7 +1090,5 @@ void LeRobotBackend::addMetadata(const Metadata& md) {
   info_file << info_.dump(4);
   info_file.close();
   std::cout << "Metadata written to info.json successfully." << std::endl;
-
-}
-
+  }
 } // namespace trossen::io::backends
