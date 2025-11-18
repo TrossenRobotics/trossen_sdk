@@ -373,6 +373,10 @@ void LeRobotBackend::convert_to_videos() const {
 
   std::vector<cv::Mat> LeRobotBackend::sample_images(
       const std::vector<std::filesystem::path> &image_paths) const {
+    if (image_paths.empty()) {
+      return {};
+    }
+    
     // Sample indices using power law distribution
     auto indices = sample_indices(image_paths.size());
 

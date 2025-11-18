@@ -239,6 +239,7 @@ public:
    * @return Vector of OpenCV Mat objects representing the sampled images
    */
   std::vector<cv::Mat> sample_images(
+    const std::vector<std::filesystem::path> &image_paths) const;
       const std::vector<std::filesystem::path> &image_paths) const;
 
   /**
@@ -248,8 +249,10 @@ public:
    * @param max_threshold Maximum threshold for downsampling (default is 300)
    * @return Downsampled OpenCV Mat object
    */
-  cv::Mat auto_downsample(const cv::Mat &img, int target_size = 150,
-                          int max_threshold = 300) const;
+  cv::Mat auto_downsample(
+    const cv::Mat &img,
+    int target_size = 150,
+    int max_threshold = 300) const;
 
   /**
    * @brief Sample indices for selecting images from a dataset
@@ -259,8 +262,11 @@ public:
    * @param power Power factor for sampling distribution (default is 0.75)
    * @return Vector of sampled indices
    */
-  std::vector<int> sample_indices(int dataset_len, int min_samples = 100,
-                                  int max_samples = 10000, float power = 0.75f) const;
+  std::vector<int> sample_indices(
+    int dataset_len,
+    int min_samples = 100,
+    int max_samples = 10000,
+    float power = 0.75f) const;
 
 
 
