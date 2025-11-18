@@ -267,9 +267,6 @@ public:
     int max_samples = 10000,
     float power = 0.75f) const;
 
-
-
-
   /// @brief Image encoding statistics
   struct ImageEncodeStats {
 

@@ -341,10 +341,7 @@ void LeRobotBackend::convert_to_videos() const {
 }
 
 
-  std::vector<int> LeRobotBackend::sample_indices(int dataset_len,
-                                                    int min_samples,
-                                                    int max_samples,
-                                                    float power) const {
+  std::vector<int> LeRobotBackend::sample_indices(int dataset_len, int min_samples, int max_samples, float power) const {
     // Calculate the number of samples based on the power law
     // Clamp the number of samples between min_samples and max_samples
     int num_samples = std::clamp(static_cast<int>(std::pow(dataset_len, power)),
@@ -355,8 +352,7 @@ void LeRobotBackend::convert_to_videos() const {
     return indices;
   }
 
-  cv::Mat LeRobotBackend::auto_downsample(const cv::Mat &img, int target_size,
-                                            int max_threshold) const{
+  cv::Mat LeRobotBackend::auto_downsample(const cv::Mat &img, int target_size, int max_threshold) const{
     int h = img.rows;
     int w = img.cols;
     // If the larger dimension is already below the max threshold, return the
@@ -402,8 +398,7 @@ void LeRobotBackend::convert_to_videos() const {
     return images;
   }
 
-  nlohmann::json LeRobotBackend::compute_image_stats (
-    const std::vector<cv::Mat> &images) const{
+  nlohmann::json LeRobotBackend::compute_image_stats (const std::vector<cv::Mat> &images) const{
     nlohmann::json stats_json;
     if (images.empty()) {
       std::cout << "No images provided." << std::endl;
@@ -412,7 +407,7 @@ void LeRobotBackend::convert_to_videos() const {
       stats_json["mean"] = {};
       stats_json["std"] = {};
       stats_json["count"] = {0};
-    return stats_json;
+      return stats_json;
     }
 
     int num_channels = images[0].channels();
@@ -422,16 +417,16 @@ void LeRobotBackend::convert_to_videos() const {
     std::vector<std::vector<float>> channel_values(num_channels);
 
     for (const auto &img : images) {
-    std::vector<cv::Mat> channels;
-    cv::split(img, channels);
+      std::vector<cv::Mat> channels;
+      cv::split(img, channels);
 
-    for (int c = 0; c < num_channels; ++c) {
-      // Flatten and push pixels into channel_values[c]
-      channel_values[c].insert(
-        channel_values[c].end(),
-        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].datastart)),
-        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].dataend)));
-    }
+      for (int c = 0; c < num_channels; ++c) {
+        // Flatten and push pixels into channel_values[c]
+        channel_values[c].insert(
+          channel_values[c].end(),
+          reinterpret_cast<float *>(const_cast<uchar *>(channels[c].datastart)),
+          reinterpret_cast<float *>(const_cast<uchar *>(channels[c].dataend)));
+      }
     }
 
     // Helper lambda to convert a vector to a nested JSON array
@@ -445,17 +440,17 @@ void LeRobotBackend::convert_to_videos() const {
 
     std::vector<float> min_vals, max_vals, mean_vals, std_vals;
     for (int c = 0; c < num_channels; ++c) {
-    cv::Mat channel_mat(channel_values[c]);
-    cv::Scalar mean, stddev;
-    cv::meanStdDev(channel_mat, mean, stddev);
+      cv::Mat channel_mat(channel_values[c]);
+      cv::Scalar mean, stddev;
+      cv::meanStdDev(channel_mat, mean, stddev);
 
-    double min_val, max_val;
-    cv::minMaxLoc(channel_mat, &min_val, &max_val);
+      double min_val, max_val;
+      cv::minMaxLoc(channel_mat, &min_val, &max_val);
 
-    min_vals.push_back(static_cast<float>(min_val));
-    max_vals.push_back(static_cast<float>(max_val));
-    mean_vals.push_back(static_cast<float>(mean[0]));
-    std_vals.push_back(static_cast<float>(stddev[0]));
+      min_vals.push_back(static_cast<float>(min_val));
+      max_vals.push_back(static_cast<float>(max_val));
+      mean_vals.push_back(static_cast<float>(mean[0]));
+      std_vals.push_back(static_cast<float>(stddev[0]));
     }
 
     stats_json["min"] = to_nested(min_vals);
