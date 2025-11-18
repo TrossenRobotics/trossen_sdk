@@ -54,7 +54,6 @@ public:
 
     /// @brief Observation feature data type
     std::string observation_dtype;
-
   };
 
   /**

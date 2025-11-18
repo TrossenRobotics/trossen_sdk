@@ -29,8 +29,6 @@ struct ProducerStats {
   uint64_t warmup_discarded{0};
 };
 
-
-
 /**
  * @brief PolledProducer: scheduler calls poll() periodically; implementation may emit 0 or more records.
  */
@@ -130,9 +128,6 @@ public:
    * @return const reference to ProducerStats
    */
   const ProducerStats& stats() const {return stats_; };
-
-  
-
 protected:
   /// @brief Whether we've opened the device
   bool opened_{false};

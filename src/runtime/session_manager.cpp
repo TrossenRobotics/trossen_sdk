@@ -438,8 +438,6 @@ std::shared_ptr<io::Backend> SessionManager::create_backend(
   }
 }
 
-
-
 void SessionManager::monitor_duration() {
   while (monitoring_active_ && episode_active_) {
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
