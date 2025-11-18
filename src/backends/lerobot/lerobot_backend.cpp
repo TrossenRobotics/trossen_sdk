@@ -1,11 +1,9 @@
 
 #include <iostream>
-#include <parquet/arrow/reader.h>
-#include <sstream>
 #include <iomanip>
-
+#include <sstream>
 #include "opencv2/imgcodecs.hpp"
-
+#include <parquet/arrow/reader.h>
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
 
@@ -488,38 +486,38 @@ void LeRobotBackend::computeStatistics() const {
 }
 
 void LeRobotBackend::printStatsTable(const nlohmann::json& stats) const {
-    std::cout << "\n================ Episode: " << cfg_.episode_index << " ================\n";
-    for (auto it = stats.begin(); it != stats.end(); ++it) {
-        const std::string& column_name = it.key();
-        const auto& metrics = it.value();
-        std::cout << "\n================ " << column_name << " ================\n";
-        std::cout << std::left << std::setw(12) << "metric" << " | values\n";
-        std::cout << "-----------------------------------------------\n";
+  std::cout << "\n================ Episode: " << cfg_.episode_index << " ================\n";
+  for (auto it = stats.begin(); it != stats.end(); ++it) {
+      const std::string& column_name = it.key();
+      const auto& metrics = it.value();
+      std::cout << "\n================ " << column_name << " ================\n";
+      std::cout << std::left << std::setw(12) << "metric" << " | values\n";
+      std::cout << "-----------------------------------------------\n";
 
-        for (auto mit = metrics.begin(); mit != metrics.end(); ++mit) {
-            const std::string& metric_name = mit.key();
-            const auto& arr = mit.value();
+      for (auto mit = metrics.begin(); mit != metrics.end(); ++mit) {
+          const std::string& metric_name = mit.key();
+          const auto& arr = mit.value();
 
-            std::cout << std::left << std::setw(12) << metric_name << " | ";
+          std::cout << std::left << std::setw(12) << metric_name << " | ";
 
-            // If metric value is a list of numbers → print inline
-            if (arr.is_array()) {
-                for (size_t i = 0; i < arr.size(); i++) {
-                    std::cout << std::fixed << std::setprecision(4)
-                              << arr[i].get<double>();
+          // If metric value is a list of numbers → print inline
+          if (arr.is_array()) {
+              for (size_t i = 0; i < arr.size(); i++) {
+                  std::cout << std::fixed << std::setprecision(4)
+                            << arr[i].get<double>();
 
-                    if (i + 1 < arr.size())
-                        std::cout << "  ";
-                }
-            } else {
-                // Single scalar (should not happen in your structure)
-                std::cout << arr.dump();
-            }
+                  if (i + 1 < arr.size())
+                      std::cout << "  ";
+              }
+          } else {
+              // Single scalar
+              std::cout << arr.dump();
+          }
 
-            std::cout << "\n";
-        }
-    }
-    std::cout << "=================================================================\n";
+          std::cout << "\n";
+      }
+  }
+  std::cout << "=================================================================\n";
 }
 
 void LeRobotBackend::flush() {
