@@ -36,6 +36,7 @@ struct RecordBase {
  * @brief Joint state sample (positions, velocities, efforts).
  */
 struct JointStateRecord : public RecordBase {
+
   // Joint positions (rad or m)
   std::vector<float> positions;
 
@@ -79,6 +80,50 @@ struct JointStateRecord : public RecordBase {
     positions = pos_f;
     velocities = vel_f;
     efforts = eff_f;
+  }
+};
+
+
+/**
+ * @brief Joint state sample (positions, velocities, efforts).
+ */
+struct TeleopJointStateRecord : public RecordBase {
+  // Joint actions (homogeneous float features)
+  std::vector<float> actions;
+
+  // Joint observations (homogeneous float features)
+  std::vector<float> observations;
+
+  TeleopJointStateRecord() = default;
+
+  // Convenience constructor used by examples where source vectors are double
+  TeleopJointStateRecord(
+    const Timestamp& ts_,
+    uint64_t seq_,
+    std::string id_,
+    const std::vector<double>& act_d,
+    const std::vector<double>& obs_d)
+  {
+    ts = ts_;
+    seq = seq_;
+    id = std::move(id_);
+    actions.assign(act_d.begin(), act_d.end());
+    observations.assign(obs_d.begin(), obs_d.end());
+  }
+
+  // Overload taking float vectors directly (avoids reallocations in synthetic producers)
+  TeleopJointStateRecord(
+    const Timestamp& ts_,
+    uint64_t seq_,
+    std::string id_,
+    const std::vector<float>& act_f,
+    const std::vector<float>& obs_f)
+  {
+    ts = ts_;
+    seq = seq_;
+    id = std::move(id_);
+    actions = act_f;
+    observations = obs_f;
   }
 };
 

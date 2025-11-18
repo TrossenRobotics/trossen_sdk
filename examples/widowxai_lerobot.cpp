@@ -26,9 +26,10 @@
 
 #include "demo_utils.hpp"
 #include "libtrossen_arm/trossen_arm.hpp"
+#include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
-#include "trossen_sdk/hw/arm/arm_producer.hpp"
-#include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
+#include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
+#include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 
@@ -268,25 +269,28 @@ int main(int argc, char** argv) {
   // Joint state producer (arm or mock)
   std::shared_ptr<trossen::hw::PolledProducer> joint_producer;
   if (cfg.use_mock) {
-    trossen::hw::arm::MockJointStateProducer::Config joint_cfg{
+    trossen::hw::arm::TeleopMockJointStateProducer::Config joint_cfg{
       6,                              // num_joints
       cfg.joint_rate_hz,              // rate_hz
-      "follower/joint_states",        // stream_id
+      "teleop_robot/joint_states",        // stream_id
       1.0                             // motion_scale
     };
-    joint_producer = std::make_shared<trossen::hw::arm::MockJointStateProducer>(joint_cfg);
+    joint_producer = std::make_shared<trossen::hw::arm::TeleopMockJointStateProducer>(joint_cfg);
     std::cout << "  ✓ Mock joint state producer (" << cfg.joint_rate_hz << " Hz, 6 joints)\n";
   } else {
-    trossen::hw::arm::TrossenArmProducer::Config joint_cfg;
-    joint_cfg.stream_id = "follower/joint_states";
+    trossen::hw::arm::TeleopTrossenArmProducer::Config joint_cfg;
+    joint_cfg.stream_id = "teleop_robot/joint_states";
     joint_cfg.use_device_time = false;
 
     // Wrap follower_driver in shared_ptr (non-owning wrapper since we manage lifetime)
     auto follower_shared = std::shared_ptr<trossen_arm::TrossenArmDriver>(
       follower_driver.get(), [](trossen_arm::TrossenArmDriver*){});
 
-    joint_producer = std::make_shared<trossen::hw::arm::TrossenArmProducer>(
-      follower_shared, joint_cfg);
+    auto leader_shared = std::shared_ptr<trossen_arm::TrossenArmDriver>(
+      leader_driver.get(), [](trossen_arm::TrossenArmDriver*){});
+
+    joint_producer = std::make_shared<trossen::hw::arm::TeleopTrossenArmProducer>(
+      leader_shared, follower_shared, joint_cfg);
     std::cout << "  ✓ Follower arm producer (" << cfg.joint_rate_hz << " Hz)\n";
   }
 
@@ -300,7 +304,7 @@ int main(int argc, char** argv) {
     cam_cfg.width = cfg.camera_width;
     cam_cfg.height = cfg.camera_height;
     cam_cfg.fps = cfg.camera_fps;
-    cam_cfg.stream_id = "camera/image";
+    cam_cfg.stream_id = "camera_main";
     cam_cfg.encoding = "bgr8";
     cam_cfg.pattern = trossen::hw::camera::MockCameraProducer::Pattern::Gradient;
     cam_cfg.warmup_frames = 3;
@@ -310,7 +314,7 @@ int main(int argc, char** argv) {
   } else {
     trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
     cam_cfg.device_index = cfg.camera_index;
-    cam_cfg.stream_id = "camera/image";
+    cam_cfg.stream_id = "camera_main";
     cam_cfg.encoding = "bgr8";
     cam_cfg.width = cfg.camera_width;
     cam_cfg.height = cfg.camera_height;

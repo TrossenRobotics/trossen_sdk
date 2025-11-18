@@ -27,6 +27,7 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   // Read robot output, save timestamp and joint states
   robot_output_ = driver_->get_robot_output();
   uint64_t device_ts = robot_output_.header.timestamp;
+  // TODO [shantanuparab-tr]: Get actions from the leader arm
   pos_d_ = robot_output_.joint.all.positions;
   vel_d_ = robot_output_.joint.all.velocities;
   eff_d_ = robot_output_.joint.all.efforts;

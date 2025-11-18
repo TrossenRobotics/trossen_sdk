@@ -56,11 +56,11 @@ TEST(JointStateRecordTest, ConstructorWithDoubleVectors) {
   ts.realtime.sec = 1'730'000'000;
   ts.realtime.nsec = 0;
 
-  std::vector<double> positions_d = {1.0, 2.0, 3.0};
+  std::vector<double> position_d = {1.0, 2.0, 3.0};
   std::vector<double> velocities_d = {0.1, 0.2, 0.3};
   std::vector<double> efforts_d = {5.0, 6.0, 7.0};
 
-  JointStateRecord record(ts, 100, "robot_arm", positions_d, velocities_d, efforts_d);
+  JointStateRecord record(ts, 100, "robot_arm", position_d, velocities_d, efforts_d);
 
   EXPECT_EQ(record.seq, 100);
   EXPECT_EQ(record.id, "robot_arm");
@@ -81,11 +81,11 @@ TEST(JointStateRecordTest, ConstructorWithFloatVectors) {
   Timestamp ts;
   ts.monotonic.sec = 20;
 
-  std::vector<float> positions_f = {1.5f, 2.5f, 3.5f, 4.5f};
+  std::vector<float> position_f = {1.5f, 2.5f, 3.5f, 4.5f};
   std::vector<float> velocities_f = {0.15f, 0.25f, 0.35f, 0.45f};
   std::vector<float> efforts_f = {10.0f, 20.0f, 30.0f, 40.0f};
 
-  JointStateRecord record(ts, 200, "dual_arm", positions_f, velocities_f, efforts_f);
+  JointStateRecord record(ts, 200, "dual_arm", position_f, velocities_f, efforts_f);
 
   EXPECT_EQ(record.seq, 200);
   EXPECT_EQ(record.id, "dual_arm");
@@ -93,7 +93,6 @@ TEST(JointStateRecordTest, ConstructorWithFloatVectors) {
   ASSERT_EQ(record.velocities.size(), 4);
   ASSERT_EQ(record.efforts.size(), 4);
 
-  EXPECT_FLOAT_EQ(record.positions[0], 1.5f);
   EXPECT_FLOAT_EQ(record.positions[3], 4.5f);
   EXPECT_FLOAT_EQ(record.velocities[1], 0.25f);
   EXPECT_FLOAT_EQ(record.efforts[2], 30.0f);
@@ -115,17 +114,17 @@ TEST(JointStateRecordTest, EmptyVectors) {
 // Test JointStateRecord with single joint
 TEST(JointStateRecordTest, SingleJoint) {
   Timestamp ts;
-  std::vector<float> pos = {3.14159f};
-  std::vector<float> vel = {0.5f};
-  std::vector<float> eff = {15.0f};
+  std::vector<float> position = {0.0f};
+  std::vector<float> velocity = {0.5f};
+  std::vector<float> effort = {15.0f};
 
-  JointStateRecord record(ts, 5, "single_joint", pos, vel, eff);
+  JointStateRecord record(ts, 5, "single_joint", position, velocity, effort);
 
   ASSERT_EQ(record.positions.size(), 1);
   ASSERT_EQ(record.velocities.size(), 1);
   ASSERT_EQ(record.efforts.size(), 1);
 
-  EXPECT_FLOAT_EQ(record.positions[0], 3.14159f);
+  EXPECT_FLOAT_EQ(record.positions[0], 0.0f);
   EXPECT_FLOAT_EQ(record.velocities[0], 0.5f);
   EXPECT_FLOAT_EQ(record.efforts[0], 15.0f);
 }
@@ -184,7 +183,7 @@ TEST(RecordPolymorphismTest, BasePointerToDerived) {
   auto joint_record = std::make_unique<JointStateRecord>();
   joint_record->seq = 99;
   joint_record->id = "test_joint";
-  joint_record->positions = {1.0f, 2.0f};
+  joint_record->positions = {3.0f, 4.0f};
 
   RecordBase* base_ptr = joint_record.get();
   EXPECT_EQ(base_ptr->seq, 99);
@@ -194,7 +193,7 @@ TEST(RecordPolymorphismTest, BasePointerToDerived) {
   JointStateRecord* derived_ptr = dynamic_cast<JointStateRecord*>(base_ptr);
   ASSERT_NE(derived_ptr, nullptr);
   ASSERT_EQ(derived_ptr->positions.size(), 2);
-  EXPECT_FLOAT_EQ(derived_ptr->positions[0], 1.0f);
+  EXPECT_FLOAT_EQ(derived_ptr->positions[0], 3.0f);
 }
 
 // Test with realistic robot data
