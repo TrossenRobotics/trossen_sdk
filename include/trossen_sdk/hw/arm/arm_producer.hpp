@@ -28,12 +28,6 @@ public:
     /// @brief Robot model
     std::string arm_model;
 
-    /// @brief Firmware version
-    std::string firmware_version;
-
-    /// @brief Number of joints
-    size_t num_joints;
-
     /// @brief Joint names
     std::vector<std::string> joint_names;
 

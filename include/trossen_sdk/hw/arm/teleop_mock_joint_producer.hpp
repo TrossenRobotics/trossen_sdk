@@ -36,32 +36,20 @@ public:
     /// @brief Robot name
     std::string robot_name;
 
-    /// @brief Leader arm model
-    std::string leader_arm_model;
-
-    /// @brief Leader firmware version
-    std::string leader_firmware_version;
-
-    /// @brief Follower arm model
-    std::string follower_arm_model;
-
-    /// @brief Follower firmware version
-    std::string follower_firmware_version;
-
     /// @brief Action feature names
     std::vector<std::string> action_feature_names;
     
     /// @brief Observation feature names
     std::vector<std::string> observation_feature_names;
 
-    /// @brief Gripper type
-    std::string gripper_type;
-
     /// @brief Action feature data type
     std::string action_dtype;
 
     /// @brief Observation feature data type
     std::string observation_dtype;
+
+    /// @brief Is Mock
+    bool is_mock{true};
 
   };
 

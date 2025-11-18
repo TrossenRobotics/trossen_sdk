@@ -21,22 +21,19 @@ TeleopTrossenArmProducer::TeleopTrossenArmProducer(
     leader_robot_output_ = leader_driver_->get_robot_output();
     follower_robot_output_ = follower_driver_->get_robot_output();
   }
-
+  // TODO (shantanuparab-tr): Extract robot info from user config or driver
   // Populate metadata
   metadata_.type = "teleop_arm";
   metadata_.id = cfg_.stream_id;
   metadata_.name = "Teleop Trossen Arm Producer";
   metadata_.description = "Produces teleoperation joint states from leader and follower Trossen Arms via TrossenArmDriver";
   metadata_.robot_name = "Trossen AI Bimanual"; // TODO: Extract from driver/User Config
-  metadata_.leader_arm_model = "WIDOWX_AI"; // TODO: Extract from driver/User Config
-  metadata_.follower_arm_model = "WIDOWX_AI"; // TODO: Extract from driver/User Config
-  metadata_.leader_firmware_version = "v1.9.0"; // TODO: Extract from driver / Remove
-  metadata_.follower_firmware_version = "v1.9.0"; // TODO: Extract from driver / Remove
   metadata_.action_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
   metadata_.observation_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
-  metadata_.gripper_type = "STANDARD"; // TODO: Extract from driver / User Config
   metadata_.action_dtype = "float32";
   metadata_.observation_dtype = "float32";
+
+  metadata_.is_mock = false;
 
 }
 

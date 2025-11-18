@@ -985,119 +985,119 @@ void LeRobotBackend::writeMetadata() {
 
   for(const auto &metadata : metadata_ ){
 
-    std::cout << "Processing Metadata Type: " << metadata->type << std::endl;
-    // Check for type if is ArmMetadata
-    if (metadata->type == "arm"){
-      std::cout << "Arm Metadata found" << std::endl;
-      std::cout << "Type: " << metadata->type << std::endl;
-      std::cout << "No support is available for Arm Metadata" << std::endl;
-    } else if (metadata->type == "mock_teleop_arm"){
-      // Type cast
-      const auto &teleop_arm_metadata = dynamic_cast<const hw::arm::TeleopMockJointStateProducer::TeleopMockJointStateProducerMetadata&>(*metadata);
-      
-      nlohmann::ordered_json action;
-      std::cout << "Action Dtype: " << teleop_arm_metadata.action_dtype << std::endl;
-      action["dtype"] = teleop_arm_metadata.action_dtype;
-      action["shape"] = {static_cast<int>(teleop_arm_metadata.action_feature_names.size())};
-      action["names"] = teleop_arm_metadata.action_feature_names;
+   if (metadata->type == "teleop_arm"){
+        if(metadata->is_mock){
+          const auto &teleop_arm_metadata = dynamic_cast<const hw::arm::TeleopMockJointStateProducer::TeleopMockJointStateProducerMetadata&>(*metadata);
+        
+          nlohmann::ordered_json action;
+          action["dtype"] = teleop_arm_metadata.action_dtype;
+          action["shape"] = {static_cast<int>(teleop_arm_metadata.action_feature_names.size())};
+          action["names"] = teleop_arm_metadata.action_feature_names;
 
-      nlohmann::ordered_json observation_state;
-      std::cout << "Observation Dtype: " << teleop_arm_metadata.observation_dtype << std::endl;
-      observation_state["dtype"] = teleop_arm_metadata.observation_dtype;
-      observation_state["shape"] = {
-          static_cast<int>(teleop_arm_metadata.observation_feature_names.size())};
-      observation_state["names"] = teleop_arm_metadata.observation_feature_names;
+          nlohmann::ordered_json observation_state;
+          observation_state["dtype"] = teleop_arm_metadata.observation_dtype;
+          observation_state["shape"] = {
+              static_cast<int>(teleop_arm_metadata.observation_feature_names.size())};
+          observation_state["names"] = teleop_arm_metadata.observation_feature_names;
+          features["action"] = action;
+          features["observation.state"] = observation_state;
 
-      features["action"] = action;
-      features["observation.state"] = observation_state;
-      
+        } else {
+          const auto &teleop_arm_metadata = dynamic_cast<const hw::arm::TeleopTrossenArmProducer::TeleopTrossenArmProducerMetadata&>(*metadata);
+        
+          nlohmann::ordered_json action;
+          action["dtype"] = teleop_arm_metadata.action_dtype;
+          action["shape"] = {static_cast<int>(teleop_arm_metadata.action_feature_names.size())};
+          action["names"] = teleop_arm_metadata.action_feature_names;
+
+          nlohmann::ordered_json observation_state;
+          observation_state["dtype"] = teleop_arm_metadata.observation_dtype;
+          observation_state["shape"] = {
+              static_cast<int>(teleop_arm_metadata.observation_feature_names.size())};
+          observation_state["names"] = teleop_arm_metadata.observation_feature_names;
+          features["action"] = action;
+          features["observation.state"] = observation_state;
+        }      
     } else if (metadata->type == "camera"){
-      const auto &camera_metadata = dynamic_cast<const hw::camera::MockCameraProducer::MockCameraProducerMetadata&>(*metadata);
-      nlohmann::ordered_json camera_feature;
-      camera_feature["dtype"] = "video";
-      camera_feature["shape"] = {camera_metadata.height, camera_metadata.width, 3};
-      camera_feature["names"] = {"height", "width", "channels"};
-      camera_feature["info"] = {
-          {"video.fps", camera_metadata.fps},           {"video.height", camera_metadata.height},
-          {"video.width", camera_metadata.width},       {"video.channels", 3},
-          {"video.codec", "av1"},                {"video.pix_fmt", "yuv420p"},
-          {"video.is_depth_map", (camera_metadata.is_depth_map)}, {"has_audio", false}};
-      features["observation.images." + camera_metadata.id] = camera_feature;
+        if(metadata->is_mock){
+          const auto &camera_metadata = dynamic_cast<const hw::camera::MockCameraProducer::MockCameraProducerMetadata&>(*metadata);
+          nlohmann::ordered_json camera_feature;
+          camera_feature["dtype"] = "video";
+          camera_feature["shape"] = {camera_metadata.height, camera_metadata.width, 3};
+          camera_feature["names"] = {"height", "width", "channels"};
+          camera_feature["info"] = {
+              {"video.fps", camera_metadata.fps},           {"video.height", camera_metadata.height},
+              {"video.width", camera_metadata.width},       {"video.channels", camera_metadata.channels},
+              {"video.codec", camera_metadata.codec},                {"video.pix_fmt", camera_metadata.pix_fmt},
+              {"video.is_depth_map", (camera_metadata.is_depth_map)}, {"has_audio", camera_metadata.has_audio}};
+          features["observation.images." + camera_metadata.id] = camera_feature;
+        } else {
+          const auto &camera_metadata = dynamic_cast<const hw::camera::OpenCvCameraProducer::OpenCvCameraProducerMetadata&>(*metadata);
+          nlohmann::ordered_json camera_feature;
+          camera_feature["dtype"] = "video";
+          camera_feature["shape"] = {camera_metadata.height, camera_metadata.width, 3};
+          camera_feature["names"] = {"height", "width", "channels"};
+          camera_feature["info"] = {
+              {"video.fps", camera_metadata.fps},           {"video.height", camera_metadata.height},
+              {"video.width", camera_metadata.width},       {"video.channels", camera_metadata.channels},
+              {"video.codec", camera_metadata.codec},                {"video.pix_fmt", camera_metadata.pix_fmt},
+              {"video.is_depth_map", (camera_metadata.is_depth_map)}, {"has_audio", camera_metadata.has_audio}};
+          features["observation.images." + camera_metadata.id] = camera_feature;
+        }
     }
   }
 
-
+  // Common Feature these can be moved to a constants file later
   
 
-  // nlohmann::ordered_json timestamp_feature;
-  // timestamp_feature["dtype"] = "float32";
-  // timestamp_feature["shape"] = {1};
-  // timestamp_feature["names"] = {};
+  nlohmann::ordered_json timestamp_feature;
+  timestamp_feature["dtype"] = "float32";
+  timestamp_feature["shape"] = {1};
+  timestamp_feature["names"] = {};
 
-  // nlohmann::ordered_json frame_index_feature;
-  // frame_index_feature["dtype"] = "int64";
-  // frame_index_feature["shape"] = {1};
-  // frame_index_feature["names"] = {};
+  nlohmann::ordered_json frame_index_feature;
+  frame_index_feature["dtype"] = "int64";
+  frame_index_feature["shape"] = {1};
+  frame_index_feature["names"] = {};
 
-  // nlohmann::ordered_json episode_index_feature;
-  // episode_index_feature["dtype"] = "int64";
-  // episode_index_feature["shape"] = {1};
-  // episode_index_feature["names"] = {};
+  nlohmann::ordered_json episode_index_feature;
+  episode_index_feature["dtype"] = "int64";
+  episode_index_feature["shape"] = {1};
+  episode_index_feature["names"] = {};
 
-  // nlohmann::ordered_json index_feature;
-  // index_feature["dtype"] = "int64";
-  // index_feature["shape"] = {1};
-  // index_feature["names"] = {};
+  nlohmann::ordered_json index_feature;
+  index_feature["dtype"] = "int64";
+  index_feature["shape"] = {1};
+  index_feature["names"] = {};
 
-  // nlohmann::ordered_json task_index_feature;
-  // task_index_feature["dtype"] = "int64";
-  // task_index_feature["shape"] = {1};
-  // task_index_feature["names"] = {};
-
-  // nlohmann::ordered_json features;
+  nlohmann::ordered_json task_index_feature;
+  task_index_feature["dtype"] = "int64";
+  task_index_feature["shape"] = {1};
+  task_index_feature["names"] = {};
   
-  // features["timestamp"] = timestamp_feature;
-  // features["frame_index"] = frame_index_feature;
-  // features["episode_index"] = episode_index_feature;
-  // features["index"] = index_feature;
-  // features["task_index"] = task_index_feature;
-
-  // // Assuming robot.get_camera_features() returns a list of camera identifiers
-  // for (const auto &cam_info : md.camera_names) {
-  //   // Add camera features
-  //   // TODO(shantanuparab-tr): [TDS-16]: Get camera specifications from a
-  //   // configuration file or constant definitions
-
-  //   nlohmann::ordered_json camera_feature;
-  //   camera_feature["dtype"] = "video";
-  //   camera_feature["shape"] = {md.camera_height, md.camera_width, 3};
-  //   camera_feature["names"] = {"height", "width", "channels"};
-  //   camera_feature["info"] = {
-  //       {"video.fps", md.fps},           {"video.height", md.camera_height},
-  //       {"video.width", md.camera_width},       {"video.channels", 3},
-  //       {"video.codec", "av1"},                {"video.pix_fmt", "yuv420p"},
-  //       {"video.is_depth_map", (md.is_depth_camera)}, {"has_audio", false}};
-  //   features["observation.images." + cam_info] = camera_feature;
-  // }
-  
+  features["timestamp"] = timestamp_feature;
+  features["frame_index"] = frame_index_feature;
+  features["episode_index"] = episode_index_feature;
+  features["index"] = index_feature;
+  features["task_index"] = task_index_feature;  
 
   info_["features"] = features;
 
-  // // Miscellaneous Feature
-  // info_["total_episodes"] = 0;
-  // info_["total_frames"] = 0;
-  // // TODO(shantanuparab-tr): [TDS-25]: Update total tasks based on total number
-  // // of unique tasks
-  // info_["total_tasks"] = 1;
-  // // TODO(shantanuparab-tr): [TDS-26] Update chunks based on total number of
-  // // episodes
-  // info_["total_chunks"] = 1;
-  // // TODO(shantanuparab-tr): [TDS-27] Add appropriate logic to decide chunk size
-  // info_["chunks_size"] = 1000;
-  // // TODO(shantanuparab-tr): [TDS-28] Update fps based on robot/control
-  // // configuration
-  // info_["fps"] = 30;
-  // info_["splits"]["train"] = "0:0";
+  // Miscellaneous Feature (Initialization with placeholder values)
+  info_["total_episodes"] = 0;
+  info_["total_frames"] = 0;
+  // TODO(shantanuparab-tr): [TDS-25]: Update total tasks based on total number
+  // of unique tasks
+  info_["total_tasks"] = 1;
+  // TODO(shantanuparab-tr): [TDS-26] Update chunks based on total number of
+  // episodes
+  info_["total_chunks"] = 1;
+  // TODO(shantanuparab-tr): [TDS-27] Add appropriate logic to decide chunk size
+  info_["chunks_size"] = 1000;
+  // TODO(shantanuparab-tr): [TDS-28] Update fps based on robot/control
+  // configuration
+  info_["fps"] = 30;
+  info_["splits"]["train"] = "0:0";
 
 
   // // Write to info.json

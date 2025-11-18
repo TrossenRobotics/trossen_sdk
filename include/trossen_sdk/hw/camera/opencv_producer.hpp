@@ -57,7 +57,7 @@ public:
 
     /// @brief Camera name
     std::string camera_name;
-
+    
     /// @brief Image width
     int width;
 
@@ -65,10 +65,23 @@ public:
     int height;
 
     /// @brief Image encoding
-    std::string encoding;
+    std::string codec;
+
+    /// @brief Pixel format
+    std::string pix_fmt;
+
+    /// @brief Channels
+    int channels;
+
+    /// @brief Does the camera have an audio stream?
+    bool has_audio{false};
 
     /// @brief Target frames per second
     int fps;
+
+    /// @brief Is this a depth camera?
+    bool is_depth_map{false};
+
   };
 
   /**

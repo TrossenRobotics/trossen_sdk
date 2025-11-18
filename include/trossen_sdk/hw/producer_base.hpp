@@ -68,6 +68,9 @@ public:
     /// @brief Description of the producer's function
     std::string description;
 
+    /// @brief Is this a mock producer?
+    bool is_mock;
+
     virtual ~ProducerMetadata() = default;
 
   };

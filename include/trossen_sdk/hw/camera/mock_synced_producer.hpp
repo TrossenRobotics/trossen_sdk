@@ -43,26 +43,34 @@ public:
   };
 
   struct MockSyncedCameraProducerMetadata : public PolledProducer::ProducerMetadata {
+
     /// @brief Camera name
     std::string camera_name;
 
-    /// @brief Color image width
-    int color_width;
+    /// @brief Image width
+    int width;
 
-    /// @brief Color image height
-    int color_height;
+    /// @brief Image height
+    int height;
 
-    /// @brief Color image encoding
-    std::string color_encoding;
+    /// @brief Image encoding
+    std::string codec;
 
-    /// @brief Depth image width
-    int depth_width;
+    /// @brief Pixel format
+    std::string pix_fmt;
 
-    /// @brief Depth image height
-    int depth_height;
+    /// @brief Channels
+    int channels;
 
-    /// @brief Depth image encoding
-    std::string depth_encoding;
+    /// @brief Does the camera have an audio stream?
+    bool has_audio{false};
+
+    /// @brief Target frames per second
+    int fps;
+
+    /// @brief Is this a depth camera?
+    bool is_depth_map{false};
+
   };
 
   explicit MockSyncedCameraProducer(Config cfg);
