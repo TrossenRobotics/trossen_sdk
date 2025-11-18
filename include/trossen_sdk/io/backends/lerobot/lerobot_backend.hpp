@@ -225,9 +225,6 @@ public:
    * @return JSON object containing the computed statistics
    */
   nlohmann::json computeFlatStats(const std::shared_ptr<arrow::Array> &array) const;
-
-
-
   /// @brief Image encoding statistics
   struct ImageEncodeStats {
 
