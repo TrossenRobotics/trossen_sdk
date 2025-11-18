@@ -259,6 +259,7 @@ private:
    * @brief Create backend instance for the given episode
    * @param output_path Path to output file
    * @param episode_index Episode index for metadata
+   * @param producer_metadatas Metadata from registered producers
    * @return Shared pointer to backend instance
    */
   std::shared_ptr<io::Backend> create_backend(
