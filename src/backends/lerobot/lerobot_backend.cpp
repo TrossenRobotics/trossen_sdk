@@ -75,7 +75,7 @@ bool LeRobotBackend::open() {
   oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index;
 
   // Create images root directory from camera names
-  images_root_ = root_ / "images" / "chunk_000000" ;
+  images_root_ = root_ / "images" / "chunk-000" ;
   try {
     fs::create_directories(images_root_);
   } catch (const std::exception& e) {
@@ -85,7 +85,7 @@ bool LeRobotBackend::open() {
 
   // Create Video Directories
   // TODO (shantanuparab-tr): Use chunk size to create chunk folders
-  videos_root_ = root_ / "videos" / "chunk_000000" / oss.str();
+  videos_root_ = root_ / "videos" / "chunk-000";
   try {
     fs::create_directories(videos_root_);
   } catch (const std::exception& e) {
@@ -115,7 +115,7 @@ bool LeRobotBackend::open() {
   }
 
   // Create data directory
-  data_root_ = root_ / "data" / "chunk_000000";
+  data_root_ = root_ / "data" / "chunk-000";
   try {
     fs::create_directories(data_root_);
   } catch (const std::exception& e) {
@@ -240,7 +240,7 @@ void LeRobotBackend::convert_to_videos() const {
 
     const std::string video_key = "observation.images." + cam_dir.path().filename().string();
     std::ostringstream oss;
-    oss << "videos/chunk_" << std::setw(6) << std::setfill('0') << episode_chunk
+    oss << "videos/chunk-" << std::setw(3) << std::setfill('0') << episode_chunk
         << "/" << video_key;
     const fs::path videos_cam_dir = base_path / oss.str();
     fs::create_directories(videos_cam_dir);
@@ -582,7 +582,7 @@ void LeRobotBackend::computeStatistics() const {
   }
 
 
-  nlohmann::ordered_json stats;
+  nlohmann::json stats;
   // Compute statistics for each column in the table
   for (const auto &field : table->schema()->fields()) {
     auto column = table->GetColumnByName(field->name());
@@ -641,11 +641,15 @@ void LeRobotBackend::computeStatistics() const {
   // // Write to info.json
   std::ofstream episode_stats_file(meta_root_ / JSONL_EPISODE_STATS, std::ios::app);
 
+  nlohmann::ordered_json episode_stats;
+  episode_stats["episode_index"] = cfg_.episode_index;
+  episode_stats["stats"] = stats;
+
   if (!episode_stats_file.is_open()) {
     std::cerr << "Failed to open episode stats file for writing." << std::endl;
     return;
   }
-  episode_stats_file << stats.dump() << "\n";
+  episode_stats_file << episode_stats.dump() << "\n";
   episode_stats_file.close();
   std::cout << "Metadata written to info.json successfully." << std::endl;
 
