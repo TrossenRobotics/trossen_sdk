@@ -15,7 +15,7 @@ namespace trossen::hw::arm {
 TeleopMockJointStateProducer::TeleopMockJointStateProducer(Config cfg)
   : cfg_(std::move(cfg)) {
   // Populate metadata
-  metadata_.type = "teleop_arm";
+  metadata_.type = "mock_teleop_arm";
   metadata_.id = cfg_.id;
   metadata_.name = "Teleop Mock Joint State Producer";
   metadata_.description = "Produces synthetic teleoperation joint states for testing and diagnostics";
@@ -24,8 +24,6 @@ TeleopMockJointStateProducer::TeleopMockJointStateProducer(Config cfg)
   metadata_.observation_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
   metadata_.action_dtype = "float32";
   metadata_.observation_dtype = "float32";
-
-  metadata_.is_mock = true;
 }
 
 void TeleopMockJointStateProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {

@@ -33,8 +33,6 @@ TeleopTrossenArmProducer::TeleopTrossenArmProducer(
   metadata_.action_dtype = "float32";
   metadata_.observation_dtype = "float32";
 
-  metadata_.is_mock = false;
-
 }
 
 void TeleopTrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {

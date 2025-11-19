@@ -21,9 +21,9 @@ MockSyncedCameraProducer::MockSyncedCameraProducer(Config cfg) : cfg_(std::move(
   frame_period_ns_ = cfg_.streams.frame_period_ns();
 
   // Populate metadata
-  metadata_.type = "camera";
+  metadata_.type = "mock_synced_camera";
   metadata_.id = "mock_camera_" + std::to_string(cfg_.seed);
-  metadata_.name = "Mock Synchronized Camera Producer";
+  metadata_.name = cfg_.stream_id;
   metadata_.description = "Produces synthetic synchronized color and depth frames for testing and diagnostics";
   metadata_.width = 640;
   metadata_.height = 480;
@@ -31,9 +31,7 @@ MockSyncedCameraProducer::MockSyncedCameraProducer(Config cfg) : cfg_(std::move(
   metadata_.codec = "av1";
   metadata_.pix_fmt = "yuv420p";
   metadata_.channels = 3;
-  metadata_.camera_name = "mock_synced_camera";
   metadata_.has_audio = false;
-  metadata_.is_mock = false;
 
 }
 
@@ -68,7 +66,7 @@ void MockSyncedCameraProducer::poll(const std::function<void(std::shared_ptr<dat
     rec->ts.monotonic = ts_mono;
     rec->ts.realtime = ts_real;
     rec->seq = seq;
-    rec->id = color_id(cfg_.camera_name);
+    rec->id = color_id(cfg_.stream_id);
     rec->width = static_cast<uint32_t>(color_mat.cols);
     rec->height = static_cast<uint32_t>(color_mat.rows);
     rec->channels = static_cast<uint32_t>(color_mat.channels());
@@ -95,7 +93,7 @@ void MockSyncedCameraProducer::poll(const std::function<void(std::shared_ptr<dat
     rec->ts.monotonic = ts_mono; // identical timestamps
     rec->ts.realtime = ts_real;
     rec->seq = seq;              // shared sequence
-    rec->id = depth_id(cfg_.camera_name);
+    rec->id = depth_id(cfg_.stream_id);
     rec->width = static_cast<uint32_t>(depth_mat.cols);
     rec->height = static_cast<uint32_t>(depth_mat.rows);
     rec->channels = 1; // depth is single channel

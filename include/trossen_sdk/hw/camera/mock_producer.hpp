@@ -79,6 +79,12 @@ public:
 
   };
 
+  /**
+   * @brief Construct a MockCameraProducer
+   *
+   * @param cfg Configuration parameters
+   */
+  explicit MockCameraProducer(Config cfg);
 
   ~MockCameraProducer() override = default;
 

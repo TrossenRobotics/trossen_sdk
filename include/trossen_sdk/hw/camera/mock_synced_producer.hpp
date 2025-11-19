@@ -35,7 +35,7 @@ public:
   enum class Pattern { Gradient, Noise }; // Reuse simple patterns for color
 
   struct Config {
-    std::string camera_name{"camera0"};
+    std::string stream_id{"camera0"};
     CameraStreamsConfig streams; // Contains frame_rate, resolutions, depth format, etc.
     Pattern pattern{Pattern::Gradient};
     uint64_t seed{0};
