@@ -1146,6 +1146,12 @@ void LeRobotBackend::writeMetadata() {
 
   info_["features"] = features;
 
+  info_["data_path"] = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet";
+  info_["video_path"] = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4";
+
+  {
+
+
   // // Write to info.json
   std::ofstream info_file(meta_root_ / JSON_INFO);
 
