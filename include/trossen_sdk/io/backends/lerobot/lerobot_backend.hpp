@@ -226,6 +226,11 @@ public:
     int max_samples = 10000,
     float power = 0.75f) const;
 
+  /**
+   * @brief Update episode information in metadata
+   */
+  void updateEpisodeInfo(int episode_frame_length) const;
+
   /// @brief Image encoding statistics
   struct ImageEncodeStats {
 
