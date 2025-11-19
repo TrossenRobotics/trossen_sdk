@@ -332,7 +332,7 @@ private:
    */
   void imageWorkerLoop();
 
-
+  /// @brief Image encoding job
   struct ImageJob {
     /// @brief Full file path to write
     std::filesystem::path file_path;

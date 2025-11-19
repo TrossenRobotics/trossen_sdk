@@ -33,7 +33,6 @@ public:
   };
 
   struct MockJointStateProducerMetadata : public PolledProducer::ProducerMetadata {
-
     /// @brief Robot model
     std::string arm_model;
 

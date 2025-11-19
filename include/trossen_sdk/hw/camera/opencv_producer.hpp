@@ -55,15 +55,13 @@ public:
 
   struct OpenCvCameraProducerMetadata : public PolledProducer::ProducerMetadata {
 
-    /// @brief Camera name
-    std::string camera_name;
-    
     /// @brief Image width
     int width;
 
     /// @brief Image height
     int height;
 
+    //TODO (shantanuparab-tr): Can be made enum
     /// @brief Image encoding
     std::string codec;
 

@@ -44,9 +44,6 @@ public:
 
   struct MockSyncedCameraProducerMetadata : public PolledProducer::ProducerMetadata {
 
-    /// @brief Camera name
-    std::string camera_name;
-
     /// @brief Image width
     int width;
 

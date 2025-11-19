@@ -48,9 +48,6 @@ public:
     /// @brief Observation feature data type
     std::string observation_dtype;
 
-    /// @brief Is Mock
-    bool is_mock{true};
-
   };
 
   explicit TeleopMockJointStateProducer(Config cfg);

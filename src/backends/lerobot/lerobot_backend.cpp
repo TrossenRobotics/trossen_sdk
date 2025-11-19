@@ -16,7 +16,6 @@
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 
 
-
 // For PNG writing we stub out with raw dump placeholder (future: integrate stb_image_write or libpng)
 namespace trossen::io::backends {
 

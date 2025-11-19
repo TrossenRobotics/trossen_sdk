@@ -51,18 +51,17 @@ public:
 
   struct MockCameraProducerMetadata : public PolledProducer::ProducerMetadata {
 
-    /// @brief Camera name
-    std::string camera_name;
-
     /// @brief Image width
     int width;
 
     /// @brief Image height
     int height;
 
+    // TODO (shantanuparab-tr): Can be made enum
     /// @brief Image encoding
     std::string codec;
 
+    // TODO (shantanuparab-tr): Can be made enum
     /// @brief Pixel format
     std::string pix_fmt;
 
@@ -80,7 +79,7 @@ public:
 
   };
 
-  explicit MockCameraProducer(Config cfg);
+
   ~MockCameraProducer() override = default;
 
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
