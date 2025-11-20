@@ -3,13 +3,12 @@
 #include <iomanip>
 #include <fstream>
 #include <sstream>
+#include <regex>
 #include "opencv2/imgcodecs.hpp"
 #include <opencv2/opencv.hpp>
 #include <parquet/arrow/reader.h>
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
-#include "trossen_sdk/hw/arm/arm_producer.hpp"
-#include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
 #include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
@@ -39,7 +38,7 @@ LeRobotBackend::LeRobotBackend(Config cfg, std::vector<std::shared_ptr<hw::Polle
   // URI is absolute path to output directory. Set to absolute path and check write access.
   // Validate output directory path
   try {
-    uri_ = (fs::path(cfg_.root_path) / cfg_.repository_id / cfg_.dataset_id).string();
+    uri_ = (fs::path(cfg_.output_dir) / cfg_.repository_id / cfg_.dataset_id).string();
   } catch (const std::exception& e) {
     throw std::runtime_error("Failed to resolve absolute path of output directory: " + std::string(e.what()));
   }
@@ -70,6 +69,10 @@ bool LeRobotBackend::open() {
     return true; // idempotent
   }
   root_ = fs::path(uri_);
+  std::cout << "=====================================================================" << std::endl;
+  std::cout << "Opening LeRobotBackend at: " << root_ << "\n";
+  std::cout << "=====================================================================" << std::endl;
+
 
   std::ostringstream oss;
   oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index;
@@ -1140,7 +1143,66 @@ void LeRobotBackend::writeMetadata() {
   }
   info_file << info_.dump(4);
   info_file.close();
-  std::cout << "Metadata written to info.json successfully." << std::endl;
+  }
 
+
+
+uint32_t LeRobotBackend::scan_existing_episodes(const std::filesystem::path& base_path) {
+
+  std::cout << "Scanning existing episodes in: " << base_path << std::endl;
+  
+  // If directory doesn't exist, return 0
+  if (!std::filesystem::exists(base_path)) {
+    return 0;
+  }
+
+  // If not a directory, return 0
+  if (!std::filesystem::is_directory(base_path)) {
+    std::cerr << "Warning: base_path exists but is not a directory: " << base_path << std::endl;
+    return 0;
+  }
+
+  // Pattern: episode_NNNNNN.parquet (6-digit zero-padded) Regex to match episode files
+  //
+  // TODO(lukeschmitt-tr): This is specific to MCAP files; consider making more generic - backend
+  // could provide pattern?
+  std::regex episode_pattern(R"(episode_(\d{6})\.parquet)");
+
+  uint32_t max_index = 0;
+  bool found_any = false;
+
+  try {
+    // Iterate through directory entries
+    for (const auto& entry : std::filesystem::directory_iterator(base_path)) {
+      // Skip if not a regular file
+      if (!entry.is_regular_file()) {
+        continue;
+      }
+
+      // Get filename only (not full path)
+      std::string filename = entry.path().filename().string();
+
+      // Try to match against episode pattern
+      std::smatch match;
+      if (std::regex_match(filename, match, episode_pattern)) {
+        // Extract the numeric index from capture group 1
+        std::string index_str = match[1].str();
+        uint32_t index = static_cast<uint32_t>(std::stoul(index_str));
+
+        // Track maximum index found
+        if (!found_any || index > max_index) {
+          max_index = index;
+          found_any = true;
+        }
+      }
+      // Silently ignore non-episode files (as per design doc)
+    }
+  } catch (const std::filesystem::filesystem_error& e) {
+    std::cerr << "Filesystem error while scanning episodes: " << e.what() << std::endl;
+    return 0;
+  }
+
+  // Return max_index + 1, or 0 if no episodes found
+  return found_any ? (max_index + 1) : 0;
 }
 } // namespace trossen::io::backends

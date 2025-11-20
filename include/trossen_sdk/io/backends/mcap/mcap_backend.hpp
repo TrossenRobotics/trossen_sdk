@@ -10,6 +10,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <regex>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -114,6 +115,14 @@ public:
    * @return Stats structure with counts
    */
   Stats stats() const { return stats_; }
+
+
+  /**
+   * @brief Scan directory for existing episode files and return next index
+   * @param base_path Directory to scan
+   * @return Next episode index (max_found + 1, or 0 if none found)
+   */
+  static uint32_t scan_existing_episodes(const std::filesystem::path& base_path);
 
 private:
   /**

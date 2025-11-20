@@ -8,7 +8,6 @@
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
-#include <regex>
 #include <sstream>
 
 namespace trossen::runtime {
@@ -40,7 +39,14 @@ SessionManager::SessionManager(SessionConfig&& config)
   }
 
   // Scan directory for existing episodes and resume from next index
-  next_episode_index_ = scan_existing_episodes(config_.base_path);
+  if(config_.backend_config->type == "mcap") {
+    next_episode_index_ = io::backends::McapBackend::scan_existing_episodes(config_.base_path);
+  } else if (config_.backend_config->type == "lerobot") {
+    std::filesystem::path data_directory_path = config_.base_path / config_.repository_id / config_.dataset_id / "data" / "chunk-000";
+    next_episode_index_ = io::backends::LeRobotBackend::scan_existing_episodes(data_directory_path);
+  } else {
+    throw std::invalid_argument("Unsupported backend type: " + config_.backend_config->type);
+  }
   if (next_episode_index_ > 0) {
     std::cout << "Found " << next_episode_index_ << " existing episode(s). "
               << "Next episode index: " << next_episode_index_ << std::endl;
@@ -313,61 +319,7 @@ SessionManager::Stats SessionManager::stats() const {
   return s;
 }
 
-uint32_t SessionManager::scan_existing_episodes(const std::filesystem::path& base_path) {
-  // If directory doesn't exist, return 0
-  if (!std::filesystem::exists(base_path)) {
-    return 0;
-  }
 
-  // If not a directory, return 0
-  if (!std::filesystem::is_directory(base_path)) {
-    std::cerr << "Warning: base_path exists but is not a directory: " << base_path << std::endl;
-    return 0;
-  }
-
-  // Pattern: episode_NNNNNN.mcap (6-digit zero-padded) Regex to match episode files
-  //
-  // TODO(lukeschmitt-tr): This is specific to MCAP files; consider making more generic - backend
-  // could provide pattern?
-  std::regex episode_pattern(R"(episode_(\d{6})\.mcap)");
-
-  uint32_t max_index = 0;
-  bool found_any = false;
-
-  try {
-    // Iterate through directory entries
-    for (const auto& entry : std::filesystem::directory_iterator(base_path)) {
-      // Skip if not a regular file
-      if (!entry.is_regular_file()) {
-        continue;
-      }
-
-      // Get filename only (not full path)
-      std::string filename = entry.path().filename().string();
-
-      // Try to match against episode pattern
-      std::smatch match;
-      if (std::regex_match(filename, match, episode_pattern)) {
-        // Extract the numeric index from capture group 1
-        std::string index_str = match[1].str();
-        uint32_t index = static_cast<uint32_t>(std::stoul(index_str));
-
-        // Track maximum index found
-        if (!found_any || index > max_index) {
-          max_index = index;
-          found_any = true;
-        }
-      }
-      // Silently ignore non-episode files (as per design doc)
-    }
-  } catch (const std::filesystem::filesystem_error& e) {
-    std::cerr << "Filesystem error while scanning episodes: " << e.what() << std::endl;
-    return 0;
-  }
-
-  // Return max_index + 1, or 0 if no episodes found
-  return found_any ? (max_index + 1) : 0;
-}
 
 std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
   // Generate filename: episode_NNNNNN.mcap (6-digit zero-padded)
@@ -376,9 +328,8 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
   if(config_.backend_config == nullptr) {
     throw std::runtime_error("SessionManager::build_episode_path: backend_config is null");
   } else if (config_.backend_config->type == "lerobot") {
-      oss << "episode_" << std::setfill('0') << std::setw(6) << index;
-  }
-  else if (config_.backend_config->type == "mcap") {
+      return config_.base_path;
+  } else if (config_.backend_config->type == "mcap") {
       oss << "episode_" << std::setfill('0') << std::setw(6) << index << ".mcap";
   } else {
     throw std::runtime_error("SessionManager::build_episode_path: Unsupported backend type: " + config_.backend_config->type);

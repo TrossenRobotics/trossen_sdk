@@ -21,6 +21,7 @@
 #include <parquet/arrow/writer.h>
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_constants.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
 namespace trossen::io::backends {
@@ -95,7 +96,7 @@ public:
     std::string dataset_id{"default_dataset"};
 
     // Root path
-    std::string root_path{get_default_root_path().string()};
+    std::string root_path{trossen::io::backends::get_default_root_path().string()};
 
     // Episode index (for organizing output)
     uint32_t episode_index{0};
@@ -230,6 +231,14 @@ public:
    * @brief Update episode information in metadata
    */
   void updateEpisodeInfo(int episode_frame_length) const;
+
+
+  /**
+   * @brief Scan directory for existing episode files and return next index
+   * @param base_path Directory to scan
+   * @return Next episode index (max_found + 1, or 0 if none found)
+   */
+  static uint32_t scan_existing_episodes(const std::filesystem::path& base_path);
 
   /// @brief Image encoding statistics
   struct ImageEncodeStats {

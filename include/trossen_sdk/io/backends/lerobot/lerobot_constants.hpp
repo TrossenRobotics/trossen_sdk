@@ -1,21 +1,8 @@
 // Copyright 2025 Trossen Robotics
 #ifndef INCLUDE_LEROBOT_CONSTANTS_HPP_
 #define INCLUDE_LEROBOT_CONSTANTS_HPP_
-#include <filesystem>
 
 namespace trossen::io::backends {
-
-/// @brief Default root path for dataset storage
-/// @brief Safely get the default root path for dataset storage
-inline std::filesystem::path get_default_root_path() {
-    const char* home = std::getenv("HOME");
-    if (home) {
-        return std::filesystem::path(home) / ".cache" / "trossen_dataset_collection_sdk";
-    } else {
-        // Fallback to current directory if HOME is not set
-        return std::filesystem::path(".") / ".cache" / "trossen_dataset_collection_sdk";
-    }
-}
 
 /// @brief Format string for leader robot configuration file path
 const char LEADER_ROBOT_CONFIG_FORMAT[] = "config/{}_leader.json";
