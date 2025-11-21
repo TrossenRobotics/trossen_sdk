@@ -90,8 +90,8 @@ public:
     // Repository ID
     std::string repository_id{"default_repo"};
 
-    // Dataset name
-    std::string dataset_name{"default_dataset"};
+    // Dataset ID
+    std::string dataset_id{"default_dataset"};
 
     // Root path
     std::string root_path{get_default_root_path().string()};
@@ -192,6 +192,11 @@ public:
    * @param md Metadata to add
    */
   void addMetadata(const Metadata& md);
+
+  /**
+   * @brief Convert recorded images to videos using FFmpeg
+   */
+  void convert_to_videos() const;
 
   /// @brief Image encoding statistics
   struct ImageEncodeStats {
@@ -354,6 +359,9 @@ private:
   std::shared_ptr<arrow::Schema> schema_;
   std::shared_ptr<arrow::io::FileOutputStream> outfile_;
   std::unique_ptr<parquet::arrow::FileWriter> writer_;
+
+  // Hash map to store the frame indices for each source
+  std::unordered_map<std::string, uint64_t> source_frame_indices_;
 };
 
 } // namespace trossen::io::backends

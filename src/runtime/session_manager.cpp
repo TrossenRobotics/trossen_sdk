@@ -385,7 +385,10 @@ std::shared_ptr<io::Backend> SessionManager::create_backend(
       // Copy backend config template and customize for this episode
     auto* lerobot_cfg = static_cast<io::backends::LeRobotBackend::Config*>(config_.backend_config.get());
     lerobot_cfg->output_dir = output_path;
-    lerobot_cfg->dataset_name = config_.dataset_id;
+    if (!lerobot_cfg) {
+      throw std::runtime_error("SessionManager::create_backend: backend_config is not LeRobotBackend::Config");
+    }
+    lerobot_cfg->dataset_id = config_.dataset_id;
     lerobot_cfg->episode_index = episode_index;
 
     auto metadata = io::backends::LeRobotBackend::Metadata{};

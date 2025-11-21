@@ -240,7 +240,7 @@ int main(int argc, char** argv) {
     lerobot_cfg->output_dir = cfg.output_dir;
     lerobot_cfg->task_name = "trossen_ai_solo_demo";
     lerobot_cfg->repository_id = "TrossenRoboticsCommunity";
-    lerobot_cfg->dataset_name = "trossen_ai_solo_dataset";
+    lerobot_cfg->dataset_id = "trossen_ai_solo_dataset";
     lerobot_cfg->overwrite_existing = false;
     lerobot_cfg->encode_videos = true;
     lerobot_cfg->type = "lerobot";
@@ -300,7 +300,7 @@ int main(int argc, char** argv) {
     cam_cfg.width = cfg.camera_width;
     cam_cfg.height = cfg.camera_height;
     cam_cfg.fps = cfg.camera_fps;
-    cam_cfg.stream_id = "camera/image";
+    cam_cfg.stream_id = "camera_main";
     cam_cfg.encoding = "bgr8";
     cam_cfg.pattern = trossen::hw::camera::MockCameraProducer::Pattern::Gradient;
     cam_cfg.warmup_frames = 3;
