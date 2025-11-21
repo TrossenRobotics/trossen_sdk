@@ -1,10 +1,9 @@
 
 #include <iostream>
-#include <sstream>
 #include <iomanip>
-
+#include <sstream>
 #include "opencv2/imgcodecs.hpp"
-
+#include <parquet/arrow/reader.h>
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
 
@@ -339,6 +338,188 @@ void LeRobotBackend::convert_to_videos() const {
   std::cout << "Encoded videos in " << secs << " seconds using " << max_concurrent_encoders << " threads" << std::endl;
 }
 
+
+nlohmann::json LeRobotBackend::computeFlatStats(
+    const std::shared_ptr<arrow::Array> &array) const {
+    double sum = 0.0, sum_sq = 0.0;
+    double min_val = std::numeric_limits<double>::max();
+    double max_val = std::numeric_limits<double>::lowest();
+    int64_t count = 0;
+
+    // Iterate over the array and compute statistics
+    for (int64_t i = 0; i < array->length(); ++i) {
+      if (array->IsNull(i)) continue;
+
+      double val = 0;
+      // Handle different data types
+      if (array->type_id() == arrow::Type::DOUBLE)
+        val = std::static_pointer_cast<arrow::DoubleArray>(array)->Value(i);
+      else if (array->type_id() == arrow::Type::FLOAT)
+        val = std::static_pointer_cast<arrow::FloatArray>(array)->Value(i);
+      else if (array->type_id() == arrow::Type::INT64)
+        val = static_cast<double>(
+            std::static_pointer_cast<arrow::Int64Array>(array)->Value(i));
+      else
+        continue;
+
+      // Update statistics
+      min_val = std::min(min_val, val);
+      max_val = std::max(max_val, val);
+      sum += val;
+      sum_sq += val * val;
+      ++count;
+    }
+    // Compute mean and standard deviation
+    double mean = count > 0 ? sum / count : 0;
+    double stddev = 0;
+
+    // Handle edge case where all values are zero and standard deviation can be
+    // NaN
+    if (count > 0) {
+      if (min_val == 0.0 && max_val == 0.0) {
+        stddev = 0.0;
+      } else {
+        stddev = std::sqrt((sum_sq / count) - (mean * mean));
+      }
+    }
+
+    return {{"min", {min_val}},
+            {"max", {max_val}},
+            {"mean", {mean}},
+            {"std", {stddev}},
+            {"count", {count}}};
+}
+
+nlohmann::json LeRobotBackend::computeListStats(
+    const std::shared_ptr<arrow::ListArray> &list_array) const {
+    // Get the values array from the ListArray
+    auto values =
+        std::static_pointer_cast<arrow::DoubleArray>(list_array->values());
+
+    // Calculate the number of lists and the dimension of each list
+    int64_t list_count = list_array->length();
+    int64_t value_count = values->length();
+    int64_t dim = list_count > 0 ? value_count / list_count : 0;
+
+    // Initialize statistics vectors
+    std::vector<double> sum(dim, 0.0), sum_sq(dim, 0.0),
+        min_val(dim, std::numeric_limits<double>::max()),
+        max_val(dim, std::numeric_limits<double>::lowest());
+
+    // Iterate over the values and compute statistics for each dimension
+    for (int64_t i = 0; i < value_count; ++i) {
+      double val = values->Value(i);
+      int d = i % dim;
+      min_val[d] = std::min(min_val[d], val);
+      max_val[d] = std::max(max_val[d], val);
+      sum[d] += val;
+      sum_sq[d] += val * val;
+    }
+
+    std::vector<double> mean(dim), stddev(dim);
+    for (int d = 0; d < dim;
+        ++d) {  // Compute mean and standard deviation for each dimension
+      mean[d] = sum[d] / list_count;
+      // Handle edge case where all values are zero and standard deviation can be
+      // NaN
+      double variance = (sum_sq[d] / list_count) - (mean[d] * mean[d]);
+      stddev[d] = (list_count > 0 && variance >= 0.0) ? std::sqrt(variance) : 0.0;
+    }
+
+    return {{"min", min_val},
+            {"max", max_val},
+            {"mean", mean},
+            {"std", stddev},
+            {"count", {list_count}}};
+}
+
+
+void LeRobotBackend::computeStatistics() const {
+
+  std::cout << "Computing dataset statistics..." << std::endl;
+
+  std::ostringstream oss;
+  oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index << ".parquet";
+  fs::path episode_path = data_root_ / oss.str();
+
+  std::unique_ptr<parquet::ParquetFileReader> parquet_reader =
+      parquet::ParquetFileReader::OpenFile(episode_path, false);
+
+  std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
+
+  auto st = parquet::arrow::FileReader::Make(
+      arrow::default_memory_pool(),
+      std::move(parquet_reader),
+      &arrow_reader
+  );
+
+  if (!st.ok()) {
+      throw std::runtime_error("Failed to create FileReader: " + st.ToString());
+  }
+
+  std::shared_ptr<arrow::Table> table;
+  st = arrow_reader->ReadTable(&table);
+  if (!st.ok()) {
+      throw std::runtime_error("Failed to read Parquet table: " + st.ToString());
+  }
+
+
+  nlohmann::json stats;
+  // Compute statistics for each column in the table
+  for (const auto &field : table->schema()->fields()) {
+    auto column = table->GetColumnByName(field->name());
+    if (!column) continue;
+    // If the column is a list, compute list statistics
+    if (field->type()->id() == arrow::Type::LIST) {
+      auto list_array =
+          std::static_pointer_cast<arrow::ListArray>(column->chunk(0));
+      stats[field->name()] = computeListStats(list_array);
+    } else {
+      // If the column is a primitive type, compute flat statistics
+      auto array = column->chunk(0);
+      stats[field->name()] = computeFlatStats(array);
+    }
+  }
+  // TODO (shantanuparab-tr): Add this to metadata file
+  printStatsTable(stats);
+  
+}
+
+void LeRobotBackend::printStatsTable(const nlohmann::json& stats) const {
+  std::cout << "\n================ Episode: " << cfg_.episode_index << " ================\n";
+  for (auto it = stats.begin(); it != stats.end(); ++it) {
+    const std::string& column_name = it.key();
+    const auto& metrics = it.value();
+    std::cout << "\n================ " << column_name << " ================\n";
+    std::cout << std::left << std::setw(12) << "metric" << " | values\n";
+    std::cout << "-----------------------------------------------\n";
+
+    for (auto mit = metrics.begin(); mit != metrics.end(); ++mit) {
+      const std::string& metric_name = mit.key();
+      const auto& arr = mit.value();
+
+      std::cout << std::left << std::setw(12) << metric_name << " | ";
+
+      // If metric value is a list of numbers → print inline
+      if (arr.is_array()) {
+        for (size_t i = 0; i < arr.size(); i++) {
+          std::cout << std::fixed << std::setprecision(4)
+                    << arr[i].get<double>();
+
+          if (i + 1 < arr.size())
+            std::cout << "  ";
+        }
+      } else {
+        // Single scalar
+        std::cout << arr.dump();
+      }
+
+      std::cout << "\n";
+    }
+  }
+  std::cout << "=================================================================\n";
+}
+
 void LeRobotBackend::flush() {
   // TODO (shantanuparab-tr): flush parquet writer if needed
 }
@@ -386,7 +567,10 @@ void LeRobotBackend::close() {
   // Encode any remaining images to videos
   convert_to_videos();
 
-  // Clear frame indices map
+  // Compute dataset statistics
+  computeStatistics();
+
+  // Clear source frame indices map
   source_frame_indices_.clear();
 
   opened_ = false;
