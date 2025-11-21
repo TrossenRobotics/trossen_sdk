@@ -52,6 +52,26 @@ public:
    * @return const reference to ProducerStats
    */
   const ProducerStats& stats() const {return stats_; };
+
+  /// @brief Metadata for producers
+  struct ProducerMetadata {
+    /// @brief Unique identifier for the producer
+    std::string id;
+
+    /// @brief Human-readable name for the producer
+    std::string name;
+
+    /// @brief Description of the producer's function
+    std::string description;
+  };
+
+  /**
+   * @brief Get producer metadata
+   *
+   * @return const reference to ProducerMetadata
+   */
+  virtual const PolledProducer::ProducerMetadata& metadata() const {return metadata_; };
+
 protected:
   /// @brief Whether we've opened the device
   bool opened_{false};
@@ -76,6 +96,9 @@ protected:
 
   /// @brief Monotonic sequence number for emitted records
   uint64_t seq_{0};
+
+  /// @brief Producer metadata
+  PolledProducer::ProducerMetadata metadata_{};
 };
 
 // PushProducer: owns its own internal thread(s); start registers emit callback.
@@ -129,6 +152,7 @@ protected:
 
   /// @brief Monotonic sequence number for emitted records
   uint64_t seq_{0};
+
 };
 
 } // namespace trossen::hw

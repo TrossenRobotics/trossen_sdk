@@ -54,18 +54,6 @@ LeRobotBackend::LeRobotBackend(Config cfg, Metadata md)
   }
   test_file.close();
   fs::remove(test_path);
-
-
-  // Print off configuration
-  std::cout << "LeRobotBackend configuration:\n"
-            << "  Output dir: " << uri_ << "\n"
-            << "  Encoder threads: " << cfg_.encoder_threads << "\n"
-            << "  Max image queue: " << (cfg_.max_image_queue == 0 ? "unbounded" : std::to_string(cfg_.max_image_queue)) << "\n"
-            << "  Drop policy: "
-            << (cfg_.drop_policy == DropPolicy::DropNewest ? "DropNewest" :
-                (cfg_.drop_policy == DropPolicy::DropOldest ? "DropOldest" : "Block"))
-            << "\n"
-            << "  PNG compression level: " << cfg_.png_compression_level << "\n";
 }
 
 bool LeRobotBackend::open() {
@@ -182,7 +170,6 @@ bool LeRobotBackend::open() {
   }
 
   writer_ = std::move(result).ValueUnsafe();  // store unique_ptr<FileWriter>
-  std::cerr << "Opened Parquet writer successfully." << std::endl;
 
   opened_ = true;
   return true;
@@ -216,7 +203,6 @@ void LeRobotBackend::writeBatch(std::span<const data::RecordBase* const> records
 }
 
 void LeRobotBackend::convert_to_videos() const {
-  std::cout << "Encoding images to videos..." << std::endl;
 
   // TODO (shantanuparab-tr): Use recorded fps from metadata if available
   const int fps = static_cast<int>(std::round(30.0)); // Use recorded fps if available
@@ -225,7 +211,6 @@ void LeRobotBackend::convert_to_videos() const {
 
   const std::string images_path = images_root_.string();
 
-  std::cout << "Images path: " << images_path << std::endl;
   const fs::path base_path = fs::path(this->config().root_path) / this->config().repository_id / this->config().dataset_id;
 
   std::atomic<int> video_count{0};
@@ -306,13 +291,15 @@ void LeRobotBackend::convert_to_videos() const {
             << task.output_path.string();
 
         auto t0 = std::chrono::steady_clock::now();
+        std::cout<<"\n════════════════════════ [Worker " << worker_id << "] Encoding video ════════════════════════"<< std::endl;
         int ret = std::system(ffmpeg_cmd.str().c_str());
+        std::cout<<"══════════════════════════════════════════════════════════════════════════════════\n"<< std::endl;
+
         auto t1 = std::chrono::steady_clock::now();
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
 
         std::lock_guard<std::mutex> lk(log_mutex);
         if (ret == 0) {
-          std::cout << "[Worker " << worker_id << "] Encoded " << task.output_path.string() << " in " << ms << " ms" << std::endl;
           video_count++;
         } else {
           std::cout << "[Worker " << worker_id << "] FFmpeg failed for " << task.output_path.string() << " (code " << ret << ")" << std::endl;
@@ -337,7 +324,6 @@ void LeRobotBackend::convert_to_videos() const {
   
   auto end_time = std::chrono::steady_clock::now();
   auto secs = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
-  std::cout << "Encoded videos in " << secs << " seconds using " << max_concurrent_encoders << " threads" << std::endl;
 }
 
 
@@ -560,8 +546,6 @@ nlohmann::json LeRobotBackend::computeListStats(
 
 void LeRobotBackend::computeStatistics() const {
 
-  std::cout << "Computing dataset statistics..." << std::endl;
-
   std::ostringstream oss;
   oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index << ".parquet";
   fs::path episode_path = data_root_ / oss.str();
@@ -700,8 +684,6 @@ void LeRobotBackend::close() {
       if (!st.ok()) {
         std::cerr << "[Parquet] Warning: Failed to close writer cleanly: "
                   << st.ToString() << std::endl;
-      } else {
-        std::cerr << "[Parquet] Writer closed successfully." << std::endl;
       }
       writer_.reset();
     }
@@ -712,8 +694,6 @@ void LeRobotBackend::close() {
       if (!st.ok()) {
         std::cerr << "[Parquet] Warning: Failed to close file stream: "
                   << st.ToString() << std::endl;
-      } else {
-        std::cerr << "[Parquet] File stream closed successfully." << std::endl;
       }
       outfile_.reset();
     }
@@ -859,7 +839,6 @@ void LeRobotBackend::writeImage(const data::RecordBase& base) {
   
   if(source_frame_indices_.find(img.id) == source_frame_indices_.end()){
     source_frame_indices_[img.id] = img.seq;
-    std::cout << "Initialized frame index for image id '" << img.id << "' to " << img.seq << std::endl;
   }
   int frame_index = img.seq - source_frame_indices_[img.id];
   
@@ -1076,8 +1055,7 @@ void LeRobotBackend::addMetadata(const Metadata& md) {
 
   // Write to info.json
   std::ofstream info_file(meta_root_ / JSON_INFO);
-  std::cout << "Writing metadata to info.json at: "
-            << (meta_root_ / JSON_INFO).string() << std::endl;
+
   if (!info_file.is_open()) {
     std::cerr << "Failed to open info.json for writing metadata." << std::endl;
     return;

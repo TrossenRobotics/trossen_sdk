@@ -17,6 +17,16 @@ TrossenArmProducer::TrossenArmProducer(
     // Initial read to populate robot_output state
     robot_output_ = driver_->get_robot_output();
   }
+
+  // Populate metadata
+  metadata_.id = cfg_.stream_id;
+  metadata_.name = "Trossen Arm Producer";
+  metadata_.description = "Produces joint states from a Trossen Arm via TrossenArmDriver";
+  metadata_.arm_model = "WIDOWX_AI"; // TODO: Extract from driver/User Config
+  metadata_.firmware_version = "v1.9.0"; // TODO: Extract from driver / Remove
+  metadata_.num_joints = driver_ ? driver_->get_num_joints() : 0;
+  metadata_.joint_names = {"joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"}; // TODO: Extract from driver / User Config
+  metadata_.gripper_type = "STANDARD"; // TODO: Extract from driver / User Config
 }
 
 void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {

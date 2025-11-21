@@ -49,10 +49,28 @@ public:
     double drop_probability{0.0}; ///< Simulated drop probability [0,1)
   };
 
+  struct MockCameraProducerMetadata : public PolledProducer::ProducerMetadata {
+    /// @brief Image width
+    int width;
+
+    /// @brief Image height
+    int height;
+
+    /// @brief Image encoding
+    std::string encoding;
+
+    /// @brief Target frames per second
+    int fps;
+    
+  };
+
   explicit MockCameraProducer(Config cfg);
   ~MockCameraProducer() override = default;
 
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
+
+  /// @brief Get producer metadata
+  const MockCameraProducerMetadata& metadata() const override { return metadata_; }
 
   struct JitterStats {
     double mean_ms{0};
@@ -81,6 +99,8 @@ private:
   // Jitter measurement: store recent inter-frame intervals (ns)
   std::vector<uint64_t> intervals_ns_;
   static constexpr size_t kMaxIntervals = 50000; // cap to avoid unbounded growth
+
+  MockCameraProducerMetadata metadata_;
 };
 
 } // namespace trossen::hw::camera

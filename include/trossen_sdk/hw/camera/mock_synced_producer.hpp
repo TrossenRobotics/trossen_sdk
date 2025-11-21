@@ -42,10 +42,36 @@ public:
     double noise_stddev{20.0};
   };
 
+  struct MockSyncedCameraProducerMetadata : public PolledProducer::ProducerMetadata {
+    /// @brief Camera name
+    std::string camera_name;
+
+    /// @brief Color image width
+    int color_width;
+
+    /// @brief Color image height
+    int color_height;
+
+    /// @brief Color image encoding
+    std::string color_encoding;
+
+    /// @brief Depth image width
+    int depth_width;
+
+    /// @brief Depth image height
+    int depth_height;
+
+    /// @brief Depth image encoding
+    std::string depth_encoding;
+  };
+
   explicit MockSyncedCameraProducer(Config cfg);
   ~MockSyncedCameraProducer() override = default;
 
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
+
+  /// @brief Get producer metadata
+  const MockSyncedCameraProducerMetadata& metadata() const override { return metadata_; }
 
   struct JitterStats {
     double mean_ms{0};
@@ -76,6 +102,8 @@ private:
   std::normal_distribution<float> norm_{0.f, 1.f};
 
   Config cfg_;
+
+  MockSyncedCameraProducerMetadata metadata_;
 };
 
 } // namespace trossen::hw::camera

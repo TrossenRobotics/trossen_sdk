@@ -24,6 +24,38 @@ public:
     bool use_device_time{true};
   };
 
+  struct TeleopTrossenArmProducerMetadata : public PolledProducer::ProducerMetadata {
+    /// @brief Robot name
+    std::string robot_name;
+
+    /// @brief Leader arm model
+    std::string leader_arm_model;
+
+    /// @brief Leader firmware version
+    std::string leader_firmware_version;
+
+    /// @brief Follower arm model
+    std::string follower_arm_model;
+
+    /// @brief Follower firmware version
+    std::string follower_firmware_version;
+
+    /// @brief Action feature names
+    std::vector<std::string> action_feature_names;
+    
+    /// @brief Observation feature names
+    std::vector<std::string> observation_feature_names;
+
+    /// @brief Gripper type
+    std::string gripper_type;
+
+    /// @brief Action feature data type
+    std::string action_dtype;
+
+    /// @brief Observation feature data type
+    std::string observation_dtype;
+  };
+
   /**
    * @brief Construct a TeleopTrossenArmProducer
    *
@@ -46,6 +78,9 @@ public:
    */
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
+  /// @brief Get producer metadata
+  const TeleopTrossenArmProducerMetadata& metadata() const override { return metadata_; };
+
 private:
   /// @brief Shared pointer to the TrossenArmDriver instance leader arm
   std::shared_ptr<trossen_arm::TrossenArmDriver> leader_driver_;
@@ -64,6 +99,9 @@ private:
 
   /// @brief Reusable robot output to avoid reallocation each poll for follower arm
   trossen_arm::RobotOutput follower_robot_output_;
+  
+  /// @brief Metadata for producer
+  TeleopTrossenArmProducerMetadata metadata_;
 };
 
 } // namespace trossen::hw::arm

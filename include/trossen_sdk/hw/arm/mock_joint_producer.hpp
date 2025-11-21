@@ -32,6 +32,24 @@ public:
     double max_period_ms{0.0}; // max observed poll interval
   };
 
+  struct MockJointStateProducerMetadata : public PolledProducer::ProducerMetadata {
+
+    /// @brief Robot model
+    std::string arm_model;
+
+    /// @brief Firmware version
+    std::string firmware_version;
+
+    /// @brief Number of joints
+    size_t num_joints;
+
+    /// @brief Joint names
+    std::vector<std::string> joint_names;
+
+    /// @brief Gripper type
+    std::string gripper_type;
+  };
+
   explicit MockJointStateProducer(Config cfg);
   ~MockJointStateProducer() override = default;
 
@@ -40,11 +58,14 @@ public:
   Diagnostics diagnostics() const { return diag_; }
   const Config& config() const { return cfg_; }
 
+  const MockJointStateProducerMetadata& metadata() const override { return metadata_; }
+
 private:
   Config cfg_;
   Diagnostics diag_{};
   bool started_{false};
   std::chrono::steady_clock::time_point last_tick_{};
+  MockJointStateProducerMetadata metadata_;
 };
 
 } // namespace trossen::hw::arm

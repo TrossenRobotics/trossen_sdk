@@ -32,6 +32,39 @@ public:
     double max_period_ms{0.0}; // max observed poll interval
   };
 
+  struct TeleopMockJointStateProducerMetadata : public PolledProducer::ProducerMetadata {
+    /// @brief Robot name
+    std::string robot_name;
+
+    /// @brief Leader arm model
+    std::string leader_arm_model;
+
+    /// @brief Leader firmware version
+    std::string leader_firmware_version;
+
+    /// @brief Follower arm model
+    std::string follower_arm_model;
+
+    /// @brief Follower firmware version
+    std::string follower_firmware_version;
+
+    /// @brief Action feature names
+    std::vector<std::string> action_feature_names;
+    
+    /// @brief Observation feature names
+    std::vector<std::string> observation_feature_names;
+
+    /// @brief Gripper type
+    std::string gripper_type;
+
+    /// @brief Action feature data type
+    std::string action_dtype;
+
+    /// @brief Observation feature data type
+    std::string observation_dtype;
+
+  };
+
   explicit TeleopMockJointStateProducer(Config cfg);
   ~TeleopMockJointStateProducer() override = default;
 
@@ -40,11 +73,14 @@ public:
   Diagnostics diagnostics() const { return diag_; }
   const Config& config() const { return cfg_; }
 
+  const TeleopMockJointStateProducerMetadata& metadata() const override { return metadata_; }
+
 private:
   Config cfg_;
   Diagnostics diag_{};
   bool started_{false};
   std::chrono::steady_clock::time_point last_tick_{};
+  TeleopMockJointStateProducerMetadata metadata_;
 };
 
 } // namespace trossen::hw::arm

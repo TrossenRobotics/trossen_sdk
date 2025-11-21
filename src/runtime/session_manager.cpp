@@ -101,9 +101,18 @@ bool SessionManager::start_episode() {
   // Build episode file path
   auto path = build_episode_path(next_episode_index_);
 
+  std::vector<hw::PolledProducer::ProducerMetadata> producer_metadata;
+  // Fetch Metadata from producers as a vector of the base class
+  for (const auto& pt : producer_tasks_) {
+    // Dynamic cast to PolledProducer to access metadata()
+    if (auto polled_producer = std::dynamic_pointer_cast<hw::PolledProducer>(pt.producer)) {
+      producer_metadata.push_back(polled_producer->metadata());
+    }
+  }
+
   // Create backend
   try {
-    current_backend_ = create_backend(path.string(), next_episode_index_);
+    current_backend_ = create_backend(path.string(), next_episode_index_, producer_metadata);
   } catch (const std::exception& e) {
     std::cerr << "Backend creation failed: " << e.what() << std::endl;
     return false;
@@ -376,7 +385,8 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
 
 std::shared_ptr<io::Backend> SessionManager::create_backend(
   const std::string& output_path,
-  uint32_t episode_index) {
+  uint32_t episode_index, 
+  const std::vector<hw::PolledProducer::ProducerMetadata>& producer_metadatas) {
 
   
   if(config_.backend_config == nullptr) {
@@ -390,6 +400,15 @@ std::shared_ptr<io::Backend> SessionManager::create_backend(
     }
     lerobot_cfg->dataset_id = config_.dataset_id;
     lerobot_cfg->episode_index = episode_index;
+    // TODO (shantanuparab-tr): Use the producer metadata to populate backend metadata
+    // Print registered producers
+    std::cout << "\n╔═══════════════════════════════════════════════ Registered Producers Metadata ═══════════════════════════════════════════════╗\n";
+    for(const auto& pm : producer_metadatas) {
+      std::cout << "║  [ID: " << pm.id << "] Name: " << pm.name << "\n";
+      std::cout << "║      Description: " << pm.description << "\n";
+      std::cout << "║ --------------------------------------------------------------------------------------------------------------------\n";
+    }
+    std::cout << "╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n";
 
     auto metadata = io::backends::LeRobotBackend::Metadata{};
     metadata.task_name = lerobot_cfg->task_name;
