@@ -40,7 +40,8 @@ SessionManager::SessionManager(SessionConfig&& config)
 
   // Scan directory for existing episodes and resume from next index
   if(config_.backend_config->type == "mcap") {
-    next_episode_index_ = io::backends::McapBackend::scan_existing_episodes(config_.base_path);
+    std::filesystem::path data_directory_path = config_.base_path / config_.dataset_id;
+    next_episode_index_ = io::backends::McapBackend::scan_existing_episodes(data_directory_path);
   } else if (config_.backend_config->type == "lerobot") {
     std::filesystem::path data_directory_path = config_.base_path / config_.repository_id / config_.dataset_id / "data" / "chunk-000";
     next_episode_index_ = io::backends::LeRobotBackend::scan_existing_episodes(data_directory_path);
@@ -103,7 +104,7 @@ bool SessionManager::start_episode() {
     std::cerr << "Max episodes (" << config_.max_episodes.value() << ") reached." << std::endl;
     return false;
   }
-
+  
   // Build episode file path
   auto path = build_episode_path(next_episode_index_);
 
@@ -331,10 +332,13 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
       return config_.base_path;
   } else if (config_.backend_config->type == "mcap") {
       oss << "episode_" << std::setfill('0') << std::setw(6) << index << ".mcap";
+      return config_.base_path / config_.dataset_id / oss.str();
+
   } else {
     throw std::runtime_error("SessionManager::build_episode_path: Unsupported backend type: " + config_.backend_config->type);
   }
-  return config_.base_path / oss.str();
+  // return empty path as fallback (should not reach here)
+  return std::filesystem::path();
 }
 
 std::shared_ptr<io::Backend> SessionManager::create_backend(

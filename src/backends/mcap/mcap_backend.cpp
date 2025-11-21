@@ -52,6 +52,16 @@ bool McapBackend::open() {
     std::cerr << "Unknown compression option: " << cfg_.compression << " (falling back to none)\n";
     opts.compression = foxglove::McapCompression::None;
   }
+  // Check it the output path parent directory exists
+  auto parent_path = path_.parent_path();
+  if (!std::filesystem::exists(parent_path)) {
+    try {
+      std::filesystem::create_directories(parent_path);
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to create parent directories for MCAP file: " << e.what() << "\n";
+      return false;
+    }
+  }
 
   // Open mcap writer
   auto writer_result = foxglove::McapWriter::create(opts);
@@ -363,11 +373,12 @@ bool McapBackend::is_depth_encoding(const std::string& enc) {
 
 
 uint32_t McapBackend::scan_existing_episodes(const std::filesystem::path& base_path) {
+  std::cout << "Scanning existing episodes in: " << base_path << std::endl;
   // If directory doesn't exist, return 0
   if (!std::filesystem::exists(base_path)) {
     return 0;
   }
-
+  
   // If not a directory, return 0
   if (!std::filesystem::is_directory(base_path)) {
     std::cerr << "Warning: base_path exists but is not a directory: " << base_path << std::endl;
