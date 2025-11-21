@@ -278,7 +278,6 @@ void LeRobotBackend::convert_to_videos() const {
       const auto &task = tasks[idx];
       try {
         // Gather all image files
-        // Gather all JPG files
         std::vector<fs::path> image_paths;
         image_paths.reserve(512);
         for (const auto &file : fs::directory_iterator(task.episode_dir)) {
@@ -388,7 +387,6 @@ void LeRobotBackend::close() {
   convert_to_videos();
 
   // Clear frame indices map
-  //  Clear frame indices map
   source_frame_indices_.clear();
 
   opened_ = false;
