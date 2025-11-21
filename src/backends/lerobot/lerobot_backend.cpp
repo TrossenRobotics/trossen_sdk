@@ -688,7 +688,7 @@ void LeRobotBackend::computeStatistics() const {
   
 }
 
-void LeRobotBackend::printStatsTable(const nlohmann::json& stats) const {
+void LeRobotBackend::printStatsTable(const nlohmann::ordered_json& stats) const {
   std::cout << "\n================ Episode: " << cfg_.episode_index << " ================\n";
   for (auto it = stats.begin(); it != stats.end(); ++it) {
     const std::string& column_name = it.key();
@@ -1163,4 +1163,5 @@ void LeRobotBackend::writeMetadata() {
   info_file.close();
   std::cout << "Metadata written to info.json successfully." << std::endl;
   }
+}
 } // namespace trossen::io::backends
