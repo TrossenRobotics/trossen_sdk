@@ -402,7 +402,7 @@ std::shared_ptr<io::Backend> SessionManager::create_backend(
     metadata.camera_width = 640; // TODO: Extract from camera producers
     metadata.camera_height = 480; // TODO: Extract from camera producers
     metadata.is_depth_camera = false; // TODO: Extract from camera producers
-    metadata.camera_names = {"front_camera", "rear_camera"}; // TODO: Extract from camera producers
+    metadata.camera_names = {"camera_main"}; // TODO: Extract from camera producers
     metadata.action_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
     metadata.observation_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
 

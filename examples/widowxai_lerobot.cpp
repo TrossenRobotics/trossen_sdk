@@ -241,7 +241,7 @@ int main(int argc, char** argv) {
     lerobot_cfg->output_dir = cfg.output_dir;
     lerobot_cfg->task_name = "trossen_ai_solo_demo";
     lerobot_cfg->repository_id = "TrossenRoboticsCommunity";
-    lerobot_cfg->dataset_name = "trossen_ai_solo_dataset";
+    lerobot_cfg->dataset_id = "trossen_ai_solo_dataset";
     lerobot_cfg->overwrite_existing = false;
     lerobot_cfg->encode_videos = true;
     lerobot_cfg->type = "lerobot";
