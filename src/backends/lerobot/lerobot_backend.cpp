@@ -35,7 +35,7 @@ LeRobotBackend::LeRobotBackend(Config cfg, std::vector<std::shared_ptr<hw::Polle
     cfg_.png_compression_level = 3;
   }
   // Create a root folder for dataset using repo-id and dataset-name and default root
-  
+
   // URI is absolute path to output directory. Set to absolute path and check write access.
   // Validate output directory path
   try {
@@ -317,7 +317,7 @@ void LeRobotBackend::convert_to_videos() const {
     if (t.joinable()) t.join();
   }
 
-  
+
   auto end_time = std::chrono::steady_clock::now();
   auto secs = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
 }
@@ -355,7 +355,7 @@ void LeRobotBackend::convert_to_videos() const {
     if (image_paths.empty()) {
       return {};
     }
-    
+
     // Sample indices using power law distribution
     auto indices = sample_indices(image_paths.size());
 
@@ -654,7 +654,7 @@ void LeRobotBackend::computeStatistics() const {
   episodes_file << episode_metadata.dump() << "\n";
   episodes_file.close();
 
-  // TODO (shantanuparab-tr): Implement logic to check for existing task entrys
+  // TODO (shantanuparab-tr): Implement logic to check for existing task entries
   nlohmann::ordered_json task_metadata;
   task_metadata["task_index"] = cfg_.episode_index;
   task_metadata["task"] = cfg_.task_name;
@@ -666,12 +666,12 @@ void LeRobotBackend::computeStatistics() const {
     return;
   }
   tasks_file << task_metadata.dump() << "\n";
-  
+
   // Get total number of rows in the table (frames recorded)
   int64_t episode_frame_length = table->num_rows();
 
   updateEpisodeInfo(episode_frame_length);
-  
+
 }
 
 void LeRobotBackend::printStatsTable(const nlohmann::ordered_json& stats) const {
@@ -716,7 +716,7 @@ void LeRobotBackend::flush() {
 void LeRobotBackend::close() {
   std::lock_guard<std::mutex> lock(open_mutex_);
   if (!opened_) return;
-  
+
   try {
     // 1. Flush and close writer if initialized
     if (writer_) {
@@ -860,7 +860,7 @@ void LeRobotBackend::writeJointState(const data::RecordBase& base) {
 void LeRobotBackend::writeImage(const data::RecordBase& base) {
   const auto& img = static_cast<const data::ImageRecord&>(base);
 
-  
+
   // exit early if nothing to write
   if (img.image.empty()) {
     return;
@@ -876,12 +876,12 @@ void LeRobotBackend::writeImage(const data::RecordBase& base) {
   //
   // ASSUMPTION: The first sequence ID we observe from a source marks the beginning
   // of a new episode for that source.
-  
+
   if(source_frame_indices_.find(img.id) == source_frame_indices_.end()){
     source_frame_indices_[img.id] = img.seq;
   }
   int frame_index = img.seq - source_frame_indices_[img.id];
-  
+
   // Directory per camera id (cached)
   // TODO: this could be moved to a pre-processing step?
   auto it = image_dir_cache_.find(img.id);
@@ -895,7 +895,7 @@ void LeRobotBackend::writeImage(const data::RecordBase& base) {
   }
   const fs::path& camera_dir = it->second;
 
-  fs::path file_path = camera_dir / (std::string("image_") + 
+  fs::path file_path = camera_dir / (std::string("image_") +
                      (std::ostringstream() << std::setw(6) << std::setfill('0') << frame_index).str() +
                      ".jpg");
 
@@ -1040,7 +1040,7 @@ void LeRobotBackend::updateEpisodeInfo(int episode_frame_length) const{
 }
 
 void LeRobotBackend::writeMetadata() {
-  
+
   // TODO(shantanuparab-tr): [TDS-15]: Extract features from the robot's
   // observation space and action space
   // TODO(shantanuparab-tr): [TDS-16]: Get feature specifications from a
@@ -1083,7 +1083,7 @@ void LeRobotBackend::writeMetadata() {
 
    if (metadata->type == "mock_teleop_arm"){
       const auto &teleop_arm_metadata = dynamic_cast<const hw::arm::TeleopMockJointStateProducer::TeleopMockJointStateProducerMetadata&>(*metadata);
-    
+
       nlohmann::ordered_json action;
       action["dtype"] = teleop_arm_metadata.action_dtype;
       action["shape"] = {static_cast<int>(teleop_arm_metadata.action_feature_names.size())};
@@ -1098,7 +1098,7 @@ void LeRobotBackend::writeMetadata() {
       features["observation.state"] = observation_state;
     } else if (metadata->type == "teleop_arm"){
       const auto &teleop_arm_metadata = dynamic_cast<const hw::arm::TeleopTrossenArmProducer::TeleopTrossenArmProducerMetadata&>(*metadata);
-    
+
       nlohmann::ordered_json action;
       action["dtype"] = teleop_arm_metadata.action_dtype;
       action["shape"] = {static_cast<int>(teleop_arm_metadata.action_feature_names.size())};
@@ -1110,7 +1110,7 @@ void LeRobotBackend::writeMetadata() {
           static_cast<int>(teleop_arm_metadata.observation_feature_names.size())};
       observation_state["names"] = teleop_arm_metadata.observation_feature_names;
       features["action"] = action;
-      features["observation.state"] = observation_state;    
+      features["observation.state"] = observation_state;
     } else if (metadata->type == "mock_camera"){
       camera_names_.push_back(metadata->id);
       const auto &camera_metadata = dynamic_cast<const hw::camera::MockCameraProducer::MockCameraProducerMetadata&>(*metadata);
@@ -1143,7 +1143,7 @@ void LeRobotBackend::writeMetadata() {
   }
 
   //TODO (shantanuparab-tr): Common Feature these can be moved to a constants file later
-  
+
   nlohmann::ordered_json timestamp_feature;
   timestamp_feature["dtype"] = "float32";
   timestamp_feature["shape"] = {1};
@@ -1168,18 +1168,18 @@ void LeRobotBackend::writeMetadata() {
   task_index_feature["dtype"] = "int64";
   task_index_feature["shape"] = {1};
   task_index_feature["names"] = {};
-  
+
   features["timestamp"] = timestamp_feature;
   features["frame_index"] = frame_index_feature;
   features["episode_index"] = episode_index_feature;
   features["index"] = index_feature;
-  features["task_index"] = task_index_feature;  
+  features["task_index"] = task_index_feature;
 
   info_["features"] = features;
 
   info_["data_path"] = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet";
   info_["video_path"] = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4";
-  
+
   // Write to info.json
   std::ofstream info_file(meta_root_ / JSON_INFO);
 
@@ -1190,5 +1190,4 @@ void LeRobotBackend::writeMetadata() {
   info_file << info_.dump(4);
   info_file.close();
   }
-}
 } // namespace trossen::io::backends
