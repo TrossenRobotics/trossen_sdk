@@ -15,12 +15,17 @@
 #include <unordered_map>
 #include <vector>
 
-#include <mcap/writer.hpp>
+#include "foxglove/foxglove.hpp"
+#include "foxglove/mcap.hpp"
+#include "foxglove/channel.hpp"
+#include "foxglove/schemas.hpp"
 
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_schemas.hpp"
 
 namespace trossen::io::backends {
+
+const size_t MCAP_INITIAL_ENCODED_BUFFER_SIZE = 1024 * 1024; // 1 MB
 
 /**
  * McapBackend writes records into an MCAP file.
@@ -111,21 +116,6 @@ public:
   Stats stats() const { return stats_; }
 
 private:
-  /// @brief Information about a registered MCAP channel
-  struct ChannelInfo {
-    /// @brief MCAP channel ID and associated info
-    mcap::ChannelId id{0};
-
-    /// @brief Stream ID (e.g., camera name or joint state topic)
-    std::string topic;
-
-    /// @brief Data encoding (e.g., "rgb8", "protobuf", etc.)
-    std::string encoding{"protobuf"};
-
-    /// @brief Associated schema ID
-    mcap::SchemaId schema_id{0};
-  };
-
   /**
    * @brief Ensure an image channel exists for the given camera name
    *
@@ -167,24 +157,14 @@ private:
    */
   void register_schemas_once();
 
-  /// @brief Image schema ID
-  mcap::SchemaId schema_image_{0};
+  /// @brief Foxglove context
+  foxglove::Context context_;
 
-  /// @brief Joint state schema ID
-  mcap::SchemaId schema_joint_{0};
+  /// @brief Foxglove MCAP writer instance
+  std::optional<foxglove::McapWriter> writer_;
 
-  // TODO(lukeschmitt-tr): camera calibration, robot description support
-  /// @brief Camera calibration schema ID
-  // mcap::SchemaId schema_cam_calib_{0};
-
-  /// @brief Robot description schema ID
-  // mcap::SchemaId schema_robot_description_{0};
-
-  /// @brief MCAP writer instance
-  mcap::McapWriter writer_;
-
-  /// @brief MCAP writer options
-  mcap::McapWriterOptions opts_{"trossen"};
+  /// @brief Protobuf schema for images
+  std::string schema_data_;
 
   /// @brief Output file path
   std::filesystem::path path_;
@@ -196,7 +176,7 @@ private:
   std::mutex writer_mutex_;
 
   /// @brief Map of image channels by camera name
-  std::unordered_map<std::string, ChannelInfo> image_channels_;
+  std::unordered_map<std::string, foxglove::RawChannel> image_channels_;
 
   /// @brief Helper to identify depth topics
   static bool is_depth_topic(const std::string& topic);
@@ -204,8 +184,8 @@ private:
   /// @brief Helper to identify depth encodings
   static bool is_depth_encoding(const std::string& enc);
 
-  /// @brief Joint state channel info
-  ChannelInfo joint_channel_{};
+  /// @brief Joint state channel
+  std::optional<foxglove::RawChannel> joint_channel_;
 
   /// @brief Statistics about written records
   Stats stats_{};

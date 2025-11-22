@@ -21,20 +21,59 @@ add_library(trossen_sdk
   src/runtime/session_manager.cpp
 )
 
+# Add architecture-specific CMAKE_PREFIX_PATH
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} /usr/lib/x86_64-linux-gnu/cmake)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+  set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} /usr/lib/aarch64-linux-gnu/cmake)
+endif()
+
+find_package(Protobuf REQUIRED)
+message(STATUS "Found Protobuf: ${Protobuf_VERSION}")
+
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 
 include(FetchContent)
+
+set(FOXGLOVE_VERSION "0.16.1")
+# Detect platform for Foxglove SDK download
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  set(FOXGLOVE_ARCH "x86_64-unknown-linux-gnu")
+  set(FOXGLOVE_HASH "d8afbb8f99b75d7ad0f1b2885d35cacead28e6f2e36bd4d1a30e17413ebab896")
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+  set(FOXGLOVE_ARCH "aarch64-unknown-linux-gnu")
+  set(FOXGLOVE_HASH "20dd412fa8be481e6ed84d88879f368e1a55a146e9a98f936a05931742e1dea5")
+else()
+  message(FATAL_ERROR "Unsupported architecture: ${CMAKE_SYSTEM_PROCESSOR}")
+endif()
+
 FetchContent_Declare(
-  mcap_builder
-  GIT_REPOSITORY https://github.com/TrossenRobotics/mcap_builder.git
-  GIT_TAG 31b70b3ea3121ef44f7a2f9e94b0c8e8325525fe
+  foxglove
+  DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  URL "https://github.com/foxglove/foxglove-sdk/releases/download/sdk%2Fv${FOXGLOVE_VERSION}/foxglove-v${FOXGLOVE_VERSION}-cpp-${FOXGLOVE_ARCH}.zip"
+  URL_HASH SHA256=${FOXGLOVE_HASH}
 )
-message(STATUS "Fetching MCAP (mcap_builder)...")
-FetchContent_MakeAvailable(mcap_builder)
-# mcap_builder provides an imported target named "mcap"
-target_link_libraries(trossen_sdk PUBLIC mcap)
-target_compile_definitions(trossen_sdk PUBLIC TROSSEN_WITH_MCAP=1)
+message(STATUS "Fetching Foxglove SDK v${FOXGLOVE_VERSION} for ${FOXGLOVE_ARCH}...")
+FetchContent_MakeAvailable(foxglove)
+
+# Find all Foxglove SDK source files
+file(GLOB FOXGLOVE_SOURCES CONFIGURE_DEPENDS
+  "${foxglove_SOURCE_DIR}/src/*.cpp"
+  "${foxglove_SOURCE_DIR}/src/server/*.cpp"
+)
+
+# Add Foxglove SDK source files
+target_sources(trossen_sdk PRIVATE ${FOXGLOVE_SOURCES})
+
+# Add Foxglove SDK include directories
+target_include_directories(trossen_sdk PUBLIC
+  ${foxglove_SOURCE_DIR}/include
+  ${foxglove_SOURCE_DIR}/include/foxglove
+)
+
+# Link against foxglove library
+target_link_libraries(trossen_sdk PRIVATE ${foxglove_SOURCE_DIR}/lib/libfoxglove.a)
 
 # Required OpenCV dependency for camera producer
 # On Ubuntu/Debian, OpenCV 4.x is typically installed as opencv4
@@ -54,30 +93,7 @@ message(STATUS "Found OpenCV: ${OpenCV_VERSION}")
 target_include_directories(trossen_sdk PUBLIC ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(trossen_sdk PUBLIC ${OpenCV_LIBS} Arrow::arrow_shared Parquet::parquet_shared)
 
-# Protobuf schemas for MCAP backend
-# Try modern CMake config first, then fall back to FindProtobuf module
-find_package(Protobuf CONFIG QUIET)
-if(NOT Protobuf_FOUND)
-  # Fall back to the Find module (older method)
-  find_package(Protobuf QUIET)
-  if(NOT Protobuf_FOUND)
-    # Last resort: use pkg-config
-    find_package(PkgConfig QUIET)
-    if(PkgConfig_FOUND)
-      pkg_check_modules(Protobuf REQUIRED protobuf)
-      # Set standard variables for compatibility
-      set(Protobuf_LIBRARIES ${Protobuf_LINK_LIBRARIES})
-      set(Protobuf_INCLUDE_DIRS ${Protobuf_INCLUDE_DIRS})
-      # Find protoc compiler
-      find_program(Protobuf_PROTOC_EXECUTABLE protoc REQUIRED)
-    else()
-      message(FATAL_ERROR "Protobuf not found. Please install libprotobuf-dev and protobuf-compiler")
-    endif()
-  endif()
-endif()
-message(STATUS "Found Protobuf: ${Protobuf_VERSION}")
-
-# List proto files
+# List proto files for MCAP backend
 set(TROSSEN_PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include/trossen_sdk/io/backends/mcap/proto)
 set(PROTOBUF_IMPORT_DIRS ${TROSSEN_PROTO_PATH})
 set(TROSSEN_PROTO_FILES
@@ -129,4 +145,3 @@ option(BUILD_BENCHMARKS "Build the benchmarking tree" OFF)
 if(BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
-

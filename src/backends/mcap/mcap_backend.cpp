@@ -2,17 +2,14 @@
 #include <unordered_set>
 #include <iostream>
 
-#include "mcap/types.hpp"
-#include "opencv2/imgcodecs.hpp"
-
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
+#include "opencv2/imgcodecs.hpp"
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
 #include "trossen_sdk/version.hpp"
 #include "JointState.pb.h"
-#include "RawImage.pb.h"
 
 
 namespace trossen::io::backends {
@@ -31,40 +28,53 @@ bool McapBackend::open() {
 
   // Parse configs
   path_ = cfg_.output_path;
-  opts_.chunkSize = cfg_.chunk_size_bytes;
+
+  // Create Foxglove context
+  context_ = foxglove::Context::create();
+
+  // Store path as string
+  std::string path_str = path_.string();
+
+  // Configure MCAP writer options
+  foxglove::McapWriterOptions opts;
+  opts.context = context_;
+  opts.path = path_str;
+  opts.profile = "trossen";
+  opts.chunk_size = cfg_.chunk_size_bytes;
+
   if (cfg_.compression == "zstd") {
-    opts_.compression = mcap::Compression::Zstd;
+    opts.compression = foxglove::McapCompression::Zstd;
   } else if (cfg_.compression == "lz4") {
-    opts_.compression = mcap::Compression::Lz4;
+    opts.compression = foxglove::McapCompression::Lz4;
   } else if (cfg_.compression.empty()) {
-    opts_.compression = mcap::Compression::None;
+    opts.compression = foxglove::McapCompression::None;
   } else {
     std::cerr << "Unknown compression option: " << cfg_.compression << " (falling back to none)\n";
-    opts_.compression = mcap::Compression::None;
+    opts.compression = foxglove::McapCompression::None;
   }
 
   // Open mcap writer
-  auto status = writer_.open(path_.string(), opts_);
-  if (!status.ok()) {
-    std::cerr << "Failed to open MCAP file: " << status.message << "\n";
+  auto writer_result = foxglove::McapWriter::create(opts);
+  if (!writer_result.has_value()) {
+    std::cerr << "Failed to open MCAP file: " << foxglove::strerror(writer_result.error()) << "\n";
     return false;
   }
+  writer_ = std::move(writer_result.value());
   opened_ = true;
 
   register_schemas_once();
 
   // Write MCAP file-level metadata
-  mcap::Metadata metadata;
-  metadata.name = "trossen_sdk_recording";
-  metadata.metadata["tool_version"] = trossen::core::version();
-  metadata.metadata["dataset_id"] = cfg_.dataset_id;
-  metadata.metadata["episode_index"] = std::to_string(cfg_.episode_index);
+  std::map<std::string, std::string> metadata;
+  metadata["tool_version"] = trossen::core::version();
+  metadata["dataset_id"] = cfg_.dataset_id;
+  metadata["episode_index"] = std::to_string(cfg_.episode_index);
   auto now = trossen::data::now_real();
-  metadata.metadata["recording_start_time"] = std::to_string(now.to_ns());
+  metadata["recording_start_time"] = std::to_string(now.to_ns());
 
-  auto st = writer_.write(metadata);
-  if (!st.ok()) {
-    std::cerr << "Failed to write metadata: " << st.message << "\n";
+  auto st = writer_->writeMetadata("trossen_sdk_recording", metadata.begin(), metadata.end());
+  if (st != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to write metadata: " << foxglove::strerror(st) << "\n";
   }
 
   return true;
@@ -75,7 +85,19 @@ void McapBackend::close() {
   if (!opened_) {
     return;
   }
-  writer_.close();
+  // Close channels
+  if (joint_channel_) {
+    joint_channel_->close();
+  }
+  for (auto& [name, channel] : image_channels_) {
+    channel.close();
+  }
+  if (writer_) {
+    auto st = writer_->close();
+    if (st != foxglove::FoxgloveError::Ok) {
+      std::cerr << "Failed to close MCAP writer: " << foxglove::strerror(st) << "\n";
+    }
+  }
   opened_ = false;
 }
 
@@ -84,7 +106,6 @@ void McapBackend::flush() {
   if (!opened_) {
     return;
   }
-  writer_.closeLastChunk();
 }
 
 void McapBackend::write(const data::RecordBase& record) {
@@ -121,20 +142,33 @@ void McapBackend::writeBatch(std::span<const data::RecordBase* const> records) {
 
 void McapBackend::ensure_jointstate_channel() {
   // Check if the channel already exists
-  if (joint_channel_.id != 0) {
+  if (joint_channel_.has_value()) {
     return;
   }
 
-  // Create a new channel
-  mcap::Channel ch;
-  ch.topic = mcapdefs::joint_state_topic(cfg_.robot_name);
-  ch.messageEncoding = "protobuf";
-  ch.schemaId = schema_joint_;
-  writer_.addChannel(ch);
-  joint_channel_.id = ch.id;
-  joint_channel_.topic = ch.topic;
-  joint_channel_.encoding = ch.messageEncoding;
-  joint_channel_.schema_id = ch.schemaId;
+  // Create schema
+  foxglove::Schema schema;
+  schema.name = "trossen_sdk.msg.JointState";
+  schema.encoding = "protobuf";
+  schema.data = reinterpret_cast<const std::byte*>(schema_data_.data());
+  schema.data_len = schema_data_.size();
+
+  // Create channel
+  auto channel_result = foxglove::RawChannel::create(
+    mcapdefs::joint_state_topic(cfg_.robot_name),
+    "protobuf",
+    schema,
+    context_,
+    std::nullopt
+  );
+
+  if (!channel_result.has_value()) {
+    std::cerr << "Failed to create joint state channel: "
+              << foxglove::strerror(channel_result.error()) << "\n";
+    return;
+  }
+
+  joint_channel_ = std::move(channel_result.value());
 }
 
 void McapBackend::ensure_image_channel(const std::string& camera_name) {
@@ -149,21 +183,29 @@ void McapBackend::ensure_image_channel_with_metadata(
   if (it != image_channels_.end()) {
     return; // already exists
   }
-  mcap::Channel ch;
-  ch.topic = mcapdefs::image_topic(camera_name);
-  ch.messageEncoding = "protobuf";
-  ch.schemaId = schema_image_;
-  // Insert metadata (MCAP Channel supports key/value map)
-  for (const auto& kv : metadata) {
-    ch.metadata[kv.first] = kv.second;
+
+  // Use Foxglove SDK's built-in RawImage schema
+  foxglove::Schema schema = foxglove::schemas::RawImage::schema();
+
+  // Convert metadata to std::map
+  std::map<std::string, std::string> channel_metadata(metadata.begin(), metadata.end());
+
+  // Create channel
+  auto channel_result = foxglove::RawChannel::create(
+    mcapdefs::image_topic(camera_name),
+    "protobuf",
+    schema,
+    context_,
+    channel_metadata
+  );
+
+  if (!channel_result.has_value()) {
+    std::cerr << "Failed to create image channel: "
+              << foxglove::strerror(channel_result.error()) << "\n";
+    return;
   }
-  writer_.addChannel(ch);
-  ChannelInfo info;
-  info.id = ch.id;
-  info.topic = ch.topic;
-  info.encoding = ch.messageEncoding;
-  info.schema_id = ch.schemaId;
-  image_channels_.emplace(camera_name, info);
+
+  image_channels_.emplace(camera_name, std::move(channel_result.value()));
 }
 
 void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
@@ -190,18 +232,16 @@ void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
   for (auto v : js.efforts) out.add_efforts(v);
   std::string payload;
   out.SerializeToString(&payload);
-  mcap::Message msg;
-  msg.channelId = joint_channel_.id;
-  msg.sequence = js.seq;
-  msg.publishTime = js.ts.realtime.to_ns();
-  msg.logTime = js.ts.realtime.to_ns();
-  msg.data = reinterpret_cast<const std::byte*>(payload.data());
-  msg.dataSize = payload.size();
-  auto st = writer_.write(msg);
-  if (!st.ok()) {
-    std::cerr << "Failed to write joint state: " << st.message << "\n";
-  }
-  else {
+
+  auto st = joint_channel_->log(
+    reinterpret_cast<const std::byte*>(payload.data()),
+    payload.size(),
+    js.ts.realtime.to_ns()
+  );
+
+  if (st != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to write joint state: " << foxglove::strerror(st) << "\n";
+  } else {
     ++stats_.joint_states_written;
   }
 }
@@ -225,31 +265,45 @@ void McapBackend::write_image_record(const data::ImageRecord& img) {
   } else {
     ensure_image_channel(img.id);
   }
-  foxglove::RawImage imsg;
-  auto* ts = imsg.mutable_timestamp();
-  ts->set_seconds(img.ts.realtime.sec);
-  ts->set_nanos(img.ts.realtime.nsec);
-  imsg.set_frame_id(img.id);
-  imsg.set_width(img.width);
-  imsg.set_height(img.height);
-  imsg.set_encoding(img.encoding);
-  // Step: use OpenCV stride (bytes per row) if available
-  imsg.set_step(static_cast<uint32_t>(img.image.step));
-  imsg.set_data(
-    reinterpret_cast<const char*>(img.image.data),
-    img.image.total() * img.image.elemSize());
-  std::string payload;
-  imsg.SerializeToString(&payload);
-  mcap::Message msg;
-  msg.channelId = image_channels_.at(img.id).id;
-  msg.sequence = img.seq;
-  msg.logTime = img.ts.realtime.to_ns();
-  msg.publishTime = msg.logTime;
-  msg.data = reinterpret_cast<const std::byte*>(payload.data());
-  msg.dataSize = payload.size();
-  auto st = writer_.write(msg);
-  if (!st.ok()) {
-    std::cerr << "Failed to write image: " << st.message << "\n";
+  foxglove::schemas::RawImage imsg;
+  imsg.timestamp = foxglove::schemas::Timestamp{
+    .sec = static_cast<uint32_t>(img.ts.realtime.sec),
+    .nsec = static_cast<uint32_t>(img.ts.realtime.nsec)
+  };
+  imsg.frame_id = img.id;
+  imsg.width = img.width;
+  imsg.height = img.height;
+  imsg.encoding = img.encoding;
+  imsg.step = static_cast<uint32_t>(img.image.step);
+  // Copy image data to std::vector<std::byte>
+  const std::byte* data_ptr = reinterpret_cast<const std::byte*>(img.image.data);
+  size_t data_size = img.image.total() * img.image.elemSize();
+  imsg.data.assign(data_ptr, data_ptr + data_size);
+
+  // Encode to buffer
+  std::vector<uint8_t> payload(MCAP_INITIAL_ENCODED_BUFFER_SIZE);
+  size_t encoded_len = 0;
+  auto encode_result = imsg.encode(payload.data(), payload.size(), &encoded_len);
+
+  if (encode_result == foxglove::FoxgloveError::BufferTooShort) {
+    // Resize and try again
+    payload.resize(encoded_len);
+    encode_result = imsg.encode(payload.data(), payload.size(), &encoded_len);
+  }
+
+  if (encode_result != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to encode image: " << foxglove::strerror(encode_result) << "\n";
+    return;
+  }
+
+  auto st = image_channels_.at(img.id).log(
+    reinterpret_cast<const std::byte*>(payload.data()),
+    encoded_len,
+    img.ts.realtime.to_ns()
+  );
+
+  if (st != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to write image: " << foxglove::strerror(st) << "\n";
   } else {
     if (depth) {
       ++stats_.depth_images_written;
@@ -266,8 +320,6 @@ void McapBackend::register_schemas_once() {
 
   const char* roots[] = {
     "trossen_sdk/io/backends/mcap/proto/JointState.proto",
-    "trossen_sdk/io/backends/mcap/proto/Rawimage.proto",
-    "trossen_sdk/io/backends/mcap/proto/Timestamp.proto"
   };
 
   std::unordered_set<std::string> visited;
@@ -297,18 +349,7 @@ void McapBackend::register_schemas_once() {
 
   std::string blob;
   set.SerializeToString(&blob);
-
-  // Register schemas we care about and store IDs
-  auto addSchema = [&](const std::string& name) -> mcap::SchemaId {
-    mcap::Schema s;
-    s.name = name;
-    s.encoding = "protobuf";
-    s.data.assign(reinterpret_cast<const std::byte*>(blob.data()), reinterpret_cast<const std::byte*>(blob.data() + blob.size()));
-    writer_.addSchema(s);
-    return s.id;
-  };
-  schema_joint_   = addSchema("trossen_sdk.msg.JointState");
-  schema_image_   = addSchema("foxglove.RawImage");
+  schema_data_ = blob;
 }
 
 bool McapBackend::is_depth_topic(const std::string& topic) {
