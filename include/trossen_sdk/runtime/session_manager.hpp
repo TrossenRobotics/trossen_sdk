@@ -27,6 +27,7 @@
 #include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
 #include "trossen_sdk/io/sink.hpp"
 #include "trossen_sdk/runtime/scheduler.hpp"
+#include "trossen_sdk/hw/metadata_variant.hpp"
 
 namespace trossen::runtime {
 
@@ -265,7 +266,7 @@ private:
   std::shared_ptr<io::Backend> create_backend(
     const std::string& output_path,
     uint32_t episode_index,
-    const std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>>& producer_metadatas
+    const std::vector<trossen::metadata::MetadataVariant>& producer_metadatas
   );
 
   /**

@@ -101,16 +101,16 @@ bool SessionManager::start_episode() {
   // Build episode file path
   auto path = build_episode_path(next_episode_index_);
 
-  std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> producer_metadata;
+  std::vector<trossen::metadata::MetadataVariant> producer_metadata;
 
   // Fetch Metadata from producers as a vector of the base class
   for (const auto& pt : producer_tasks_) {
     // Dynamic cast to PolledProducer to access metadata()
-    if (auto polled_producer = std::dynamic_pointer_cast<hw::PolledProducer>(pt.producer)) {
-      std::cout << "  Pushed Producer: " << polled_producer->metadata()->name
-                << " (ID: " << polled_producer->metadata()->id << ")\n";
-      producer_metadata.push_back(polled_producer->metadata());
-    }
+    auto base_meta = pt.producer->metadata();
+
+    producer_metadata.push_back(
+        trossen::metadata::make_metadata_variant(base_meta)
+);
   }
   std::cout<< "Number of Producers Pushed: " << producer_metadata.size() << std::endl;
   // Create backend
@@ -389,7 +389,7 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
 std::shared_ptr<io::Backend> SessionManager::create_backend(
   const std::string& output_path,
   uint32_t episode_index, 
-  const std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>>& producer_metadatas) {
+  const std::vector<trossen::metadata::MetadataVariant>& producer_metadatas) {
 
   
   if(config_.backend_config == nullptr) {
@@ -405,13 +405,13 @@ std::shared_ptr<io::Backend> SessionManager::create_backend(
     lerobot_cfg->episode_index = episode_index;
     // TODO (shantanuparab-tr): Use the producer metadata to populate backend metadata
     // Print registered producers
-    std::cout << "\n╔═══════════════════════════════════════════════ Registered Producers Metadata ═══════════════════════════════════════════════╗\n";
-    for(const auto& pm : producer_metadatas) {
-      std::cout << "║  [ID: " << pm->id << "] Name: " << pm->name << "\n";
-      std::cout << "║      Description: " << pm->description << "\n";
-      std::cout << "║ --------------------------------------------------------------------------------------------------------------------\n";
-    }
-    std::cout << "╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n";
+    // std::cout << "\n╔═══════════════════════════════════════════════ Registered Producers Metadata ═══════════════════════════════════════════════╗\n";
+    // for(const auto& pm : producer_metadatas) {
+    //   std::cout << "║  [ID: " << pm->id << "] Name: " << pm->name << "\n";
+    //   std::cout << "║      Description: " << pm->description << "\n";
+    //   std::cout << "║ --------------------------------------------------------------------------------------------------------------------\n";
+    // }
+    // std::cout << "╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n";
 
     return std::make_shared<io::backends::LeRobotBackend>(*lerobot_cfg, producer_metadatas);
   }

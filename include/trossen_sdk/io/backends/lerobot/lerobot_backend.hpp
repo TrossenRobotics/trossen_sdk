@@ -22,6 +22,7 @@
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_constants.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
+#include "trossen_sdk/hw/metadata_variant.hpp"
 
 namespace trossen::io::backends {
 
@@ -110,7 +111,7 @@ public:
    *
    * @param cfg Configuration parameters
    */
-  explicit LeRobotBackend(Config cfg,std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata);
+  explicit LeRobotBackend(Config cfg,std::vector<trossen::metadata::MetadataVariant> metadata);
 
   /**
    * @brief Open a LeRobot V2 logging destination
@@ -352,7 +353,7 @@ private:
   // Config for this backend
   Config cfg_;
   // Metadata for this backend
-  std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata_;
+  std::vector<trossen::metadata::MetadataVariant> metadata_;
 
   // Store camera names from metadata for easy access
   std::vector<std::string> camera_names_;
