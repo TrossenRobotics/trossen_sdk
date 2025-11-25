@@ -598,7 +598,6 @@ void LeRobotBackend::computeStatistics() const {
       stats[field->name()] = computeFlatStats(array);
     }
   }
-  std::cout << "Computing image data statistics successfully." << std::endl;
   // Compute image statistics for each camera
   for (const auto &camera_info : camera_names_) {
     std::cout << "Computing image statistics for camera: " << camera_info << std::endl;
@@ -1048,29 +1047,24 @@ void LeRobotBackend::writeMetadata() {
 
   nlohmann::ordered_json features;
 
-    for(const auto &metadata : metadata_ ){
-      nlohmann::ordered_json producer_feature = metadata->get_info();
-      // Merge producer_feature into features
-      for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
-        features[it.key()] = it.value();
-      }
-      // Check if metadata has a features["observation.images." + id] entry and add to camera_names_
-      // Extract camera IDs from image feature keys for later use in statistics computation.
-      // Camera names are derived from "observation.images.*" keys in producer metadata
-      // and are used to locate the corresponding image directories.
-      // TODO (shantanuparab-tr): This logic can be improved by having a dedicated method in
-      // metadata interface to get camera IDs.
-      for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
-        const std::string& key = it.key();
-        if (key.find("observation.images.") == 0) {
-          std::string camera_id = key.substr(std::string("observation.images.").length());
-          camera_names_.push_back(camera_id);
+  for(const auto &metadata : metadata_ ){
+    nlohmann::ordered_json producer_feature = metadata->get_info();
+    // Merge producer_feature into features
+    for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
+      features[it.key()] = it.value();
+    }
+    // Extract camera names for video features
+    for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
+      if (it.value().contains("dtype") && it.value()["dtype"] == "video") {
+        if (it.value().contains("id")) {
+          camera_names_.push_back(it.value()["id"].get<std::string>());
         }
       }
     }
+  }
 
   //TODO (shantanuparab-tr): Common Feature these can be moved to a constants file later
-  
+
   nlohmann::ordered_json timestamp_feature;
   timestamp_feature["dtype"] = "float32";
   timestamp_feature["shape"] = {1};
@@ -1095,20 +1089,17 @@ void LeRobotBackend::writeMetadata() {
   task_index_feature["dtype"] = "int64";
   task_index_feature["shape"] = {1};
   task_index_feature["names"] = {};
-  
+
   features["timestamp"] = timestamp_feature;
   features["frame_index"] = frame_index_feature;
   features["episode_index"] = episode_index_feature;
   features["index"] = index_feature;
-  features["task_index"] = task_index_feature;  
+  features["task_index"] = task_index_feature;
 
   info_["features"] = features;
 
   info_["data_path"] = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet";
   info_["video_path"] = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4";
-
-  {
-
 
   // // Write to info.json
   std::ofstream info_file(meta_root_ / JSON_INFO);
@@ -1120,6 +1111,6 @@ void LeRobotBackend::writeMetadata() {
   info_file << info_.dump(4);
   info_file.close();
   std::cout << "Metadata written to info.json successfully." << std::endl;
-  }
+
 }
 } // namespace trossen::io::backends

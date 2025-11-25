@@ -80,9 +80,12 @@ public:
     /// @brief Is this a depth camera?
     bool is_depth_map{false};
 
+    /// @brief Get producer info as JSON
+    /// @return JSON object containing producer information
     nlohmann::ordered_json get_info() const override {
       nlohmann::ordered_json features;
       nlohmann::ordered_json camera_feature;
+      camera_feature["id"] = id;
       camera_feature["dtype"] = "video";
       camera_feature["shape"] = {height, width, 3};
       camera_feature["names"] = {"height", "width", "channels"};

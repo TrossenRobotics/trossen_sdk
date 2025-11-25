@@ -48,6 +48,8 @@ public:
     /// @brief Observation feature data type
     std::string observation_dtype;
 
+    /// @brief Get producer info as JSON
+    /// @return JSON object containing producer information
     nlohmann::ordered_json get_info() const override {
       nlohmann::ordered_json features;
       nlohmann::ordered_json action;
