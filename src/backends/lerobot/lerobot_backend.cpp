@@ -1012,7 +1012,6 @@ void LeRobotBackend::updateEpisodeInfo(int episode_frame_length) const{
       info_file.close();
     }
   }
-  std::cout << info_json.dump(4) << std::endl;
   // Update episode count
   info_json["total_episodes"] = info_json.value("total_episodes", 0) + 1;
 
