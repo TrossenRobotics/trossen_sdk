@@ -68,6 +68,21 @@ public:
     /// @brief Is this a depth camera?
     bool is_depth_map{false};
 
+    nlohmann::ordered_json get_info() const override {
+      nlohmann::ordered_json features;
+      nlohmann::ordered_json camera_feature;
+      camera_feature["dtype"] = "video";
+      camera_feature["shape"] = {height, width, 3};
+      camera_feature["names"] = {"height", "width", "channels"};
+      camera_feature["info"] = {
+          {"video.fps", fps},           {"video.height", height},
+          {"video.width", width},       {"video.channels", channels},
+          {"video.codec", codec},                {"video.pix_fmt", pix_fmt},
+          {"video.is_depth_map", is_depth_map}, {"has_audio", has_audio}};
+      features["observation.images." + id] = camera_feature;
+      return features;
+    }
+
   };
 
   explicit MockSyncedCameraProducer(Config cfg);

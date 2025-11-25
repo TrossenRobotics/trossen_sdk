@@ -598,10 +598,10 @@ void LeRobotBackend::computeStatistics() const {
       stats[field->name()] = computeFlatStats(array);
     }
   }
-
+  std::cout << "Computing image data statistics successfully." << std::endl;
   // Compute image statistics for each camera
   for (const auto &camera_info : camera_names_) {
-
+    std::cout << "Computing image statistics for camera: " << camera_info << std::endl;
     std::string image_key = "observation.images." + camera_info;
     // Get image paths for the current episode and camera
     std::string image_folder_path = images_root_.string();
@@ -1048,68 +1048,26 @@ void LeRobotBackend::writeMetadata() {
 
   nlohmann::ordered_json features;
 
-  for(const auto &metadata : metadata_ ){
-
-   if (metadata->type == "mock_teleop_arm"){
-      const auto &teleop_arm_metadata = dynamic_cast<const hw::arm::TeleopMockJointStateProducer::TeleopMockJointStateProducerMetadata&>(*metadata);
-    
-      nlohmann::ordered_json action;
-      action["dtype"] = teleop_arm_metadata.action_dtype;
-      action["shape"] = {static_cast<int>(teleop_arm_metadata.action_feature_names.size())};
-      action["names"] = teleop_arm_metadata.action_feature_names;
-
-      nlohmann::ordered_json observation_state;
-      observation_state["dtype"] = teleop_arm_metadata.observation_dtype;
-      observation_state["shape"] = {
-          static_cast<int>(teleop_arm_metadata.observation_feature_names.size())};
-      observation_state["names"] = teleop_arm_metadata.observation_feature_names;
-      features["action"] = action;
-      features["observation.state"] = observation_state;
-    } else if (metadata->type == "teleop_arm"){
-      const auto &teleop_arm_metadata = dynamic_cast<const hw::arm::TeleopTrossenArmProducer::TeleopTrossenArmProducerMetadata&>(*metadata);
-    
-      nlohmann::ordered_json action;
-      action["dtype"] = teleop_arm_metadata.action_dtype;
-      action["shape"] = {static_cast<int>(teleop_arm_metadata.action_feature_names.size())};
-      action["names"] = teleop_arm_metadata.action_feature_names;
-
-      nlohmann::ordered_json observation_state;
-      observation_state["dtype"] = teleop_arm_metadata.observation_dtype;
-      observation_state["shape"] = {
-          static_cast<int>(teleop_arm_metadata.observation_feature_names.size())};
-      observation_state["names"] = teleop_arm_metadata.observation_feature_names;
-      features["action"] = action;
-      features["observation.state"] = observation_state;    
-    } else if (metadata->type == "mock_camera"){
-      camera_names_.push_back(metadata->id);
-      const auto &camera_metadata = dynamic_cast<const hw::camera::MockCameraProducer::MockCameraProducerMetadata&>(*metadata);
-      nlohmann::ordered_json camera_feature;
-      camera_feature["dtype"] = "video";
-      camera_feature["shape"] = {camera_metadata.height, camera_metadata.width, 3};
-      camera_feature["names"] = {"height", "width", "channels"};
-      camera_feature["info"] = {
-          {"video.fps", camera_metadata.fps},           {"video.height", camera_metadata.height},
-          {"video.width", camera_metadata.width},       {"video.channels", camera_metadata.channels},
-          {"video.codec", camera_metadata.codec},                {"video.pix_fmt", camera_metadata.pix_fmt},
-          {"video.is_depth_map", (camera_metadata.is_depth_map)}, {"has_audio", camera_metadata.has_audio}};
-      features["observation.images." + camera_metadata.id] = camera_feature;
-    } else if (metadata->type == "opencv_camera"){
-      camera_names_.push_back(metadata->id);
-      const auto &camera_metadata = dynamic_cast<const hw::camera::OpenCvCameraProducer::OpenCvCameraProducerMetadata&>(*metadata);
-      nlohmann::ordered_json camera_feature;
-      camera_feature["dtype"] = "video";
-      camera_feature["shape"] = {camera_metadata.height, camera_metadata.width, 3};
-      camera_feature["names"] = {"height", "width", "channels"};
-      camera_feature["info"] = {
-          {"video.fps", camera_metadata.fps},           {"video.height", camera_metadata.height},
-          {"video.width", camera_metadata.width},       {"video.channels", camera_metadata.channels},
-          {"video.codec", camera_metadata.codec},                {"video.pix_fmt", camera_metadata.pix_fmt},
-          {"video.is_depth_map", (camera_metadata.is_depth_map)}, {"has_audio", camera_metadata.has_audio}};
-      features["observation.images." + camera_metadata.id] = camera_feature;
-    } else {
-      std::cerr << "Unknown metadata type: " << metadata->type << std::endl;
+    for(const auto &metadata : metadata_ ){
+      nlohmann::ordered_json producer_feature = metadata->get_info();
+      // Merge producer_feature into features
+      for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
+        features[it.key()] = it.value();
+      }
+      // Check if metadata has a features["observation.images." + id] entry and add to camera_names_
+      // Extract camera IDs from image feature keys for later use in statistics computation.
+      // Camera names are derived from "observation.images.*" keys in producer metadata
+      // and are used to locate the corresponding image directories.
+      // TODO (shantanuparab-tr): This logic can be improved by having a dedicated method in
+      // metadata interface to get camera IDs.
+      for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
+        const std::string& key = it.key();
+        if (key.find("observation.images.") == 0) {
+          std::string camera_id = key.substr(std::string("observation.images.").length());
+          camera_names_.push_back(camera_id);
+        }
+      }
     }
-  }
 
   //TODO (shantanuparab-tr): Common Feature these can be moved to a constants file later
   

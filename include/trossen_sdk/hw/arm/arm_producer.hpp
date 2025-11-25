@@ -33,6 +33,12 @@ public:
 
     /// @brief Gripper type
     std::string gripper_type;
+
+    nlohmann::ordered_json get_info() const override {
+      std::cout << "TrossenArmProducerMetadata: " << name << " (" << id << ") - " << description
+                << ", Model: " << arm_model << ", Gripper: " << gripper_type << "\n";
+      return nlohmann::ordered_json{};
+    }
   };
 
   /**
