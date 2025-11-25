@@ -244,7 +244,7 @@ int main(int argc, char** argv) {
     lerobot_cfg->overwrite_existing = false;
     lerobot_cfg->encode_videos = true;
     lerobot_cfg->type = "lerobot";
-    lerobot_cfg->fps = 30.0f;
+    lerobot_cfg->fps = cfg.camera_fps;
     lerobot_cfg->robot_name = "bimanual_widowxai";
     session_cfg.backend_config = std::move(lerobot_cfg);
     
