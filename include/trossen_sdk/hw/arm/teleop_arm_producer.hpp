@@ -39,6 +39,25 @@ public:
 
     /// @brief Observation feature data type
     std::string observation_dtype;
+
+    /// @brief Get producer info as JSON
+    /// @return JSON object containing producer information
+    nlohmann::ordered_json get_info() const override {
+      nlohmann::ordered_json features;
+      nlohmann::ordered_json action;
+      action["dtype"] = action_dtype;
+      action["shape"] = {static_cast<int>(action_feature_names.size())};
+      action["names"] = action_feature_names;
+
+      nlohmann::ordered_json observation_state;
+      observation_state["dtype"] = observation_dtype;
+      observation_state["shape"] = {
+          static_cast<int>(observation_feature_names.size())};
+      observation_state["names"] = observation_feature_names;
+      features["action"] = action;
+      features["observation.state"] = observation_state;
+      return features;
+    }
   };
 
   /**

@@ -11,8 +11,9 @@
 #include <atomic>
 #include <cstdint>
 #include <string>
-
-#include "trossen_sdk/data/record.hpp"
+#include <iostream>
+#include "nlohmann/json.hpp"
+#include "trossen_sdk/data/record.hpp"  
 
 namespace trossen::hw {
 
@@ -70,6 +71,13 @@ public:
 
     /// @brief Virtual destructor
     virtual ~ProducerMetadata() = default;
+
+    /// @brief Get producer info as JSON
+    /// @return JSON object containing producer information
+    virtual nlohmann::ordered_json get_info() const {
+      std::cout << "ProducerMetadata: " << name << " (" << id << ") - " << description << "\n";
+      return nlohmann::ordered_json{};
+    }
 
   };
 

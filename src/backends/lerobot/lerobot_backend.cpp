@@ -598,10 +598,9 @@ void LeRobotBackend::computeStatistics() const {
       stats[field->name()] = computeFlatStats(array);
     }
   }
-
   // Compute image statistics for each camera
   for (const auto &camera_info : camera_names_) {
-
+    std::cout << "Computing image statistics for camera: " << camera_info << std::endl;
     std::string image_key = "observation.images." + camera_info;
     // Get image paths for the current episode and camera
     std::string image_folder_path = images_root_.string();
@@ -1049,70 +1048,23 @@ void LeRobotBackend::writeMetadata() {
   nlohmann::ordered_json features;
 
   for(const auto &metadata : metadata_ ){
-
-   if (metadata->type == "mock_teleop_arm"){
-      const auto &teleop_arm_metadata = dynamic_cast<const hw::arm::TeleopMockJointStateProducer::TeleopMockJointStateProducerMetadata&>(*metadata);
-    
-      nlohmann::ordered_json action;
-      action["dtype"] = teleop_arm_metadata.action_dtype;
-      action["shape"] = {static_cast<int>(teleop_arm_metadata.action_feature_names.size())};
-      action["names"] = teleop_arm_metadata.action_feature_names;
-
-      nlohmann::ordered_json observation_state;
-      observation_state["dtype"] = teleop_arm_metadata.observation_dtype;
-      observation_state["shape"] = {
-          static_cast<int>(teleop_arm_metadata.observation_feature_names.size())};
-      observation_state["names"] = teleop_arm_metadata.observation_feature_names;
-      features["action"] = action;
-      features["observation.state"] = observation_state;
-    } else if (metadata->type == "teleop_arm"){
-      const auto &teleop_arm_metadata = dynamic_cast<const hw::arm::TeleopTrossenArmProducer::TeleopTrossenArmProducerMetadata&>(*metadata);
-    
-      nlohmann::ordered_json action;
-      action["dtype"] = teleop_arm_metadata.action_dtype;
-      action["shape"] = {static_cast<int>(teleop_arm_metadata.action_feature_names.size())};
-      action["names"] = teleop_arm_metadata.action_feature_names;
-
-      nlohmann::ordered_json observation_state;
-      observation_state["dtype"] = teleop_arm_metadata.observation_dtype;
-      observation_state["shape"] = {
-          static_cast<int>(teleop_arm_metadata.observation_feature_names.size())};
-      observation_state["names"] = teleop_arm_metadata.observation_feature_names;
-      features["action"] = action;
-      features["observation.state"] = observation_state;    
-    } else if (metadata->type == "mock_camera"){
-      camera_names_.push_back(metadata->id);
-      const auto &camera_metadata = dynamic_cast<const hw::camera::MockCameraProducer::MockCameraProducerMetadata&>(*metadata);
-      nlohmann::ordered_json camera_feature;
-      camera_feature["dtype"] = "video";
-      camera_feature["shape"] = {camera_metadata.height, camera_metadata.width, 3};
-      camera_feature["names"] = {"height", "width", "channels"};
-      camera_feature["info"] = {
-          {"video.fps", camera_metadata.fps},           {"video.height", camera_metadata.height},
-          {"video.width", camera_metadata.width},       {"video.channels", camera_metadata.channels},
-          {"video.codec", camera_metadata.codec},                {"video.pix_fmt", camera_metadata.pix_fmt},
-          {"video.is_depth_map", (camera_metadata.is_depth_map)}, {"has_audio", camera_metadata.has_audio}};
-      features["observation.images." + camera_metadata.id] = camera_feature;
-    } else if (metadata->type == "opencv_camera"){
-      camera_names_.push_back(metadata->id);
-      const auto &camera_metadata = dynamic_cast<const hw::camera::OpenCvCameraProducer::OpenCvCameraProducerMetadata&>(*metadata);
-      nlohmann::ordered_json camera_feature;
-      camera_feature["dtype"] = "video";
-      camera_feature["shape"] = {camera_metadata.height, camera_metadata.width, 3};
-      camera_feature["names"] = {"height", "width", "channels"};
-      camera_feature["info"] = {
-          {"video.fps", camera_metadata.fps},           {"video.height", camera_metadata.height},
-          {"video.width", camera_metadata.width},       {"video.channels", camera_metadata.channels},
-          {"video.codec", camera_metadata.codec},                {"video.pix_fmt", camera_metadata.pix_fmt},
-          {"video.is_depth_map", (camera_metadata.is_depth_map)}, {"has_audio", camera_metadata.has_audio}};
-      features["observation.images." + camera_metadata.id] = camera_feature;
-    } else {
-      std::cerr << "Unknown metadata type: " << metadata->type << std::endl;
+    nlohmann::ordered_json producer_feature = metadata->get_info();
+    // Merge producer_feature into features
+    for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
+      features[it.key()] = it.value();
+    }
+    // Extract camera names for video features
+    for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
+      if (it.value().contains("dtype") && it.value()["dtype"] == "video") {
+        if (it.value().contains("id")) {
+          camera_names_.push_back(it.value()["id"].get<std::string>());
+        }
+      }
     }
   }
 
   //TODO (shantanuparab-tr): Common Feature these can be moved to a constants file later
-  
+
   nlohmann::ordered_json timestamp_feature;
   timestamp_feature["dtype"] = "float32";
   timestamp_feature["shape"] = {1};
@@ -1137,20 +1089,17 @@ void LeRobotBackend::writeMetadata() {
   task_index_feature["dtype"] = "int64";
   task_index_feature["shape"] = {1};
   task_index_feature["names"] = {};
-  
+
   features["timestamp"] = timestamp_feature;
   features["frame_index"] = frame_index_feature;
   features["episode_index"] = episode_index_feature;
   features["index"] = index_feature;
-  features["task_index"] = task_index_feature;  
+  features["task_index"] = task_index_feature;
 
   info_["features"] = features;
 
   info_["data_path"] = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet";
   info_["video_path"] = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4";
-
-  {
-
 
   // // Write to info.json
   std::ofstream info_file(meta_root_ / JSON_INFO);
@@ -1162,6 +1111,6 @@ void LeRobotBackend::writeMetadata() {
   info_file << info_.dump(4);
   info_file.close();
   std::cout << "Metadata written to info.json successfully." << std::endl;
-  }
+
 }
 } // namespace trossen::io::backends

@@ -42,6 +42,15 @@ public:
     /// @brief Gripper type
     std::string gripper_type;
 
+    /// @brief Get producer info as JSON
+    /// @return JSON object containing producer information
+    nlohmann::ordered_json   get_info() const override {
+      //TODO (shantanuparab-tr): Implement JSON output when needed
+      std::cout << "MockJointStateProducerMetadata: " << name << " (" << id << ") - " << description
+                << ", Model: " << arm_model << ", Gripper: " << gripper_type << "\n";
+      return nlohmann::ordered_json{};
+    }
+
   };
 
   explicit MockJointStateProducer(Config cfg);
