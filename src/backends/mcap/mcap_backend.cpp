@@ -52,6 +52,16 @@ bool McapBackend::open() {
     std::cerr << "Unknown compression option: " << cfg_.compression << " (falling back to none)\n";
     opts.compression = foxglove::McapCompression::None;
   }
+  // Check if the output path parent directory exists
+  auto parent_path = path_.parent_path();
+  if (!std::filesystem::exists(parent_path)) {
+    try {
+      std::filesystem::create_directories(parent_path);
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to create parent directories for MCAP file at " << parent_path << ": " << e.what() << "\n";
+      return false;
+    }
+  }
 
   // Open mcap writer
   auto writer_result = foxglove::McapWriter::create(opts);
@@ -359,6 +369,61 @@ bool McapBackend::is_depth_topic(const std::string& topic) {
 
 bool McapBackend::is_depth_encoding(const std::string& enc) {
   return enc == "depth16" || enc == "32FC1" || enc == "16UC1"; // allow alias
+}
+
+
+uint32_t McapBackend::scan_existing_episodes(const std::filesystem::path& base_path) {
+  std::cout << "Scanning existing episodes in: " << base_path << std::endl;
+  // If directory doesn't exist, return 0
+  if (!std::filesystem::exists(base_path)) {
+    return 0;
+  }
+  
+  // If not a directory, return 0
+  if (!std::filesystem::is_directory(base_path)) {
+    std::cerr << "Warning: base_path exists but is not a directory: " << base_path << std::endl;
+    return 0;
+  }
+
+  // Pattern: episode_NNNNNN.mcap (6-digit zero-padded) Regex to match episode files
+  std::regex episode_pattern(R"(episode_(\d{6})\.mcap)");
+
+  uint32_t max_index = 0;
+  bool found_any = false;
+
+  try {
+    // Iterate through directory entries
+    for (const auto& entry : std::filesystem::directory_iterator(base_path)) {
+      // Skip if not a regular file
+      if (!entry.is_regular_file()) {
+        continue;
+      }
+
+      // Get filename only (not full path)
+      std::string filename = entry.path().filename().string();
+
+      // Try to match against episode pattern
+      std::smatch match;
+      if (std::regex_match(filename, match, episode_pattern)) {
+        // Extract the numeric index from capture group 1
+        std::string index_str = match[1].str();
+        uint32_t index = static_cast<uint32_t>(std::stoul(index_str));
+
+        // Track maximum index found
+        if (!found_any || index > max_index) {
+          max_index = index;
+          found_any = true;
+        }
+      }
+      // Silently ignore non-episode files (as per design doc)
+    }
+  } catch (const std::filesystem::filesystem_error& e) {
+    std::cerr << "Filesystem error while scanning episodes: " << e.what() << std::endl;
+    return 0;
+  }
+
+  // Return max_index + 1, or 0 if no episodes found
+  return found_any ? (max_index + 1) : 0;
 }
 
 } // namespace trossen::io::backends

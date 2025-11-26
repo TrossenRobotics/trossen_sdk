@@ -31,6 +31,7 @@
 #include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
 
 using namespace std::chrono_literals;
 using namespace trossen::demo;
@@ -43,7 +44,8 @@ struct Config {
   int duration_s = 10;
   int episodes = 3;
   std::string dataset_id = "";  // empty = auto-generate
-  std::string output_dir = "output/episodes";
+  std::string output_dir = trossen::io::backends::get_default_root_path().string();
+  std::string repository_id = "TrossenRoboticsCommunity"; //Valid only for LeRobot backend
   bool use_mock = false;
   bool show_help = false;
 
@@ -69,6 +71,7 @@ void print_usage(const char* prog_name) {
             << "  --episodes <count>       Number of episodes to record (default: 3)\n"
             << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
             << "  --output-dir <path>      Output directory for episodes (default: output/episodes)\n"
+            << "  --repository-id <string> Repository identifier (default: TrossenRoboticsCommunity, only for LeRobot backend)\n"
             << "  --mock                   Use mock producers instead of real hardware\n"
             << "  --camera-index <num>     Camera device index (default: 2, i.e., /dev/video2)\n"
             << "  --camera-width <pixels>  Camera width (default: 1920)\n"
@@ -100,6 +103,8 @@ Config parse_args(int argc, char** argv) {
       cfg.dataset_id = argv[++i];
     } else if (arg == "--output-dir" && i + 1 < argc) {
       cfg.output_dir = argv[++i];
+    } else if (arg == "--repository-id" && i + 1 < argc) {
+      cfg.repository_id = argv[++i];
     } else if (arg == "--mock") {
       cfg.use_mock = true;
     } else if (arg == "--camera-index" && i + 1 < argc) {
@@ -144,6 +149,7 @@ int main(int argc, char** argv) {
     "Number of episodes:   " + std::to_string(cfg.episodes),
     "Dataset ID:           " + (cfg.dataset_id.empty() ? "<auto-generate>" : cfg.dataset_id),
     "Output directory:     " + cfg.output_dir,
+    "Repository ID:       " + cfg.repository_id,
     "Backend:              " + cfg.backend_type
   };
 
@@ -227,6 +233,7 @@ int main(int argc, char** argv) {
   session_cfg.dataset_id = cfg.dataset_id;
   session_cfg.max_duration = std::chrono::seconds(cfg.duration_s);
   session_cfg.max_episodes = cfg.episodes;
+  session_cfg.repository_id = cfg.repository_id;
 
   if(cfg.backend_type == "mcap") {
     auto mcap_cfg = std::make_unique<trossen::io::backends::McapBackend::Config>();
@@ -239,8 +246,8 @@ int main(int argc, char** argv) {
     auto lerobot_cfg = std::make_unique<trossen::io::backends::LeRobotBackend::Config>();
     lerobot_cfg->output_dir = cfg.output_dir;
     lerobot_cfg->task_name = "trossen_ai_solo_demo";
-    lerobot_cfg->repository_id = "TrossenRoboticsCommunity";
-    lerobot_cfg->dataset_id = "trossen_ai_solo_dataset";
+    lerobot_cfg->repository_id = cfg.repository_id;
+    lerobot_cfg->dataset_id = cfg.dataset_id;
     lerobot_cfg->overwrite_existing = false;
     lerobot_cfg->encode_videos = true;
     lerobot_cfg->type = "lerobot";

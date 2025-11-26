@@ -47,6 +47,10 @@ struct SessionConfig {
   /// Optional: maximum number of episodes (nullopt = unlimited)
   std::optional<uint32_t> max_episodes = std::nullopt;
 
+  /// Repository identifier (used by LeRobot backend)
+  // TODO (shantanuparab-tr): Make this generic or remove it after making backend-agnostic
+  std::string repository_id = "";
+
   /// Backend configuration template (output_path will be overwritten per episode)
   std::unique_ptr<trossen::io::Backend::Config> backend_config;
 };
