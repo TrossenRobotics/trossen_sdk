@@ -386,9 +386,6 @@ uint32_t McapBackend::scan_existing_episodes(const std::filesystem::path& base_p
   }
 
   // Pattern: episode_NNNNNN.mcap (6-digit zero-padded) Regex to match episode files
-  //
-  // TODO(lukeschmitt-tr): This is specific to MCAP files; consider making more generic - backend
-  // could provide pattern?
   std::regex episode_pattern(R"(episode_(\d{6})\.mcap)");
 
   uint32_t max_index = 0;
