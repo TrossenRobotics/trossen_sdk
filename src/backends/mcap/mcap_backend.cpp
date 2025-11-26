@@ -52,13 +52,13 @@ bool McapBackend::open() {
     std::cerr << "Unknown compression option: " << cfg_.compression << " (falling back to none)\n";
     opts.compression = foxglove::McapCompression::None;
   }
-  // Check it the output path parent directory exists
+  // Check if the output path parent directory exists
   auto parent_path = path_.parent_path();
   if (!std::filesystem::exists(parent_path)) {
     try {
       std::filesystem::create_directories(parent_path);
     } catch (const std::exception& e) {
-      std::cerr << "Failed to create parent directories for MCAP file: " << e.what() << "\n";
+      std::cerr << "Failed to create parent directories for MCAP file at " << parent_path << ": " << e.what() << "\n";
       return false;
     }
   }

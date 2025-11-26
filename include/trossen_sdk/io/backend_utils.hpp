@@ -1,4 +1,3 @@
-// Copyright 2025 Trossen Robotics
 #ifndef INCLUDE_TROSSEN_SDK_IO_BACKEND_UTILS_HPP_
 #define INCLUDE_TROSSEN_SDK_IO_BACKEND_UTILS_HPP_
 #include <filesystem>

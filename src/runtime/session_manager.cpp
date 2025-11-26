@@ -37,7 +37,7 @@ SessionManager::SessionManager(SessionConfig&& config)
     config_.dataset_id = oss.str();
     std::cout << "Auto-generated dataset_id: " << config_.dataset_id << std::endl;
   }
-
+  // TODO (shantanuparab-tr): Make this backend-agnostic by using a factory method
   // Scan directory for existing episodes and resume from next index
   if(config_.backend_config->type == "mcap") {
     std::filesystem::path data_directory_path = config_.base_path / config_.dataset_id;
@@ -337,8 +337,6 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
   } else {
     throw std::runtime_error("SessionManager::build_episode_path: Unsupported backend type: " + config_.backend_config->type);
   }
-  // return empty path as fallback (should not reach here)
-  return std::filesystem::path();
 }
 
 std::shared_ptr<io::Backend> SessionManager::create_backend(
