@@ -28,12 +28,6 @@ public:
     /// @brief Robot model
     std::string arm_model;
 
-    /// @brief Firmware version
-    std::string firmware_version;
-
-    /// @brief Number of joints
-    size_t num_joints;
-
     /// @brief Joint names
     std::vector<std::string> joint_names;
 
@@ -62,7 +56,9 @@ public:
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
   /// @brief Get producer metadata
-  const TrossenArmProducerMetadata& metadata() const override { return metadata_; }
+  std::shared_ptr<ProducerMetadata> metadata() const override {
+    return std::make_shared<TrossenArmProducerMetadata>(metadata_);
+  }
 
 private:
   /// @brief Shared pointer to the TrossenArmDriver instance

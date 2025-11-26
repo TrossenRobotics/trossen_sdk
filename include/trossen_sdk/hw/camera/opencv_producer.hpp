@@ -55,20 +55,31 @@ public:
 
   struct OpenCvCameraProducerMetadata : public PolledProducer::ProducerMetadata {
 
-    /// @brief Camera name
-    std::string camera_name;
-
     /// @brief Image width
     int width;
 
     /// @brief Image height
     int height;
 
+    //TODO (shantanuparab-tr): Can be made enum
     /// @brief Image encoding
-    std::string encoding;
+    std::string codec;
+
+    /// @brief Pixel format
+    std::string pix_fmt;
+
+    /// @brief Channels
+    int channels;
+
+    /// @brief Does the camera have an audio stream?
+    bool has_audio{false};
 
     /// @brief Target frames per second
     int fps;
+
+    /// @brief Is this a depth camera?
+    bool is_depth_map{false};
+
   };
 
   /**
@@ -94,7 +105,9 @@ public:
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
   /// @brief Get producer metadata
-  const OpenCvCameraProducerMetadata& metadata() const override { return metadata_; }
+  std::shared_ptr<ProducerMetadata> metadata() const override {
+    return std::make_shared<OpenCvCameraProducerMetadata>(metadata_);
+  }
 
 protected:
   /**

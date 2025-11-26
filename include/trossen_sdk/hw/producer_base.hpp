@@ -55,6 +55,10 @@ public:
 
   /// @brief Metadata for producers
   struct ProducerMetadata {
+
+    /// @brief Type of the producer
+    std::string type;
+
     /// @brief Unique identifier for the producer
     std::string id;
 
@@ -63,14 +67,20 @@ public:
 
     /// @brief Description of the producer's function
     std::string description;
+
+    /// @brief Virtual destructor
+    virtual ~ProducerMetadata() = default;
+
   };
+
+  
 
   /**
    * @brief Get producer metadata
    *
    * @return const reference to ProducerMetadata
    */
-  virtual const PolledProducer::ProducerMetadata& metadata() const {return metadata_; };
+  virtual std::shared_ptr<ProducerMetadata> metadata() const = 0;
 
 protected:
   /// @brief Whether we've opened the device

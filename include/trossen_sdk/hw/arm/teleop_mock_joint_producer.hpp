@@ -36,26 +36,11 @@ public:
     /// @brief Robot name
     std::string robot_name;
 
-    /// @brief Leader arm model
-    std::string leader_arm_model;
-
-    /// @brief Leader firmware version
-    std::string leader_firmware_version;
-
-    /// @brief Follower arm model
-    std::string follower_arm_model;
-
-    /// @brief Follower firmware version
-    std::string follower_firmware_version;
-
     /// @brief Action feature names
     std::vector<std::string> action_feature_names;
     
     /// @brief Observation feature names
     std::vector<std::string> observation_feature_names;
-
-    /// @brief Gripper type
-    std::string gripper_type;
 
     /// @brief Action feature data type
     std::string action_dtype;
@@ -73,7 +58,9 @@ public:
   Diagnostics diagnostics() const { return diag_; }
   const Config& config() const { return cfg_; }
 
-  const TeleopMockJointStateProducerMetadata& metadata() const override { return metadata_; }
+  std::shared_ptr<ProducerMetadata> metadata() const override {
+    return std::make_shared<TeleopMockJointStateProducerMetadata>(metadata_);
+  }
 
 private:
   Config cfg_;

@@ -10,13 +10,17 @@ namespace trossen::hw::camera {
 
 OpenCvCameraProducer::OpenCvCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   // Populate metadata
+  metadata_.type = "opencv_camera";
   metadata_.id = "opencv_camera_" + std::to_string(cfg_.device_index);
-  metadata_.name = "OpenCV Camera Producer";
+  metadata_.name = cfg_.stream_id;
   metadata_.description = "Produces camera frames from a physical camera device using OpenCV";
   metadata_.width = cfg_.width;
   metadata_.height = cfg_.height;
-  metadata_.encoding = cfg_.encoding;
   metadata_.fps = cfg_.fps;
+  metadata_.codec = "av1";
+  metadata_.pix_fmt = "yuv420p";
+  metadata_.channels = (cfg_.encoding == "bgr8" || cfg_.encoding == "rgb8") ? 3 : 1;
+  metadata_.has_audio = false;
 }
 
 OpenCvCameraProducer::~OpenCvCameraProducer() {

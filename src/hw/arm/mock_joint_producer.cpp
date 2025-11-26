@@ -15,16 +15,13 @@ MockJointStateProducer::MockJointStateProducer(Config cfg)
   : cfg_(std::move(cfg)) {
 
   // Populate metadata
+  metadata_.type = "mock_arm";
   metadata_.id = cfg_.id;
   metadata_.name = "Mock Joint State Producer";
   metadata_.description = "Produces synthetic joint states for testing and diagnostics";
-  metadata_.arm_model = "MOCK_ARM";
-  metadata_.firmware_version = "v0.0.1-mock";
-  metadata_.num_joints = cfg_.num_joints;
-  metadata_.joint_names.resize(cfg_.num_joints);
-  for (size_t i = 0; i < cfg_.num_joints; ++i) {
-    metadata_.joint_names[i] = "joint_" + std::to_string(i);
-  }
+  metadata_.arm_model = "MOCK_WIDOWX_AI"; // TODO: Extract from driver/User Config
+  metadata_.joint_names = {"joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"}; // TODO: Extract from driver / User Config
+  metadata_.gripper_type = "STANDARD"; // TODO: Extract from driver / User Config
 }
 
 void MockJointStateProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {

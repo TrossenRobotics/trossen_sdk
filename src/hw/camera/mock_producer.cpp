@@ -19,13 +19,17 @@ MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   }
 
   // Populate metadata
+  metadata_.type = "mock_camera";
   metadata_.id = cfg_.stream_id;
-  metadata_.name = "Mock Camera Producer";
+  metadata_.name = cfg_.stream_id;
   metadata_.description = "Produces synthetic camera frames for testing and diagnostics";
   metadata_.width = cfg_.width;
   metadata_.height = cfg_.height;
-  metadata_.encoding = cfg_.encoding;
   metadata_.fps = cfg_.fps;
+  metadata_.codec = "av1";
+  metadata_.pix_fmt = "yuv420p";
+  metadata_.channels = (cfg_.encoding == "bgr8" || cfg_.encoding == "rgb8") ? 3 : 1;
+  metadata_.has_audio = false;
 }
 
 void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {

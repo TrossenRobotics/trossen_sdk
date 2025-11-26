@@ -50,27 +50,50 @@ public:
   };
 
   struct MockCameraProducerMetadata : public PolledProducer::ProducerMetadata {
+
     /// @brief Image width
     int width;
 
     /// @brief Image height
     int height;
 
+    // TODO (shantanuparab-tr): Can be made enum
     /// @brief Image encoding
-    std::string encoding;
+    std::string codec;
+
+    // TODO (shantanuparab-tr): Can be made enum
+    /// @brief Pixel format
+    std::string pix_fmt;
+
+    /// @brief Channels
+    int channels;
+
+    /// @brief Does the camera have an audio stream?
+    bool has_audio{false};
 
     /// @brief Target frames per second
     int fps;
-    
+
+    /// @brief Is this a depth camera?
+    bool is_depth_map{false};
+
   };
 
+  /**
+   * @brief Construct a MockCameraProducer
+   *
+   * @param cfg Configuration parameters
+   */
   explicit MockCameraProducer(Config cfg);
+
   ~MockCameraProducer() override = default;
 
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
   /// @brief Get producer metadata
-  const MockCameraProducerMetadata& metadata() const override { return metadata_; }
+  std::shared_ptr<ProducerMetadata> metadata() const override {
+    return std::make_shared<MockCameraProducerMetadata>(metadata_);
+  }
 
   struct JitterStats {
     double mean_ms{0};

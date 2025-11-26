@@ -101,15 +101,18 @@ bool SessionManager::start_episode() {
   // Build episode file path
   auto path = build_episode_path(next_episode_index_);
 
-  std::vector<hw::PolledProducer::ProducerMetadata> producer_metadata;
+  std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> producer_metadata;
+
   // Fetch Metadata from producers as a vector of the base class
   for (const auto& pt : producer_tasks_) {
     // Dynamic cast to PolledProducer to access metadata()
     if (auto polled_producer = std::dynamic_pointer_cast<hw::PolledProducer>(pt.producer)) {
+      std::cout << "  Pushed Producer: " << polled_producer->metadata()->name
+                << " (ID: " << polled_producer->metadata()->id << ")\n";
       producer_metadata.push_back(polled_producer->metadata());
     }
   }
-
+  std::cout<< "Number of Producers Pushed: " << producer_metadata.size() << std::endl;
   // Create backend
   try {
     current_backend_ = create_backend(path.string(), next_episode_index_, producer_metadata);
@@ -386,7 +389,7 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
 std::shared_ptr<io::Backend> SessionManager::create_backend(
   const std::string& output_path,
   uint32_t episode_index, 
-  const std::vector<hw::PolledProducer::ProducerMetadata>& producer_metadatas) {
+  const std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>>& producer_metadatas) {
 
   
   if(config_.backend_config == nullptr) {
@@ -404,28 +407,13 @@ std::shared_ptr<io::Backend> SessionManager::create_backend(
     // Print registered producers
     std::cout << "\n╔═══════════════════════════════════════════════ Registered Producers Metadata ═══════════════════════════════════════════════╗\n";
     for(const auto& pm : producer_metadatas) {
-      std::cout << "║  [ID: " << pm.id << "] Name: " << pm.name << "\n";
-      std::cout << "║      Description: " << pm.description << "\n";
+      std::cout << "║  [ID: " << pm->id << "] Name: " << pm->name << "\n";
+      std::cout << "║      Description: " << pm->description << "\n";
       std::cout << "║ --------------------------------------------------------------------------------------------------------------------\n";
     }
     std::cout << "╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n";
 
-    auto metadata = io::backends::LeRobotBackend::Metadata{};
-    metadata.task_name = lerobot_cfg->task_name;
-    metadata.robot_name = "TrossenRobot"; // TODO: Make configurable
-    metadata.codebase_version = "1.0.0";   // TODO: Extract from build system
-    metadata.trossen_subversion = "rev_1234"; // TODO: Extract from VCS 
-    metadata.num_cameras = 2; // TODO: Extract from registered producers
-    metadata.num_action_features = 7; // TODO: Extract from registered producers
-    metadata.num_observation_features = 7; // TODO: Extract from registered producers
-    metadata.camera_width = 640; // TODO: Extract from camera producers
-    metadata.camera_height = 480; // TODO: Extract from camera producers
-    metadata.is_depth_camera = false; // TODO: Extract from camera producers
-    metadata.camera_names = {"camera_main"}; // TODO: Extract from camera producers
-    metadata.action_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
-    metadata.observation_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
-
-    return std::make_shared<io::backends::LeRobotBackend>(*lerobot_cfg, metadata);
+    return std::make_shared<io::backends::LeRobotBackend>(*lerobot_cfg, producer_metadatas);
   }
   else if (config_.backend_config->type == "mcap") {
     // Copy backend config template and customize for this episode

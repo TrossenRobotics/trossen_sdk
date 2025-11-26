@@ -28,26 +28,11 @@ public:
     /// @brief Robot name
     std::string robot_name;
 
-    /// @brief Leader arm model
-    std::string leader_arm_model;
-
-    /// @brief Leader firmware version
-    std::string leader_firmware_version;
-
-    /// @brief Follower arm model
-    std::string follower_arm_model;
-
-    /// @brief Follower firmware version
-    std::string follower_firmware_version;
-
     /// @brief Action feature names
     std::vector<std::string> action_feature_names;
     
     /// @brief Observation feature names
     std::vector<std::string> observation_feature_names;
-
-    /// @brief Gripper type
-    std::string gripper_type;
 
     /// @brief Action feature data type
     std::string action_dtype;
@@ -79,7 +64,9 @@ public:
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
   /// @brief Get producer metadata
-  const TeleopTrossenArmProducerMetadata& metadata() const override { return metadata_; };
+  std::shared_ptr<ProducerMetadata> metadata() const override {
+    return std::make_shared<TeleopTrossenArmProducerMetadata>(metadata_);
+  }
 
 private:
   /// @brief Shared pointer to the TrossenArmDriver instance leader arm
