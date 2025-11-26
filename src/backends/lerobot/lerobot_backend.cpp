@@ -816,7 +816,7 @@ void LeRobotBackend::writeJointState(const data::RecordBase& base) {
 
   // Append timestamp
   check_status(
-      ts_builder.Append(static_cast<float>(js.ts.monotonic.to_ns()) / 1e9f),
+      ts_builder.Append(static_cast<float>(frame_id) / cfg_.fps),
       "Failed to append timestamp");
 
   // Observation list

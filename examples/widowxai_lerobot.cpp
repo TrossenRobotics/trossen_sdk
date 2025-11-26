@@ -54,7 +54,7 @@ struct Config {
   int camera_fps = 30;
 
   // Arm settings
-  float joint_rate_hz = 200.0f;
+  float joint_rate_hz = 30.0f;
   std::string leader_ip = "192.168.1.2";
   std::string follower_ip = "192.168.1.4";
 
@@ -74,7 +74,7 @@ void print_usage(const char* prog_name) {
             << "  --camera-width <pixels>  Camera width (default: 1920)\n"
             << "  --camera-height <pixels> Camera height (default: 1080)\n"
             << "  --camera-fps <fps>       Camera frame rate (default: 30)\n"
-            << "  --joint-rate <hz>        Joint state capture rate (default: 200)\n"
+            << "  --joint-rate <hz>        Joint state capture rate (default: 30)\n"
             << "  --leader-ip <ip>         Leader arm IP (default: 192.168.1.2)\n"
             << "  --follower-ip <ip>       Follower arm IP (default: 192.168.1.4)\n"
             << "  --backend <type>         Dataset backend type (default: mcap)\n"
@@ -244,7 +244,10 @@ int main(int argc, char** argv) {
     lerobot_cfg->overwrite_existing = false;
     lerobot_cfg->encode_videos = true;
     lerobot_cfg->type = "lerobot";
+    lerobot_cfg->fps = cfg.camera_fps;
+    lerobot_cfg->robot_name = "bimanual_widowxai";
     session_cfg.backend_config = std::move(lerobot_cfg);
+    
   } else {
     std::cerr << "Unsupported backend type: " << cfg.backend_type << "\n";
     return 1;

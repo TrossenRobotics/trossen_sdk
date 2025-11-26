@@ -103,6 +103,9 @@ public:
     // Robot name
     std::string robot_name{"trossen_ai_generic"};
 
+    // Frames per second for timestamping
+    float fps{30.0f};
+
   };
 
   /**
