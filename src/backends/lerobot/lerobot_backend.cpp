@@ -101,19 +101,6 @@ bool LeRobotBackend::open() {
     std::cerr << "Failed to create metadata directories: " << e.what() << "\n";
     return false;
   }
-  // Create metadata files as needed (not implemented yet)
-  //info.json, stats.json, tasks.json, episode_stats.json
-
-  std::ofstream info_file(meta_root_ / JSON_INFO);
-      // std::ofstream episode_file(meta_root_ / JSONL_EPISODES);
-      // std::ofstream tasks_file(meta_root_ / JSONL_TASKS);
-      // std::ofstream episode_stats_file(meta_root_ / JSONL_EPISODE_STATS);
-
-  if (!info_file /*|| !episode_file || !tasks_file || !episode_stats_file*/) {
-    std::cerr << "Failed to create metadata files\n";
-    return false;
-  }
-
   // Create data directory
   data_root_ = root_ / "data" / "chunk-000";
   try {
@@ -650,7 +637,6 @@ void LeRobotBackend::computeStatistics() const {
   }
   episode_stats_file << episode_stats.dump() << "\n";
   episode_stats_file.close();
-  std::cout << "Metadata written to info.json successfully." << std::endl;
 
 
   nlohmann::ordered_json episode_metadata;
@@ -666,7 +652,6 @@ void LeRobotBackend::computeStatistics() const {
   }
   episodes_file << episode_metadata.dump() << "\n";
   episodes_file.close();
-  std::cout << "Metadata written to info.json successfully." << std::endl;
 
   // TODO (shantanuparab-tr): Implement logic to check for existing task entrys
   nlohmann::ordered_json task_metadata;
@@ -681,9 +666,10 @@ void LeRobotBackend::computeStatistics() const {
   }
   tasks_file << task_metadata.dump() << "\n";
   
+  // Get total number of rows in the table (frames recorded)
+  int64_t episode_frame_length = table->num_rows();
 
-  // TODO (shantanuparab-tr): Add this to metadata file
-  // printStatsTable(stats);
+  updateEpisodeInfo(episode_frame_length);
   
 }
 
@@ -1015,14 +1001,57 @@ void LeRobotBackend::imageWorkerLoop() {
 }
 
 
+void LeRobotBackend::updateEpisodeInfo(int episode_frame_length) const{
+  // Load the existing info.json
+  fs::path info_path = meta_root_ / JSON_INFO;
+  nlohmann::ordered_json info_json;
+  if (fs::exists(info_path)) {
+    std::ifstream info_file(info_path);
+    if (info_file.is_open()) {
+      info_file >> info_json;
+      info_file.close();
+    }
+  }
+  // Update episode count
+  info_json["total_episodes"] = info_json.value("total_episodes", 0) + 1;
+
+  // update total videos
+  info_json["total_videos"] = info_json.value("total_videos", 0) + camera_names_.size();
+
+  // Update splits (simple logic: all episodes go to train)
+  std::string train_split = info_json["splits"].value("train", "0:0");
+  size_t colon_pos = train_split.find(':');
+  int train_start = std::stoi(train_split.substr(0, colon_pos));;
+  int train_end = std::stoi(train_split.substr(colon_pos + 1));;
+  train_end += 1; // add one episode to train
+  info_json["splits"]["train"] = std::to_string(train_start) + ":" + std::to_string(train_end);
+
+  // Update total frames
+  info_json["total_frames"] = info_json.value("total_frames", 0) + episode_frame_length ;
+
+  // Write back to info.json
+  std::ofstream info_file(info_path);
+  if (info_file.is_open()) {
+    info_file << info_json.dump(4);
+    info_file.close();
+  }
+}
+
 void LeRobotBackend::writeMetadata() {
   
   // TODO(shantanuparab-tr): [TDS-15]: Extract features from the robot's
   // observation space and action space
   // TODO(shantanuparab-tr): [TDS-16]: Get feature specifications from a
   // configuration file or constant definitions
-  
 
+
+  // Check if info.json already exists
+  fs::path info_path = meta_root_ / JSON_INFO;
+  if (fs::exists(info_path)) {
+    std::cout << "Info file already exists at " << info_path
+              << ". Skipping metadata write." << std::endl;
+    return;
+  }
   nlohmann::ordered_json info_;
 
   // Miscellaneous Feature (Initialization with placeholder values)
@@ -1032,6 +1061,7 @@ void LeRobotBackend::writeMetadata() {
 
   info_["total_episodes"] = 0;
   info_["total_frames"] = 0;
+  info_["total_videos"] = 0;
   // TODO(shantanuparab-tr): [TDS-25]: Update total tasks based on total number
   // of unique tasks
   info_["total_tasks"] = 1;
