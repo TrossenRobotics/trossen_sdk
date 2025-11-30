@@ -9,7 +9,7 @@ install: build
 
 run-example: build
 	./build/examples/widowxai
-.PHONY: run_example
+.PHONY: run-example
 
 test:
 	mkdir -p build
@@ -24,10 +24,6 @@ test-verbose:
 docker-build:
 	docker build -t trossen-sdk:latest .
 .PHONY: docker-build
-
-docker-run:
-	docker compose up
-.PHONY: docker-run
 
 clean:
 	rm -rf build output
