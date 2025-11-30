@@ -7,8 +7,8 @@ install: build
 	cd build && make install
 .PHONY: install
 
-run_example: build
-	./build/examples/trossen_ai_solo_mcap
+run-example: build
+	./build/examples/widowxai
 .PHONY: run_example
 
 test:
@@ -20,6 +20,14 @@ test-verbose:
 	mkdir -p build
 	cd build && cmake -DBUILD_TESTING=ON .. && make -j4
 .PHONY: test-verbose
+
+docker-build:
+	docker build -t trossen-sdk:latest .
+.PHONY: docker-build
+
+docker-run:
+	docker compose up
+.PHONY: docker-run
 
 clean:
 	rm -rf build output

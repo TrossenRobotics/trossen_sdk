@@ -1,0 +1,17 @@
+services:
+  trossen-sdk:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: trossen-sdk:latest
+    container_name: trossen-sdk-demo
+
+    # Mount the data directory to persist recordings
+    volumes:
+      - ./data:/data
+
+    privileged: true
+    devices:
+      - /dev/bus/usb:/dev/bus/usb
+
+    network_mode: host
