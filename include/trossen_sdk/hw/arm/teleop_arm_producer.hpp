@@ -30,7 +30,7 @@ public:
 
     /// @brief Action feature names
     std::vector<std::string> action_feature_names;
-    
+
     /// @brief Observation feature names
     std::vector<std::string> observation_feature_names;
 
@@ -105,11 +105,11 @@ private:
 
   /// @brief Reusable robot output to avoid reallocation each poll for follower arm
   trossen_arm::RobotOutput follower_robot_output_;
-  
+
   /// @brief Metadata for producer
   TeleopTrossenArmProducerMetadata metadata_;
 };
 
-} // namespace trossen::hw::arm
+}  // namespace trossen::hw::arm
 
-#endif // TROSSEN_SDK__HW__ARM__TELEOP_ARM_PRODUCER_HPP
+#endif  // TROSSEN_SDK__HW__ARM__TELEOP_ARM_PRODUCER_HPP

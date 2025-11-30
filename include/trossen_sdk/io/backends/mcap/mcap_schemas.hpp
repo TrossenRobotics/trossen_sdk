@@ -19,4 +19,4 @@ inline std::string joint_state_topic(const std::string& robot_name) {
   return robot_name + "/joints/state";
 }
 
-} // namespace trossen::mcapdefs
+}  // namespace trossen::mcapdefs

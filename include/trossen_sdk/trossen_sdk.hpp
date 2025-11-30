@@ -21,4 +21,4 @@
 #include "trossen_sdk/runtime/session_manager.hpp"
 #include "trossen_sdk/runtime/scheduler.hpp"
 
-#endif // TROSSEN_SDK__TROSSEN_SDK_HPP
+#endif  // TROSSEN_SDK__TROSSEN_SDK_HPP

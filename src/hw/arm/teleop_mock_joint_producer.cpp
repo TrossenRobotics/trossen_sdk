@@ -18,15 +18,20 @@ TeleopMockJointStateProducer::TeleopMockJointStateProducer(Config cfg)
   metadata_.type = "mock_teleop_arm";
   metadata_.id = cfg_.id;
   metadata_.name = "Teleop Mock Joint State Producer";
-  metadata_.description = "Produces synthetic teleoperation joint states for testing and diagnostics";
-  metadata_.robot_name = "MOCK_TELEOP_ROBOT"; 
-  metadata_.action_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
-  metadata_.observation_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
+  metadata_.description =
+    "Produces synthetic teleoperation joint states for testing and diagnostics";
+  metadata_.robot_name = "MOCK_TELEOP_ROBOT";
+  metadata_.action_feature_names =
+    {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
+  metadata_.observation_feature_names =
+    {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
   metadata_.action_dtype = "float32";
   metadata_.observation_dtype = "float32";
 }
 
-void TeleopMockJointStateProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
+void TeleopMockJointStateProducer::poll(
+  const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
+{
   using clock = std::chrono::steady_clock;
   auto now = clock::now();
   if (!started_) {
@@ -45,14 +50,20 @@ void TeleopMockJointStateProducer::poll(const std::function<void(std::shared_ptr
 
   // Generate synthetic joint state
   std::vector<float>  act(cfg_.num_joints), obs(cfg_.num_joints);
-  double t = (cfg_.rate_hz > 0.0) ? (static_cast<double>(stats_.produced) / cfg_.rate_hz) : static_cast<double>(stats_.produced);
+  double t = 0.0;
+  if (cfg_.rate_hz > 0.0) {
+    t = static_cast<double>(stats_.produced) / cfg_.rate_hz;
+  } else {
+    t = static_cast<double>(stats_.produced);
+  }
   for (size_t i = 0; i < cfg_.num_joints; ++i) {
     double phase = t * 0.5 + static_cast<double>(i) * 0.1;
     act[i] = static_cast<float>(cfg_.amplitude * std::sin(phase));
     obs[i] = static_cast<float>(cfg_.amplitude * 0.5 * std::cos(phase));
   }
-  uint64_t seq = stats_.produced; // sequential
-  if (seq != (seq_)) { // seq_ tracks last emitted internally
+  uint64_t seq = stats_.produced;  // sequential
+  // seq_ tracks last emitted internally
+  if (seq != (seq_)) {
     if (stats_.produced > 0 && seq != seq_ + 1) {
       diag_.gaps++;
     }
@@ -69,4 +80,4 @@ void TeleopMockJointStateProducer::poll(const std::function<void(std::shared_ptr
   stats_.produced++;
 }
 
-} // namespace trossen::hw::arm
+}  // namespace trossen::hw::arm

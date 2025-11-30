@@ -6,13 +6,14 @@
 #ifndef TROSSEN_SDK__RUNTIME__SCHEDULER_HPP
 #define TROSSEN_SDK__RUNTIME__SCHEDULER_HPP
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <functional>
-#include <thread>
-#include <vector>
-#include <atomic>
 #include <string>
+#include <thread>
+#include <utility>
+#include <vector>
 
 namespace trossen::runtime {
 
@@ -68,7 +69,7 @@ public:
     uint64_t next_deadline_ns{0};
     uint32_t spin_us{0};
     bool high_res{false};
-    TaskStats stats; // embedded stats (ticks etc.)
+    TaskStats stats;
   };
 
   /**
@@ -84,7 +85,7 @@ public:
 
   // Backward-compatible overload (no options)
   void add_task(Callback cb, uint32_t period_ms) {
-    TaskOptions opts; // defaults
+    TaskOptions opts;
     add_task(std::chrono::milliseconds(period_ms), std::move(cb), opts);
   }
 
@@ -99,7 +100,10 @@ public:
   template <class Rep, class Period>
   void add_task(std::chrono::duration<Rep, Period> period, Callback cb, const TaskOptions& opts) {
     auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(period).count();
-    if (ns <= 0) return; // ignore invalid
+    if (ns <= 0) {
+      // Invalid period
+      return;
+    }
     Task t;
     t.cb = std::move(cb);
     t.period_ns = static_cast<uint64_t>(ns);
@@ -109,13 +113,17 @@ public:
     t.stats.name = opts.name;
     t.stats.high_res = t.high_res;
     t.stats.period_ns = t.period_ns;
-    if (t.high_res) tasks_high_.push_back(std::move(t)); else tasks_normal_.push_back(std::move(t));
+    if (t.high_res) {
+      tasks_high_.push_back(std::move(t));
+    } else {
+      tasks_normal_.push_back(std::move(t));
+    }
   }
 
   // Backward-compatible template overload without TaskOptions
   template <class Rep, class Period>
   void add_task(std::chrono::duration<Rep, Period> period, Callback cb) {
-    TaskOptions opts; // default constructed
+    TaskOptions opts;
     add_task(period, std::move(cb), opts);
   }
 
@@ -153,54 +161,92 @@ private:
   }
 
   void loop_high() {
-    using namespace std::chrono;
     while (running_) {
       stats_.wake_cycles_high++;
       uint64_t now_ns = now_steady_ns();
-      uint64_t next_wake_ns = now_ns + 1'000'000ULL; // tighter default
+      uint64_t next_wake_ns = now_ns + 1'000'000ULL;
       for (auto &task : tasks_high_) {
-        if (now_ns >= task.next_deadline_ns) execute_task(task, now_ns, true);
-        if (task.next_deadline_ns < next_wake_ns) next_wake_ns = task.next_deadline_ns;
+        if (now_ns >= task.next_deadline_ns) {
+          execute_task(task, now_ns, true);
+        }
+        if (task.next_deadline_ns < next_wake_ns) {
+          next_wake_ns = task.next_deadline_ns;
+        }
       }
       now_ns = now_steady_ns();
-      if (next_wake_ns <= now_ns) { std::this_thread::yield(); continue; }
+      if (next_wake_ns <= now_ns) {
+        std::this_thread::yield();
+        continue;
+      }
       uint64_t delta_ns = next_wake_ns - now_ns;
-      uint32_t spin_us = 0; for (auto &task : tasks_high_) if (task.next_deadline_ns == next_wake_ns && task.spin_us > spin_us) spin_us = task.spin_us;
+      uint32_t spin_us = 0;
+      for (auto &task : tasks_high_) {
+        if (task.next_deadline_ns == next_wake_ns && task.spin_us > spin_us) {
+          spin_us = task.spin_us;
+        }
+      }
       uint64_t spin_ns = static_cast<uint64_t>(spin_us) * 1000ULL;
-      if (spin_ns > 0 && delta_ns > spin_ns) std::this_thread::sleep_for(nanoseconds(delta_ns - spin_ns));
-      else if (delta_ns > 1'500'000ULL) std::this_thread::sleep_for(nanoseconds(delta_ns - 500'000ULL));
-      while (running_) { now_ns = now_steady_ns(); if (now_ns >= next_wake_ns) break; if (spin_ns == 0) std::this_thread::yield(); }
+
+      if (spin_ns > 0 && delta_ns > spin_ns) {
+        std::this_thread::sleep_for(std::chrono::nanoseconds(delta_ns - spin_ns));
+      } else if (delta_ns > 1'500'000ULL) {
+        std::this_thread::sleep_for(std::chrono::nanoseconds(delta_ns - 500'000ULL));
+      }
+
+      while (running_) {
+        now_ns = now_steady_ns();
+        if (now_ns >= next_wake_ns) {
+          break;
+        }
+        if (spin_ns == 0) {
+          std::this_thread::yield();
+        }
+      }
     }
   }
 
   void loop_normal() {
-    using namespace std::chrono;
     while (running_) {
       stats_.wake_cycles_normal++;
       uint64_t now_ns = now_steady_ns();
-      uint64_t next_wake_ns = now_ns + 5'000'000ULL; // 5ms default
+      uint64_t next_wake_ns = now_ns + 5'000'000ULL;  // 5ms
       for (auto &task : tasks_normal_) {
         if (now_ns >= task.next_deadline_ns) execute_task(task, now_ns, false);
         if (task.next_deadline_ns < next_wake_ns) next_wake_ns = task.next_deadline_ns;
       }
       now_ns = now_steady_ns();
-      if (next_wake_ns <= now_ns) { std::this_thread::yield(); continue; }
+      if (next_wake_ns <= now_ns) {
+        std::this_thread::yield();
+        continue;
+      }
       uint64_t delta_ns = next_wake_ns - now_ns;
-      if (delta_ns > 2'000'000ULL) std::this_thread::sleep_for(nanoseconds(delta_ns - 500'000ULL));
-      else std::this_thread::sleep_for(nanoseconds(delta_ns));
+      if (delta_ns > 2'000'000ULL) {
+        std::this_thread::sleep_for(std::chrono::nanoseconds(delta_ns - 500'000ULL));
+      } else {
+        std::this_thread::sleep_for(std::chrono::nanoseconds(delta_ns));
+      }
     }
   }
 
   void execute_task(Task &task, uint64_t &now_ns, bool is_high) {
-    double jitter_us = static_cast<double>((int64_t)now_ns - (int64_t)task.next_deadline_ns) / 1000.0;
+    double jitter_us =
+      static_cast<double>(
+        static_cast<int64_t>(now_ns) - static_cast<int64_t>(task.next_deadline_ns)) / 1000.0;
     if (jitter_us < 0) jitter_us = -jitter_us;
     if (task.stats.ticks > 0) {
-      task.stats.avg_jitter_us += (jitter_us - task.stats.avg_jitter_us) / static_cast<double>(task.stats.ticks);
-      if (jitter_us > task.stats.max_jitter_us) task.stats.max_jitter_us = jitter_us;
+      task.stats.avg_jitter_us +=
+        (jitter_us - task.stats.avg_jitter_us) / static_cast<double>(task.stats.ticks);
+      if (jitter_us > task.stats.max_jitter_us) {
+        task.stats.max_jitter_us = jitter_us;
+      }
     }
     task.cb();
     task.stats.ticks++;
-    if (is_high) stats_.high_res_ticks++; else stats_.normal_ticks++;
+    if (is_high) {
+      stats_.high_res_ticks++;
+    } else {
+      stats_.normal_ticks++;
+    }
     now_ns = now_steady_ns();
     if (now_ns > task.next_deadline_ns + task.period_ns) {
       task.stats.overruns++;
@@ -231,6 +277,6 @@ public:
   Stats stats_{};
 };
 
-} // namespace trossen::runtime
+}  // namespace trossen::runtime
 
-#endif // TROSSEN_SDK__RUNTIME__SCHEDULER_HPP
+#endif  // TROSSEN_SDK__RUNTIME__SCHEDULER_HPP

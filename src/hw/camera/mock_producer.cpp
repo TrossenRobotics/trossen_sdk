@@ -2,14 +2,17 @@
  * @file mock_producer.cpp
  */
 
-#include "trossen_sdk/hw/camera/mock_producer.hpp"
-
+#include <algorithm>
 #include <chrono>
 #include <iostream>
+#include <memory>
+#include <utility>
+#include <vector>
+
+#include "trossen_sdk/hw/camera/mock_producer.hpp"
 
 namespace trossen::hw::camera {
 
-using namespace std::chrono;
 
 MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   rng_.seed(static_cast<uint32_t>(cfg_.seed));
@@ -41,14 +44,14 @@ void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   }
   if (frame_period_ns_ > 0 && last_emit_mono_ != 0) {
     if (now_mono - last_emit_mono_ < frame_period_ns_) {
-      return; // not time yet
+      return;  // not time yet
     }
   }
 
   // Simulated drop
   if (cfg_.drop_probability > 0.0 && drop_dist_(rng_) < cfg_.drop_probability) {
-    ++stats_.dropped; // treat as drop
-    last_emit_mono_ = now_mono; // still advance to keep pacing realistic
+    ++stats_.dropped;  // treat as drop
+    last_emit_mono_ = now_mono;  // still advance to keep pacing realistic
     return;
   }
 
@@ -85,7 +88,10 @@ MockCameraProducer::JitterStats MockCameraProducer::jitter_stats() const {
   std::sort(copy.begin(), copy.end());
   double sum = 0.0;
   for (auto v : copy) sum += static_cast<double>(v);
-  auto pct = [&](double p){ size_t idx = static_cast<size_t>(p * (copy.size()-1)); return copy[idx]; };
+  auto pct = [&](double p) {
+    size_t idx = static_cast<size_t>(p * (copy.size()-1));
+    return copy[idx];
+  };
   js.samples = copy.size();
   js.mean_ms = (sum / copy.size()) / 1e6;
   js.p50_ms = pct(0.50) / 1e6;
@@ -100,9 +106,9 @@ void MockCameraProducer::generate_frame(cv::Mat &dst) {
     case Pattern::Gradient: {
       // Horizontal gradient with vertical modulation (time-based to create subtle motion)
       double t = (seq_ % 1000) / 1000.0;
-      for (int y=0; y<dst.rows; ++y) {
+      for (int y=0; y < dst.rows; ++y) {
         auto *row = dst.ptr<cv::Vec3b>(y);
-        for (int x=0; x<dst.cols; ++x) {
+        for (int x=0; x < dst.cols; ++x) {
           uint8_t v = static_cast<uint8_t>((255.0 * x) / dst.cols);
           uint8_t b = static_cast<uint8_t>(v * (0.5 + 0.5 * t));
           row[x] = cv::Vec3b(b, v, static_cast<uint8_t>((v + y) & 0xFF));
@@ -111,17 +117,16 @@ void MockCameraProducer::generate_frame(cv::Mat &dst) {
       break;
     }
     case Pattern::Noise: {
-      for (int y=0; y<dst.rows; ++y) {
+      for (int y=0; y < dst.rows; ++y) {
         auto *row = dst.ptr<cv::Vec3b>(y);
-        for (int x=0; x<dst.cols; ++x) {
+        for (int x=0; x < dst.cols; ++x) {
           double n0 = noise_norm_(rng_) * cfg_.noise_stddev + 127.0;
           double n1 = noise_norm_(rng_) * cfg_.noise_stddev + 127.0;
           double n2 = noise_norm_(rng_) * cfg_.noise_stddev + 127.0;
           row[x] = cv::Vec3b(
             static_cast<uint8_t>(std::clamp(n0, 0.0, 255.0)),
             static_cast<uint8_t>(std::clamp(n1, 0.0, 255.0)),
-            static_cast<uint8_t>(std::clamp(n2, 0.0, 255.0))
-          );
+            static_cast<uint8_t>(std::clamp(n2, 0.0, 255.0)));
         }
       }
       break;
@@ -129,4 +134,4 @@ void MockCameraProducer::generate_frame(cv::Mat &dst) {
   }
 }
 
-} // namespace trossen::hw::camera
+}  // namespace trossen::hw::camera

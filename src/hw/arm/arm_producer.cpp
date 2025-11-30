@@ -1,14 +1,15 @@
 #include "trossen_sdk/hw/arm/arm_producer.hpp"
 
 #include <algorithm>
+#include <memory>
+#include <utility>
 
 namespace trossen::hw::arm {
 
 TrossenArmProducer::TrossenArmProducer(
   std::shared_ptr<trossen_arm::TrossenArmDriver> driver,
   Config cfg)
-  : driver_(std::move(driver)), cfg_(std::move(cfg))
-{
+  : driver_(std::move(driver)), cfg_(std::move(cfg)) {
   if (driver_) {
     // Preallocate buffers based on number of joints
     pos_d_.resize(driver_->get_num_joints());
@@ -23,9 +24,13 @@ TrossenArmProducer::TrossenArmProducer(
   metadata_.id = cfg_.stream_id;
   metadata_.name = "Trossen Arm Producer";
   metadata_.description = "Produces joint states from a Trossen Arm via TrossenArmDriver";
-  metadata_.arm_model = "WIDOWX_AI"; // TODO: Extract from driver/User Config
-  metadata_.joint_names = {"joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"}; // TODO: Extract from driver / User Config
-  metadata_.gripper_type = "STANDARD"; // TODO: Extract from driver / User Config
+  // TODO(shantanuparab-tr): Extract from driver / User Config
+  metadata_.arm_model = "WIDOWX_AI";
+  // TODO(shantanuparab-tr): Extract from driver / User Config
+  metadata_.joint_names = {
+    "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"};
+  // TODO(shantanuparab-tr): Extract from driver / User Config
+  metadata_.gripper_type = "STANDARD";
 }
 
 void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
@@ -36,7 +41,7 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   // Read robot output, save timestamp and joint states
   robot_output_ = driver_->get_robot_output();
   uint64_t device_ts = robot_output_.header.timestamp;
-  // TODO [shantanuparab-tr]: Get actions from the leader arm
+  // TODO(shantanuparab-tr): Get actions from the leader arm
   pos_d_ = robot_output_.joint.all.positions;
   vel_d_ = robot_output_.joint.all.velocities;
   eff_d_ = robot_output_.joint.all.efforts;
@@ -74,4 +79,4 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   ++stats_.produced;
 }
 
-} // namespace trossen::hw::arm
+}  // namespace trossen::hw::arm

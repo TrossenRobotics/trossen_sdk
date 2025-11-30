@@ -48,7 +48,7 @@ struct SessionConfig {
   std::optional<uint32_t> max_episodes = std::nullopt;
 
   /// Repository identifier (used by LeRobot backend)
-  // TODO (shantanuparab-tr): Make this generic or remove it after making backend-agnostic
+  // TODO(shantanuparab-tr): Make this generic or remove it after making backend-agnostic
   std::string repository_id = "";
 
   /// Backend configuration template (output_path will be overwritten per episode)
@@ -168,12 +168,18 @@ public:
    * @brief Statistics about episode recording session
    */
   struct Stats {
-    uint32_t current_episode_index;      ///< Current or next episode number
-    bool episode_active;                 ///< Is an episode currently recording?
-    std::chrono::duration<double> elapsed;  ///< Time since episode start (0 if not active)
-    std::optional<std::chrono::duration<double>> remaining; ///< Time until auto-stop (nullopt if unlimited)
-    uint64_t records_written_current;    ///< Records written to current episode
-    uint64_t total_episodes_completed;   ///< Episodes finished this session
+    /// @brief Current or next episode number
+    uint32_t current_episode_index;
+    /// @brief Is an episode currently recording?
+    bool episode_active;
+    /// @brief Time since episode start (0 if not active)
+    std::chrono::duration<double> elapsed;
+    /// @brief Time until auto-stop (nullopt if unlimited)
+    std::optional<std::chrono::duration<double>> remaining;
+    /// @brief Records written to current episode
+    uint64_t records_written_current;
+    /// @brief Episodes finished this session
+    uint64_t total_episodes_completed;
   };
 
   /**
@@ -269,8 +275,7 @@ private:
   std::shared_ptr<io::Backend> create_backend(
     const std::string& output_path,
     uint32_t episode_index,
-    const std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>>& producer_metadatas
-  );
+    const std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>>& producer_metadatas);
 
   /**
    * @brief Background monitoring loop for auto-stop
@@ -279,6 +284,6 @@ private:
   void monitor_duration();
 };
 
-} // namespace trossen::runtime
+}  // namespace trossen::runtime
 
-#endif // TROSSEN_SDK__RUNTIME__SESSION_MANAGER_HPP
+#endif  // TROSSEN_SDK__RUNTIME__SESSION_MANAGER_HPP

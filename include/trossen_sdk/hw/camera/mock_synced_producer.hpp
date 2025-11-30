@@ -32,18 +32,17 @@ namespace trossen::hw::camera {
  */
 class MockSyncedCameraProducer : public ::trossen::hw::PolledProducer {
 public:
-  enum class Pattern { Gradient, Noise }; // Reuse simple patterns for color
+  enum class Pattern { Gradient, Noise };
 
   struct Config {
     std::string stream_id{"camera0"};
-    CameraStreamsConfig streams; // Contains frame_rate, resolutions, depth format, etc.
+    CameraStreamsConfig streams;
     Pattern pattern{Pattern::Gradient};
     uint64_t seed{0};
     double noise_stddev{20.0};
   };
 
   struct MockSyncedCameraProducerMetadata : public PolledProducer::ProducerMetadata {
-
     /// @brief Image width
     int width;
 
@@ -85,7 +84,6 @@ public:
       features["observation.images." + id] = camera_feature;
       return features;
     }
-
   };
 
   explicit MockSyncedCameraProducer(Config cfg);
@@ -130,6 +128,6 @@ private:
   MockSyncedCameraProducerMetadata metadata_;
 };
 
-} // namespace trossen::hw::camera
+}  // namespace trossen::hw::camera
 
-#endif // TROSSEN_SDK__HW__CAMERA__MOCK_SYNCED_PRODUCER_HPP
+#endif  // TROSSEN_SDK__HW__CAMERA__MOCK_SYNCED_PRODUCER_HPP

@@ -4,6 +4,7 @@
 #include <iostream>
 #include <memory>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace trossen::hw::camera {
@@ -44,14 +45,15 @@ bool OpenCvCameraProducer::open_if_needed() {
       // Break out early if already in desired format (avoid redundant set calls)
       double current_fourcc = cap_.get(cv::CAP_PROP_FOURCC);
       if (static_cast<int32_t>(current_fourcc) == code) {
-        break; // already negotiated
+        break;  // already negotiated
       }
       if (!cap_.set(cv::CAP_PROP_FOURCC, static_cast<double>(code))) {
         char c0 = static_cast<char>(code & 0xFF);
         char c1 = static_cast<char>((code >> 8) & 0xFF);
         char c2 = static_cast<char>((code >> 16) & 0xFF);
         char c3 = static_cast<char>((code >> 24) & 0xFF);
-        std::cerr << "Failed to set FOURCC=" << c0 << c1 << c2 << c3 << " (index " << i << ")" << std::endl;
+        std::cerr << "Failed to set FOURCC=" << c0 << c1 << c2 << c3
+                  << " (index " << i << ")" << std::endl;
         continue;
       }
       // Re-read to verify which format we actually got.
@@ -61,8 +63,9 @@ bool OpenCvCameraProducer::open_if_needed() {
         char c1 = static_cast<char>((code >> 8) & 0xFF);
         char c2 = static_cast<char>((code >> 16) & 0xFF);
         char c3 = static_cast<char>((code >> 24) & 0xFF);
-        std::cout << "Negotiated FOURCC=" << c0 << c1 << c2 << c3 << " (preference " << i << ")" << std::endl;
-        break; // stop after first successful preference
+        std::cout << "Negotiated FOURCC=" << c0 << c1 << c2 << c3
+                  << " (preference " << i << ")" << std::endl;
+        break;  // stop after first successful preference
       }
     }
   }
@@ -86,21 +89,23 @@ bool OpenCvCameraProducer::open_if_needed() {
   std::cout << "Camera opened: " << eff_w << "x" << eff_h << " @ " << eff_fps
             << " FPS FOURCC=" << fourcc_chars << std::endl;
   if (cfg_.fps > 0 && static_cast<int>(eff_fps) != cfg_.fps) {
-    std::cerr << "Warning: requested fps=" << cfg_.fps << " but device reports " << eff_fps << std::endl;
+    std::cerr << "Warning: requested fps="
+              << cfg_.fps << " but device reports " << eff_fps << std::endl;
   }
   opened_ = true;
   return true;
 }
 
 bool OpenCvCameraProducer::warmup() {
-  // TODO: check that received frames are valid and match the requested configuration
+  // TODO(lukeschmitt-tr): check that received frames are valid and match requested configuration
   if (!open_if_needed()) {
     return false;
   }
   if (cfg_.warmup_seconds <= 0.0) {
     return true;
   }
-  auto warmup_end = std::chrono::steady_clock::now() + std::chrono::duration<double>(cfg_.warmup_seconds);
+  auto warmup_end =
+    std::chrono::steady_clock::now() + std::chrono::duration<double>(cfg_.warmup_seconds);
   cv::Mat frame;
   while (std::chrono::steady_clock::now() < warmup_end) {
     if (!cap_.read(frame)) {
@@ -114,8 +119,10 @@ bool OpenCvCameraProducer::warmup() {
   return true;
 }
 
-void OpenCvCameraProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
-  // TODO: silently fails if cannot open
+void OpenCvCameraProducer::poll(
+  const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
+{
+  // TODO(lukeschmitt-tr): silently fails if cannot open
   if (!open_if_needed()) {
     return;
   }
@@ -126,7 +133,7 @@ void OpenCvCameraProducer::poll(const std::function<void(std::shared_ptr<data::R
   }
 
   data::Timestamp ts;
-  // TODO: use device timestamp if available and cfg_.use_device_time
+  // TODO(lukeschmitt-tr): use device timestamp if available and cfg_.use_device_time
   uint64_t mono_now = data::now_mono().to_ns();
   ts.monotonic = data::now_mono();
   ts.realtime = data::now_real();
@@ -151,8 +158,9 @@ void OpenCvCameraProducer::poll(const std::function<void(std::shared_ptr<data::R
   emit(img);
   ++stats_.produced;
 
-  // Periodic FPS health report every approx requested_fps * 10 frames (or default 300) if requested fps set
-  // TODO: make this all configurable via config
+  // Periodically report FPS health
+
+  // TODO(lukeschmitt-tr): make this all configurable via config
   if (cfg_.fps > 0 && stats_.produced >= next_health_report_frame_) {
     double avg_if_ms = 0.0;
     double max_if_ms = 0.0;
@@ -171,11 +179,11 @@ void OpenCvCameraProducer::poll(const std::function<void(std::shared_ptr<data::R
       std::cout << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps
                 << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
     }
-    // schedule next report
-    uint64_t interval = static_cast<uint64_t>(cfg_.fps) * 10; // ~10 seconds
+    // schedule next report ~10 seconds later
+    uint64_t interval = static_cast<uint64_t>(cfg_.fps) * 10;
     if (interval == 0) interval = 300;
     next_health_report_frame_ += interval;
   }
 }
 
-} // namespace trossen::hw::camera
+}  // namespace trossen::hw::camera

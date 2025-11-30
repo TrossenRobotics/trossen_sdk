@@ -58,7 +58,8 @@ bool McapBackend::open() {
     try {
       std::filesystem::create_directories(parent_path);
     } catch (const std::exception& e) {
-      std::cerr << "Failed to create parent directories for MCAP file at " << parent_path << ": " << e.what() << "\n";
+      std::cerr << "Failed to create parent directories for MCAP file at "
+                << parent_path << ": " << e.what() << "\n";
       return false;
     }
   }
@@ -169,8 +170,7 @@ void McapBackend::ensure_jointstate_channel() {
     "protobuf",
     schema,
     context_,
-    std::nullopt
-  );
+    std::nullopt);
 
   if (!channel_result.has_value()) {
     std::cerr << "Failed to create joint state channel: "
@@ -191,7 +191,7 @@ void McapBackend::ensure_image_channel_with_metadata(
   const std::unordered_map<std::string, std::string>& metadata) {
   auto it = image_channels_.find(camera_name);
   if (it != image_channels_.end()) {
-    return; // already exists
+    return;  // already exists
   }
 
   // Use Foxglove SDK's built-in RawImage schema
@@ -206,8 +206,7 @@ void McapBackend::ensure_image_channel_with_metadata(
     "protobuf",
     schema,
     context_,
-    channel_metadata
-  );
+    channel_metadata);
 
   if (!channel_result.has_value()) {
     std::cerr << "Failed to create image channel: "
@@ -246,8 +245,7 @@ void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
   auto st = joint_channel_->log(
     reinterpret_cast<const std::byte*>(payload.data()),
     payload.size(),
-    js.ts.realtime.to_ns()
-  );
+    js.ts.realtime.to_ns());
 
   if (st != foxglove::FoxgloveError::Ok) {
     std::cerr << "Failed to write joint state: " << foxglove::strerror(st) << "\n";
@@ -258,10 +256,15 @@ void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
 
 void McapBackend::write_image_record(const data::ImageRecord& img) {
   // Determine if this is a depth frame based on encoding or topic
-  const bool depth = is_depth_encoding(img.encoding) || is_depth_topic(mcapdefs::image_topic(img.id));
+  const bool depth =
+    is_depth_encoding(img.encoding) || is_depth_topic(mcapdefs::image_topic(img.id));
   if (depth) {
-    // Depth metadata; attempt to parse scale if provided in encoding (future) - for now leave blank
-    // We cannot know depth_scale_m here without augmenting ImageRecord; future extension could pass via id pattern.
+    // Depth metadata; attempt to parse scale if provided in encoding (future) - for now leave
+    // blank
+    //
+    // We cannot know depth_scale_m here without augmenting ImageRecord; future extension could
+    // pass via id pattern.
+    //
     // Minimal metadata: stream_type + semantics if derivable from encoding.
     std::unordered_map<std::string, std::string> md;
     md["stream_type"] = "depth";
@@ -309,8 +312,7 @@ void McapBackend::write_image_record(const data::ImageRecord& img) {
   auto st = image_channels_.at(img.id).log(
     reinterpret_cast<const std::byte*>(payload.data()),
     encoded_len,
-    img.ts.realtime.to_ns()
-  );
+    img.ts.realtime.to_ns());
 
   if (st != foxglove::FoxgloveError::Ok) {
     std::cerr << "Failed to write image: " << foxglove::strerror(st) << "\n";
@@ -335,8 +337,13 @@ void McapBackend::register_schemas_once() {
   std::unordered_set<std::string> visited;
   std::function<void(const google::protobuf::FileDescriptor*)> add_with_deps;
   add_with_deps = [&](const google::protobuf::FileDescriptor* fd) {
-    if (!fd) return;
-    if (!visited.insert(fd->name()).second) return; // already added
+    if (!fd) {
+      return;
+    }
+    if (!visited.insert(fd->name()).second){
+      // already added
+       return;
+    }
     // Recurse first so dependencies appear earlier (order not strictly required)
     for (int i = 0; i < fd->dependency_count(); ++i) {
       add_with_deps(fd->dependency(i));
@@ -368,7 +375,7 @@ bool McapBackend::is_depth_topic(const std::string& topic) {
 }
 
 bool McapBackend::is_depth_encoding(const std::string& enc) {
-  return enc == "depth16" || enc == "32FC1" || enc == "16UC1"; // allow alias
+  return enc == "depth16" || enc == "32FC1" || enc == "16UC1";  // allow alias
 }
 
 
@@ -378,7 +385,7 @@ uint32_t McapBackend::scan_existing_episodes(const std::filesystem::path& base_p
   if (!std::filesystem::exists(base_path)) {
     return 0;
   }
-  
+
   // If not a directory, return 0
   if (!std::filesystem::is_directory(base_path)) {
     std::cerr << "Warning: base_path exists but is not a directory: " << base_path << std::endl;
@@ -426,4 +433,4 @@ uint32_t McapBackend::scan_existing_episodes(const std::filesystem::path& base_p
   return found_any ? (max_index + 1) : 0;
 }
 
-} // namespace trossen::io::backends
+}  // namespace trossen::io::backends

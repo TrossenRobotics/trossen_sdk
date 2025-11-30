@@ -63,6 +63,6 @@ inline bool depth_enabled(CameraCapability cap) {
   return cap == CameraCapability::ColorAndDepth;
 }
 
-} // namespace trossen::hw::camera
+}  // namespace trossen::hw::camera
 
-#endif // TROSSEN_SDK__HW__CAMERA__CAMERA_TYPES_HPP
+#endif  // TROSSEN_SDK__HW__CAMERA__CAMERA_TYPES_HPP

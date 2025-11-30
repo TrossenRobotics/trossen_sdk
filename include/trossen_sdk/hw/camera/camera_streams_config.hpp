@@ -24,8 +24,8 @@ const int kDefaultHeight = 480;
 const int kDefaultWidth = 640;
 const int kMinWarmupFrames = 0;
 const int kDefaultWarmupFrames = 5;
-const double kDefaultDepthScaleM = 1.0; // 1m units for DEPTH16
-const std::string kDefaultColorEncoding = "bgr8";
+const double kDefaultDepthScaleM = 1.0;  // 1m units for DEPTH16
+const char kDefaultColorEncoding[] = "bgr8";
 const DepthFormat kDefaultDepthFormat = DepthFormat::DEPTH16;
 const CameraCapability kDefaultCameraCapability = CameraCapability::ColorOnly;
 const bool kDefaultEnableDepth = false;
@@ -65,7 +65,7 @@ struct CameraStreamsConfig {
   /// @brief Depth scale in meters per unit (if depth_format requires it, e.g. DEPTH16)
   double depth_scale_m{kDefaultDepthScaleM};
 
-  /// @brief Number of initial frames to discard after starting the camera (to allow auto-exposure, etc)
+  /// @brief Number of initial frames to discard after starting the camera
   int warmup_frames{kDefaultWarmupFrames};
 
   /// @brief Convenience alias (if true -> capability ColorAndDepth)
@@ -82,7 +82,7 @@ struct CameraStreamsConfig {
     if (enable_depth) {
       capability = CameraCapability::ColorAndDepth;
     } else if (capability == CameraCapability::ColorOnly) {
-      enable_depth = false; // keep explicit
+      enable_depth = false;
     } else if (capability == CameraCapability::ColorAndDepth) {
       enable_depth = true;
     }
@@ -111,9 +111,10 @@ struct CameraStreamsConfig {
    */
   bool validate(std::string * error = nullptr) const {
     auto fail = [&](const std::string& msg) {
-      if (error) *error = msg; {
-        return false;
+      if (error) {
+        *error = msg;
       }
+      return false;
     };
 
     if (color_width <= 0 || color_height <= 0) {
@@ -143,6 +144,6 @@ struct CameraStreamsConfig {
   }
 };
 
-} // namespace trossen::hw::camera
+}  // namespace trossen::hw::camera
 
-#endif // TROSSEN_SDK__HW__CAMERA__CAMERA_STREAMS_CONFIG_HPP
+#endif  // TROSSEN_SDK__HW__CAMERA__CAMERA_STREAMS_CONFIG_HPP

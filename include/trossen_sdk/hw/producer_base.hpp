@@ -13,13 +13,12 @@
 #include <string>
 #include <iostream>
 #include "nlohmann/json.hpp"
-#include "trossen_sdk/data/record.hpp"  
+#include "trossen_sdk/data/record.hpp"
 
 namespace trossen::hw {
 
 /// @brief Statistics for producers
 struct ProducerStats {
-
   /// @brief Total records emitted
   uint64_t produced{0};
 
@@ -52,11 +51,10 @@ public:
    *
    * @return const reference to ProducerStats
    */
-  const ProducerStats& stats() const {return stats_; };
+  const ProducerStats& stats() const {return stats_; }
 
   /// @brief Metadata for producers
   struct ProducerMetadata {
-
     /// @brief Type of the producer
     std::string type;
 
@@ -78,10 +76,9 @@ public:
       std::cout << "ProducerMetadata: " << name << " (" << id << ") - " << description << "\n";
       return nlohmann::ordered_json{};
     }
-
   };
 
-  
+
 
   /**
    * @brief Get producer metadata
@@ -145,7 +142,8 @@ public:
    *
    * @return const reference to ProducerStats
    */
-  const ProducerStats& stats() const {return stats_; };
+  const ProducerStats& stats() const {return stats_; }
+
 protected:
   /// @brief Whether we've opened the device
   bool opened_{false};
@@ -170,9 +168,8 @@ protected:
 
   /// @brief Monotonic sequence number for emitted records
   uint64_t seq_{0};
-
 };
 
-} // namespace trossen::hw
+}  // namespace trossen::hw
 
 #endif  // TROSSEN_SDK__HW__PRODUCER_BASE_HPP

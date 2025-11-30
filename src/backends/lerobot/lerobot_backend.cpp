@@ -1,12 +1,19 @@
-
-#include <iostream>
-#include <iomanip>
+#include <algorithm>
 #include <fstream>
-#include <sstream>
+#include <iomanip>
+#include <iostream>
+#include <limits>
+#include <memory>
 #include <regex>
+#include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
 #include "opencv2/imgcodecs.hpp"
-#include <opencv2/opencv.hpp>
-#include <parquet/arrow/reader.h>
+#include "opencv2/opencv.hpp"
+#include "parquet/arrow/reader.h"
+
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
 #include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
@@ -14,17 +21,15 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 
-
-// For PNG writing we stub out with raw dump placeholder (future: integrate stb_image_write or libpng)
 namespace trossen::io::backends {
-
-// OpenCV PNG compression level now driven by cfg_.png_compression_level
 
 namespace fs = std::filesystem;
 
-LeRobotBackend::LeRobotBackend(Config cfg, std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata)
-  : io::Backend(cfg.output_dir), cfg_(std::move(cfg)), metadata_(std::move(metadata)) {
-
+LeRobotBackend::LeRobotBackend(
+  Config cfg,
+  std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata)
+  : io::Backend(cfg.output_dir), cfg_(std::move(cfg)), metadata_(std::move(metadata))
+{
   // Validate encoder threads
   if (cfg_.encoder_threads <= 0) {
     cfg_.encoder_threads = 1;
@@ -40,7 +45,8 @@ LeRobotBackend::LeRobotBackend(Config cfg, std::vector<std::shared_ptr<hw::Polle
   try {
     uri_ = (fs::path(cfg_.output_dir) / cfg_.repository_id / cfg_.dataset_id).string();
   } catch (const std::exception& e) {
-    throw std::runtime_error("Failed to resolve absolute path of output directory: " + std::string(e.what()));
+    throw std::runtime_error(
+      "Failed to resolve absolute path of output directory: " + std::string(e.what()));
   }
   // Validate non-empty path
   if (uri_.empty()) {
@@ -66,7 +72,7 @@ LeRobotBackend::LeRobotBackend(Config cfg, std::vector<std::shared_ptr<hw::Polle
 bool LeRobotBackend::open() {
   std::lock_guard<std::mutex> lock(open_mutex_);
   if (opened_) {
-    return true; // idempotent
+    return true;
   }
   root_ = fs::path(uri_);
   std::cout << "=====================================================================" << std::endl;
@@ -78,7 +84,7 @@ bool LeRobotBackend::open() {
   oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index;
 
   // Create images root directory from camera names
-  images_root_ = root_ / "images" / "chunk-000" ;
+  images_root_ = root_ / "images" / "chunk-000";
   try {
     fs::create_directories(images_root_);
   } catch (const std::exception& e) {
@@ -87,7 +93,7 @@ bool LeRobotBackend::open() {
   }
 
   // Create Video Directories
-  // TODO (shantanuparab-tr): Use chunk size to create chunk folders
+  // TODO(shantanuparab-tr): Use chunk size to create chunk folders
   videos_root_ = root_ / "videos" / "chunk-000";
   try {
     fs::create_directories(videos_root_);
@@ -154,7 +160,7 @@ bool LeRobotBackend::open() {
 
   auto result = parquet::arrow::FileWriter::Open(
       *schema_,                    // Arrow schema
-      arrow::default_memory_pool(), // Memory pool
+      arrow::default_memory_pool(),  // Memory pool
       outfile_,                    // Output stream
       writer_props,                // Writer properties
       arrow_props);                // Arrow writer props
@@ -199,15 +205,19 @@ void LeRobotBackend::writeBatch(std::span<const data::RecordBase* const> records
 }
 
 void LeRobotBackend::convert_to_videos() const {
-
-  // TODO (shantanuparab-tr): Use recorded fps from metadata if available
-  const int fps = static_cast<int>(std::round(30.0)); // Use recorded fps if available
+  // TODO(shantanuparab-tr): Use recorded fps from metadata if available
+  const int fps = static_cast<int>(std::round(30.0));  // Use recorded fps if available
   const int episode_chunk = 0;
-  const size_t max_concurrent_encoders = std::max<size_t>(2, std::thread::hardware_concurrency() / 2);
+  const size_t max_concurrent_encoders = std::max<size_t>(
+    2,
+    std::thread::hardware_concurrency() / 2);
 
   const std::string images_path = images_root_.string();
 
-  const fs::path base_path = fs::path(this->config().root_path) / this->config().repository_id / this->config().dataset_id;
+  const fs::path base_path =
+    fs::path(this->config().root_path) /
+    this->config().repository_id /
+    this->config().dataset_id;
 
   std::atomic<int> video_count{0};
   std::mutex log_mutex;
@@ -287,9 +297,9 @@ void LeRobotBackend::convert_to_videos() const {
             << task.output_path.string();
 
         auto t0 = std::chrono::steady_clock::now();
-        std::cout<<"\n════════════════════════ [Worker " << worker_id << "] Encoding video ════════════════════════"<< std::endl;
+        std::cout << "\n[Worker " << worker_id << "] Encoding video"<< std::endl;
         int ret = std::system(ffmpeg_cmd.str().c_str());
-        std::cout<<"══════════════════════════════════════════════════════════════════════════════════\n"<< std::endl;
+        std::cout << std::endl;
 
         auto t1 = std::chrono::steady_clock::now();
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
@@ -298,12 +308,13 @@ void LeRobotBackend::convert_to_videos() const {
         if (ret == 0) {
           video_count++;
         } else {
-          std::cout << "[Worker " << worker_id << "] FFmpeg failed for " << task.output_path.string() << " (code " << ret << ")" << std::endl;
+          std::cout << "[Worker " << worker_id << "] FFmpeg failed for "
+                    << task.output_path.string() << " (code " << ret << ")" << std::endl;
         }
-
       } catch (const std::exception &e) {
         std::lock_guard<std::mutex> lk(log_mutex);
-        std::cout << "[Worker " << worker_id << "] Exception for " << task.episode_name << ": " << e.what() << std::endl;
+        std::cout << "[Worker " << worker_id << "] Exception for "
+                  << task.episode_name << ": " << e.what() << std::endl;
       }
     }
   };
@@ -389,7 +400,7 @@ std::vector<cv::Mat> LeRobotBackend::sample_images(
   return images;
 }
 
-nlohmann::ordered_json LeRobotBackend::compute_image_stats (
+nlohmann::ordered_json LeRobotBackend::compute_image_stats(
   const std::vector<cv::Mat> &images) const{
   nlohmann::ordered_json stats_json;
   if (images.empty()) {
@@ -655,7 +666,7 @@ void LeRobotBackend::computeStatistics() const {
   episodes_file << episode_metadata.dump() << "\n";
   episodes_file.close();
 
-  // TODO (shantanuparab-tr): Implement logic to check for existing task entries
+  // TODO(shantanuparab-tr): Implement logic to check for existing task entries
   nlohmann::ordered_json task_metadata;
   task_metadata["task_index"] = cfg_.episode_index;
   task_metadata["task"] = cfg_.task_name;
@@ -710,7 +721,7 @@ void LeRobotBackend::printStatsTable(const nlohmann::ordered_json& stats) const 
 }
 
 void LeRobotBackend::flush() {
-  // TODO (shantanuparab-tr): flush parquet writer if needed
+  // TODO(shantanuparab-tr): flush parquet writer if needed
 }
 
 void LeRobotBackend::close() {
@@ -876,13 +887,13 @@ void LeRobotBackend::writeImage(const data::RecordBase& base) {
   // ASSUMPTION: The first sequence ID we observe from a source marks the beginning
   // of a new episode for that source.
 
-  if(source_frame_indices_.find(img.id) == source_frame_indices_.end()) {
+  if (source_frame_indices_.find(img.id) == source_frame_indices_.end()) {
     source_frame_indices_[img.id] = img.seq;
   }
   int frame_index = img.seq - source_frame_indices_[img.id];
 
   // Directory per camera id (cached)
-  // TODO: this could be moved to a pre-processing step?
+  // TODO(shantanuparab-tr): this could be moved to a pre-processing step?
   auto it = image_dir_cache_.find(img.id);
   if (it == image_dir_cache_.end()) {
     std::ostringstream oss;
@@ -895,7 +906,8 @@ void LeRobotBackend::writeImage(const data::RecordBase& base) {
   const fs::path& camera_dir = it->second;
 
   fs::path file_path = camera_dir / (std::string("image_") +
-                     (std::ostringstream() << std::setw(6) << std::setfill('0') << frame_index).str() +
+                     (std::ostringstream() << std::setw(6)
+                     << std::setfill('0') << frame_index).str() +
                      ".jpg");
 
   // Enqueue job (clone image to ensure safety if producer overwrites buffer later)
@@ -961,10 +973,16 @@ void LeRobotBackend::imageWorkerLoop() {
       image_queue_.pop_front();
       // queue wait time
       auto start_steady = std::chrono::steady_clock::now();
-      uint64_t wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(start_steady - enq_time).count();
+      uint64_t wait_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(start_steady - enq_time).count();
       img_queue_wait_time_ns_acc_.fetch_add(wait_ns, std::memory_order_relaxed);
       uint64_t prev_qw_max = img_queue_wait_time_ns_max_.load(std::memory_order_relaxed);
-      while (wait_ns > prev_qw_max && !img_queue_wait_time_ns_max_.compare_exchange_weak(prev_qw_max, wait_ns)) {}
+      while (
+        wait_ns > prev_qw_max
+        && !img_queue_wait_time_ns_max_.compare_exchange_weak(prev_qw_max, wait_ns))
+      {
+        // loop
+      }
     }
     auto t0 = std::chrono::steady_clock::now();
     try {
@@ -972,7 +990,8 @@ void LeRobotBackend::imageWorkerLoop() {
         std::cerr << "Failed to write PNG: " << job.file_path << std::endl;
       }
     } catch (const cv::Exception& e) {
-      std::cerr << "OpenCV exception writing PNG (" << job.file_path << "): " << e.what() << std::endl;
+      std::cerr << "OpenCV exception writing PNG ("
+                << job.file_path << "): " << e.what() << std::endl;
     }
     auto t1 = std::chrono::steady_clock::now();
     uint64_t dt = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
@@ -1022,11 +1041,11 @@ void LeRobotBackend::updateEpisodeInfo(int episode_frame_length) const {
   size_t colon_pos = train_split.find(':');
   int train_start = std::stoi(train_split.substr(0, colon_pos));;
   int train_end = std::stoi(train_split.substr(colon_pos + 1));;
-  train_end += 1; // add one episode to train
+  train_end += 1;  // add one episode to train
   info_json["splits"]["train"] = std::to_string(train_start) + ":" + std::to_string(train_end);
 
   // Update total frames
-  info_json["total_frames"] = info_json.value("total_frames", 0) + episode_frame_length ;
+  info_json["total_frames"] = info_json.value("total_frames", 0) + episode_frame_length;
 
   // Write back to info.json
   std::ofstream info_file(info_path);
@@ -1053,7 +1072,8 @@ void LeRobotBackend::writeMetadata() {
 
   // Miscellaneous Feature (Initialization with placeholder values)
 
-  info_["codebase_version"] = "v2.1"; // TODO(shantanuparab-tr): [TDS-24]: Update codebase version dynamically (Uses LeRobot version for now)
+  // TODO(shantanuparab-tr): [TDS-24]: Update codebase version dynamically
+  info_["codebase_version"] = "v2.1";
   info_["robot_type"] = cfg_.robot_name;
 
   info_["total_episodes"] = 0;
@@ -1074,7 +1094,7 @@ void LeRobotBackend::writeMetadata() {
 
   nlohmann::ordered_json features;
 
-  for(const auto &metadata : metadata_ ) {
+  for (const auto &metadata : metadata_) {
     nlohmann::ordered_json producer_feature = metadata->get_info();
     // Merge producer_feature into features
     for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
@@ -1090,7 +1110,7 @@ void LeRobotBackend::writeMetadata() {
     }
   }
 
-  //TODO (shantanuparab-tr): Common Feature these can be moved to a constants file later
+  // TODO(shantanuparab-tr): Common Feature these can be moved to a constants file later
 
   nlohmann::ordered_json timestamp_feature;
   timestamp_feature["dtype"] = "float32";
@@ -1126,7 +1146,8 @@ void LeRobotBackend::writeMetadata() {
   info_["features"] = features;
 
   info_["data_path"] = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet";
-  info_["video_path"] = "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4";
+  info_["video_path"] =
+    "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4";
 
   // // Write to info.json
   std::ofstream info_file(meta_root_ / JSON_INFO);
@@ -1194,4 +1215,4 @@ uint32_t LeRobotBackend::scan_existing_episodes(const std::filesystem::path& bas
   return found_any ? (max_index + 1) : 0;
 }
 
-} // namespace trossen::io::backends
+}  // namespace trossen::io::backends

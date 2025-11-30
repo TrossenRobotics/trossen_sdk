@@ -7,6 +7,7 @@
 #define TROSSEN_SDK__CORE__VERSION_HPP
 
 #include <cstdint>
+#include <string>
 
 namespace trossen::core {
 inline constexpr uint32_t VERSION_MAJOR = 0;
@@ -23,8 +24,7 @@ inline ::std::string version() {
          ::std::to_string(VERSION_MAJOR) + "." +
          ::std::to_string(VERSION_MINOR) + "." +
          ::std::to_string(VERSION_PATCH);
-
 }
-}
+}  // namespace trossen::core
 
-#endif // TROSSEN_SDK__CORE__VERSION_HPP
+#endif  // TROSSEN_SDK__CORE__VERSION_HPP

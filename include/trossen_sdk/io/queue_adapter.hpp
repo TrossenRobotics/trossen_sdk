@@ -74,6 +74,6 @@ private:
 /** @brief Owning pointer type for queue adapters */
 using QueueAdapterPtr = std::unique_ptr<QueueAdapter>;
 
-} // namespace trossen::io
+}  // namespace trossen::io
 
-#endif // TROSSEN_SDK__IO__QUEUE_ADAPTER_HPP
+#endif  // TROSSEN_SDK__IO__QUEUE_ADAPTER_HPP

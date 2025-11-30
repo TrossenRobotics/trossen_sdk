@@ -28,7 +28,7 @@ public:
    *
    * @param uri Path or logical destination identifier
    */
-  Backend(const std::string& uri) : uri_(uri) {};
+  explicit Backend(const std::string& uri) : uri_(uri) {}
 
   /**
    * @brief Virtual destructor
@@ -91,6 +91,6 @@ protected:
   bool opened_{false};
 };
 
-} // namespace trossen::io
+}  // namespace trossen::io
 
-#endif // TROSSEN__IO__BACKEND_HPP
+#endif  // TROSSEN__IO__BACKEND_HPP

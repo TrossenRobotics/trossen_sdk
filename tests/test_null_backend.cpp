@@ -3,13 +3,17 @@
  * @brief Unit tests for NullBackend
  */
 
-#include <gtest/gtest.h>
-#include "trossen_sdk/io/backends/null/null_backend.hpp"
-#include "trossen_sdk/data/record.hpp"
 #include <vector>
 
-using namespace trossen::io::backends;
-using namespace trossen::data;
+#include "gtest/gtest.h"
+
+#include "trossen_sdk/data/record.hpp"
+#include "trossen_sdk/io/backends/null/null_backend.hpp"
+
+using trossen::data::ImageRecord;
+using trossen::data::JointStateRecord;
+using trossen::data::RecordBase;
+using trossen::io::backends::NullBackend;
 
 // TODO(lukeschmitt-tr): Add multithreading tests
 

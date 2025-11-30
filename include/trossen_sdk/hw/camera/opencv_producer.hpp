@@ -45,8 +45,8 @@ public:
 
     /// @brief Preferred FOURCC pixel formats (in order). Default: MJPG, YUYV
     std::vector<int32_t> preferred_fourcc = {
-      cv::VideoWriter::fourcc('M','J','P','G'),
-      cv::VideoWriter::fourcc('Y','U','Y','V')
+      cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),
+      cv::VideoWriter::fourcc('Y', 'U', 'Y', 'V')
     };
 
     /// @brief Whether to enforce the requested fps (may reduce if device cannot keep up)
@@ -54,14 +54,13 @@ public:
 };
 
   struct OpenCvCameraProducerMetadata : public PolledProducer::ProducerMetadata {
-
     /// @brief Image width
     int width;
 
     /// @brief Image height
     int height;
 
-    //TODO (shantanuparab-tr): Can be made enum
+    // TODO(shantanuparab-tr): Can be made enum
     /// @brief Image encoding
     std::string codec;
 
@@ -97,7 +96,6 @@ public:
       features["observation.images." + id] = camera_feature;
       return features;
     }
-
   };
 
   /**
@@ -144,9 +142,8 @@ protected:
 private:
   /// @brief Metadata
   OpenCvCameraProducerMetadata metadata_;
-  
 };
 
-} // namespace trossen::hw::camera
+}  // namespace trossen::hw::camera
 
 #endif  // TROSSEN_SDK__HW__CAMERA__OPENCV_PRODUCER_HPP

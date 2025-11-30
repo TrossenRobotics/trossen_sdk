@@ -43,25 +43,24 @@ public:
     std::string encoding{"bgr8"};
     Pattern pattern{Pattern::Gradient};
     uint64_t seed{0};          ///< Deterministic seed (0 = pick fixed default)
-    double noise_stddev{20.0}; ///< For Noise pattern (0-255 scale)
+    double noise_stddev{20.0};  ///< For Noise pattern (0-255 scale)
     int square_size{120};      ///< For MovingSquare pattern
     int warmup_frames{0};      ///< Frames to generate & discard before emitting
-    double drop_probability{0.0}; ///< Simulated drop probability [0,1)
+    double drop_probability{0.0};  ///< Simulated drop probability [0,1)
   };
 
   struct MockCameraProducerMetadata : public PolledProducer::ProducerMetadata {
-
     /// @brief Image width
     int width;
 
     /// @brief Image height
     int height;
 
-    // TODO (shantanuparab-tr): Can be made enum
+    // TODO(shantanuparab-tr): Can be made enum
     /// @brief Image encoding
     std::string codec;
 
-    // TODO (shantanuparab-tr): Can be made enum
+    // TODO(shantanuparab-tr): Can be made enum
     /// @brief Pixel format
     std::string pix_fmt;
 
@@ -94,7 +93,6 @@ public:
       features["observation.images." + id] = camera_feature;
       return features;
     }
-
   };
 
   /**
@@ -139,11 +137,11 @@ private:
 
   // Jitter measurement: store recent inter-frame intervals (ns)
   std::vector<uint64_t> intervals_ns_;
-  static constexpr size_t kMaxIntervals = 50000; // cap to avoid unbounded growth
+  static constexpr size_t kMaxIntervals = 50000;  // cap to avoid unbounded growth
 
   MockCameraProducerMetadata metadata_;
 };
 
-} // namespace trossen::hw::camera
+}  // namespace trossen::hw::camera
 
-#endif // TROSSEN_SDK__HW__CAMERA__MOCK_PRODUCER_HPP
+#endif  // TROSSEN_SDK__HW__CAMERA__MOCK_PRODUCER_HPP
