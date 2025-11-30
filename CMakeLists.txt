@@ -33,8 +33,7 @@ find_package(PkgConfig)
 # First try pkg-config
 if(PKG_CONFIG_FOUND)
   pkg_check_modules(Protobuf REQUIRED protobuf)
-  set(Protobuf_LIBRARIES ${Protobuf_LIBRARIES})
-  set(Protobuf_INCLUDE_DIRS ${Protobuf_INCLUDE_DIRS})
+
   message(STATUS "Found Protobuf via pkg-config: ${Protobuf_VERSION}")
 else()
   # Fallback to CMake find_package
