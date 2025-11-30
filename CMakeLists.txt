@@ -28,8 +28,32 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
   set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} /usr/lib/aarch64-linux-gnu/cmake)
 endif()
 
-find_package(Protobuf REQUIRED)
-message(STATUS "Found Protobuf: ${Protobuf_VERSION}")
+# Try to find Protobuf
+find_package(PkgConfig)
+# First try pkg-config
+if(PKG_CONFIG_FOUND)
+  pkg_check_modules(Protobuf REQUIRED protobuf)
+  set(Protobuf_LIBRARIES ${Protobuf_LIBRARIES})
+  set(Protobuf_INCLUDE_DIRS ${Protobuf_INCLUDE_DIRS})
+  message(STATUS "Found Protobuf via pkg-config: ${Protobuf_VERSION}")
+else()
+  # Fallback to CMake find_package
+  find_package(Protobuf REQUIRED)
+  message(STATUS "Found Protobuf: ${Protobuf_VERSION}")
+endif()
+
+# Help CMake find ZLIB and BZip2 (needed by Arrow)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+  set(ZLIB_ROOT /usr/lib/x86_64-linux-gnu)
+  set(BZIP2_LIBRARIES /usr/lib/x86_64-linux-gnu/libbz2.so)
+  set(BZIP2_INCLUDE_DIRS /usr/include)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+  set(ZLIB_ROOT /usr/lib/aarch64-linux-gnu)
+  set(BZIP2_LIBRARIES /usr/lib/aarch64-linux-gnu/libbz2.so)
+  set(BZIP2_INCLUDE_DIRS /usr/include)
+endif()
+find_package(ZLIB REQUIRED)
+find_package(BZip2 REQUIRED)
 
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
@@ -98,7 +122,6 @@ set(TROSSEN_PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include/trossen_sdk/io/backen
 set(PROTOBUF_IMPORT_DIRS ${TROSSEN_PROTO_PATH})
 set(TROSSEN_PROTO_FILES
   ${TROSSEN_PROTO_PATH}/JointState.proto
-  ${TROSSEN_PROTO_PATH}/RawImage.proto
   ${TROSSEN_PROTO_PATH}/RobotDescription.proto
   ${TROSSEN_PROTO_PATH}/Timestamp.proto
 )
