@@ -2,10 +2,9 @@
  * @file session_manager.hpp
  * @brief Session Manager orchestrates discrete recording sessions (episodes).
  *
- * The Session Manager controls the lifecycle of individual episode recordings,
- * each producing a separate output file (e.g., episode_000000.mcap).
- * It manages Scheduler, Sink, and Backend instances per episode, ensuring clean
- * separation between recording sessions.
+ * The Session Manager controls the lifecycle of individual episode recordings, each producing a
+ * separate output file (e.g., episode_000000.mcap). It manages Scheduler, Sink, and Backend
+ * instances per episode, ensuring clean separation between recording sessions.
  */
 
 #ifndef TROSSEN_SDK__RUNTIME__SESSION_MANAGER_HPP

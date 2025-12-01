@@ -50,7 +50,7 @@ public:
    *
    * @param records Voided record pointers
    */
-  void writeBatch(std::span<const data::RecordBase* const> records) override {
+  void write_batch(std::span<const data::RecordBase* const> records) override {
     count_ += records.size();
   }
 

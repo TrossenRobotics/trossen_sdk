@@ -140,7 +140,7 @@ void McapBackend::write(const data::RecordBase& record) {
   }
 }
 
-void McapBackend::writeBatch(std::span<const data::RecordBase* const> records) {
+void McapBackend::write_batch(std::span<const data::RecordBase* const> records) {
   // Acquire once for the batch to avoid per-message lock/unlock churn
   std::scoped_lock lk(writer_mutex_);
   if (!opened_) return;
