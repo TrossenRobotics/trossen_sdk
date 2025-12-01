@@ -35,7 +35,7 @@ namespace fs = std::filesystem;
 
 LeRobotBackend::LeRobotBackend(
   Config cfg,
-  std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata = {})
+  ProducerMetadataList metadata = {})
   : io::Backend(cfg.output_dir), cfg_(std::move(cfg)), metadata_(std::move(metadata))
 {
   // Validate encoder threads
@@ -46,6 +46,20 @@ LeRobotBackend::LeRobotBackend(
   if (cfg_.png_compression_level < 0 || cfg_.png_compression_level > 9) {
     cfg_.png_compression_level = 3;
   }
+}
+
+void LeRobotBackend::preprocess_episode(
+  const std::string& output_path,
+  uint32_t episode_index,
+  const std::string& dataset_id,
+  const std::string& repository_id)
+{
+  // Update config with episode-specific values
+  cfg_.output_dir = output_path;
+  cfg_.episode_index = episode_index;
+  cfg_.dataset_id = dataset_id;
+  cfg_.repository_id = repository_id;
+
   // Create a root folder for dataset using repo-id and dataset-name and default root
 
   // URI is absolute path to output directory. Set to absolute path and check write access.

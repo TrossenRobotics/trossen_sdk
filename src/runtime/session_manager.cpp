@@ -12,6 +12,7 @@
 #include <utility>
 #include <vector>
 
+#include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
 namespace trossen::runtime {
@@ -117,7 +118,7 @@ bool SessionManager::start_episode() {
   // Build episode file path
   auto path = build_episode_path(next_episode_index_);
 
-  std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> producer_metadata;
+  ProducerMetadataList producer_metadata;
 
   // Fetch Metadata from producers as a vector of the base class
   for (const auto& pt : producer_tasks_) {
@@ -329,8 +330,6 @@ SessionManager::Stats SessionManager::stats() const {
   return s;
 }
 
-
-
 std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
   // Generate filename: episode_NNNNNN.mcap (6-digit zero-padded)
   // TODO(lukeschmitt-tr): This is specific to MCAP files; consider making more generic
@@ -353,39 +352,26 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
 std::shared_ptr<io::Backend> SessionManager::create_backend(
   const std::string& output_path,
   uint32_t episode_index,
-  const std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>>& producer_metadatas)
+  const ProducerMetadataList& producer_metadatas)
 {
   if (config_.backend_config == nullptr) {
     throw std::runtime_error("SessionManager::create_backend: backend_config is null");
-  } else if (config_.backend_config->type == "lerobot") {
-      // Copy backend config template and customize for this episode
-    auto* lerobot_cfg =
-      static_cast<io::backends::LeRobotBackend::Config*>(config_.backend_config.get());
-    lerobot_cfg->output_dir = output_path;
-    if (!lerobot_cfg) {
-      throw std::runtime_error(
-        "SessionManager::create_backend: backend_config is not LeRobotBackend::Config");
-    }
-    lerobot_cfg->dataset_id = config_.dataset_id;
-    lerobot_cfg->episode_index = episode_index;
-    // TODO(shantanuparab-tr): Use the producer metadata to populate backend metadata
-    // Print registered producers
-    std::cout << "\nRegistered Producers Metadata:\n";
-    for (const auto& pm : producer_metadatas) {
-      std::cout << "  [ID: " << pm->id << "] Name: " << pm->name << "\n";
-      std::cout << "      Description: " << pm->description << "\n";
-    }
-
-    return std::make_shared<io::backends::LeRobotBackend>(*lerobot_cfg, producer_metadatas);
-  } else if (config_.backend_config->type == "mcap") {
-    // Copy backend config template and customize for this episode
-    auto* mcap_cfg = static_cast<io::backends::McapBackend::Config*>(config_.backend_config.get());
-    mcap_cfg->output_path = output_path;
-    return std::make_shared<io::backends::McapBackend>(*mcap_cfg);
-  } else {
-    throw std::runtime_error(
-      "SessionManager::create_backend: Unsupported backend type: " + config_.backend_config->type);
   }
+
+  // Create backend instance via registry
+  auto backend = io::BackendRegistry::create(
+    config_.backend_config->type,
+    *config_.backend_config,
+    producer_metadatas);
+
+  // Let the backend configure itself for this episode
+  backend->preprocess_episode(
+    output_path,
+    episode_index,
+    config_.dataset_id,
+    config_.repository_id);
+
+  return backend;
 }
 
 void SessionManager::monitor_duration() {

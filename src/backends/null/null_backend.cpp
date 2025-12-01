@@ -10,7 +10,10 @@ namespace trossen::io::backends {
 
 REGISTER_BACKEND(NullBackend, "null")
 
-NullBackend::NullBackend(const Config& cfg) : Backend(cfg.uri) {}
+NullBackend::NullBackend(
+  const Config& cfg,
+  const ProducerMetadataList&)
+  : Backend(cfg.uri) {}
 
 bool NullBackend::open() {
   opened_ = true;

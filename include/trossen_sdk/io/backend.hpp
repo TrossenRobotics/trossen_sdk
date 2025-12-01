@@ -15,6 +15,7 @@
 #include <string>
 
 #include "trossen_sdk/data/record.hpp"
+#include "trossen_sdk/types.hpp"
 
 namespace trossen::io {
 
@@ -47,6 +48,24 @@ public:
      */
     virtual ~Config() = default;
   };
+
+  /**
+   * @brief Prepare backend for a new episode with runtime parameters
+   *
+   * @param output_path Base output path for this episode
+   * @param episode_index Zero-based episode index
+   * @param dataset_id Dataset identifier
+   * @param repository_id Repository identifier (may be empty)
+   *
+   * This method is called after backend construction but before open() to allow backends to
+   * configure episode-specific paths and metadata. Default implementation does nothing (backends
+   * that don't need per-episode customization can ignore this).
+   */
+  virtual void preprocess_episode(
+    const std::string& output_path,
+    uint32_t episode_index,
+    const std::string& dataset_id = "",
+    const std::string& repository_id = "") {}
 
   /**
    * @brief Open a logging destination

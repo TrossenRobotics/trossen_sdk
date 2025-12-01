@@ -14,8 +14,11 @@
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
+#include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/io/backend.hpp"
+#include "trossen_sdk/types.hpp"
 
 namespace trossen::io {
 
@@ -27,7 +30,9 @@ namespace trossen::io {
 class BackendRegistry {
 public:
   /// @brief Factory function signature for creating backend instances
-  using FactoryFunc = std::function<std::shared_ptr<Backend>(Backend::Config&)>;
+  using FactoryFunc = std::function<std::shared_ptr<Backend>(
+    Backend::Config&,
+    const ProducerMetadataList&)>;
 
   /**
    * @brief Register a backend factory function
@@ -47,6 +52,7 @@ public:
    *
    * @param type Backend type string
    * @param config Backend configuration (must be compatible with registered type)
+   * @param producer_metadatas Optional vector of producer metadata (used by some backends)
    *
    * @return Shared pointer to created backend instance
    *
@@ -55,7 +61,10 @@ public:
    * @note The config reference is downcast to the appropriate concrete config type by the
    *       registered factory function.
    */
-  static std::shared_ptr<Backend> create(const std::string& type, Backend::Config& config);
+  static std::shared_ptr<Backend> create(
+    const std::string& type,
+    Backend::Config& config,
+    const ProducerMetadataList& producer_metadatas = {});
 
   /**
    * @brief Check if a backend type is registered
@@ -97,8 +106,10 @@ private:
     ClassName##Registrar() {                                                             \
       ::trossen::io::BackendRegistry::register_backend(                                  \
         TypeString,                                                                      \
-        [](::trossen::io::Backend::Config& cfg) -> std::shared_ptr<::trossen::io::Backend> { \
-          return std::make_shared<ClassName>(static_cast<ClassName::Config&>(cfg));     \
+        [](::trossen::io::Backend::Config& cfg,                                          \
+           const ::trossen::ProducerMetadataList& metadata)                              \
+             -> std::shared_ptr<::trossen::io::Backend> {                                \
+          return std::make_shared<ClassName>(static_cast<ClassName::Config&>(cfg), metadata); \
         });                                                                              \
     }                                                                                    \
   };                                                                                     \

@@ -7,7 +7,10 @@
 #define TROSSEN_SDK__IO__BACKENDS__NULL_BACKEND_HPP
 
 #include <atomic>
+#include <memory>
+#include <vector>
 
+#include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/io/backend.hpp"
 
 namespace trossen::io::backends {
@@ -31,8 +34,11 @@ public:
    * @brief Construct a NullBackend with the given configuration
    *
    * @param cfg Configuration options
+   * @param metadata Optional producer metadata
    */
-  explicit NullBackend(const Config& cfg);
+  explicit NullBackend(
+    const Config& cfg,
+    const ProducerMetadataList& metadata = {});
 
   /**
    * @brief Open a null logging destination
