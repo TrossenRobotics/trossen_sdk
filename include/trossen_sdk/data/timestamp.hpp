@@ -82,6 +82,8 @@ inline Timespec now_real() {
 
 /**
  * @brief Create a Timestamp with both clocks set to now
+ *
+ * @return Current Timestamp
  */
 inline Timestamp make_timestamp_now() {
   Timestamp ts;

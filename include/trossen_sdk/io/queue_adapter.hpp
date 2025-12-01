@@ -2,9 +2,9 @@
  * @file queue_adapter.hpp
  * @brief Queue abstraction for sink producer/consumer decoupling.
  *
- * Provides an interface (`QueueAdapter`) that abstracts the underlying
- * multi-producer single-consumer queue implementation. The default
- * implementation wraps moodycamel::ConcurrentQueue.
+ * Provides an interface (`QueueAdapter`) that abstracts the underlying multi-producer
+ * single-consumer queue implementation. The default implementation wraps
+ * moodycamel::ConcurrentQueue.
  */
 
 #ifndef TROSSEN_SDK__IO__QUEUE_ADAPTER_HPP
@@ -26,6 +26,9 @@ namespace trossen::io {
  */
 class QueueAdapter {
 public:
+  /**
+   * @brief Virtual destructor
+   */
   virtual ~QueueAdapter() = default;
 
   /**
@@ -67,7 +70,9 @@ public:
   bool try_dequeue(std::shared_ptr<data::RecordBase>& rec) override {
     return queue_.try_dequeue(rec);
   }
+
 private:
+  /// @brief Underlying concurrent queue
   moodycamel::ConcurrentQueue<std::shared_ptr<data::RecordBase>> queue_;
 };
 

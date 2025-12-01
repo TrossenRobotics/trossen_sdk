@@ -1,11 +1,16 @@
+/**
+ * @file opencv_producer.hpp
+ * @brief Camera producer using OpenCV VideoCapture for real hardware.
+ */
+
 #ifndef TROSSEN_SDK__HW__CAMERA__OPENCV_PRODUCER_HPP
 #define TROSSEN_SDK__HW__CAMERA__OPENCV_PRODUCER_HPP
 
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
 #include <vector>
-#include <cstdint>
 
 #include "opencv2/core.hpp"
 #include "opencv2/videoio.hpp"
@@ -16,32 +21,38 @@
 
 namespace trossen::hw::camera {
 
+/**
+ * @brief Camera producer using OpenCV VideoCapture for real hardware.
+ */
 class OpenCvCameraProducer : public ::trossen::hw::PolledProducer {
 public:
+  /**
+   * @brief Configuration parameters for OpenCvCameraProducer
+   */
   struct Config {
     /// @brief Index of the camera device (0, 1, etc.)
-    int device_index = 0;
+    int device_index{0};
 
     /// @brief Logical stream identifier (e.g. "camera0")
-    std::string stream_id = "camera0";
+    std::string stream_id{"camera0"};
 
     /// @brief Desired output image encoding (e.g. "bgr8", "rgb8", "mono8")
-    std::string encoding = "bgr8";
+    std::string encoding{"bgr8"};
 
     /// @brief Desired image width (pixels). 0 = leave default
-    int width = 0;   //
+    int width{0};
 
     /// @brief Desired image height (pixels). 0 = leave default
-    int height = 0;
+    int height{0};
 
     /// @brief Desired frame rate (fps). 0 = leave default
-    int fps = 0;
+    int fps{0};
 
     /// @brief Prefer device timestamp if available
-    bool use_device_time = true;
+    bool use_device_time{true};
 
     /// @brief Seconds to warm up (discard frames) after device open before emitting
-    double warmup_seconds = 0.0;
+    double warmup_seconds{0.0};
 
     /// @brief Preferred FOURCC pixel formats (in order). Default: MJPG, YUYV
     std::vector<int32_t> preferred_fourcc = {
@@ -51,8 +62,11 @@ public:
 
     /// @brief Whether to enforce the requested fps (may reduce if device cannot keep up)
     bool enforce_requested_fps = true;
-};
+  };
 
+  /**
+   * @brief Metadata specific to OpenCvCameraProducer
+   */
   struct OpenCvCameraProducerMetadata : public PolledProducer::ProducerMetadata {
     /// @brief Image width
     int width;
@@ -79,8 +93,11 @@ public:
     /// @brief Is this a depth camera?
     bool is_depth_map{false};
 
-    /// @brief Get producer info as JSON
-    /// @return JSON object containing producer information
+    /**
+     * @brief Get producer info as JSON
+     *
+     * @return JSON object containing producer information
+     */
     nlohmann::ordered_json get_info() const override {
       nlohmann::ordered_json features;
       nlohmann::ordered_json camera_feature;
@@ -89,10 +106,14 @@ public:
       camera_feature["shape"] = {height, width, 3};
       camera_feature["names"] = {"height", "width", "channels"};
       camera_feature["info"] = {
-          {"video.fps", fps},           {"video.height", height},
-          {"video.width", width},       {"video.channels", channels},
-          {"video.codec", codec},                {"video.pix_fmt", pix_fmt},
-          {"video.is_depth_map", is_depth_map}, {"has_audio", has_audio}};
+          {"video.fps", fps},
+          {"video.height", height},
+          {"video.width", width},
+          {"video.channels", channels},
+          {"video.codec", codec},
+          {"video.pix_fmt", pix_fmt},
+          {"video.is_depth_map", is_depth_map},
+          {"has_audio", has_audio}};
       features["observation.images." + id] = camera_feature;
       return features;
     }
@@ -117,10 +138,18 @@ public:
    */
   bool warmup();
 
-  /// Poll for a single frame; emits 0 or 1 records.
+  /**
+   * @brief Poll the producer for new data and emit records via the callback
+   *
+   * @param emit Callback to invoke for each produced record
+   */
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
-  /// @brief Get producer metadata
+  /**
+   * @brief Get producer metadata
+   *
+   * @return const reference to ProducerMetadata
+   */
   std::shared_ptr<ProducerMetadata> metadata() const override {
     return std::make_shared<OpenCvCameraProducerMetadata>(metadata_);
   }
@@ -140,7 +169,7 @@ protected:
   cv::VideoCapture cap_;
 
 private:
-  /// @brief Metadata
+  /// @brief Producer metadata
   OpenCvCameraProducerMetadata metadata_;
 };
 

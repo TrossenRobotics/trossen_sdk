@@ -1,3 +1,8 @@
+/**
+ * @file lerobot_backend.cpp
+ * @brief Implementation of LeRobotBackend for Trossen SDK.
+ */
+
 #include <algorithm>
 #include <fstream>
 #include <iomanip>

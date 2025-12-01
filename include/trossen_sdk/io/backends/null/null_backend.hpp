@@ -6,8 +6,9 @@
 #ifndef TROSSEN_SDK__IO__BACKENDS__NULL_BACKEND_HPP
 #define TROSSEN_SDK__IO__BACKENDS__NULL_BACKEND_HPP
 
-#include "trossen_sdk/io/backend.hpp"
 #include <atomic>
+
+#include "trossen_sdk/io/backend.hpp"
 
 namespace trossen::io::backends {
 
@@ -18,7 +19,11 @@ namespace trossen::io::backends {
  */
 class NullBackend : public io::Backend {
 public:
+  /**
+   * @brief Construct a NullBackend with the given URI
+   */
   explicit NullBackend(const std::string& uri = "null://") : Backend(uri) {}
+
   /**
    * @brief Open a null logging destination
    *
@@ -49,16 +54,32 @@ public:
     count_ += records.size();
   }
 
+  /**
+   * @brief No-op flush
+   */
   void flush() override {}
+
+  /**
+   * @brief Close the null backend
+   */
   void close() override {
     opened_ = false;
   }
+
+  /**
+   * @brief Get the number of records "written"
+   *
+   * @return Count of records
+   */
   uint64_t count() const {
     return count_.load();
   }
 
-  private:
+private:
+  /// @brief Count of records "written"
   std::atomic<uint64_t> count_{0};
+
+  /// @brief Whether the backend is opened
   bool opened_{false};
 };
 

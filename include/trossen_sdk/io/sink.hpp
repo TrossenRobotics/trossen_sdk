@@ -2,9 +2,8 @@
  * @file sink.hpp
  * @brief Sink worker that drains a queue and forwards records to a backend.
  *
- * A Sink owns a queue adapter (MPSC) and a backend. Producers call
- * emplace() to enqueue records; an internal thread drains and writes
- * them out, applying batching/timing policies.
+ * A Sink owns a queue adapter (MPSC) and a backend. Producers call emplace() to enqueue records;
+ * an internal thread drains and writes them out, applying batching/timing policies.
  */
 
 #ifndef TROSSEN_SDK__IO__SINK_HPP
@@ -29,6 +28,12 @@ namespace trossen::io {
  */
 class Sink {
 public:
+  /**
+   * @brief Construct a sink with the given backend and queue adapter
+   *
+   * @param backend Shared pointer to the backend
+   * @param queue Unique pointer to the queue adapter (default: MoodyCamelQueueAdapter)
+   */
   explicit Sink(
     std::shared_ptr<Backend> backend,
     QueueAdapterPtr queue = std::make_unique<MoodyCamelQueueAdapter>())
@@ -41,6 +46,7 @@ public:
 
   /**
    * @brief Construct and enqueue a record of type R in-place
+   *
    * @tparam R Record type deriving from data::RecordBase
    * @param args Constructor arguments forwarded to R
    */
@@ -57,6 +63,7 @@ public:
 
   /**
    * @brief Enqueue an already constructed record (zero-copy for the shared_ptr)
+   *
    * @param rec Shared pointer to a RecordBase-derived instance
    */
   void enqueue(std::shared_ptr<data::RecordBase> rec) {
@@ -119,7 +126,8 @@ private:
    * @brief Internal worker loop
    */
   void drainLoop() {
-    static constexpr size_t kMaxBatch = 64;  // TODO(lukeschmitt-tr): expose via configuration
+    // TODO(lukeschmitt-tr): expose via configuration
+    static constexpr size_t kMaxBatch = 64;
     std::array<const data::RecordBase*, kMaxBatch> batch_ptrs{};
     while (running_) {
       size_t count = 0;
@@ -161,16 +169,23 @@ private:
     }
   }
 
+  /// @brief Backend to write records to
   std::shared_ptr<Backend> backend_;
+
+  /// @brief Queue adapter for incoming records
   QueueAdapterPtr queue_;
+
+  /// @brief Whether the sink is running
   std::atomic<bool> running_{false};
+
+  /// @brief Worker thread
   std::thread worker_;
 
   /// Count of records processed
   std::atomic<size_t> num_records_processed_{0};
 
   /// Holds shared_ptrs for current batch to ensure lifetime until backend consumes them
-  std::vector<std::shared_ptr<data::RecordBase>> batch_storage_;
+  std::vector<std::shared_ptr<data::RecordBase>> batch_storage_{};
 };
 
 }  // namespace trossen::io

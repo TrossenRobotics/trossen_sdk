@@ -10,8 +10,13 @@
 #include <string>
 
 namespace trossen::core {
+/// @brief Major version number
 inline constexpr uint32_t VERSION_MAJOR = 0;
+
+/// @brief Minor version number
 inline constexpr uint32_t VERSION_MINOR = 1;
+
+/// @brief Patch version number
 inline constexpr uint32_t VERSION_PATCH = 0;
 
 /**

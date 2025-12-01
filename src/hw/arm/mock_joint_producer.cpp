@@ -6,8 +6,8 @@
 #include <cmath>
 #include <utility>
 
-#include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
+#include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
 
 namespace trossen::hw::arm {
 

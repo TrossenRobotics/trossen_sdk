@@ -1,23 +1,27 @@
 /**
  * @file producer_base.hpp
- * @brief Base classes for hardware producers (polled and push).
+ * @brief Base classes for hardware producers.
  */
 
 #ifndef TROSSEN_SDK__HW__PRODUCER_BASE_HPP
 #define TROSSEN_SDK__HW__PRODUCER_BASE_HPP
 
-#include <functional>
-#include <memory>
 #include <atomic>
 #include <cstdint>
-#include <string>
+#include <functional>
 #include <iostream>
+#include <memory>
+#include <string>
+
 #include "nlohmann/json.hpp"
+
 #include "trossen_sdk/data/record.hpp"
 
 namespace trossen::hw {
 
-/// @brief Statistics for producers
+/**
+ * @brief Statistics for a producer
+ */
 struct ProducerStats {
   /// @brief Total records emitted
   uint64_t produced{0};
@@ -30,7 +34,8 @@ struct ProducerStats {
 };
 
 /**
- * @brief PolledProducer: scheduler calls poll() periodically; implementation may emit 0 or more records.
+ * @brief PolledProducer: scheduler calls poll() periodically; implementation may emit 0 or more
+ * records.
  */
 class PolledProducer {
 public:
@@ -67,18 +72,21 @@ public:
     /// @brief Description of the producer's function
     std::string description;
 
-    /// @brief Virtual destructor
+    /**
+     * @brief Virtual destructor
+     */
     virtual ~ProducerMetadata() = default;
 
-    /// @brief Get producer info as JSON
-    /// @return JSON object containing producer information
+    /**
+     * @brief Get producer info as JSON
+     *
+     * @return JSON object containing producer information
+     */
     virtual nlohmann::ordered_json get_info() const {
       std::cout << "ProducerMetadata: " << name << " (" << id << ") - " << description << "\n";
       return nlohmann::ordered_json{};
     }
   };
-
-
 
   /**
    * @brief Get producer metadata
@@ -116,7 +124,9 @@ protected:
   PolledProducer::ProducerMetadata metadata_{};
 };
 
-// PushProducer: owns its own internal thread(s); start registers emit callback.
+/**
+ * @brief PushProducer: owns its own internal thread(s); start registers emit callback.
+ */
 class PushProducer {
 public:
   /**

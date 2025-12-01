@@ -4,11 +4,11 @@
  */
 
 #include <cmath>
+#include <iostream>
 #include <utility>
 
-#include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
-#include <iostream>
+#include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 
 namespace trossen::hw::arm {
 

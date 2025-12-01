@@ -1,15 +1,20 @@
+/**
+ * @file mcap_backend.cpp
+ * @brief Implementation of McapBackend for Trossen SDK.
+ */
+
 #include <chrono>
-#include <unordered_set>
 #include <iostream>
+#include <unordered_set>
 
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
 #include "opencv2/imgcodecs.hpp"
 
+#include "JointState.pb.h"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
 #include "trossen_sdk/version.hpp"
-#include "JointState.pb.h"
 
 
 namespace trossen::io::backends {

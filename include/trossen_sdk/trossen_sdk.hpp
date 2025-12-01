@@ -1,3 +1,8 @@
+/**
+ * @file trossen_sdk.hpp
+ * @brief Main include file for Trossen SDK
+ */
+
 #ifndef TROSSEN_SDK__TROSSEN_SDK_HPP
 #define TROSSEN_SDK__TROSSEN_SDK_HPP
 

@@ -22,14 +22,18 @@ namespace trossen::data {
  * @brief Base record containing common metadata.
  */
 struct RecordBase {
-  // Dual timestamp (monotonic + realtime)
+  /// @brief Dual timestamp (monotonic + realtime)
   Timestamp ts{};
 
-  // Monotonic sequence number per source
+  /// @brief Monotonic sequence number per source
   uint64_t seq{0};
 
-  // Stream identifier (e.g., "cam_high/color", "leader_left/joint_states", etc.)
+  /// @brief Stream identifier (e.g., "cam_high/color", "leader_left/joint_states", etc.)
   std::string id;
+
+  /**
+   * @brief Virtual destructor
+   */
   virtual ~RecordBase() = default;
 };
 
@@ -37,18 +41,30 @@ struct RecordBase {
  * @brief Joint state sample (positions, velocities, efforts).
  */
 struct JointStateRecord : public RecordBase {
-  // Joint positions (rad or m)
+  /// @brief Joint positions (rad or m)
   std::vector<float> positions;
 
-  // Joint velocities in rad/s or m/s
+  /// @brief Joint velocities in rad/s or m/s
   std::vector<float> velocities;
 
-  // Efforts in Nm or N
+  /// @brief Efforts in Nm or N
   std::vector<float> efforts;
 
+  /**
+   * @brief Default constructor
+   */
   JointStateRecord() = default;
 
-  // Convenience constructor used by examples where source vectors are double
+  /**
+   * @brief Convenience constructor used when source vectors are double
+   *
+   * @param ts_ Timestamp
+   * @param seq_ Sequence number
+   * @param id_ Stream identifier
+   * @param pos_d Joint positions in double
+   * @param vel_d Joint velocities in double
+   * @param eff_d Joint efforts in double
+   */
   JointStateRecord(
     const Timestamp& ts_,
     uint64_t seq_,
@@ -65,7 +81,16 @@ struct JointStateRecord : public RecordBase {
     efforts.assign(eff_d.begin(), eff_d.end());
   }
 
-  // Overload taking float vectors directly (avoids reallocations in synthetic producers)
+  /**
+   * @brief Convenience constructor used when source vectors are float
+   *
+   * @param ts_ Timestamp
+   * @param seq_ Sequence number
+   * @param id_ Stream identifier
+   * @param pos_f Joint positions in float
+   * @param vel_f Joint velocities in float
+   * @param eff_f Joint efforts in float
+   */
   JointStateRecord(
     const Timestamp& ts_,
     uint64_t seq_,
@@ -88,15 +113,26 @@ struct JointStateRecord : public RecordBase {
  * @brief Joint state sample (positions, velocities, efforts).
  */
 struct TeleopJointStateRecord : public RecordBase {
-  // Joint actions (homogeneous float features)
+  /// @brief Joint actions (homogeneous float features)
   std::vector<float> actions;
 
-  // Joint observations (homogeneous float features)
+  /// @brief Joint observations (homogeneous float features)
   std::vector<float> observations;
 
+  /**
+   * @brief Default constructor
+   */
   TeleopJointStateRecord() = default;
 
-  // Convenience constructor used by examples where source vectors are double
+  /**
+   * @brief Convenience constructor used when source vectors are double
+   *
+   * @param ts_ Timestamp
+   * @param seq_ Sequence number
+   * @param id_ Stream identifier
+   * @param act_d Joint actions in double
+   * @param obs_d Joint observations in double
+   */
   TeleopJointStateRecord(
     const Timestamp& ts_,
     uint64_t seq_,
@@ -111,7 +147,15 @@ struct TeleopJointStateRecord : public RecordBase {
     observations.assign(obs_d.begin(), obs_d.end());
   }
 
-  // Overload taking float vectors directly (avoids reallocations in synthetic producers)
+  /**
+   * @brief Convenience constructor used when source vectors are float
+   *
+   * @param ts_ Timestamp
+   * @param seq_ Sequence number
+   * @param id_ Stream identifier
+   * @param act_f Joint actions in float
+   * @param obs_f Joint observations in float
+   */
   TeleopJointStateRecord(
     const Timestamp& ts_,
     uint64_t seq_,
@@ -131,19 +175,19 @@ struct TeleopJointStateRecord : public RecordBase {
  * @brief Image frame payload.
  */
 struct ImageRecord : public RecordBase {
-  // Pixel width
+  /// @brief Pixel width
   uint32_t width{0};
 
-  // Pixel height
+  /// @brief Pixel height
   uint32_t height{0};
 
-  // Channels (1=gray,3=RGB,...)
+  /// @brief Channels (1=gray,3=RGB,...)
   uint32_t channels{0};
 
-  // Encoding string (e.g., "rgb8")
+  /// @brief Encoding string (e.g., "rgb8")
   std::string encoding;
 
-  // Image data stored as OpenCV matrix (reference-counted internally)
+  /// @brief Image data stored as OpenCV matrix (reference-counted internally)
   cv::Mat image;
 };
 }  // namespace trossen::data

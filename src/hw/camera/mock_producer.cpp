@@ -1,5 +1,6 @@
 /**
  * @file mock_producer.cpp
+ * @brief Implementation of synthetic camera frame producer.
  */
 
 #include <algorithm>
