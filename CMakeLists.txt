@@ -11,6 +11,7 @@ add_library(trossen_sdk
   src/backends/trossen/trossen_backend.cpp
   src/backends/lerobot/lerobot_backend.cpp
   src/backends/mcap/mcap_backend.cpp
+  src/backends/null/null_backend.cpp
   src/hw/arm/arm_producer.cpp
   src/hw/arm/teleop_arm_producer.cpp
   src/hw/arm/mock_joint_producer.cpp
