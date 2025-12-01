@@ -204,7 +204,7 @@ public:
   nlohmann::ordered_json compute_image_stats(const std::vector<cv::Mat> &images) const;
 
   /**
-   * @brief Sample a set of images from a list of image path
+   * @brief Sample a set of images from a list of image paths
    *
    * @param image_paths Vector of filesystem paths to the images
    * @return Vector of OpenCV Mat objects representing the sampled images

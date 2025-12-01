@@ -149,7 +149,7 @@ public:
     }
 
     /**
-     * @return Average queue wait time in milliseconds
+     * @brief Average queue wait time in milliseconds
      *
      * @return Average queue wait time in milliseconds
      */
