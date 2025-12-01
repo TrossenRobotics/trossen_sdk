@@ -7,7 +7,8 @@ project(trossen_sdk
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-add_library(trossen_sdk
+add_library(trossen_sdk SHARED
+  src/backends/backend_registry.cpp
   src/backends/trossen/trossen_backend.cpp
   src/backends/lerobot/lerobot_backend.cpp
   src/backends/mcap/mcap_backend.cpp
@@ -57,6 +58,7 @@ find_package(BZip2 REQUIRED)
 
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
+find_package(libtrossen_arm REQUIRED)
 
 include(FetchContent)
 
@@ -115,7 +117,13 @@ if(NOT OpenCV_FOUND)
 endif()
 message(STATUS "Found OpenCV: ${OpenCV_VERSION}")
 target_include_directories(trossen_sdk PUBLIC ${OpenCV_INCLUDE_DIRS})
-target_link_libraries(trossen_sdk PUBLIC ${OpenCV_LIBS} Arrow::arrow_shared Parquet::parquet_shared)
+target_link_libraries(
+  trossen_sdk PUBLIC
+  ${OpenCV_LIBS}
+  Arrow::arrow_shared
+  Parquet::parquet_shared
+  libtrossen_arm
+)
 
 # List proto files for MCAP backend
 set(TROSSEN_PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include/trossen_sdk/io/backends/mcap/proto)

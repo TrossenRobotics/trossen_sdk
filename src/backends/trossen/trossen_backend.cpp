@@ -13,9 +13,12 @@
 #include "opencv2/imgcodecs.hpp"
 
 #include "trossen_sdk/data/record.hpp"
+#include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen/trossen_backend.hpp"
 
 namespace trossen::io::backends {
+
+REGISTER_BACKEND(TrossenBackend, "trossen")
 
 namespace fs = std::filesystem;
 

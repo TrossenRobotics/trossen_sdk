@@ -19,3 +19,7 @@ target_link_libraries(widowxai_lerobot demo_utils trossen_sdk libtrossen_arm)
 find_package(libtrossen_arm)
 add_executable(widowxai_bimanual widowxai_bimanual.cpp)
 target_link_libraries(widowxai_bimanual demo_utils trossen_sdk libtrossen_arm)
+
+# Backend registry demo
+add_executable(backend_registry_demo backend_registry_demo.cpp)
+target_link_libraries(backend_registry_demo trossen_sdk)

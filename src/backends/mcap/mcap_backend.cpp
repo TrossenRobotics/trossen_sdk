@@ -13,11 +13,14 @@
 
 #include "JointState.pb.h"
 #include "trossen_sdk/data/record.hpp"
+#include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
 #include "trossen_sdk/version.hpp"
 
 
 namespace trossen::io::backends {
+
+REGISTER_BACKEND(McapBackend, "mcap")
 
 McapBackend::McapBackend(Config cfg)
   : io::Backend(cfg.output_path), cfg_(std::move(cfg)) {}

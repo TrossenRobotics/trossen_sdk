@@ -20,8 +20,13 @@ add_executable(test_null_backend test_null_backend.cpp)
 target_link_libraries(test_null_backend PRIVATE trossen_sdk GTest::gtest_main)
 add_test(NAME test_null_backend COMMAND test_null_backend)
 
+add_executable(test_backend_registry test_backend_registry.cpp)
+target_link_libraries(test_backend_registry PRIVATE trossen_sdk GTest::gtest_main)
+add_test(NAME test_backend_registry COMMAND test_backend_registry)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
 gtest_discover_tests(test_record)
 gtest_discover_tests(test_null_backend)
+gtest_discover_tests(test_backend_registry)

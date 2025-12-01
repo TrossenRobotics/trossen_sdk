@@ -16,6 +16,7 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 
 #include "trossen_sdk/io/backend.hpp"
+#include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen/trossen_backend.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_schemas.hpp"

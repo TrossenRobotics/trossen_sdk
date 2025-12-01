@@ -4,8 +4,11 @@
  */
 
 #include "trossen_sdk/io/backends/null/null_backend.hpp"
+#include "trossen_sdk/io/backend_registry.hpp"
 
 namespace trossen::io::backends {
+
+REGISTER_BACKEND(NullBackend, "null")
 
 NullBackend::NullBackend(const Config& cfg) : Backend(cfg.uri) {}
 
