@@ -32,58 +32,45 @@ public:
    *
    * @param cfg Configuration options
    */
-  explicit NullBackend(const Config& cfg) : Backend(cfg.uri) {}
+  explicit NullBackend(const Config& cfg);
 
   /**
    * @brief Open a null logging destination
    *
-   * @param uri Voided backend uri
    * @return true on success
    */
-  bool open() override {
-    opened_ = true;
-    return true;
-  }
+  bool open() override;
 
   /**
    * @brief Discard a single record, counting it.
    *
    * @param record Voided record
    */
-  void write(const data::RecordBase& record) override {
-    (void)record;
-    ++count_;
-  }
+  void write(const data::RecordBase& record) override;
 
   /**
    * @brief Discard a batch of records, counting them.
    *
    * @param records Voided record pointers
    */
-  void write_batch(std::span<const data::RecordBase* const> records) override {
-    count_ += records.size();
-  }
+  void write_batch(std::span<const data::RecordBase* const> records) override;
 
   /**
    * @brief No-op flush
    */
-  void flush() override {}
+  void flush() override;
 
   /**
    * @brief Close the null backend
    */
-  void close() override {
-    opened_ = false;
-  }
+  void close() override;
 
   /**
    * @brief Get the number of records "written"
    *
    * @return Count of records
    */
-  uint64_t count() const {
-    return count_.load();
-  }
+  uint64_t count() const;
 
 private:
   /// @brief Count of records "written"

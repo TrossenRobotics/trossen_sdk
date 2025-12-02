@@ -32,7 +32,7 @@ namespace fs = std::filesystem;
 
 LeRobotBackend::LeRobotBackend(
   Config cfg,
-  std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata)
+  std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata = {})
   : io::Backend(cfg.output_dir), cfg_(std::move(cfg)), metadata_(std::move(metadata))
 {
   // Validate encoder threads

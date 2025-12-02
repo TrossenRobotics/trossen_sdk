@@ -49,7 +49,7 @@ public:
   /**
    * @brief Configuration parameters
    */
-  struct Config {
+  struct Config : public io::Backend::Config {
     /// @brief Root output directory
     std::string output_dir;
 
