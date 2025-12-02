@@ -20,9 +20,19 @@ namespace trossen::io::backends {
 class NullBackend : public io::Backend {
 public:
   /**
-   * @brief Construct a NullBackend with the given URI
+   * @brief Configuration for NullBackend
    */
-  explicit NullBackend(const std::string& uri = "null://") : Backend(uri) {}
+  struct Config : public io::Backend::Config {
+    /// @brief URI for the null backend (defaults to "null://")
+    std::string uri{"null://"};
+  };
+
+  /**
+   * @brief Construct a NullBackend with the given configuration
+   *
+   * @param cfg Configuration options
+   */
+  explicit NullBackend(const Config& cfg) : Backend(cfg.uri) {}
 
   /**
    * @brief Open a null logging destination
