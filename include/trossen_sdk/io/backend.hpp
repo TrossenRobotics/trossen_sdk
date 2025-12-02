@@ -61,7 +61,7 @@ public:
    *
    * @param record Record to write
    *
-   * Default implementation may forward to writeBatch for uniform handling
+   * Default implementation may forward to write_batch for uniform handling
    */
   virtual void write(const data::RecordBase& record) = 0;
 
@@ -73,7 +73,7 @@ public:
    * Implementations may override for more efficient encoding (e.g. shared compression window).
    * Default implementation will loop and call write(record) if not overridden.
    */
-  virtual void writeBatch(std::span<const data::RecordBase* const> records) {
+  virtual void write_batch(std::span<const data::RecordBase* const> records) {
     for (auto* r : records) {
       if (r) write(*r);
     }

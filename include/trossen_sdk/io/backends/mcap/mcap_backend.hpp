@@ -102,7 +102,7 @@ public:
    *
    * @param records Span of record pointers (non-owning); lifetime must cover call
    */
-  void writeBatch(std::span<const data::RecordBase* const> records) override;
+  void write_batch(std::span<const data::RecordBase* const> records) override;
 
   /**
    * @brief Flush any buffered data

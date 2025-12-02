@@ -71,7 +71,7 @@ TEST(NullBackendTest, WriteMultipleRecords) {
   EXPECT_EQ(backend.count(), 3);
 }
 
-// Test writeBatch with multiple records
+// Test write_batch with multiple records
 TEST(NullBackendTest, WriteBatch) {
   NullBackend backend;
   backend.open();
@@ -86,23 +86,23 @@ TEST(NullBackendTest, WriteBatch) {
   record3.seq = 3;
 
   std::vector<const RecordBase*> batch = {&record1, &record2, &record3};
-  backend.writeBatch(batch);
+  backend.write_batch(batch);
 
   EXPECT_EQ(backend.count(), 3);
 }
 
-// Test writeBatch with empty batch
+// Test write_batch with empty batch
 TEST(NullBackendTest, WriteBatchEmpty) {
   NullBackend backend;
   backend.open();
 
   std::vector<const RecordBase*> batch;
-  backend.writeBatch(batch);
+  backend.write_batch(batch);
 
   EXPECT_EQ(backend.count(), 0);
 }
 
-// Test writeBatch with single record
+// Test write_batch with single record
 TEST(NullBackendTest, WriteBatchSingleRecord) {
   NullBackend backend;
   backend.open();
@@ -111,12 +111,12 @@ TEST(NullBackendTest, WriteBatchSingleRecord) {
   record.seq = 42;
 
   std::vector<const RecordBase*> batch = {&record};
-  backend.writeBatch(batch);
+  backend.write_batch(batch);
 
   EXPECT_EQ(backend.count(), 1);
 }
 
-// Test mixed write and writeBatch
+// Test mixed write and write_batch
 TEST(NullBackendTest, MixedWriteOperations) {
   NullBackend backend;
   backend.open();
@@ -127,7 +127,7 @@ TEST(NullBackendTest, MixedWriteOperations) {
   JointStateRecord record2;
   JointStateRecord record3;
   std::vector<const RecordBase*> batch = {&record2, &record3};
-  backend.writeBatch(batch);  // count = 3
+  backend.write_batch(batch);  // count = 3
 
   ImageRecord record4;
   backend.write(record4);  // count = 4
@@ -183,7 +183,7 @@ TEST(NullBackendTest, LargeBatch) {
     batch.push_back(&records[i]);
   }
 
-  backend.writeBatch(batch);
+  backend.write_batch(batch);
 
   EXPECT_EQ(backend.count(), 1000);
 }
@@ -206,7 +206,7 @@ TEST(NullBackendTest, CounterAccuracy) {
   for (auto& rec : records) {
     batch.push_back(&rec);
   }
-  backend.writeBatch(batch);
+  backend.write_batch(batch);
   EXPECT_EQ(backend.count(), 15);
 
   // Write 3 more individual

@@ -132,7 +132,7 @@ bool LeRobotBackend::open() {
   size_t nthreads = cfg_.encoder_threads == 0 ? 1 : cfg_.encoder_threads;
   image_workers_.reserve(nthreads);
   for (size_t i = 0; i < nthreads; ++i) {
-    image_workers_.emplace_back(&LeRobotBackend::imageWorkerLoop, this);
+    image_workers_.emplace_back(&LeRobotBackend::image_worker_loop, this);
   }
 
   // Open a Parquet file for joint states and frame data
@@ -176,7 +176,7 @@ bool LeRobotBackend::open() {
 
   writer_ = std::move(result).ValueUnsafe();  // store unique_ptr<FileWriter>
 
-  writeMetadata();
+  write_metadata();
 
   opened_ = true;
   return true;
@@ -187,24 +187,24 @@ void LeRobotBackend::write(const data::RecordBase& record) {
 
   // Decide type by RTTI (simple approach for now)
   if (auto js = dynamic_cast<const data::TeleopJointStateRecord*>(&record)) {
-    writeJointState(*js);
+    write_joint_state(*js);
   } else if (auto img = dynamic_cast<const data::ImageRecord*>(&record)) {
-    writeImage(*img);
+    write_image(*img);
   } else {
     // Unknown type ignored for now
   }
 }
 
-void LeRobotBackend::writeBatch(std::span<const data::RecordBase* const> records) {
+void LeRobotBackend::write_batch(std::span<const data::RecordBase* const> records) {
   std::lock_guard<std::mutex> lock(write_mutex_);
   for (auto* r : records) {
     if (!r) {
       continue;
     }
     if (auto js = dynamic_cast<const data::TeleopJointStateRecord*>(r)) {
-      writeJointState(*js);
+      write_joint_state(*js);
     } else if (auto img = dynamic_cast<const data::ImageRecord*>(r)) {
-      writeImage(*img);
+      write_image(*img);
     }
   }
 }
@@ -470,7 +470,7 @@ nlohmann::ordered_json LeRobotBackend::compute_image_stats(
   return stats_json;
 }
 
-nlohmann::ordered_json LeRobotBackend::computeFlatStats(
+nlohmann::ordered_json LeRobotBackend::compute_flat_stats(
     const std::shared_ptr<arrow::Array> &array) const {
     double sum = 0.0, sum_sq = 0.0;
     double min_val = std::numeric_limits<double>::max();
@@ -521,7 +521,7 @@ nlohmann::ordered_json LeRobotBackend::computeFlatStats(
             {"count", {count}}};
 }
 
-nlohmann::ordered_json LeRobotBackend::computeListStats(
+nlohmann::ordered_json LeRobotBackend::compute_list_stats(
   const std::shared_ptr<arrow::ListArray> &list_array) const
 {
   // Get the values array from the ListArray
@@ -564,7 +564,7 @@ nlohmann::ordered_json LeRobotBackend::computeListStats(
 }
 
 
-void LeRobotBackend::computeStatistics() const {
+void LeRobotBackend::compute_statistics() const {
   std::ostringstream oss;
   oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index << ".parquet";
   fs::path episode_path = data_root_ / oss.str();
@@ -598,11 +598,11 @@ void LeRobotBackend::computeStatistics() const {
     if (field->type()->id() == arrow::Type::LIST) {
       auto list_array =
           std::static_pointer_cast<arrow::ListArray>(column->chunk(0));
-      stats[field->name()] = computeListStats(list_array);
+      stats[field->name()] = compute_list_stats(list_array);
     } else {
       // If the column is a primitive type, compute flat statistics
       auto array = column->chunk(0);
-      stats[field->name()] = computeFlatStats(array);
+      stats[field->name()] = compute_flat_stats(array);
     }
   }
   // Compute image statistics for each camera
@@ -687,10 +687,10 @@ void LeRobotBackend::computeStatistics() const {
   // Get total number of rows in the table (frames recorded)
   int64_t episode_frame_length = table->num_rows();
 
-  updateEpisodeInfo(episode_frame_length);
+  update_episode_info(episode_frame_length);
 }
 
-void LeRobotBackend::printStatsTable(const nlohmann::ordered_json& stats) const {
+void LeRobotBackend::print_stats_table(const nlohmann::ordered_json& stats) const {
   std::cout << "\n================ Episode: " << cfg_.episode_index << " ================\n";
   for (auto it = stats.begin(); it != stats.end(); ++it) {
     const std::string& column_name = it.key();
@@ -771,7 +771,7 @@ void LeRobotBackend::close() {
   convert_to_videos();
 
   // Compute dataset statistics
-  computeStatistics();
+  compute_statistics();
 
   // Clear source frame indices map
   source_frame_indices_.clear();
@@ -779,7 +779,7 @@ void LeRobotBackend::close() {
   opened_ = false;
 }
 
-void LeRobotBackend::writeJointState(const data::RecordBase& base) {
+void LeRobotBackend::write_joint_state(const data::RecordBase& base) {
   const auto& js = static_cast<const data::TeleopJointStateRecord&>(base);
 
   // Frame indexing strategy for multi-source data streams:
@@ -873,7 +873,7 @@ void LeRobotBackend::writeJointState(const data::RecordBase& base) {
   }
 }
 
-void LeRobotBackend::writeImage(const data::RecordBase& base) {
+void LeRobotBackend::write_image(const data::RecordBase& base) {
   const auto& img = static_cast<const data::ImageRecord&>(base);
 
   // exit early if nothing to write
@@ -962,7 +962,7 @@ void LeRobotBackend::writeImage(const data::RecordBase& base) {
   image_queue_cv_.notify_one();
 }
 
-void LeRobotBackend::imageWorkerLoop() {
+void LeRobotBackend::image_worker_loop() {
   const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_.png_compression_level };
   while (image_worker_running_) {
     ImageJob job;
@@ -1024,7 +1024,7 @@ void LeRobotBackend::imageWorkerLoop() {
   }
 }
 
-void LeRobotBackend::updateEpisodeInfo(int episode_frame_length) const {
+void LeRobotBackend::update_episode_info(int episode_frame_length) const {
   // Load the existing info.json
   fs::path info_path = meta_root_ / JSON_INFO;
   nlohmann::ordered_json info_json;
@@ -1060,7 +1060,7 @@ void LeRobotBackend::updateEpisodeInfo(int episode_frame_length) const {
   }
 }
 
-void LeRobotBackend::writeMetadata() {
+void LeRobotBackend::write_metadata() {
   // TODO(shantanuparab-tr): [TDS-15]: Extract features from the robot's
   // observation space and action space
   // TODO(shantanuparab-tr): [TDS-16]: Get feature specifications from a

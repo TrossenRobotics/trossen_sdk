@@ -88,7 +88,7 @@ public:
       // Logging backend can internally ignore if already open; we won't distinguish here
       // Provided implementation will guard.
     }
-    worker_ = std::thread([this]{ drainLoop(); });
+    worker_ = std::thread([this]{ drain_loop(); });
   }
 
   /**
@@ -118,14 +118,14 @@ private:
   /**
    * @brief Attempt to dequeue a single record (non-blocking)
    */
-  bool tryDequeue(std::shared_ptr<data::RecordBase>& rec) {
+  bool try_dequeue(std::shared_ptr<data::RecordBase>& rec) {
     return queue_->try_dequeue(rec);
   }
 
   /**
    * @brief Internal worker loop
    */
-  void drainLoop() {
+  void drain_loop() {
     // TODO(lukeschmitt-tr): expose via configuration
     static constexpr size_t kMaxBatch = 64;
     std::array<const data::RecordBase*, kMaxBatch> batch_ptrs{};
@@ -133,13 +133,13 @@ private:
       size_t count = 0;
       std::shared_ptr<data::RecordBase> rec;
       // Collect up to kMaxBatch records (first record triggers loop)
-      while (count < kMaxBatch && tryDequeue(rec)) {
+      while (count < kMaxBatch && try_dequeue(rec)) {
         batch_storage_.push_back(rec);  // keep shared_ptr ownership
         batch_ptrs[count++] = rec.get();
         rec.reset();
       }
       if (count > 0) {
-        backend_->writeBatch(std::span<const data::RecordBase* const>(batch_ptrs.data(), count));
+        backend_->write_batch(std::span<const data::RecordBase* const>(batch_ptrs.data(), count));
         num_records_processed_.fetch_add(count, std::memory_order_relaxed);
         batch_storage_.clear();
       } else {
@@ -151,19 +151,19 @@ private:
     std::shared_ptr<data::RecordBase> rec2;
     size_t count2 = 0;
     std::array<const data::RecordBase*, kMaxBatch> tail_batch{};
-    while (count2 < kMaxBatch && tryDequeue(rec2)) {
+    while (count2 < kMaxBatch && try_dequeue(rec2)) {
       batch_storage_.push_back(rec2);
       tail_batch[count2++] = rec2.get();
       rec2.reset();
       if (count2 == kMaxBatch) {
-        backend_->writeBatch(std::span<const data::RecordBase* const>(tail_batch.data(), count2));
+        backend_->write_batch(std::span<const data::RecordBase* const>(tail_batch.data(), count2));
         num_records_processed_.fetch_add(count2, std::memory_order_relaxed);
         batch_storage_.clear();
         count2 = 0;
       }
     }
     if (count2 > 0) {
-      backend_->writeBatch(std::span<const data::RecordBase* const>(tail_batch.data(), count2));
+      backend_->write_batch(std::span<const data::RecordBase* const>(tail_batch.data(), count2));
       num_records_processed_.fetch_add(count2, std::memory_order_relaxed);
       batch_storage_.clear();
     }

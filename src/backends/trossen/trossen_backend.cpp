@@ -99,7 +99,7 @@ bool TrossenBackend::open() {
   size_t nthreads = cfg_.encoder_threads == 0 ? 1 : cfg_.encoder_threads;
   image_workers_.reserve(nthreads);
   for (size_t i = 0; i < nthreads; ++i) {
-    image_workers_.emplace_back(&TrossenBackend::imageWorkerLoop, this);
+    image_workers_.emplace_back(&TrossenBackend::image_worker_loop, this);
   }
   opened_ = true;
   return true;
@@ -109,24 +109,24 @@ void TrossenBackend::write(const data::RecordBase& record) {
   std::lock_guard<std::mutex> lock(write_mutex_);
   // Decide type by RTTI (simple approach for now)
   if (auto js = dynamic_cast<const data::JointStateRecord*>(&record)) {
-    writeJointState(*js);
+    write_joint_state(*js);
   } else if (auto img = dynamic_cast<const data::ImageRecord*>(&record)) {
-    writeImage(*img);
+    write_image(*img);
   } else {
     // Unknown type ignored for now
   }
 }
 
-void TrossenBackend::writeBatch(std::span<const data::RecordBase* const> records) {
+void TrossenBackend::write_batch(std::span<const data::RecordBase* const> records) {
   std::lock_guard<std::mutex> lock(write_mutex_);
   for (auto* r : records) {
     if (!r) {
       continue;
     }
     if (auto js = dynamic_cast<const data::JointStateRecord*>(r)) {
-      writeJointState(*js);
+      write_joint_state(*js);
     } else if (auto img = dynamic_cast<const data::ImageRecord*>(r)) {
-      writeImage(*img);
+      write_image(*img);
     }
   }
 }
@@ -149,7 +149,7 @@ void TrossenBackend::close() {
   opened_ = false;
 }
 
-void TrossenBackend::writeJointState(const data::RecordBase& base) {
+void TrossenBackend::write_joint_state(const data::RecordBase& base) {
   const auto& js = static_cast<const data::JointStateRecord&>(base);
   if (!header_written_) {
     joint_csv_ << "monotonic_ns,realtime_ns,id,positions,velocities,efforts\n";
@@ -171,7 +171,7 @@ void TrossenBackend::writeJointState(const data::RecordBase& base) {
              << vecToStr(js.efforts) << '\n';
 }
 
-void TrossenBackend::writeImage(const data::RecordBase& base) {
+void TrossenBackend::write_image(const data::RecordBase& base) {
   const auto& img = static_cast<const data::ImageRecord&>(base);
 
   // exit early if nothing to write
@@ -239,7 +239,7 @@ void TrossenBackend::writeImage(const data::RecordBase& base) {
   image_queue_cv_.notify_one();
 }
 
-void TrossenBackend::imageWorkerLoop() {
+void TrossenBackend::image_worker_loop() {
   const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_.png_compression_level };
   while (image_worker_running_) {
     ImageJob job;

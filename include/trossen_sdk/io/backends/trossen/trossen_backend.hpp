@@ -92,7 +92,7 @@ public:
    *
    * @param records Records to write
    */
-  void writeBatch(std::span<const data::RecordBase* const> records) override;
+  void write_batch(std::span<const data::RecordBase* const> records) override;
 
   /**
    * @brief Flush any buffered data
@@ -214,19 +214,19 @@ private:
    *
    * @param base Record to write (will be dynamic_cast to JointStateRecord)
    */
-  void writeJointState(const data::RecordBase& base);
+  void write_joint_state(const data::RecordBase& base);
 
   /**
    * @brief Write an image record to disk
    *
    * @param base Record to write (will be dynamic_cast to ImageRecord)
    */
-  void writeImage(const data::RecordBase& base);
+  void write_image(const data::RecordBase& base);
 
   /**
    * @brief Write images to disk in a worker thread
    */
-  void imageWorkerLoop();
+  void image_worker_loop();
 
   /**
    * @brief Image encoding job

@@ -142,7 +142,7 @@ public:
    *
    * @param records Records to write
    */
-  void writeBatch(std::span<const data::RecordBase* const> records) override;
+  void write_batch(std::span<const data::RecordBase* const> records) override;
 
   /**
    * @brief Flush any buffered data
@@ -159,7 +159,7 @@ public:
    *
    * @param md Metadata to add
    */
-  void writeMetadata();
+  void write_metadata();
 
   /**
    * @brief Convert recorded images to videos using FFmpeg
@@ -169,14 +169,14 @@ public:
   /**
    * @brief Compute and print statistics about the recorded data
    */
-  void computeStatistics() const;
+  void compute_statistics() const;
 
   /**
    * @brief Print statistics in a tabular format
    *
    * @param stats JSON object containing the statistics
    */
-  void printStatsTable(const nlohmann::ordered_json& stats) const;
+  void print_stats_table(const nlohmann::ordered_json& stats) const;
 
   /**
    * @brief Compute statistics for a ListArray
@@ -184,7 +184,7 @@ public:
    * @param list_array Shared pointer to the ListArray
    * @return JSON object containing the computed statistics
    */
-  nlohmann::ordered_json computeListStats(
+  nlohmann::ordered_json compute_list_stats(
     const std::shared_ptr<arrow::ListArray> &list_array) const;
 
   /**
@@ -193,7 +193,7 @@ public:
    * @param array Shared pointer to the flat array
    * @return JSON object containing the computed statistics
    */
-  nlohmann::ordered_json computeFlatStats(const std::shared_ptr<arrow::Array> &array) const;
+  nlohmann::ordered_json compute_flat_stats(const std::shared_ptr<arrow::Array> &array) const;
 
   /**
    * @brief Compute statistics for a set of images
@@ -245,7 +245,7 @@ public:
    *
    * @param episode_frame_length Length of the episode in frames
    */
-  void updateEpisodeInfo(int episode_frame_length) const;
+  void update_episode_info(int episode_frame_length) const;
 
   /**
    * @brief Scan directory for existing episode files and return next index
@@ -373,19 +373,19 @@ private:
    *
    * @param base Record to write (will be dynamic_cast to JointStateRecord)
    */
-  void writeJointState(const data::RecordBase& base);
+  void write_joint_state(const data::RecordBase& base);
 
   /**
    * @brief Write an image record to disk
    *
    * @param base Record to write (will be dynamic_cast to ImageRecord)
    */
-  void writeImage(const data::RecordBase& base);
+  void write_image(const data::RecordBase& base);
 
   /**
    * @brief Write images to disk in a worker thread
    */
-  void imageWorkerLoop();
+  void image_worker_loop();
 
   /**
    * @brief Image encoding job
