@@ -1,23 +1,21 @@
-
+#include <iomanip>
 #include <iostream>
 #include <sstream>
-#include <iomanip>
+#include <string>
+#include <utility>
+#include <vector>
 
 #include "opencv2/imgcodecs.hpp"
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backends/trossen/trossen_backend.hpp"
 
-// For PNG writing we stub out with raw dump placeholder (future: integrate stb_image_write or libpng)
 namespace trossen::io::backends {
-
-// OpenCV PNG compression level now driven by cfg_.png_compression_level
 
 namespace fs = std::filesystem;
 
 TrossenBackend::TrossenBackend(Config cfg)
   : Backend(cfg.output_dir), cfg_(std::move(cfg)) {
-
   // Validate encoder threads
   if (cfg_.encoder_threads <= 0) {
     cfg_.encoder_threads = 1;
@@ -32,7 +30,8 @@ TrossenBackend::TrossenBackend(Config cfg)
   try {
     uri_ = fs::absolute(cfg_.output_dir).string();
   } catch (const std::exception& e) {
-    throw std::runtime_error("Failed to resolve absolute path of output directory: " + std::string(e.what()));
+    throw std::runtime_error(
+      "Failed to resolve absolute path of output directory: " + std::string(e.what()));
   }
   // Validate non-empty path
   if (uri_.empty()) {
@@ -58,7 +57,9 @@ TrossenBackend::TrossenBackend(Config cfg)
   std::cout << "TrossenBackend configuration:\n"
             << "  Output dir: " << uri_ << "\n"
             << "  Encoder threads: " << cfg_.encoder_threads << "\n"
-            << "  Max image queue: " << (cfg_.max_image_queue == 0 ? "unbounded" : std::to_string(cfg_.max_image_queue)) << "\n"
+            << "  Max image queue: "
+            << (cfg_.max_image_queue == 0 ? "unbounded" : std::to_string(cfg_.max_image_queue))
+            << "\n"
             << "  Drop policy: "
             << (cfg_.drop_policy == DropPolicy::DropNewest ? "DropNewest" :
                 (cfg_.drop_policy == DropPolicy::DropOldest ? "DropOldest" : "Block"))
@@ -69,7 +70,7 @@ TrossenBackend::TrossenBackend(Config cfg)
 bool TrossenBackend::open() {
   std::lock_guard<std::mutex> lock(open_mutex_);
   if (opened_) {
-    return true; // idempotent
+    return true;
   }
   root_ = fs::path(uri_);
   images_root_ = root_ / "observations" / "images";
@@ -151,7 +152,7 @@ void TrossenBackend::writeJointState(const data::RecordBase& base) {
   }
   auto vecToStr = [](const std::vector<float>& v) {
     std::ostringstream oss;
-    for (size_t i=0; i<v.size(); ++i) {
+    for (size_t i=0; i < v.size(); ++i) {
       if (i) oss << ';';
       oss << std::setprecision(6) << v[i];
     }
@@ -174,7 +175,7 @@ void TrossenBackend::writeImage(const data::RecordBase& base) {
   }
 
   // Directory per camera id (cached)
-  // TODO: this could be moved to a pre-processing step?
+  // TODO(lukeschmitt-tr): this could be moved to a pre-processing step?
   auto it = image_dir_cache_.find(img.id);
   if (it == image_dir_cache_.end()) {
     fs::path camera_dir = images_root_ / img.id;
@@ -249,10 +250,16 @@ void TrossenBackend::imageWorkerLoop() {
       image_queue_.pop_front();
       // queue wait time
       auto start_steady = std::chrono::steady_clock::now();
-      uint64_t wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(start_steady - enq_time).count();
+      uint64_t wait_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(start_steady - enq_time).count();
       img_queue_wait_time_ns_acc_.fetch_add(wait_ns, std::memory_order_relaxed);
       uint64_t prev_qw_max = img_queue_wait_time_ns_max_.load(std::memory_order_relaxed);
-      while (wait_ns > prev_qw_max && !img_queue_wait_time_ns_max_.compare_exchange_weak(prev_qw_max, wait_ns)) {}
+      while (
+        wait_ns > prev_qw_max
+        && !img_queue_wait_time_ns_max_.compare_exchange_weak(prev_qw_max, wait_ns))
+      {
+        // loop
+      }
     }
     auto t0 = std::chrono::steady_clock::now();
     try {
@@ -260,7 +267,8 @@ void TrossenBackend::imageWorkerLoop() {
         std::cerr << "Failed to write PNG: " << job.file_path << std::endl;
       }
     } catch (const cv::Exception& e) {
-      std::cerr << "OpenCV exception writing PNG (" << job.file_path << "): " << e.what() << std::endl;
+      std::cerr << "OpenCV exception writing PNG ("
+                << job.file_path << "): " << e.what() << std::endl;
     }
     auto t1 = std::chrono::steady_clock::now();
     uint64_t dt = std::chrono::duration_cast<std::chrono::nanoseconds>(t1 - t0).count();
@@ -288,4 +296,4 @@ void TrossenBackend::imageWorkerLoop() {
   }
 }
 
-} // namespace trossen::io::backends
+}  // namespace trossen::io::backends

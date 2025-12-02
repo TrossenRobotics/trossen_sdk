@@ -3,11 +3,18 @@
  * @brief Unit tests for record data structures
  */
 
-#include <gtest/gtest.h>
-#include "trossen_sdk/data/record.hpp"
+#include <memory>
+#include <vector>
+
+#include "gtest/gtest.h"
 #include "opencv2/core.hpp"
 
-using namespace trossen::data;
+#include "trossen_sdk/data/record.hpp"
+
+using trossen::data::RecordBase;
+using trossen::data::JointStateRecord;
+using trossen::data::Timestamp;
+using trossen::data::ImageRecord;
 
 // Test RecordBase default construction
 TEST(RecordBaseTest, DefaultConstruction) {
@@ -198,7 +205,7 @@ TEST(RecordPolymorphismTest, BasePointerToDerived) {
 
 // Test with realistic robot data
 TEST(JointStateRecordTest, RealisticRobotData) {
-  Timestamp ts = make_timestamp_now();
+  Timestamp ts = trossen::data::make_timestamp_now();
 
   // 6-DOF robot arm positions (radians)
   std::vector<double> positions = {0.0, -1.57, 1.57, 0.0, 1.57, 0.0};

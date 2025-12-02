@@ -26,10 +26,14 @@ public:
   };
 
   struct Diagnostics {
-    uint64_t gaps{0};          // sequence gaps detected
-    uint64_t overruns{0};      // poll interval overruns
-    double avg_period_ms{0.0}; // running mean of poll intervals
-    double max_period_ms{0.0}; // max observed poll interval
+    /// @brief sequence gaps detected
+    uint64_t gaps{0};
+    /// @brief poll interval overruns
+    uint64_t overruns{0};
+    /// @brief running mean of poll intervals
+    double avg_period_ms{0.0};
+    /// @brief max observed poll interval
+    double max_period_ms{0.0};
   };
 
   struct TeleopMockJointStateProducerMetadata : public PolledProducer::ProducerMetadata {
@@ -38,7 +42,7 @@ public:
 
     /// @brief Action feature names
     std::vector<std::string> action_feature_names;
-    
+
     /// @brief Observation feature names
     std::vector<std::string> observation_feature_names;
 
@@ -88,6 +92,6 @@ private:
   TeleopMockJointStateProducerMetadata metadata_;
 };
 
-} // namespace trossen::hw::arm
+}  // namespace trossen::hw::arm
 
 #endif  // TROSSEN_SDK__HW__ARM__MOCK_JOINT_PRODUCER_HPP

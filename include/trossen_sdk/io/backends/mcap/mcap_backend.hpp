@@ -26,7 +26,7 @@
 
 namespace trossen::io::backends {
 
-const size_t MCAP_INITIAL_ENCODED_BUFFER_SIZE = 1024 * 1024; // 1 MB
+const size_t MCAP_INITIAL_ENCODED_BUFFER_SIZE = 1024 * 1024;  // 1 MB
 
 /**
  * McapBackend writes records into an MCAP file.
@@ -200,6 +200,6 @@ private:
   Stats stats_{};
 };
 
-} // namespace trossen::io::backends
+}  // namespace trossen::io::backends
 
-#endif // TROSSEN_SDK__IO__BACKENDS__MCAP_BACKEND_HPP
+#endif  // TROSSEN_SDK__IO__BACKENDS__MCAP_BACKEND_HPP

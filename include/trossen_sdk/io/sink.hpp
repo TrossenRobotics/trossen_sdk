@@ -10,13 +10,14 @@
 #ifndef TROSSEN_SDK__IO__SINK_HPP
 #define TROSSEN_SDK__IO__SINK_HPP
 
+#include <array>
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <thread>
 #include <type_traits>
+#include <utility>
 #include <vector>
-#include <chrono>
-#include <array>
 
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/queue_adapter.hpp"
@@ -75,7 +76,7 @@ public:
     }
     // Idempotent open (backend is expected to handle multiple open calls safely)
     if (!backend_->open()) {
-      // TODO: Handle this
+      // TODO(lukeschmitt-tr): Handle this
       // If open returns false and backend wasn't already opened, treat as fatal
       // Logging backend can internally ignore if already open; we won't distinguish here
       // Provided implementation will guard.
@@ -118,14 +119,14 @@ private:
    * @brief Internal worker loop
    */
   void drainLoop() {
-    static constexpr size_t kMaxBatch = 64; // TODO: expose via configuration
+    static constexpr size_t kMaxBatch = 64;  // TODO(lukeschmitt-tr): expose via configuration
     std::array<const data::RecordBase*, kMaxBatch> batch_ptrs{};
     while (running_) {
       size_t count = 0;
       std::shared_ptr<data::RecordBase> rec;
       // Collect up to kMaxBatch records (first record triggers loop)
       while (count < kMaxBatch && tryDequeue(rec)) {
-        batch_storage_.push_back(rec); // keep shared_ptr ownership
+        batch_storage_.push_back(rec);  // keep shared_ptr ownership
         batch_ptrs[count++] = rec.get();
         rec.reset();
       }
@@ -134,7 +135,7 @@ private:
         num_records_processed_.fetch_add(count, std::memory_order_relaxed);
         batch_storage_.clear();
       } else {
-        // TODO: adaptive timing strategy; simple sleep for now
+        // TODO(lukeschmitt-tr): adaptive timing strategy; simple sleep for now
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
     }
@@ -172,6 +173,6 @@ private:
   std::vector<std::shared_ptr<data::RecordBase>> batch_storage_;
 };
 
-} // namespace trossen::io
+}  // namespace trossen::io
 
-#endif // TROSSEN_SDK__IO__SINK_HPP
+#endif  // TROSSEN_SDK__IO__SINK_HPP

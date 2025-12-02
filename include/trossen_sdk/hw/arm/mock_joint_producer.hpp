@@ -5,10 +5,11 @@
 #ifndef TROSSEN_SDK__HW__ARM__MOCK_JOINT_PRODUCER_HPP
 #define TROSSEN_SDK__HW__ARM__MOCK_JOINT_PRODUCER_HPP
 
-#include <vector>
-#include <string>
-#include <memory>
 #include <chrono>
+#include <iostream>
+#include <memory>
+#include <string>
+#include <vector>
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
@@ -26,10 +27,14 @@ public:
   };
 
   struct Diagnostics {
-    uint64_t gaps{0};          // sequence gaps detected
-    uint64_t overruns{0};      // poll interval overruns
-    double avg_period_ms{0.0}; // running mean of poll intervals
-    double max_period_ms{0.0}; // max observed poll interval
+    /// @brief sequence gaps detected
+    uint64_t gaps{0};
+    /// @brief poll interval overruns
+    uint64_t overruns{0};
+    /// @brief running mean of poll intervals
+    double avg_period_ms{0.0};
+    /// @brief max observed poll interval
+    double max_period_ms{0.0};
   };
 
   struct MockJointStateProducerMetadata : public PolledProducer::ProducerMetadata {
@@ -45,12 +50,13 @@ public:
     /// @brief Get producer info as JSON
     /// @return JSON object containing producer information
     nlohmann::ordered_json   get_info() const override {
-      //TODO (shantanuparab-tr): Implement JSON output when needed
-      std::cout << "MockJointStateProducerMetadata: " << name << " (" << id << ") - " << description
-                << ", Model: " << arm_model << ", Gripper: " << gripper_type << "\n";
+      // TODO(shantanuparab-tr): Implement JSON output when needed
+      std::cout << "MockJointStateProducerMetadata: " << name << " (" << id << ") - "
+                << description
+                << ", Model: " << arm_model
+                << ", Gripper: " << gripper_type << "\n";
       return nlohmann::ordered_json{};
     }
-
   };
 
   explicit MockJointStateProducer(Config cfg);
@@ -72,7 +78,6 @@ private:
   std::chrono::steady_clock::time_point last_tick_{};
   MockJointStateProducerMetadata metadata_;
 };
-
-} // namespace trossen::hw::arm
+}  // namespace trossen::hw::arm
 
 #endif  // TROSSEN_SDK__HW__ARM__MOCK_JOINT_PRODUCER_HPP

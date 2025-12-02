@@ -3,13 +3,15 @@
  * @brief Implementation of shared utilities for Trossen SDK demo applications
  */
 
-#include "demo_utils.hpp"
-
 #include <csignal>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <string>
 #include <thread>
+#include <vector>
+
+#include "./demo_utils.hpp"
 
 namespace trossen::demo {
 
@@ -31,7 +33,8 @@ void print_episode_header(uint32_t index, int duration_s) {
   std::cout << "║  Episode " << index << " | Target Duration: " << duration_s << "s";
 
   // Calculate padding to align right edge
-  std::string padding(41 - std::to_string(index).length() - std::to_string(duration_s).length(), ' ');
+  std::string padding(
+    41 - std::to_string(index).length() - std::to_string(duration_s).length(), ' ');
   std::cout << padding << "║\n";
   std::cout << "╚════════════════════════════════════════════════════════════╝\n";
 }
@@ -96,11 +99,9 @@ bool perform_sanity_check(
 {
   // Calculate expected records based on actual duration
   int expected_joint_records = static_cast<int>(
-    config.joint_rate_hz * config.actual_duration_s * config.joint_producers
-  );
+    config.joint_rate_hz * config.actual_duration_s * config.joint_producers);
   int expected_image_records = static_cast<int>(
-    config.camera_fps * config.actual_duration_s * config.camera_producers
-  );
+    config.camera_fps * config.actual_duration_s * config.camera_producers);
   int expected_total = expected_joint_records + expected_image_records;
 
   // Calculate tolerance range
@@ -127,7 +128,8 @@ bool perform_sanity_check(
               << config.tolerance_percent << "% tolerance)\n";
   } else {
     std::cout << "  Status:               ✗ WARNING (outside expected range)\n";
-    double deviation = 100.0 * (static_cast<double>(actual_records) - expected_total) / expected_total;
+    double deviation =
+      100.0 * (static_cast<double>(actual_records) - expected_total) / expected_total;
     std::cout << "  Deviation:            " << std::fixed << std::setprecision(1)
               << std::showpos << deviation << std::noshowpos << "%\n";
   }

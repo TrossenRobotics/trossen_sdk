@@ -37,7 +37,7 @@ public:
     /// @brief Get producer info as JSON
     /// @return JSON object containing producer information
     nlohmann::ordered_json get_info() const override {
-      //TODO (shantanuparab-tr): Implement JSON output when needed
+      // TODO(shantanuparab-tr): Implement JSON output when needed
       std::cout << "TrossenArmProducerMetadata: " << name << " (" << id << ") - " << description
                 << ", Model: " << arm_model << ", Gripper: " << gripper_type << "\n";
       return nlohmann::ordered_json{};
@@ -85,6 +85,6 @@ private:
   TrossenArmProducerMetadata metadata_;
 };
 
-} // namespace trossen::hw::arm
+}  // namespace trossen::hw::arm
 
-#endif // TROSSEN_SDK__HW__ARM__ARM_PRODUCER_HPP
+#endif  // TROSSEN_SDK__HW__ARM__ARM_PRODUCER_HPP

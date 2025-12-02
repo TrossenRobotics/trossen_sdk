@@ -56,11 +56,12 @@ public:
   uint64_t count() const {
     return count_.load();
   }
-private:
+
+  private:
   std::atomic<uint64_t> count_{0};
   bool opened_{false};
 };
 
-} // namespace trossen::io::backends
+}  // namespace trossen::io::backends
 
 #endif  // TROSSEN_SDK__IO__BACKENDS__NULL_BACKEND_HPP

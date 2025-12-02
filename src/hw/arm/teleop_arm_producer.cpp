@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <iostream>
+#include <memory>
+#include <utility>
 
 namespace trossen::hw::arm {
 
@@ -21,21 +23,27 @@ TeleopTrossenArmProducer::TeleopTrossenArmProducer(
     leader_robot_output_ = leader_driver_->get_robot_output();
     follower_robot_output_ = follower_driver_->get_robot_output();
   }
-  // TODO (shantanuparab-tr): Extract robot info from user config or driver
+  // TODO(shantanuparab-tr): Extract robot info from user config or driver
   // Populate metadata
   metadata_.type = "teleop_arm";
   metadata_.id = cfg_.stream_id;
   metadata_.name = "Teleop Trossen Arm Producer";
-  metadata_.description = "Produces teleoperation joint states from leader and follower Trossen Arms via TrossenArmDriver";
-  metadata_.robot_name = "Trossen AI Bimanual"; // TODO: Extract from driver/User Config
-  metadata_.action_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
-  metadata_.observation_feature_names = {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
+  metadata_.description =
+    "Produces teleoperation joint states from leader and follower "
+    "Trossen Arms via TrossenArmDriver";
+  // TODO(shantanuparab-tr): Extract from driver/User Config
+  metadata_.robot_name = "Trossen AI Bimanual";
+  metadata_.action_feature_names =
+    {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
+  metadata_.observation_feature_names =
+    {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
   metadata_.action_dtype = "float32";
   metadata_.observation_dtype = "float32";
-
 }
 
-void TeleopTrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
+void TeleopTrossenArmProducer::poll(
+  const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
+{
   if (!leader_driver_ || !follower_driver_) {
     return;
   }
@@ -44,7 +52,7 @@ void TeleopTrossenArmProducer::poll(const std::function<void(std::shared_ptr<dat
   leader_robot_output_ = leader_driver_->get_robot_output();
   follower_robot_output_ = follower_driver_->get_robot_output();
   uint64_t device_ts = leader_robot_output_.header.timestamp;
-  // TODO [shantanuparab-tr]: Get actions from the leader arm
+  // TODO(shantanuparab-tr): Get actions from the leader arm
   act_d_ = leader_robot_output_.joint.all.positions;
   obs_d_ = follower_robot_output_.joint.all.positions;
 
@@ -76,4 +84,4 @@ void TeleopTrossenArmProducer::poll(const std::function<void(std::shared_ptr<dat
   ++stats_.produced;
 }
 
-} // namespace trossen::hw::arm
+}  // namespace trossen::hw::arm

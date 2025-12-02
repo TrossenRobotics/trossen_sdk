@@ -3,18 +3,22 @@
  * @brief Implementation of Session Manager
  */
 
-#include "trossen_sdk/runtime/session_manager.hpp"
-
 #include <algorithm>
 #include <iomanip>
 #include <iostream>
+#include <memory>
 #include <sstream>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "trossen_sdk/runtime/session_manager.hpp"
 
 namespace trossen::runtime {
 
 SessionManager::SessionManager(SessionConfig&& config)
-  : config_(std::move(config)) {
-
+  : config_(std::move(config))
+{
   // Validate required configuration
   if (config_.base_path.empty()) {
     throw std::invalid_argument("SessionConfig::base_path cannot be empty");
@@ -28,7 +32,7 @@ SessionManager::SessionManager(SessionConfig&& config)
 
   // Auto-generate dataset_id if not provided
   if (config_.dataset_id.empty()) {
-    // TODO: Generate UUID (for now, use timestamp-based ID)
+    // TODO(lukeschmitt-tr): Generate UUID (for now, use timestamp-based ID)
     auto now = std::chrono::system_clock::now();
     auto time_t_now = std::chrono::system_clock::to_time_t(now);
     std::ostringstream oss;
@@ -37,13 +41,18 @@ SessionManager::SessionManager(SessionConfig&& config)
     config_.dataset_id = oss.str();
     std::cout << "Auto-generated dataset_id: " << config_.dataset_id << std::endl;
   }
-  // TODO (shantanuparab-tr): Make this backend-agnostic by using a factory method
+  // TODO(shantanuparab-tr): Make this backend-agnostic by using a factory method
   // Scan directory for existing episodes and resume from next index
-  if(config_.backend_config->type == "mcap") {
+  if (config_.backend_config->type == "mcap") {
     std::filesystem::path data_directory_path = config_.base_path / config_.dataset_id;
     next_episode_index_ = io::backends::McapBackend::scan_existing_episodes(data_directory_path);
   } else if (config_.backend_config->type == "lerobot") {
-    std::filesystem::path data_directory_path = config_.base_path / config_.repository_id / config_.dataset_id / "data" / "chunk-000";
+    std::filesystem::path data_directory_path =
+      config_.base_path /
+      config_.repository_id /
+      config_.dataset_id /
+      "data" /
+      "chunk-000";
     next_episode_index_ = io::backends::LeRobotBackend::scan_existing_episodes(data_directory_path);
   } else {
     throw std::invalid_argument("Unsupported backend type: " + config_.backend_config->type);
@@ -70,8 +79,8 @@ void SessionManager::shutdown() {
 void SessionManager::add_producer(
   std::shared_ptr<hw::PolledProducer> producer,
   std::chrono::milliseconds poll_period,
-  const Scheduler::TaskOptions& opts) {
-
+  const Scheduler::TaskOptions& opts)
+{
   if (!producer) {
     throw std::invalid_argument("Cannot add null producer");
   }
@@ -104,7 +113,7 @@ bool SessionManager::start_episode() {
     std::cerr << "Max episodes (" << config_.max_episodes.value() << ") reached." << std::endl;
     return false;
   }
-  
+
   // Build episode file path
   auto path = build_episode_path(next_episode_index_);
 
@@ -144,7 +153,7 @@ bool SessionManager::start_episode() {
 
   // Create and configure scheduler
   scheduler_ = std::make_unique<Scheduler>();
-  // TODO: Expose Scheduler::Config in SessionConfig if needed
+  // TODO(lukeschmitt-tr): Expose Scheduler::Config in SessionConfig if needed
 
   // Register producer tasks with scheduler
   for (const auto& pt : producer_tasks_) {
@@ -206,7 +215,7 @@ void SessionManager::stop_episode() {
   std::lock_guard<std::mutex> lock(episode_mutex_);
 
   if (!episode_active_) {
-    return; // no-op if not active
+    return;  // no-op if not active
   }
 
   std::cout << "Stopping episode " << next_episode_index_ << "..." << std::endl;
@@ -299,7 +308,7 @@ SessionManager::Stats SessionManager::stats() const {
         s.remaining = std::chrono::duration<double>(0);
       }
     } else {
-      s.remaining = std::nullopt; // unlimited
+      s.remaining = std::nullopt;  // unlimited
     }
 
     // Compute records written to current episode as delta from start
@@ -326,7 +335,7 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
   // Generate filename: episode_NNNNNN.mcap (6-digit zero-padded)
   // TODO(lukeschmitt-tr): This is specific to MCAP files; consider making more generic
   std::ostringstream oss;
-  if(config_.backend_config == nullptr) {
+  if (config_.backend_config == nullptr) {
     throw std::runtime_error("SessionManager::build_episode_path: backend_config is null");
   } else if (config_.backend_config->type == "lerobot") {
       return config_.base_path;
@@ -335,47 +344,47 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
       return config_.base_path / config_.dataset_id / oss.str();
 
   } else {
-    throw std::runtime_error("SessionManager::build_episode_path: Unsupported backend type: " + config_.backend_config->type);
+    throw std::runtime_error(
+      "SessionManager::build_episode_path: Unsupported backend type: "
+      + config_.backend_config->type);
   }
 }
 
 std::shared_ptr<io::Backend> SessionManager::create_backend(
   const std::string& output_path,
-  uint32_t episode_index, 
-  const std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>>& producer_metadatas) {
-
-  
-  if(config_.backend_config == nullptr) {
+  uint32_t episode_index,
+  const std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>>& producer_metadatas)
+{
+  if (config_.backend_config == nullptr) {
     throw std::runtime_error("SessionManager::create_backend: backend_config is null");
   } else if (config_.backend_config->type == "lerobot") {
       // Copy backend config template and customize for this episode
-    auto* lerobot_cfg = static_cast<io::backends::LeRobotBackend::Config*>(config_.backend_config.get());
+    auto* lerobot_cfg =
+      static_cast<io::backends::LeRobotBackend::Config*>(config_.backend_config.get());
     lerobot_cfg->output_dir = output_path;
     if (!lerobot_cfg) {
-      throw std::runtime_error("SessionManager::create_backend: backend_config is not LeRobotBackend::Config");
+      throw std::runtime_error(
+        "SessionManager::create_backend: backend_config is not LeRobotBackend::Config");
     }
     lerobot_cfg->dataset_id = config_.dataset_id;
     lerobot_cfg->episode_index = episode_index;
-    // TODO (shantanuparab-tr): Use the producer metadata to populate backend metadata
+    // TODO(shantanuparab-tr): Use the producer metadata to populate backend metadata
     // Print registered producers
-    std::cout << "\n╔═══════════════════════════════════════════════ Registered Producers Metadata ═══════════════════════════════════════════════╗\n";
-    for(const auto& pm : producer_metadatas) {
-      std::cout << "║  [ID: " << pm->id << "] Name: " << pm->name << "\n";
-      std::cout << "║      Description: " << pm->description << "\n";
-      std::cout << "║ --------------------------------------------------------------------------------------------------------------------\n";
+    std::cout << "\nRegistered Producers Metadata:\n";
+    for (const auto& pm : producer_metadatas) {
+      std::cout << "  [ID: " << pm->id << "] Name: " << pm->name << "\n";
+      std::cout << "      Description: " << pm->description << "\n";
     }
-    std::cout << "╚════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════════╝\n";
 
     return std::make_shared<io::backends::LeRobotBackend>(*lerobot_cfg, producer_metadatas);
-  }
-  else if (config_.backend_config->type == "mcap") {
+  } else if (config_.backend_config->type == "mcap") {
     // Copy backend config template and customize for this episode
     auto* mcap_cfg = static_cast<io::backends::McapBackend::Config*>(config_.backend_config.get());
     mcap_cfg->output_path = output_path;
-
     return std::make_shared<io::backends::McapBackend>(*mcap_cfg);
   } else {
-    throw std::runtime_error("SessionManager::create_backend: Unsupported backend type: " + config_.backend_config->type);
+    throw std::runtime_error(
+      "SessionManager::create_backend: Unsupported backend type: " + config_.backend_config->type);
   }
 }
 
@@ -405,4 +414,4 @@ void SessionManager::monitor_duration() {
   }
 }
 
-} // namespace trossen::runtime
+}  // namespace trossen::runtime

@@ -34,7 +34,6 @@ class TrossenBackend : public io::Backend {
 public:
   /// @brief Image queue drop policy when full
   enum class DropPolicy {
-
     /// @brief Drop newest incoming image
     DropNewest,
 
@@ -103,7 +102,6 @@ public:
 
   /// @brief Image encoding statistics
   struct ImageEncodeStats {
-
     /// @brief Total images enqueued
     uint64_t enqueued{0};
 
@@ -150,7 +148,8 @@ public:
     /// NOTE: This is approximate; actual parallel overlap may differ.
     double est_per_thread_fps(size_t threads) const {
       if (threads == 0 || encode_time_ns_acc == 0) return 0.0;
-      double total_s = encode_time_ns_acc / 1e9; // sum of per-frame times across all threads
+      // sum of per-frame times across all threads
+      double total_s = encode_time_ns_acc / 1e9;
       double frames = static_cast<double>(written);
       // Each frame's encode time counted once; so average frame time = total_s / frames.
       double avg_frame_s = total_s / frames;
@@ -256,6 +255,6 @@ private:
   std::unordered_map<std::string, std::filesystem::path> image_dir_cache_;
 };
 
-} // namespace trossen::io::backends
+}  // namespace trossen::io::backends
 
-#endif // TROSSEN_SDK__IO__BACKENDS__TROSSEN_HPP
+#endif  // TROSSEN_SDK__IO__BACKENDS__TROSSEN_HPP

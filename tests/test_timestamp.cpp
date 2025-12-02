@@ -8,7 +8,12 @@
 #include <thread>
 #include <chrono>
 
-using namespace trossen::data;
+using trossen::data::make_timestamp_now;
+using trossen::data::now_mono;
+using trossen::data::now_real;
+using trossen::data::S_TO_NS;
+using trossen::data::Timespec;
+using trossen::data::Timestamp;
 
 // Test Timespec basic construction
 TEST(TimespecTest, DefaultConstruction) {

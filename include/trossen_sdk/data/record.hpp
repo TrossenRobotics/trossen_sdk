@@ -9,6 +9,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "opencv2/core.hpp"
@@ -36,7 +37,6 @@ struct RecordBase {
  * @brief Joint state sample (positions, velocities, efforts).
  */
 struct JointStateRecord : public RecordBase {
-
   // Joint positions (rad or m)
   std::vector<float> positions;
 
@@ -146,7 +146,6 @@ struct ImageRecord : public RecordBase {
   // Image data stored as OpenCV matrix (reference-counted internally)
   cv::Mat image;
 };
+}  // namespace trossen::data
 
-} // namespace trossen::data
-
-#endif // TROSSEN_SDK__DATA__RECORD_HPP
+#endif  // TROSSEN_SDK__DATA__RECORD_HPP

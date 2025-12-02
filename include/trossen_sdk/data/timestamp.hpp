@@ -12,13 +12,12 @@
 namespace trossen::data {
 
 /// @brief Nanoseconds per second
-const unsigned long long S_TO_NS = 1'000'000'000ull;
+const uint64_t S_TO_NS = 1'000'000'000ull;
 
 /**
  * @brief Time specification with seconds and nanoseconds components
  */
 struct Timespec {
-
   /// @brief Seconds
   int64_t sec{0};
 
@@ -91,6 +90,6 @@ inline Timestamp make_timestamp_now() {
   return ts;
 }
 
-} // namespace trossen::data
+}  // namespace trossen::data
 
-#endif // TROSSEN_SDK__DATA__TIMESTAMP_HPP
+#endif  // TROSSEN_SDK__DATA__TIMESTAMP_HPP

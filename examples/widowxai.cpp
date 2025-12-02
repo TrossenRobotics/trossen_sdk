@@ -32,8 +32,6 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 
-using namespace std::chrono_literals;
-using namespace trossen::demo;
 
 // ────────────────────────────────────────────────────────────
 // Command-line configuration
@@ -63,26 +61,27 @@ struct Config {
 };
 
 void print_usage(const char* prog_name) {
-  std::cout << "Usage: " << prog_name << " [options]\n\n"
-            << "Options:\n"
-            << "  --duration <seconds>     Duration per episode (default: 10)\n"
-            << "  --episodes <count>       Number of episodes to record (default: 3)\n"
-            << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
-            << "  --output-dir <path>      Output directory for episodes (default: output/episodes)\n"
-            << "  --mock                   Use mock producers instead of real hardware\n"
-            << "  --camera-index <num>     Camera device index (default: 2, i.e., /dev/video2)\n"
-            << "  --camera-width <pixels>  Camera width (default: 1920)\n"
-            << "  --camera-height <pixels> Camera height (default: 1080)\n"
-            << "  --camera-fps <fps>       Camera frame rate (default: 30)\n"
-            << "  --joint-rate <hz>        Joint state capture rate (default: 200)\n"
-            << "  --leader-ip <ip>         Leader arm IP (default: 192.168.1.2)\n"
-            << "  --follower-ip <ip>       Follower arm IP (default: 192.168.1.4)\n"
-            << "  --backend <type>         Dataset backend type (default: mcap)\n"
-            << "  --help                   Show this help message\n\n"
-            << "Examples:\n"
-            << "  " << prog_name << " --duration 10 --episodes 5\n"
-            << "  " << prog_name << " --mock --duration 5 --episodes 3\n"
-            << "  " << prog_name << " --dataset-id solo_demo_001 --output-dir /data/recordings\n";
+  std::cout
+    << "Usage: " << prog_name << " [options]\n\n"
+    << "Options:\n"
+    << "  --duration <seconds>     Duration per episode (default: 10)\n"
+    << "  --episodes <count>       Number of episodes to record (default: 3)\n"
+    << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
+    << "  --output-dir <path>      Output directory for episodes (default: output/episodes)\n"
+    << "  --mock                   Use mock producers instead of real hardware\n"
+    << "  --camera-index <num>     Camera device index (default: 2, i.e., /dev/video2)\n"
+    << "  --camera-width <pixels>  Camera width (default: 1920)\n"
+    << "  --camera-height <pixels> Camera height (default: 1080)\n"
+    << "  --camera-fps <fps>       Camera frame rate (default: 30)\n"
+    << "  --joint-rate <hz>        Joint state capture rate (default: 200)\n"
+    << "  --leader-ip <ip>         Leader arm IP (default: 192.168.1.2)\n"
+    << "  --follower-ip <ip>       Follower arm IP (default: 192.168.1.4)\n"
+    << "  --backend <type>         Dataset backend type (default: mcap)\n"
+    << "  --help                   Show this help message\n\n"
+    << "Examples:\n"
+    << "  " << prog_name << " --duration 10 --episodes 5\n"
+    << "  " << prog_name << " --mock --duration 5 --episodes 3\n"
+    << "  " << prog_name << " --dataset-id solo_demo_001 --output-dir /data/recordings\n";
 }
 
 Config parse_args(int argc, char** argv) {
@@ -153,14 +152,15 @@ int main(int argc, char** argv) {
   }
 
   config_lines.push_back("Joint rate:           " + std::to_string(cfg.joint_rate_hz) + " Hz");
-  config_lines.push_back("Camera:               /dev/video" + std::to_string(cfg.camera_index) +
-                        " @ " + std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
-                        " @ " + std::to_string(cfg.camera_fps) + " fps");
+  config_lines.push_back(
+    "Camera:               /dev/video" + std::to_string(cfg.camera_index) +
+    " @ " + std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
+    " @ " + std::to_string(cfg.camera_fps) + " fps");
 
-  print_config_banner("Trossen AI Solo Complete Demo", config_lines);
+  trossen::demo::print_config_banner("Trossen AI Solo Complete Demo", config_lines);
 
   // Install signal handler for graceful shutdown
-  install_signal_handler();
+  trossen::demo::install_signal_handler();
 
   // Create output directory
   std::filesystem::create_directories(cfg.output_dir);
@@ -206,13 +206,13 @@ int main(int argc, char** argv) {
     // Adjust follower joint limits for gripper tolerance
     auto joint_limits = follower_driver->get_joint_limits();
     joint_limits[follower_driver->get_num_joints() - 1].position_tolerance = 0.01;
-    follower_driver->set_joint_limits(joint_limits);    // Set both arms to position mode and stage them
+    follower_driver->set_joint_limits(joint_limits);
 
     // Move arms to staged positions
     leader_driver->set_all_modes(trossen_arm::Mode::position);
     follower_driver->set_all_modes(trossen_arm::Mode::position);
-    leader_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
-    follower_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    leader_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+    follower_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
     std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
 
     std::cout << "  ✓ Arms staged to starting positions\n";
@@ -228,7 +228,7 @@ int main(int argc, char** argv) {
   session_cfg.max_duration = std::chrono::seconds(cfg.duration_s);
   session_cfg.max_episodes = cfg.episodes;
 
-  if(cfg.backend_type == "mcap") {
+  if (cfg.backend_type == "mcap") {
     auto mcap_cfg = std::make_unique<trossen::io::backends::McapBackend::Config>();
     mcap_cfg->compression = "zstd";
     mcap_cfg->chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
@@ -320,8 +320,9 @@ int main(int argc, char** argv) {
     camera_producer = std::make_shared<trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
 
     // Warmup camera before registering
-    std::cout << "  ⏳ Warming up camera...\n";
-    auto opencv_cam = std::static_pointer_cast<trossen::hw::camera::OpenCvCameraProducer>(camera_producer);
+    std::cout << "    Warming up camera...\n";
+    auto opencv_cam =
+      std::static_pointer_cast<trossen::hw::camera::OpenCvCameraProducer>(camera_producer);
     if (!opencv_cam->warmup()) {
       std::cerr << "Failed to warmup camera\n";
       return 1;
@@ -356,13 +357,13 @@ int main(int argc, char** argv) {
   // ──────────────────────────────────────────────────────────
 
   for (int ep = 0; ep < cfg.episodes; ++ep) {
-    if (g_stop_requested) {
+    if (trossen::demo::g_stop_requested) {
       std::cout << "\n\nStopping at user request (Ctrl+C).\n";
       break;
     }
 
     // Display episode header
-    print_episode_header(mgr.stats().current_episode_index, cfg.duration_s);
+    trossen::demo::print_episode_header(mgr.stats().current_episode_index, cfg.duration_s);
 
     // Lock the leader arm, move the follower arm to mirror the leader's current position, and
     // unlock the leader
@@ -396,7 +397,7 @@ int main(int argc, char** argv) {
     std::thread teleop_thread;
     if (!cfg.use_mock) {
       teleop_thread = std::thread([&]() {
-        while (mgr.is_episode_active() && !g_stop_requested) {
+        while (mgr.is_episode_active() && !trossen::demo::g_stop_requested) {
           auto leader_js = leader_driver->get_all_positions();
           follower_driver->set_all_positions(leader_js, 0.0f, false);
           std::this_thread::sleep_for(std::chrono::milliseconds(1));
@@ -405,7 +406,7 @@ int main(int argc, char** argv) {
     }
 
     // Monitor loop: display stats while episode is active
-    uint64_t last_record_count = monitor_episode(mgr);
+    uint64_t last_record_count = trossen::demo::monitor_episode(mgr);
 
     // Stop episode and wait for teleop thread
     if (mgr.is_episode_active()) {
@@ -418,17 +419,20 @@ int main(int argc, char** argv) {
 
     // Calculate actual episode duration
     auto episode_end_time = std::chrono::steady_clock::now();
-    double actual_duration = std::chrono::duration<double>(episode_end_time - episode_start_time).count();
+    double actual_duration =
+      std::chrono::duration<double>(episode_end_time - episode_start_time).count();
 
     // Build the file path and print summary
-    std::string file_path = generate_episode_path(cfg.output_dir, recording_episode_index);
-    print_episode_summary(file_path, last_record_count);
+    std::string file_path = trossen::demo::generate_episode_path(
+      cfg.output_dir,
+      recording_episode_index);
+    trossen::demo::print_episode_summary(file_path, last_record_count);
 
     // ──────────────────────────────────────────────────────────
     // Sanity check: verify expected record counts
     // ──────────────────────────────────────────────────────────
 
-    SanityCheckConfig sanity_cfg{
+    trossen::demo::SanityCheckConfig sanity_cfg{
       actual_duration,
       1,  // 1 joint producer (follower)
       cfg.joint_rate_hz,
@@ -436,10 +440,10 @@ int main(int argc, char** argv) {
       cfg.camera_fps,
       5.0  // 5% tolerance
     };
-    perform_sanity_check(recording_episode_index, last_record_count, sanity_cfg);
+    trossen::demo::perform_sanity_check(recording_episode_index, last_record_count, sanity_cfg);
 
     // Check if user requested stop
-    if (g_stop_requested) {
+    if (trossen::demo::g_stop_requested) {
       std::cout << "\nStopping at user request (Ctrl+C).\n";
       break;
     }
@@ -447,7 +451,7 @@ int main(int argc, char** argv) {
     // Pause between episodes (unless this was the last one)
     if (ep < cfg.episodes - 1) {
       std::cout << "\nPausing for 1 second before next episode...\n";
-      if (!interruptible_sleep(1s)) {
+      if (!trossen::demo::interruptible_sleep(std::chrono::seconds(1))) {
         break;  // Stop requested during pause
       }
     }
@@ -463,8 +467,8 @@ int main(int argc, char** argv) {
   if (!cfg.use_mock && leader_driver && follower_driver) {
     std::cout << "\nReturning arms to starting positions...\n";
     leader_driver->set_all_modes(trossen_arm::Mode::position);
-    leader_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
-    follower_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    leader_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+    follower_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
     std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
     leader_driver->set_all_positions(
       std::vector<double>(leader_driver->get_num_joints(), 0.0),
@@ -479,7 +483,7 @@ int main(int argc, char** argv) {
   }
 
   auto final_stats = mgr.stats();
-  print_final_summary(final_stats.total_episodes_completed, cfg.output_dir);
+  trossen::demo::print_final_summary(final_stats.total_episodes_completed, cfg.output_dir);
 
   return 0;
 }
