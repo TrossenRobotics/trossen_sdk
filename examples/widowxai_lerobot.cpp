@@ -1,5 +1,5 @@
 /**
- * @file trossen_ai_solo_complete.cpp
+ * @file widowxai_lerobot.cpp
  * @brief Complete Trossen AI Solo demo with Session Manager, MCAP backend, and OpenCV camera
  *
  * This demo combines:
@@ -10,9 +10,9 @@
  * - Configurable episode count and duration
  *
  * Usage:
- *   ./trossen_ai_solo_complete --episodes 5 --duration 10
- *   ./trossen_ai_solo_complete --episodes 3 --duration 5 --output-dir /data/recordings
- *   ./trossen_ai_solo_complete --mock  # Use mock producers for testing without hardware
+ *   ./widowxai_lerobot --episodes 5 --duration 10
+ *   ./widowxai_lerobot --episodes 3 --duration 5 --output-dir /data/recordings
+ *   ./widowxai_lerobot --mock  # Use mock producers for testing without hardware
  */
 
 #include <chrono>
@@ -23,7 +23,6 @@
 #include <thread>
 #include <vector>
 
-#include "demo_utils.hpp"
 #include "libtrossen_arm/trossen_arm.hpp"
 #include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
@@ -32,6 +31,9 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+
+#include "./demo_utils.hpp"
+
 
 // ────────────────────────────────────────────────────────────
 // Command-line configuration

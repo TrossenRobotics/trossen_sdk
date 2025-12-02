@@ -20,43 +20,82 @@ namespace trossen::runtime {
 /**
  * @brief Single-thread time-sliced periodic scheduler
  *
- * Not real-time; uses a coarse sleep and executes callbacks whose period has elapsed.
- * Callbacks should be short and non-blocking to avoid delaying other tasks.
+ * Not real-time; uses a coarse sleep and executes callbacks whose period has elapsed. Callbacks
+ * should be short and non-blocking to avoid delaying other tasks.
  */
 class Scheduler {
 public:
   // Callback type
   using Callback = std::function<void()>;
 
+  /**
+   * @brief Configuration parameters
+   */
   struct Config {
-    // If true, any task with period <= high_res_cutover_ms becomes high-res automatically
+    /// @brief If true, any task with period <= high_res_cutover_ms becomes high-res automatically
     uint32_t high_res_cutover_ms{5};
-    // Global enable forcing all tasks high-res
+
+    /// @brief Global enable forcing all tasks high-res
     bool force_high_res{false};
-    // Default spin threshold (microseconds) for high-res tasks (0 = no spin)
+
+    /// @brief Default spin threshold (microseconds) for high-res tasks (0 = no spin)
     uint32_t default_spin_us{0};
   };
 
+  /**
+   * @brief Options for individual tasks
+   */
   struct TaskOptions {
-    bool force_high_res{false};          // elevate this task regardless of period
-    uint32_t spin_threshold_us{0};       // override spin window, 0 uses config default
-    std::string name;                    // optional label for stats
+    /// @brief elevate this task regardless of period
+    bool force_high_res{false};
+
+    /// @brief override spin window, 0 uses config default
+    uint32_t spin_threshold_us{0};
+
+    /// @brief optional label for stats
+    std::string name{""};
   };
 
+  /**
+   * @brief Statistics for a single task
+   */
   struct TaskStats {
-    std::string name;
+    /// @brief Optional name/label
+    std::string name{""};
+
+    /// @brief Number of times the task has run
     uint64_t ticks{0};
+
+    /// @brief Number of times the task overran its period
     uint64_t overruns{0};
+
+    /// @brief Average jitter in microseconds
     double avg_jitter_us{0.0};
+
+    /// @brief Maximum jitter in microseconds
     double max_jitter_us{0.0};
+
+    /// @brief Whether this is a high-res task
     bool high_res{false};
+
+    /// @brief Task period in nanoseconds
     uint64_t period_ns{0};
   };
 
+  /**
+   * @brief Overall scheduler statistics
+   */
   struct Stats {
+    /// @brief Number of high-res wake cycles
     uint64_t wake_cycles_high{0};
+
+    /// @brief Number of normal wake cycles
     uint64_t wake_cycles_normal{0};
+
+    /// @brief High-res task ticks
     uint64_t high_res_ticks{0};
+
+    /// @brief Normal task ticks
     uint64_t normal_ticks{0};
   };
 
@@ -64,11 +103,22 @@ public:
    * @brief Internal task record. Keeps track of the callback, its period, and last run time.
    */
   struct Task {
+    /// @brief Function to invoke
     Callback cb;
+
+    /// @brief Period in nanoseconds
     uint64_t period_ns{0};
+
+    /// @brief Next deadline in nanoseconds since epoch
     uint64_t next_deadline_ns{0};
+
+    /// @brief Spin threshold in microseconds
     uint32_t spin_us{0};
+
+    /// @brief Whether this is a high-res task
     bool high_res{false};
+
+    /// @brief Statistics for this task
     TaskStats stats;
   };
 
@@ -78,14 +128,7 @@ public:
    * @param cb Function to invoke
    * @param period_ms Interval in milliseconds
    */
-  // Primary add_task with explicit TaskOptions
   void add_task(Callback cb, uint32_t period_ms, const TaskOptions& opts) {
-    add_task(std::chrono::milliseconds(period_ms), std::move(cb), opts);
-  }
-
-  // Backward-compatible overload (no options)
-  void add_task(Callback cb, uint32_t period_ms) {
-    TaskOptions opts;
     add_task(std::chrono::milliseconds(period_ms), std::move(cb), opts);
   }
 
@@ -120,13 +163,6 @@ public:
     }
   }
 
-  // Backward-compatible template overload without TaskOptions
-  template <class Rep, class Period>
-  void add_task(std::chrono::duration<Rep, Period> period, Callback cb) {
-    TaskOptions opts;
-    add_task(period, std::move(cb), opts);
-  }
-
   /**
    * @brief Start scheduler thread
    */
@@ -145,8 +181,12 @@ public:
    */
   void stop() {
     running_ = false;
-    if (thread_high_.joinable()) thread_high_.join();
-    if (thread_normal_.joinable()) thread_normal_.join();
+    if (thread_high_.joinable()) {
+      thread_high_.join();
+    }
+    if (thread_normal_.joinable()) {
+      thread_normal_.join();
+    }
   }
 
 private:
@@ -160,6 +200,9 @@ private:
       std::chrono::steady_clock::now().time_since_epoch()).count();
   }
 
+  /**
+   * @brief High-resolution task loop
+   */
   void loop_high() {
     while (running_) {
       stats_.wake_cycles_high++;
@@ -205,6 +248,9 @@ private:
     }
   }
 
+  /**
+   * @brief Normal task loop
+   */
   void loop_normal() {
     while (running_) {
       stats_.wake_cycles_normal++;
@@ -228,6 +274,13 @@ private:
     }
   }
 
+  /**
+   * @brief Execute a task and update its stats
+   *
+   * @param task Task to execute
+   * @param now_ns Current time in nanoseconds (updated after execution)
+   * @param is_high Whether this is a high-res task
+   */
   void execute_task(Task &task, uint64_t &now_ns, bool is_high) {
     double jitter_us =
       static_cast<double>(
@@ -259,21 +312,51 @@ private:
   }
 
 public:
+  /**
+   * @brief Get statistics for all tasks
+   *
+   * @return Vector of TaskStats structs
+   */
   std::vector<TaskStats> task_stats() const {
     std::vector<TaskStats> out; out.reserve(tasks_high_.size() + tasks_normal_.size());
     for (auto const& t : tasks_high_) out.push_back(t.stats);
     for (auto const& t : tasks_normal_) out.push_back(t.stats);
     return out;
   }
+
+  /**
+   * @brief Get overall scheduler statistics
+   *
+   * @return Stats struct
+   */
   Stats stats() const { return stats_; }
+
+  /**
+   * @brief Configure scheduler parameters
+   *
+   * @param cfg Config struct
+   */
   void configure(Config cfg) { config_ = cfg; }
 
+  /// @brief List of high-res tasks
   std::vector<Task> tasks_high_;
+
+  /// @brief List of normal tasks
   std::vector<Task> tasks_normal_;
+
+  /// @brief Whether the scheduler is running
   bool running_{false};
+
+  /// @brief High-rate scheduler thread
   std::thread thread_high_;
+
+  /// @brief Normal-rate scheduler thread
   std::thread thread_normal_;
+
+  /// @brief Scheduler configuration
   Config config_{};
+
+  /// @brief Scheduler statistics
   Stats stats_{};
 };
 

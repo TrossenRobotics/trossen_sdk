@@ -1,9 +1,15 @@
-#include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
+/**
+ * @file teleop_arm_producer.cpp
+ * @brief Implementation of TeleopTrossenArmProducer that emits teleoperation joint states from
+ * leader and follower Trossen Arms via TrossenArmDriver.
+ */
 
 #include <algorithm>
 #include <iostream>
 #include <memory>
 #include <utility>
+
+#include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
 
 namespace trossen::hw::arm {
 

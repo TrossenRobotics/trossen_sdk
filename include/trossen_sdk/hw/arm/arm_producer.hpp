@@ -1,10 +1,15 @@
+/**
+ * @file arm_producer.hpp
+ * @brief Producer that emits joint states from a Trossen Arm via TrossenArmDriver.
+ */
+
 #ifndef TROSSEN_SDK__HW__ARM__ARM_PRODUCER_HPP
 #define TROSSEN_SDK__HW__ARM__ARM_PRODUCER_HPP
 
-#include <vector>
+#include <functional>
 #include <memory>
 #include <string>
-#include <functional>
+#include <vector>
 
 #include "libtrossen_arm/trossen_arm.hpp"
 
@@ -14,8 +19,14 @@
 
 namespace trossen::hw::arm {
 
+/**
+ * @brief Producer that emits joint states from a Trossen Arm via TrossenArmDriver.
+ */
 class TrossenArmProducer : public ::trossen::hw::PolledProducer {
 public:
+  /**
+   * @brief Configuration parameters for TrossenArmProducer
+   */
   struct Config {
     /// @brief Logical stream identifier (e.g. "arm_left")
     std::string stream_id{"arm"};
@@ -24,6 +35,9 @@ public:
     bool use_device_time{true};
   };
 
+  /**
+   * @brief Metadata specific to TrossenArmProducer
+   */
   struct TrossenArmProducerMetadata : public PolledProducer::ProducerMetadata {
     /// @brief Robot model
     std::string arm_model;
@@ -34,8 +48,11 @@ public:
     /// @brief Gripper type
     std::string gripper_type;
 
-    /// @brief Get producer info as JSON
-    /// @return JSON object containing producer information
+    /**
+     * @brief Get producer info as JSON
+     *
+     * @return JSON object containing producer information
+     */
     nlohmann::ordered_json get_info() const override {
       // TODO(shantanuparab-tr): Implement JSON output when needed
       std::cout << "TrossenArmProducerMetadata: " << name << " (" << id << ") - " << description
@@ -64,7 +81,11 @@ public:
    */
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
-  /// @brief Get producer metadata
+  /**
+   * @brief Get producer metadata
+   *
+   * @return const reference to ProducerMetadata
+   */
   std::shared_ptr<ProducerMetadata> metadata() const override {
     return std::make_shared<TrossenArmProducerMetadata>(metadata_);
   }
@@ -82,6 +103,7 @@ private:
   /// @brief Reusable robot output to avoid reallocation each poll
   trossen_arm::RobotOutput robot_output_;
 
+  /// @brief Producer metadata
   TrossenArmProducerMetadata metadata_;
 };
 

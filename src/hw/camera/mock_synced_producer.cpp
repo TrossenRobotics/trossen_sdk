@@ -134,9 +134,9 @@ void MockSyncedCameraProducer::generate_color(cv::Mat &dst, uint64_t seq_counter
     for (int y=0; y < dst.rows; ++y) {
       auto *row = dst.ptr<cv::Vec3b>(y);
       for (int x=0; x < dst.cols; ++x) {
-        float n0 = norm_(rng_) * cfg_.noise_stddev + 127.f;
-        float n1 = norm_(rng_) * cfg_.noise_stddev + 127.f;
-        float n2 = norm_(rng_) * cfg_.noise_stddev + 127.f;
+        float n0 = noise_norm_(rng_) * cfg_.noise_stddev + 127.f;
+        float n1 = noise_norm_(rng_) * cfg_.noise_stddev + 127.f;
+        float n2 = noise_norm_(rng_) * cfg_.noise_stddev + 127.f;
         row[x] = cv::Vec3b(
           static_cast<uint8_t>(std::clamp(n0, 0.f, 255.f)),
           static_cast<uint8_t>(std::clamp(n1, 0.f, 255.f)),

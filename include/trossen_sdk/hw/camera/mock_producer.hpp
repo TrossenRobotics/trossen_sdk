@@ -24,31 +24,64 @@ namespace trossen::hw::camera {
 /**
  * @brief Mock camera that synthetically generates frames at (approximately) a target FPS.
  *
- * This is a polled producer; callers may poll at any cadence. The producer will only
- * emit a frame when enough time has elapsed since the last emitted frame to respect
- * the configured target frame period (unless fps==0, in which case it emits every poll).
+ * This is a polled producer; callers may poll at any cadence. The producer will only emit a frame
+ * when enough time has elapsed since the last emitted frame to respect the configured target frame
+ * period (unless fps==0, in which case it emits every poll).
  */
 class MockCameraProducer : public ::trossen::hw::PolledProducer {
 public:
+  /**
+   * @brief Pattern types for synthetic image generation
+   */
   enum class Pattern {
+    /// @brief Gradient pattern
     Gradient,
+
+    /// @brief Noise pattern
     Noise
   };
 
+  /**
+   * @brief Configuration parameters for MockCameraProducer
+   */
   struct Config {
+    /// @brief Image width in pixels
     int width{1920};
+
+    /// @brief Image height in pixels
     int height{1080};
-    int fps{60};               ///< Target frames per second (0 = emit every poll)
+
+    /// @brief Target frames per second (0 = emit every poll)
+    int fps{60};
+
+    /// @brief Logical stream identifier
     std::string stream_id{"mock_cam"};
+
+    /// @brief Image encoding (e.g. "bgr8", "rgb8", "mono8", etc)
     std::string encoding{"bgr8"};
+
+    /// @brief Image pattern to generate
     Pattern pattern{Pattern::Gradient};
-    uint64_t seed{0};          ///< Deterministic seed (0 = pick fixed default)
-    double noise_stddev{20.0};  ///< For Noise pattern (0-255 scale)
-    int square_size{120};      ///< For MovingSquare pattern
-    int warmup_frames{0};      ///< Frames to generate & discard before emitting
-    double drop_probability{0.0};  ///< Simulated drop probability [0,1)
+
+    /// @brief Random seed for noise pattern
+    uint64_t seed{0};
+
+    /// @brief Stddev for noise pattern
+    double noise_stddev{20.0};
+
+    /// @brief For MovingSquare pattern
+    int square_size{120};
+
+    /// @brief Frames to generate & discard before emitting
+    int warmup_frames{0};
+
+    /// @brief Simulated drop probability [0,1)
+    double drop_probability{0.0};
   };
 
+  /**
+   * @brief Metadata specific to MockCameraProducer
+   */
   struct MockCameraProducerMetadata : public PolledProducer::ProducerMetadata {
     /// @brief Image width
     int width;
@@ -76,8 +109,11 @@ public:
     /// @brief Is this a depth camera?
     bool is_depth_map{false};
 
-    /// @brief Get producer info as JSON
-    /// @return JSON object containing producer information
+    /**
+     * @brief Get producer info as JSON
+     *
+     * @return JSON object containing producer information
+     */
     nlohmann::ordered_json get_info() const override {
       nlohmann::ordered_json features;
       nlohmann::ordered_json camera_feature;
@@ -86,10 +122,14 @@ public:
       camera_feature["shape"] = {height, width, 3};
       camera_feature["names"] = {"height", "width", "channels"};
       camera_feature["info"] = {
-          {"video.fps", fps},           {"video.height", height},
-          {"video.width", width},       {"video.channels", channels},
-          {"video.codec", codec},                {"video.pix_fmt", pix_fmt},
-          {"video.is_depth_map", is_depth_map}, {"has_audio", has_audio}};
+          {"video.fps", fps},
+          {"video.height", height},
+          {"video.width", width},
+          {"video.channels", channels},
+          {"video.codec", codec},
+          {"video.pix_fmt", pix_fmt},
+          {"video.is_depth_map", is_depth_map},
+          {"has_audio", has_audio}};
       features["observation.images." + id] = camera_feature;
       return features;
     }
@@ -102,43 +142,93 @@ public:
    */
   explicit MockCameraProducer(Config cfg);
 
+  /**
+   * @brief Destructor
+   */
   ~MockCameraProducer() override = default;
 
+  /**
+   * @brief Poll the producer for new data and emit records via the callback
+   *
+   * @param emit Callback to invoke for each produced record
+   */
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
-  /// @brief Get producer metadata
+  /**
+   * @brief Get producer metadata
+   *
+   * @return const reference to ProducerMetadata
+   */
   std::shared_ptr<ProducerMetadata> metadata() const override {
     return std::make_shared<MockCameraProducerMetadata>(metadata_);
   }
 
+  /**
+   * @brief Jitter statistics for emitted frames
+   */
   struct JitterStats {
+    /// @brief Mean inter-frame interval in milliseconds
     double mean_ms{0};
+
+    /// @brief 50th percentile inter-frame interval in milliseconds
     double p50_ms{0};
+
+    /// @brief 95th percentile inter-frame interval in milliseconds
     double p95_ms{0};
+
+    /// @brief 99th percentile inter-frame interval in milliseconds
     double p99_ms{0};
+
+    /// @brief Maximum inter-frame interval in milliseconds
     double max_ms{0};
+
+    /// @brief Number of samples
     size_t samples{0};
   };
 
+  /**
+   * @brief Get jitter statistics for emitted frames
+   *
+   * @return JitterStats struct
+   */
   JitterStats jitter_stats() const;
 
 private:
+  /**
+   * @brief Generate a synthetic frame into the provided Mat
+   *
+   * @param[out] dst Destination Mat to fill
+   */
   void generate_frame(cv::Mat &dst);
 
+  /// @brief Configuration parameters
   Config cfg_;
+
+  /// @brief Target frame period in nanoseconds
   uint64_t frame_period_ns_{0};
+
+  /// @brief Last emitted frame monotonic timestamp
   uint64_t last_emit_mono_{0};
+
+  /// @brief Number of warmup frames remaining
   int warmup_remaining_{0};
 
-  // PRNG state
+  /// @brief PRNG state
   std::mt19937 rng_;
+
+  /// @brief Normal distribution for noise pattern
   std::normal_distribution<double> noise_norm_{0.0, 1.0};
+
+  /// @brief Uniform distribution for drop simulation
   std::uniform_real_distribution<double> drop_dist_{0.0, 1.0};
 
-  // Jitter measurement: store recent inter-frame intervals (ns)
+  /// @brief Recorded inter-frame intervals in nanoseconds
   std::vector<uint64_t> intervals_ns_;
-  static constexpr size_t kMaxIntervals = 50000;  // cap to avoid unbounded growth
 
+  /// @brief Maximum stored intervals for jitter stats
+  static constexpr size_t kMaxIntervals = 50'000;
+
+  /// @brief Producer metadata
   MockCameraProducerMetadata metadata_;
 };
 

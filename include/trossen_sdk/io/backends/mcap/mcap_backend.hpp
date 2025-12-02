@@ -16,9 +16,9 @@
 #include <unordered_map>
 #include <vector>
 
+#include "foxglove/channel.hpp"
 #include "foxglove/foxglove.hpp"
 #include "foxglove/mcap.hpp"
-#include "foxglove/channel.hpp"
 #include "foxglove/schemas.hpp"
 
 #include "trossen_sdk/io/backend.hpp"
@@ -26,14 +26,17 @@
 
 namespace trossen::io::backends {
 
+/// @brief Initial buffer size for encoded messages
 const size_t MCAP_INITIAL_ENCODED_BUFFER_SIZE = 1024 * 1024;  // 1 MB
 
 /**
- * McapBackend writes records into an MCAP file.
+ * @brief McapBackend writes records into an MCAP file.
  */
 class McapBackend : public io::Backend {
 public:
-  /// @brief Configuration options for McapBackend
+  /**
+   * @brief Configuration options for McapBackend
+   */
   struct Config : public io::Backend::Config {
     /// @brief .mcap file path
     std::string output_path;
@@ -54,7 +57,9 @@ public:
     uint32_t episode_index{0};
   };
 
-  /// @brief Statistics about written records
+  /**
+   * @brief Statistics about written records
+   */
   struct Stats {
     /// @brief Number of joint state records written
     uint64_t joint_states_written{0};
@@ -116,9 +121,9 @@ public:
    */
   Stats stats() const { return stats_; }
 
-
   /**
    * @brief Scan directory for existing episode files and return next index
+   *
    * @param base_path Directory to scan
    * @return Next episode index (max_found + 1, or 0 if none found)
    */

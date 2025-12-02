@@ -1,4 +1,8 @@
-#include "trossen_sdk/hw/camera/opencv_producer.hpp"
+/**
+ * @file opencv_producer.cpp
+ * @brief Implementation of OpenCvCameraProducer that emits camera frames from a physical camera
+ * device using OpenCV.
+ */
 
 #include <chrono>
 #include <iostream>
@@ -6,6 +10,8 @@
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include "trossen_sdk/hw/camera/opencv_producer.hpp"
 
 namespace trossen::hw::camera {
 

@@ -1,3 +1,8 @@
+/**
+ * @file trossen_backend.cpp
+ * @brief Implementation of TrossenBackend for Trossen SDK.
+ */
+
 #include <iomanip>
 #include <iostream>
 #include <sstream>

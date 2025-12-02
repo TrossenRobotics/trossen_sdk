@@ -1,21 +1,33 @@
+/**
+ * @file teleop_arm_producer.hpp
+ * @brief Producer that emits teleoperation joint states from leader and follower Trossen Arms via
+ * TrossenArmDriver.
+ */
+
 #ifndef TROSSEN_SDK__HW__ARM__TELEOP_ARM_PRODUCER_HPP
 #define TROSSEN_SDK__HW__ARM__TELEOP_ARM_PRODUCER_HPP
 
-#include <vector>
+#include <functional>
 #include <memory>
 #include <string>
-#include <functional>
+#include <vector>
 
 #include "libtrossen_arm/trossen_arm.hpp"
 
-#include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
+#include "trossen_sdk/hw/producer_base.hpp"
 
 namespace trossen::hw::arm {
 
+/**
+ * @brief Producer that emits teleoperation joint states from leader and follower Trossen Arms via TrossenArmDriver.
+ */
 class TeleopTrossenArmProducer : public ::trossen::hw::PolledProducer {
 public:
+  /**
+   * @brief Configuration parameters for TeleopTrossenArmProducer
+   */
   struct Config {
     /// @brief Logical stream identifier (e.g. "arm_left")
     std::string stream_id{"teleop_arm"};
@@ -24,6 +36,9 @@ public:
     bool use_device_time{true};
   };
 
+  /**
+   * @brief Metadata specific to TeleopTrossenArmProducer
+   */
   struct TeleopTrossenArmProducerMetadata : public PolledProducer::ProducerMetadata {
     /// @brief Robot name
     std::string robot_name;
@@ -40,8 +55,11 @@ public:
     /// @brief Observation feature data type
     std::string observation_dtype;
 
-    /// @brief Get producer info as JSON
-    /// @return JSON object containing producer information
+    /**
+     * @brief Get producer info as JSON
+     *
+     * @return JSON object containing producer information
+     */
     nlohmann::ordered_json get_info() const override {
       nlohmann::ordered_json features;
       nlohmann::ordered_json action;
@@ -66,9 +84,10 @@ public:
    * @param driver Shared pointer to an initialized TrossenArmDriver instance
    * @param cfg Configuration parameters
    */
-  TeleopTrossenArmProducer(std::shared_ptr<trossen_arm::TrossenArmDriver> leader_driver,
-                           std::shared_ptr<trossen_arm::TrossenArmDriver> follower_driver,
-                           Config cfg);
+  TeleopTrossenArmProducer(
+    std::shared_ptr<trossen_arm::TrossenArmDriver> leader_driver,
+    std::shared_ptr<trossen_arm::TrossenArmDriver> follower_driver,
+    Config cfg);
 
   /**
    * @brief Destructor
@@ -82,7 +101,11 @@ public:
    */
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
-  /// @brief Get producer metadata
+  /**
+   * @brief Get producer metadata
+   *
+   * @return const reference to ProducerMetadata
+   */
   std::shared_ptr<ProducerMetadata> metadata() const override {
     return std::make_shared<TeleopTrossenArmProducerMetadata>(metadata_);
   }

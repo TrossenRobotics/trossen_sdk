@@ -34,24 +34,25 @@ namespace trossen::runtime {
  * @brief Configuration for the Session Manager
  */
 struct SessionConfig {
-  /// Required: base directory for episode files
+  /// @brief Base directory for episode files
   std::filesystem::path base_path;
 
-  /// Dataset identifier (user-provided or auto-generated UUID)
-  /// Empty string triggers auto-generation in constructor
+  /// @brief Dataset identifier (user-provided or auto-generated UUID)
+  /// @note Empty string triggers auto-generation in constructor
   std::string dataset_id = "";
 
-  /// Optional: maximum duration per episode (nullopt = unlimited)
+  /// @brief Maximum duration per episode (nullopt = unlimited)
   std::optional<std::chrono::duration<double>> max_duration = std::chrono::seconds(20);
 
-  /// Optional: maximum number of episodes (nullopt = unlimited)
+  /// @brief Maximum number of episodes (nullopt = unlimited)
   std::optional<uint32_t> max_episodes = std::nullopt;
 
-  /// Repository identifier (used by LeRobot backend)
   // TODO(shantanuparab-tr): Make this generic or remove it after making backend-agnostic
+
+  /// @brief Repository identifier (used by LeRobot backend)
   std::string repository_id = "";
 
-  /// Backend configuration template (output_path will be overwritten per episode)
+  /// @brief Backend configuration template (output_path will be overwritten per episode)
   std::unique_ptr<trossen::io::Backend::Config> backend_config;
 };
 
@@ -71,6 +72,7 @@ class SessionManager {
 public:
   /**
    * @brief Construct Session Manager with configuration
+   *
    * @param config Session configuration
    */
   explicit SessionManager(SessionConfig&& config);
@@ -80,34 +82,27 @@ public:
    */
   ~SessionManager();
 
-  // ──────────────────────────────────────────────────────────
-  // Producer Registration (before starting episodes)
-  // ──────────────────────────────────────────────────────────
-
   /**
    * @brief Register a producer to be polled during episodes
+   *
    * @param producer Shared pointer to producer (arm, camera, etc.)
    * @param poll_period How frequently to poll this producer
    * @param opts Scheduler task options (high-res, spin, name)
    *
-   * Must be called before start_episode(). Producers are registered once
-   * and used for all episodes in the session.
+   * Must be called before start_episode(). Producers are registered once and used for all episodes
+   * in the session.
    *
-   * Session Manager stores producer info and registers Scheduler tasks
-   * during each start_episode() call. Tasks poll producers and enqueue
-   * records to the current episode's Sink.
+   * Session Manager stores producer info and registers Scheduler tasks during each start_episode()
+   * call. Tasks poll producers and enqueue records to the current episode's Sink.
    */
   void add_producer(
     std::shared_ptr<hw::PolledProducer> producer,
     std::chrono::milliseconds poll_period,
     const Scheduler::TaskOptions& opts = {});
 
-  // ──────────────────────────────────────────────────────────
-  // Episode Lifecycle
-  // ──────────────────────────────────────────────────────────
-
   /**
    * @brief Start a new episode
+   *
    * @return true on success, false if max_episodes reached or setup fails
    *
    * - Creates episode_NNNNNN.mcap file (6-digit zero-padded index)
@@ -125,17 +120,20 @@ public:
    * - Flushes and closes Backend
    * - Updates episode index for next start
    *
-   * Safe to call if no episode running (no-op).
+   * @note Safe to call if no episode running (no-op).
    */
   void stop_episode();
 
   /**
    * @brief Check if an episode is currently running
+   *
+   * @return true if episode active, false otherwise
    */
   bool is_episode_active() const;
 
   /**
    * @brief Wait for auto-stop signal (if max_duration is set)
+   *
    * @param timeout Maximum time to wait (default: wait indefinitely)
    * @return true if auto-stop was triggered, false if timeout or episode manually stopped
    *
@@ -160,24 +158,25 @@ public:
    */
   void shutdown();
 
-  // ──────────────────────────────────────────────────────────
-  // Monitoring & Stats
-  // ──────────────────────────────────────────────────────────
-
   /**
    * @brief Statistics about episode recording session
    */
   struct Stats {
     /// @brief Current or next episode number
     uint32_t current_episode_index;
+
     /// @brief Is an episode currently recording?
     bool episode_active;
+
     /// @brief Time since episode start (0 if not active)
     std::chrono::duration<double> elapsed;
+
     /// @brief Time until auto-stop (nullopt if unlimited)
     std::optional<std::chrono::duration<double>> remaining;
+
     /// @brief Records written to current episode
     uint64_t records_written_current;
+
     /// @brief Episodes finished this session
     uint64_t total_episodes_completed;
   };
@@ -188,78 +187,64 @@ public:
   Stats stats() const;
 
 private:
-  // ──────────────────────────────────────────────────────────
-  // Internal State
-  // ──────────────────────────────────────────────────────────
-
-  /// Configuration
+  /// @brief Configuration
   SessionConfig config_;
 
-  /// Next episode index to use
+  /// @brief Next episode index to use
   uint32_t next_episode_index_{0};
 
-  /// Episode start time (for duration tracking)
+  /// @brief Episode start time (for duration tracking)
   std::chrono::steady_clock::time_point episode_start_time_;
 
-  /// Is an episode currently active?
+  /// @brief Is an episode currently active?
   bool episode_active_{false};
 
-  /// Total episodes completed this session
+  /// @brief Total episodes completed this session
   uint64_t total_episodes_completed_{0};
 
-  /// Sink's processed_count() at the start of current episode (for delta tracking)
+  /// @brief Sink's processed_count() at the start of current episode (for delta tracking)
   uint64_t episode_start_record_count_{0};
 
-  /// Monitoring thread for duration-based auto-stop
+  /// @brief Monitoring thread for duration-based auto-stop
   std::thread monitor_thread_;
 
-  /// Flag to control monitoring thread lifecycle
+  /// @brief Flag to control monitoring thread lifecycle
   std::atomic<bool> monitoring_active_{false};
 
-  /// Flag indicating that auto-stop was triggered by monitor thread
+  /// @brief Flag indicating that auto-stop was triggered by monitor thread
   std::atomic<bool> auto_stop_triggered_{false};
 
-  /// Condition variable for auto-stop signaling
+  /// @brief Condition variable for auto-stop signaling
   std::condition_variable auto_stop_cv_;
 
-  /// Mutex for condition variable
+  /// @brief Mutex for condition variable
   std::mutex auto_stop_mutex_;
 
-  /// Mutex to protect episode lifecycle operations
+  /// @brief Mutex to protect episode lifecycle operations
   mutable std::mutex episode_mutex_;
 
-  /// Current sink instance (per episode)
+  /// @brief Current sink instance (per episode)
   std::unique_ptr<io::Sink> current_sink_;
 
-  /// Current backend instance (per episode)
+  /// @brief Current backend instance (per episode)
   std::shared_ptr<io::Backend> current_backend_;
 
-  /// Current scheduler instance (per episode)
+  /// @brief Current scheduler instance (per episode)
   std::unique_ptr<Scheduler> scheduler_;
 
-  /// Producer registration info
+  /// @brief Producer registration info
   struct ProducerTask {
     std::shared_ptr<hw::PolledProducer> producer;
     std::chrono::milliseconds period;
     Scheduler::TaskOptions opts;
   };
 
-  /// Registered producers (persists across episodes)
+  /// @brief Registered producers (persists across episodes)
   std::vector<ProducerTask> producer_tasks_;
-
-  // ──────────────────────────────────────────────────────────
-  // Internal Helper Methods
-  // ──────────────────────────────────────────────────────────
-
-  /**
-   * @brief Scan directory for existing episode files and return next index
-   * @param base_path Directory to scan
-   * @return Next episode index (max_found + 1, or 0 if none found)
-   */
-  uint32_t scan_existing_episodes(const std::filesystem::path& base_path);
 
   /**
    * @brief Build episode file path with zero-padded index
+   *
    * @param index Episode index (0-999999)
    * @return Full path to episode file (e.g., /data/episode_000042.mcap)
    */
@@ -267,6 +252,7 @@ private:
 
   /**
    * @brief Create backend instance for the given episode
+   *
    * @param output_path Path to output file
    * @param episode_index Episode index for metadata
    * @param producer_metadatas Metadata from registered producers

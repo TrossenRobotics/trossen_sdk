@@ -1,6 +1,7 @@
 /**
  * @file camera_types.hpp
- * @brief Shared camera capability and depth format enums & helpers for multi-stream (color + depth) support.
+ * @brief Shared camera capability and depth format enums & helpers for multi-stream (color +
+ * depth) support.
  */
 
 #ifndef TROSSEN_SDK__HW__CAMERA__CAMERA_TYPES_HPP

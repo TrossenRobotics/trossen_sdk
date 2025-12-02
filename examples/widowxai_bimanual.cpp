@@ -1,5 +1,5 @@
 /**
- * @file stationary_ai_kit_complete.cpp
+ * @file widowxai_bimanual.cpp
  * @brief Complete Stationary AI Kit demo with Session Manager, MCAP backend, and multi-camera
  *
  * This demo is designed for the full stationary AI kit configuration:
@@ -17,9 +17,9 @@
  *   Cameras:        4x 720p @ 30fps (indices 0, 2, 4, 6)
  *
  * Usage:
- *   ./stationary_ai_kit_complete --episodes 5 --duration 10
- *   ./stationary_ai_kit_complete --episodes 3 --duration 5 --output-dir /data/recordings
- *   ./stationary_ai_kit_complete --mock  # Use mock producers for testing without hardware
+ *   ./widowxai_bimanual --episodes 5 --duration 10
+ *   ./widowxai_bimanual --episodes 3 --duration 5 --output-dir /data/recordings
+ *   ./widowxai_bimanual --mock  # Use mock producers for testing without hardware
  */
 
 #include <algorithm>
@@ -33,13 +33,14 @@
 #include <utility>
 #include <vector>
 
-#include "./demo_utils.hpp"
 #include "libtrossen_arm/trossen_arm.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 #include "trossen_sdk/hw/arm/arm_producer.hpp"
 #include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
+
+#include "./demo_utils.hpp"
 
 struct Config {
   int duration_s = 10;

@@ -2,7 +2,8 @@
  * @file camera_streams_config.hpp
  * @brief Unified configuration for (color [+ depth]) camera streams
  */
-#ifndef TROSSEN_SDK__HW__CAMERA__CAMERA_STREAMS_CONFIG_HPP
+
+ #ifndef TROSSEN_SDK__HW__CAMERA__CAMERA_STREAMS_CONFIG_HPP
 #define TROSSEN_SDK__HW__CAMERA__CAMERA_STREAMS_CONFIG_HPP
 
 #include <cstdint>
@@ -106,6 +107,7 @@ struct CameraStreamsConfig {
 
   /**
    * @brief Validate invariants AFTER normalize().
+   *
    * @param error optional string to receive human-readable error
    * @return true if valid
    */
@@ -135,7 +137,9 @@ struct CameraStreamsConfig {
   }
 
   /**
-   * @brief Estimated frame period in nanoseconds (ceil division to avoid drift accumulation guidance) .
+   * @brief Estimated frame period in nanoseconds (ceil division to avoid drift accumulation)
+   *
+   * @return Frame period in nanoseconds
    */
   uint64_t frame_period_ns() const {
     // Use integer math: ceil(1e9 / fps) = (1e9 + fps - 1) / fps

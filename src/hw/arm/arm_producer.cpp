@@ -1,8 +1,14 @@
-#include "trossen_sdk/hw/arm/arm_producer.hpp"
+/**
+ * @file arm_producer.cpp
+ * @brief Implementation of TrossenArmProducer that emits joint states from a Trossen Arm via
+ * TrossenArmDriver.
+ */
 
 #include <algorithm>
 #include <memory>
 #include <utility>
+
+#include "trossen_sdk/hw/arm/arm_producer.hpp"
 
 namespace trossen::hw::arm {
 

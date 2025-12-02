@@ -11,8 +11,8 @@
 #define TROSSEN_SDK__IO__BACKEND_HPP
 
 #include <memory>
-#include <string>
 #include <span>
+#include <string>
 
 #include "trossen_sdk/data/record.hpp"
 
@@ -39,14 +39,18 @@ public:
    * @brief Configuration struct for backend.
    */
   struct Config {
-    // Base config options for all backends can be added here
-    std::string type{""};    // Config type (can be overridden by child classes)
-    // Example: bool enable_logging = false;
+    /// @brief Base config options for all backends can be added here
+    std::string type{""};
+
+    /**
+     * @brief Virtual destructor
+     */
     virtual ~Config() = default;
   };
 
   /**
    * @brief Open a logging destination
+   *
    * @return true on success, false otherwise
    * @note Must be called before data can be written
    */
@@ -54,6 +58,7 @@ public:
 
   /**
    * @brief Serialize & persist a single record
+   *
    * @param record Record to write
    *
    * Default implementation may forward to writeBatch for uniform handling
@@ -62,6 +67,7 @@ public:
 
   /**
    * @brief Serialize & persist a contiguous batch of records
+   *
    * @param records Span of record pointers (non-owning); lifetime must cover call
    *
    * Implementations may override for more efficient encoding (e.g. shared compression window).

@@ -32,7 +32,9 @@ namespace trossen::io::backends {
  */
 class TrossenBackend : public io::Backend {
 public:
-  /// @brief Image queue drop policy when full
+  /**
+   * @brief Image queue drop policy when full
+   */
   enum class DropPolicy {
     /// @brief Drop newest incoming image
     DropNewest,
@@ -40,25 +42,27 @@ public:
     /// @brief Drop oldest image in queue to make room for new one
     DropOldest,
 
-    /// @brief Block until space is available (not recommended)
+    /// @brief Block until space is available (not implemented)
     // Block
   };
 
-  /// @brief Configuration parameters
+  /**
+   * @brief Configuration parameters
+   */
   struct Config {
-    // Root output directory
+    /// @brief Root output directory
     std::string output_dir;
 
-    // Number of image encoding threads
+    /// @brief Number of image encoding threads
     size_t encoder_threads{1};
 
-    // 0 = unbounded
+    /// @brief 0 = unbounded
     size_t max_image_queue{0};
 
-    // Policy when max_image_queue > 0 and image queue is full
+    /// @brief Policy when max_image_queue > 0 and image queue is full
     DropPolicy drop_policy{DropPolicy::DropNewest};
 
-    // PNG compression level (0-9)
+    /// @brief PNG compression level (0-9)
     int png_compression_level{3};
   };
 
@@ -100,7 +104,9 @@ public:
    */
   void close() override;
 
-  /// @brief Image encoding statistics
+  /**
+   * @brief Image encoding statistics
+   */
   struct ImageEncodeStats {
     /// @brief Total images enqueued
     uint64_t enqueued{0};
@@ -129,7 +135,11 @@ public:
     /// @brief Average image queue length (samples taken at enqueue time)
     double avg_backlog{0.0};
 
-    /// @brief Average image encode time (ms)
+    /**
+     * @brief Average image encode time (ms)
+     *
+     * @return Average encode time in milliseconds
+     */
     double avg_encode_ms() const {
       // Avoid divide-by-zero
       if (written == 0) {
@@ -138,14 +148,23 @@ public:
       return (encode_time_ns_acc / 1e6) / static_cast<double>(written);
     }
 
-    /// @brief Average queue wait time (ms)
+    /**
+     * @brief Average queue wait time in milliseconds
+     *
+     * @return Average queue wait time in milliseconds
+     */
     double avg_queue_wait_ms() const {
       if (written == 0) return 0.0;
       return (queue_wait_ns_acc / 1e6) / static_cast<double>(written);
     }
 
-    /// @brief Estimated per-thread encode throughput (fps) = threads * written / total_encode_wall
-    /// NOTE: This is approximate; actual parallel overlap may differ.
+    /**
+     * @brief Estimated per-thread encode throughput (fps)
+     *
+     * @param threads Number of encoding threads
+     * @return Estimated per-thread encode throughput in frames per second
+     * @note This is approximate; actual parallel overlap may differ.
+     */
     double est_per_thread_fps(size_t threads) const {
       if (threads == 0 || encode_time_ns_acc == 0) return 0.0;
       // sum of per-frame times across all threads
@@ -209,7 +228,9 @@ private:
    */
   void imageWorkerLoop();
 
-  /// @brief Image encoding job
+  /**
+   * @brief Image encoding job
+   */
   struct ImageJob {
     /// @brief Full file path to write
     std::filesystem::path file_path;
@@ -218,19 +239,28 @@ private:
     cv::Mat image;
   };
 
-  // Async image encoding members
+  /// @brief Async image encoding members
   std::deque<ImageJob> image_queue_;
-  // Parallel deque storing enqueue steady_clock timestamps for wait time measurement
+
+  /// @brief Parallel deque storing enqueue steady_clock timestamps for wait time measurement
   std::deque<std::chrono::steady_clock::time_point> image_queue_enqueue_times_;
+
+  /// @brief Mutex protecting image queue
   std::mutex image_queue_mutex_;
+
+  /// @brief Condition variable for image queue
   std::condition_variable image_queue_cv_;
-  // Encoder workers (multi-threaded encoding support)
+
+  /// @brief Encoder workers (multi-threaded encoding support)
   std::vector<std::thread> image_workers_;
-  // Config for this backend
+
+  /// @brief Config for this backend
   Config cfg_;
+
+  /// @brief Whether image worker threads should keep running
   std::atomic<bool> image_worker_running_{false};
 
-  // Basic stats
+  /// @brief Basic stats
   std::atomic<uint64_t> img_enqueued_{0};
   std::atomic<uint64_t> img_encoded_{0};
   std::atomic<uint64_t> img_dropped_{0};
@@ -242,7 +272,7 @@ private:
   std::atomic<uint64_t> img_queue_backlog_sum_{0};
   std::atomic<uint64_t> img_queue_backlog_samples_{0};
 
-  // Derived / cached config values
+  /// @brief Derived / cached config values
   size_t max_image_queue_cached_{0};
 
   std::filesystem::path root_;
