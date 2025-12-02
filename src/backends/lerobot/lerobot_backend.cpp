@@ -34,7 +34,7 @@ LeRobotBackend::LeRobotBackend(Config cfg, std::vector<std::shared_ptr<hw::Polle
     cfg_.png_compression_level = 3;
   }
   // Create a root folder for dataset using repo-id and dataset-name and default root
-  
+
   // URI is absolute path to output directory. Set to absolute path and check write access.
   // Validate output directory path
   try {
@@ -124,7 +124,6 @@ bool LeRobotBackend::open() {
     image_workers_.emplace_back(&LeRobotBackend::imageWorkerLoop, this);
   }
 
-
   // Open a Parquet file for joint states and frame data
 
   // Define schema once (Can move this to constants if needed)
@@ -161,12 +160,10 @@ bool LeRobotBackend::open() {
       arrow_props);                // Arrow writer props
 
   if (!result.ok()) {
-    throw std::runtime_error("Failed to create Parquet writer: " +
-                            result.status().ToString());
+    throw std::runtime_error("Failed to create Parquet writer: " + result.status().ToString());
   }
 
   writer_ = std::move(result).ValueUnsafe();  // store unique_ptr<FileWriter>
-
 
   writeMetadata();
 
@@ -320,134 +317,142 @@ void LeRobotBackend::convert_to_videos() const {
     if (t.joinable()) t.join();
   }
 
-  
   auto end_time = std::chrono::steady_clock::now();
   auto secs = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
 }
 
+std::vector<int> LeRobotBackend::sample_indices(
+  int dataset_len,
+  int min_samples,
+  int max_samples,
+  float power) const
+{
+  // Calculate the number of samples based on the power law
+  // Clamp the number of samples between min_samples and max_samples
+  int num_samples = std::clamp(
+    static_cast<int>(std::pow(dataset_len, power)),
+    min_samples,
+    max_samples);
 
-  std::vector<int> LeRobotBackend::sample_indices(int dataset_len, int min_samples, int max_samples, float power) const {
-    // Calculate the number of samples based on the power law
-    // Clamp the number of samples between min_samples and max_samples
-    int num_samples = std::clamp(static_cast<int>(std::pow(dataset_len, power)),
-                                min_samples, max_samples);
-    std::vector<int> indices(num_samples);
-    float step = static_cast<float>(dataset_len - 1) / (num_samples - 1);
-    for (int i = 0; i < num_samples; ++i) indices[i] = std::round(i * step);
-    return indices;
+  std::vector<int> indices(num_samples);
+  float step = static_cast<float>(dataset_len - 1) / (num_samples - 1);
+  for (int i = 0; i < num_samples; ++i) indices[i] = std::round(i * step);
+  return indices;
+}
+
+cv::Mat LeRobotBackend::auto_downsample(
+  const cv::Mat &img,
+  int target_size,
+  int max_threshold) const
+{
+  int h = img.rows;
+  int w = img.cols;
+  // If the larger dimension is already below the max threshold, return the original image
+  if (std::max(w, h) < max_threshold) return img;
+  // Calculate the downsampling factor to make the larger dimension equal to target_size
+  float factor = (w > h) ? (w / static_cast<float>(target_size))
+                        : (h / static_cast<float>(target_size));
+  // Downsample the image using area interpolation for better quality
+  cv::Mat downsampled;
+  cv::resize(img, downsampled, {}, 1.0 / factor, 1.0 / factor, cv::INTER_AREA);
+  return downsampled;
+}
+
+std::vector<cv::Mat> LeRobotBackend::sample_images(
+  const std::vector<std::filesystem::path> &image_paths) const
+{
+  if (image_paths.empty()) {
+    return {};
   }
 
-  cv::Mat LeRobotBackend::auto_downsample(const cv::Mat &img, int target_size, int max_threshold) const{
-    int h = img.rows;
-    int w = img.cols;
-    // If the larger dimension is already below the max threshold, return the
-    // original image
-    if (std::max(w, h) < max_threshold) return img;
-    // Calculate the downsampling factor to make the larger dimension equal to
-    // target_size
-    float factor = (w > h) ? (w / static_cast<float>(target_size))
-                          : (h / static_cast<float>(target_size));
-    // Downsample the image using area interpolation for better quality
-    cv::Mat downsampled;
-    cv::resize(img, downsampled, {}, 1.0 / factor, 1.0 / factor, cv::INTER_AREA);
-    return downsampled;
+  // Sample indices using power law distribution
+  auto indices = sample_indices(image_paths.size());
+
+  std::vector<cv::Mat> images;
+  // Load and process images at the sampled indices
+  for (int idx : indices) {
+    cv::Mat img = cv::imread(image_paths[idx].string(), cv::IMREAD_COLOR);
+    if (img.empty()) continue;
+    // Downsample the image if necessary and convert to float32
+    cv::Mat img_downsampled = auto_downsample(img);
+    cv::Mat img_float;
+    // Normalize pixel values to [0, 1]
+    img_downsampled.convertTo(img_float, CV_32F, 1.0 / 255.0);
+    // Ensure the image has 3 channels (BGR)
+    if (img_float.channels() == 3) {
+      images.push_back(img_float);
+    } else {
+      std::cout << "Unexpected channel count: " << img_float.channels() << std::endl;
+    }
   }
 
-  std::vector<cv::Mat> LeRobotBackend::sample_images(
-      const std::vector<std::filesystem::path> &image_paths) const {
-    if (image_paths.empty()) {
-      return {};
-    }
-    
-    // Sample indices using power law distribution
-    auto indices = sample_indices(image_paths.size());
+  return images;
+}
 
-    std::vector<cv::Mat> images;
-    // Load and process images at the sampled indices
-    for (int idx : indices) {
-      cv::Mat img = cv::imread(image_paths[idx].string(), cv::IMREAD_COLOR);
-      if (img.empty()) continue;
-      // Downsample the image if necessary and convert to float32
-      cv::Mat img_downsampled = auto_downsample(img);
-      cv::Mat img_float;
-      // Normalize pixel values to [0, 1]
-      img_downsampled.convertTo(img_float, CV_32F, 1.0 / 255.0);
-      // Ensure the image has 3 channels (BGR)
-      if (img_float.channels() == 3) {
-        images.push_back(img_float);
-      } else {
-        std::cout << "Unexpected channel count: " << img_float.channels() << std::endl;
-      }
-    }
-
-    return images;
+nlohmann::ordered_json LeRobotBackend::compute_image_stats (
+  const std::vector<cv::Mat> &images) const{
+  nlohmann::ordered_json stats_json;
+  if (images.empty()) {
+    std::cout << "No images provided." << std::endl;
+    stats_json["min"] = {};
+    stats_json["max"] = {};
+    stats_json["mean"] = {};
+    stats_json["std"] = {};
+    stats_json["count"] = {0};
+    return stats_json;
   }
 
-  nlohmann::ordered_json LeRobotBackend::compute_image_stats (
-    const std::vector<cv::Mat> &images) const{
-    nlohmann::ordered_json stats_json;
-    if (images.empty()) {
-      std::cout << "No images provided." << std::endl;
-      stats_json["min"] = {};
-      stats_json["max"] = {};
-      stats_json["mean"] = {};
-      stats_json["std"] = {};
-      stats_json["count"] = {0};
-      return stats_json;
+  int num_channels = images[0].channels();
+  int count = static_cast<int>(images.size());
+
+  // Create a vector for each channel
+  std::vector<std::vector<float>> channel_values(num_channels);
+
+  for (const auto &img : images) {
+    std::vector<cv::Mat> channels;
+    cv::split(img, channels);
+
+    for (int c = 0; c < num_channels; ++c) {
+      // Flatten and push pixels into channel_values[c]
+      channel_values[c].insert(
+        channel_values[c].end(),
+        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].datastart)),
+        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].dataend)));
     }
+  }
 
-    int num_channels = images[0].channels();
-    int count = static_cast<int>(images.size());
-
-    // Create a vector for each channel
-    std::vector<std::vector<float>> channel_values(num_channels);
-
-    for (const auto &img : images) {
-      std::vector<cv::Mat> channels;
-      cv::split(img, channels);
-
-      for (int c = 0; c < num_channels; ++c) {
-        // Flatten and push pixels into channel_values[c]
-        channel_values[c].insert(
-          channel_values[c].end(),
-          reinterpret_cast<float *>(const_cast<uchar *>(channels[c].datastart)),
-          reinterpret_cast<float *>(const_cast<uchar *>(channels[c].dataend)));
-      }
-    }
-
-    // Helper lambda to convert a vector to a nested JSON array
-    auto to_nested = [](const std::vector<float> &vec) {
+  // Helper lambda to convert a vector to a nested JSON array
+  auto to_nested = [](const std::vector<float> &vec) {
     nlohmann::ordered_json result = nlohmann::ordered_json::array();
     for (float v : vec) {
       result.push_back({{v}});
     }
     return result;
-    };
+  };
 
-    std::vector<float> min_vals, max_vals, mean_vals, std_vals;
-    for (int c = 0; c < num_channels; ++c) {
-      cv::Mat channel_mat(channel_values[c]);
-      cv::Scalar mean, stddev;
-      cv::meanStdDev(channel_mat, mean, stddev);
+  std::vector<float> min_vals, max_vals, mean_vals, std_vals;
+  for (int c = 0; c < num_channels; ++c) {
+    cv::Mat channel_mat(channel_values[c]);
+    cv::Scalar mean, stddev;
+    cv::meanStdDev(channel_mat, mean, stddev);
 
-      double min_val, max_val;
-      cv::minMaxLoc(channel_mat, &min_val, &max_val);
+    double min_val, max_val;
+    cv::minMaxLoc(channel_mat, &min_val, &max_val);
 
-      min_vals.push_back(static_cast<float>(min_val));
-      max_vals.push_back(static_cast<float>(max_val));
-      mean_vals.push_back(static_cast<float>(mean[0]));
-      std_vals.push_back(static_cast<float>(stddev[0]));
-    }
-
-    stats_json["min"] = to_nested(min_vals);
-    stats_json["max"] = to_nested(max_vals);
-    stats_json["mean"] = to_nested(mean_vals);
-    stats_json["std"] = to_nested(std_vals);
-    stats_json["count"] = {count};
-
-    return stats_json;
+    min_vals.push_back(static_cast<float>(min_val));
+    max_vals.push_back(static_cast<float>(max_val));
+    mean_vals.push_back(static_cast<float>(mean[0]));
+    std_vals.push_back(static_cast<float>(stddev[0]));
   }
 
+  stats_json["min"] = to_nested(min_vals);
+  stats_json["max"] = to_nested(max_vals);
+  stats_json["mean"] = to_nested(mean_vals);
+  stats_json["std"] = to_nested(std_vals);
+  stats_json["count"] = {count};
+
+  return stats_json;
+}
 
 nlohmann::ordered_json LeRobotBackend::computeFlatStats(
     const std::shared_ptr<arrow::Array> &array) const {
@@ -462,15 +467,16 @@ nlohmann::ordered_json LeRobotBackend::computeFlatStats(
 
       double val = 0;
       // Handle different data types
-      if (array->type_id() == arrow::Type::DOUBLE)
+      if (array->type_id() == arrow::Type::DOUBLE) {
         val = std::static_pointer_cast<arrow::DoubleArray>(array)->Value(i);
-      else if (array->type_id() == arrow::Type::FLOAT)
+      } else if (array->type_id() == arrow::Type::FLOAT) {
         val = std::static_pointer_cast<arrow::FloatArray>(array)->Value(i);
-      else if (array->type_id() == arrow::Type::INT64)
+      } else if (array->type_id() == arrow::Type::INT64) {
         val = static_cast<double>(
             std::static_pointer_cast<arrow::Int64Array>(array)->Value(i));
-      else
+      } else {
         continue;
+      }
 
       // Update statistics
       min_val = std::min(min_val, val);
@@ -483,8 +489,7 @@ nlohmann::ordered_json LeRobotBackend::computeFlatStats(
     double mean = count > 0 ? sum / count : 0;
     double stddev = 0;
 
-    // Handle edge case where all values are zero and standard deviation can be
-    // NaN
+    // Handle edge case where all values are zero and standard deviation can be NaN
     if (count > 0) {
       if (min_val == 0.0 && max_val == 0.0) {
         stddev = 0.0;
@@ -501,51 +506,49 @@ nlohmann::ordered_json LeRobotBackend::computeFlatStats(
 }
 
 nlohmann::ordered_json LeRobotBackend::computeListStats(
-    const std::shared_ptr<arrow::ListArray> &list_array) const {
-    // Get the values array from the ListArray
-    auto values =
-        std::static_pointer_cast<arrow::DoubleArray>(list_array->values());
+  const std::shared_ptr<arrow::ListArray> &list_array) const
+{
+  // Get the values array from the ListArray
+  auto values = std::static_pointer_cast<arrow::DoubleArray>(list_array->values());
 
-    // Calculate the number of lists and the dimension of each list
-    int64_t list_count = list_array->length();
-    int64_t value_count = values->length();
-    int64_t dim = list_count > 0 ? value_count / list_count : 0;
+  // Calculate the number of lists and the dimension of each list
+  int64_t list_count = list_array->length();
+  int64_t value_count = values->length();
+  int64_t dim = list_count > 0 ? value_count / list_count : 0;
 
-    // Initialize statistics vectors
-    std::vector<double> sum(dim, 0.0), sum_sq(dim, 0.0),
-        min_val(dim, std::numeric_limits<double>::max()),
-        max_val(dim, std::numeric_limits<double>::lowest());
+  // Initialize statistics vectors
+  std::vector<double> sum(dim, 0.0), sum_sq(dim, 0.0),
+      min_val(dim, std::numeric_limits<double>::max()),
+      max_val(dim, std::numeric_limits<double>::lowest());
 
-    // Iterate over the values and compute statistics for each dimension
-    for (int64_t i = 0; i < value_count; ++i) {
-      double val = values->Value(i);
-      int d = i % dim;
-      min_val[d] = std::min(min_val[d], val);
-      max_val[d] = std::max(max_val[d], val);
-      sum[d] += val;
-      sum_sq[d] += val * val;
-    }
+  // Iterate over the values and compute statistics for each dimension
+  for (int64_t i = 0; i < value_count; ++i) {
+    double val = values->Value(i);
+    int d = i % dim;
+    min_val[d] = std::min(min_val[d], val);
+    max_val[d] = std::max(max_val[d], val);
+    sum[d] += val;
+    sum_sq[d] += val * val;
+  }
 
-    std::vector<double> mean(dim), stddev(dim);
-    for (int d = 0; d < dim;
-        ++d) {  // Compute mean and standard deviation for each dimension
-      mean[d] = sum[d] / list_count;
-      // Handle edge case where all values are zero and standard deviation can be
-      // NaN
-      double variance = (sum_sq[d] / list_count) - (mean[d] * mean[d]);
-      stddev[d] = (list_count > 0 && variance >= 0.0) ? std::sqrt(variance) : 0.0;
-    }
+  std::vector<double> mean(dim), stddev(dim);
+  // Compute mean and standard deviation for each dimension
+  for (int d = 0; d < dim; ++d) {
+    mean[d] = sum[d] / list_count;
+    // Handle edge case where all values are zero and standard deviation can be NaN
+    double variance = (sum_sq[d] / list_count) - (mean[d] * mean[d]);
+    stddev[d] = (list_count > 0 && variance >= 0.0) ? std::sqrt(variance) : 0.0;
+  }
 
-    return {{"min", min_val},
-            {"max", max_val},
-            {"mean", mean},
-            {"std", stddev},
-            {"count", {list_count}}};
+  return {{"min", min_val},
+          {"max", max_val},
+          {"mean", mean},
+          {"std", stddev},
+          {"count", {list_count}}};
 }
 
 
 void LeRobotBackend::computeStatistics() const {
-
   std::ostringstream oss;
   oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index << ".parquet";
   fs::path episode_path = data_root_ / oss.str();
@@ -556,10 +559,9 @@ void LeRobotBackend::computeStatistics() const {
   std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
 
   auto st = parquet::arrow::FileReader::Make(
-      arrow::default_memory_pool(),
-      std::move(parquet_reader),
-      &arrow_reader
-  );
+    arrow::default_memory_pool(),
+    std::move(parquet_reader),
+    &arrow_reader);
 
   if (!st.ok()) {
       throw std::runtime_error("Failed to create FileReader: " + st.ToString());
@@ -570,7 +572,6 @@ void LeRobotBackend::computeStatistics() const {
   if (!st.ok()) {
       throw std::runtime_error("Failed to read Parquet table: " + st.ToString());
   }
-
 
   nlohmann::json stats;
   // Compute statistics for each column in the table
@@ -612,8 +613,7 @@ void LeRobotBackend::computeStatistics() const {
 
     // Collect all image file paths in the directory
     std::vector<std::filesystem::path> paths;
-    for (const auto &entry :
-         std::filesystem::directory_iterator(episode_image_dir)) {
+    for (const auto &entry : std::filesystem::directory_iterator(episode_image_dir)) {
       if (entry.is_regular_file()) {
         std::string ext = entry.path().extension().string();
         std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
@@ -641,7 +641,6 @@ void LeRobotBackend::computeStatistics() const {
   episode_stats_file << episode_stats.dump() << "\n";
   episode_stats_file.close();
 
-
   nlohmann::ordered_json episode_metadata;
   episode_metadata["episode_index"] = cfg_.episode_index;
   episode_metadata["tasks"] = {cfg_.task_name};
@@ -656,7 +655,7 @@ void LeRobotBackend::computeStatistics() const {
   episodes_file << episode_metadata.dump() << "\n";
   episodes_file.close();
 
-  // TODO (shantanuparab-tr): Implement logic to check for existing task entrys
+  // TODO (shantanuparab-tr): Implement logic to check for existing task entries
   nlohmann::ordered_json task_metadata;
   task_metadata["task_index"] = cfg_.episode_index;
   task_metadata["task"] = cfg_.task_name;
@@ -668,12 +667,11 @@ void LeRobotBackend::computeStatistics() const {
     return;
   }
   tasks_file << task_metadata.dump() << "\n";
-  
+
   // Get total number of rows in the table (frames recorded)
   int64_t episode_frame_length = table->num_rows();
 
   updateEpisodeInfo(episode_frame_length);
-  
 }
 
 void LeRobotBackend::printStatsTable(const nlohmann::ordered_json& stats) const {
@@ -694,11 +692,11 @@ void LeRobotBackend::printStatsTable(const nlohmann::ordered_json& stats) const 
       // If metric value is a list of numbers → print inline
       if (arr.is_array()) {
         for (size_t i = 0; i < arr.size(); i++) {
-          std::cout << std::fixed << std::setprecision(4)
-                    << arr[i].get<double>();
+          std::cout << std::fixed << std::setprecision(4) << arr[i].get<double>();
 
-          if (i + 1 < arr.size())
+          if (i + 1 < arr.size()) {
             std::cout << "  ";
+          }
         }
       } else {
         // Single scalar
@@ -717,8 +715,10 @@ void LeRobotBackend::flush() {
 
 void LeRobotBackend::close() {
   std::lock_guard<std::mutex> lock(open_mutex_);
-  if (!opened_) return;
-  
+  if (!opened_) {
+    return;
+  }
+
   try {
     // 1. Flush and close writer if initialized
     if (writer_) {
@@ -764,9 +764,7 @@ void LeRobotBackend::close() {
 }
 
 void LeRobotBackend::writeJointState(const data::RecordBase& base) {
-
   const auto& js = static_cast<const data::TeleopJointStateRecord&>(base);
-
 
   // Frame indexing strategy for multi-source data streams:
   //
@@ -790,8 +788,7 @@ void LeRobotBackend::writeJointState(const data::RecordBase& base) {
                                  std::make_shared<arrow::DoubleBuilder>());
   arrow::ListBuilder act_builder(arrow::default_memory_pool(),
                                  std::make_shared<arrow::DoubleBuilder>());
-  arrow::Int64Builder epi_idx_builder, frame_idx_builder, index_builder,
-      task_idx_builder;
+  arrow::Int64Builder epi_idx_builder, frame_idx_builder, index_builder, task_idx_builder;
 
   auto* obs_val = static_cast<arrow::DoubleBuilder*>(obs_builder.value_builder());
   auto* act_val = static_cast<arrow::DoubleBuilder*>(act_builder.value_builder());
@@ -805,18 +802,20 @@ void LeRobotBackend::writeJointState(const data::RecordBase& base) {
 
   // Append timestamp
   check_status(
-      ts_builder.Append(static_cast<float>(frame_id) / cfg_.fps),
-      "Failed to append timestamp");
+    ts_builder.Append(static_cast<float>(frame_id) / cfg_.fps),
+    "Failed to append timestamp");
 
   // Observation list
   check_status(obs_builder.Append(), "Failed to append observation list");
-  for (auto v : js.observations)
+  for (auto v : js.observations) {
     check_status(obs_val->Append(v), "Failed to append observation value");
+  }
 
   // Action list
   check_status(act_builder.Append(), "Failed to append action list");
-  for (auto v : js.actions)
+  for (auto v : js.actions) {
     check_status(act_val->Append(v), "Failed to append action value");
+  }
 
   // Scalar columns
   check_status(epi_idx_builder.Append(cfg_.episode_index), "Failed to append episode index");
@@ -854,15 +853,13 @@ void LeRobotBackend::writeJointState(const data::RecordBase& base) {
   auto status = writer_->WriteRecordBatch(*batch);
 
   if (!status.ok()) {
-    throw std::runtime_error("Failed to write Parquet record batch: " +
-                             status.ToString());
+    throw std::runtime_error("Failed to write Parquet record batch: " + status.ToString());
   }
 }
 
 void LeRobotBackend::writeImage(const data::RecordBase& base) {
   const auto& img = static_cast<const data::ImageRecord&>(base);
 
-  
   // exit early if nothing to write
   if (img.image.empty()) {
     return;
@@ -878,12 +875,12 @@ void LeRobotBackend::writeImage(const data::RecordBase& base) {
   //
   // ASSUMPTION: The first sequence ID we observe from a source marks the beginning
   // of a new episode for that source.
-  
-  if(source_frame_indices_.find(img.id) == source_frame_indices_.end()){
+
+  if(source_frame_indices_.find(img.id) == source_frame_indices_.end()) {
     source_frame_indices_[img.id] = img.seq;
   }
   int frame_index = img.seq - source_frame_indices_[img.id];
-  
+
   // Directory per camera id (cached)
   // TODO: this could be moved to a pre-processing step?
   auto it = image_dir_cache_.find(img.id);
@@ -897,7 +894,7 @@ void LeRobotBackend::writeImage(const data::RecordBase& base) {
   }
   const fs::path& camera_dir = it->second;
 
-  fs::path file_path = camera_dir / (std::string("image_") + 
+  fs::path file_path = camera_dir / (std::string("image_") +
                      (std::ostringstream() << std::setw(6) << std::setfill('0') << frame_index).str() +
                      ".jpg");
 
@@ -934,10 +931,10 @@ void LeRobotBackend::writeImage(const data::RecordBase& base) {
         //   break;
       }
     }
-  // Extend job by storing enqueue steady time via file_path metadata hack? Better: expand struct.
-  image_queue_.push_back(std::move(job));
-  // Store enqueue timestamp in parallel deque
-  image_queue_enqueue_times_.push_back(enqueue_time);
+    // Extend job by storing enqueue steady time via file_path metadata hack? Better: expand struct.
+    image_queue_.push_back(std::move(job));
+    // Store enqueue timestamp in parallel deque
+    image_queue_enqueue_times_.push_back(enqueue_time);
     auto qsize = image_queue_.size();
     img_enqueued_.fetch_add(1, std::memory_order_relaxed);
     size_t prev = img_queue_high_water_.load(std::memory_order_relaxed);
@@ -1003,8 +1000,7 @@ void LeRobotBackend::imageWorkerLoop() {
   }
 }
 
-
-void LeRobotBackend::updateEpisodeInfo(int episode_frame_length) const{
+void LeRobotBackend::updateEpisodeInfo(int episode_frame_length) const {
   // Load the existing info.json
   fs::path info_path = meta_root_ / JSON_INFO;
   nlohmann::ordered_json info_json;
@@ -1041,12 +1037,10 @@ void LeRobotBackend::updateEpisodeInfo(int episode_frame_length) const{
 }
 
 void LeRobotBackend::writeMetadata() {
-  
   // TODO(shantanuparab-tr): [TDS-15]: Extract features from the robot's
   // observation space and action space
   // TODO(shantanuparab-tr): [TDS-16]: Get feature specifications from a
   // configuration file or constant definitions
-
 
   // Check if info.json already exists
   fs::path info_path = meta_root_ / JSON_INFO;
@@ -1080,7 +1074,7 @@ void LeRobotBackend::writeMetadata() {
 
   nlohmann::ordered_json features;
 
-  for(const auto &metadata : metadata_ ){
+  for(const auto &metadata : metadata_ ) {
     nlohmann::ordered_json producer_feature = metadata->get_info();
     // Merge producer_feature into features
     for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
@@ -1143,14 +1137,11 @@ void LeRobotBackend::writeMetadata() {
   }
   info_file << info_.dump(4);
   info_file.close();
-  }
-
-
+}
 
 uint32_t LeRobotBackend::scan_existing_episodes(const std::filesystem::path& base_path) {
-
   std::cout << "Scanning existing episodes in: " << base_path << std::endl;
-  
+
   // If directory doesn't exist, return 0
   if (!std::filesystem::exists(base_path)) {
     return 0;
@@ -1202,4 +1193,5 @@ uint32_t LeRobotBackend::scan_existing_episodes(const std::filesystem::path& bas
   // Return max_index + 1, or 0 if no episodes found
   return found_any ? (max_index + 1) : 0;
 }
+
 } // namespace trossen::io::backends
