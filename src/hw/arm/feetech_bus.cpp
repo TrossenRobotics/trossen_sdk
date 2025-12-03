@@ -1,4 +1,4 @@
-#include "so101_drivers/feetech_bus.hpp"
+#include "trossen_sdk/hw/arm/feetech_bus.hpp"
 #include <iostream>
 
 FeetechBus::FeetechBus(const std::string &port, const std::map<std::string, Motor> &motors)
@@ -46,48 +46,4 @@ void FeetechBus::syncWritePosition(const std::map<std::string, int> &goal_positi
     for (auto &[name, goal] : goal_positions) {
         servo_->WritePosEx(motors_[name].id, goal, 0, 0);
     }
-}
-
-void FeetechBus::configureMotors() {
-    for (auto &[name, motor] : motors_) {
-        servo_->ServoMode(motor.id);
-        servo_->EnableTorque(motor.id, 1);
-    }
-}
-
-void FeetechBus::disableTorque() {
-    for (auto &[name, motor] : motors_) {
-        servo_->EnableTorque(motor.id, 0);
-    }
-}
-
-void FeetechBus::enableTorque() {
-    for (auto &[name, motor] : motors_) {
-        servo_->EnableTorque(motor.id, 1);
-    }
-}
-
-void FeetechBus::writeCalibration(const std::map<std::string, MotorCalibration> &calibration) {
-    for (auto &[name, cal] : calibration) {
-        calibration_[cal.id] = cal;
-    }
-}
-
-bool FeetechBus::isCalibrated() const {
-    return !calibration_.empty();
-}
-
-void FeetechBus::writeMotor(int id, int address, int value) {
-    if (servo_->writeWord(id, address, value) != 1) {
-        std::cerr << "Failed to write motor " << id << " addr " << address << std::endl;
-    }
-}
-
-int FeetechBus::readMotor(int id, int address) {
-    int value = servo_->readWord(id, address);
-    if (value == -1) {
-        std::cerr << "Failed to read motor " << id << " addr " << address << std::endl;
-        return 0;
-    }
-    return value;
 }

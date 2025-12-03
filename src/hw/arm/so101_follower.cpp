@@ -1,4 +1,4 @@
-#include "so101_drivers/so101_follower.hpp"
+#include "trossen_sdk/hw/arm/so101_follower.hpp"
 #include <iostream>
 
 SO101Follower::SO101Follower(const std::string &port) {
@@ -10,6 +10,16 @@ SO101Follower::SO101Follower(const std::string &port) {
         {"wrist_roll", {5, "sts3215", 0, 100}},
         {"gripper", {6, "sts3215", 0, 100}}
     };
+    
+    joint_names_ = {
+        "shoulder_pan",
+        "shoulder_lift",
+        "elbow_flex",
+        "wrist_flex",
+        "wrist_roll",
+        "gripper"
+    };
+    
     bus_ = std::make_unique<FeetechBus>(port, motors);
 }
 
@@ -30,46 +40,14 @@ bool SO101Follower::isConnected() const {
     return bus_->isConnected();
 }
 
-std::map<std::string, int> SO101Follower::getObservation() {
+std::map<std::string, int> SO101Follower::getJointPositions() {
     return bus_->syncReadPosition();
 }
 
-void SO101Follower::sendAction(const std::map<std::string, int> &action) {
-    bus_->syncWritePosition(action);
+void SO101Follower::setJointPositions(const std::map<std::string, int> &positions) {
+    bus_->syncWritePosition(positions);
 }
 
-void SO101Follower::calibrate() {
-    // Unlock EPROM to write calibration data
-    std::map<std::string, Motor> motors = {
-        {"shoulder_pan", {1, "sts3215", 0, 100}},
-        {"shoulder_lift", {2, "sts3215", 0, 100}},
-        {"elbow_flex", {3, "sts3215", 0, 100}},
-        {"wrist_flex", {4, "sts3215", 0, 100}},
-        {"wrist_roll", {5, "sts3215", 0, 100}},
-        {"gripper", {6, "sts3215", 0, 100}}
-    };
-    
-    // Read current positions and set as calibration offsets
-    std::map<std::string, MotorCalibration> calibration;
-    auto positions = bus_->syncReadPosition();
-    
-    for (const auto &[name, motor] : motors) {
-        MotorCalibration cal;
-        cal.id = motor.id;
-        cal.drive_mode = 0; // Position mode
-        cal.homing_offset = positions[name];
-        cal.range_min = static_cast<int>(motor.min_range);
-        cal.range_max = static_cast<int>(motor.max_range);
-        calibration[name] = cal;
-        
-        std::cout << "Calibrated " << name << " at position " << positions[name] << std::endl;
-    }
-    
-    bus_->writeCalibration(calibration);
-}
-
-void SO101Follower::configure() {
-    bus_->disableTorque();
-    bus_->configureMotors();
-    bus_->enableTorque();
+std::vector<std::string> SO101Follower::getJointNames() const {
+    return joint_names_;
 }
