@@ -121,7 +121,21 @@ public:
    */
   explicit LeRobotBackend(
     Config cfg,
-    std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata);
+    ProducerMetadataList metadata);
+
+  /**
+   * @brief Prepare backend for a new episode
+   *
+   * @param output_path Base output path for this episode
+   * @param episode_index Zero-based episode index
+   * @param dataset_id Dataset identifier
+   * @param repository_id Repository identifier (unused)
+   */
+  void preprocess_episode(
+    const std::string& output_path,
+    uint32_t episode_index,
+    const std::string& dataset_id,
+    const std::string& repository_id) override;
 
   /**
    * @brief Open a LeRobot V2 logging destination
@@ -417,7 +431,7 @@ private:
   Config cfg_;
 
   /// @brief Metadata for this backend
-  std::vector<std::shared_ptr<hw::PolledProducer::ProducerMetadata>> metadata_;
+  ProducerMetadataList metadata_;
 
   /// @brief Store camera names from metadata for easy access
   std::vector<std::string> camera_names_;

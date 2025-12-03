@@ -22,9 +22,21 @@ namespace trossen::io::backends {
 
 REGISTER_BACKEND(McapBackend, "mcap")
 
-McapBackend::McapBackend(Config cfg)
+McapBackend::McapBackend(
+  Config cfg,
+  const ProducerMetadataList&)
   : io::Backend(cfg.output_path), cfg_(std::move(cfg)) {}
 McapBackend::~McapBackend() { close(); }
+
+void McapBackend::preprocess_episode(
+  const std::string& output_path,
+  uint32_t episode_index,
+  const std::string& dataset_id,
+  const std::string& repository_id)
+{
+  cfg_.output_path = output_path;
+  uri_ = output_path;
+}
 
 bool McapBackend::open() {
   std::scoped_lock lk(writer_mutex_);

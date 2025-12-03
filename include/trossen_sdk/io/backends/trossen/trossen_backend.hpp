@@ -69,9 +69,12 @@ public:
   /**
    * @brief Construct a TrossenBackend
    *
-   * @param cfg Configuration parameters
+   * @param cfg Configuration options
+   * @param metadata Optional producer metadata
    */
-  explicit TrossenBackend(Config cfg);
+  explicit TrossenBackend(
+    Config cfg,
+    const ProducerMetadataList& metadata = {});
 
   /**
    * @brief Open a LeRobot V2 logging destination

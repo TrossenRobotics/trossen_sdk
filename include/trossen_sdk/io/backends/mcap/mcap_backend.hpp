@@ -75,13 +75,30 @@ public:
    * @brief Construct an McapBackend with the given configuration
    *
    * @param cfg Configuration options
+   * @param metadata Optional producer metadata
    */
-  explicit McapBackend(Config cfg);
+  explicit McapBackend(
+    Config cfg,
+    const ProducerMetadataList& metadata = {});
 
   /**
    * @brief Destructor
    */
   ~McapBackend() override;
+
+  /**
+   * @brief Prepare backend for a new episode
+   *
+   * @param output_path Output file path for this episode
+   * @param episode_index Zero-based episode index (unused)
+   * @param dataset_id Dataset identifier (unused)
+   * @param repository_id Repository identifier (unused)
+   */
+  void preprocess_episode(
+    const std::string& output_path,
+    uint32_t episode_index,
+    const std::string& dataset_id,
+    const std::string& repository_id) override;
 
   /**
    * @brief Open the MCAP writer

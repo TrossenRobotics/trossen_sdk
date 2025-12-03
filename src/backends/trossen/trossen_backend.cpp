@@ -22,8 +22,11 @@ REGISTER_BACKEND(TrossenBackend, "trossen")
 
 namespace fs = std::filesystem;
 
-TrossenBackend::TrossenBackend(Config cfg)
-  : Backend(cfg.output_dir), cfg_(std::move(cfg)) {
+TrossenBackend::TrossenBackend(
+  Config cfg,
+  const ProducerMetadataList&)
+  : io::Backend(cfg.output_dir), cfg_(std::move(cfg))
+{
   // Validate encoder threads
   if (cfg_.encoder_threads <= 0) {
     cfg_.encoder_threads = 1;
