@@ -20,13 +20,16 @@
 #include "parquet/arrow/reader.h"
 
 #include "trossen_sdk/data/record.hpp"
-#include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
 #include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
-#include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
+#include "trossen_sdk/hw/camera/opencv_producer.hpp"
+#include "trossen_sdk/io/backend_registry.hpp"
+#include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
 
 namespace trossen::io::backends {
+
+REGISTER_BACKEND(LeRobotBackend, "lerobot")
 
 namespace fs = std::filesystem;
 
