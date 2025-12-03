@@ -39,7 +39,6 @@ void SO101Follower::sendAction(const std::map<std::string, int> &action) {
 }
 
 void SO101Follower::calibrate() {
-    // Unlock EPROM to write calibration data
     std::map<std::string, Motor> motors = {
         {"shoulder_pan", {1, "sts3215", 0, 100}},
         {"shoulder_lift", {2, "sts3215", 0, 100}},

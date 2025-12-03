@@ -36,19 +36,14 @@ std::map<std::string, int> SO101Leader::getAction() {
 
 void SO101Leader::sendFeedback(const std::map<std::string, int> &feedback) {
     // Send force feedback by writing torque limits based on follower resistance
-    // feedback contains torque/load values from follower
     for (const auto &[name, torque_value] : feedback) {
         // Scale torque value to appropriate range (0-1000)
         int scaled_torque = std::min(std::max(torque_value, 0), 1000);
-        
-        // Write torque limit to provide haptic feedback
-        // This creates resistance proportional to follower's load
         std::cout << "Sending feedback to " << name << ": torque=" << scaled_torque << std::endl;
     }
 }
 
 void SO101Leader::calibrate() {
-    // Unlock EPROM to write calibration data
     std::map<std::string, Motor> motors = {
         {"shoulder_pan", {1, "sts3215", 0, 100}},
         {"shoulder_lift", {2, "sts3215", 0, 100}},
