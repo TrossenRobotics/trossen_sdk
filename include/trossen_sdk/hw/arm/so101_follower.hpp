@@ -5,98 +5,97 @@
 #include <map>
 #include <string>
 #include <memory>
+#include <vector>
 
 /**
- * @class SO101Follower
- * @brief Control interface for SO-101 follower arm
- * 
- * This class provides control and communication with an SO-101 follower arm,
- * which receives actions and reports observations through a Feetech serial bus.
+ * @brief SO101 Follower arm driver for teleoperation.
+ *
+ * This class provides an interface to control an SO101 follower arm equipped
+ * with Feetech servos. The follower arm receives position commands
+ * and replicates the motions of a leader arm or other control input.
  */
 class SO101Follower {
 public:
     /**
-     * Construct an SO101Follower instance.
+     * @brief Construct a new SO101Follower instance.
      *
-     * This constructor initializes the follower arm interface with the specified
-     * serial port. The connection is not established until connect() is called.
+     * Initializes the follower arm driver with the specified serial port.
      *
      * @param port Serial port device path (e.g., "/dev/ttyUSB0").
      */
     SO101Follower(const std::string &port);
     
     /**
-     * Destroy the SO101Follower instance.
+     * @brief Destructor.
      *
-     * This destructor automatically disconnects from the arm if still connected.
+     * Automatically disconnects from the arm if still connected.
      */
     ~SO101Follower();
 
     /**
-     * Establish connection to the SO-101 follower arm.
+     * @brief Connect to the follower arm.
      *
-     * This function opens the serial port and initializes communication with
-     * the follower arm servos via the Feetech bus protocol.
+     * Establishes a serial connection to the arm and initializes communication
+     * with the servo motors.
      *
-     * @return true if connection successful, false otherwise.
+     * @return true if connection was successful, false otherwise.
      */
     bool connect();
     
     /**
-     * Disconnect from the SO-101 follower arm.
+     * @brief Disconnect from the follower arm.
      *
-     * This function closes the serial port connection and releases resources.
+     * Closes the serial connection to the arm.
      */
     void disconnect();
     
     /**
-     * Check if currently connected to the arm.
+     * @brief Check if the arm is connected.
      *
-     * This function queries the connection state without attempting to communicate
-     * with the hardware.
-     *
-     * @return true if connected, false otherwise.
+     * @return true if the arm is currently connected, false otherwise.
      */
     bool isConnected() const;
 
     /**
-     * Read current state observations from the follower arm.
+     * @brief Read current joint positions from the follower arm.
      *
-     * This function queries all servos and retrieves their current positions
-     * and states, returning them as a map indexed by joint name.
+     * Queries all servo motors and returns their current positions in servo units.
+     * Position values are typically in the range 0-4095 for STS3215 servos.
      *
-     * @return Map of joint names to their current positions/states.
+     * @return Map of joint names to position values in servo units.
      */
-    std::map<std::string, int> getObservation();
+    std::map<std::string, int> getJointPositions();
     
     /**
-     * Send action commands to the follower arm.
+     * @brief Write target joint positions to the follower arm.
      *
-     * This function transmits target positions to the servos, commanding them
-     * to move to the specified positions.
+     * Commands the servo motors to move to the specified target positions.
      *
-     * @param action Map of joint names to target positions/commands.
+     * @param positions Map of joint names to target position values in servo units.
      */
-    void sendAction(const std::map<std::string, int> &action);
-
-    /**
-     * Perform calibration routine for the follower arm.
-     *
-     * This function executes a calibration sequence to establish zero positions
-     * and verify servo functionality.
-     */
-    void calibrate();
+    void setJointPositions(const std::map<std::string, int> &positions);
     
     /**
-     * Configure the follower arm with default settings.
+     * @brief Get ordered list of joint names.
      *
-     * This function applies standard configuration parameters to all servos,
-     * including PID gains, speed limits, and torque settings.
+     * Returns the joint names in a consistent order matching the physical
+     * kinematic chain of the arm.
+     *
+     * @return Vector of joint names in order: shoulder_pan, shoulder_lift,
+     *         elbow_flex, wrist_flex, wrist_roll, gripper.
      */
-    void configure();
+    std::vector<std::string> getJointNames() const;
+    
+    /**
+     * @brief Get the arm model name.
+     *
+     * @return The model name "SO101".
+     */
+    std::string getModelName() const { return "SO101"; }
 
 private:
     std::unique_ptr<FeetechBus> bus_;
+    std::vector<std::string> joint_names_;
 };
 
 #endif // TROSSEN_SDK__HW__ARM__SO101_FOLLOWER_HPP

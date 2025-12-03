@@ -5,99 +5,87 @@
 #include <map>
 #include <string>
 #include <memory>
+#include <vector>
 
 /**
- * @class SO101Leader
- * @brief Control interface for SO-101 leader arm
- * 
- * This class provides control and communication with an SO-101 leader arm,
- * which reads user actions and provides feedback through a Feetech serial bus.
- * Typically used in teleoperation scenarios.
+ * @brief SO101 Leader arm driver for teleoperation.
+ *
+ * This class provides an interface to read joint positions from an SO101 leader arm
+ * equipped with Feetech servos. The leader arm is typically used to capture
+ * human operator motions for teleoperation tasks.
  */
 class SO101Leader {
 public:
     /**
-     * Construct an SO101Leader instance.
+     * @brief Construct a new SO101Leader instance.
      *
-     * This constructor initializes the leader arm interface with the specified
-     * serial port. The connection is not established until connect() is called.
+     * Initializes the leader arm driver with the specified serial port.
      *
      * @param port Serial port device path (e.g., "/dev/ttyUSB0").
      */
     SO101Leader(const std::string &port);
     
     /**
-     * Destroy the SO101Leader instance.
+     * @brief Destructor.
      *
-     * This destructor automatically disconnects from the arm if still connected.
+     * Automatically disconnects from the arm if still connected.
      */
     ~SO101Leader();
 
     /**
-     * Establish connection to the SO-101 leader arm.
+     * @brief Connect to the leader arm.
      *
-     * This function opens the serial port and initializes communication with
-     * the leader arm servos via the Feetech bus protocol.
+     * Establishes a serial connection to the arm and initializes communication
+     * with the servo motors.
      *
-     * @return true if connection successful, false otherwise.
+     * @return true if connection was successful, false otherwise.
      */
     bool connect();
     
     /**
-     * Disconnect from the SO-101 leader arm.
+     * @brief Disconnect from the leader arm.
      *
-     * This function closes the serial port connection and releases resources.
+     * Closes the serial connection to the arm.
      */
     void disconnect();
     
     /**
-     * Check if currently connected to the arm.
+     * @brief Check if the arm is connected.
      *
-     * This function queries the connection state without attempting to communicate
-     * with the hardware.
-     *
-     * @return true if connected, false otherwise.
+     * @return true if the arm is currently connected, false otherwise.
      */
     bool isConnected() const;
 
     /**
-     * Read action commands from the leader arm.
+     * @brief Read current joint positions from the leader arm.
      *
-     * This function queries all servos to read the operator's commanded positions,
-     * returning them as a map indexed by joint name for teleoperation use.
+     * Queries all servo motors and returns their current positions in servo units.
      *
-     * @return Map of joint names to their current positions/actions.
+     * @return Map of joint names to position values in servo units.
      */
-    std::map<std::string, int> getAction();
+    std::map<std::string, int> getJointPositions();
     
     /**
-     * Send feedback to the leader arm.
+     * @brief Get ordered list of joint names.
      *
-     * This function transmits feedback values (e.g., force feedback or resistance)
-     * to the leader arm servos to provide haptic cues to the operator.
+     * Returns the joint names in a consistent order matching the physical
+     * kinematic chain of the arm.
      *
-     * @param feedback Map of joint names to feedback values.
+     * @return Vector of joint names in order: shoulder_pan, shoulder_lift,
+     *         elbow_flex, wrist_flex, wrist_roll, gripper.
      */
-    void sendFeedback(const std::map<std::string, int> &feedback);
-
-    /**
-     * Perform calibration routine for the leader arm.
-     *
-     * This function executes a calibration sequence to establish zero positions
-     * and verify servo functionality.
-     */
-    void calibrate();
+    std::vector<std::string> getJointNames() const;
     
     /**
-     * Configure the leader arm with default settings.
+     * @brief Get the arm model name.
      *
-     * This function applies standard configuration parameters to all servos,
-     * including PID gains, speed limits, and torque settings.
+     * @return The model name "SO101".
      */
-    void configure();
+    std::string getModelName() const { return "SO101"; }
 
 private:
     std::unique_ptr<FeetechBus> bus_;
+    std::vector<std::string> joint_names_;
 };
 
 #endif // TROSSEN_SDK__HW__ARM__SO101_LEADER_HPP
