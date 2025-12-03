@@ -10,7 +10,6 @@ SO101Follower::SO101Follower(const std::string &port) {
         {"wrist_roll", {5, "sts3215", 0, 100}},
         {"gripper", {6, "sts3215", 0, 100}}
     };
-
     joint_names_ = {
         "shoulder_pan",
         "shoulder_lift",
@@ -19,7 +18,6 @@ SO101Follower::SO101Follower(const std::string &port) {
         "wrist_roll",
         "gripper"
     };
-
     bus_ = std::make_unique<FeetechBus>(port, motors);
 }
 

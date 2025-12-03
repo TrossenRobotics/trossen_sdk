@@ -65,14 +65,12 @@ public:
      * @return true if connection was successful, false otherwise.
      */
     bool connect();
-
     /**
      * @brief Disconnect from the servo bus.
      *
      * Closes the serial port connection to the servo motors.
      */
     void disconnect();
-
     /**
      * @brief Check if the bus is connected.
      *

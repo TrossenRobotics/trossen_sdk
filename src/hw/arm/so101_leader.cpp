@@ -19,7 +19,6 @@ SO101Leader::SO101Leader(const std::string &port) {
         "wrist_roll",
         "gripper"
     };
-
     bus_ = std::make_unique<FeetechBus>(port, motors);
 }
 
