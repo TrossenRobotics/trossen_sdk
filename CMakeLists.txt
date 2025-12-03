@@ -17,6 +17,10 @@ add_library(trossen_sdk SHARED
   src/hw/arm/teleop_arm_producer.cpp
   src/hw/arm/mock_joint_producer.cpp
   src/hw/arm/teleop_mock_joint_producer.cpp
+  src/hw/arm/so101_leader.cpp
+  src/hw/arm/so101_follower.cpp
+  src/hw/arm/feetech_bus.cpp
+  src/hw/arm/so101_teleop_arm_producer.cpp
   src/hw/camera/opencv_producer.cpp
   src/hw/camera/mock_producer.cpp
   src/hw/camera/mock_synced_producer.cpp
@@ -117,14 +121,36 @@ if(NOT OpenCV_FOUND)
 endif()
 message(STATUS "Found OpenCV: ${OpenCV_VERSION}")
 target_include_directories(trossen_sdk PUBLIC ${OpenCV_INCLUDE_DIRS})
+
+# # Feetech servo library for SO101 arms (SCServo library)
+# find_library(SCSERVO_LIBRARY NAMES SCServo PATHS /usr/local/lib /usr/lib)
+# find_path(SCSERVO_INCLUDE_DIR ftservo/ftservo.h PATHS /usr/local/include /usr/include)
+FetchContent_Declare(
+  SCServo
+  SYSTEM
+  GIT_REPOSITORY https://github.com/ftservo/FTServo_Linux.git
+  GIT_TAG 064a6dbf814477b970959b5b01b2fc9bc594afa3
+  CMAKE_ARGS
+    -D CMAKE_POLICY_VERSION_MINIMUM=3.5
+  PATCH_COMMAND ${CMAKE_COMMAND} -E chdir <SOURCE_DIR> bash -c "git apply --check ${CMAKE_SOURCE_DIR}/cmake/patches/SCServo.patch && git apply ${CMAKE_SOURCE_DIR}/cmake/patches/SCServo.patch || echo 'Patch already applied'"
+
+)
+FetchContent_MakeAvailable(SCServo)
+
+# Add SCServo src subdirectory to build the library
+add_subdirectory(${scservo_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/scservo-build)
+
+# Use the FetchContent source directory for include paths
+target_include_directories(trossen_sdk PUBLIC ${scservo_SOURCE_DIR}/src)
+
 target_link_libraries(
   trossen_sdk PUBLIC
   ${OpenCV_LIBS}
   Arrow::arrow_shared
   Parquet::parquet_shared
   libtrossen_arm
+  SCServo
 )
-
 # List proto files for MCAP backend
 set(TROSSEN_PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include/trossen_sdk/io/backends/mcap/proto)
 set(PROTOBUF_IMPORT_DIRS ${TROSSEN_PROTO_PATH})

@@ -20,6 +20,7 @@
 
 namespace trossen::io::backends {
 
+
 REGISTER_BACKEND(McapBackend, "mcap")
 
 McapBackend::McapBackend(

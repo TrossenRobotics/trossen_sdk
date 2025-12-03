@@ -8,6 +8,7 @@
 
 namespace trossen::io::backends {
 
+
 REGISTER_BACKEND(NullBackend, "null")
 
 NullBackend::NullBackend(
