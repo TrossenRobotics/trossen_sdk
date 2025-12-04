@@ -34,6 +34,16 @@ MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   metadata_.pix_fmt = "yuv420p";
   metadata_.channels = (cfg_.encoding == "bgr8" || cfg_.encoding == "rgb8") ? 3 : 1;
   metadata_.has_audio = false;
+
+  // Pre-allocate frame buffer to avoid repeated allocations
+  frame_buffer_ = cv::Mat(cfg_.height, cfg_.width, CV_8UC3);
+
+  // Generate cached frame if caching is enabled
+  if (cfg_.cache_frames) {
+    cached_frame_ = cv::Mat(cfg_.height, cfg_.width, CV_8UC3);
+    generate_frame(cached_frame_);
+    cache_valid_ = true;
+  }
 }
 
 void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
@@ -43,6 +53,11 @@ void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   // Warmup: discard first N emission opportunities without generating frames
   // This allows the system to stabilize before recording actual data
   if (warmup_remaining_ > 0) {
+    if (cache_valid_) {
+      // Use cached frame for warmup
+    } else {
+      generate_frame(frame_buffer_);
+    }
     --warmup_remaining_;
     ++stats_.warmup_discarded;
     last_emit_mono_ = now_mono;
@@ -62,19 +77,25 @@ void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::Rec
     if (intervals_ns_.size() < kMaxIntervals) intervals_ns_.push_back(dt);
   }
 
-  cv::Mat frame(cfg_.height, cfg_.width, CV_8UC3);
-  generate_frame(frame);
+  // Use cached frame or generate into pre-allocated buffer
+  cv::Mat* source_frame;
+  if (cache_valid_) {
+    source_frame = &cached_frame_;
+  } else {
+    generate_frame(frame_buffer_);
+    source_frame = &frame_buffer_;
+  }
 
   auto rec = std::make_shared<data::ImageRecord>();
   rec->ts.monotonic = data::now_mono();
   rec->ts.realtime = data::now_real();
   rec->seq = seq_++;
   rec->id = cfg_.stream_id;
-  rec->width = static_cast<uint32_t>(frame.cols);
-  rec->height = static_cast<uint32_t>(frame.rows);
-  rec->channels = static_cast<uint32_t>(frame.channels());
+  rec->width = static_cast<uint32_t>(source_frame->cols);
+  rec->height = static_cast<uint32_t>(source_frame->rows);
+  rec->channels = static_cast<uint32_t>(source_frame->channels());
   rec->encoding = cfg_.encoding;
-  rec->image = std::move(frame);
+  rec->image = source_frame->clone();  // Clone for record (must own the data)
 
   emit(rec);
   ++stats_.produced;
@@ -103,16 +124,25 @@ MockCameraProducer::JitterStats MockCameraProducer::jitter_stats() const {
 
 void MockCameraProducer::generate_frame(cv::Mat &dst) {
   switch (cfg_.pattern) {
+    case Pattern::Solid: {
+      // Fastest: solid gray (ideal for benchmarking pure throughput)
+      dst.setTo(cv::Scalar(128, 128, 128));
+      break;
+    }
     case Pattern::Gradient: {
-      // Horizontal gradient with vertical modulation (time-based to create subtle motion)
-      double t = (seq_ % 1000) / 1000.0;
-      for (int y=0; y < dst.rows; ++y) {
-        auto *row = dst.ptr<cv::Vec3b>(y);
-        for (int x=0; x < dst.cols; ++x) {
+      // Optimized: pre-compute one row, memcpy to all rows (much faster)
+      static std::vector<cv::Vec3b> gradient_row;
+      if (gradient_row.size() != static_cast<size_t>(dst.cols)) {
+        gradient_row.resize(dst.cols);
+        for (int x = 0; x < dst.cols; ++x) {
           uint8_t v = static_cast<uint8_t>((255.0 * x) / dst.cols);
-          uint8_t b = static_cast<uint8_t>(v * (0.5 + 0.5 * t));
-          row[x] = cv::Vec3b(b, v, static_cast<uint8_t>((v + y) & 0xFF));
+          gradient_row[x] = cv::Vec3b(v/2, v, v);
         }
+      }
+      // Copy pre-computed row to all rows (avoids nested loops)
+      for (int y = 0; y < dst.rows; ++y) {
+        std::memcpy(dst.ptr<cv::Vec3b>(y), gradient_row.data(),
+                    dst.cols * sizeof(cv::Vec3b));
       }
       break;
     }

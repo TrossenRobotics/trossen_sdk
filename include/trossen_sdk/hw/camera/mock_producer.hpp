@@ -34,6 +34,9 @@ public:
    * @brief Pattern types for synthetic image generation
    */
   enum class Pattern {
+    /// @brief Solid color pattern (fastest generation)
+    Solid,
+
     /// @brief Gradient pattern
     Gradient,
 
@@ -53,6 +56,9 @@ public:
 
     /// @brief Target frames per second (0 = emit every poll)
     int fps{60};
+
+    /// @brief Cache and reuse a single frame (huge performance boost)
+    bool cache_frames{false};
 
     /// @brief Logical stream identifier
     std::string stream_id{"mock_cam"};
@@ -230,6 +236,15 @@ private:
 
   /// @brief Producer metadata
   MockCameraProducerMetadata metadata_;
+
+  /// @brief Pre-allocated frame buffer (reused to avoid allocations)
+  cv::Mat frame_buffer_;
+
+  /// @brief Cached frame for reuse mode
+  cv::Mat cached_frame_;
+
+  /// @brief Whether cached frame has been generated
+  bool cache_valid_{false};
 };
 
 }  // namespace trossen::hw::camera
