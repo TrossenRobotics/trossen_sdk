@@ -31,6 +31,8 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/configuration/loaders/json_loader.hpp"
 
 #include "./demo_utils.hpp"
 
@@ -142,6 +144,14 @@ int main(int argc, char** argv) {
     print_usage(argv[0]);
     return 0;
   }
+  if (!std::filesystem::exists("config/sdk_config.json")) {
+    std::cerr << "Error: config/sdk_config.json not found!" << std::endl;
+    return 1;
+  }
+
+  // Create and load global configuration
+  auto j = JsonLoader::load("config/sdk_config.json");
+  GlobalConfig::instance().load_from_json(j);
 
   // Print configuration
   std::vector<std::string> config_lines = {

@@ -23,6 +23,7 @@
 
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_schemas.hpp"
+#include "trossen_sdk/configuration/types/backends/mcap_backend_config.hpp"
 
 namespace trossen::io::backends {
 
@@ -220,6 +221,9 @@ private:
 
   /// @brief Statistics about written records
   Stats stats_{};
+
+  /// @brief Test Config
+  std::shared_ptr<McapBackendConfig> test_config_;
 };
 
 }  // namespace trossen::io::backends

@@ -21,6 +21,8 @@ add_library(trossen_sdk SHARED
   src/hw/camera/mock_producer.cpp
   src/hw/camera/mock_synced_producer.cpp
   src/runtime/session_manager.cpp
+  src/configuration/global_config.cpp
+  src/configuration/loaders/json_loader.cpp
 )
 
 # Add architecture-specific CMAKE_PREFIX_PATH
