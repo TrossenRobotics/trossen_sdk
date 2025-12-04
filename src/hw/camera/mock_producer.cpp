@@ -18,8 +18,12 @@ namespace trossen::hw::camera {
 MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   rng_.seed(static_cast<uint32_t>(cfg_.seed));
   warmup_remaining_ = cfg_.warmup_frames;
+  // Convert FPS to frame period in nanoseconds
+  // For polled producers, floor to nearest ms to align with
+  // typical polling periods and avoid timing mismatches with schedulers
   if (cfg_.fps > 0) {
-    frame_period_ns_ = static_cast<uint64_t>(1e9 / static_cast<double>(cfg_.fps));
+    double period_ms = 1000.0 / static_cast<double>(cfg_.fps);
+    frame_period_ns_ = static_cast<uint64_t>(std::floor(period_ms)) * 1'000'000;
   }
 
   // Populate metadata
@@ -39,14 +43,26 @@ MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
 void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
   // Respect target FPS (if configured)
   uint64_t now_mono = data::now_mono().to_ns();
-  if (last_emit_mono_ != 0) {
-    uint64_t dt = now_mono - last_emit_mono_;
-    if (intervals_ns_.size() < kMaxIntervals) intervals_ns_.push_back(dt);
-  }
+  
+  // Check if enough time has passed since last emit
+  // Use a small tolerance (1ms = 1,000,000ns) to account for scheduler timing jitter
+  // This prevents missing frames when polling period closely matches frame period
+  // not sure if this is the best practice but i get 148 frames out of 150 for 5 seconds at 30 fps 
   if (frame_period_ns_ > 0 && last_emit_mono_ != 0) {
-    if (now_mono - last_emit_mono_ < frame_period_ns_) {
-      return;  // not time yet
+    constexpr uint64_t tolerance_ns = 1'000'000;  // 1ms tolerance
+    uint64_t elapsed = now_mono - last_emit_mono_;
+    if (elapsed + tolerance_ns < frame_period_ns_) {
+      return;  // not time yet (even with tolerance)
     }
+  }
+
+  if (warmup_remaining_ > 0) {
+    cv::Mat frame(cfg_.height, cfg_.width, CV_8UC3);
+    generate_frame(frame);
+    --warmup_remaining_;
+    ++stats_.warmup_discarded;
+    last_emit_mono_ = now_mono;
+    return;
   }
 
   // Simulated drop
@@ -56,15 +72,14 @@ void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::Rec
     return;
   }
 
+  // Record interval for emitted frames only
+  if (last_emit_mono_ != 0) {
+    uint64_t dt = now_mono - last_emit_mono_;
+    if (intervals_ns_.size() < kMaxIntervals) intervals_ns_.push_back(dt);
+  }
+
   cv::Mat frame(cfg_.height, cfg_.width, CV_8UC3);
   generate_frame(frame);
-
-  if (warmup_remaining_ > 0) {
-    --warmup_remaining_;
-    ++stats_.warmup_discarded;
-    last_emit_mono_ = now_mono;
-    return;
-  }
 
   auto rec = std::make_shared<data::ImageRecord>();
   rec->ts.monotonic = data::now_mono();
