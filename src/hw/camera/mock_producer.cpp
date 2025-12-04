@@ -43,11 +43,11 @@ MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
 void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
   // Respect target FPS (if configured)
   uint64_t now_mono = data::now_mono().to_ns();
-  
+
   // Check if enough time has passed since last emit
   // Use a small tolerance (1ms = 1,000,000ns) to account for scheduler timing jitter
   // This prevents missing frames when polling period closely matches frame period
-  // not sure if this is the best practice but i get 148 frames out of 150 for 5 seconds at 30 fps 
+  // not sure if this is the best practice but i get 148 frames out of 150 for 5 seconds at 30 fps
   if (frame_period_ns_ > 0 && last_emit_mono_ != 0) {
     constexpr uint64_t tolerance_ns = 1'000'000;  // 1ms tolerance
     uint64_t elapsed = now_mono - last_emit_mono_;
@@ -56,9 +56,9 @@ void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::Rec
     }
   }
 
+  // Warmup: discard first N emission opportunities without generating frames
+  // This allows the system to stabilize before recording actual data
   if (warmup_remaining_ > 0) {
-    cv::Mat frame(cfg_.height, cfg_.width, CV_8UC3);
-    generate_frame(frame);
     --warmup_remaining_;
     ++stats_.warmup_discarded;
     last_emit_mono_ = now_mono;
