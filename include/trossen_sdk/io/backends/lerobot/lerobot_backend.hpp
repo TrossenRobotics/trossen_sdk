@@ -25,6 +25,7 @@
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_constants.hpp"
+#include "trossen_sdk/configuration/types/backends/lerobot_backend_config.hpp"
 
 namespace trossen::io::backends {
 
@@ -471,6 +472,9 @@ private:
 
   /// @brief Hash map to store the frame indices for each source
   std::unordered_map<std::string, uint64_t> source_frame_indices_;
+
+  /// @brief Test Config
+  std::shared_ptr<LeRobotBackendConfig> test_config_;
 };
 
 }  // namespace trossen::io::backends

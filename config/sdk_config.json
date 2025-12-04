@@ -1,0 +1,28 @@
+{
+  "lerobot_backend": {
+    "type": "lerobot_backend",
+    "output_dir": "/data/lerobot_output",
+    "encoder_threads": 2,
+    "max_image_queue": 10,
+    "png_compression_level": 5,
+    "override_existing": true,
+    "encode_videos": true,
+    "task_name": "widowxai_pick_and_place",
+    "repository_id": "trossen-roboticsd/widowxai_dataset",
+    "dataset_id": "widowxai_v1",
+    "root_path": "/data/widowxai_dataset",
+    "episode_index": 0,
+    "robot_name": "widowxai",
+    "fps": 30.0
+  },
+  "mcap_backend": {
+    "type": "mcap_backend",
+    "output_dir": "/data/mcap_output",
+    "robot_name": "/robot/joint_states",
+    "chunk_size_bytes": 4194304,
+    "compression": "zstd",
+    "dataset_id": "mcap_dataset_v1",
+    "episode_index": 0
+  }
+}
+
