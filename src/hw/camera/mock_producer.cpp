@@ -18,13 +18,9 @@ namespace trossen::hw::camera {
 MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   rng_.seed(static_cast<uint32_t>(cfg_.seed));
   warmup_remaining_ = cfg_.warmup_frames;
-  // Convert FPS to frame period in nanoseconds
-  // For polled producers, floor to nearest ms to align with
-  // typical polling periods and avoid timing mismatches with schedulers
-  if (cfg_.fps > 0) {
-    double period_ms = 1000.0 / static_cast<double>(cfg_.fps);
-    frame_period_ns_ = static_cast<uint64_t>(std::floor(period_ms)) * 1'000'000;
-  }
+  // No internal FPS throttling - rely on Session Manager polling rate
+  // The fps config is kept for metadata only
+  frame_period_ns_ = 0;
 
   // Populate metadata
   metadata_.type = "mock_camera";
@@ -41,20 +37,8 @@ MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
 }
 
 void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
-  // Respect target FPS (if configured)
+  // No FPS throttling - emit on every poll (Session Manager controls rate)
   uint64_t now_mono = data::now_mono().to_ns();
-
-  // Check if enough time has passed since last emit
-  // Use a small tolerance (1ms = 1,000,000ns) to account for scheduler timing jitter
-  // This prevents missing frames when polling period closely matches frame period
-  // not sure if this is the best practice but i get 148 frames out of 150 for 5 seconds at 30 fps
-  if (frame_period_ns_ > 0 && last_emit_mono_ != 0) {
-    constexpr uint64_t tolerance_ns = 1'000'000;  // 1ms tolerance
-    uint64_t elapsed = now_mono - last_emit_mono_;
-    if (elapsed + tolerance_ns < frame_period_ns_) {
-      return;  // not time yet (even with tolerance)
-    }
-  }
 
   // Warmup: discard first N emission opportunities without generating frames
   // This allows the system to stabilize before recording actual data
@@ -67,8 +51,8 @@ void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::Rec
 
   // Simulated drop
   if (cfg_.drop_probability > 0.0 && drop_dist_(rng_) < cfg_.drop_probability) {
-    ++stats_.dropped;  // treat as drop
-    last_emit_mono_ = now_mono;  // still advance to keep pacing realistic
+    ++stats_.dropped;
+    last_emit_mono_ = now_mono;
     return;
   }
 
