@@ -29,25 +29,12 @@ public:
    *
    * @param uri Path or logical destination identifier
    */
-  explicit Backend(const std::string& uri) : uri_(uri) {}
+  explicit Backend(){}
 
   /**
    * @brief Virtual destructor
    */
   virtual ~Backend() = default;
-
-  /**
-   * @brief Configuration struct for backend.
-   */
-  struct Config {
-    /// @brief Base config options for all backends can be added here
-    std::string type{""};
-
-    /**
-     * @brief Virtual destructor
-     */
-    virtual ~Config() = default;
-  };
 
   /**
    * @brief Prepare backend for a new episode with runtime parameters

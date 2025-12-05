@@ -23,23 +23,37 @@ REGISTER_BACKEND(TrossenBackend, "trossen")
 namespace fs = std::filesystem;
 
 TrossenBackend::TrossenBackend(
-  Config cfg,
   const ProducerMetadataList&)
-  : io::Backend(cfg.output_dir), cfg_(std::move(cfg))
-{
+  : io::Backend()
+{ 
+
+  // Load configuration
+  cfg_ = GlobalConfig::instance().get_as<TrossenBackendConfig>("trossen_backend");
+  if (!cfg_) {
+        std::cerr << "Backend config not found!" << std::endl;
+        return;
+  }
+  // Print the stored values
+  std::cout << "================= Trossen Backend Config =================" << std::endl;
+  std::cout << "Output Dir: " << cfg_->output_dir << std::endl;
+  std::cout << "Encoder Threads: " << cfg_->encoder_threads << std::endl;
+  std::cout << "Max Image Queue: " << cfg_->max_image_queue << std::endl;
+  std::cout << "Drop Policy: " << cfg_->drop_policy << std::endl;
+  std::cout << "PNG Compression Level: " << cfg_->png_compression_level << std::endl;
+  std::cout << "==========================================================" << std::endl;
   // Validate encoder threads
-  if (cfg_.encoder_threads <= 0) {
-    cfg_.encoder_threads = 1;
+  if (cfg_->encoder_threads <= 0) {
+    cfg_->encoder_threads = 1;
   }
   // Validate PNG compression level
-  if (cfg_.png_compression_level < 0 || cfg_.png_compression_level > 9) {
-    cfg_.png_compression_level = 3;
+  if (cfg_->png_compression_level < 0 || cfg_->png_compression_level > 9) {
+    cfg_->png_compression_level = 3;
   }
 
   // URI is absolute path to output directory. Set to absolute path and check write access.
   // Validate output directory path
   try {
-    uri_ = fs::absolute(cfg_.output_dir).string();
+    uri_ = fs::absolute(cfg_->output_dir).string();
   } catch (const std::exception& e) {
     throw std::runtime_error(
       "Failed to resolve absolute path of output directory: " + std::string(e.what()));
@@ -67,15 +81,15 @@ TrossenBackend::TrossenBackend(
   // Print off configuration
   std::cout << "TrossenBackend configuration:\n"
             << "  Output dir: " << uri_ << "\n"
-            << "  Encoder threads: " << cfg_.encoder_threads << "\n"
+            << "  Encoder threads: " << cfg_->encoder_threads << "\n"
             << "  Max image queue: "
-            << (cfg_.max_image_queue == 0 ? "unbounded" : std::to_string(cfg_.max_image_queue))
+            << (cfg_->max_image_queue == 0 ? "unbounded" : std::to_string(cfg_->max_image_queue))
             << "\n"
             << "  Drop policy: "
-            << (cfg_.drop_policy == DropPolicy::DropNewest ? "DropNewest" :
-                (cfg_.drop_policy == DropPolicy::DropOldest ? "DropOldest" : "Block"))
+            // << (cfg_->drop_policy == DropPolicy::DropNewest ? "DropNewest" :
+            //     (cfg_->drop_policy == DropPolicy::DropOldest ? "DropOldest" : "Block"))
             << "\n"
-            << "  PNG compression level: " << cfg_.png_compression_level << "\n";
+            << "  PNG compression level: " << cfg_->png_compression_level << "\n";
 }
 
 bool TrossenBackend::open() {
@@ -98,11 +112,11 @@ bool TrossenBackend::open() {
   }
   header_written_ = false;
   // Cache queue policy derived members
-  max_image_queue_cached_ = cfg_.max_image_queue;
+  max_image_queue_cached_ = cfg_->max_image_queue;
 
   // Start image worker threads
   image_worker_running_ = true;
-  size_t nthreads = cfg_.encoder_threads == 0 ? 1 : cfg_.encoder_threads;
+  size_t nthreads = cfg_->encoder_threads == 0 ? 1 : cfg_->encoder_threads;
   image_workers_.reserve(nthreads);
   for (size_t i = 0; i < nthreads; ++i) {
     image_workers_.emplace_back(&TrossenBackend::image_worker_loop, this);
@@ -210,7 +224,7 @@ void TrossenBackend::write_image(const data::RecordBase& base) {
     std::lock_guard<std::mutex> lk(image_queue_mutex_);
     // Enforce queue policy if max_image_queue_ is set
     if (max_image_queue_cached_ > 0 && image_queue_.size() >= max_image_queue_cached_) {
-      switch (cfg_.drop_policy) {
+      switch (trossen::io::backends::drop_policy_from_string(cfg_->drop_policy)) {
         case DropPolicy::DropNewest: {
           // Silently drop newest by not adding it to the queue
           img_dropped_.fetch_add(1, std::memory_order_relaxed);
@@ -246,7 +260,7 @@ void TrossenBackend::write_image(const data::RecordBase& base) {
 }
 
 void TrossenBackend::image_worker_loop() {
-  const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_.png_compression_level };
+  const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_->png_compression_level };
   while (image_worker_running_) {
     ImageJob job;
     {

@@ -18,12 +18,13 @@ struct LeRobotBackendConfig : public IConfig {
     int episode_index{0};
     std::string robot_name{"trossen_ai_generic"};
     float fps{30.0f};
+    std::string drop_policy{"DropNewest"};
 
     std::string type() const override { return "lerobot_backend"; }
 
     static LeRobotBackendConfig from_json(const nlohmann::json& j) {
         LeRobotBackendConfig c;
-        c.output_dir = j.at("output_dir").get<std::string>();
+        c.output_dir = j.value("output_dir", trossen::io::backends::get_default_root_path().string());
         c.encoder_threads = j.value("encoder_threads", 1);
         c.max_image_queue = j.value("max_image_queue", 0);
         c.png_compression_level = j.value("png_compression_level", 3);
@@ -37,6 +38,7 @@ struct LeRobotBackendConfig : public IConfig {
         c.episode_index = j.value("episode_index", 0);
         c.robot_name = j.value("robot_name", "trossen_ai_generic");
         c.fps = j.value("fps", 30.0f);
+        c.drop_policy = j.value("drop_policy", "DropNewest");
 
         return c;
     }

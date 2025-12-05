@@ -44,10 +44,10 @@ SessionManager::SessionManager(SessionConfig&& config)
   }
   // TODO(shantanuparab-tr): Make this backend-agnostic by using a factory method
   // Scan directory for existing episodes and resume from next index
-  if (config_.backend_config->type == "mcap") {
+  if (config_.backend_type == "mcap") {
     std::filesystem::path data_directory_path = config_.base_path / config_.dataset_id;
     next_episode_index_ = io::backends::McapBackend::scan_existing_episodes(data_directory_path);
-  } else if (config_.backend_config->type == "lerobot") {
+  } else if (config_.backend_type == "lerobot") {
     std::filesystem::path data_directory_path =
       config_.base_path /
       config_.repository_id /
@@ -56,7 +56,7 @@ SessionManager::SessionManager(SessionConfig&& config)
       "chunk-000";
     next_episode_index_ = io::backends::LeRobotBackend::scan_existing_episodes(data_directory_path);
   } else {
-    throw std::invalid_argument("Unsupported backend type: " + config_.backend_config->type);
+    throw std::invalid_argument("Unsupported backend type: " + config_.backend_type);
   }
   if (next_episode_index_ > 0) {
     std::cout << "Found " << next_episode_index_ << " existing episode(s). "
@@ -334,18 +334,16 @@ std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
   // Generate filename: episode_NNNNNN.mcap (6-digit zero-padded)
   // TODO(lukeschmitt-tr): This is specific to MCAP files; consider making more generic
   std::ostringstream oss;
-  if (config_.backend_config == nullptr) {
-    throw std::runtime_error("SessionManager::build_episode_path: backend_config is null");
-  } else if (config_.backend_config->type == "lerobot") {
+ if (config_.backend_type == "lerobot") {
       return config_.base_path;
-  } else if (config_.backend_config->type == "mcap") {
+  } else if (config_.backend_type == "mcap") {
       oss << "episode_" << std::setfill('0') << std::setw(6) << index << ".mcap";
       return config_.base_path / config_.dataset_id / oss.str();
 
   } else {
     throw std::runtime_error(
       "SessionManager::build_episode_path: Unsupported backend type: "
-      + config_.backend_config->type);
+      + config_.backend_type);
   }
 }
 
@@ -354,14 +352,13 @@ std::shared_ptr<io::Backend> SessionManager::create_backend(
   uint32_t episode_index,
   const ProducerMetadataList& producer_metadatas)
 {
-  if (config_.backend_config == nullptr) {
-    throw std::runtime_error("SessionManager::create_backend: backend_config is null");
+  if (config_.backend_type.empty()) {
+    throw std::runtime_error("SessionManager::create_backend: backend_type is empty");
   }
 
   // Create backend instance via registry
   auto backend = io::BackendRegistry::create(
-    config_.backend_config->type,
-    *config_.backend_config,
+    config_.backend_type,
     producer_metadatas);
 
   // Let the backend configure itself for this episode

@@ -9,6 +9,8 @@
 #include <memory>
 
 #include "trossen_sdk/trossen_sdk.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/configuration/loaders/json_loader.hpp"
 
 int main() {
   // List registered backends
@@ -20,13 +22,11 @@ int main() {
   }
   std::cout << "\n";
 
-  // Create and use a backend through the registry
-  std::cout << "Creating null backend...\n";
-  trossen::io::backends::NullBackend::Config cfg;
-  cfg.type = "null";
-  cfg.uri = "null://demo";
+  // Create and load global configuration
+  auto j = JsonLoader::load("config/sdk_config.json");
+  GlobalConfig::instance().load_from_json(j);
 
-  auto backend = trossen::io::BackendRegistry::create("null", cfg);
+  auto backend = trossen::io::BackendRegistry::create("null");
   backend->open();
 
   // Write some data

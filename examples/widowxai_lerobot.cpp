@@ -248,25 +248,9 @@ int main(int argc, char** argv) {
   session_cfg.repository_id = cfg.repository_id;
 
   if (cfg.backend_type == "mcap") {
-    auto mcap_cfg = std::make_unique<trossen::io::backends::McapBackend::Config>();
-    mcap_cfg->compression = "zstd";
-    mcap_cfg->chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
-    mcap_cfg->robot_name = "/robots/widowxai";
-    mcap_cfg->type = "mcap";
-    session_cfg.backend_config = std::move(mcap_cfg);
+    session_cfg.backend_type = "mcap";
   } else if (cfg.backend_type == "lerobot") {
-    auto lerobot_cfg = std::make_unique<trossen::io::backends::LeRobotBackend::Config>();
-    lerobot_cfg->output_dir = cfg.output_dir;
-    lerobot_cfg->task_name = "trossen_ai_solo_demo";
-    lerobot_cfg->repository_id = cfg.repository_id;
-    lerobot_cfg->dataset_id = cfg.dataset_id;
-    lerobot_cfg->overwrite_existing = false;
-    lerobot_cfg->encode_videos = true;
-    lerobot_cfg->type = "lerobot";
-    lerobot_cfg->fps = cfg.camera_fps;
-    lerobot_cfg->robot_name = "bimanual_widowxai";
-    session_cfg.backend_config = std::move(lerobot_cfg);
-
+    session_cfg.backend_type = "lerobot";
   } else {
     std::cerr << "Unsupported backend type: " << cfg.backend_type << "\n";
     return 1;

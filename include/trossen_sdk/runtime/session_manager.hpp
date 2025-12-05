@@ -51,8 +51,9 @@ struct SessionConfig {
   /// @brief Repository identifier (used by LeRobot backend)
   std::string repository_id = "";
 
-  /// @brief Backend configuration template (output_path will be overwritten per episode)
-  std::unique_ptr<trossen::io::Backend::Config> backend_config;
+  // TODO(shantanuparab-tr): Delete this once the configuration system is in place
+  /// @brief Backend configuration type
+  std::string backend_type = "mcap";
 };
 
 /**

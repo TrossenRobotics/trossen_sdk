@@ -16,6 +16,10 @@
 #include <unordered_map>
 
 #include "trossen_sdk/io/backend.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/configuration/types/backends/trossen_backend_config.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
+
 
 namespace trossen::io::backends {
 
@@ -32,48 +36,13 @@ namespace trossen::io::backends {
  */
 class TrossenBackend : public io::Backend {
 public:
-  /**
-   * @brief Image queue drop policy when full
-   */
-  enum class DropPolicy {
-    /// @brief Drop newest incoming image
-    DropNewest,
-
-    /// @brief Drop oldest image in queue to make room for new one
-    DropOldest,
-
-    /// @brief Block until space is available (not implemented)
-    // Block
-  };
-
-  /**
-   * @brief Configuration parameters
-   */
-  struct Config : public io::Backend::Config {
-    /// @brief Root output directory
-    std::string output_dir;
-
-    /// @brief Number of image encoding threads
-    size_t encoder_threads{1};
-
-    /// @brief 0 = unbounded
-    size_t max_image_queue{0};
-
-    /// @brief Policy when max_image_queue > 0 and image queue is full
-    DropPolicy drop_policy{DropPolicy::DropNewest};
-
-    /// @brief PNG compression level (0-9)
-    int png_compression_level{3};
-  };
 
   /**
    * @brief Construct a TrossenBackend
    *
-   * @param cfg Configuration options
    * @param metadata Optional producer metadata
    */
   explicit TrossenBackend(
-    Config cfg,
     const ProducerMetadataList& metadata = {});
 
   /**
@@ -204,13 +173,6 @@ public:
     return s;
   }
 
-  /**
-   * @brief Access current config
-   *
-   * @return Current configuration
-   */
-  const Config& config() const { return cfg_; }
-
 private:
   /**
    * @brief Write a joint state record to disk
@@ -258,7 +220,7 @@ private:
   std::vector<std::thread> image_workers_;
 
   /// @brief Config for this backend
-  Config cfg_;
+  std::shared_ptr<TrossenBackendConfig> cfg_;
 
   /// @brief Whether image worker threads should keep running
   std::atomic<bool> image_worker_running_{false};

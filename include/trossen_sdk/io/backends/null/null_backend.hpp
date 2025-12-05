@@ -12,6 +12,9 @@
 
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/io/backend.hpp"
+#include "trossen_sdk/configuration/types/backends/null_backend_config.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
+
 
 namespace trossen::io::backends {
 
@@ -23,21 +26,11 @@ namespace trossen::io::backends {
 class NullBackend : public io::Backend {
 public:
   /**
-   * @brief Configuration for NullBackend
-   */
-  struct Config : public io::Backend::Config {
-    /// @brief URI for the null backend (defaults to "null://")
-    std::string uri{"null://"};
-  };
-
-  /**
    * @brief Construct a NullBackend with the given configuration
    *
-   * @param cfg Configuration options
    * @param metadata Optional producer metadata
    */
   explicit NullBackend(
-    const Config& cfg,
     const ProducerMetadataList& metadata = {});
 
   /**
@@ -84,6 +77,9 @@ private:
 
   /// @brief Whether the backend is opened
   bool opened_{false};
+
+  /// @brief Configuration for this backend
+  std::shared_ptr<NullBackendConfig> cfg_;
 };
 
 }  // namespace trossen::io::backends
