@@ -49,15 +49,15 @@ struct Config {
   bool show_help = false;
 
   // Camera settings
-  int camera_index = 2;
+  int camera_index = 4;
   int camera_width = 1920;
   int camera_height = 1080;
   int camera_fps = 30;
 
   // Arm settings
   float joint_rate_hz = 30.0f;
-  std::string leader_port = "/dev/ttyACM1";
-  std::string follower_port = "/dev/ttyACM0";
+  std::string leader_port = "/dev/ttyACM0";
+  std::string follower_port = "/dev/ttyACM1";
 
   // Dataset backend type
   std::string backend_type = "mcap";
@@ -214,7 +214,7 @@ int main(int argc, char** argv) {
     auto mcap_cfg = std::make_unique<trossen::io::backends::McapBackend::Config>();
     mcap_cfg->compression = "zstd";
     mcap_cfg->chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
-    mcap_cfg->robot_name = "/robots/widowxai";
+    mcap_cfg->robot_name = "/robots/so101";
     mcap_cfg->type = "mcap";
     session_cfg.backend_config = std::move(mcap_cfg);
   } else if (cfg.backend_type == "lerobot") {
@@ -227,7 +227,7 @@ int main(int argc, char** argv) {
     lerobot_cfg->encode_videos = true;
     lerobot_cfg->type = "lerobot";
     lerobot_cfg->fps = cfg.camera_fps;
-    lerobot_cfg->robot_name = "bimanual_widowxai";
+    lerobot_cfg->robot_name = "so101";
     session_cfg.backend_config = std::move(lerobot_cfg);
 
   } else {

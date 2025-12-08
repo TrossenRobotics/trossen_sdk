@@ -19,16 +19,16 @@ TeleopSO101ArmProducer::TeleopSO101ArmProducer(
     // Get joint names from the devices
     auto leader_joints = leader_->getJointNames();
     auto follower_joints = follower_->getJointNames();
-    
+
     // Preallocate buffers based on number of joints
     act_d_.resize(leader_joints.size());
     obs_d_.resize(follower_joints.size());
-    
+
     // Store joint names for metadata
     metadata_.action_feature_names = leader_joints;
     metadata_.observation_feature_names = follower_joints;
   }
-  
+
   // Populate metadata
   metadata_.type = "teleop_so101_arm";
   metadata_.id = cfg_.stream_id;
@@ -36,7 +36,7 @@ TeleopSO101ArmProducer::TeleopSO101ArmProducer(
   metadata_.description =
     "Produces teleoperation joint states from leader and follower "
     "SO-101 Arms";
-  
+
   metadata_.robot_name = "SO-101";
   metadata_.action_dtype = "float32";
   metadata_.observation_dtype = "float32";
@@ -80,13 +80,13 @@ void TeleopSO101ArmProducer::poll(
   rec->ts = ts;
   rec->seq = seq_++;
   rec->id = cfg_.stream_id;
-  
+
   // Convert double->float
   rec->actions.reserve(act_d_.size());
   rec->actions.clear();
   rec->observations.reserve(obs_d_.size());
   rec->observations.clear();
-  
+
   for (double v : act_d_) {
     rec->actions.push_back(static_cast<float>(v));
   }

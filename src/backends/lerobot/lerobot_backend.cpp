@@ -1115,7 +1115,7 @@ void LeRobotBackend::write_metadata() {
   info_["splits"]["train"] = "0:0";
 
   nlohmann::ordered_json features;
-
+  // TODO(shantanuparab-tr): Add .pos to end of position names
   for (const auto &metadata : metadata_) {
     nlohmann::ordered_json producer_feature = metadata->get_info();
     // Merge producer_feature into features
