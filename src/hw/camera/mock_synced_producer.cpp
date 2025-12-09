@@ -26,7 +26,6 @@ MockSyncedCameraProducer::MockSyncedCameraProducer(Config cfg) : cfg_(std::move(
   cfg_.streams.normalize();
   if (cfg_.seed) rng_.seed(static_cast<uint32_t>(cfg_.seed));
   warmup_remaining_ = cfg_.streams.warmup_frames;
-  frame_period_ns_ = cfg_.streams.frame_period_ns();
 
   // Populate metadata
   metadata_.type = "mock_synced_camera";
@@ -50,10 +49,6 @@ void MockSyncedCameraProducer::poll(
   if (last_emit_mono_ != 0) {
     uint64_t dt = now_ns - last_emit_mono_;
     if (intervals_ns_.size() < kMaxIntervals) intervals_ns_.push_back(dt);
-    if (frame_period_ns_ > 0 && dt < frame_period_ns_) {
-      // not time yet
-      return;
-    }
   }
 
   // Capture timestamps once for pair
