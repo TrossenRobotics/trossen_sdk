@@ -1,7 +1,7 @@
 #include "trossen_sdk/hw/arm/feetech_bus.hpp"
 #include <iostream>
 
-FeetechBus::FeetechBus(const std::string &port, const std::map<std::string, Motor> &motors)
+FeetechBus::FeetechBus(const std::string &port, const std::vector<Motor> &motors)
     : port_(port), motors_(motors), connected_(false), servo_(std::make_unique<SMS_STS>()) {}
 
 FeetechBus::~FeetechBus() {
@@ -27,23 +27,27 @@ void FeetechBus::disconnect() {
     connected_ = false;
 }
 
-bool FeetechBus::isConnected() const {
+bool FeetechBus::is_connected() const {
     return connected_;
 }
 
-std::map<std::string, int> FeetechBus::syncReadPosition() {
+std::vector<int> FeetechBus::sync_read_position() {
     std::lock_guard<std::mutex> lock(bus_mutex_);
-    std::map<std::string, int> positions;
-    for (auto &[name, motor] : motors_) {
+    std::vector<int> positions;
+    positions.reserve(motors_.size());
+
+    for (const auto &motor : motors_) {
         int pos = servo_->ReadPos(motor.id);
-        positions[name] = pos;
+        positions.push_back(pos);
     }
     return positions;
 }
 
-void FeetechBus::syncWritePosition(const std::map<std::string, int> &goal_positions) {
+void FeetechBus::sync_write_position(const std::vector<int> &goal_positions) {
     std::lock_guard<std::mutex> lock(bus_mutex_);
-    for (auto &[name, goal] : goal_positions) {
-        servo_->WritePosEx(motors_[name].id, goal, 0, 0);
+
+    size_t num_motors = std::min(goal_positions.size(), motors_.size());
+    for (size_t i = 0; i < num_motors; ++i) {
+        servo_->WritePosEx(motors_[i].id, goal_positions[i], 0, 0);
     }
 }

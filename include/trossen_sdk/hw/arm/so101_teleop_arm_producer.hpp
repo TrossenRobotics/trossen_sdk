@@ -2,15 +2,13 @@
 #define TROSSEN_SDK__HW__ARM__SO101_TELEOP_ARM_PRODUCER_HPP
 
 #include <functional>
-#include <map>
 #include <memory>
 #include <string>
 #include <vector>
 
 #include "nlohmann/json.hpp"
 
-#include "trossen_sdk/hw/arm/so101_leader.hpp"
-#include "trossen_sdk/hw/arm/so101_follower.hpp"
+#include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
@@ -79,13 +77,13 @@ public:
   /**
    * @brief Construct a TeleopSO101ArmProducer
    *
-   * @param leader Shared pointer to an initialized SO101Leader instance
-   * @param follower Shared pointer to an initialized SO101Follower instance
+   * @param leader Shared pointer to an initialized SO101ArmDriver instance (leader end effector)
+   * @param follower Shared pointer to an initialized SO101ArmDriver instance (follower end effector)
    * @param cfg Configuration parameters
    */
   TeleopSO101ArmProducer(
-    std::shared_ptr<SO101Leader> leader,
-    std::shared_ptr<SO101Follower> follower,
+    std::shared_ptr<SO101ArmDriver> leader,
+    std::shared_ptr<SO101ArmDriver> follower,
     Config cfg);
 
   /**
@@ -110,23 +108,14 @@ public:
   }
 
 private:
-  /// @brief Shared pointer to the SO101Leader instance
-  std::shared_ptr<SO101Leader> leader_;
+  /// @brief Shared pointer to the SO101ArmDriver instance (leader end effector)
+  std::shared_ptr<SO101ArmDriver> leader_;
 
-  /// @brief Shared pointer to the SO101Follower instance
-  std::shared_ptr<SO101Follower> follower_;
+  /// @brief Shared pointer to the SO101ArmDriver instance (follower end effector)
+  std::shared_ptr<SO101ArmDriver> follower_;
 
   /// @brief Configuration parameters
   Config cfg_;
-
-  /// @brief Reusable joint state buffers to avoid reallocation each poll
-  std::vector<double> act_d_, obs_d_;
-
-  /// @brief Reusable action map to avoid reallocation each poll for leader arm
-  std::map<std::string, int> leader_action_;
-
-  /// @brief Reusable observation map to avoid reallocation each poll for follower arm
-  std::map<std::string, int> follower_observation_;
 
   /// @brief Metadata for producer
   TeleopSO101ArmProducerMetadata metadata_;

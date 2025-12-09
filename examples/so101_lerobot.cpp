@@ -26,8 +26,7 @@
 #include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 #include "trossen_sdk/hw/arm/so101_teleop_arm_producer.hpp"
-#include "trossen_sdk/hw/arm/so101_leader.hpp"
-#include "trossen_sdk/hw/arm/so101_follower.hpp"
+#include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
@@ -177,21 +176,34 @@ int main(int argc, char** argv) {
   // Initialize hardware (if not using mock)
   // ──────────────────────────────────────────────────────────
 
-  std::shared_ptr<::SO101Leader> leader_driver;
-  std::shared_ptr<::SO101Follower> follower_driver;
+  std::shared_ptr<SO101ArmDriver> leader_driver;
+  std::shared_ptr<SO101ArmDriver> follower_driver;
 
   if (!cfg.use_mock) {
     std::cout << "Initializing SO101 hardware...\n";
 
-    leader_driver = std::make_shared<::SO101Leader>(cfg.leader_port);
-    follower_driver = std::make_shared<::SO101Follower>(cfg.follower_port);
+    // Create and configure leader driver
+    leader_driver = std::make_shared<SO101ArmDriver>();
+    if (!leader_driver->configure(SO101EndEffector::leader, cfg.leader_port)) {
+      std::cerr << "Failed to configure leader on " << cfg.leader_port << "\n";
+      return 1;
+    }
 
+    // Create and configure follower driver
+    follower_driver = std::make_shared<SO101ArmDriver>();
+    if (!follower_driver->configure(SO101EndEffector::follower, cfg.follower_port)) {
+      std::cerr << "Failed to configure follower on " << cfg.follower_port << "\n";
+      return 1;
+    }
+
+    // Connect to leader
     if (!leader_driver->connect()) {
       std::cerr << "Failed to connect to leader on " << cfg.leader_port << "\n";
       return 1;
     }
     std::cout << "  ✓ Leader arm connected (" << cfg.leader_port << ")\n";
 
+    // Connect to follower
     if (!follower_driver->connect()) {
       std::cerr << "Failed to connect to follower on " << cfg.follower_port << "\n";
       return 1;
@@ -342,8 +354,8 @@ int main(int argc, char** argv) {
 
     // Sync follower to leader's current position before recording
     if (!cfg.use_mock) {
-      auto leader_positions = leader_driver->getJointPositions();
-      follower_driver->setJointPositions(leader_positions);
+      auto leader_positions = leader_driver->get_joint_positions();
+      follower_driver->set_joint_positions(leader_positions);
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
@@ -366,8 +378,8 @@ int main(int argc, char** argv) {
     if (!cfg.use_mock) {
       teleop_thread = std::thread([&]() {
         while (mgr.is_episode_active() && !trossen::demo::g_stop_requested) {
-          auto leader_positions = leader_driver->getJointPositions();
-          follower_driver->setJointPositions(leader_positions);
+          auto leader_positions = leader_driver->get_joint_positions();
+          follower_driver->set_joint_positions(leader_positions);
           std::this_thread::sleep_for(std::chrono::milliseconds(10));
         }
       });

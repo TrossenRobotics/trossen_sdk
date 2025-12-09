@@ -8,8 +8,8 @@
 namespace trossen::hw::arm {
 
 TeleopSO101ArmProducer::TeleopSO101ArmProducer(
-  std::shared_ptr<SO101Leader> leader,
-  std::shared_ptr<SO101Follower> follower,
+  std::shared_ptr<SO101ArmDriver> leader,
+  std::shared_ptr<SO101ArmDriver> follower,
   Config cfg)
   : leader_(std::move(leader)),
     follower_(std::move(follower)),
@@ -17,12 +17,8 @@ TeleopSO101ArmProducer::TeleopSO101ArmProducer(
 {
   if (leader_ && follower_) {
     // Get joint names from the devices
-    auto leader_joints = leader_->getJointNames();
-    auto follower_joints = follower_->getJointNames();
-
-    // Preallocate buffers based on number of joints
-    act_d_.resize(leader_joints.size());
-    obs_d_.resize(follower_joints.size());
+    auto leader_joints = leader_->get_joint_names();
+    auto follower_joints = follower_->get_joint_names();
 
     // Store joint names for metadata
     metadata_.action_feature_names = leader_joints;
@@ -50,25 +46,9 @@ void TeleopSO101ArmProducer::poll(
   }
 
   // Read joint positions from leader (actions) and follower (observations)
-  leader_action_ = leader_->getJointPositions();
-  follower_observation_ = follower_->getJointPositions();
-
-  // Convert map values to vectors in consistent order
-  act_d_.clear();
-  act_d_.reserve(metadata_.action_feature_names.size());
-  for (const auto& joint_name : metadata_.action_feature_names) {
-    if (leader_action_.count(joint_name)) {
-      act_d_.push_back(static_cast<double>(leader_action_[joint_name]));
-    }
-  }
-
-  obs_d_.clear();
-  obs_d_.reserve(metadata_.observation_feature_names.size());
-  for (const auto& joint_name : metadata_.observation_feature_names) {
-    if (follower_observation_.count(joint_name)) {
-      obs_d_.push_back(static_cast<double>(follower_observation_[joint_name]));
-    }
-  }
+  // These now return vectors directly in the correct order
+  auto leader_positions = leader_->get_joint_positions();
+  auto follower_positions = follower_->get_joint_positions();
 
   // Create record with appropriate timestamp
   data::Timestamp ts;
@@ -82,15 +62,13 @@ void TeleopSO101ArmProducer::poll(
   rec->id = cfg_.stream_id;
 
   // Convert double->float
-  rec->actions.reserve(act_d_.size());
-  rec->actions.clear();
-  rec->observations.reserve(obs_d_.size());
-  rec->observations.clear();
+  rec->actions.reserve(leader_positions.size());
+  rec->observations.reserve(follower_positions.size());
 
-  for (double v : act_d_) {
+  for (double v : leader_positions) {
     rec->actions.push_back(static_cast<float>(v));
   }
-  for (double v : obs_d_) {
+  for (double v : follower_positions) {
     rec->observations.push_back(static_cast<float>(v));
   }
 

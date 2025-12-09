@@ -17,8 +17,7 @@ add_library(trossen_sdk SHARED
   src/hw/arm/teleop_arm_producer.cpp
   src/hw/arm/mock_joint_producer.cpp
   src/hw/arm/teleop_mock_joint_producer.cpp
-  src/hw/arm/so101_leader.cpp
-  src/hw/arm/so101_follower.cpp
+  src/hw/arm/so101_arm_driver.cpp
   src/hw/arm/feetech_bus.cpp
   src/hw/arm/so101_teleop_arm_producer.cpp
   src/hw/camera/opencv_producer.cpp
