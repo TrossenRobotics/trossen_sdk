@@ -18,9 +18,6 @@ namespace trossen::hw::camera {
 MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   rng_.seed(static_cast<uint32_t>(cfg_.seed));
   warmup_remaining_ = cfg_.warmup_frames;
-  // No internal FPS throttling - rely on Session Manager polling rate
-  // The fps config is kept for metadata only
-  frame_period_ns_ = 0;
 
   // Populate metadata
   metadata_.type = "mock_camera";

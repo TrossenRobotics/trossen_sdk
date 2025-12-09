@@ -63,7 +63,7 @@ void print_header() {
   std::cout << "  - FPS: 15, 30, 60, 90, 120\n";
   std::cout << "  - Resolutions: 640x480, 1280x720, 1920x1080, 2560x1440, 3840x2160\n";
   std::cout << "  - Cameras: 1, 2, 4, 8\n";
-  std::cout << "  - Tolerance: 5% (performance testing)\n";
+  std::cout << "  - Tolerance: 1% (strict performance testing)\n";
   std::cout << "\n";
   std::cout << "═══════════════════════════════════════════════════════════════════════════\n";
   std::cout << "\n";
@@ -217,7 +217,7 @@ int main(int argc, char** argv) {
   std::vector<uint32_t> camera_counts = {1, 2, 4, 8};
 
   double duration = 3.0;  // 3 seconds per test
-  double tolerance = 5.0;  // 5% tolerance (reasonable for performance testing)
+  double tolerance = 1.0;  // 1% tolerance (strict performance validation)
 
   std::vector<BenchmarkResult> all_results;
 
