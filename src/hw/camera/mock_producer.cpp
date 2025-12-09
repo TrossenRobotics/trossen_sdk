@@ -125,12 +125,12 @@ MockCameraProducer::JitterStats MockCameraProducer::jitter_stats() const {
 void MockCameraProducer::generate_frame(cv::Mat &dst) {
   switch (cfg_.pattern) {
     case Pattern::Solid: {
-      // Fastest: solid gray (ideal for benchmarking pure throughput)
+      // Solid gray
       dst.setTo(cv::Scalar(128, 128, 128));
       break;
     }
     case Pattern::Gradient: {
-      // Optimized: pre-compute one row, memcpy to all rows (much faster)
+      // Pre-compute one row, memcpy to all rows
       static std::vector<cv::Vec3b> gradient_row;
       if (gradient_row.size() != static_cast<size_t>(dst.cols)) {
         gradient_row.resize(dst.cols);
@@ -139,7 +139,7 @@ void MockCameraProducer::generate_frame(cv::Mat &dst) {
           gradient_row[x] = cv::Vec3b(v/2, v, v);
         }
       }
-      // Copy pre-computed row to all rows (avoids nested loops)
+      // Copy pre-computed row to all rows
       for (int y = 0; y < dst.rows; ++y) {
         std::memcpy(dst.ptr<cv::Vec3b>(y), gradient_row.data(),
                     dst.cols * sizeof(cv::Vec3b));
