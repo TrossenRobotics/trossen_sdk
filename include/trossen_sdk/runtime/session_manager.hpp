@@ -33,23 +33,12 @@ namespace trossen::runtime {
  * @brief Configuration for the Session Manager
  */
 struct SessionConfig {
-  /// @brief Base directory for episode files
-  std::filesystem::path base_path;
-
-  /// @brief Dataset identifier (user-provided or auto-generated UUID)
-  /// @note Empty string triggers auto-generation in constructor
-  std::string dataset_id = "";
 
   /// @brief Maximum duration per episode (nullopt = unlimited)
   std::optional<std::chrono::duration<double>> max_duration = std::chrono::seconds(20);
 
   /// @brief Maximum number of episodes (nullopt = unlimited)
   std::optional<uint32_t> max_episodes = std::nullopt;
-
-  // TODO(shantanuparab-tr): Make this generic or remove it after making backend-agnostic
-
-  /// @brief Repository identifier (used by LeRobot backend)
-  std::string repository_id = "";
 
   /// @brief Backend configuration template (output_path will be overwritten per episode)
   std::unique_ptr<trossen::io::Backend::Config> backend_config;
@@ -242,14 +231,6 @@ private:
   std::vector<ProducerTask> producer_tasks_;
 
   /**
-   * @brief Build episode file path with zero-padded index
-   *
-   * @param index Episode index (0-999999)
-   * @return Full path to episode file (e.g., /data/episode_000042.mcap)
-   */
-  std::filesystem::path build_episode_path(uint32_t index) const;
-
-  /**
    * @brief Create backend instance for the given episode
    *
    * @param output_path Path to output file
@@ -258,8 +239,6 @@ private:
    * @return Shared pointer to backend instance
    */
   std::shared_ptr<io::Backend> create_backend(
-    const std::string& output_path,
-    uint32_t episode_index,
     const ProducerMetadataList& producer_metadatas);
 
   /**

@@ -78,6 +78,14 @@ public:
    */
   uint64_t count() const;
 
+  /**
+   * @brief Scan directory for existing episode files and return next index
+   */
+  uint32_t scan_existing_episodes() override {
+    // NullBackend has no files, so always return 0
+    return 0;
+  };
+
 private:
   /// @brief Count of records "written"
   std::atomic<uint64_t> count_{0};

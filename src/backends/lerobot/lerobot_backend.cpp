@@ -37,7 +37,7 @@ namespace fs = std::filesystem;
 LeRobotBackend::LeRobotBackend(
   Config cfg,
   ProducerMetadataList metadata = {})
-  : io::Backend(cfg.output_dir), cfg_(std::move(cfg)), metadata_(std::move(metadata))
+  : io::Backend(), cfg_(std::move(cfg)), metadata_(std::move(metadata))
 {
   // Validate encoder threads
   if (cfg_.encoder_threads <= 0) {
@@ -78,41 +78,30 @@ LeRobotBackend::LeRobotBackend(
 
 }
 
-void LeRobotBackend::preprocess_episode(
-  const std::string& output_path,
-  uint32_t episode_index,
-  const std::string& dataset_id,
-  const std::string& repository_id)
+void LeRobotBackend::preprocess_episode()
 {
-  // Update config with episode-specific values
-  cfg_.output_dir = output_path;
-  cfg_.episode_index = episode_index;
-  cfg_.dataset_id = dataset_id;
-  cfg_.repository_id = repository_id;
-
-  // Create a root folder for dataset using repo-id and dataset-name and default root
-
-  // URI is absolute path to output directory. Set to absolute path and check write access.
-  // Validate output directory path
+  // Root is the base output directory for this episode
+  // Constructed as: output_dir/repository_id/dataset_id/ for LeRobot V2
+  // This is used to form the full paths for images, videos, metadata, and data
   try {
-    uri_ = (fs::path(cfg_.output_dir) / cfg_.repository_id / cfg_.dataset_id).string();
+    root_ = fs::path(cfg_.output_dir) / cfg_.repository_id / cfg_.dataset_id;
   } catch (const std::exception& e) {
     throw std::runtime_error(
       "Failed to resolve absolute path of output directory: " + std::string(e.what()));
   }
   // Validate non-empty path
-  if (uri_.empty()) {
+  if (root_.empty()) {
     throw std::runtime_error("Output directory path is empty");
   }
   // Check that we can write to the output directory
   try {
-    if (!fs::exists(uri_)) {
-      fs::create_directories(uri_);
+    if (!fs::exists(root_)) {
+      fs::create_directories(root_);
     }
   } catch (const std::exception& e) {
     throw std::runtime_error("Failed to create output directory: " + std::string(e.what()));
   }
-  fs::path test_path = fs::path(uri_) / "trossen_sdk_lerobot_v2_test.tmp";
+  fs::path test_path = root_ / "trossen_sdk_lerobot_v2_test.tmp";
   std::ofstream test_file(test_path.string(), std::ios::out | std::ios::trunc);
   if (!test_file) {
     throw std::runtime_error("Failed to open test file for writing: " + test_path.string());
@@ -126,14 +115,13 @@ bool LeRobotBackend::open() {
   if (opened_) {
     return true;
   }
-  root_ = fs::path(uri_);
   std::cout << "=====================================================================" << std::endl;
   std::cout << "Opening LeRobotBackend at: " << root_ << "\n";
   std::cout << "=====================================================================" << std::endl;
 
 
   std::ostringstream oss;
-  oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index;
+  oss << "episode_" << std::setfill('0') << std::setw(6) << episode_index_;
 
   // Create images root directory from camera names
   images_root_ = root_ / "images" / "chunk-000";
@@ -266,11 +254,6 @@ void LeRobotBackend::convert_to_videos() const {
 
   const std::string images_path = images_root_.string();
 
-  const fs::path base_path =
-    fs::path(this->config().root_path) /
-    this->config().repository_id /
-    this->config().dataset_id;
-
   std::atomic<int> video_count{0};
   std::mutex log_mutex;
 
@@ -291,7 +274,7 @@ void LeRobotBackend::convert_to_videos() const {
     std::ostringstream oss;
     oss << "videos/chunk-" << std::setw(3) << std::setfill('0') << episode_chunk
         << "/" << video_key;
-    const fs::path videos_cam_dir = base_path / oss.str();
+    const fs::path videos_cam_dir = root_ / oss.str();
     fs::create_directories(videos_cam_dir);
 
     for (const auto &episode_dir : fs::directory_iterator(cam_dir.path())) {
@@ -613,7 +596,7 @@ nlohmann::ordered_json LeRobotBackend::compute_list_stats(
 
 void LeRobotBackend::compute_statistics() const {
   std::ostringstream oss;
-  oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index << ".parquet";
+  oss << "episode_" << std::setfill('0') << std::setw(6) << episode_index_ << ".parquet";
   fs::path episode_path = data_root_ / oss.str();
 
   std::unique_ptr<parquet::ParquetFileReader> parquet_reader =
@@ -661,7 +644,7 @@ void LeRobotBackend::compute_statistics() const {
 
     std::ostringstream episode_folder_ss;
     episode_folder_ss << "episode_" << std::setfill('0') << std::setw(6)
-                      << cfg_.episode_index;
+                      << episode_index_;
     std::string episode_folder_name = episode_folder_ss.str();
 
     // Construct the full path to the episode's image directory for the current
@@ -694,7 +677,7 @@ void LeRobotBackend::compute_statistics() const {
   std::ofstream episode_stats_file(meta_root_ / JSONL_EPISODE_STATS, std::ios::app);
 
   nlohmann::ordered_json episode_stats;
-  episode_stats["episode_index"] = cfg_.episode_index;
+  episode_stats["episode_index"] = episode_index_;
   episode_stats["stats"] = stats;
 
   if (!episode_stats_file.is_open()) {
@@ -705,7 +688,7 @@ void LeRobotBackend::compute_statistics() const {
   episode_stats_file.close();
 
   nlohmann::ordered_json episode_metadata;
-  episode_metadata["episode_index"] = cfg_.episode_index;
+  episode_metadata["episode_index"] = episode_index_;
   episode_metadata["tasks"] = {cfg_.task_name};
   episode_metadata["length"] = table->num_rows();
 
@@ -720,7 +703,7 @@ void LeRobotBackend::compute_statistics() const {
 
   // TODO(shantanuparab-tr): Implement logic to check for existing task entries
   nlohmann::ordered_json task_metadata;
-  task_metadata["task_index"] = cfg_.episode_index;
+  task_metadata["task_index"] = episode_index_;
   task_metadata["task"] = cfg_.task_name;
 
   std::ofstream tasks_file(meta_root_ / JSONL_TASKS, std::ios::app);
@@ -738,7 +721,7 @@ void LeRobotBackend::compute_statistics() const {
 }
 
 void LeRobotBackend::print_stats_table(const nlohmann::ordered_json& stats) const {
-  std::cout << "\n================ Episode: " << cfg_.episode_index << " ================\n";
+  std::cout << "\n================ Episode: " << episode_index_ << " ================\n";
   for (auto it = stats.begin(); it != stats.end(); ++it) {
     const std::string& column_name = it.key();
     const auto& metrics = it.value();
@@ -881,7 +864,7 @@ void LeRobotBackend::write_joint_state(const data::RecordBase& base) {
   }
 
   // Scalar columns
-  check_status(epi_idx_builder.Append(cfg_.episode_index), "Failed to append episode index");
+  check_status(epi_idx_builder.Append(episode_index_), "Failed to append episode index");
   check_status(frame_idx_builder.Append(frame_id), "Failed to append frame index");
   check_status(index_builder.Append(js.seq), "Failed to append global index");
   check_status(task_idx_builder.Append(0), "Failed to append task index");
@@ -949,7 +932,7 @@ void LeRobotBackend::write_image(const data::RecordBase& base) {
   auto it = image_dir_cache_.find(img.id);
   if (it == image_dir_cache_.end()) {
     std::ostringstream oss;
-    oss << "episode_" << std::setfill('0') << std::setw(6) << cfg_.episode_index;
+    oss << "episode_" << std::setfill('0') << std::setw(6) << episode_index_;
     fs::path camera_dir = images_root_ / img.id / oss.str();
     std::error_code ec;
     fs::create_directories(camera_dir, ec);
@@ -1212,7 +1195,8 @@ void LeRobotBackend::write_metadata() {
   info_file.close();
 }
 
-uint32_t LeRobotBackend::scan_existing_episodes(const std::filesystem::path& base_path) {
+uint32_t LeRobotBackend::scan_existing_episodes() {
+  std::filesystem::path base_path = std::filesystem::path(cfg_.output_dir) / std::filesystem::path(cfg_.repository_id) / std::filesystem::path(cfg_.dataset_id) / "data" / "chunk-000";
   std::cout << "Scanning existing episodes in: " << base_path << std::endl;
 
   // If directory doesn't exist, return 0

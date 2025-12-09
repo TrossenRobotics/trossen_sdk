@@ -223,8 +223,6 @@ int main(int argc, char** argv) {
   // ──────────────────────────────────────────────────────────
 
   trossen::runtime::SessionConfig session_cfg;
-  session_cfg.base_path = cfg.output_dir;
-  session_cfg.dataset_id = cfg.dataset_id;
   session_cfg.max_duration = std::chrono::seconds(cfg.duration_s);
   session_cfg.max_episodes = cfg.episodes;
 

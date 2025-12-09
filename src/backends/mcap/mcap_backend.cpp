@@ -28,7 +28,7 @@ REGISTER_BACKEND(McapBackend, "mcap")
 McapBackend::McapBackend(
   Config cfg,
   const ProducerMetadataList&)
-  : io::Backend(cfg.output_path), cfg_(std::move(cfg)) {
+  : io::Backend(), cfg_(std::move(cfg)) {
 
 
   // This allows us to access the global configuration for the Mcap backend
@@ -52,14 +52,11 @@ McapBackend::McapBackend(
   }
 McapBackend::~McapBackend() { close(); }
 
-void McapBackend::preprocess_episode(
-  const std::string& output_path,
-  uint32_t episode_index,
-  const std::string& dataset_id,
-  const std::string& repository_id)
+void McapBackend::preprocess_episode()
 {
-  cfg_.output_path = output_path;
-  uri_ = output_path;
+  // No-op Delete If not needed
+  std::cout << "McapBackend::preprocess_episode() called." << std::endl;
+
 }
 
 bool McapBackend::open() {
@@ -69,9 +66,12 @@ bool McapBackend::open() {
   if (opened_) {
     return true;
   }
-
+  std::ostringstream oss;
+  oss << cfg_.output_path << "/"
+      << cfg_.dataset_id << "/"
+      << "episode_" << std::setw(6) << std::setfill('0') << episode_index_ << ".mcap";
   // Parse configs
-  path_ = cfg_.output_path;
+  path_ = std::filesystem::path(oss.str());
 
   // Create Foxglove context
   context_ = foxglove::Context::create();
@@ -98,7 +98,7 @@ bool McapBackend::open() {
   }
   // Check if the output path parent directory exists
   auto parent_path = path_.parent_path();
-  if (!std::filesystem::exists(parent_path)) {
+  if (!parent_path.empty() && !std::filesystem::exists(parent_path)) {
     try {
       std::filesystem::create_directories(parent_path);
     } catch (const std::exception& e) {
@@ -123,7 +123,7 @@ bool McapBackend::open() {
   std::map<std::string, std::string> metadata;
   metadata["tool_version"] = trossen::core::version();
   metadata["dataset_id"] = cfg_.dataset_id;
-  metadata["episode_index"] = std::to_string(cfg_.episode_index);
+  metadata["episode_index"] = std::to_string(episode_index_);
   auto now = trossen::data::now_real();
   metadata["recording_start_time"] = std::to_string(now.to_ns());
 
@@ -423,7 +423,8 @@ bool McapBackend::is_depth_encoding(const std::string& enc) {
 }
 
 
-uint32_t McapBackend::scan_existing_episodes(const std::filesystem::path& base_path) {
+uint32_t McapBackend::scan_existing_episodes() {
+  std::filesystem::path base_path = std::filesystem::path(cfg_.output_path) / cfg_.dataset_id;
   std::cout << "Scanning existing episodes in: " << base_path << std::endl;
   // If directory doesn't exist, return 0
   if (!std::filesystem::exists(base_path)) {

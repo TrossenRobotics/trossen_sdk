@@ -19,49 +19,43 @@ namespace trossen::runtime {
 
 SessionManager::SessionManager(SessionConfig&& config)
   : config_(std::move(config))
-{
+{ 
+  std::cout<< "Initializing Session Manager with configuration:" << std::endl;
+  if (config_.max_duration.has_value()) {
+    std::cout << "  Max Duration: " << config_.max_duration->count() << " seconds" << std::endl;
+  } else {
+    std::cout << "  Max Duration: unlimited" << std::endl;
+  }
+  if (config_.max_episodes.has_value()) {
+    std::cout << "  Max Episodes: " << config_.max_episodes.value() << std::endl;
+  } else {
+    std::cout << "  Max Episodes: unlimited" << std::endl;
+  }
   // Validate required configuration
-  if (config_.base_path.empty()) {
-    throw std::invalid_argument("SessionConfig::base_path cannot be empty");
-  }
+  // if (config_.base_path.empty()) {
+  //   throw std::invalid_argument("SessionConfig::base_path cannot be empty");
+  // }
 
-  // Create base directory if it doesn't exist
-  if (!std::filesystem::exists(config_.base_path)) {
-    // TODO(lukeschmitt-tr): Handle potential errors
-    std::filesystem::create_directories(config_.base_path);
-  }
+  // // Create base directory if it doesn't exist
+  // if (!std::filesystem::exists(config_.base_path)) {
+  //   // TODO(lukeschmitt-tr): Handle potential errors
+  //   std::filesystem::create_directories(config_.base_path);
+  // }
 
-  // Auto-generate dataset_id if not provided
-  if (config_.dataset_id.empty()) {
-    // TODO(lukeschmitt-tr): Generate UUID (for now, use timestamp-based ID)
-    auto now = std::chrono::system_clock::now();
-    auto time_t_now = std::chrono::system_clock::to_time_t(now);
-    std::ostringstream oss;
-    // Format: dataset_YYYYMMDD_HHMMSS in local time
-    oss << "dataset_" << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S");
-    config_.dataset_id = oss.str();
-    std::cout << "Auto-generated dataset_id: " << config_.dataset_id << std::endl;
-  }
+  // // Auto-generate dataset_id if not provided
+  // if (config_.dataset_id.empty()) {
+  //   // TODO(lukeschmitt-tr): Generate UUID (for now, use timestamp-based ID)
+  //   auto now = std::chrono::system_clock::now();
+  //   auto time_t_now = std::chrono::system_clock::to_time_t(now);
+  //   std::ostringstream oss;
+  //   // Format: dataset_YYYYMMDD_HHMMSS in local time
+  //   oss << "dataset_" << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S");
+  //   config_.dataset_id = oss.str();
+  //   std::cout << "Auto-generated dataset_id: " << config_.dataset_id << std::endl;
+  // }
   // TODO(shantanuparab-tr): Make this backend-agnostic by using a factory method
   // Scan directory for existing episodes and resume from next index
-  if (config_.backend_config->type == "mcap") {
-    std::filesystem::path data_directory_path = config_.base_path / config_.dataset_id;
-    next_episode_index_ = io::backends::McapBackend::scan_existing_episodes(data_directory_path);
-  } else if (config_.backend_config->type == "lerobot") {
-    std::filesystem::path data_directory_path =
-      config_.base_path /
-      config_.repository_id /
-      config_.dataset_id /
-      "data" /
-      "chunk-000";
-    next_episode_index_ = io::backends::LeRobotBackend::scan_existing_episodes(data_directory_path);
-  } else {
-    throw std::invalid_argument("Unsupported backend type: " + config_.backend_config->type);
-  }
-  if (next_episode_index_ > 0) {
-    std::cout << "Found " << next_episode_index_ << " existing episode(s). "
-              << "Next episode index: " << next_episode_index_ << std::endl;
-  }
+
 }
 
 SessionManager::~SessionManager() {
@@ -106,18 +100,6 @@ bool SessionManager::start_episode() {
     return false;
   }
 
-  // Check max_episodes limit
-  //
-  // TODO(lukeschmitt-tr): This "end of recording" check could be moved elsewhere - right now it
-  // will stop recording on episode N+1 start attempt
-  if (config_.max_episodes.has_value() && next_episode_index_ >= config_.max_episodes.value()) {
-    std::cerr << "Max episodes (" << config_.max_episodes.value() << ") reached." << std::endl;
-    return false;
-  }
-
-  // Build episode file path
-  auto path = build_episode_path(next_episode_index_);
-
   ProducerMetadataList producer_metadata;
 
   // Fetch Metadata from producers as a vector of the base class
@@ -132,15 +114,33 @@ bool SessionManager::start_episode() {
   std::cout<< "Number of Producers Pushed: " << producer_metadata.size() << std::endl;
   // Create backend
   try {
-    current_backend_ = create_backend(path.string(), next_episode_index_, producer_metadata);
+    current_backend_ = create_backend(producer_metadata);
   } catch (const std::exception& e) {
     std::cerr << "Backend creation failed: " << e.what() << std::endl;
     return false;
   }
 
+  next_episode_index_ = current_backend_->scan_existing_episodes();
+
+  if (next_episode_index_ > 0) {
+    std::cout << "Found " << next_episode_index_ << " existing episode(s). "
+              << "Next episode index: " << next_episode_index_ << std::endl;
+  }
+
+  current_backend_->set_episode_index(next_episode_index_);
+
+  // Check max_episodes limit
+  //
+  // TODO(lukeschmitt-tr): This "end of recording" check could be moved elsewhere - right now it
+  // will stop recording on episode N+1 start attempt
+  if (config_.max_episodes.has_value() && next_episode_index_ >= config_.max_episodes.value()) {
+    std::cerr << "Max episodes (" << config_.max_episodes.value() << ") reached." << std::endl;
+    return false;
+  }
+
   // Open backend
   if (!current_backend_->open()) {
-    std::cerr << "Backend open failed for: " << path << std::endl;
+    std::cerr << "Backend open failed for: " << std::endl;
     current_backend_.reset();
     return false;
   }
@@ -196,7 +196,7 @@ bool SessionManager::start_episode() {
     monitor_thread_ = std::thread([this]() { monitor_duration(); });
   }
 
-  std::cout << "Episode " << next_episode_index_ << " started: " << path << std::endl;
+  std::cout << "Episode " << next_episode_index_ << " started." << std::endl;
 
   return true;
 }
@@ -330,28 +330,7 @@ SessionManager::Stats SessionManager::stats() const {
   return s;
 }
 
-std::filesystem::path SessionManager::build_episode_path(uint32_t index) const {
-  // Generate filename: episode_NNNNNN.mcap (6-digit zero-padded)
-  // TODO(lukeschmitt-tr): This is specific to MCAP files; consider making more generic
-  std::ostringstream oss;
-  if (config_.backend_config == nullptr) {
-    throw std::runtime_error("SessionManager::build_episode_path: backend_config is null");
-  } else if (config_.backend_config->type == "lerobot") {
-      return config_.base_path;
-  } else if (config_.backend_config->type == "mcap") {
-      oss << "episode_" << std::setfill('0') << std::setw(6) << index << ".mcap";
-      return config_.base_path / config_.dataset_id / oss.str();
-
-  } else {
-    throw std::runtime_error(
-      "SessionManager::build_episode_path: Unsupported backend type: "
-      + config_.backend_config->type);
-  }
-}
-
 std::shared_ptr<io::Backend> SessionManager::create_backend(
-  const std::string& output_path,
-  uint32_t episode_index,
   const ProducerMetadataList& producer_metadatas)
 {
   if (config_.backend_config == nullptr) {
@@ -365,11 +344,7 @@ std::shared_ptr<io::Backend> SessionManager::create_backend(
     producer_metadatas);
 
   // Let the backend configure itself for this episode
-  backend->preprocess_episode(
-    output_path,
-    episode_index,
-    config_.dataset_id,
-    config_.repository_id);
+  backend->preprocess_episode();
 
   return backend;
 }

@@ -108,6 +108,14 @@ public:
   void close() override;
 
   /**
+   * @brief Scan directory for existing episode files and return next index
+   */
+  uint32_t scan_existing_episodes() override {
+    // TrossenBackend has incomplete implementation, so always return 0
+    return 0;
+  };
+
+  /**
    * @brief Image encoding statistics
    */
   struct ImageEncodeStats {
