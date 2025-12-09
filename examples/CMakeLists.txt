@@ -27,3 +27,6 @@ target_link_libraries(backend_registry_demo trossen_sdk)
 # S0101 teleop demo
 add_executable(so101_teleop so101_lerobot.cpp)
 target_link_libraries(so101_teleop demo_utils)
+# Camera benchmark tool
+add_executable(camera_benchmark camera_benchmark.cpp)
+target_link_libraries(camera_benchmark trossen_sdk)
