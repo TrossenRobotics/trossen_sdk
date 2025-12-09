@@ -204,9 +204,6 @@ private:
   /// @brief Configuration parameters
   Config cfg_;
 
-  /// @brief Target frame period in nanoseconds
-  uint64_t frame_period_ns_{0};
-
   /// @brief Last emitted frame monotonic timestamp
   uint64_t last_emit_mono_{0};
 
