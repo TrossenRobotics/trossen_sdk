@@ -34,7 +34,6 @@ MockCameraProducer::MockCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
 }
 
 void MockCameraProducer::poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) {
-  // No FPS throttling - emit on every poll (Session Manager controls rate)
   uint64_t now_mono = data::now_mono().to_ns();
 
   // Warmup: discard first N emission opportunities without generating frames
