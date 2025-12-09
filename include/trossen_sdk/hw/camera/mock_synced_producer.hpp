@@ -199,9 +199,6 @@ private:
    */
   void generate_depth_f32(cv::Mat &dst, uint64_t seq_counter);
 
-  /// @brief Target frame period in nanoseconds
-  uint64_t frame_period_ns_{0};
-
   /// @brief Last emitted frame monotonic timestamp
   uint64_t last_emit_mono_{0};
 
