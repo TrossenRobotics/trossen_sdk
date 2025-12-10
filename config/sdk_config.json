@@ -29,6 +29,19 @@
     "compression": "zstd",
     "dataset_id": "mcap_dataset_v1",
     "episode_index": 0
+  },
+  "trossen_backend": {
+    "type": "trossen_backend",
+    "root": "/data/trossen",
+    "encoder_threads": 2,
+    "max_image_queue": 10,
+    "png_compression_level": 5,
+    "drop_policy": "DropNewest"
+
+  },
+  "null_backend": {
+    "type": "null_backend",
+    "uri": "/data/trossen"
   }
 }
 

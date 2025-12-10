@@ -12,6 +12,8 @@
 
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/io/backend.hpp"
+#include "trossen_sdk/configuration/types/backends/null_backend_config.hpp"
+
 
 namespace trossen::io::backends {
 

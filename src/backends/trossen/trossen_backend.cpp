@@ -64,6 +64,14 @@ TrossenBackend::TrossenBackend(
   test_file.close();
   fs::remove(test_path);
 
+  // Load global configuration for logging
+  test_config_ = GlobalConfig::instance().get_as<TrossenBackendConfig>("trossen_backend");
+
+  if (!test_config_) {
+        std::cerr << "Backend config not found!" << std::endl;
+        return;
+  }
+
   // Print off configuration
   std::cout << "================= Trossen Backend Config =================" << std::endl;
   std::cout << "Root Directory: " << root_ << std::endl;
