@@ -110,12 +110,9 @@ bool SessionManager::start_episode() {
   for (const auto& pt : producer_tasks_) {
     // Dynamic cast to PolledProducer to access metadata()
     if (auto polled_producer = std::dynamic_pointer_cast<hw::PolledProducer>(pt.producer)) {
-      std::cout << "  Pushed Producer: " << polled_producer->metadata()->name
-                << " (ID: " << polled_producer->metadata()->id << ")\n";
       producer_metadata.push_back(polled_producer->metadata());
     }
   }
-  std::cout<< "Number of Producers Pushed: " << producer_metadata.size() << std::endl;
   // Create backend
   try {
     current_backend_ = create_backend(producer_metadata);
