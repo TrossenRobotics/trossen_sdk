@@ -20,17 +20,23 @@ namespace trossen::runtime {
 SessionManager::SessionManager(SessionConfig&& config)
   : config_(std::move(config))
 { 
-  std::cout<< "Initializing Session Manager with configuration:" << std::endl;
+  std::cout << "================= Session Manager Config =================" << std::endl;
   if (config_.max_duration.has_value()) {
-    std::cout << "  Max Duration: " << config_.max_duration->count() << " seconds" << std::endl;
+    std::cout << "Max Duration: " << config_.max_duration->count() << " seconds" << std::endl;
   } else {
-    std::cout << "  Max Duration: unlimited" << std::endl;
+    std::cout << "Max Duration: unlimited" << std::endl;
   }
   if (config_.max_episodes.has_value()) {
-    std::cout << "  Max Episodes: " << config_.max_episodes.value() << std::endl;
+    std::cout << "Max Episodes: " << config_.max_episodes.value() << std::endl;
   } else {
-    std::cout << "  Max Episodes: unlimited" << std::endl;
+    std::cout << "Max Episodes: unlimited" << std::endl;
   }
+  if (config_.backend_config) {
+    std::cout << "Backend Type: " << config_.backend_config->type << std::endl;
+  } else {
+    std::cout << "Backend Type: (none)" << std::endl;
+  }
+  std::cout << "==========================================================" << std::endl;
   // TODO(shantanuparab-tr): Move this logic to a backend utility function
   // Validate required configuration
   // if (config_.base_path.empty()) {

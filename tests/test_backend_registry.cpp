@@ -65,7 +65,7 @@ TEST(BackendRegistryTest, CreateNullBackend) {
 TEST(BackendRegistryTest, CreateMcapBackend) {
   McapBackend::Config cfg;
   cfg.type = "mcap";
-  cfg.output_path = "/tmp/test_registry.mcap";
+  cfg.root = "/tmp/test_registry.mcap";
   cfg.robot_name = "test_robot";
   cfg.dataset_id = "test_dataset";
   cfg.episode_index = 0;
@@ -100,7 +100,7 @@ TEST(BackendRegistryTest, MultipleBackendsWithDifferentConfigs) {
   // Create mcap backend
   McapBackend::Config cfg3;
   cfg3.type = "mcap";
-  cfg3.output_path = "/tmp/test.mcap";
+  cfg3.root = "/tmp/test.mcap";
   auto backend3 = BackendRegistry::create("mcap", cfg3);
   ASSERT_NE(backend3, nullptr);
 
@@ -162,7 +162,7 @@ TEST(BackendRegistryTest, TypicalUsageDemo) {
   } else if (backend_type == "mcap") {
     auto mcap_cfg = std::make_unique<McapBackend::Config>();
     mcap_cfg->type = "mcap";
-    mcap_cfg->output_path = "/tmp/demo.mcap";
+    mcap_cfg->root = "/tmp/demo.mcap";
     cfg = std::move(mcap_cfg);
   }
 

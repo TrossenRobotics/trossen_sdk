@@ -16,6 +16,7 @@
 #include <unordered_map>
 
 #include "trossen_sdk/io/backend.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
 
 namespace trossen::io::backends {
 
@@ -51,7 +52,7 @@ public:
    */
   struct Config : public io::Backend::Config {
     /// @brief Root output directory
-    std::string output_dir;
+    std::string root{trossen::io::backends::get_default_root_path().string()};
 
     /// @brief Number of image encoding threads
     size_t encoder_threads{1};

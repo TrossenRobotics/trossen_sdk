@@ -41,7 +41,7 @@ McapBackend::McapBackend(
   }
   // Print the stored values
   std::cout << "================= MCAP Backend Config =================" << std::endl;
-  std::cout << "Output Dir: " << test_config_->output_dir << std::endl;
+  std::cout << "Root Dir: " << test_config_->root << std::endl;
   std::cout << "Robot Name: " << test_config_->robot_name << std::endl;
   std::cout << "Chunk Size Bytes: " << test_config_->chunk_size_bytes << std::endl;
   std::cout << "Compression: " << test_config_->compression << std::endl;
@@ -65,7 +65,7 @@ bool McapBackend::open() {
     return true;
   }
   std::ostringstream oss;
-  oss << cfg_.output_path << "/"
+  oss << cfg_.root << "/"
       << cfg_.dataset_id << "/"
       << "episode_" << std::setw(6) << std::setfill('0') << episode_index_ << ".mcap";
   // Parse configs
@@ -422,8 +422,7 @@ bool McapBackend::is_depth_encoding(const std::string& enc) {
 
 
 uint32_t McapBackend::scan_existing_episodes() {
-  std::filesystem::path base_path = std::filesystem::path(cfg_.output_path) / cfg_.dataset_id;
-  std::cout << "Scanning existing episodes in: " << base_path << std::endl;
+  std::filesystem::path base_path = std::filesystem::path(cfg_.root) / cfg_.dataset_id;
   // If directory doesn't exist, return 0
   if (!std::filesystem::exists(base_path)) {
     return 0;

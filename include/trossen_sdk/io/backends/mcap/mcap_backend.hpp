@@ -22,6 +22,7 @@
 #include "foxglove/schemas.hpp"
 
 #include "trossen_sdk/io/backend.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_schemas.hpp"
 #include "trossen_sdk/configuration/types/backends/mcap_backend_config.hpp"
 
@@ -39,8 +40,8 @@ public:
    * @brief Configuration options for McapBackend
    */
   struct Config : public io::Backend::Config {
-    /// @brief .mcap file path
-    std::string output_path;
+    /// @brief Root directory for episode files
+    std::string root{trossen::io::backends::get_default_root_path().string()};
 
     /// @brief prefix used for joint states
     std::string robot_name{"/robot/joint_states"};
