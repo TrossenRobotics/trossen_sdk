@@ -1,4 +1,10 @@
-{
+{ 
+  "session_manager": {
+    "type": "session_manager",
+    "max_duration": 3,
+    "max_episodes": 2,
+    "backend_type": "lerobot"
+  },
   "lerobot_backend": {
     "type": "lerobot_backend",
     "output_dir": "/data/lerobot_output",

@@ -26,6 +26,9 @@
 #include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
 #include "trossen_sdk/io/sink.hpp"
 #include "trossen_sdk/runtime/scheduler.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/configuration/types/runtime/session_manager_config.hpp"
+
 
 namespace trossen::runtime {
 
@@ -177,6 +180,9 @@ public:
 private:
   /// @brief Configuration
   SessionConfig config_;
+
+  /// @brief Test Configuration
+  std::shared_ptr<SessionManagerConfig> test_config_;
 
   /// @brief Next episode index to use
   uint32_t next_episode_index_{0};
