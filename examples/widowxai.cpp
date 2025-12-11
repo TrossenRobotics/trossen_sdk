@@ -219,7 +219,6 @@ int main(int argc, char** argv) {
     std::cout << "  ✓ Arms staged to starting positions\n";
   }
 
-
   trossen::runtime::SessionManager mgr;
 
   std::cout << "\nInitialized Session Manager\n";

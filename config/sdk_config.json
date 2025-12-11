@@ -3,7 +3,7 @@
     "type": "session_manager",
     "max_duration": 3,
     "max_episodes": 2,
-    "backend_type": "trossen"
+    "backend_type": "lerobot"
   },
   "lerobot_backend": {
     "type": "lerobot_backend",
