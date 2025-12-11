@@ -23,7 +23,6 @@ void BackendRegistry::register_backend(const std::string& type, FactoryFunc fact
 
 std::shared_ptr<Backend> BackendRegistry::create(
   const std::string& type,
-  Backend::Config& config,
   const ProducerMetadataList& producer_metadatas)
 {
   auto& registry = get_registry();
@@ -31,7 +30,7 @@ std::shared_ptr<Backend> BackendRegistry::create(
   if (it == registry.end()) {
     throw std::runtime_error("Unsupported backend type: '" + type + "'");
   }
-  return it->second(config, producer_metadatas);
+  return it->second(producer_metadatas);
 }
 
 bool BackendRegistry::is_registered(const std::string& type) {

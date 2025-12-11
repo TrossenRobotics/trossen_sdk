@@ -31,7 +31,6 @@ class BackendRegistry {
 public:
   /// @brief Factory function signature for creating backend instances
   using FactoryFunc = std::function<std::shared_ptr<Backend>(
-    Backend::Config&,
     const ProducerMetadataList&)>;
 
   /**
@@ -63,7 +62,6 @@ public:
    */
   static std::shared_ptr<Backend> create(
     const std::string& type,
-    Backend::Config& config,
     const ProducerMetadataList& producer_metadatas = {});
 
   /**
@@ -106,10 +104,9 @@ private:
     ClassName##Registrar() {                                                             \
       ::trossen::io::BackendRegistry::register_backend(                                  \
         TypeString,                                                                      \
-        [](::trossen::io::Backend::Config& cfg,                                          \
-           const ::trossen::ProducerMetadataList& metadata)                              \
+        [](const ::trossen::ProducerMetadataList& metadata)                              \
              -> std::shared_ptr<::trossen::io::Backend> {                                \
-          return std::make_shared<ClassName>(static_cast<ClassName::Config&>(cfg), metadata); \
+          return std::make_shared<ClassName>(metadata); \
         });                                                                              \
     }                                                                                    \
   };                                                                                     \

@@ -279,34 +279,7 @@ int main(int argc, char** argv) {
     std::cout << "  ✓ All arms staged to starting positions\n";
   }
 
-  trossen::runtime::SessionConfig session_cfg;
-  session_cfg.max_duration = std::chrono::seconds(cfg.duration_s);
-  session_cfg.max_episodes = cfg.episodes;
-
-  if (cfg.backend_type == "mcap") {
-    auto mcap_cfg = std::make_unique<trossen::io::backends::McapBackend::Config>();
-    mcap_cfg->compression = "zstd";
-    mcap_cfg->chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
-    mcap_cfg->robot_name = "/robots/bi_widowxai";
-    mcap_cfg->type = "mcap";
-    session_cfg.backend_config = std::move(mcap_cfg);
-  } else if (cfg.backend_type == "lerobot") {
-    auto lerobot_cfg = std::make_unique<trossen::io::backends::LeRobotBackend::Config>();
-    lerobot_cfg->root = cfg.root;
-    lerobot_cfg->task_name = "trossen_ai_solo_demo";
-    lerobot_cfg->repository_id = "TrossenRoboticsCommunity";
-    lerobot_cfg->dataset_id = "trossen_ai_bimanual_dataset";
-    lerobot_cfg->overwrite_existing = false;
-    lerobot_cfg->encode_videos = true;
-    lerobot_cfg->type = "lerobot";
-    // Set other fields as needed
-    session_cfg.backend_config = std::move(lerobot_cfg);
-  } else {
-    std::cerr << "Unsupported backend type: " << cfg.backend_type << "\n";
-    return 1;
-  }
-
-  trossen::runtime::SessionManager mgr(std::move(session_cfg));
+  trossen::runtime::SessionManager mgr;
 
   std::cout << "\nInitialized Session Manager\n";
   std::cout << "  Starting episode index: " << mgr.stats().current_episode_index << "\n";

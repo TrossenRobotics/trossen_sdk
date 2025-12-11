@@ -34,25 +34,15 @@ REGISTER_BACKEND(LeRobotBackend, "lerobot")
 namespace fs = std::filesystem;
 
 LeRobotBackend::LeRobotBackend(
-  Config cfg,
   ProducerMetadataList metadata = {})
-  : io::Backend(), cfg_(std::move(cfg)), metadata_(std::move(metadata))
+  : io::Backend(), metadata_(std::move(metadata))
 {
-  // Validate encoder threads
-  if (cfg_.encoder_threads <= 0) {
-    cfg_.encoder_threads = 1;
-  }
-  // Validate PNG compression level
-  if (cfg_.png_compression_level < 0 || cfg_.png_compression_level > 9) {
-    cfg_.png_compression_level = 3;
-  }
-
   // This allows us to access the global configuration for the LeRobot backend
   // without passing it explicitly.
 
-  test_config_ = GlobalConfig::instance().get_as<LeRobotBackendConfig>("lerobot_backend");
+  cfg_ = GlobalConfig::instance().get_as<LeRobotBackendConfig>("lerobot_backend");
 
-  if (!test_config_) {
+  if (!cfg_) {
         std::cerr << "Backend config not found!" << std::endl;
         return;
   }
@@ -64,18 +54,18 @@ LeRobotBackend::LeRobotBackend(
   // Print the stored values
   std::cout << "================= LeRobot Backend Config =================" << std::endl;
   std::cout << "Backend Config Loaded:" << std::endl;
-  std::cout << "  root = " << test_config_->root << std::endl;
-  std::cout << "  encoder_threads = " << test_config_->encoder_threads << std::endl;
-  std::cout << "  max_image_queue = " << test_config_->max_image_queue << std::endl;
-  std::cout << "  png_compression_level = " << test_config_->png_compression_level << std::endl;
-  std::cout << "  overwrite_existing = " << (test_config_->overwrite_existing ? "true" : "false") << std::endl;
-  std::cout << "  encode_videos = " << (test_config_->encode_videos ? "true" : "false") << std::endl;
-  std::cout << "  task_name = " << test_config_->task_name << std::endl;
-  std::cout << "  repository_id = " << test_config_->repository_id << std::endl;
-  std::cout << "  dataset_id = " << test_config_->dataset_id << std::endl;
-  std::cout << "  episode_index = " << test_config_->episode_index << std::endl;
-  std::cout << "  robot_name = " << test_config_->robot_name << std::endl;
-  std::cout << "  fps = " << test_config_->fps << std::endl;
+  std::cout << "  root = " << cfg_->root << std::endl;
+  std::cout << "  encoder_threads = " << cfg_->encoder_threads << std::endl;
+  std::cout << "  max_image_queue = " << cfg_->max_image_queue << std::endl;
+  std::cout << "  png_compression_level = " << cfg_->png_compression_level << std::endl;
+  std::cout << "  overwrite_existing = " << (cfg_->overwrite_existing ? "true" : "false") << std::endl;
+  std::cout << "  encode_videos = " << (cfg_->encode_videos ? "true" : "false") << std::endl;
+  std::cout << "  task_name = " << cfg_->task_name << std::endl;
+  std::cout << "  repository_id = " << cfg_->repository_id << std::endl;
+  std::cout << "  dataset_id = " << cfg_->dataset_id << std::endl;
+  std::cout << "  episode_index = " << cfg_->episode_index << std::endl;
+  std::cout << "  robot_name = " << cfg_->robot_name << std::endl;
+  std::cout << "  fps = " << cfg_->fps << std::endl;
   std::cout << "==========================================================" << std::endl;
 
 }
@@ -86,7 +76,7 @@ void LeRobotBackend::preprocess_episode()
   // Constructed as: output_dir/repository_id/dataset_id/ for LeRobot V2
   // This is used to form the full paths for images, videos, metadata, and data
   try {
-    root_ = fs::path(cfg_.output_dir) / cfg_.repository_id / cfg_.dataset_id;
+    root_ = fs::path(cfg_->root) / cfg_->repository_id / cfg_->dataset_id;
   } catch (const std::exception& e) {
     throw std::runtime_error(
       "Failed to resolve absolute path of output directory: " + std::string(e.what()));
@@ -158,11 +148,11 @@ bool LeRobotBackend::open() {
   }
 
   // Cache queue policy derived members
-  max_image_queue_cached_ = cfg_.max_image_queue;
+  max_image_queue_cached_ = cfg_->max_image_queue;
 
   // Start image worker threads
   image_worker_running_ = true;
-  size_t nthreads = cfg_.encoder_threads == 0 ? 1 : cfg_.encoder_threads;
+  size_t nthreads = cfg_->encoder_threads == 0 ? 1 : cfg_->encoder_threads;
   image_workers_.reserve(nthreads);
   for (size_t i = 0; i < nthreads; ++i) {
     image_workers_.emplace_back(&LeRobotBackend::image_worker_loop, this);
@@ -689,7 +679,7 @@ void LeRobotBackend::compute_statistics() const {
 
   nlohmann::ordered_json episode_metadata;
   episode_metadata["episode_index"] = episode_index_;
-  episode_metadata["tasks"] = {cfg_.task_name};
+  episode_metadata["tasks"] = {cfg_->task_name};
   episode_metadata["length"] = table->num_rows();
 
   std::ofstream episodes_file(meta_root_ / JSONL_EPISODES, std::ios::app);
@@ -704,7 +694,7 @@ void LeRobotBackend::compute_statistics() const {
   // TODO(shantanuparab-tr): Implement logic to check for existing task entries
   nlohmann::ordered_json task_metadata;
   task_metadata["task_index"] = episode_index_;
-  task_metadata["task"] = cfg_.task_name;
+  task_metadata["task"] = cfg_->task_name;
 
   std::ofstream tasks_file(meta_root_ / JSONL_TASKS, std::ios::app);
 
@@ -848,7 +838,7 @@ void LeRobotBackend::write_joint_state(const data::RecordBase& base) {
 
   // Append timestamp
   check_status(
-    ts_builder.Append(static_cast<float>(frame_id) / cfg_.fps),
+    ts_builder.Append(static_cast<float>(frame_id) / cfg_->fps),
     "Failed to append timestamp");
 
   // Observation list
@@ -957,26 +947,27 @@ void LeRobotBackend::write_image(const data::RecordBase& base) {
     std::lock_guard<std::mutex> lk(image_queue_mutex_);
     // Enforce queue policy if max_image_queue_ is set
     if (max_image_queue_cached_ > 0 && image_queue_.size() >= max_image_queue_cached_) {
-      switch (cfg_.drop_policy) {
-        case DropPolicy::DropNewest: {
-          // Silently drop newest by not adding it to the queue
-          img_dropped_.fetch_add(1, std::memory_order_relaxed);
-          return;
-        }
-        case DropPolicy::DropOldest: {
-          // Drop the oldest in the queue to make room for the new one
-          if (!image_queue_.empty()) {
-            image_queue_.pop_front();
-            img_dropped_.fetch_add(1, std::memory_order_relaxed);
-          }
-          // Break to add the new job
-          break;
-        }
-        // case DropPolicy::Block:
-        //   // Wait until space is available (not implemented)
-        //   image_queue_cv_.wait(lk, [&]{ return image_queue_.size() < max_image_queue_cached_; });
-        //   break;
-      }
+      // TODO(shantanuparab-tr): implement drop policies currently unused
+      // switch (cfg_->drop_policy) {
+      //   case DropPolicy::DropNewest: {
+      //     // Silently drop newest by not adding it to the queue
+      //     img_dropped_.fetch_add(1, std::memory_order_relaxed);
+      //     return;
+      //   }
+      //   case DropPolicy::DropOldest: {
+      //     // Drop the oldest in the queue to make room for the new one
+      //     if (!image_queue_.empty()) {
+      //       image_queue_.pop_front();
+      //       img_dropped_.fetch_add(1, std::memory_order_relaxed);
+      //     }
+      //     // Break to add the new job
+      //     break;
+      //   }
+      //   // case DropPolicy::Block:
+      //   //   // Wait until space is available (not implemented)
+      //   //   image_queue_cv_.wait(lk, [&]{ return image_queue_.size() < max_image_queue_cached_; });
+      //   //   break;
+      // }
     }
     // Extend job by storing enqueue steady time via file_path metadata hack? Better: expand struct.
     image_queue_.push_back(std::move(job));
@@ -993,7 +984,7 @@ void LeRobotBackend::write_image(const data::RecordBase& base) {
 }
 
 void LeRobotBackend::image_worker_loop() {
-  const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_.png_compression_level };
+  const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_->png_compression_level };
   while (image_worker_running_) {
     ImageJob job;
     {
@@ -1107,7 +1098,7 @@ void LeRobotBackend::write_metadata() {
 
   // TODO(shantanuparab-tr): [TDS-24]: Update codebase version dynamically
   info_["codebase_version"] = "v2.1";
-  info_["robot_type"] = cfg_.robot_name;
+  info_["robot_type"] = cfg_->robot_name;
 
   info_["total_episodes"] = 0;
   info_["total_frames"] = 0;
@@ -1194,7 +1185,7 @@ void LeRobotBackend::write_metadata() {
 }
 
 uint32_t LeRobotBackend::scan_existing_episodes() {
-  std::filesystem::path base_path = std::filesystem::path(cfg_.output_dir) / std::filesystem::path(cfg_.repository_id) / std::filesystem::path(cfg_.dataset_id) / "data" / "chunk-000";
+  std::filesystem::path base_path = std::filesystem::path(cfg_->root) / std::filesystem::path(cfg_->repository_id) / std::filesystem::path(cfg_->dataset_id) / "data" / "chunk-000";
 
   // If directory doesn't exist, return 0
   if (!std::filesystem::exists(base_path)) {

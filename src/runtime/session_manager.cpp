@@ -17,58 +17,56 @@
 
 namespace trossen::runtime {
 
-SessionManager::SessionManager(SessionConfig&& config)
-  : config_(std::move(config))
-{ 
+SessionManager::SessionManager(){
 
   // This allows us to access the global configuration for the Session Manager
   // without passing it explicitly.
 
-  test_config_ = GlobalConfig::instance().get_as<SessionManagerConfig>("session_manager");
+  cfg_ = GlobalConfig::instance().get_as<SessionManagerConfig>("session_manager");
 
-  if (!test_config_) {
+  if (!cfg_) {
         std::cerr << "Session Manager config not found!" << std::endl;
         return;
   }
   std::cout << "================= Session Manager Config =================" << std::endl;
-  if (test_config_->max_duration.has_value()) {
-    std::cout << "Max Duration: " << test_config_->max_duration->count() << " seconds" << std::endl;
+  if (cfg_->max_duration.has_value()) {
+    std::cout << "Max Duration: " << cfg_->max_duration->count() << " seconds" << std::endl;
   } else {
     std::cout << "Max Duration: unlimited" << std::endl;
   }
-  if (test_config_->max_episodes.has_value()) {
-    std::cout << "Max Episodes: " << test_config_->max_episodes.value() << std::endl;
+  if (cfg_->max_episodes.has_value()) {
+    std::cout << "Max Episodes: " << cfg_->max_episodes.value() << std::endl;
   } else {
     std::cout << "Max Episodes: unlimited" << std::endl;
   }
-  if (test_config_->backend_type != "") {
-    std::cout << "Backend Type: " << test_config_->backend_type << std::endl;
+  if (cfg_->backend_type != "") {
+    std::cout << "Backend Type: " << cfg_->backend_type << std::endl;
   } else {
     std::cout << "Backend Type: (none)" << std::endl;
   }
   std::cout << "==========================================================" << std::endl;
   // TODO(shantanuparab-tr): Move this logic to a backend utility function
   // Validate required configuration
-  // if (config_.base_path.empty()) {
+  // if (cfg_->base_path.empty()) {
   //   throw std::invalid_argument("SessionConfig::base_path cannot be empty");
   // }
 
   // // Create base directory if it doesn't exist
-  // if (!std::filesystem::exists(config_.base_path)) {
+  // if (!std::filesystem::exists(cfg_->base_path)) {
   //   // TODO(lukeschmitt-tr): Handle potential errors
-  //   std::filesystem::create_directories(config_.base_path);
+  //   std::filesystem::create_directories(cfg_->base_path);
   // }
 
   // // Auto-generate dataset_id if not provided
-  // if (config_.dataset_id.empty()) {
+  // if (cfg_->dataset_id.empty()) {
   //   // TODO(lukeschmitt-tr): Generate UUID (for now, use timestamp-based ID)
   //   auto now = std::chrono::system_clock::now();
   //   auto time_t_now = std::chrono::system_clock::to_time_t(now);
   //   std::ostringstream oss;
   //   // Format: dataset_YYYYMMDD_HHMMSS in local time
   //   oss << "dataset_" << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S");
-  //   config_.dataset_id = oss.str();
-  //   std::cout << "Auto-generated dataset_id: " << config_.dataset_id << std::endl;
+  //   cfg_->dataset_id = oss.str();
+  //   std::cout << "Auto-generated dataset_id: " << cfg_->dataset_id << std::endl;
   // }
 }
 
@@ -144,8 +142,8 @@ bool SessionManager::start_episode() {
   //
   // TODO(lukeschmitt-tr): This "end of recording" check could be moved elsewhere - right now it
   // will stop recording on episode N+1 start attempt
-  if (config_.max_episodes.has_value() && next_episode_index_ >= config_.max_episodes.value()) {
-    std::cerr << "Max episodes (" << config_.max_episodes.value() << ") reached." << std::endl;
+  if (cfg_->max_episodes.has_value() && next_episode_index_ >= cfg_->max_episodes.value()) {
+    std::cerr << "Max episodes (" << cfg_->max_episodes.value() << ") reached." << std::endl;
     return false;
   }
 
@@ -196,7 +194,7 @@ bool SessionManager::start_episode() {
   }
 
   // Start duration monitoring thread if max_duration is set
-  if (config_.max_duration.has_value()) {
+  if (cfg_->max_duration.has_value()) {
     // Ensure any previous monitoring thread is fully cleaned up
     if (monitor_thread_.joinable()) {
       monitoring_active_ = false;
@@ -312,8 +310,8 @@ SessionManager::Stats SessionManager::stats() const {
     auto now = std::chrono::steady_clock::now();
     s.elapsed = std::chrono::duration<double>(now - episode_start_time_);
 
-    if (config_.max_duration.has_value()) {
-      auto max_dur = config_.max_duration.value();
+    if (cfg_->max_duration.has_value()) {
+      auto max_dur = cfg_->max_duration.value();
       if (s.elapsed < max_dur) {
         s.remaining = max_dur - s.elapsed;
       } else {
@@ -344,14 +342,13 @@ SessionManager::Stats SessionManager::stats() const {
 std::shared_ptr<io::Backend> SessionManager::create_backend(
   const ProducerMetadataList& producer_metadatas)
 {
-  if (config_.backend_config == nullptr) {
+  if (cfg_->backend_type == "") {
     throw std::runtime_error("SessionManager::create_backend: backend_config is null");
   }
 
   // Create backend instance via registry
   auto backend = io::BackendRegistry::create(
-    config_.backend_config->type,
-    *config_.backend_config,
+    cfg_->backend_type,
     producer_metadatas);
 
   // Let the backend configure itself for this episode
@@ -367,8 +364,8 @@ void SessionManager::monitor_duration() {
     auto now = std::chrono::steady_clock::now();
     auto elapsed = now - episode_start_time_;
 
-    if (config_.max_duration.has_value() && elapsed >= *config_.max_duration) {
-      std::cout << "\nMax duration (" << config_.max_duration->count()
+    if (cfg_->max_duration.has_value() && elapsed >= *cfg_->max_duration) {
+      std::cout << "\nMax duration (" << cfg_->max_duration->count()
                 << "s) reached, stopping episode automatically" << std::endl;
 
       // Stop monitoring first
