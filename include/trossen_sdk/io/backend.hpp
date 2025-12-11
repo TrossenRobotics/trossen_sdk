@@ -121,7 +121,6 @@ public:
   }
 
 protected:
-
   /// @brief Whether the backend is opened
   bool opened_{false};
 

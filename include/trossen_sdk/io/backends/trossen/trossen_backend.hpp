@@ -45,6 +45,8 @@ public:
 
   /**
    * @brief Convert DropPolicy enum to string
+   * @param policy DropPolicy enum value
+   * @return String representation
    */
   static std::string drop_policy_to_string(DropPolicy policy) {
     switch (policy) {
@@ -54,9 +56,11 @@ public:
     }
   }
 
-  // TODO (shantanu-tr) : Move this to a common utility header if needed elsewhere
+  // TODO(shantanuparab-tr) : Move this to a common utility header if needed elsewhere
   /**
    * @brief Convert string to DropPolicy enum
+   * @param s String representation
+   * @return DropPolicy enum value
    */
   static DropPolicy drop_policy_from_string(const std::string& s) {
     if (s == "DropNewest") return DropPolicy::DropNewest;

@@ -36,7 +36,6 @@ const size_t MCAP_INITIAL_ENCODED_BUFFER_SIZE = 1024 * 1024;  // 1 MB
  */
 class McapBackend : public io::Backend {
 public:
-
   /**
    * @brief Statistics about written records
    */
@@ -193,7 +192,6 @@ private:
 
   /// @brief Statistics about written records
   Stats stats_{};
-
 };
 
 }  // namespace trossen::io::backends

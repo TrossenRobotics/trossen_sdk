@@ -25,7 +25,6 @@ TEST(NullBackendTest, Construction) {
 
 // Test NullBackend construction with custom URI
 TEST(NullBackendTest, ConstructionWithURI) {
-
   NullBackend backend;
   EXPECT_EQ(backend.count(), 0);
 }

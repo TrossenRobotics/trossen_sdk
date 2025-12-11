@@ -34,7 +34,6 @@ TEST(BackendRegistryTest, UnknownBackendNotRegistered) {
 
 // Test creating a NullBackend through the registry
 TEST(BackendRegistryTest, CreateNullBackend) {
-
   auto backend = BackendRegistry::create("null");
   ASSERT_NE(backend, nullptr);
 
@@ -60,7 +59,6 @@ TEST(BackendRegistryTest, CreateNullBackend) {
 
 // Test creating an McapBackend through the registry
 TEST(BackendRegistryTest, CreateMcapBackend) {
-
   auto backend = BackendRegistry::create("mcap");
   ASSERT_NE(backend, nullptr);
 
@@ -92,7 +90,6 @@ TEST(BackendRegistryTest, MultipleBackendsWithDifferentConfigs) {
 
 // Test that base Backend::Config works with proper downcasting
 TEST(BackendRegistryTest, ConfigDowncasting) {
-
   auto backend = BackendRegistry::create("null");
   ASSERT_NE(backend, nullptr);
 
@@ -102,7 +99,6 @@ TEST(BackendRegistryTest, ConfigDowncasting) {
 
 // Test polymorphic behavior through registry
 TEST(BackendRegistryTest, PolymorphicBackendUsage) {
-
   // Create through registry, use through base class interface
   std::shared_ptr<Backend> backend = BackendRegistry::create("null");
 

@@ -27,11 +27,8 @@ REGISTER_BACKEND(McapBackend, "mcap")
 McapBackend::McapBackend(
   const ProducerMetadataList&)
   : io::Backend() {
-
-
   // This allows us to access the global configuration for the Mcap backend
   // without passing it explicitly.
-
   cfg_ = GlobalConfig::instance().get_as<McapBackendConfig>("mcap_backend");
   if (!cfg_) {
         std::cerr << "Backend config not found!" << std::endl;
@@ -50,7 +47,6 @@ McapBackend::McapBackend(
   std::cout << "Dataset ID: " << cfg_->dataset_id << std::endl;
   std::cout << "Episode Index: " << cfg_->episode_index << std::endl;
   std::cout << "======================================================" << std::endl;
-
   }
 McapBackend::~McapBackend() { close(); }
 

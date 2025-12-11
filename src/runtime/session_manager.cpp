@@ -18,7 +18,6 @@
 namespace trossen::runtime {
 
 SessionManager::SessionManager(){
-
   // This allows us to access the global configuration for the Session Manager
   // without passing it explicitly.
 

@@ -24,7 +24,6 @@ namespace trossen::io::backends {
  */
 class NullBackend : public io::Backend {
 public:
-
   /**
    * @brief Construct a NullBackend with the given configuration
    *

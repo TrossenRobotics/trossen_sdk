@@ -58,7 +58,8 @@ LeRobotBackend::LeRobotBackend(
   std::cout << "  encoder_threads = " << cfg_->encoder_threads << std::endl;
   std::cout << "  max_image_queue = " << cfg_->max_image_queue << std::endl;
   std::cout << "  png_compression_level = " << cfg_->png_compression_level << std::endl;
-  std::cout << "  overwrite_existing = " << (cfg_->overwrite_existing ? "true" : "false") << std::endl;
+  std::cout << "  overwrite_existing = "
+            << (cfg_->overwrite_existing ? "true" : "false") << std::endl;
   std::cout << "  encode_videos = " << (cfg_->encode_videos ? "true" : "false") << std::endl;
   std::cout << "  task_name = " << cfg_->task_name << std::endl;
   std::cout << "  repository_id = " << cfg_->repository_id << std::endl;
@@ -67,7 +68,6 @@ LeRobotBackend::LeRobotBackend(
   std::cout << "  robot_name = " << cfg_->robot_name << std::endl;
   std::cout << "  fps = " << cfg_->fps << std::endl;
   std::cout << "==========================================================" << std::endl;
-
 }
 
 void LeRobotBackend::preprocess_episode()
@@ -272,7 +272,7 @@ void LeRobotBackend::convert_to_videos() const {
       const fs::path output_video_path = videos_cam_dir / (episode_name + ".mp4");
 
       if (fs::exists(output_video_path)) {
-        // TODO (shantanuparab-tr): Make this into debug log
+        // TODO(shantanuparab-tr): Make this into debug log
         // std::cout << "Skipping existing video: " << output_video_path.string() << std::endl;
         video_count++;
         continue;
@@ -305,7 +305,7 @@ void LeRobotBackend::convert_to_videos() const {
 
         if (image_paths.empty()) {
           std::lock_guard<std::mutex> lk(log_mutex);
-          // TODO (shantanuparab-tr): Make this into debug log
+          // TODO(shantanuparab-tr): Make this into debug log
           // std::cout << "No images found in episode folder: " << task.episode_name << std::endl;
           continue;
         }
@@ -322,7 +322,7 @@ void LeRobotBackend::convert_to_videos() const {
             << task.output_path.string();
 
         auto t0 = std::chrono::steady_clock::now();
-        // TODO (shantanuparab-tr): Make this into debug log
+        // TODO(shantanuparab-tr): Make this into debug log
         // std::cout << "\n[Worker " << worker_id << "] Encoding video"<< std::endl;
         int ret = std::system(ffmpeg_cmd.str().c_str());
         // std::cout << std::endl;
@@ -963,10 +963,10 @@ void LeRobotBackend::write_image(const data::RecordBase& base) {
       //     // Break to add the new job
       //     break;
       //   }
-      //   // case DropPolicy::Block:
-      //   //   // Wait until space is available (not implemented)
-      //   //   image_queue_cv_.wait(lk, [&]{ return image_queue_.size() < max_image_queue_cached_; });
-      //   //   break;
+      //   case DropPolicy::Block:
+      //     // Wait until space is available (not implemented)
+      //     image_queue_cv_.wait(lk, [&]{ return image_queue_.size() < max_image_queue_cached_; });
+      //     break;
       // }
     }
     // Extend job by storing enqueue steady time via file_path metadata hack? Better: expand struct.
@@ -1185,7 +1185,10 @@ void LeRobotBackend::write_metadata() {
 }
 
 uint32_t LeRobotBackend::scan_existing_episodes() {
-  std::filesystem::path base_path = std::filesystem::path(cfg_->root) / std::filesystem::path(cfg_->repository_id) / std::filesystem::path(cfg_->dataset_id) / "data" / "chunk-000";
+  std::filesystem::path base_path = std::filesystem::path(cfg_->root)
+                                  / std::filesystem::path(cfg_->repository_id)
+                                  / std::filesystem::path(cfg_->dataset_id)
+                                  / "data" / "chunk-000";
 
   // If directory doesn't exist, return 0
   if (!std::filesystem::exists(base_path)) {

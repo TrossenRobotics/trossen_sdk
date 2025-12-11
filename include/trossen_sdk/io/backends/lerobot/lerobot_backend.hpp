@@ -411,7 +411,6 @@ private:
 
   /// @brief Hash map to store the frame indices for each source
   std::unordered_map<std::string, uint64_t> source_frame_indices_;
-
 };
 
 }  // namespace trossen::io::backends

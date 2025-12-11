@@ -80,7 +80,6 @@ TrossenBackend::TrossenBackend(
   }
   test_file.close();
   fs::remove(test_path);
-
 }
 
 bool TrossenBackend::open() {

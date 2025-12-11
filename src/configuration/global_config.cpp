@@ -14,7 +14,6 @@ std::shared_ptr<IConfig> GlobalConfig::get(const std::string& key) const {
 
 void GlobalConfig::load_from_json(const nlohmann::json& j) {
     for (auto& [key, value] : j.items()) {
-
         // Handle nested namespaces like cameras.wrist
         if (value.is_object() && !value.contains("type")) {
             for (auto& [subkey, subvalue] : value.items()) {
