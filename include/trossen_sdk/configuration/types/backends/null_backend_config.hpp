@@ -6,16 +6,10 @@
 #include "trossen_sdk/configuration/global_config.hpp"
 
 struct NullBackendConfig : public IConfig {
-    std::string uri{"/data/trossen"};
-
     std::string type() const override { return "null_backend"; }
 
     static NullBackendConfig from_json(const nlohmann::json& j) {
         NullBackendConfig c;
-        c.uri = j.value("uri", "");
-        if (c.uri.empty()) {
-            c.uri = trossen::io::backends::get_default_root_path().string();
-        }
         return c;
     }
 };

@@ -27,10 +27,7 @@ public:
   /**
    * @brief Configuration for NullBackend
    */
-  struct Config : public io::Backend::Config {
-    /// @brief URI for the null backend (defaults to "null://")
-    std::string uri{"null://"};
-  };
+  struct Config : public io::Backend::Config {};
 
   /**
    * @brief Construct a NullBackend with the given configuration
