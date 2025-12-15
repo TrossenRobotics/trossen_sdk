@@ -57,6 +57,10 @@ LeRobotBackend::LeRobotBackend(
         std::cerr << "Backend config not found!" << std::endl;
         return;
   }
+  // If the root path is empty, set to default
+  if (test_config_->root.empty()) {
+      test_config_->root = trossen::io::backends::get_default_root_path().string();
+  }
 
   // Print the stored values
   std::cout << "================= LeRobot Backend Config =================" << std::endl;

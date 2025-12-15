@@ -72,7 +72,7 @@ void print_usage(const char* prog_name) {
     << "  --duration <seconds>     Duration per episode (default: 10)\n"
     << "  --episodes <count>       Number of episodes to record (default: 3)\n"
     << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
-    << "  --root <path>      Root directory for episodes (default: ~/.cache/trossen_sdk/)\n"
+    << "  --root <path>            Root directory for episodes (default: ~/.cache/trossen_sdk/)\n"
     << "  --repository-id <string> Repository identifier (default: TrossenRoboticsCommunity, "
     << "only for LeRobot backend)\n"
     << "  --mock                   Use mock producers instead of real hardware\n"

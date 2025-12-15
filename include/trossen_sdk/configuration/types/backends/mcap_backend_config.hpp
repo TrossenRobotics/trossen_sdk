@@ -5,7 +5,7 @@
 #include "trossen_sdk/io/backend_utils.hpp"
 
 struct McapBackendConfig : public IConfig {
-    std::string root;
+    std::string root{trossen::io::backends::get_default_root_path().string()};
     std::string robot_name{"/robot/joint_states"};
     int chunk_size_bytes{4 * 1024 * 1024};
     std::string compression{""};
@@ -17,9 +17,6 @@ struct McapBackendConfig : public IConfig {
     static  McapBackendConfig from_json(const nlohmann::json& j) {
         McapBackendConfig c;
         c.root = j.value("root", "");
-        if (c.root.empty()) {
-            c.root = trossen::io::backends::get_default_root_path().string();
-        }
         c.robot_name = j.value("robot_name", "/robot/joint_states");
         c.chunk_size_bytes = j.value("chunk_size_bytes", 4 * 1024 * 1024);
         c.compression = j.value("compression", "");
