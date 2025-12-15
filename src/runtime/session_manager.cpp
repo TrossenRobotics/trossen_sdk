@@ -31,6 +31,7 @@ SessionManager::SessionManager(SessionConfig&& config)
   } else {
     std::cout << "  Max Episodes: unlimited" << std::endl;
   }
+  // TODO(shantanuparab-tr): Move this logic to a backend utility function
   // Validate required configuration
   // if (config_.base_path.empty()) {
   //   throw std::invalid_argument("SessionConfig::base_path cannot be empty");
@@ -53,9 +54,6 @@ SessionManager::SessionManager(SessionConfig&& config)
   //   config_.dataset_id = oss.str();
   //   std::cout << "Auto-generated dataset_id: " << config_.dataset_id << std::endl;
   // }
-  // TODO(shantanuparab-tr): Make this backend-agnostic by using a factory method
-  // Scan directory for existing episodes and resume from next index
-
 }
 
 SessionManager::~SessionManager() {
@@ -140,7 +138,7 @@ bool SessionManager::start_episode() {
 
   // Open backend
   if (!current_backend_->open()) {
-    std::cerr << "Backend open failed for: " << std::endl;
+    std::cerr << "Failed to open backend" << std::endl;
     current_backend_.reset();
     return false;
   }

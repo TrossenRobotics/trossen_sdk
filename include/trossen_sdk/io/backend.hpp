@@ -106,6 +106,7 @@ public:
 
   /**
    * @brief Scan directory for existing episode files and return next index
+   * @return Next episode index to use
    */
   virtual uint32_t scan_existing_episodes() = 0;
 
@@ -124,7 +125,7 @@ protected:
   /// @brief Whether the backend is opened
   bool opened_{false};
 
-  /// @brief Episode index
+  /// @brief Episode index for current recording session
   uint32_t episode_index_{0};
 };
 

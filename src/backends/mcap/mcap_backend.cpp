@@ -55,8 +55,6 @@ McapBackend::~McapBackend() { close(); }
 void McapBackend::preprocess_episode()
 {
   // No-op Delete If not needed
-  std::cout << "McapBackend::preprocess_episode() called." << std::endl;
-
 }
 
 bool McapBackend::open() {
