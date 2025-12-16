@@ -1,3 +1,7 @@
+/**
+* @file global_config.cpp
+* @brief Global configuration manager implementation
+*/
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/config_registry.hpp"
 

@@ -1,9 +1,14 @@
-#pragma once
+/**
+ * @file global_config.hpp
+ * @brief Global configuration manager
+ */
+#ifndef TROSSEN_SDK__CONFIGURATION__GLOBAL_CONFIG_HPP_
+#define TROSSEN_SDK__CONFIGURATION__GLOBAL_CONFIG_HPP_
 #include <unordered_map>
 #include <memory>
 #include <string>
-#include "base_config.hpp"
 #include <nlohmann/json.hpp>
+#include "trossen_sdk/configuration/base_config.hpp"
 
 class GlobalConfig {
 public:
@@ -25,7 +30,6 @@ public:
             throw std::runtime_error(
             "Config key '" + key + "' has wrong type");
         }
-        }
 
         return casted;
     }
@@ -33,3 +37,4 @@ public:
 private:
     std::unordered_map<std::string, std::shared_ptr<BaseConfig>> config_map_;
 };
+#endif  // TROSSEN_SDK__CONFIGURATION__GLOBAL_CONFIG_HPP_

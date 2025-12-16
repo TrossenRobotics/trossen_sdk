@@ -1,4 +1,9 @@
-#pragma once
+/**
+ * @file session_manager_config.hpp
+ * @brief Configuration for Session Manager
+ */
+#ifndef TROSSEN_SDK__CONFIGURATION__TYPES__RUNTIME__SESSION_MANAGER_CONFIG_HPP_
+#define TROSSEN_SDK__CONFIGURATION__TYPES__RUNTIME__SESSION_MANAGER_CONFIG
 
 #include <optional>
 #include <chrono>
@@ -29,3 +34,4 @@ struct SessionManagerConfig : public BaseConfig {
 };
 
 REGISTER_CONFIG(SessionManagerConfig, "session_manager");
+#endif  // TROSSEN_SDK__CONFIGURATION__TYPES__RUNTIME__SESSION_MANAGER_CONFIG_HPP_

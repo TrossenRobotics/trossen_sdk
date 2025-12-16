@@ -1,6 +1,10 @@
-#pragma once
+/**
+ * @file mcap_backend_config.hpp
+ * @brief Configuration for MCAP backend
+ */
+#ifndef TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__MCAP_BACKEND_CONFIG_HPP_
+#define TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__MCAP_BACKEND_CONFIG_HPP_
 #include "../../base_config.hpp"
-// #include "../../json.hpp"
 #include "../../config_registry.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
@@ -29,3 +33,4 @@ struct McapBackendConfig : public BaseConfig {
 };
 
 REGISTER_CONFIG(McapBackendConfig, "mcap_backend");
+#endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__MCAP_BACKEND_CONFIG_HPP_

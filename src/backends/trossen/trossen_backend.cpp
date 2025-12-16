@@ -34,7 +34,7 @@ TrossenBackend::TrossenBackend(
         return;
   }
 
-  // Print off configuration in MCAP style
+  // Print stored configuration values
   std::cout << "================= Trossen Backend Config =================" << std::endl;
   std::cout << "Root Directory: " << cfg_->root << std::endl;
   std::cout << "Encoder Threads: " << cfg_->encoder_threads << std::endl;
