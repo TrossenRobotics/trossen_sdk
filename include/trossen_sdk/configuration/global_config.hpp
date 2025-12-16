@@ -15,7 +15,19 @@ public:
 
     template<typename T>
     std::shared_ptr<T> get_as(const std::string& key) const {
-        return std::static_pointer_cast<T>(get(key));
+        auto base = get(key);
+        if (!base) {
+            throw std::runtime_error("Config key not found: " + key);
+        }
+
+        auto casted = std::dynamic_pointer_cast<T>(base);
+        if (!casted) {
+            throw std::runtime_error(
+                "Config key '" + key + "' has wrong type"
+            );
+        }
+
+        return casted;
     }
 
 private:
