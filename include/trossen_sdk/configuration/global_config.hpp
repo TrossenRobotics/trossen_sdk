@@ -2,7 +2,7 @@
 #include <unordered_map>
 #include <memory>
 #include <string>
-#include "i_config.hpp"
+#include "base_config.hpp"
 #include <nlohmann/json.hpp>
 
 class GlobalConfig {
@@ -23,8 +23,8 @@ public:
         auto casted = std::dynamic_pointer_cast<T>(base);
         if (!casted) {
             throw std::runtime_error(
-                "Config key '" + key + "' has wrong type"
-            );
+            "Config key '" + key + "' has wrong type");
+        }
         }
 
         return casted;

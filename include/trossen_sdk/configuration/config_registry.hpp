@@ -3,7 +3,7 @@
 #include <unordered_map>
 #include <functional>
 #include <nlohmann/json.hpp>
-#include "i_config.hpp"
+#include "base_config.hpp"
 
 class ConfigRegistry {
 public:
