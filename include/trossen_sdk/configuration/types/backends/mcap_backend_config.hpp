@@ -5,7 +5,7 @@
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 
-struct McapBackendConfig : public IConfig {
+struct McapBackendConfig : public BaseConfig {
     std::string root{trossen::io::backends::get_default_root_path().string()};
     std::string robot_name{"/robot/joint_states"};
     int chunk_size_bytes{4 * 1024 * 1024};

@@ -5,7 +5,7 @@
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 
-struct TrossenBackendConfig : public IConfig {
+struct TrossenBackendConfig : public BaseConfig {
     std::string root{"/data/trossen"};
     int encoder_threads{1};
     int max_image_queue{0};

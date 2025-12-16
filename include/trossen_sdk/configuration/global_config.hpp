@@ -11,7 +11,7 @@ public:
 
     void load_from_json(const nlohmann::json& j);
 
-    std::shared_ptr<IConfig> get(const std::string& key) const;
+    std::shared_ptr<BaseConfig> get(const std::string& key) const;
 
     template<typename T>
     std::shared_ptr<T> get_as(const std::string& key) const {
@@ -31,5 +31,5 @@ public:
     }
 
 private:
-    std::unordered_map<std::string, std::shared_ptr<IConfig>> config_map_;
+    std::unordered_map<std::string, std::shared_ptr<BaseConfig>> config_map_;
 };

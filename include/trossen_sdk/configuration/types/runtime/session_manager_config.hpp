@@ -6,7 +6,7 @@
 // #include "../../json.hpp"
 #include "../../config_registry.hpp"
 
-struct SessionManagerConfig : public IConfig {
+struct SessionManagerConfig : public BaseConfig {
     std::optional<std::chrono::duration<double>> max_duration{std::chrono::seconds(20)};
     std::optional<uint32_t> max_episodes{std::nullopt};
     std::string backend_type{"mcap"};

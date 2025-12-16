@@ -6,7 +6,7 @@ GlobalConfig& GlobalConfig::instance() {
     return g;
 }
 
-std::shared_ptr<IConfig> GlobalConfig::get(const std::string& key) const {
+std::shared_ptr<BaseConfig> GlobalConfig::get(const std::string& key) const {
     auto it = config_map_.find(key);
     if (it == config_map_.end()) return nullptr;
     return it->second;

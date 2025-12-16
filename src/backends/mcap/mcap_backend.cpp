@@ -35,8 +35,8 @@ McapBackend::McapBackend(
         return;
   }
   // If the root path is empty, set to default
-  if (test_config_->root.empty()) {
-      test_config_->root = trossen::io::backends::get_default_root_path().string();
+  if (cfg_->root.empty()) {
+      cfg_->root = trossen::io::backends::get_default_root_path().string();
   }
   // Print the stored values
   std::cout << "================= MCAP Backend Config =================" << std::endl;

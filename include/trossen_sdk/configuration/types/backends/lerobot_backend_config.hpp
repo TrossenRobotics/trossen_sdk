@@ -6,7 +6,7 @@
 #include "trossen_sdk/configuration/global_config.hpp"
 
 
-struct LeRobotBackendConfig : public IConfig {
+struct LeRobotBackendConfig : public BaseConfig {
     int encoder_threads{1};
     int max_image_queue{0};
     int png_compression_level{3};

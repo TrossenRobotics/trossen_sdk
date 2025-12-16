@@ -5,7 +5,7 @@
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 
-struct NullBackendConfig : public IConfig {
+struct NullBackendConfig : public BaseConfig {
     std::string type() const override { return "null_backend"; }
 
     static NullBackendConfig from_json(const nlohmann::json& j) {
