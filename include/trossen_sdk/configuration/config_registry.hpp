@@ -2,12 +2,16 @@
  * @file config_registry.hpp
  * @brief Configuration registry for dynamic config type creation
  */
+
 #ifndef TROSSEN_SDK__CONFIGURATION__CONFIG_REGISTRY_HPP_
 #define TROSSEN_SDK__CONFIGURATION__CONFIG_REGISTRY_HPP_
+
+#include <functional>
 #include <memory>
 #include <unordered_map>
-#include <functional>
+
 #include <nlohmann/json.hpp>
+
 #include "trossen_sdk/configuration/base_config.hpp"
 
 namespace trossen::configuration {
@@ -43,5 +47,7 @@ private:
             [](const nlohmann::json& j){ return std::make_shared<Type>(Type::from_json(j)); }); \
         return true; \
     }();
+
 }  // namespace trossen::configuration
+
 #endif  // TROSSEN_SDK__CONFIGURATION__CONFIG_REGISTRY_HPP_

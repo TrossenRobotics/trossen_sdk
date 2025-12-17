@@ -2,12 +2,16 @@
  * @file global_config.hpp
  * @brief Global configuration manager
  */
+
 #ifndef TROSSEN_SDK__CONFIGURATION__GLOBAL_CONFIG_HPP_
 #define TROSSEN_SDK__CONFIGURATION__GLOBAL_CONFIG_HPP_
-#include <unordered_map>
+
 #include <memory>
 #include <string>
+#include <unordered_map>
+
 #include <nlohmann/json.hpp>
+
 #include "trossen_sdk/configuration/base_config.hpp"
 
 namespace trossen::configuration {
@@ -40,4 +44,5 @@ private:
 };
 
 }  // namespace trossen::configuration
+
 #endif  // TROSSEN_SDK__CONFIGURATION__GLOBAL_CONFIG_HPP_

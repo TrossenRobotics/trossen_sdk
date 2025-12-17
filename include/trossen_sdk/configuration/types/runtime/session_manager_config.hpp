@@ -2,14 +2,15 @@
  * @file session_manager_config.hpp
  * @brief Configuration for Session Manager
  */
+
 #ifndef TROSSEN_SDK__CONFIGURATION__TYPES__RUNTIME__SESSION_MANAGER_CONFIG_HPP_
 #define TROSSEN_SDK__CONFIGURATION__TYPES__RUNTIME__SESSION_MANAGER_CONFIG_HPP_
 
-#include <optional>
 #include <chrono>
-#include "../../base_config.hpp"
-#include "../../config_registry.hpp"
+#include <optional>
 
+#include "trossen_sdk/configuration/base_config.hpp"
+#include "trossen_sdk/configuration/config_registry.hpp"
 
 namespace trossen::configuration {
 
@@ -38,4 +39,5 @@ struct SessionManagerConfig : public BaseConfig {
 REGISTER_CONFIG(SessionManagerConfig, "session_manager");
 
 }  // namespace trossen::configuration
+
 #endif  // TROSSEN_SDK__CONFIGURATION__TYPES__RUNTIME__SESSION_MANAGER_CONFIG_HPP_
