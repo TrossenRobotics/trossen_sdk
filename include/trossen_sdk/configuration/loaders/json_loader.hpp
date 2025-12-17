@@ -8,13 +8,13 @@
 
 #include <string>
 
-#include <nlohmann/json.hpp>
+#include "nlohmann/json.hpp"
 
 namespace trossen::configuration {
 
 class JsonLoader {
 public:
-    static nlohmann::json load(const std::string& path);
+  static nlohmann::json load(const std::string& path);
 };
 
 }  // namespace trossen::configuration

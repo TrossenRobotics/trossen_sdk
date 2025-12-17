@@ -30,8 +30,7 @@ namespace trossen::io {
 class BackendRegistry {
 public:
   /// @brief Factory function signature for creating backend instances
-  using FactoryFunc = std::function<std::shared_ptr<Backend>(
-    const ProducerMetadataList&)>;
+  using FactoryFunc = std::function<std::shared_ptr<Backend>(const ProducerMetadataList&)>;
 
   /**
    * @brief Register a backend factory function

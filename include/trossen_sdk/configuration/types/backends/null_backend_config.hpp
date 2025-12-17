@@ -14,12 +14,12 @@
 namespace trossen::configuration {
 
 struct NullBackendConfig : public BaseConfig {
-    std::string type() const override { return "null_backend"; }
+  std::string type() const override { return "null_backend"; }
 
-    static NullBackendConfig from_json(const nlohmann::json& j) {
-        NullBackendConfig c;
-        return c;
-    }
+  static NullBackendConfig from_json(const nlohmann::json& j) {
+    NullBackendConfig c;
+    return c;
+  }
 };
 
 REGISTER_CONFIG(NullBackendConfig, "null_backend");
