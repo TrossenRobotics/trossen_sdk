@@ -3,13 +3,15 @@
  * @brief Configuration for Session Manager
  */
 #ifndef TROSSEN_SDK__CONFIGURATION__TYPES__RUNTIME__SESSION_MANAGER_CONFIG_HPP_
-#define TROSSEN_SDK__CONFIGURATION__TYPES__RUNTIME__SESSION_MANAGER_CONFIG
+#define TROSSEN_SDK__CONFIGURATION__TYPES__RUNTIME__SESSION_MANAGER_CONFIG_HPP_
 
 #include <optional>
 #include <chrono>
 #include "../../base_config.hpp"
-// #include "../../json.hpp"
 #include "../../config_registry.hpp"
+
+
+namespace trossen::configuration {
 
 struct SessionManagerConfig : public BaseConfig {
     std::optional<std::chrono::duration<double>> max_duration{std::chrono::seconds(20)};
@@ -34,4 +36,6 @@ struct SessionManagerConfig : public BaseConfig {
 };
 
 REGISTER_CONFIG(SessionManagerConfig, "session_manager");
+
+}  // namespace trossen::configuration
 #endif  // TROSSEN_SDK__CONFIGURATION__TYPES__RUNTIME__SESSION_MANAGER_CONFIG_HPP_

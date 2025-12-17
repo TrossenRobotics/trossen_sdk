@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 #include "trossen_sdk/configuration/base_config.hpp"
 
+namespace trossen::configuration {
 class GlobalConfig {
 public:
     static GlobalConfig& instance();
@@ -37,4 +38,6 @@ public:
 private:
     std::unordered_map<std::string, std::shared_ptr<BaseConfig>> config_map_;
 };
+
+}  // namespace trossen::configuration
 #endif  // TROSSEN_SDK__CONFIGURATION__GLOBAL_CONFIG_HPP_

@@ -40,7 +40,9 @@ LeRobotBackend::LeRobotBackend(
   // This allows us to access the global configuration for the LeRobot backend
   // without passing it explicitly.
 
-  cfg_ = GlobalConfig::instance().get_as<LeRobotBackendConfig>("lerobot_backend");
+  cfg_ = trossen::configuration::GlobalConfig::instance()
+           .get_as<trossen::configuration::LeRobotBackendConfig>(
+             "lerobot_backend");
 
   if (!cfg_) {
         std::cerr << "Backend config not found!" << std::endl;

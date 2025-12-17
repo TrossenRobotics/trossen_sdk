@@ -9,6 +9,8 @@
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 
+namespace trossen::configuration {
+
 struct NullBackendConfig : public BaseConfig {
     std::string type() const override { return "null_backend"; }
 
@@ -18,5 +20,7 @@ struct NullBackendConfig : public BaseConfig {
     }
 };
 
+
 REGISTER_CONFIG(NullBackendConfig, "null_backend");
+}  // namespace trossen::configuration
 #endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__NULL_BACKEND_CONFIG_HPP_

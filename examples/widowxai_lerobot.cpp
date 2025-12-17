@@ -150,8 +150,8 @@ int main(int argc, char** argv) {
   }
 
   // Create and load global configuration
-  auto j = JsonLoader::load("config/sdk_config.json");
-  GlobalConfig::instance().load_from_json(j);
+  auto j = trossen::configuration::JsonLoader::load("config/sdk_config.json");
+  trossen::configuration::GlobalConfig::instance().load_from_json(j);
 
   // Print configuration
   std::vector<std::string> config_lines = {

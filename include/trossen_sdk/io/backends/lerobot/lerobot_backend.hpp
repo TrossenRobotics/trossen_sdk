@@ -368,7 +368,7 @@ private:
   std::vector<std::thread> image_workers_;
 
   /// @brief Config for this backend
-  std::shared_ptr<LeRobotBackendConfig> cfg_;
+  std::shared_ptr<trossen::configuration::LeRobotBackendConfig> cfg_;
 
   /// @brief Metadata for this backend
   ProducerMetadataList metadata_;

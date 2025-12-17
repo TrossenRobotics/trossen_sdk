@@ -9,6 +9,9 @@
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 
+
+namespace trossen::configuration {
+
 struct TrossenBackendConfig : public BaseConfig {
     std::string root{"/data/trossen"};
     int encoder_threads{1};
@@ -34,4 +37,5 @@ struct TrossenBackendConfig : public BaseConfig {
 };
 
 REGISTER_CONFIG(TrossenBackendConfig, "trossen_backend");
+}  // namespace trossen::configuration
 #endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__TROSSEN_BACKEND_CONFIG_HPP_

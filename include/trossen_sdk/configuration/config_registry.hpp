@@ -10,6 +10,7 @@
 #include <nlohmann/json.hpp>
 #include "trossen_sdk/configuration/base_config.hpp"
 
+namespace trossen::configuration {
 class ConfigRegistry {
 public:
     using BuilderFn = std::function<std::shared_ptr<BaseConfig>(const nlohmann::json&)>;
@@ -42,4 +43,5 @@ private:
             [](const nlohmann::json& j){ return std::make_shared<Type>(Type::from_json(j)); }); \
         return true; \
     }();
+}  // namespace trossen::configuration
 #endif  // TROSSEN_SDK__CONFIGURATION__CONFIG_REGISTRY_HPP_

@@ -9,6 +9,7 @@
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 
+namespace trossen::configuration {
 
 struct LeRobotBackendConfig : public BaseConfig {
     int encoder_threads{1};
@@ -47,5 +48,7 @@ struct LeRobotBackendConfig : public BaseConfig {
 };
 
 REGISTER_CONFIG(LeRobotBackendConfig, "lerobot_backend");
+
+}  // namespace trossen::configuration
 
 #endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_BACKEND_CONFIG_HPP_

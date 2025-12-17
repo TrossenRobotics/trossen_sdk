@@ -173,7 +173,7 @@ private:
   std::filesystem::path path_;
 
   /// @brief Configuration options
-  std::shared_ptr<McapBackendConfig> cfg_;
+  std::shared_ptr<trossen::configuration::McapBackendConfig> cfg_;
 
   /// @brief Mutex to protect writer access
   std::mutex writer_mutex_;

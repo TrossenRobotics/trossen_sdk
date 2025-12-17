@@ -29,7 +29,9 @@ McapBackend::McapBackend(
   : io::Backend() {
   // This allows us to access the global configuration for the Mcap backend
   // without passing it explicitly.
-  cfg_ = GlobalConfig::instance().get_as<McapBackendConfig>("mcap_backend");
+  cfg_ = trossen::configuration::GlobalConfig::instance()
+           .get_as<trossen::configuration::McapBackendConfig>(
+             "mcap_backend");
   if (!cfg_) {
         std::cerr << "Backend config not found!" << std::endl;
         return;

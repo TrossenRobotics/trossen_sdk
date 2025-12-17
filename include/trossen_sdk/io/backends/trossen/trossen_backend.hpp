@@ -259,7 +259,7 @@ private:
   std::vector<std::thread> image_workers_;
 
   /// @brief Config for this backend
-  std::shared_ptr<TrossenBackendConfig> cfg_;
+  std::shared_ptr<trossen::configuration::TrossenBackendConfig> cfg_;
 
   /// @brief Whether image worker threads should keep running
   std::atomic<bool> image_worker_running_{false};

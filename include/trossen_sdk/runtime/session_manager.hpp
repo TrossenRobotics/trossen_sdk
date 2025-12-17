@@ -164,7 +164,7 @@ public:
 
 private:
   /// @brief Configuration
-  std::shared_ptr<SessionManagerConfig> cfg_;
+  std::shared_ptr<trossen::configuration::SessionManagerConfig> cfg_;
 
   /// @brief Next episode index to use
   uint32_t next_episode_index_{0};

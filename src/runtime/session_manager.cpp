@@ -21,7 +21,9 @@ SessionManager::SessionManager(){
   // This allows us to access the global configuration for the Session Manager
   // without passing it explicitly.
 
-  cfg_ = GlobalConfig::instance().get_as<SessionManagerConfig>("session_manager");
+  cfg_ = trossen::configuration::GlobalConfig::instance()
+           .get_as<trossen::configuration::SessionManagerConfig>(
+             "session_manager");
 
   if (!cfg_) {
         std::cerr << "Session Manager config not found!" << std::endl;

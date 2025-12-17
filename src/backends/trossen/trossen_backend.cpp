@@ -27,7 +27,9 @@ TrossenBackend::TrossenBackend(
   : io::Backend()
 {
   // Load global configuration for logging
-  cfg_ = GlobalConfig::instance().get_as<TrossenBackendConfig>("trossen_backend");
+  cfg_ = trossen::configuration::GlobalConfig::instance()
+    .get_as<trossen::configuration::TrossenBackendConfig>(
+      "trossen_backend");
 
   if (!cfg_) {
         std::cerr << "Backend config not found!" << std::endl;

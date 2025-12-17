@@ -9,6 +9,9 @@
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 
+
+namespace trossen::configuration {
+
 struct McapBackendConfig : public BaseConfig {
     std::string root{trossen::io::backends::get_default_root_path().string()};
     std::string robot_name{"/robot/joint_states"};
@@ -33,4 +36,7 @@ struct McapBackendConfig : public BaseConfig {
 };
 
 REGISTER_CONFIG(McapBackendConfig, "mcap_backend");
+
+}  // namespace trossen::configuration
+
 #endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__MCAP_BACKEND_CONFIG_HPP_
