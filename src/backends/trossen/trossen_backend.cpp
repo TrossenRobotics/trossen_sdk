@@ -23,59 +23,65 @@ REGISTER_BACKEND(TrossenBackend, "trossen")
 namespace fs = std::filesystem;
 
 TrossenBackend::TrossenBackend(
-  Config cfg,
   const ProducerMetadataList&)
-  : io::Backend(cfg.output_dir), cfg_(std::move(cfg))
+  : io::Backend()
 {
-  // Validate encoder threads
-  if (cfg_.encoder_threads <= 0) {
-    cfg_.encoder_threads = 1;
-  }
-  // Validate PNG compression level
-  if (cfg_.png_compression_level < 0 || cfg_.png_compression_level > 9) {
-    cfg_.png_compression_level = 3;
+  // Load global configuration for logging
+  cfg_ = trossen::configuration::GlobalConfig::instance()
+    .get_as<trossen::configuration::TrossenBackendConfig>(
+      "trossen_backend");
+
+  if (!cfg_) {
+        std::cerr << "Backend config not found!" << std::endl;
+        return;
   }
 
-  // URI is absolute path to output directory. Set to absolute path and check write access.
-  // Validate output directory path
+  // Print stored configuration values
+  std::cout << "================= Trossen Backend Config =================" << std::endl;
+  std::cout << "Root Directory: " << cfg_->root << std::endl;
+  std::cout << "Encoder Threads: " << cfg_->encoder_threads << std::endl;
+  std::cout << "Max Image Queue: "
+            << (cfg_->max_image_queue == 0 ? "unbounded" : std::to_string(cfg_->max_image_queue))
+            << std::endl;
+  std::cout << "Drop Policy: " << cfg_->drop_policy << std::endl;
+  std::cout << "PNG Compression Level: " << cfg_->png_compression_level << std::endl;
+  std::cout << "==========================================================" << std::endl;
+  // Validate encoder threads
+  if (cfg_->encoder_threads <= 0) {
+    cfg_->encoder_threads = 1;
+  }
+  // Validate PNG compression level
+  if (cfg_->png_compression_level < 0 || cfg_->png_compression_level > 9) {
+    cfg_->png_compression_level = 3;
+  }
+
+  // URI is absolute path to root directory. Set to absolute path and check write access.
+  // Validate root directory path
   try {
-    uri_ = fs::absolute(cfg_.output_dir).string();
+    root_ = fs::absolute(cfg_->root);
   } catch (const std::exception& e) {
     throw std::runtime_error(
-      "Failed to resolve absolute path of output directory: " + std::string(e.what()));
+      "Failed to resolve absolute path of root directory: " + std::string(e.what()));
   }
   // Validate non-empty path
-  if (uri_.empty()) {
-    throw std::runtime_error("Output directory path is empty");
+  if (root_.empty()) {
+    throw std::runtime_error("Root directory path is empty");
   }
-  // Check that we can write to the output directory
+  // Check that we can write to the root directory
   try {
-    if (!fs::exists(uri_)) {
-      fs::create_directories(uri_);
+    if (!fs::exists(root_)) {
+      fs::create_directories(root_);
     }
   } catch (const std::exception& e) {
-    throw std::runtime_error("Failed to create output directory: " + std::string(e.what()));
+    throw std::runtime_error("Failed to create root directory: " + std::string(e.what()));
   }
-  fs::path test_path = fs::path(uri_) / "trossen_sdk_lerobot_v2_test.tmp";
+  fs::path test_path = root_ / "trossen_sdk_lerobot_v2_test.tmp";
   std::ofstream test_file(test_path.string(), std::ios::out | std::ios::trunc);
   if (!test_file) {
     throw std::runtime_error("Failed to open test file for writing: " + test_path.string());
   }
   test_file.close();
   fs::remove(test_path);
-
-  // Print off configuration
-  std::cout << "TrossenBackend configuration:\n"
-            << "  Output dir: " << uri_ << "\n"
-            << "  Encoder threads: " << cfg_.encoder_threads << "\n"
-            << "  Max image queue: "
-            << (cfg_.max_image_queue == 0 ? "unbounded" : std::to_string(cfg_.max_image_queue))
-            << "\n"
-            << "  Drop policy: "
-            << (cfg_.drop_policy == DropPolicy::DropNewest ? "DropNewest" :
-                (cfg_.drop_policy == DropPolicy::DropOldest ? "DropOldest" : "Block"))
-            << "\n"
-            << "  PNG compression level: " << cfg_.png_compression_level << "\n";
 }
 
 bool TrossenBackend::open() {
@@ -83,7 +89,6 @@ bool TrossenBackend::open() {
   if (opened_) {
     return true;
   }
-  root_ = fs::path(uri_);
   images_root_ = root_ / "observations" / "images";
   try {
     fs::create_directories(images_root_);
@@ -98,11 +103,11 @@ bool TrossenBackend::open() {
   }
   header_written_ = false;
   // Cache queue policy derived members
-  max_image_queue_cached_ = cfg_.max_image_queue;
+  max_image_queue_cached_ = cfg_->max_image_queue;
 
   // Start image worker threads
   image_worker_running_ = true;
-  size_t nthreads = cfg_.encoder_threads == 0 ? 1 : cfg_.encoder_threads;
+  size_t nthreads = cfg_->encoder_threads == 0 ? 1 : cfg_->encoder_threads;
   image_workers_.reserve(nthreads);
   for (size_t i = 0; i < nthreads; ++i) {
     image_workers_.emplace_back(&TrossenBackend::image_worker_loop, this);
@@ -210,7 +215,9 @@ void TrossenBackend::write_image(const data::RecordBase& base) {
     std::lock_guard<std::mutex> lk(image_queue_mutex_);
     // Enforce queue policy if max_image_queue_ is set
     if (max_image_queue_cached_ > 0 && image_queue_.size() >= max_image_queue_cached_) {
-      switch (cfg_.drop_policy) {
+      // Convert drop_policy string to DropPolicy enum
+      DropPolicy drop_policy_enum = TrossenBackend::drop_policy_from_string(cfg_->drop_policy);
+      switch (drop_policy_enum) {
         case DropPolicy::DropNewest: {
           // Silently drop newest by not adding it to the queue
           img_dropped_.fetch_add(1, std::memory_order_relaxed);
@@ -246,7 +253,7 @@ void TrossenBackend::write_image(const data::RecordBase& base) {
 }
 
 void TrossenBackend::image_worker_loop() {
-  const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_.png_compression_level };
+  const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_->png_compression_level };
   while (image_worker_running_) {
     ImageJob job;
     {

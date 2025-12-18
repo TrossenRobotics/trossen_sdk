@@ -22,7 +22,9 @@
 #include "foxglove/schemas.hpp"
 
 #include "trossen_sdk/io/backend.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_schemas.hpp"
+#include "trossen_sdk/configuration/types/backends/mcap_backend_config.hpp"
 
 namespace trossen::io::backends {
 
@@ -34,29 +36,6 @@ const size_t MCAP_INITIAL_ENCODED_BUFFER_SIZE = 1024 * 1024;  // 1 MB
  */
 class McapBackend : public io::Backend {
 public:
-  /**
-   * @brief Configuration options for McapBackend
-   */
-  struct Config : public io::Backend::Config {
-    /// @brief .mcap file path
-    std::string output_path;
-
-    /// @brief prefix used for joint states
-    std::string robot_name{"/robot/joint_states"};
-
-    /// @brief Chunking / compression options (applied when opening)
-    size_t chunk_size_bytes{4 * 1024 * 1024};
-
-    /// @brief "" (none) or "zstd" (if library was built with it)
-    std::string compression{""};
-
-    /// @brief Dataset identifier (user-provided or auto-generated UUID)
-    std::string dataset_id;
-
-    /// @brief Episode index within the dataset (zero-based)
-    uint32_t episode_index{0};
-  };
-
   /**
    * @brief Statistics about written records
    */
@@ -74,11 +53,9 @@ public:
   /**
    * @brief Construct an McapBackend with the given configuration
    *
-   * @param cfg Configuration options
    * @param metadata Optional producer metadata
    */
   explicit McapBackend(
-    Config cfg,
     const ProducerMetadataList& metadata = {});
 
   /**
@@ -94,11 +71,7 @@ public:
    * @param dataset_id Dataset identifier (unused)
    * @param repository_id Repository identifier (unused)
    */
-  void preprocess_episode(
-    const std::string& output_path,
-    uint32_t episode_index,
-    const std::string& dataset_id,
-    const std::string& repository_id) override;
+  void preprocess_episode() override;
 
   /**
    * @brief Open the MCAP writer
@@ -141,10 +114,9 @@ public:
   /**
    * @brief Scan directory for existing episode files and return next index
    *
-   * @param base_path Directory to scan
    * @return Next episode index (max_found + 1, or 0 if none found)
    */
-  static uint32_t scan_existing_episodes(const std::filesystem::path& base_path);
+  uint32_t scan_existing_episodes() override;
 
 private:
   /**
@@ -201,7 +173,7 @@ private:
   std::filesystem::path path_;
 
   /// @brief Configuration options
-  Config cfg_;
+  std::shared_ptr<trossen::configuration::McapBackendConfig> cfg_;
 
   /// @brief Mutex to protect writer access
   std::mutex writer_mutex_;
