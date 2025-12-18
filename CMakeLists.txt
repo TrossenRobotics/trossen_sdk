@@ -178,3 +178,9 @@ option(BUILD_BENCHMARKS "Build the benchmarking tree" OFF)
 if(BUILD_BENCHMARKS)
   add_subdirectory(benchmarks)
 endif()
+
+# Applications
+option(BUILD_APPS "Build applications" OFF)
+if(BUILD_APPS)
+  add_subdirectory(apps/soma)
+endif()
