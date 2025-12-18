@@ -18,7 +18,7 @@ namespace trossen::hw::camera {
 RealsenseCameraProducer::RealsenseCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   // Populate metadata
   metadata_.type = "realsense_camera";
-  metadata_.id = "realsense_camera_" + std::to_string(cfg_.device_index);
+  metadata_.id = "realsense_camera_" + std::to_string(cfg_.serial_number);
   metadata_.name = cfg_.stream_id;
   metadata_.description = "Produces camera frames from a physical camera device using Realsense";
   metadata_.width = cfg_.width;
@@ -38,92 +38,49 @@ RealsenseCameraProducer::~RealsenseCameraProducer() {
 
 bool RealsenseCameraProducer::open_if_needed() {
   if (opened_) return true;
-  if (!cap_.open(cfg_.device_index, cv::CAP_V4L2)) {
-    std::cerr << "Failed to open camera index " << cfg_.device_index << std::endl;
-    return false;
-  }
-  // Attempt pixel format (FOURCC) negotiation if a preference list was provided.
-  // We do this immediately after opening and before setting resolution/FPS so driver
-  // can reconfigure cleanly.
-  if (!cfg_.preferred_fourcc.empty()) {
-    for (size_t i = 0; i < cfg_.preferred_fourcc.size(); ++i) {
-      int32_t code = cfg_.preferred_fourcc[i];
-      // Break out early if already in desired format (avoid redundant set calls)
-      double current_fourcc = cap_.get(cv::CAP_PROP_FOURCC);
-      if (static_cast<int32_t>(current_fourcc) == code) {
-        break;  // already negotiated
-      }
-      if (!cap_.set(cv::CAP_PROP_FOURCC, static_cast<double>(code))) {
-        char c0 = static_cast<char>(code & 0xFF);
-        char c1 = static_cast<char>((code >> 8) & 0xFF);
-        char c2 = static_cast<char>((code >> 16) & 0xFF);
-        char c3 = static_cast<char>((code >> 24) & 0xFF);
-        std::cerr << "Failed to set FOURCC=" << c0 << c1 << c2 << c3
-                  << " (index " << i << ")" << std::endl;
-        continue;
-      }
-      // Re-read to verify which format we actually got.
-      double after = cap_.get(cv::CAP_PROP_FOURCC);
-      if (static_cast<int32_t>(after) == code) {
-        char c0 = static_cast<char>(code & 0xFF);
-        char c1 = static_cast<char>((code >> 8) & 0xFF);
-        char c2 = static_cast<char>((code >> 16) & 0xFF);
-        char c3 = static_cast<char>((code >> 24) & 0xFF);
-        std::cout << "Negotiated FOURCC=" << c0 << c1 << c2 << c3
-                  << " (preference " << i << ")" << std::endl;
-        break;  // stop after first successful preference
-      }
-    }
-  }
-  if (cfg_.width > 0 && !cap_.set(cv::CAP_PROP_FRAME_WIDTH, cfg_.width)) {
-    std::cerr << "Failed to set width=" << cfg_.width << std::endl; return false; }
-  if (cfg_.height > 0 && !cap_.set(cv::CAP_PROP_FRAME_HEIGHT, cfg_.height)) {
-    std::cerr << "Failed to set height=" << cfg_.height << std::endl; return false; }
-  if (cfg_.fps > 0 && !cap_.set(cv::CAP_PROP_FPS, cfg_.fps)) {
-    std::cerr << "Failed to set fps=" << cfg_.fps << std::endl; return false; }
+  // Create a realsense config
+  rs2::config cam_cfg;
 
-  double eff_w = cap_.get(cv::CAP_PROP_FRAME_WIDTH);
-  double eff_h = cap_.get(cv::CAP_PROP_FRAME_HEIGHT);
-  double eff_fps = cap_.get(cv::CAP_PROP_FPS);
-  double fourcc = cap_.get(cv::CAP_PROP_FOURCC);
-  char fourcc_chars[] = {
-    static_cast<char>(static_cast<int>(fourcc) & 0xFF),
-    static_cast<char>((static_cast<int>(fourcc) >> 8) & 0xFF),
-    static_cast<char>((static_cast<int>(fourcc) >> 16) & 0xFF),
-    static_cast<char>((static_cast<int>(fourcc) >> 24) & 0xFF),
-    '\0'};
-  std::cout << "Camera opened: " << eff_w << "x" << eff_h << " @ " << eff_fps
-            << " FPS FOURCC=" << fourcc_chars << std::endl;
-  if (cfg_.fps > 0 && static_cast<int>(eff_fps) != cfg_.fps) {
-    std::cerr << "Warning: requested fps="
-              << cfg_.fps << " but device reports " << eff_fps << std::endl;
+  // Enable the device using the unique ID
+  if (!unique_id_.empty()) {
+    cam_cfg.enable_device(cfg_.serial_number);
+  } else {
+    spdlog::error(
+        "Unique ID is empty. Cannot connect to RealSense camera: {}", cfg_.stream_id);
+    throw std::runtime_error("Unique ID is empty for camera: " + cfg_.stream_id);
+  }
+
+  // Enable the color stream as default
+  cam_cfg.enable_stream(RS2_STREAM_COLOR, cfg_.width, cfg_.height,
+                    RS2_FORMAT_RGB8, cfg_.fps);
+
+  // Enable depth stream if use_depth_ is true
+  if (use_depth_) {
+    cam_cfg.enable_stream(RS2_STREAM_DEPTH, cfg_.width, cfg_.height,
+                      RS2_FORMAT_Z16, cfg_.fps);
+  }
+
+  try {
+    // Start the camera pipeline
+    rs2::pipeline_profile profile = camera_.start(cam_cfg);
+  } catch (const rs2::error& e) {
+    spdlog::error(
+        "Failed to enable device with Unique ID: {}. Error: {}. Listing all "
+        "available cameras.",
+        unique_id_, e.what());
+    find_cameras();
+    spdlog::info(
+        "Available cameras listed above. Please check outputs folder to get "
+        "images associated "
+        "with each camera.");
+    throw std::runtime_error(
+        "Unique ID (serial number) is required to connect to RealSense camera");
   }
   opened_ = true;
   return true;
 }
 
-bool RealsenseCameraProducer::warmup() {
-  // TODO(lukeschmitt-tr): check that received frames are valid and match requested configuration
-  if (!open_if_needed()) {
-    return false;
-  }
-  if (cfg_.warmup_seconds <= 0.0) {
-    return true;
-  }
-  auto warmup_end =
-    std::chrono::steady_clock::now() + std::chrono::duration<double>(cfg_.warmup_seconds);
-  cv::Mat frame;
-  while (std::chrono::steady_clock::now() < warmup_end) {
-    if (!cap_.read(frame)) {
-      ++stats_.dropped;
-      continue;
-    }
-    ++stats_.warmup_discarded;
-    // Sleep a bit to avoid tight busy loop
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  }
-  return true;
-}
+
 
 void RealsenseCameraProducer::poll(
   const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
@@ -133,10 +90,60 @@ void RealsenseCameraProducer::poll(
     return;
   }
   auto img = std::make_shared<data::ImageRecord>();
-  if (!cap_.read(img->image)) {
+
+  // Initialize frameset
+  rs2::frameset frames;
+
+  // Wait for the next set of frames from the camera with a timeout of 3000 ms
+  try {
+    frames = camera_.wait_for_frames(3000);
+  } catch (const rs2::error& e) {
+    std::cout << "[WARN] Failed to get frames from RealSense camera: " << e.what() << std::endl;
     ++stats_.dropped;
     return;
   }
+
+  if (frames && frames.size() == 0) {
+    spdlog::error("No frames received from camera: {}", name_);
+    return;
+  }
+  // Try to get color frame
+  try {
+    rs2::frame color_frame = frames.get_color_frame();
+
+    if (color_frame) {
+      // Convert rs2::frame to cv::Mat
+      const void* data_ptr = static_cast<const void*>(color_frame.get_data());
+      cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3,
+                    const_cast<void*>(data_ptr), cv::Mat::AUTO_STEP);
+      img_data->image = std::move(image);
+    } else {
+      spdlog::error("Failed to read color frame from camera: {}", name_);
+    }
+  } catch (const rs2::error& e) {
+    spdlog::error("Error retrieving color frame from camera: {}. Error: {}",
+                  name_, e.what());
+  }
+  if (cfg_.use_depth_) {
+    // Try to get depth frame
+    try {
+      rs2::frame depth_frame = frames.get_depth_frame();
+      if (depth_frame) {
+        const void* depth_data_ptr =
+            static_cast<const void*>(depth_frame.get_data());
+        cv::Mat depth_map(cv::Size(capture_width_, capture_height_), CV_16UC1,
+                          const_cast<void*>(depth_data_ptr),
+                          cv::Mat::AUTO_STEP);
+        img_data->depth_map = std::move(depth_map);
+      } else {
+        spdlog::error("Failed to read depth frame from camera: {}", name_);
+      }
+    } catch (const rs2::error& e) {
+      spdlog::error("Error retrieving depth frame from camera: {}. Error: {}",
+                    name_, e.what());
+    }
+  }
+  img_data->timestamp_ms = static_cast<int64_t>(frames.get_timestamp());
 
   data::Timestamp ts;
   // TODO(lukeschmitt-tr): use device timestamp if available and cfg_.use_device_time

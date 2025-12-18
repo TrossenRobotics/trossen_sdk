@@ -12,8 +12,7 @@
 #include <string>
 #include <vector>
 
-#include "Realsense2/core.hpp"
-#include "Realsense2/videoio.hpp"
+#include <librealsense2/rs.hpp>  // RealSense SDK
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
@@ -62,6 +61,10 @@ public:
 
     /// @brief Whether to enforce the requested fps (may reduce if device cannot keep up)
     bool enforce_requested_fps = true;
+
+    /// @brief Flag to use depth map stream along with color stream
+    bool use_depth_map{false};
+
   };
 
   /**
@@ -156,17 +159,22 @@ public:
 
 protected:
   /**
-   * @brief Open the device if not already opened
+   * @brief Connect the device if not already opened
    *
-   * @return true on successful open or already opened, false on failure
+   * @return true on successful connection or already opened, false on failure
    */
-  bool open_if_needed();
+  bool connect();
+
+  /**
+    * @brief Read the camera frame
+    */
+  void read();
 
   /// @brief Configuration parameters
   Config cfg_;
 
-  /// @brief Capture handle
-  cv::VideoCapture cap_;
+  /// @brief Realsense pipeline
+  rs2::pipeline camera_pipeline_;
 
 private:
   /// @brief Producer metadata
