@@ -25,7 +25,7 @@ namespace fs = std::filesystem;
 TrossenBackend::TrossenBackend(
   Config cfg,
   const ProducerMetadataList&)
-  : io::Backend(cfg.output_dir), cfg_(std::move(cfg))
+  : io::Backend(), cfg_(std::move(cfg))
 {
   // Validate encoder threads
   if (cfg_.encoder_threads <= 0) {
@@ -39,24 +39,24 @@ TrossenBackend::TrossenBackend(
   // URI is absolute path to output directory. Set to absolute path and check write access.
   // Validate output directory path
   try {
-    uri_ = fs::absolute(cfg_.output_dir).string();
+    root_ = fs::absolute(cfg_.output_dir);
   } catch (const std::exception& e) {
     throw std::runtime_error(
       "Failed to resolve absolute path of output directory: " + std::string(e.what()));
   }
   // Validate non-empty path
-  if (uri_.empty()) {
+  if (root_.empty()) {
     throw std::runtime_error("Output directory path is empty");
   }
   // Check that we can write to the output directory
   try {
-    if (!fs::exists(uri_)) {
-      fs::create_directories(uri_);
+    if (!fs::exists(root_)) {
+      fs::create_directories(root_);
     }
   } catch (const std::exception& e) {
     throw std::runtime_error("Failed to create output directory: " + std::string(e.what()));
   }
-  fs::path test_path = fs::path(uri_) / "trossen_sdk_lerobot_v2_test.tmp";
+  fs::path test_path = root_ / "trossen_sdk_lerobot_v2_test.tmp";
   std::ofstream test_file(test_path.string(), std::ios::out | std::ios::trunc);
   if (!test_file) {
     throw std::runtime_error("Failed to open test file for writing: " + test_path.string());
@@ -66,7 +66,7 @@ TrossenBackend::TrossenBackend(
 
   // Print off configuration
   std::cout << "TrossenBackend configuration:\n"
-            << "  Output dir: " << uri_ << "\n"
+            << "  Output dir: " << root_ << "\n"
             << "  Encoder threads: " << cfg_.encoder_threads << "\n"
             << "  Max image queue: "
             << (cfg_.max_image_queue == 0 ? "unbounded" : std::to_string(cfg_.max_image_queue))
@@ -83,7 +83,6 @@ bool TrossenBackend::open() {
   if (opened_) {
     return true;
   }
-  root_ = fs::path(uri_);
   images_root_ = root_ / "observations" / "images";
   try {
     fs::create_directories(images_root_);

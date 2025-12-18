@@ -95,11 +95,7 @@ public:
    * @param dataset_id Dataset identifier (unused)
    * @param repository_id Repository identifier (unused)
    */
-  void preprocess_episode(
-    const std::string& output_path,
-    uint32_t episode_index,
-    const std::string& dataset_id,
-    const std::string& repository_id) override;
+  void preprocess_episode() override;
 
   /**
    * @brief Open the MCAP writer
@@ -142,10 +138,9 @@ public:
   /**
    * @brief Scan directory for existing episode files and return next index
    *
-   * @param base_path Directory to scan
    * @return Next episode index (max_found + 1, or 0 if none found)
    */
-  static uint32_t scan_existing_episodes(const std::filesystem::path& base_path);
+  uint32_t scan_existing_episodes() override;
 
 private:
   /**

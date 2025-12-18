@@ -241,11 +241,8 @@ int main(int argc, char** argv) {
   // ──────────────────────────────────────────────────────────
 
   trossen::runtime::SessionConfig session_cfg;
-  session_cfg.base_path = cfg.output_dir;
-  session_cfg.dataset_id = cfg.dataset_id;
   session_cfg.max_duration = std::chrono::seconds(cfg.duration_s);
   session_cfg.max_episodes = cfg.episodes;
-  session_cfg.repository_id = cfg.repository_id;
 
   if (cfg.backend_type == "mcap") {
     auto mcap_cfg = std::make_unique<trossen::io::backends::McapBackend::Config>();
@@ -253,6 +250,8 @@ int main(int argc, char** argv) {
     mcap_cfg->chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
     mcap_cfg->robot_name = "/robots/widowxai";
     mcap_cfg->type = "mcap";
+    mcap_cfg->output_path = cfg.output_dir;  // Will be set per episode
+    mcap_cfg->dataset_id = cfg.dataset_id;
     session_cfg.backend_config = std::move(mcap_cfg);
   } else if (cfg.backend_type == "lerobot") {
     auto lerobot_cfg = std::make_unique<trossen::io::backends::LeRobotBackend::Config>();

@@ -29,7 +29,7 @@ public:
    *
    * @param uri Path or logical destination identifier
    */
-  explicit Backend(const std::string& uri) : uri_(uri) {}
+  explicit Backend(){}
 
   /**
    * @brief Virtual destructor
@@ -61,11 +61,7 @@ public:
    * configure episode-specific paths and metadata. Default implementation does nothing (backends
    * that don't need per-episode customization can ignore this).
    */
-  virtual void preprocess_episode(
-    const std::string& output_path,
-    uint32_t episode_index,
-    const std::string& dataset_id = "",
-    const std::string& repository_id = "") {}
+  virtual void preprocess_episode() {}
 
   /**
    * @brief Open a logging destination
@@ -108,12 +104,29 @@ public:
    */
   virtual void close() = 0;
 
+  /**
+   * @brief Scan directory for existing episode files and return next index
+   * @return Next episode index to use
+   */
+  virtual uint32_t scan_existing_episodes() = 0;
+
+  /**
+   * @brief Set episode index
+   *
+   * Default implementation sets the episode_index_ member.
+   * Children can override if custom behavior is needed.
+   */
+  virtual void set_episode_index(uint32_t episode_index) {
+    episode_index_ = episode_index;
+  }
+
 protected:
-  /// @brief Destination identifier (file path, etc.)
-  std::string uri_{""};
 
   /// @brief Whether the backend is opened
   bool opened_{false};
+
+  /// @brief Episode index for current recording session
+  uint32_t episode_index_{0};
 };
 
 }  // namespace trossen::io
