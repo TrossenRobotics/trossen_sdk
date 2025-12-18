@@ -53,18 +53,11 @@ public:
     /// @brief Seconds to warm up (discard frames) after device open before emitting
     double warmup_seconds{0.0};
 
-    /// @brief Preferred FOURCC pixel formats (in order). Default: MJPG, YUYV
-    std::vector<int32_t> preferred_fourcc = {
-      cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),
-      cv::VideoWriter::fourcc('Y', 'U', 'Y', 'V')
-    };
-
     /// @brief Whether to enforce the requested fps (may reduce if device cannot keep up)
     bool enforce_requested_fps = true;
 
     /// @brief Flag to use depth map stream along with color stream
     bool use_depth_map{false};
-
   };
 
   /**
@@ -159,22 +152,17 @@ public:
 
 protected:
   /**
-   * @brief Connect the device if not already opened
+   * @brief Open the device if not already opened
    *
-   * @return true on successful connection or already opened, false on failure
+   * @return true on successful open or already opened, false on failure
    */
-  bool connect();
-
-  /**
-    * @brief Read the camera frame
-    */
-  void read();
+  bool open_if_needed();
 
   /// @brief Configuration parameters
   Config cfg_;
 
   /// @brief Realsense pipeline
-  rs2::pipeline camera_pipeline_;
+  rs2::pipeline camera_;
 
 private:
   /// @brief Producer metadata

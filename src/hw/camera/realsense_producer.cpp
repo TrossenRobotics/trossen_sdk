@@ -18,7 +18,7 @@ namespace trossen::hw::camera {
 RealsenseCameraProducer::RealsenseCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   // Populate metadata
   metadata_.type = "realsense_camera";
-  metadata_.id = "realsense_camera_" + std::to_string(cfg_.serial_number);
+  metadata_.id = "realsense_camera_" + cfg_.serial_number;
   metadata_.name = cfg_.stream_id;
   metadata_.description = "Produces camera frames from a physical camera device using Realsense";
   metadata_.width = cfg_.width;
@@ -32,7 +32,7 @@ RealsenseCameraProducer::RealsenseCameraProducer(Config cfg) : cfg_(std::move(cf
 
 RealsenseCameraProducer::~RealsenseCameraProducer() {
   if (opened_) {
-    cap_.release();
+    std::cout << "Stopping RealSense camera: " << metadata_.name << std::endl;
   }
 }
 
@@ -42,11 +42,11 @@ bool RealsenseCameraProducer::open_if_needed() {
   rs2::config cam_cfg;
 
   // Enable the device using the unique ID
-  if (!unique_id_.empty()) {
+  if (!cfg_.serial_number.empty()) {
     cam_cfg.enable_device(cfg_.serial_number);
   } else {
-    spdlog::error(
-        "Unique ID is empty. Cannot connect to RealSense camera: {}", cfg_.stream_id);
+    std::cout << "Unique ID is empty. Cannot connect to RealSense camera: "
+      << cfg_.stream_id << std::endl;
     throw std::runtime_error("Unique ID is empty for camera: " + cfg_.stream_id);
   }
 
@@ -54,25 +54,16 @@ bool RealsenseCameraProducer::open_if_needed() {
   cam_cfg.enable_stream(RS2_STREAM_COLOR, cfg_.width, cfg_.height,
                     RS2_FORMAT_RGB8, cfg_.fps);
 
-  // Enable depth stream if use_depth_ is true
-  if (use_depth_) {
-    cam_cfg.enable_stream(RS2_STREAM_DEPTH, cfg_.width, cfg_.height,
-                      RS2_FORMAT_Z16, cfg_.fps);
-  }
-
   try {
     // Start the camera pipeline
     rs2::pipeline_profile profile = camera_.start(cam_cfg);
   } catch (const rs2::error& e) {
-    spdlog::error(
-        "Failed to enable device with Unique ID: {}. Error: {}. Listing all "
-        "available cameras.",
-        unique_id_, e.what());
-    find_cameras();
-    spdlog::info(
+    std::cout << "Failed to enable device with Unique ID: " << cfg_.serial_number
+              << ". Error: " << e.what() << ". Listing all available cameras." << std::endl;
+    std::cout << "Available cameras listed above. Please check outputs folder to get "
         "Available cameras listed above. Please check outputs folder to get "
         "images associated "
-        "with each camera.");
+        "with each camera." << std::endl;
     throw std::runtime_error(
         "Unique ID (serial number) is required to connect to RealSense camera");
   }
@@ -104,7 +95,7 @@ void RealsenseCameraProducer::poll(
   }
 
   if (frames && frames.size() == 0) {
-    spdlog::error("No frames received from camera: {}", name_);
+    std::cout << "No frames received from camera: " << cfg_.stream_id << std::endl;
     return;
   }
   // Try to get color frame
@@ -114,36 +105,16 @@ void RealsenseCameraProducer::poll(
     if (color_frame) {
       // Convert rs2::frame to cv::Mat
       const void* data_ptr = static_cast<const void*>(color_frame.get_data());
-      cv::Mat image(cv::Size(capture_width_, capture_height_), CV_8UC3,
+      cv::Mat image(cv::Size(cfg_.width, cfg_.height), CV_8UC3,
                     const_cast<void*>(data_ptr), cv::Mat::AUTO_STEP);
-      img_data->image = std::move(image);
+      img->image = std::move(image);
     } else {
-      spdlog::error("Failed to read color frame from camera: {}", name_);
+      std::cout << "Failed to read color frame from camera: " << cfg_.stream_id << std::endl;
     }
   } catch (const rs2::error& e) {
-    spdlog::error("Error retrieving color frame from camera: {}. Error: {}",
-                  name_, e.what());
+    std::cout << "Error retrieving color frame from camera: "
+              << cfg_.stream_id << ". Error: " << e.what() << std::endl;
   }
-  if (cfg_.use_depth_) {
-    // Try to get depth frame
-    try {
-      rs2::frame depth_frame = frames.get_depth_frame();
-      if (depth_frame) {
-        const void* depth_data_ptr =
-            static_cast<const void*>(depth_frame.get_data());
-        cv::Mat depth_map(cv::Size(capture_width_, capture_height_), CV_16UC1,
-                          const_cast<void*>(depth_data_ptr),
-                          cv::Mat::AUTO_STEP);
-        img_data->depth_map = std::move(depth_map);
-      } else {
-        spdlog::error("Failed to read depth frame from camera: {}", name_);
-      }
-    } catch (const rs2::error& e) {
-      spdlog::error("Error retrieving depth frame from camera: {}. Error: {}",
-                    name_, e.what());
-    }
-  }
-  img_data->timestamp_ms = static_cast<int64_t>(frames.get_timestamp());
 
   data::Timestamp ts;
   // TODO(lukeschmitt-tr): use device timestamp if available and cfg_.use_device_time

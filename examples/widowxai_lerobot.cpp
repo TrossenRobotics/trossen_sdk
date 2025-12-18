@@ -30,6 +30,7 @@
 #include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
+#include "trossen_sdk/hw/camera/realsense_producer.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
@@ -322,6 +323,23 @@ int main(int argc, char** argv) {
 
   auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
   mgr.add_producer(camera_producer, camera_period);
+
+  // Create a Realsense Camera Producer (Hardcoded configuration for demo purposes)
+
+  trossen::hw::camera::RealsenseCameraProducer::Config realsense_cfg;
+  realsense_cfg.serial_number = "218622274938";  // Replace with your camera's serial number
+  realsense_cfg.stream_id = "realsense_camera0";
+  realsense_cfg.encoding = "bgr8";
+  realsense_cfg.width = 640;
+  realsense_cfg.height = 480;
+  realsense_cfg.fps = 30;
+  realsense_cfg.use_device_time = true;
+  realsense_cfg.warmup_seconds = 2.0;
+  auto realsense_producer =
+    std::make_shared<trossen::hw::camera::RealsenseCameraProducer>(realsense_cfg);
+  auto realsense_period = std::chrono::milliseconds(static_cast<int>(1000.0f / 30.0f));
+  mgr.add_producer(realsense_producer, realsense_period);
+  std::cout << "  ✓ Realsense camera producer (30 Hz, 640x480)\n";
 
   std::cout << "\nProducers registered. Ready to record.\n";
 
