@@ -11,7 +11,7 @@
  *
  * Usage:
  *   ./widowxai_lerobot --episodes 5 --duration 10
- *   ./widowxai_lerobot --episodes 3 --duration 5 --output-dir /data/recordings
+ *   ./widowxai_lerobot --episodes 3 --duration 5 --root-dir /data/recordings
  *   ./widowxai_lerobot --mock  # Use mock producers for testing without hardware
  */
 
@@ -31,6 +31,8 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/configuration/loaders/json_loader.hpp"
 
 #include "./demo_utils.hpp"
 
@@ -43,7 +45,7 @@ struct Config {
   int duration_s = 10;
   int episodes = 3;
   std::string dataset_id = "";  // empty = auto-generate
-  std::string output_dir = trossen::io::backends::get_default_root_path().string();
+  std::string root = trossen::io::backends::get_default_root_path().string();
   std::string repository_id = "TrossenRoboticsCommunity";  // Valid only for LeRobot backend
   bool use_mock = false;
   bool show_help = false;
@@ -70,7 +72,7 @@ void print_usage(const char* prog_name) {
     << "  --duration <seconds>     Duration per episode (default: 10)\n"
     << "  --episodes <count>       Number of episodes to record (default: 3)\n"
     << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
-    << "  --output-dir <path>      Output directory for episodes (default: output/episodes)\n"
+    << "  --root <path>            Root directory for episodes (default: ~/.cache/trossen_sdk/)\n"
     << "  --repository-id <string> Repository identifier (default: TrossenRoboticsCommunity, "
     << "only for LeRobot backend)\n"
     << "  --mock                   Use mock producers instead of real hardware\n"
@@ -86,7 +88,7 @@ void print_usage(const char* prog_name) {
     << "Examples:\n"
     << "  " << prog_name << " --duration 10 --episodes 5\n"
     << "  " << prog_name << " --mock --duration 5 --episodes 3\n"
-    << "  " << prog_name << " --dataset-id solo_demo_001 --output-dir /data/recordings\n";
+    << "  " << prog_name << " --dataset-id solo_demo_001 --root /data/recordings\n";
 }
 
 Config parse_args(int argc, char** argv) {
@@ -102,8 +104,8 @@ Config parse_args(int argc, char** argv) {
       cfg.episodes = std::max(1, std::atoi(argv[++i]));
     } else if (arg == "--dataset-id" && i + 1 < argc) {
       cfg.dataset_id = argv[++i];
-    } else if (arg == "--output-dir" && i + 1 < argc) {
-      cfg.output_dir = argv[++i];
+    } else if (arg == "--root" && i + 1 < argc) {
+      cfg.root = argv[++i];
     } else if (arg == "--repository-id" && i + 1 < argc) {
       cfg.repository_id = argv[++i];
     } else if (arg == "--mock") {
@@ -142,6 +144,14 @@ int main(int argc, char** argv) {
     print_usage(argv[0]);
     return 0;
   }
+  if (!std::filesystem::exists("config/sdk_config.json")) {
+    std::cerr << "Error: config/sdk_config.json not found!" << std::endl;
+    return 1;
+  }
+
+  // Create and load global configuration
+  auto j = trossen::configuration::JsonLoader::load("config/sdk_config.json");
+  trossen::configuration::GlobalConfig::instance().load_from_json(j);
 
   // Print configuration
   std::vector<std::string> config_lines = {
@@ -149,8 +159,8 @@ int main(int argc, char** argv) {
     "Duration per episode: " + std::to_string(cfg.duration_s) + "s",
     "Number of episodes:   " + std::to_string(cfg.episodes),
     "Dataset ID:           " + (cfg.dataset_id.empty() ? "<auto-generate>" : cfg.dataset_id),
-    "Output directory:     " + cfg.output_dir,
-    "Repository ID:       " + cfg.repository_id,
+    "Root directory:       " + cfg.root,
+    "Repository ID:        " + cfg.repository_id,
     "Backend:              " + cfg.backend_type
   };
 
@@ -165,13 +175,13 @@ int main(int argc, char** argv) {
     " @ " + std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
     " @ " + std::to_string(cfg.camera_fps) + " fps");
 
-  trossen::demo::print_config_banner("Trossen AI Solo Complete Demo", config_lines);
+  trossen::demo::print_config_banner("Trossen AI LeRobot Solo Complete Demo", config_lines);
 
   // Install signal handler for graceful shutdown
   trossen::demo::install_signal_handler();
 
-  // Create output directory
-  std::filesystem::create_directories(cfg.output_dir);
+  // Create root directory
+  std::filesystem::create_directories(cfg.root);
 
   // ──────────────────────────────────────────────────────────
   // Initialize hardware (if not using mock)
@@ -226,43 +236,7 @@ int main(int argc, char** argv) {
     std::cout << "  ✓ Arms staged to starting positions\n";
   }
 
-  // ──────────────────────────────────────────────────────────
-  // Configure Session Manager
-  // ──────────────────────────────────────────────────────────
-
-  trossen::runtime::SessionConfig session_cfg;
-  session_cfg.base_path = cfg.output_dir;
-  session_cfg.dataset_id = cfg.dataset_id;
-  session_cfg.max_duration = std::chrono::seconds(cfg.duration_s);
-  session_cfg.max_episodes = cfg.episodes;
-  session_cfg.repository_id = cfg.repository_id;
-
-  if (cfg.backend_type == "mcap") {
-    auto mcap_cfg = std::make_unique<trossen::io::backends::McapBackend::Config>();
-    mcap_cfg->compression = "zstd";
-    mcap_cfg->chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
-    mcap_cfg->robot_name = "/robots/widowxai";
-    mcap_cfg->type = "mcap";
-    session_cfg.backend_config = std::move(mcap_cfg);
-  } else if (cfg.backend_type == "lerobot") {
-    auto lerobot_cfg = std::make_unique<trossen::io::backends::LeRobotBackend::Config>();
-    lerobot_cfg->output_dir = cfg.output_dir;
-    lerobot_cfg->task_name = "trossen_ai_solo_demo";
-    lerobot_cfg->repository_id = cfg.repository_id;
-    lerobot_cfg->dataset_id = cfg.dataset_id;
-    lerobot_cfg->overwrite_existing = false;
-    lerobot_cfg->encode_videos = true;
-    lerobot_cfg->type = "lerobot";
-    lerobot_cfg->fps = cfg.camera_fps;
-    lerobot_cfg->robot_name = "bimanual_widowxai";
-    session_cfg.backend_config = std::move(lerobot_cfg);
-
-  } else {
-    std::cerr << "Unsupported backend type: " << cfg.backend_type << "\n";
-    return 1;
-  }
-
-  trossen::runtime::SessionManager mgr(std::move(session_cfg));
+  trossen::runtime::SessionManager mgr;
 
   std::cout << "\nInitialized Session Manager\n";
   std::cout << "  Starting episode index: " << mgr.stats().current_episode_index << "\n";
@@ -439,7 +413,7 @@ int main(int argc, char** argv) {
 
     // Build the file path and print summary
     std::string file_path = trossen::demo::generate_episode_path(
-      cfg.output_dir,
+      cfg.root,
       recording_episode_index);
     trossen::demo::print_episode_summary(file_path, last_record_count);
 
@@ -498,7 +472,7 @@ int main(int argc, char** argv) {
   }
 
   auto final_stats = mgr.stats();
-  trossen::demo::print_final_summary(final_stats.total_episodes_completed, cfg.output_dir);
+  trossen::demo::print_final_summary(final_stats.total_episodes_completed, cfg.root);
 
   return 0;
 }

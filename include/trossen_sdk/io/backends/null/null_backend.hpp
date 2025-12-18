@@ -12,6 +12,8 @@
 
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/io/backend.hpp"
+#include "trossen_sdk/configuration/types/backends/null_backend_config.hpp"
+
 
 namespace trossen::io::backends {
 
@@ -23,21 +25,11 @@ namespace trossen::io::backends {
 class NullBackend : public io::Backend {
 public:
   /**
-   * @brief Configuration for NullBackend
-   */
-  struct Config : public io::Backend::Config {
-    /// @brief URI for the null backend (defaults to "null://")
-    std::string uri{"null://"};
-  };
-
-  /**
    * @brief Construct a NullBackend with the given configuration
    *
-   * @param cfg Configuration options
    * @param metadata Optional producer metadata
    */
   explicit NullBackend(
-    const Config& cfg,
     const ProducerMetadataList& metadata = {});
 
   /**
@@ -77,6 +69,14 @@ public:
    * @return Count of records
    */
   uint64_t count() const;
+
+  /**
+   * @brief Scan directory for existing episode files and return next index
+   */
+  uint32_t scan_existing_episodes() override {
+    // NullBackend has no files, so always return 0
+    return 0;
+  };
 
 private:
   /// @brief Count of records "written"

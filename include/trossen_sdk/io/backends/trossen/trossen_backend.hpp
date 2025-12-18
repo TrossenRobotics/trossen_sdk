@@ -16,6 +16,8 @@
 #include <unordered_map>
 
 #include "trossen_sdk/io/backend.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/configuration/types/backends/trossen_backend_config.hpp"
 
 namespace trossen::io::backends {
 
@@ -36,44 +38,42 @@ public:
    * @brief Image queue drop policy when full
    */
   enum class DropPolicy {
-    /// @brief Drop newest incoming image
     DropNewest,
-
-    /// @brief Drop oldest image in queue to make room for new one
     DropOldest,
-
-    /// @brief Block until space is available (not implemented)
-    // Block
+    Block
   };
 
   /**
-   * @brief Configuration parameters
+   * @brief Convert DropPolicy enum to string
+   * @param policy DropPolicy enum value
+   * @return String representation
    */
-  struct Config : public io::Backend::Config {
-    /// @brief Root output directory
-    std::string output_dir;
+  static std::string drop_policy_to_string(DropPolicy policy) {
+    switch (policy) {
+      case DropPolicy::DropNewest: return "DropNewest";
+      case DropPolicy::DropOldest: return "DropOldest";
+      case DropPolicy::Block: default: return "Block";
+    }
+  }
 
-    /// @brief Number of image encoding threads
-    size_t encoder_threads{1};
-
-    /// @brief 0 = unbounded
-    size_t max_image_queue{0};
-
-    /// @brief Policy when max_image_queue > 0 and image queue is full
-    DropPolicy drop_policy{DropPolicy::DropNewest};
-
-    /// @brief PNG compression level (0-9)
-    int png_compression_level{3};
-  };
+  // TODO(shantanuparab-tr) : Move this to a common utility header if needed elsewhere
+  /**
+   * @brief Convert string to DropPolicy enum
+   * @param s String representation
+   * @return DropPolicy enum value
+   */
+  static DropPolicy drop_policy_from_string(const std::string& s) {
+    if (s == "DropNewest") return DropPolicy::DropNewest;
+    if (s == "DropOldest") return DropPolicy::DropOldest;
+    return DropPolicy::Block;
+  }
 
   /**
    * @brief Construct a TrossenBackend
    *
-   * @param cfg Configuration options
    * @param metadata Optional producer metadata
    */
   explicit TrossenBackend(
-    Config cfg,
     const ProducerMetadataList& metadata = {});
 
   /**
@@ -106,6 +106,14 @@ public:
    * @brief Close the backend
    */
   void close() override;
+
+  /**
+   * @brief Scan directory for existing episode files and return next index
+   */
+  uint32_t scan_existing_episodes() override {
+    // TrossenBackend has incomplete implementation, so always return 0
+    return 0;
+  };
 
   /**
    * @brief Image encoding statistics
@@ -204,13 +212,6 @@ public:
     return s;
   }
 
-  /**
-   * @brief Access current config
-   *
-   * @return Current configuration
-   */
-  const Config& config() const { return cfg_; }
-
 private:
   /**
    * @brief Write a joint state record to disk
@@ -258,7 +259,7 @@ private:
   std::vector<std::thread> image_workers_;
 
   /// @brief Config for this backend
-  Config cfg_;
+  std::shared_ptr<trossen::configuration::TrossenBackendConfig> cfg_;
 
   /// @brief Whether image worker threads should keep running
   std::atomic<bool> image_worker_running_{false};
