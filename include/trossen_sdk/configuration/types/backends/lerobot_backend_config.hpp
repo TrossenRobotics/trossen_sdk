@@ -3,6 +3,8 @@
 // #include "../../json.hpp"
 #include "../../config_registry.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
+
 
 struct LeRobotBackendConfig : public IConfig {
     int encoder_threads{1};

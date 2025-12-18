@@ -12,6 +12,8 @@
 
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/io/backend.hpp"
+#include "trossen_sdk/configuration/types/backends/null_backend_config.hpp"
+
 
 namespace trossen::io::backends {
 
@@ -25,10 +27,7 @@ public:
   /**
    * @brief Configuration for NullBackend
    */
-  struct Config : public io::Backend::Config {
-    /// @brief URI for the null backend (defaults to "null://")
-    std::string uri{"null://"};
-  };
+  struct Config : public io::Backend::Config {};
 
   /**
    * @brief Construct a NullBackend with the given configuration

@@ -17,6 +17,7 @@
 
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/configuration/types/backends/trossen_backend_config.hpp"
 
 namespace trossen::io::backends {
 
@@ -268,6 +269,9 @@ private:
 
   /// @brief Config for this backend
   Config cfg_;
+
+  /// @brief Global configuration for testing
+  std::shared_ptr<TrossenBackendConfig> test_config_;
 
   /// @brief Whether image worker threads should keep running
   std::atomic<bool> image_worker_running_{false};

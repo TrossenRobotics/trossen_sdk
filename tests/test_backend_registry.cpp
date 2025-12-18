@@ -36,7 +36,6 @@ TEST(BackendRegistryTest, UnknownBackendNotRegistered) {
 TEST(BackendRegistryTest, CreateNullBackend) {
   NullBackend::Config cfg;
   cfg.type = "null";
-  cfg.uri = "null://test";
 
   auto backend = BackendRegistry::create("null", cfg);
   ASSERT_NE(backend, nullptr);
@@ -83,14 +82,12 @@ TEST(BackendRegistryTest, MultipleBackendsWithDifferentConfigs) {
   // Create first null backend
   NullBackend::Config cfg1;
   cfg1.type = "null";
-  cfg1.uri = "null://instance1";
   auto backend1 = BackendRegistry::create("null", cfg1);
   ASSERT_NE(backend1, nullptr);
 
   // Create second null backend with different config
   NullBackend::Config cfg2;
   cfg2.type = "null";
-  cfg2.uri = "null://instance2";
   auto backend2 = BackendRegistry::create("null", cfg2);
   ASSERT_NE(backend2, nullptr);
 
@@ -114,7 +111,6 @@ TEST(BackendRegistryTest, ConfigDowncasting) {
   // Create config as concrete type
   NullBackend::Config null_cfg;
   null_cfg.type = "null";
-  null_cfg.uri = "null://downcast_test";
 
   // Pass as base reference (simulating SessionManager usage)
   Backend::Config& base_cfg = null_cfg;
@@ -157,7 +153,6 @@ TEST(BackendRegistryTest, TypicalUsageDemo) {
   if (backend_type == "null") {
     auto null_cfg = std::make_unique<NullBackend::Config>();
     null_cfg->type = "null";
-    null_cfg->uri = "null://demo";
     cfg = std::move(null_cfg);
   } else if (backend_type == "mcap") {
     auto mcap_cfg = std::make_unique<McapBackend::Config>();

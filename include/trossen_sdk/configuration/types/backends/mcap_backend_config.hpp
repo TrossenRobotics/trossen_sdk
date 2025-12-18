@@ -3,6 +3,7 @@
 // #include "../../json.hpp"
 #include "../../config_registry.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
 
 struct McapBackendConfig : public IConfig {
     std::string root{trossen::io::backends::get_default_root_path().string()};

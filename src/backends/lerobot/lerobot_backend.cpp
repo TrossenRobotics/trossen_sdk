@@ -26,7 +26,6 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
-#include "trossen_sdk/configuration/global_config.hpp"
 
 namespace trossen::io::backends {
 

@@ -24,7 +24,6 @@ int main() {
   std::cout << "Creating null backend...\n";
   trossen::io::backends::NullBackend::Config cfg;
   cfg.type = "null";
-  cfg.uri = "null://demo";
 
   auto backend = trossen::io::BackendRegistry::create("null", cfg);
   backend->open();

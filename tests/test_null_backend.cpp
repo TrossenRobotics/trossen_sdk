@@ -26,7 +26,6 @@ TEST(NullBackendTest, Construction) {
 // Test NullBackend construction with custom URI
 TEST(NullBackendTest, ConstructionWithURI) {
   NullBackend::Config cfg;
-  cfg.uri = "null://test";
   NullBackend backend(cfg);
   EXPECT_EQ(backend.count(), 0);
 }
@@ -261,7 +260,6 @@ TEST(NullBackendTest, URIStorage) {
   NullBackend backend1(cfg1);
 
   NullBackend::Config cfg2;
-  cfg2.uri = "null://custom";
   NullBackend backend2(cfg2);
 
   // The base class stores the URI, though we can't directly test it without accessing

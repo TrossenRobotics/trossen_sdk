@@ -16,7 +16,6 @@
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
 #include "trossen_sdk/version.hpp"
-#include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/types/backends/mcap_backend_config.hpp"
 
 
