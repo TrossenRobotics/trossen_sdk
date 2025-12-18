@@ -20,19 +20,29 @@ namespace trossen::runtime {
 SessionManager::SessionManager(SessionConfig&& config)
   : config_(std::move(config))
 { 
+
+  // This allows us to access the global configuration for the Session Manager
+  // without passing it explicitly.
+
+  test_config_ = GlobalConfig::instance().get_as<SessionManagerConfig>("session_manager");
+
+  if (!test_config_) {
+        std::cerr << "Session Manager config not found!" << std::endl;
+        return;
+  }
   std::cout << "================= Session Manager Config =================" << std::endl;
-  if (config_.max_duration.has_value()) {
-    std::cout << "Max Duration: " << config_.max_duration->count() << " seconds" << std::endl;
+  if (test_config_->max_duration.has_value()) {
+    std::cout << "Max Duration: " << test_config_->max_duration->count() << " seconds" << std::endl;
   } else {
     std::cout << "Max Duration: unlimited" << std::endl;
   }
-  if (config_.max_episodes.has_value()) {
-    std::cout << "Max Episodes: " << config_.max_episodes.value() << std::endl;
+  if (test_config_->max_episodes.has_value()) {
+    std::cout << "Max Episodes: " << test_config_->max_episodes.value() << std::endl;
   } else {
     std::cout << "Max Episodes: unlimited" << std::endl;
   }
-  if (config_.backend_config) {
-    std::cout << "Backend Type: " << config_.backend_config->type << std::endl;
+  if (test_config_->backend_type != "") {
+    std::cout << "Backend Type: " << test_config_->backend_type << std::endl;
   } else {
     std::cout << "Backend Type: (none)" << std::endl;
   }
