@@ -9,9 +9,10 @@
 #include <string>
 
 namespace trossen::configuration {
+
 struct BaseConfig {
-    virtual ~BaseConfig() = default;
-    virtual std::string type() const = 0;
+  virtual ~BaseConfig() = default;
+  virtual std::string type() const = 0;
 };
 
 }  // namespace trossen::configuration
