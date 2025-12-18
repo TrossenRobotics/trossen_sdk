@@ -20,13 +20,7 @@ int main() {
   }
   std::cout << "\n";
 
-  // Create and use a backend through the registry
-  std::cout << "Creating null backend...\n";
-  trossen::io::backends::NullBackend::Config cfg;
-  cfg.type = "null";
-  cfg.uri = "null://demo";
-
-  auto backend = trossen::io::BackendRegistry::create("null", cfg);
+  auto backend = trossen::io::BackendRegistry::create("null");
   backend->open();
 
   // Write some data

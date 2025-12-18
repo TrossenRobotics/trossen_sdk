@@ -34,11 +34,7 @@ TEST(BackendRegistryTest, UnknownBackendNotRegistered) {
 
 // Test creating a NullBackend through the registry
 TEST(BackendRegistryTest, CreateNullBackend) {
-  NullBackend::Config cfg;
-  cfg.type = "null";
-  cfg.uri = "null://test";
-
-  auto backend = BackendRegistry::create("null", cfg);
+  auto backend = BackendRegistry::create("null");
   ASSERT_NE(backend, nullptr);
 
   // Verify it works as expected
@@ -63,14 +59,7 @@ TEST(BackendRegistryTest, CreateNullBackend) {
 
 // Test creating an McapBackend through the registry
 TEST(BackendRegistryTest, CreateMcapBackend) {
-  McapBackend::Config cfg;
-  cfg.type = "mcap";
-  cfg.output_path = "/tmp/test_registry.mcap";
-  cfg.robot_name = "test_robot";
-  cfg.dataset_id = "test_dataset";
-  cfg.episode_index = 0;
-
-  auto backend = BackendRegistry::create("mcap", cfg);
+  auto backend = BackendRegistry::create("mcap");
   ASSERT_NE(backend, nullptr);
 
   // Verify it's actually an McapBackend
@@ -81,27 +70,17 @@ TEST(BackendRegistryTest, CreateMcapBackend) {
 // Test registry with different backend configurations
 TEST(BackendRegistryTest, MultipleBackendsWithDifferentConfigs) {
   // Create first null backend
-  NullBackend::Config cfg1;
-  cfg1.type = "null";
-  cfg1.uri = "null://instance1";
-  auto backend1 = BackendRegistry::create("null", cfg1);
+  auto backend1 = BackendRegistry::create("null");
   ASSERT_NE(backend1, nullptr);
 
   // Create second null backend with different config
-  NullBackend::Config cfg2;
-  cfg2.type = "null";
-  cfg2.uri = "null://instance2";
-  auto backend2 = BackendRegistry::create("null", cfg2);
+  auto backend2 = BackendRegistry::create("null");
   ASSERT_NE(backend2, nullptr);
 
   // Both should be independent
   EXPECT_NE(backend1.get(), backend2.get());
 
-  // Create mcap backend
-  McapBackend::Config cfg3;
-  cfg3.type = "mcap";
-  cfg3.output_path = "/tmp/test.mcap";
-  auto backend3 = BackendRegistry::create("mcap", cfg3);
+  auto backend3 = BackendRegistry::create("mcap");
   ASSERT_NE(backend3, nullptr);
 
   // Should be different types
@@ -111,15 +90,7 @@ TEST(BackendRegistryTest, MultipleBackendsWithDifferentConfigs) {
 
 // Test that base Backend::Config works with proper downcasting
 TEST(BackendRegistryTest, ConfigDowncasting) {
-  // Create config as concrete type
-  NullBackend::Config null_cfg;
-  null_cfg.type = "null";
-  null_cfg.uri = "null://downcast_test";
-
-  // Pass as base reference (simulating SessionManager usage)
-  Backend::Config& base_cfg = null_cfg;
-
-  auto backend = BackendRegistry::create("null", base_cfg);
+  auto backend = BackendRegistry::create("null");
   ASSERT_NE(backend, nullptr);
 
   auto* null_backend = dynamic_cast<NullBackend*>(backend.get());
@@ -128,11 +99,8 @@ TEST(BackendRegistryTest, ConfigDowncasting) {
 
 // Test polymorphic behavior through registry
 TEST(BackendRegistryTest, PolymorphicBackendUsage) {
-  NullBackend::Config cfg;
-  cfg.type = "null";
-
   // Create through registry, use through base class interface
-  std::shared_ptr<Backend> backend = BackendRegistry::create("null", cfg);
+  std::shared_ptr<Backend> backend = BackendRegistry::create("null");
 
   // All backends should support these operations
   EXPECT_TRUE(backend->open());
@@ -152,24 +120,9 @@ TEST(BackendRegistryTest, TypicalUsageDemo) {
   // Simulate selecting backend type at runtime (e.g., from config file)
   std::string backend_type = "null";
 
-  // Create appropriate config based on type
-  std::unique_ptr<Backend::Config> cfg;
-  if (backend_type == "null") {
-    auto null_cfg = std::make_unique<NullBackend::Config>();
-    null_cfg->type = "null";
-    null_cfg->uri = "null://demo";
-    cfg = std::move(null_cfg);
-  } else if (backend_type == "mcap") {
-    auto mcap_cfg = std::make_unique<McapBackend::Config>();
-    mcap_cfg->type = "mcap";
-    mcap_cfg->output_path = "/tmp/demo.mcap";
-    cfg = std::move(mcap_cfg);
-  }
-
-  ASSERT_NE(cfg, nullptr);
 
   // Create backend through registry
-  auto backend = BackendRegistry::create(backend_type, *cfg);
+  auto backend = BackendRegistry::create(backend_type);
   ASSERT_NE(backend, nullptr);
 
   // Use backend polymorphically
