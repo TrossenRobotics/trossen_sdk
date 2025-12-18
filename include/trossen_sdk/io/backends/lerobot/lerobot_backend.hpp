@@ -101,8 +101,8 @@ public:
     /// @brief Dataset ID
     std::string dataset_id{"default_dataset"};
 
-    /// @brief Root path
-    std::string root_path{trossen::io::backends::get_default_root_path().string()};
+    /// @brief Root directory
+    std::string root{trossen::io::backends::get_default_root_path().string()};
 
     /// @brief Episode index (for organizing output)
     uint32_t episode_index{0};

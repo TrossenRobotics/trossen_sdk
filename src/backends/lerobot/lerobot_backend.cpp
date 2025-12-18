@@ -57,11 +57,15 @@ LeRobotBackend::LeRobotBackend(
         std::cerr << "Backend config not found!" << std::endl;
         return;
   }
+  // If the root path is empty, set to default
+  if (test_config_->root.empty()) {
+      test_config_->root = trossen::io::backends::get_default_root_path().string();
+  }
 
   // Print the stored values
   std::cout << "================= LeRobot Backend Config =================" << std::endl;
   std::cout << "Backend Config Loaded:" << std::endl;
-  std::cout << "  storage_path = " << test_config_->output_dir << std::endl;
+  std::cout << "  root = " << test_config_->root << std::endl;
   std::cout << "  encoder_threads = " << test_config_->encoder_threads << std::endl;
   std::cout << "  max_image_queue = " << test_config_->max_image_queue << std::endl;
   std::cout << "  png_compression_level = " << test_config_->png_compression_level << std::endl;
@@ -70,7 +74,6 @@ LeRobotBackend::LeRobotBackend(
   std::cout << "  task_name = " << test_config_->task_name << std::endl;
   std::cout << "  repository_id = " << test_config_->repository_id << std::endl;
   std::cout << "  dataset_id = " << test_config_->dataset_id << std::endl;
-  std::cout << "  root_path = " << test_config_->root_path << std::endl;
   std::cout << "  episode_index = " << test_config_->episode_index << std::endl;
   std::cout << "  robot_name = " << test_config_->robot_name << std::endl;
   std::cout << "  fps = " << test_config_->fps << std::endl;
@@ -115,10 +118,6 @@ bool LeRobotBackend::open() {
   if (opened_) {
     return true;
   }
-  std::cout << "=====================================================================" << std::endl;
-  std::cout << "Opening LeRobotBackend at: " << root_ << "\n";
-  std::cout << "=====================================================================" << std::endl;
-
 
   std::ostringstream oss;
   oss << "episode_" << std::setfill('0') << std::setw(6) << episode_index_;
@@ -284,7 +283,8 @@ void LeRobotBackend::convert_to_videos() const {
       const fs::path output_video_path = videos_cam_dir / (episode_name + ".mp4");
 
       if (fs::exists(output_video_path)) {
-        std::cout << "Skipping existing video: " << output_video_path.string() << std::endl;
+        // TODO (shantanuparab-tr): Make this into debug log
+        // std::cout << "Skipping existing video: " << output_video_path.string() << std::endl;
         video_count++;
         continue;
       }
@@ -316,7 +316,8 @@ void LeRobotBackend::convert_to_videos() const {
 
         if (image_paths.empty()) {
           std::lock_guard<std::mutex> lk(log_mutex);
-          std::cout << "No images found in episode folder: " << task.episode_name << std::endl;
+          // TODO (shantanuparab-tr): Make this into debug log
+          // std::cout << "No images found in episode folder: " << task.episode_name << std::endl;
           continue;
         }
 
@@ -332,9 +333,10 @@ void LeRobotBackend::convert_to_videos() const {
             << task.output_path.string();
 
         auto t0 = std::chrono::steady_clock::now();
-        std::cout << "\n[Worker " << worker_id << "] Encoding video"<< std::endl;
+        // TODO (shantanuparab-tr): Make this into debug log
+        // std::cout << "\n[Worker " << worker_id << "] Encoding video"<< std::endl;
         int ret = std::system(ffmpeg_cmd.str().c_str());
-        std::cout << std::endl;
+        // std::cout << std::endl;
 
         auto t1 = std::chrono::steady_clock::now();
         auto ms = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
@@ -343,12 +345,12 @@ void LeRobotBackend::convert_to_videos() const {
         if (ret == 0) {
           video_count++;
         } else {
-          std::cout << "[Worker " << worker_id << "] FFmpeg failed for "
+          std::cerr << "[Worker " << worker_id << "] FFmpeg failed for "
                     << task.output_path.string() << " (code " << ret << ")" << std::endl;
         }
       } catch (const std::exception &e) {
         std::lock_guard<std::mutex> lk(log_mutex);
-        std::cout << "[Worker " << worker_id << "] Exception for "
+        std::cerr << "[Worker " << worker_id << "] Exception for "
                   << task.episode_name << ": " << e.what() << std::endl;
       }
     }
@@ -428,7 +430,7 @@ std::vector<cv::Mat> LeRobotBackend::sample_images(
     if (img_float.channels() == 3) {
       images.push_back(img_float);
     } else {
-      std::cout << "Unexpected channel count: " << img_float.channels() << std::endl;
+      std::cerr << "Unexpected channel count: " << img_float.channels() << std::endl;
     }
   }
 
@@ -439,7 +441,7 @@ nlohmann::ordered_json LeRobotBackend::compute_image_stats(
   const std::vector<cv::Mat> &images) const{
   nlohmann::ordered_json stats_json;
   if (images.empty()) {
-    std::cout << "No images provided." << std::endl;
+    std::cerr << "No images provided." << std::endl;
     stats_json["min"] = {};
     stats_json["max"] = {};
     stats_json["mean"] = {};
@@ -637,7 +639,6 @@ void LeRobotBackend::compute_statistics() const {
   }
   // Compute image statistics for each camera
   for (const auto &camera_info : camera_names_) {
-    std::cout << "Computing image statistics for camera: " << camera_info << std::endl;
     std::string image_key = "observation.images." + camera_info;
     // Get image paths for the current episode and camera
     std::string image_folder_path = images_root_.string();
@@ -652,7 +653,7 @@ void LeRobotBackend::compute_statistics() const {
     std::filesystem::path episode_image_dir =
         std::filesystem::path(image_folder_path) / camera_info/ episode_folder_name;
     if (!std::filesystem::exists(episode_image_dir)) {
-      std::cout << "Image directory does not exist: "
+      std::cerr << "Image directory does not exist: "
                 << episode_image_dir.string() << std::endl;
       continue;
     }
@@ -1099,8 +1100,6 @@ void LeRobotBackend::write_metadata() {
   // Check if info.json already exists
   fs::path info_path = meta_root_ / JSON_INFO;
   if (fs::exists(info_path)) {
-    std::cout << "Info file already exists at " << info_path
-              << ". Skipping metadata write." << std::endl;
     return;
   }
   nlohmann::ordered_json info_;
@@ -1197,7 +1196,6 @@ void LeRobotBackend::write_metadata() {
 
 uint32_t LeRobotBackend::scan_existing_episodes() {
   std::filesystem::path base_path = std::filesystem::path(cfg_.output_dir) / std::filesystem::path(cfg_.repository_id) / std::filesystem::path(cfg_.dataset_id) / "data" / "chunk-000";
-  std::cout << "Scanning existing episodes in: " << base_path << std::endl;
 
   // If directory doesn't exist, return 0
   if (!std::filesystem::exists(base_path)) {

@@ -83,7 +83,6 @@ public:
      * @return JSON object containing producer information
      */
     virtual nlohmann::ordered_json get_info() const {
-      std::cout << "ProducerMetadata: " << name << " (" << id << ") - " << description << "\n";
       return nlohmann::ordered_json{};
     }
   };

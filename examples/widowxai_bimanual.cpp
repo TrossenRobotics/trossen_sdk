@@ -18,7 +18,7 @@
  *
  * Usage:
  *   ./widowxai_bimanual --episodes 5 --duration 10
- *   ./widowxai_bimanual --episodes 3 --duration 5 --output-dir /data/recordings
+ *   ./widowxai_bimanual --episodes 3 --duration 5 --root /data/recordings
  *   ./widowxai_bimanual --mock  # Use mock producers for testing without hardware
  */
 
@@ -36,6 +36,7 @@
 #include "libtrossen_arm/trossen_arm.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 #include "trossen_sdk/hw/arm/arm_producer.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
@@ -46,7 +47,7 @@ struct Config {
   int duration_s = 10;
   int episodes = 3;
   std::string dataset_id = "";  // empty = auto-generate
-  std::string output_dir = "output/episodes";
+  std::string root = trossen::io::backends::get_default_root_path().string();
   bool use_mock = false;
   bool show_help = false;
 
@@ -74,7 +75,7 @@ void print_usage(const char* prog_name) {
     << "  --duration <seconds>     Duration per episode (default: 10)\n"
     << "  --episodes <count>       Number of episodes to record (default: 3)\n"
     << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
-    << "  --output-dir <path>      Output directory for episodes (default: output/episodes)\n"
+    << "  --root <path>            Root directory for episodes (default: ~/.cache/trossen_sdk/)\n"
     << "  --mock                   Use mock producers instead of real hardware\n"
     << "  --camera-width <pixels>  Camera width (default: 1280 for 720p)\n"
     << "  --camera-height <pixels> Camera height (default: 720)\n"
@@ -91,7 +92,7 @@ void print_usage(const char* prog_name) {
     << "Examples:\n"
     << "  " << prog_name << " --duration 10 --episodes 5\n"
     << "  " << prog_name << " --mock --duration 5 --episodes 3\n"
-    << "  " << prog_name << " --dataset-id stationary_demo_001 --output-dir /data/recordings\n";
+    << "  " << prog_name << " --dataset-id stationary_demo_001 --root /data/recordings\n";
 }
 
 Config parse_args(int argc, char** argv) {
@@ -107,8 +108,8 @@ Config parse_args(int argc, char** argv) {
       cfg.episodes = std::max(1, std::atoi(argv[++i]));
     } else if (arg == "--dataset-id" && i + 1 < argc) {
       cfg.dataset_id = argv[++i];
-    } else if (arg == "--output-dir" && i + 1 < argc) {
-      cfg.output_dir = argv[++i];
+    } else if (arg == "--root" && i + 1 < argc) {
+      cfg.root = argv[++i];
     } else if (arg == "--mock") {
       cfg.use_mock = true;
     } else if (arg == "--camera-width" && i + 1 < argc) {
@@ -142,7 +143,7 @@ int main(int argc, char** argv) {
     "Duration per episode: " + std::to_string(cfg.duration_s) + "s",
     "Number of episodes:   " + std::to_string(cfg.episodes),
     "Dataset ID:           " + (cfg.dataset_id.empty() ? "<auto-generate>" : cfg.dataset_id),
-    "Output directory:     " + cfg.output_dir,
+    "Root directory:       " + cfg.root,
     "Backend:              " + cfg.backend_type
   };
 
@@ -176,8 +177,8 @@ int main(int argc, char** argv) {
   // Install signal handler for graceful shutdown
   trossen::demo::install_signal_handler();
 
-  // Create output directory
-  std::filesystem::create_directories(cfg.output_dir);
+  // Create root directory
+  std::filesystem::create_directories(cfg.root);
 
   std::unique_ptr<trossen_arm::TrossenArmDriver> leader_left_driver;
   std::unique_ptr<trossen_arm::TrossenArmDriver> leader_right_driver;
@@ -291,7 +292,7 @@ int main(int argc, char** argv) {
     session_cfg.backend_config = std::move(mcap_cfg);
   } else if (cfg.backend_type == "lerobot") {
     auto lerobot_cfg = std::make_unique<trossen::io::backends::LeRobotBackend::Config>();
-    lerobot_cfg->output_dir = cfg.output_dir;
+    lerobot_cfg->root = cfg.root;
     lerobot_cfg->task_name = "trossen_ai_solo_demo";
     lerobot_cfg->repository_id = "TrossenRoboticsCommunity";
     lerobot_cfg->dataset_id = "trossen_ai_bimanual_dataset";
@@ -525,7 +526,7 @@ int main(int argc, char** argv) {
 
     // Build the file path and print summary
     std::string file_path = trossen::demo::generate_episode_path(
-      cfg.output_dir,
+      cfg.root,
       recording_episode_index);
     trossen::demo::print_episode_summary(file_path, last_record_count);
 
@@ -600,7 +601,7 @@ int main(int argc, char** argv) {
   };
   trossen::demo::print_final_summary(
     final_stats.total_episodes_completed,
-    cfg.output_dir,
+    cfg.root,
     extra_info);
 
   return 0;
