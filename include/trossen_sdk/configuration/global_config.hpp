@@ -1,0 +1,35 @@
+#pragma once
+#include <unordered_map>
+#include <memory>
+#include <string>
+#include "i_config.hpp"
+#include <nlohmann/json.hpp>
+
+class GlobalConfig {
+public:
+    static GlobalConfig& instance();
+
+    void load_from_json(const nlohmann::json& j);
+
+    std::shared_ptr<IConfig> get(const std::string& key) const;
+
+    template<typename T>
+    std::shared_ptr<T> get_as(const std::string& key) const {
+        auto base = get(key);
+        if (!base) {
+            throw std::runtime_error("Config key not found: " + key);
+        }
+
+        auto casted = std::dynamic_pointer_cast<T>(base);
+        if (!casted) {
+            throw std::runtime_error(
+                "Config key '" + key + "' has wrong type"
+            );
+        }
+
+        return casted;
+    }
+
+private:
+    std::unordered_map<std::string, std::shared_ptr<IConfig>> config_map_;
+};

@@ -26,6 +26,7 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
 
 namespace trossen::io::backends {
 
@@ -46,6 +47,35 @@ LeRobotBackend::LeRobotBackend(
   if (cfg_.png_compression_level < 0 || cfg_.png_compression_level > 9) {
     cfg_.png_compression_level = 3;
   }
+
+  // This allows us to access the global configuration for the LeRobot backend
+  // without passing it explicitly.
+
+  test_config_ = GlobalConfig::instance().get_as<LeRobotBackendConfig>("lerobot_backend");
+
+  if (!test_config_) {
+        std::cerr << "Backend config not found!" << std::endl;
+        return;
+  }
+
+  // Print the stored values
+  std::cout << "================= LeRobot Backend Config =================" << std::endl;
+  std::cout << "Backend Config Loaded:" << std::endl;
+  std::cout << "  storage_path = " << test_config_->output_dir << std::endl;
+  std::cout << "  encoder_threads = " << test_config_->encoder_threads << std::endl;
+  std::cout << "  max_image_queue = " << test_config_->max_image_queue << std::endl;
+  std::cout << "  png_compression_level = " << test_config_->png_compression_level << std::endl;
+  std::cout << "  overwrite_existing = " << (test_config_->overwrite_existing ? "true" : "false") << std::endl;
+  std::cout << "  encode_videos = " << (test_config_->encode_videos ? "true" : "false") << std::endl;
+  std::cout << "  task_name = " << test_config_->task_name << std::endl;
+  std::cout << "  repository_id = " << test_config_->repository_id << std::endl;
+  std::cout << "  dataset_id = " << test_config_->dataset_id << std::endl;
+  std::cout << "  root_path = " << test_config_->root_path << std::endl;
+  std::cout << "  episode_index = " << test_config_->episode_index << std::endl;
+  std::cout << "  robot_name = " << test_config_->robot_name << std::endl;
+  std::cout << "  fps = " << test_config_->fps << std::endl;
+  std::cout << "==========================================================" << std::endl;
+
 }
 
 void LeRobotBackend::preprocess_episode(
