@@ -25,18 +25,11 @@ namespace trossen::io::backends {
 class NullBackend : public io::Backend {
 public:
   /**
-   * @brief Configuration for NullBackend
-   */
-  struct Config : public io::Backend::Config {};
-
-  /**
    * @brief Construct a NullBackend with the given configuration
    *
-   * @param cfg Configuration options
    * @param metadata Optional producer metadata
    */
   explicit NullBackend(
-    const Config& cfg,
     const ProducerMetadataList& metadata = {});
 
   /**

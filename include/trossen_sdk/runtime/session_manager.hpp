@@ -32,20 +32,6 @@
 
 namespace trossen::runtime {
 
-/**
- * @brief Configuration for the Session Manager
- */
-struct SessionConfig {
-
-  /// @brief Maximum duration per episode (nullopt = unlimited)
-  std::optional<std::chrono::duration<double>> max_duration = std::chrono::seconds(20);
-
-  /// @brief Maximum number of episodes (nullopt = unlimited)
-  std::optional<uint32_t> max_episodes = std::nullopt;
-
-  /// @brief Backend configuration template (output_path will be overwritten per episode)
-  std::unique_ptr<trossen::io::Backend::Config> backend_config;
-};
 
 /**
  * @brief Session Manager orchestrates discrete recording sessions
@@ -64,9 +50,8 @@ public:
   /**
    * @brief Construct Session Manager with configuration
    *
-   * @param config Session configuration
    */
-  explicit SessionManager(SessionConfig&& config);
+  explicit SessionManager();
 
   /**
    * @brief Destructor ensures current episode is closed
@@ -179,10 +164,7 @@ public:
 
 private:
   /// @brief Configuration
-  SessionConfig config_;
-
-  /// @brief Test Configuration
-  std::shared_ptr<SessionManagerConfig> test_config_;
+  std::shared_ptr<trossen::configuration::SessionManagerConfig> cfg_;
 
   /// @brief Next episode index to use
   uint32_t next_episode_index_{0};

@@ -1,11 +1,19 @@
-#pragma once
-#include "../../i_config.hpp"
-// #include "../../json.hpp"
-#include "../../config_registry.hpp"
-#include "trossen_sdk/io/backend_utils.hpp"
-#include "trossen_sdk/configuration/global_config.hpp"
+/**
+ * @file trossen_backend_config.hpp
+ * @brief Configuration for Trossen backend
+ */
 
-struct TrossenBackendConfig : public IConfig {
+#ifndef TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__TROSSEN_BACKEND_CONFIG_HPP_
+#define TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__TROSSEN_BACKEND_CONFIG_HPP_
+
+#include "trossen_sdk/configuration/base_config.hpp"
+#include "trossen_sdk/configuration/config_registry.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
+
+namespace trossen::configuration {
+
+struct TrossenBackendConfig : public BaseConfig {
     std::string root{"/data/trossen"};
     int encoder_threads{1};
     int max_image_queue{0};
@@ -30,3 +38,7 @@ struct TrossenBackendConfig : public IConfig {
 };
 
 REGISTER_CONFIG(TrossenBackendConfig, "trossen_backend");
+
+}  // namespace trossen::configuration
+
+#endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__TROSSEN_BACKEND_CONFIG_HPP_

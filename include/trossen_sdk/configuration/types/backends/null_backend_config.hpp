@@ -1,11 +1,19 @@
-#pragma once
-#include "../../i_config.hpp"
-// #include "../../json.hpp"
-#include "../../config_registry.hpp"
-#include "trossen_sdk/io/backend_utils.hpp"
-#include "trossen_sdk/configuration/global_config.hpp"
+/**
+ * @file null_backend_config.hpp
+ * @brief Configuration for Null backend
+ */
 
-struct NullBackendConfig : public IConfig {
+#ifndef TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__NULL_BACKEND_CONFIG_HPP_
+#define TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__NULL_BACKEND_CONFIG_HPP_
+
+#include "trossen_sdk/configuration/base_config.hpp"
+#include "trossen_sdk/configuration/config_registry.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
+
+namespace trossen::configuration {
+
+struct NullBackendConfig : public BaseConfig {
     std::string type() const override { return "null_backend"; }
 
     static NullBackendConfig from_json(const nlohmann::json& j) {
@@ -15,3 +23,7 @@ struct NullBackendConfig : public IConfig {
 };
 
 REGISTER_CONFIG(NullBackendConfig, "null_backend");
+
+}  // namespace trossen::configuration
+
+#endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__NULL_BACKEND_CONFIG_HPP_

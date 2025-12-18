@@ -1,3 +1,4 @@
+// TODO(shantanuparab-tr): Update the test cases to capture actual behavior
 /**
  * @file test_null_backend.cpp
  * @brief Unit tests for NullBackend
@@ -19,26 +20,25 @@ using trossen::io::backends::NullBackend;
 
 // Test NullBackend construction
 TEST(NullBackendTest, Construction) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   EXPECT_EQ(backend.count(), 0);
 }
 
 // Test NullBackend construction with custom URI
 TEST(NullBackendTest, ConstructionWithURI) {
-  NullBackend::Config cfg;
-  NullBackend backend(cfg);
+  NullBackend backend;
   EXPECT_EQ(backend.count(), 0);
 }
 
 // Test open operation
 TEST(NullBackendTest, Open) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   EXPECT_TRUE(backend.open());
 }
 
 // Test write single record
 TEST(NullBackendTest, WriteSingleRecord) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   JointStateRecord record;
@@ -53,7 +53,7 @@ TEST(NullBackendTest, WriteSingleRecord) {
 
 // Test write multiple records
 TEST(NullBackendTest, WriteMultipleRecords) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   JointStateRecord record1;
@@ -74,7 +74,7 @@ TEST(NullBackendTest, WriteMultipleRecords) {
 
 // Test write_batch with multiple records
 TEST(NullBackendTest, WriteBatch) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   JointStateRecord record1;
@@ -94,7 +94,7 @@ TEST(NullBackendTest, WriteBatch) {
 
 // Test write_batch with empty batch
 TEST(NullBackendTest, WriteBatchEmpty) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   std::vector<const RecordBase*> batch;
@@ -105,7 +105,7 @@ TEST(NullBackendTest, WriteBatchEmpty) {
 
 // Test write batch with single record
 TEST(NullBackendTest, WriteBatchSingleRecord) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   JointStateRecord record;
@@ -119,7 +119,7 @@ TEST(NullBackendTest, WriteBatchSingleRecord) {
 
 // Test mixed write and write_batch
 TEST(NullBackendTest, MixedWriteOperations) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   JointStateRecord record1;
@@ -138,7 +138,7 @@ TEST(NullBackendTest, MixedWriteOperations) {
 
 // Test flush (no-op but should not crash)
 TEST(NullBackendTest, Flush) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   JointStateRecord record;
@@ -150,7 +150,7 @@ TEST(NullBackendTest, Flush) {
 
 // Test close
 TEST(NullBackendTest, Close) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   JointStateRecord record;
@@ -162,7 +162,7 @@ TEST(NullBackendTest, Close) {
 
 // Test write after close (should still work for null backend)
 TEST(NullBackendTest, WriteAfterClose) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
   backend.close();
 
@@ -174,7 +174,7 @@ TEST(NullBackendTest, WriteAfterClose) {
 
 // Test large batch
 TEST(NullBackendTest, LargeBatch) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   std::vector<JointStateRecord> records(1000);
@@ -191,7 +191,7 @@ TEST(NullBackendTest, LargeBatch) {
 
 // Test counter accuracy with many operations
 TEST(NullBackendTest, CounterAccuracy) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   // Write 10 individual records
@@ -220,7 +220,7 @@ TEST(NullBackendTest, CounterAccuracy) {
 
 // Test writing different record types
 TEST(NullBackendTest, DifferentRecordTypes) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   JointStateRecord joint_record;
@@ -237,7 +237,7 @@ TEST(NullBackendTest, DifferentRecordTypes) {
 
 // Test that backend discards data (doesn't store it)
 TEST(NullBackendTest, DataIsDiscarded) {
-  NullBackend backend(NullBackend::Config{});
+  NullBackend backend;
   backend.open();
 
   // Create a record with large data
@@ -256,11 +256,9 @@ TEST(NullBackendTest, DataIsDiscarded) {
 
 // Test URI is stored (inherited from Backend base class)
 TEST(NullBackendTest, URIStorage) {
-  NullBackend::Config cfg1;
-  NullBackend backend1(cfg1);
+  NullBackend backend1;
 
-  NullBackend::Config cfg2;
-  NullBackend backend2(cfg2);
+  NullBackend backend2;
 
   // The base class stores the URI, though we can't directly test it without accessing
   // protected/private members. This test just ensures construction with different URIs doesn't

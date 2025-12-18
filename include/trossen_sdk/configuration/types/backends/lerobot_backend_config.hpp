@@ -1,12 +1,19 @@
-#pragma once
-#include "../../i_config.hpp"
-// #include "../../json.hpp"
-#include "../../config_registry.hpp"
-#include "trossen_sdk/io/backend_utils.hpp"
+/**
+* @file lerobot_backend_config.hpp
+* @brief Configuration for LeRobot backend
+*/
+
+#ifndef TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_BACKEND_CONFIG_HPP_
+#define TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_BACKEND_CONFIG_HPP_
+
+#include "trossen_sdk/configuration/base_config.hpp"
+#include "trossen_sdk/configuration/config_registry.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
 
+namespace trossen::configuration {
 
-struct LeRobotBackendConfig : public IConfig {
+struct LeRobotBackendConfig : public BaseConfig {
     int encoder_threads{1};
     int max_image_queue{0};
     int png_compression_level{3};
@@ -43,3 +50,7 @@ struct LeRobotBackendConfig : public IConfig {
 };
 
 REGISTER_CONFIG(LeRobotBackendConfig, "lerobot_backend");
+
+}  // namespace trossen::configuration
+
+#endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_BACKEND_CONFIG_HPP_

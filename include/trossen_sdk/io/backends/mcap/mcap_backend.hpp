@@ -37,29 +37,6 @@ const size_t MCAP_INITIAL_ENCODED_BUFFER_SIZE = 1024 * 1024;  // 1 MB
 class McapBackend : public io::Backend {
 public:
   /**
-   * @brief Configuration options for McapBackend
-   */
-  struct Config : public io::Backend::Config {
-    /// @brief Root directory for episode files
-    std::string root{trossen::io::backends::get_default_root_path().string()};
-
-    /// @brief prefix used for joint states
-    std::string robot_name{"/robot/joint_states"};
-
-    /// @brief Chunking / compression options (applied when opening)
-    size_t chunk_size_bytes{4 * 1024 * 1024};
-
-    /// @brief "" (none) or "zstd" (if library was built with it)
-    std::string compression{""};
-
-    /// @brief Dataset identifier (user-provided or auto-generated UUID)
-    std::string dataset_id;
-
-    /// @brief Episode index within the dataset (zero-based)
-    uint32_t episode_index{0};
-  };
-
-  /**
    * @brief Statistics about written records
    */
   struct Stats {
@@ -76,11 +53,9 @@ public:
   /**
    * @brief Construct an McapBackend with the given configuration
    *
-   * @param cfg Configuration options
    * @param metadata Optional producer metadata
    */
   explicit McapBackend(
-    Config cfg,
     const ProducerMetadataList& metadata = {});
 
   /**
@@ -198,7 +173,7 @@ private:
   std::filesystem::path path_;
 
   /// @brief Configuration options
-  Config cfg_;
+  std::shared_ptr<trossen::configuration::McapBackendConfig> cfg_;
 
   /// @brief Mutex to protect writer access
   std::mutex writer_mutex_;
@@ -217,9 +192,6 @@ private:
 
   /// @brief Statistics about written records
   Stats stats_{};
-
-  /// @brief Test Config
-  std::shared_ptr<McapBackendConfig> test_config_;
 };
 
 }  // namespace trossen::io::backends

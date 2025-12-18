@@ -68,60 +68,11 @@ public:
   };
 
   /**
-   * @brief Configuration parameters for LeRobotBackend
-   */
-  struct Config : public io::Backend::Config {
-    /// @brief Root output directory
-    std::string output_dir;
-
-    /// @brief Number of image encoding threads
-    size_t encoder_threads{1};
-
-    /// @brief 0 = unbounded
-    size_t max_image_queue{0};
-
-    /// @brief Policy when max_image_queue > 0 and image queue is full
-    DropPolicy drop_policy{DropPolicy::DropNewest};
-
-    /// @brief PNG compression level (0-9) (May not be required)
-    int png_compression_level{3};
-
-    /// @brief Overwrite existing files
-    bool overwrite_existing{false};
-
-    /// @brief Option to encode videos after recording
-    bool encode_videos{false};
-
-    /// @brief Task name for organizing datasets
-    std::string task_name{"default_task"};
-
-    /// @brief Repository ID
-    std::string repository_id{"default_repo"};
-
-    /// @brief Dataset ID
-    std::string dataset_id{"default_dataset"};
-
-    /// @brief Root directory
-    std::string root{trossen::io::backends::get_default_root_path().string()};
-
-    /// @brief Episode index (for organizing output)
-    uint32_t episode_index{0};
-
-    /// @brief Robot name
-    std::string robot_name{"trossen_ai_generic"};
-
-    /// @brief Frames per second for timestamping
-    float fps{30.0f};
-  };
-
-  /**
    * @brief Construct a LeRobotBackend
    *
-   * @param cfg Configuration parameters
    * @param metadata Vector of producer metadata to include in info.json
    */
   explicit LeRobotBackend(
-    Config cfg,
     ProducerMetadataList metadata);
 
   /**
@@ -370,13 +321,6 @@ public:
     return s;
   }
 
-  /**
-   * @brief Access current config
-   *
-   * @return Current configuration
-   */
-  const Config& config() const { return cfg_; }
-
 private:
   /**
    * @brief Write a joint state record to disk
@@ -424,7 +368,7 @@ private:
   std::vector<std::thread> image_workers_;
 
   /// @brief Config for this backend
-  Config cfg_;
+  std::shared_ptr<trossen::configuration::LeRobotBackendConfig> cfg_;
 
   /// @brief Metadata for this backend
   ProducerMetadataList metadata_;
@@ -467,9 +411,6 @@ private:
 
   /// @brief Hash map to store the frame indices for each source
   std::unordered_map<std::string, uint64_t> source_frame_indices_;
-
-  /// @brief Test Config
-  std::shared_ptr<LeRobotBackendConfig> test_config_;
 };
 
 }  // namespace trossen::io::backends

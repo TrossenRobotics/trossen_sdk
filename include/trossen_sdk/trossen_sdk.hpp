@@ -27,4 +27,12 @@
 #include "trossen_sdk/runtime/session_manager.hpp"
 #include "trossen_sdk/runtime/scheduler.hpp"
 
+#include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/configuration/loaders/json_loader.hpp"
+#include "trossen_sdk/configuration/types/runtime/session_manager_config.hpp"
+#include "trossen_sdk/configuration/types/backends/mcap_backend_config.hpp"
+#include "trossen_sdk/configuration/types/backends/null_backend_config.hpp"
+#include "trossen_sdk/configuration/types/backends/lerobot_backend_config.hpp"
+#include "trossen_sdk/configuration/types/backends/trossen_backend_config.hpp"
+
 #endif  // TROSSEN_SDK__TROSSEN_SDK_HPP

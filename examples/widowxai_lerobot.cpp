@@ -150,8 +150,8 @@ int main(int argc, char** argv) {
   }
 
   // Create and load global configuration
-  auto j = JsonLoader::load("config/sdk_config.json");
-  GlobalConfig::instance().load_from_json(j);
+  auto j = trossen::configuration::JsonLoader::load("config/sdk_config.json");
+  trossen::configuration::GlobalConfig::instance().load_from_json(j);
 
   // Print configuration
   std::vector<std::string> config_lines = {
@@ -236,42 +236,7 @@ int main(int argc, char** argv) {
     std::cout << "  ✓ Arms staged to starting positions\n";
   }
 
-  // ──────────────────────────────────────────────────────────
-  // Configure Session Manager
-  // ──────────────────────────────────────────────────────────
-
-  trossen::runtime::SessionConfig session_cfg;
-  session_cfg.max_duration = std::chrono::seconds(cfg.duration_s);
-  session_cfg.max_episodes = cfg.episodes;
-
-  if (cfg.backend_type == "mcap") {
-    auto mcap_cfg = std::make_unique<trossen::io::backends::McapBackend::Config>();
-    mcap_cfg->compression = "zstd";
-    mcap_cfg->chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
-    mcap_cfg->robot_name = "/robots/widowxai";
-    mcap_cfg->type = "mcap";
-    mcap_cfg->root = cfg.root;  // Will be set per episode
-    mcap_cfg->dataset_id = cfg.dataset_id;
-    session_cfg.backend_config = std::move(mcap_cfg);
-  } else if (cfg.backend_type == "lerobot") {
-    auto lerobot_cfg = std::make_unique<trossen::io::backends::LeRobotBackend::Config>();
-    lerobot_cfg->root = cfg.root;
-    lerobot_cfg->task_name = "trossen_ai_solo_demo";
-    lerobot_cfg->repository_id = cfg.repository_id;
-    lerobot_cfg->dataset_id = cfg.dataset_id;
-    lerobot_cfg->overwrite_existing = false;
-    lerobot_cfg->encode_videos = true;
-    lerobot_cfg->type = "lerobot";
-    lerobot_cfg->fps = cfg.camera_fps;
-    lerobot_cfg->robot_name = "bimanual_widowxai";
-    session_cfg.backend_config = std::move(lerobot_cfg);
-
-  } else {
-    std::cerr << "Unsupported backend type: " << cfg.backend_type << "\n";
-    return 1;
-  }
-
-  trossen::runtime::SessionManager mgr(std::move(session_cfg));
+  trossen::runtime::SessionManager mgr;
 
   std::cout << "\nInitialized Session Manager\n";
   std::cout << "  Starting episode index: " << mgr.stats().current_episode_index << "\n";

@@ -16,42 +16,36 @@
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
 #include "trossen_sdk/version.hpp"
-#include "trossen_sdk/configuration/types/backends/mcap_backend_config.hpp"
-
-
 
 namespace trossen::io::backends {
 
 REGISTER_BACKEND(McapBackend, "mcap")
 
 McapBackend::McapBackend(
-  Config cfg,
   const ProducerMetadataList&)
-  : io::Backend(), cfg_(std::move(cfg)) {
-
-
+  : io::Backend() {
   // This allows us to access the global configuration for the Mcap backend
   // without passing it explicitly.
-
-  test_config_ = GlobalConfig::instance().get_as<McapBackendConfig>("mcap_backend");
-  if (!test_config_) {
+  cfg_ = trossen::configuration::GlobalConfig::instance()
+           .get_as<trossen::configuration::McapBackendConfig>(
+             "mcap_backend");
+  if (!cfg_) {
         std::cerr << "Backend config not found!" << std::endl;
         return;
   }
   // If the root path is empty, set to default
-  if (test_config_->root.empty()) {
-      test_config_->root = trossen::io::backends::get_default_root_path().string();
+  if (cfg_->root.empty()) {
+      cfg_->root = trossen::io::backends::get_default_root_path().string();
   }
   // Print the stored values
   std::cout << "================= MCAP Backend Config =================" << std::endl;
-  std::cout << "Root Dir: " << test_config_->root << std::endl;
-  std::cout << "Robot Name: " << test_config_->robot_name << std::endl;
-  std::cout << "Chunk Size Bytes: " << test_config_->chunk_size_bytes << std::endl;
-  std::cout << "Compression: " << test_config_->compression << std::endl;
-  std::cout << "Dataset ID: " << test_config_->dataset_id << std::endl;
-  std::cout << "Episode Index: " << test_config_->episode_index << std::endl;
+  std::cout << "Root Dir: " << cfg_->root << std::endl;
+  std::cout << "Robot Name: " << cfg_->robot_name << std::endl;
+  std::cout << "Chunk Size Bytes: " << cfg_->chunk_size_bytes << std::endl;
+  std::cout << "Compression: " << cfg_->compression << std::endl;
+  std::cout << "Dataset ID: " << cfg_->dataset_id << std::endl;
+  std::cout << "Episode Index: " << cfg_->episode_index << std::endl;
   std::cout << "======================================================" << std::endl;
-
   }
 McapBackend::~McapBackend() { close(); }
 
@@ -68,8 +62,8 @@ bool McapBackend::open() {
     return true;
   }
   std::ostringstream oss;
-  oss << cfg_.root << "/"
-      << cfg_.dataset_id << "/"
+  oss << cfg_->root << "/"
+      << cfg_->dataset_id << "/"
       << "episode_" << std::setw(6) << std::setfill('0') << episode_index_ << ".mcap";
   // Parse configs
   path_ = std::filesystem::path(oss.str());
@@ -85,16 +79,16 @@ bool McapBackend::open() {
   opts.context = context_;
   opts.path = path_str;
   opts.profile = "trossen";
-  opts.chunk_size = cfg_.chunk_size_bytes;
+  opts.chunk_size = cfg_->chunk_size_bytes;
 
-  if (cfg_.compression == "zstd") {
+  if (cfg_->compression == "zstd") {
     opts.compression = foxglove::McapCompression::Zstd;
-  } else if (cfg_.compression == "lz4") {
+  } else if (cfg_->compression == "lz4") {
     opts.compression = foxglove::McapCompression::Lz4;
-  } else if (cfg_.compression.empty()) {
+  } else if (cfg_->compression.empty()) {
     opts.compression = foxglove::McapCompression::None;
   } else {
-    std::cerr << "Unknown compression option: " << cfg_.compression << " (falling back to none)\n";
+    std::cerr << "Unknown compression option: " << cfg_->compression << " (falling back to none)\n";
     opts.compression = foxglove::McapCompression::None;
   }
   // Check if the output path parent directory exists
@@ -123,7 +117,7 @@ bool McapBackend::open() {
   // Write MCAP file-level metadata
   std::map<std::string, std::string> metadata;
   metadata["tool_version"] = trossen::core::version();
-  metadata["dataset_id"] = cfg_.dataset_id;
+  metadata["dataset_id"] = cfg_->dataset_id;
   metadata["episode_index"] = std::to_string(episode_index_);
   auto now = trossen::data::now_real();
   metadata["recording_start_time"] = std::to_string(now.to_ns());
@@ -211,7 +205,7 @@ void McapBackend::ensure_jointstate_channel() {
 
   // Create channel
   auto channel_result = foxglove::RawChannel::create(
-    mcapdefs::joint_state_topic(cfg_.robot_name),
+    mcapdefs::joint_state_topic(cfg_->robot_name),
     "protobuf",
     schema,
     context_,
@@ -425,7 +419,7 @@ bool McapBackend::is_depth_encoding(const std::string& enc) {
 
 
 uint32_t McapBackend::scan_existing_episodes() {
-  std::filesystem::path base_path = std::filesystem::path(cfg_.root) / cfg_.dataset_id;
+  std::filesystem::path base_path = std::filesystem::path(cfg_->root) / cfg_->dataset_id;
   // If directory doesn't exist, return 0
   if (!std::filesystem::exists(base_path)) {
     return 0;
