@@ -9,6 +9,8 @@ on:
 
 jobs:
   build-and-test:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
 
     steps:
@@ -24,11 +26,21 @@ jobs:
           libopencv-dev \
           libprotobuf-dev \
           protobuf-compiler \
-          libarrow-dev \
-          libparquet-dev \
           pkg-config \
           libbz2-dev \
           zlib1g-dev
+
+    - name: Install Parquet dependencies
+      run: |
+        wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb && \
+        sudo apt-get update && \
+        sudo apt-get install -yqq --no-install-recommends \
+          ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb && \
+        sudo apt-get update && \
+        sudo apt-get install -yqq --no-install-recommends \
+          libarrow-dev \
+          libparquet-dev && \
+        rm apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 
     - name: Install libtrossen_arm
       run: |
@@ -43,7 +55,7 @@ jobs:
 
     - name: Build SDK
       run: |
-        make build
+        make build NPROC=$(nproc)
 
     - name: Run Tests
       run: |
