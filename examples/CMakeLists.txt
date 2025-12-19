@@ -8,12 +8,10 @@ find_package(libtrossen_arm)
 add_executable(widowxai widowxai.cpp)
 target_link_libraries(widowxai demo_utils trossen_sdk libtrossen_arm)
 
-
 # Trossen AI Solo demo
 find_package(libtrossen_arm)
 add_executable(widowxai_lerobot widowxai_lerobot.cpp)
 target_link_libraries(widowxai_lerobot demo_utils trossen_sdk libtrossen_arm)
-
 
 # Stationary AI Kit demo
 find_package(libtrossen_arm)
@@ -23,7 +21,3 @@ target_link_libraries(widowxai_bimanual demo_utils trossen_sdk libtrossen_arm)
 # Backend registry demo
 add_executable(backend_registry_demo backend_registry_demo.cpp)
 target_link_libraries(backend_registry_demo trossen_sdk)
-
-# Camera benchmark tool
-add_executable(camera_benchmark camera_benchmark.cpp)
-target_link_libraries(camera_benchmark trossen_sdk)
