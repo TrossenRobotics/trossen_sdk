@@ -1,0 +1,50 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install system dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          libopencv-dev \
+          libprotobuf-dev \
+          protobuf-compiler \
+          libarrow-dev \
+          libparquet-dev \
+          pkg-config \
+          libbz2-dev \
+          zlib1g-dev
+
+    - name: Install libtrossen_arm
+      run: |
+        # Clone and install libtrossen_arm dependency
+        git clone https://github.com/TrossenRobotics/libtrossen_arm.git /tmp/libtrossen_arm
+        cd /tmp/libtrossen_arm
+        mkdir -p build && cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release
+        make -j$(nproc)
+        sudo make install
+        sudo ldconfig
+
+    - name: Build SDK
+      run: |
+        make build
+
+    - name: Run Tests
+      run: |
+        make test-verbose
