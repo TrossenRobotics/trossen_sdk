@@ -1,6 +1,8 @@
+NPROC ?= 4
+
 build:
 	mkdir -p build
-	cd build && cmake .. && make -j4
+	cd build && cmake .. && make -j$(NPROC)
 .PHONY: build
 
 install: build
@@ -18,7 +20,7 @@ test:
 
 test-verbose:
 	mkdir -p build
-	cd build && cmake -DBUILD_TESTING=ON .. && make -j4
+	cd build && cmake -DBUILD_TESTING=ON .. && make -j$(NPROC)
 .PHONY: test-verbose
 
 clean:
