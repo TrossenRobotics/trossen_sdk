@@ -14,7 +14,7 @@
     "encode_videos": true,
     "task_name": "widowxai_pick_and_place",
     "repository_id": "TrossenRoboticsCommunity",
-    "dataset_id": "widowxai_v4",
+    "dataset_id": "widowxai_v9",
     "episode_index": 0,
     "robot_name": "widowxai",
     "fps": 30.0

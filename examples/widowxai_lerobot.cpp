@@ -30,6 +30,8 @@
 #include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
+#include "trossen_sdk/hw/camera/realsense_producer.hpp"
+#include "trossen_sdk/hw/camera/realsense_depth_producer.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
@@ -322,6 +324,82 @@ int main(int argc, char** argv) {
 
   auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
   mgr.add_producer(camera_producer, camera_period);
+
+  // Create a Realsense Camera Producer (Hardcoded configuration for demo purposes)
+
+  trossen::hw::camera::RealsenseCameraProducer::Config realsense_cfg;
+  realsense_cfg.serial_number = "218622274938";  // Replace with your camera's serial number
+  realsense_cfg.stream_id = "realsense_camera0";
+  realsense_cfg.encoding = "bgr8";
+  realsense_cfg.width = 640;
+  realsense_cfg.height = 480;
+  realsense_cfg.fps = 30;
+  realsense_cfg.use_device_time = true;
+  realsense_cfg.warmup_seconds = 2.0;
+
+  // Create Realsense config
+  rs2::config cam_cfg;
+
+  // Create a realsense pipeline
+  rs2::pipeline realsense_pipeline;
+  auto camera_ = std::make_shared<rs2::pipeline>(realsense_pipeline);
+
+  // Enable the device using the unique ID
+  if (!realsense_cfg.serial_number.empty()) {
+    cam_cfg.enable_device(realsense_cfg.serial_number);
+  } else {
+    std::cout << "Unique ID is empty. Cannot connect to RealSense camera: "
+      << realsense_cfg.stream_id << std::endl;
+    throw std::runtime_error("Unique ID is empty for camera: " + realsense_cfg.stream_id);
+  }
+
+  // Enable the color stream as default
+  cam_cfg.enable_stream(RS2_STREAM_COLOR, realsense_cfg.width, realsense_cfg.height,
+                    RS2_FORMAT_RGB8, realsense_cfg.fps);
+
+  // Make this conditional to enable depth stream
+  cam_cfg.enable_stream(RS2_STREAM_DEPTH, realsense_cfg.width, realsense_cfg.height,
+                    RS2_FORMAT_Z16, realsense_cfg.fps);
+  try {
+    // Start the camera pipeline
+    rs2::pipeline_profile profile = camera_->start(cam_cfg);
+  } catch (const rs2::error& e) {
+    std::cout << "Failed to enable device with Unique ID: " << realsense_cfg.serial_number
+              << ". Error: " << e.what() << ". Listing all available cameras." << std::endl;
+    std::cout << "Available cameras listed above. Please check outputs folder to get "
+        "Available cameras listed above. Please check outputs folder to get "
+        "images associated "
+        "with each camera." << std::endl;
+    throw std::runtime_error(
+        "Unique ID (serial number) is required to connect to RealSense camera");
+  }
+
+
+  auto realsense_producer =
+    std::make_shared<trossen::hw::camera::RealsenseCameraProducer>(camera_, realsense_cfg);
+
+  auto realsense_period = std::chrono::milliseconds(static_cast<int>(1000.0f / 30.0f));
+
+  mgr.add_producer(realsense_producer, realsense_period);
+  std::cout << "  ✓ Realsense camera producer (30 Hz, 640x480)\n";
+
+  trossen::hw::camera::RealsenseDepthCameraProducer::Config realsense_depth_cfg;
+
+  realsense_depth_cfg.serial_number = "218622274938";  // Replace with your camera's serial number
+  realsense_depth_cfg.stream_id = "realsense_depth_camera0";
+  realsense_depth_cfg.encoding = "16UC1";
+  realsense_depth_cfg.width = 640;
+  realsense_depth_cfg.height = 480;
+  realsense_depth_cfg.fps = 30;
+  realsense_depth_cfg.use_device_time = true;
+  realsense_depth_cfg.warmup_seconds = 2.0;
+
+  auto realsense_depth_producer =
+    std::make_shared<trossen::hw::camera::RealsenseDepthCameraProducer>(
+      camera_,
+      realsense_depth_cfg);
+  mgr.add_producer(realsense_depth_producer, realsense_period);
+  std::cout << "  ✓ Realsense depth camera producer (30 Hz, 640x480)\n";
 
   std::cout << "\nProducers registered. Ready to record.\n";
 
