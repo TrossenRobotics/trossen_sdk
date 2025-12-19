@@ -16,6 +16,7 @@
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
+#include "trossen_sdk/hw/camera/realsense_frame_cache.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
 namespace trossen::hw::camera {
@@ -121,7 +122,7 @@ public:
    * @param camera Shared pointer to an rs2::pipeline object
    * @param cfg Configuration parameters
    */
-  explicit RealsenseCameraProducer(std::shared_ptr<rs2::pipeline> camera, Config cfg);
+  explicit RealsenseCameraProducer(std::shared_ptr<RealsenseFrameCache> cache, Config cfg);
 
   /**
    * @brief Destructor
@@ -162,8 +163,10 @@ protected:
   /// @brief Configuration parameters
   Config cfg_;
 
-  /// @brief Realsense pipeline
-  std::shared_ptr<rs2::pipeline> camera_;
+  /// @brief Realsense cache of framesets
+  std::shared_ptr<RealsenseFrameCache> frame_cache_;
+
+  int64_t number_of_frames_captured_{0};
 
 private:
   /// @brief Producer metadata

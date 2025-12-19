@@ -16,8 +16,8 @@
 namespace trossen::hw::camera {
 
 RealsenseDepthCameraProducer::RealsenseDepthCameraProducer(
-  std::shared_ptr<rs2::pipeline> camera, Config cfg)
-  : camera_(std::move(camera)),
+  std::shared_ptr<trossen::hw::camera::RealsenseFrameCache> frame_cache, Config cfg)
+  : frame_cache_(std::move(frame_cache)),
     cfg_(std::move(cfg)) {
   // Populate metadata
   metadata_.type = "realsense_camera";
@@ -44,40 +44,31 @@ void RealsenseDepthCameraProducer::poll(
 {
   auto img = std::make_shared<data::ImageRecord>();
 
-  // Initialize frameset
   rs2::frameset frames;
-
-  // Wait for the next set of frames from the camera with a timeout of 3000 ms
   try {
-    frames = camera_->wait_for_frames(3000);
+    frames = frame_cache_->get_frames(3000);
   } catch (const rs2::error& e) {
-    std::cout << "[WARN] Failed to get frames from RealSense camera: " << e.what() << std::endl;
+    std::cout << "[WARN] RealSense poll failed: " << e.what() << std::endl;
     ++stats_.dropped;
     return;
   }
 
-  if (frames && frames.size() == 0) {
-    std::cout << "No frames received from camera: " << cfg_.stream_id << std::endl;
+  auto depth_frame = frames.get_depth_frame();
+  if (!depth_frame) {
+    std::cout << "[WARN] RealSense poll failed: " << std::endl;
+
+    ++stats_.dropped;
     return;
   }
 
-  try {
-    rs2::frame depth_frame = frames.get_depth_frame();
+  // Convert rs2::frame to cv::Mat
+  const void* data_ptr = static_cast<const void*>(depth_frame.get_data());
+  cv::Mat depth_image(cv::Size(cfg_.width, cfg_.height), CV_16UC1,
+                    const_cast<void*>(data_ptr), cv::Mat::AUTO_STEP);
+  img->image = std::move(depth_image);
 
-    if (depth_frame) {
-      // Convert rs2::frame to cv::Mat
-      const void* data_ptr = static_cast<const void*>(depth_frame.get_data());
-      cv::Mat depth_image(cv::Size(cfg_.width, cfg_.height), CV_16UC1,
-                        const_cast<void*>(data_ptr), cv::Mat::AUTO_STEP);
-      img->image = std::move(depth_image);
-    } else {
-      std::cout << "Failed to read depth frame from camera: " << cfg_.stream_id << std::endl;
-    }
-  } catch (const rs2::error& e) {
-    std::cout << "Error retrieving depth frame from camera: "
-              << cfg_.stream_id << ". Error: " << e.what() << std::endl;
-  }
-
+  std::cout << "Got frames from frame cache " << number_of_frames_captured_ << std::endl;
+  ++number_of_frames_captured_;
   data::Timestamp ts;
   // TODO(lukeschmitt-tr): use device timestamp if available and cfg_.use_device_time
   uint64_t mono_now = data::now_mono().to_ns();
@@ -119,7 +110,7 @@ void RealsenseDepthCameraProducer::poll(
       produced_fps = 1e9 / (static_cast<double>(if_accum_ns_) / static_cast<double>(if_samples_));
     }
     if (produced_fps > 0 && (produced_fps + 0.5) < cfg_.fps) {
-      std::cerr << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps
+      std::cout << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps
                 << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
     } else {
       std::cout << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps

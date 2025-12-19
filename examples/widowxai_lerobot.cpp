@@ -32,6 +32,7 @@
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 #include "trossen_sdk/hw/camera/realsense_producer.hpp"
 #include "trossen_sdk/hw/camera/realsense_depth_producer.hpp"
+#include "trossen_sdk/hw/camera/realsense_frame_cache.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
@@ -374,9 +375,10 @@ int main(int argc, char** argv) {
         "Unique ID (serial number) is required to connect to RealSense camera");
   }
 
+  auto frame_cache = std::make_shared<trossen::hw::camera::RealsenseFrameCache>(camera_, 2);
 
   auto realsense_producer =
-    std::make_shared<trossen::hw::camera::RealsenseCameraProducer>(camera_, realsense_cfg);
+    std::make_shared<trossen::hw::camera::RealsenseCameraProducer>(frame_cache, realsense_cfg);
 
   auto realsense_period = std::chrono::milliseconds(static_cast<int>(1000.0f / 30.0f));
 
@@ -396,7 +398,7 @@ int main(int argc, char** argv) {
 
   auto realsense_depth_producer =
     std::make_shared<trossen::hw::camera::RealsenseDepthCameraProducer>(
-      camera_,
+      frame_cache,
       realsense_depth_cfg);
   mgr.add_producer(realsense_depth_producer, realsense_period);
   std::cout << "  ✓ Realsense depth camera producer (30 Hz, 640x480)\n";
@@ -500,11 +502,11 @@ int main(int argc, char** argv) {
     // ──────────────────────────────────────────────────────────
 
     trossen::demo::SanityCheckConfig sanity_cfg{
-      actual_duration,
-      1,  // 1 joint producer (follower)
-      cfg.joint_rate_hz,
-      1,  // 1 camera
-      cfg.camera_fps,
+      5.0,  // 5 second startup grace period
+      2,  // 2 joint producers (leader and follower)
+      30,
+      2,  // 2 cameras (color and depth)
+      30,
       5.0  // 5% tolerance
     };
     trossen::demo::perform_sanity_check(recording_episode_index, last_record_count, sanity_cfg);

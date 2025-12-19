@@ -2,7 +2,7 @@
   "session_manager": {
     "type": "session_manager",
     "max_duration": 3,
-    "max_episodes": 2,
+    "max_episodes": 5,
     "backend_type": "lerobot"
   },
   "lerobot_backend": {
