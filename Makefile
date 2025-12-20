@@ -28,6 +28,10 @@ test-verbose:
 	cd build && cmake -DBUILD_TESTING=ON .. && make -j$(NPROC)
 .PHONY: test-verbose
 
+docker-build:
+	docker build -t trossen-sdk:latest .
+.PHONY: docker-build
+
 clean:
 	rm -rf build output
 .PHONY: clean
