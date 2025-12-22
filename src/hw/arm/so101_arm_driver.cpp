@@ -4,6 +4,7 @@
  */
 
 #include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
+#include <cmath>
 #include <iostream>
 #include <vector>
 #include <string>
@@ -172,5 +173,5 @@ int SO101ArmDriver::unnormalize(
   int range = calibration.range_max - calibration.range_min;
   double raw_double =
       ((clamped - NORMALIZED_MIN) / NORMALIZED_RANGE) * range + calibration.range_min;
-  return static_cast<int>(raw_double + 0.5);  // Round to nearest int
+  return static_cast<int>(std::round(raw_double));
 }
