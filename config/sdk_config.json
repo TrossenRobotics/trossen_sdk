@@ -12,11 +12,11 @@
     "png_compression_level": 5,
     "override_existing": true,
     "encode_videos": true,
-    "task_name": "widowxai_pick_and_place",
+    "task_name": "so101_teleop",
     "repository_id": "TrossenRoboticsCommunity",
-    "dataset_id": "widowxai_v4",
+    "dataset_id": "so101_v1",
     "episode_index": 0,
-    "robot_name": "widowxai",
+    "robot_name": "so101",
     "fps": 30.0
   },
   "mcap_backend": {
