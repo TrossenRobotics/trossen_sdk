@@ -48,6 +48,6 @@ void FeetechBus::sync_write_position(const std::vector<int> &goal_positions) {
 
     size_t num_motors = std::min(goal_positions.size(), motors_.size());
     for (size_t i = 0; i < num_motors; ++i) {
-        servo_->WritePosEx(motors_[i].id, goal_positions[i], 0, 0);
+        servo_->WritePosEx(motors_[i].id, goal_positions[i], 2000, 0);
     }
 }

@@ -30,6 +30,8 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/configuration/loaders/json_loader.hpp"
 
 #include "./demo_utils.hpp"
 
@@ -55,8 +57,8 @@ struct Config {
 
   // Arm settings
   float joint_rate_hz = 30.0f;
-  std::string leader_port = "/dev/ttyACM0";
-  std::string follower_port = "/dev/ttyACM1";
+  std::string leader_port = "/dev/ttyACM1";
+  std::string follower_port = "/dev/ttyACM0";
 
   // Dataset backend type
   std::string backend_type = "mcap";
@@ -132,8 +134,6 @@ Config parse_args(int argc, char** argv) {
 
 // ────────────────────────────────────────────────────────────
 // Main
-// ────────────────────────────────────────────────────────────
-
 int main(int argc, char** argv) {
   // Parse command-line arguments
   auto cfg = parse_args(argc, argv);
@@ -141,6 +141,15 @@ int main(int argc, char** argv) {
     print_usage(argv[0]);
     return 0;
   }
+
+  if (!std::filesystem::exists("config/sdk_config.json")) {
+    std::cerr << "Error: config/sdk_config.json not found!" << std::endl;
+    return 1;
+  }
+
+  // Create and load global configuration
+  auto j = trossen::configuration::JsonLoader::load("config/sdk_config.json");
+  trossen::configuration::GlobalConfig::instance().load_from_json(j);
 
   // Print configuration
   std::vector<std::string> config_lines = {
@@ -215,39 +224,7 @@ int main(int argc, char** argv) {
   // Configure Session Manager
   // ──────────────────────────────────────────────────────────
 
-  trossen::runtime::SessionConfig session_cfg;
-  session_cfg.base_path = cfg.output_dir;
-  session_cfg.dataset_id = cfg.dataset_id;
-  session_cfg.max_duration = std::chrono::seconds(cfg.duration_s);
-  session_cfg.max_episodes = cfg.episodes;
-  session_cfg.repository_id = cfg.repository_id;
-
-  if (cfg.backend_type == "mcap") {
-    auto mcap_cfg = std::make_unique<trossen::io::backends::McapBackend::Config>();
-    mcap_cfg->compression = "zstd";
-    mcap_cfg->chunk_size_bytes = 4 * 1024 * 1024;  // 4 MB chunks
-    mcap_cfg->robot_name = "/robots/so101";
-    mcap_cfg->type = "mcap";
-    session_cfg.backend_config = std::move(mcap_cfg);
-  } else if (cfg.backend_type == "lerobot") {
-    auto lerobot_cfg = std::make_unique<trossen::io::backends::LeRobotBackend::Config>();
-    lerobot_cfg->output_dir = cfg.output_dir;
-    lerobot_cfg->task_name = "trossen_ai_solo_demo";
-    lerobot_cfg->repository_id = cfg.repository_id;
-    lerobot_cfg->dataset_id = cfg.dataset_id;
-    lerobot_cfg->overwrite_existing = false;
-    lerobot_cfg->encode_videos = true;
-    lerobot_cfg->type = "lerobot";
-    lerobot_cfg->fps = cfg.camera_fps;
-    lerobot_cfg->robot_name = "so101";
-    session_cfg.backend_config = std::move(lerobot_cfg);
-
-  } else {
-    std::cerr << "Unsupported backend type: " << cfg.backend_type << "\n";
-    return 1;
-  }
-
-  trossen::runtime::SessionManager mgr(std::move(session_cfg));
+  trossen::runtime::SessionManager mgr;
 
   std::cout << "\nInitialized Session Manager\n";
   std::cout << "  Starting episode index: " << mgr.stats().current_episode_index << "\n";

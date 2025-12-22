@@ -7,7 +7,6 @@
 #include <mutex>
 #include <ftservo/ftservo.h>
 
-// Forward declaration of Feetech servo driver class from ftservo library
 class SMS_STS;
 
 /**
@@ -65,12 +64,14 @@ public:
      * @return true if connection was successful, false otherwise.
      */
     bool connect();
+
     /**
      * @brief Disconnect from the servo bus.
      *
      * Closes the serial port connection to the servo motors.
      */
     void disconnect();
+
     /**
      * @brief Check if the bus is connected.
      *
