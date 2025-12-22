@@ -28,7 +28,7 @@ public:
     std::string stream_id{"teleop_so101_arm"};
 
     /// @brief Prefer device timestamp if available
-    bool use_device_time{true};
+    bool use_device_time{false};
   };
 
   /**
@@ -91,7 +91,7 @@ public:
   ~TeleopSO101ArmProducer() override = default;
 
   /**
-   * @brief Poll the leader and follower for the latest joint states and emit a JointStateRecord
+   * @brief Poll the leader and follower for the latest joint states and emit a TeleopJointStateRecord
    *
    * @param emit Callback to invoke for each produced record
    */

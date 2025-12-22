@@ -95,7 +95,7 @@ public:
   ~TeleopTrossenArmProducer() override = default;
 
   /**
-   * @brief Poll the driver for the latest joint states and emit a JointStateRecord
+   * @brief Poll the driver for the latest joint states and emit a TeleopJointStateRecord
    *
    * @param emit Callback to invoke for each produced record
    */
