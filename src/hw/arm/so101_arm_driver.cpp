@@ -3,11 +3,12 @@
  * @brief Implementation of unified SO101 arm driver.
  */
 
-#include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
 #include <cmath>
 #include <iostream>
-#include <vector>
 #include <string>
+#include <vector>
+
+#include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
 
 SO101ArmDriver::~SO101ArmDriver() {
   disconnect();
