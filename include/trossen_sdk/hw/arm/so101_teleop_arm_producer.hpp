@@ -9,7 +9,6 @@
 #include "nlohmann/json.hpp"
 
 #include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
-
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
