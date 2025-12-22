@@ -154,22 +154,23 @@ double SO101ArmDriver::normalize(int raw_value, const JointCalibration& calibrat
   }
   double normalized =
       (((static_cast<double>(raw_value - calibration.range_min)) / range) *
-       200.0) -
-      100.0;
-  if (normalized < -100.0) normalized = -100.0;
-  if (normalized > 100.0) normalized = 100.0;
+       NORMALIZED_RANGE) +
+      NORMALIZED_MIN;
+  if (normalized < NORMALIZED_MIN) normalized = NORMALIZED_MIN;
+  if (normalized > NORMALIZED_MAX) normalized = NORMALIZED_MAX;
   return normalized;
 }
 
 int SO101ArmDriver::unnormalize(
     double normalized_value, const JointCalibration& calibration) const {
-  // Map from normalized range [-100, 100] to raw range [min, max]
-  // Formula: raw = ((normalized + 100.0) / 200.0) * (max - min) + min
+  // Map from normalized range to raw range [min, max]
+  // Formula: raw = ((normalized - min_norm) / range_norm) * (max - min) + min
   double clamped = normalized_value;
-  if (clamped < -100.0) clamped = -100.0;
-  if (clamped > 100.0) clamped = 100.0;
+  if (clamped < NORMALIZED_MIN) clamped = NORMALIZED_MIN;
+  if (clamped > NORMALIZED_MAX) clamped = NORMALIZED_MAX;
 
   int range = calibration.range_max - calibration.range_min;
-  double raw_double = ((clamped + 100.0) / 200.0) * range + calibration.range_min;
+  double raw_double =
+      ((clamped - NORMALIZED_MIN) / NORMALIZED_RANGE) * range + calibration.range_min;
   return static_cast<int>(raw_double + 0.5);  // Round to nearest int
 }

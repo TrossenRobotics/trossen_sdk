@@ -23,6 +23,10 @@ enum class SO101EndEffector {
  */
 class SO101ArmDriver {
 public:
+  /// Normalization range constants
+  static constexpr double NORMALIZED_MIN = -100.0;
+  static constexpr double NORMALIZED_MAX = 100.0;
+  static constexpr double NORMALIZED_RANGE = NORMALIZED_MAX - NORMALIZED_MIN;
   /**
    * @brief Default constructor.
    */
