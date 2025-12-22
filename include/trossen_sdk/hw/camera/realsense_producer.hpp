@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-#include <librealsense2/rs.hpp>  // RealSense SDK
+#include "opencv2/imgproc.hpp"
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
@@ -56,9 +56,6 @@ public:
 
     /// @brief Whether to enforce the requested fps (may reduce if device cannot keep up)
     bool enforce_requested_fps = true;
-
-    /// @brief Flag to use depth map stream along with color stream
-    bool use_depth_map{false};
   };
 
   /**
@@ -165,8 +162,6 @@ protected:
 
   /// @brief Realsense cache of framesets
   std::shared_ptr<RealsenseFrameCache> frame_cache_;
-
-  int64_t number_of_frames_captured_{0};
 
 private:
   /// @brief Producer metadata

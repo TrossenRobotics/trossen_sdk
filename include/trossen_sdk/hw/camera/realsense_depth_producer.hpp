@@ -54,9 +54,6 @@ public:
 
     /// @brief Whether to enforce the requested fps (may reduce if device cannot keep up)
     bool enforce_requested_fps = true;
-
-    /// @brief Flag to use depth map stream along with color stream
-    bool use_depth_map{false};
   };
 
   /**
@@ -151,21 +148,11 @@ public:
   }
 
 protected:
-  /**
-   * @brief Open the device if not already opened
-   *
-   * @return true on successful open or already opened, false on failure
-   */
-  bool open_if_needed();
-
   /// @brief Configuration parameters
   Config cfg_;
 
   /// @brief Realsense cache of framesets
   std::shared_ptr<RealsenseFrameCache> frame_cache_;
-
-  int64_t number_of_frames_captured_{0};
-
 
 private:
   /// @brief Producer metadata

@@ -61,14 +61,21 @@ void RealsenseCameraProducer::poll(
   const void* data_ptr = static_cast<const void*>(color_frame.get_data());
   cv::Mat image(cv::Size(cfg_.width, cfg_.height), CV_8UC3,
                 const_cast<void*>(data_ptr), cv::Mat::AUTO_STEP);
+  // BGR format
+  cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
   img->image = std::move(image);
 
-  std::cout << "Got frames from frame cache " << number_of_frames_captured_ << std::endl;
-  ++number_of_frames_captured_;
   data::Timestamp ts;
   // TODO(lukeschmitt-tr): use device timestamp if available and cfg_.use_device_time
+
   uint64_t mono_now = data::now_mono().to_ns();
-  ts.monotonic = data::now_mono();
+
+  if (cfg_.use_device_time) {
+    uint64_t device_ts = color_frame.get_timestamp();
+    ts.monotonic = data::Timespec::from_ns(device_ts);
+  } else {
+    ts.monotonic = data::now_mono();
+  }
   ts.realtime = data::now_real();
 
   // Inter-frame timing instrumentation

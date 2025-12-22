@@ -1,8 +1,9 @@
 #pragma once
 
-#include <librealsense2/rs.hpp>
 #include <memory>
 #include <mutex>
+
+#include "librealsense2/rs.hpp"
 
 namespace trossen::hw::camera {
 

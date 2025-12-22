@@ -502,11 +502,11 @@ int main(int argc, char** argv) {
     // ──────────────────────────────────────────────────────────
 
     trossen::demo::SanityCheckConfig sanity_cfg{
-      5.0,  // 5 second startup grace period
-      2,  // 2 joint producers (leader and follower)
-      30,
-      2,  // 2 cameras (color and depth)
-      30,
+      actual_duration,
+      1,  // 1 joint producer (follower)
+      cfg.joint_rate_hz,
+      1,  // 1 camera
+      cfg.camera_fps,
       5.0  // 5% tolerance
     };
     trossen::demo::perform_sanity_check(recording_episode_index, last_record_count, sanity_cfg);

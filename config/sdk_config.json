@@ -2,7 +2,7 @@
   "session_manager": {
     "type": "session_manager",
     "max_duration": 3,
-    "max_episodes": 5,
+    "max_episodes": 2,
     "backend_type": "lerobot"
   },
   "lerobot_backend": {
@@ -14,7 +14,7 @@
     "encode_videos": true,
     "task_name": "widowxai_pick_and_place",
     "repository_id": "TrossenRoboticsCommunity",
-    "dataset_id": "widowxai_v9",
+    "dataset_id": "widowxai_v4",
     "episode_index": 0,
     "robot_name": "widowxai",
     "fps": 30.0

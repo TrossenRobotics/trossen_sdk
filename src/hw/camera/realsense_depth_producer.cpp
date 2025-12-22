@@ -67,12 +67,17 @@ void RealsenseDepthCameraProducer::poll(
                     const_cast<void*>(data_ptr), cv::Mat::AUTO_STEP);
   img->image = std::move(depth_image);
 
-  std::cout << "Got frames from frame cache " << number_of_frames_captured_ << std::endl;
-  ++number_of_frames_captured_;
   data::Timestamp ts;
   // TODO(lukeschmitt-tr): use device timestamp if available and cfg_.use_device_time
+
   uint64_t mono_now = data::now_mono().to_ns();
-  ts.monotonic = data::now_mono();
+
+  if (cfg_.use_device_time) {
+    uint64_t device_ts = depth_frame.get_timestamp();
+    ts.monotonic = data::Timespec::from_ns(device_ts);
+  } else {
+    ts.monotonic = data::now_mono();
+  }
   ts.realtime = data::now_real();
 
   // Inter-frame timing instrumentation
