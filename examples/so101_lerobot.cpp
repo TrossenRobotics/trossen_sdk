@@ -1,18 +1,18 @@
 /**
- * @file widowxai_lerobot.cpp
- * @brief Complete Trossen AI Solo demo with Session Manager, MCAP backend, and OpenCV camera
+ * @file so101_lerobot.cpp
+ * @brief Complete SO101 demo with Session Manager, MCAP backend, and OpenCV camera
  *
  * This demo combines:
- * - Trossen AI Solo hardware (leader + follower arms)
+ * - SO101 hardware (leader + follower arms)
  * - Session Manager for multi-episode recording
  * - MCAP backend for data storage
  * - OpenCV camera producer for image capture
  * - Configurable episode count and duration
  *
  * Usage:
- *   ./widowxai_lerobot --episodes 5 --duration 10
- *   ./widowxai_lerobot --episodes 3 --duration 5 --output-dir /data/recordings
- *   ./widowxai_lerobot --mock  # Use mock producers for testing without hardware
+ *   ./so101_teleop --episodes 5 --duration 10
+ *   ./so101_teleop --episodes 3 --duration 5 --root /data/recordings
+ *   ./so101_teleop --mock  # Use mock producers for testing without hardware
  */
 
 #include <chrono>
@@ -23,10 +23,10 @@
 #include <thread>
 #include <vector>
 
+#include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
 #include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 #include "trossen_sdk/hw/arm/so101_teleop_arm_producer.hpp"
-#include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
@@ -42,7 +42,7 @@
 
 struct Config {
   int duration_s = 10;
-  int episodes = 3;
+  int episodes = 1;
   std::string dataset_id = "";  // empty = auto-generate
   std::string root = trossen::io::backends::get_default_root_path().string();
   std::string repository_id = "TrossenRoboticsCommunity";  // Valid only for LeRobot backend
@@ -69,13 +69,13 @@ void print_usage(const char* prog_name) {
     << "Usage: " << prog_name << " [options]\n\n"
     << "Options:\n"
     << "  --duration <seconds>     Duration per episode (default: 10)\n"
-    << "  --episodes <count>       Number of episodes to record (default: 3)\n"
+    << "  --episodes <count>       Number of episodes to record (default: 1)\n"
     << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
     << "  --root <path>            Root directory for episodes (default: ~/.cache/trossen_sdk/)\n"
     << "  --repository-id <string> Repository identifier (default: TrossenRoboticsCommunity, "
     << "only for LeRobot backend)\n"
     << "  --mock                   Use mock producers instead of real hardware\n"
-    << "  --camera-index <num>     Camera device index (default: 2, i.e., /dev/video2)\n"
+    << "  --camera-index <num>     Camera device index (default: 4, i.e., /dev/video4)\n"
     << "  --camera-width <pixels>  Camera width (default: 1920)\n"
     << "  --camera-height <pixels> Camera height (default: 1080)\n"
     << "  --camera-fps <fps>       Camera frame rate (default: 30)\n"
@@ -174,7 +174,7 @@ int main(int argc, char** argv) {
     " @ " + std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
     " @ " + std::to_string(cfg.camera_fps) + " fps");
 
-  trossen::demo::print_config_banner("Trossen AI SO101 Complete Demo", config_lines);
+  trossen::demo::print_config_banner("SO101 LeRobot Complete Demo", config_lines);
 
   // Install signal handler for graceful shutdown
   trossen::demo::install_signal_handler();
@@ -190,7 +190,7 @@ int main(int argc, char** argv) {
   std::shared_ptr<SO101ArmDriver> follower_driver;
 
   if (!cfg.use_mock) {
-    std::cout << "Initializing SO101 hardware...\n";
+    std::cout << "Initializing hardware...\n";
 
     // Create and configure leader driver
     leader_driver = std::make_shared<SO101ArmDriver>();
@@ -242,7 +242,7 @@ int main(int argc, char** argv) {
     trossen::hw::arm::TeleopMockJointStateProducer::Config joint_cfg{
       6,                              // num_joints
       cfg.joint_rate_hz,              // rate_hz
-      "teleop_robot/joint_states",        // stream_id
+      "teleop_robot/joint_states",    // stream_id
       1.0                             // motion_scale
     };
     joint_producer = std::make_shared<trossen::hw::arm::TeleopMockJointStateProducer>(joint_cfg);
