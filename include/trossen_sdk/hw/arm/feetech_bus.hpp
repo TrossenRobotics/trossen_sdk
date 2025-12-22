@@ -5,7 +5,7 @@
 #include <vector>
 #include <memory>
 #include <mutex>
-#include <ftservo/ftservo.h>
+#include <SCServo.h>
 
 class SMS_STS;
 
