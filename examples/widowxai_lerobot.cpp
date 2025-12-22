@@ -421,6 +421,11 @@ int main(int argc, char** argv) {
       false);
   }
 
+  // TODO(shantanuparab-tr): Create a method for checking if all the hardware
+  // producers are ready before starting the recording. For now, adding a sleep.
+  // Sleep briefly to ensure everything is settled
+  std::this_thread::sleep_for(std::chrono::seconds(5));
+
   // ──────────────────────────────────────────────────────────
   // Recording loop: record requested number of episodes
   // ──────────────────────────────────────────────────────────
