@@ -23,8 +23,8 @@ public:
      *
      * @param port Serial port device path (e.g., "/dev/ttyUSB0").
      */
-    SO101Leader(const std::string &port);
-    
+    explicit SO101Leader(const std::string &port);
+
     /**
      * @brief Destructor.
      *
@@ -41,14 +41,14 @@ public:
      * @return true if connection was successful, false otherwise.
      */
     bool connect();
-    
+
     /**
      * @brief Disconnect from the leader arm.
      *
      * Closes the serial connection to the arm.
      */
     void disconnect();
-    
+
     /**
      * @brief Check if the arm is connected.
      *
@@ -64,7 +64,7 @@ public:
      * @return Map of joint names to position values in servo units.
      */
     std::map<std::string, int> getJointPositions();
-    
+
     /**
      * @brief Get ordered list of joint names.
      *
@@ -75,7 +75,7 @@ public:
      *         elbow_flex, wrist_flex, wrist_roll, gripper.
      */
     std::vector<std::string> getJointNames() const;
-    
+
     /**
      * @brief Get the arm model name.
      *
@@ -88,4 +88,4 @@ private:
     std::vector<std::string> joint_names_;
 };
 
-#endif // TROSSEN_SDK__HW__ARM__SO101_LEADER_HPP
+#endif  // TROSSEN_SDK__HW__ARM__SO101_LEADER_HPP

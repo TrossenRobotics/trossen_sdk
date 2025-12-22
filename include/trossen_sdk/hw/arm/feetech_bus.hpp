@@ -7,6 +7,7 @@
 #include <mutex>
 #include <ftservo/ftservo.h>
 
+// Forward declaration of Feetech servo driver class from ftservo library
 class SMS_STS;
 
 /**
@@ -17,13 +18,13 @@ class SMS_STS;
 struct Motor {
     /// @brief Servo motor ID
     int id;
-    
+
     /// @brief Motor model name
     std::string model;
-    
+
     /// @brief Minimum position range in degrees or servo units
     double min_range;
-    
+
     /// @brief Maximum position range in degrees or servo units
     double max_range;
 };
@@ -47,7 +48,7 @@ public:
      * @param motors Map of motor names to Motor configuration structs.
      */
     FeetechBus(const std::string &port, const std::map<std::string, Motor> &motors);
-    
+
     /**
      * @brief Destructor.
      *
@@ -64,14 +65,14 @@ public:
      * @return true if connection was successful, false otherwise.
      */
     bool connect();
-    
+
     /**
      * @brief Disconnect from the servo bus.
      *
      * Closes the serial port connection to the servo motors.
      */
     void disconnect();
-    
+
     /**
      * @brief Check if the bus is connected.
      *
@@ -88,7 +89,7 @@ public:
      * @return Map of motor names to current position values in servo units.
      */
     std::map<std::string, int> syncReadPosition();
-    
+
     /**
      * @brief Write target positions to motors synchronously.
      *
@@ -102,18 +103,18 @@ public:
 private:
     /// @brief Serial port device path
     std::string port_;
-    
+
     /// @brief Map of motor names to Motor configurations
     std::map<std::string, Motor> motors_;
-    
+
     /// @brief Connection status flag
     bool connected_;
-    
+
     /// @brief Mutex for thread-safe bus access
     std::mutex bus_mutex_;
-    
+
     /// @brief Pointer to the underlying SMS_STS servo driver
     std::unique_ptr<SMS_STS> servo_;
 };
 
-#endif // TROSSEN_SDK__HW__ARM__FEETECH_BUS_HPP
+#endif  // TROSSEN_SDK__HW__ARM__FEETECH_BUS_HPP
