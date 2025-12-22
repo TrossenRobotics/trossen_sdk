@@ -7,6 +7,7 @@
 #include <mutex>
 #include <ftservo/ftservo.h>
 
+// Forward declaration of Feetech servo driver class from ftservo library
 class SMS_STS;
 
 /**
