@@ -38,17 +38,10 @@ if(TROSSEN_ENABLE_REALSENSE)
   )
   target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_REALSENSE)
 
-  find_package(realsense2 QUIET)
-
-  if(NOT realsense2_FOUND)
-    message(FATAL_ERROR
-      "Intel RealSense SDK (librealsense2) not found.\n"
-      "Required version: 2.55.1\n"
-      "\n"
-      "Install it using:\n"
-      "  scripts/install_realsense.sh\n"
-    )
-  endif()
+  # Find RealSense dependencies first
+  find_package(fastcdr REQUIRED)
+  find_package(fastrtps REQUIRED)
+  find_package(realsense2 REQUIRED)
 endif()
 
 # Add architecture-specific CMAKE_PREFIX_PATH
