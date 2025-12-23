@@ -1,18 +1,21 @@
-// This is a testfile to create a script to test the realsense camera producer.
-// This is to verify that the realsense sdk can be integrated properly from the CmakeLists.txt
-// and that the realsense camera producer can be compiled without errors.
+/**
+ * @file realsense_depth_producer.cpp
+ * @brief Implementation of RealsenseDepthCameraProducer that emits camera frames from a physical camera
+ * device using Realsense SDK.
+ */
 
+#include <chrono>
 #include <iostream>
 #include <memory>
 #include <thread>
 #include <utility>
 #include <vector>
 
-#include "trossen_sdk/hw/camera/realsense_producer.hpp"
+#include "trossen_sdk/hw/camera/realsense_depth_producer.hpp"
 
 namespace trossen::hw::camera {
 
-RealsenseCameraProducer::RealsenseCameraProducer(
+RealsenseDepthCameraProducer::RealsenseDepthCameraProducer(
   std::shared_ptr<trossen::hw::camera::RealsenseFrameCache> frame_cache, Config cfg)
   : frame_cache_(std::move(frame_cache)),
     cfg_(std::move(cfg)) {
@@ -30,13 +33,13 @@ RealsenseCameraProducer::RealsenseCameraProducer(
   metadata_.has_audio = false;
 }
 
-RealsenseCameraProducer::~RealsenseCameraProducer() {
+RealsenseDepthCameraProducer::~RealsenseDepthCameraProducer() {
   if (opened_) {
     std::cout << "Stopping RealSense camera: " << metadata_.name << std::endl;
   }
 }
 
-void RealsenseCameraProducer::poll(
+void RealsenseDepthCameraProducer::poll(
   const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
 {
   auto img = std::make_shared<data::ImageRecord>();
@@ -50,20 +53,19 @@ void RealsenseCameraProducer::poll(
     return;
   }
 
-  auto color_frame = frames.get_color_frame();
-  if (!color_frame) {
+  auto depth_frame = frames.get_depth_frame();
+  if (!depth_frame) {
     std::cout << "[WARN] RealSense poll failed: " << std::endl;
+
     ++stats_.dropped;
     return;
   }
 
   // Convert rs2::frame to cv::Mat
-  const void* data_ptr = static_cast<const void*>(color_frame.get_data());
-  cv::Mat image(cv::Size(cfg_.width, cfg_.height), CV_8UC3,
-                const_cast<void*>(data_ptr), cv::Mat::AUTO_STEP);
-  // BGR format
-  cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
-  img->image = std::move(image);
+  const void* data_ptr = static_cast<const void*>(depth_frame.get_data());
+  cv::Mat depth_image(cv::Size(cfg_.width, cfg_.height), CV_16UC1,
+                    const_cast<void*>(data_ptr), cv::Mat::AUTO_STEP);
+  img->image = std::move(depth_image);
 
   data::Timestamp ts;
   // TODO(lukeschmitt-tr): use device timestamp if available and cfg_.use_device_time
@@ -71,7 +73,7 @@ void RealsenseCameraProducer::poll(
   uint64_t mono_now = data::now_mono().to_ns();
 
   if (cfg_.use_device_time) {
-    uint64_t device_ts = color_frame.get_timestamp();
+    uint64_t device_ts = depth_frame.get_timestamp();
     ts.monotonic = data::Timespec::from_ns(device_ts);
   } else {
     ts.monotonic = data::now_mono();
@@ -113,7 +115,7 @@ void RealsenseCameraProducer::poll(
       produced_fps = 1e9 / (static_cast<double>(if_accum_ns_) / static_cast<double>(if_samples_));
     }
     if (produced_fps > 0 && (produced_fps + 0.5) < cfg_.fps) {
-      std::cerr << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps
+      std::cout << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps
                 << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
     } else {
       std::cout << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps

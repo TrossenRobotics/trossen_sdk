@@ -32,7 +32,10 @@ add_library(trossen_sdk SHARED
 
 if(TROSSEN_ENABLE_REALSENSE)
   message(STATUS "Intel RealSense support enabled")
-  target_sources(trossen_sdk PRIVATE src/hw/camera/realsense_producer.cpp)
+  target_sources(trossen_sdk PRIVATE
+    src/hw/camera/realsense_producer.cpp
+    src/hw/camera/realsense_depth_producer.cpp
+  )
   target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_REALSENSE)
 
   find_package(realsense2 QUIET)
