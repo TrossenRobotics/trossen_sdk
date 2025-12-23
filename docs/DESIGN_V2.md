@@ -335,6 +335,12 @@ public:
 `OpenCvCameraProducer` (push thread): open device, capture loop, convert frame, timestamp, emit.
 Depth extension later via secondary capture or composite record.
 
+### Realsense Camera Producer
+
+`RealsenseCameraProducer` (polled, color) and `RealsenseDepthCameraProducer` (polled, depth) share a **single RealSense pipeline** via a synchronized **frame cache**, allowing each producer to emit **one image record per poll** while guaranteeing color–depth frames originate from the **same frameset**.
+This design avoids concurrent `wait_for_frames()` calls, preserves existing producer semantics, and ensures deterministic multi-stream synchronization (see [Realsense Frame Cache Design](./hardware/REALSENSE_CAMERA.md) for details).
+
+
 ### Timestamp Strategy
 
 Priority: hardware monotonic > driver capture time > SDK monotonic.
