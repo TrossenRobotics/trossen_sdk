@@ -3,23 +3,51 @@
  * @brief Unit tests for BackendRegistry
  */
 
+#include <filesystem>
+#include <iostream>
 #include <memory>
 #include <stdexcept>
 
 #include "gtest/gtest.h"
 
+#include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
-#include "trossen_sdk/io/backends/null/null_backend.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
+#include "trossen_sdk/io/backends/null/null_backend.hpp"
 
 using trossen::io::BackendRegistry;
 using trossen::io::Backend;
 using trossen::io::backends::NullBackend;
 using trossen::io::backends::McapBackend;
 
+// Test fixture to load configuration before running tests
+class BackendRegistryTest : public ::testing::Test {
+ protected:
+  static void SetUpTestSuite() {
+    // Load configuration once for all tests
+    // Tests run from build/tests directory, so we need to go up two levels
+    const std::string config_path = "../../config/sdk_config.json";
+
+    if (!std::filesystem::exists(config_path)) {
+      std::cerr << "Warning: " << config_path << " not found" << std::endl;
+      std::cerr << "Current directory: " << std::filesystem::current_path() << std::endl;
+      return;
+    }
+
+    try {
+      auto j = trossen::configuration::JsonLoader::load(config_path);
+      trossen::configuration::GlobalConfig::instance().load_from_json(j);
+      std::cout << "Successfully loaded configuration from " << config_path << std::endl;
+    } catch (const std::exception& e) {
+      std::cerr << "Error loading config: " << e.what() << std::endl;
+    }
+  }
+};
+
 // Test that common backend types are registered
-TEST(BackendRegistryTest, CommonBackendsAreRegistered) {
+TEST_F(BackendRegistryTest, CommonBackendsAreRegistered) {
   EXPECT_TRUE(BackendRegistry::is_registered("lerobot"));
   EXPECT_TRUE(BackendRegistry::is_registered("mcap"));
   EXPECT_TRUE(BackendRegistry::is_registered("null"));
@@ -27,13 +55,13 @@ TEST(BackendRegistryTest, CommonBackendsAreRegistered) {
 }
 
 // Test that unknown backend types are not registered
-TEST(BackendRegistryTest, UnknownBackendNotRegistered) {
+TEST_F(BackendRegistryTest, UnknownBackendNotRegistered) {
   EXPECT_FALSE(BackendRegistry::is_registered("unknown"));
   EXPECT_FALSE(BackendRegistry::is_registered(""));
 }
 
 // Test creating a NullBackend through the registry
-TEST(BackendRegistryTest, CreateNullBackend) {
+TEST_F(BackendRegistryTest, CreateNullBackend) {
   auto backend = BackendRegistry::create("null");
   ASSERT_NE(backend, nullptr);
 
@@ -58,7 +86,7 @@ TEST(BackendRegistryTest, CreateNullBackend) {
 }
 
 // Test creating an McapBackend through the registry
-TEST(BackendRegistryTest, CreateMcapBackend) {
+TEST_F(BackendRegistryTest, CreateMcapBackend) {
   auto backend = BackendRegistry::create("mcap");
   ASSERT_NE(backend, nullptr);
 
@@ -68,7 +96,7 @@ TEST(BackendRegistryTest, CreateMcapBackend) {
 }
 
 // Test registry with different backend configurations
-TEST(BackendRegistryTest, MultipleBackendsWithDifferentConfigs) {
+TEST_F(BackendRegistryTest, MultipleBackendsWithDifferentConfigs) {
   // Create first null backend
   auto backend1 = BackendRegistry::create("null");
   ASSERT_NE(backend1, nullptr);
@@ -89,7 +117,7 @@ TEST(BackendRegistryTest, MultipleBackendsWithDifferentConfigs) {
 }
 
 // Test that base Backend::Config works with proper downcasting
-TEST(BackendRegistryTest, ConfigDowncasting) {
+TEST_F(BackendRegistryTest, ConfigDowncasting) {
   auto backend = BackendRegistry::create("null");
   ASSERT_NE(backend, nullptr);
 
@@ -98,7 +126,7 @@ TEST(BackendRegistryTest, ConfigDowncasting) {
 }
 
 // Test polymorphic behavior through registry
-TEST(BackendRegistryTest, PolymorphicBackendUsage) {
+TEST_F(BackendRegistryTest, PolymorphicBackendUsage) {
   // Create through registry, use through base class interface
   std::shared_ptr<Backend> backend = BackendRegistry::create("null");
 
@@ -116,7 +144,7 @@ TEST(BackendRegistryTest, PolymorphicBackendUsage) {
 }
 
 // Demo test showing typical usage pattern
-TEST(BackendRegistryTest, TypicalUsageDemo) {
+TEST_F(BackendRegistryTest, TypicalUsageDemo) {
   // Simulate selecting backend type at runtime (e.g., from config file)
   std::string backend_type = "null";
 
