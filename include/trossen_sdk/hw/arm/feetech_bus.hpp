@@ -2,12 +2,11 @@
 #define TROSSEN_SDK__HW__ARM__FEETECH_BUS_HPP
 
 #include <string>
-#include <map>
+#include <vector>
 #include <memory>
 #include <mutex>
-#include <ftservo/ftservo.h>
+#include <SCServo.h>
 
-// Forward declaration of Feetech servo driver class from ftservo library
 class SMS_STS;
 
 /**
@@ -42,12 +41,12 @@ public:
      * @brief Construct a new FeetechBus instance.
      *
      * Initializes the servo bus with the specified serial port and motor configuration.
-     * Motors are identified by name and configured with their ID and range parameters.
+     * Motors are stored in the order provided and all subsequent operations maintain this order.
      *
      * @param port Serial port device path (e.g., "/dev/ttyUSB0").
-     * @param motors Map of motor names to Motor configuration structs.
+     * @param motors Vector of Motor configuration structs in desired order.
      */
-    FeetechBus(const std::string &port, const std::map<std::string, Motor> &motors);
+    FeetechBus(const std::string &port, const std::vector<Motor> &motors);
 
     /**
      * @brief Destructor.
@@ -78,34 +77,34 @@ public:
      *
      * @return true if the bus is currently connected, false otherwise.
      */
-    bool isConnected() const;
+    bool is_connected() const;
 
     /**
      * @brief Read current positions from all motors synchronously.
      *
-     * Queries each configured motor for its current position and returns
-     * the results as a map. Position values are in servo units.
+     * Queries each configured motor for its current position in the order
+     * motors were provided during construction. Position values are in servo units.
      *
-     * @return Map of motor names to current position values in servo units.
+     * @return Vector of position values in servo units, ordered by motor configuration.
      */
-    std::map<std::string, int> syncReadPosition();
+    std::vector<int> sync_read_position();
 
     /**
      * @brief Write target positions to motors synchronously.
      *
-     * Commands each specified motor to move to its target position.
-     * Position values should be in servo units matching the motor's range.
+     * Commands each motor to move to its target position. Positions are expected
+     * in the same order as motors were provided during construction.
      *
-     * @param goal_positions Map of motor names to target position values in servo units.
+     * @param goal_positions Vector of target position values in servo units.
      */
-    void syncWritePosition(const std::map<std::string, int> &goal_positions);
+    void sync_write_position(const std::vector<int> &goal_positions);
 
 private:
     /// @brief Serial port device path
     std::string port_;
 
-    /// @brief Map of motor names to Motor configurations
-    std::map<std::string, Motor> motors_;
+    /// @brief Vector of Motor configurations in order
+    std::vector<Motor> motors_;
 
     /// @brief Connection status flag
     bool connected_;

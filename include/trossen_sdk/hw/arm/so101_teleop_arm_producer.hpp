@@ -1,19 +1,14 @@
-/**
- * @file teleop_arm_producer.hpp
- * @brief Producer that emits teleoperation joint states from leader and follower Trossen Arms via
- * TrossenArmDriver.
- */
-
-#ifndef TROSSEN_SDK__HW__ARM__TELEOP_ARM_PRODUCER_HPP
-#define TROSSEN_SDK__HW__ARM__TELEOP_ARM_PRODUCER_HPP
+#ifndef TROSSEN_SDK__HW__ARM__SO101_TELEOP_ARM_PRODUCER_HPP
+#define TROSSEN_SDK__HW__ARM__SO101_TELEOP_ARM_PRODUCER_HPP
 
 #include <functional>
 #include <memory>
 #include <string>
 #include <vector>
 
-#include "libtrossen_arm/trossen_arm.hpp"
+#include "nlohmann/json.hpp"
 
+#include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
@@ -21,25 +16,25 @@
 namespace trossen::hw::arm {
 
 /**
- * @brief Producer that emits teleoperation joint states from leader and follower Trossen Arms via TrossenArmDriver.
+ * @brief Producer that emits teleoperation joint states from leader and follower SO-101 Arms.
  */
-class TeleopTrossenArmProducer : public ::trossen::hw::PolledProducer {
+class TeleopSO101ArmProducer : public ::trossen::hw::PolledProducer {
 public:
   /**
-   * @brief Configuration parameters for TeleopTrossenArmProducer
+   * @brief Configuration parameters for TeleopSO101ArmProducer
    */
   struct Config {
     /// @brief Logical stream identifier (e.g. "arm_left")
-    std::string stream_id{"teleop_arm"};
+    std::string stream_id{"teleop_so101_arm"};
 
     /// @brief Prefer device timestamp if available
-    bool use_device_time{true};
+    bool use_device_time{false};
   };
 
   /**
-   * @brief Metadata specific to TeleopTrossenArmProducer
+   * @brief Metadata specific to TeleopSO101ArmProducer
    */
-  struct TeleopTrossenArmProducerMetadata : public PolledProducer::ProducerMetadata {
+  struct TeleopSO101ArmProducerMetadata : public PolledProducer::ProducerMetadata {
     /// @brief Robot name
     std::string robot_name;
 
@@ -79,23 +74,24 @@ public:
   };
 
   /**
-   * @brief Construct a TeleopTrossenArmProducer
+   * @brief Construct a TeleopSO101ArmProducer
    *
-   * @param driver Shared pointer to an initialized TrossenArmDriver instance
+   * @param leader Shared pointer to an initialized SO101ArmDriver instance (leader end effector)
+   * @param follower Shared pointer to an initialized SO101ArmDriver instance (follower end effector)
    * @param cfg Configuration parameters
    */
-  TeleopTrossenArmProducer(
-    std::shared_ptr<trossen_arm::TrossenArmDriver> leader_driver,
-    std::shared_ptr<trossen_arm::TrossenArmDriver> follower_driver,
+  TeleopSO101ArmProducer(
+    std::shared_ptr<SO101ArmDriver> leader,
+    std::shared_ptr<SO101ArmDriver> follower,
     Config cfg);
 
   /**
    * @brief Destructor
    */
-  ~TeleopTrossenArmProducer() override = default;
+  ~TeleopSO101ArmProducer() override = default;
 
   /**
-   * @brief Poll the driver for the latest joint states and emit a TeleopJointStateRecord
+   * @brief Poll the leader and follower for the latest joint states and emit a TeleopJointStateRecord
    *
    * @param emit Callback to invoke for each produced record
    */
@@ -107,32 +103,23 @@ public:
    * @return const reference to ProducerMetadata
    */
   std::shared_ptr<ProducerMetadata> metadata() const override {
-    return std::make_shared<TeleopTrossenArmProducerMetadata>(metadata_);
+    return std::make_shared<TeleopSO101ArmProducerMetadata>(metadata_);
   }
 
 private:
-  /// @brief Shared pointer to the TrossenArmDriver instance leader arm
-  std::shared_ptr<trossen_arm::TrossenArmDriver> leader_driver_;
+  /// @brief Shared pointer to the SO101ArmDriver instance (leader end effector)
+  std::shared_ptr<SO101ArmDriver> leader_;
 
-  /// @brief Shared pointer to the TrossenArmDriver instance follower arm
-  std::shared_ptr<trossen_arm::TrossenArmDriver> follower_driver_;
+  /// @brief Shared pointer to the SO101ArmDriver instance (follower end effector)
+  std::shared_ptr<SO101ArmDriver> follower_;
 
   /// @brief Configuration parameters
   Config cfg_;
 
-  /// @brief Reusable joint state buffers to avoid reallocation each poll
-  std::vector<double> act_d_, obs_d_;
-
-  /// @brief Reusable robot output to avoid reallocation each poll for leader arm
-  trossen_arm::RobotOutput leader_robot_output_;
-
-  /// @brief Reusable robot output to avoid reallocation each poll for follower arm
-  trossen_arm::RobotOutput follower_robot_output_;
-
   /// @brief Metadata for producer
-  TeleopTrossenArmProducerMetadata metadata_;
+  TeleopSO101ArmProducerMetadata metadata_;
 };
 
 }  // namespace trossen::hw::arm
 
-#endif  // TROSSEN_SDK__HW__ARM__TELEOP_ARM_PRODUCER_HPP
+#endif  // TROSSEN_SDK__HW__ARM__SO101_TELEOP_ARM_PRODUCER_HPP
