@@ -3,6 +3,10 @@ add_library(demo_utils STATIC demo_utils.cpp)
 target_link_libraries(demo_utils PUBLIC trossen_sdk)
 target_include_directories(demo_utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
+# SO101 demo
+add_executable(so101_teleop so101_lerobot.cpp)
+target_link_libraries(so101_teleop demo_utils trossen_sdk)
+
 # Trossen AI Solo demo
 find_package(libtrossen_arm)
 add_executable(widowxai widowxai.cpp)
