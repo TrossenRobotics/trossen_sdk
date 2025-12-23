@@ -7,6 +7,8 @@ project(trossen_sdk
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+option(TROSSEN_ENABLE_REALSENSE "Enable Intel RealSense support" OFF)
+
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
   src/backends/trossen/trossen_backend.cpp
@@ -24,6 +26,24 @@ add_library(trossen_sdk SHARED
   src/configuration/global_config.cpp
   src/configuration/loaders/json_loader.cpp
 )
+
+if(TROSSEN_ENABLE_REALSENSE)
+  message(STATUS "Intel RealSense support enabled")
+  target_sources(trossen_sdk PRIVATE src/hw/camera/realsense_producer.cpp)
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_REALSENSE)
+
+  find_package(realsense2 QUIET)
+
+  if(NOT realsense2_FOUND)
+    message(FATAL_ERROR
+      "Intel RealSense SDK (librealsense2) not found.\n"
+      "Required version: 2.55.1\n"
+      "\n"
+      "Install it using:\n"
+      "  scripts/install_realsense.sh\n"
+    )
+  endif()
+endif()
 
 # Add architecture-specific CMAKE_PREFIX_PATH
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
@@ -126,6 +146,9 @@ target_link_libraries(
   Parquet::parquet_shared
   libtrossen_arm
 )
+if(TROSSEN_ENABLE_REALSENSE)
+  target_link_libraries(trossen_sdk PUBLIC realsense2::realsense2)
+endif()
 
 # List proto files for MCAP backend
 set(TROSSEN_PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include/trossen_sdk/io/backends/mcap/proto)
