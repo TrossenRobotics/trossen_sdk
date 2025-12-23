@@ -30,3 +30,8 @@ docker-build:
 clean:
 	rm -rf build output
 .PHONY: clean
+
+realsense:
+	mkdir -p build
+	cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON .. && make -j4
+.PHONY: realsense
