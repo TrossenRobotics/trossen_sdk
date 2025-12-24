@@ -1,0 +1,27 @@
+{
+  "session_manager": {
+    "type": "session_manager",
+    "max_duration": 86400,
+    "max_episodes": 1000,
+    "backend_type": "mcap"
+  },
+  "mcap_backend": {
+    "type": "mcap_backend",
+    "robot_name": "/robot/jetson_benchmark",
+    "chunk_size_bytes": 134217728,
+    "compression": "none",
+    "dataset_id": "jetson_benchmark",
+    "episode_index": 0
+  },
+  "lerobot_backend": {
+    "type": "lerobot_backend",
+    "robot_name": "/robot/jetson_benchmark",
+    "dataset_id": "jetson_benchmark",
+    "task_name": "jetson_performance_test",
+    "episode_index": 0,
+    "fps": 30,
+    "video_enabled": true,
+    "video_codec": "libx264",
+    "statistics_enabled": false
+  }
+}
