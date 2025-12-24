@@ -46,29 +46,6 @@ SessionManager::SessionManager(){
     std::cout << "Backend Type: (none)" << std::endl;
   }
   std::cout << "==========================================================" << std::endl;
-  // TODO(shantanuparab-tr): Move this logic to a backend utility function
-  // Validate required configuration
-  // if (cfg_->base_path.empty()) {
-  //   throw std::invalid_argument("SessionConfig::base_path cannot be empty");
-  // }
-
-  // // Create base directory if it doesn't exist
-  // if (!std::filesystem::exists(cfg_->base_path)) {
-  //   // TODO(lukeschmitt-tr): Handle potential errors
-  //   std::filesystem::create_directories(cfg_->base_path);
-  // }
-
-  // // Auto-generate dataset_id if not provided
-  // if (cfg_->dataset_id.empty()) {
-  //   // TODO(lukeschmitt-tr): Generate UUID (for now, use timestamp-based ID)
-  //   auto now = std::chrono::system_clock::now();
-  //   auto time_t_now = std::chrono::system_clock::to_time_t(now);
-  //   std::ostringstream oss;
-  //   // Format: dataset_YYYYMMDD_HHMMSS in local time
-  //   oss << "dataset_" << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S");
-  //   cfg_->dataset_id = oss.str();
-  //   std::cout << "Auto-generated dataset_id: " << cfg_->dataset_id << std::endl;
-  // }
 }
 
 SessionManager::~SessionManager() {
