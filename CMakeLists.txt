@@ -17,6 +17,9 @@ add_library(trossen_sdk SHARED
   src/backends/null/null_backend.cpp
   src/configuration/global_config.cpp
   src/configuration/loaders/json_loader.cpp
+  src/hw/hardware_registry.cpp
+  src/hw/active_hardware_registry.cpp
+  src/hw/arm/trossen_arm_component.cpp
   src/hw/arm/arm_producer.cpp
   src/hw/arm/teleop_arm_producer.cpp
   src/hw/arm/mock_joint_producer.cpp
@@ -24,6 +27,7 @@ add_library(trossen_sdk SHARED
   src/hw/arm/so101_arm_driver.cpp
   src/hw/arm/feetech_bus.cpp
   src/hw/arm/so101_teleop_arm_producer.cpp
+  src/hw/camera/opencv_camera_component.cpp
   src/hw/camera/opencv_producer.cpp
   src/hw/camera/mock_producer.cpp
   src/hw/camera/mock_synced_producer.cpp

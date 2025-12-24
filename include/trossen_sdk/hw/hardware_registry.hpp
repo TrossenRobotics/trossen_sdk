@@ -13,6 +13,7 @@
 #include <string>
 #include <vector>
 
+#include "trossen_sdk/hw/active_hardware_registry.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
 
 namespace trossen::hw {
@@ -47,6 +48,7 @@ public:
    * @param type Hardware type string
    * @param identifier Unique identifier for this hardware instance
    * @param config JSON configuration for the hardware
+   * @param mark_active If true, register the created hardware in ActiveHardwareRegistry
    *
    * @return Shared pointer to created hardware instance
    *
@@ -56,7 +58,8 @@ public:
   static std::shared_ptr<HardwareComponent> create(
     const std::string& type,
     const std::string& identifier,
-    const nlohmann::json& config);
+    const nlohmann::json& config,
+    bool mark_active = true);
 
   /**
    * @brief Check if a hardware type is registered
