@@ -79,7 +79,7 @@ struct BenchmarkConfig {
   double tolerance_percent;
 
   // Hardware configuration (only used when g_use_hardware = true)
-  std::vector<std::string> arm_ports;      // Serial ports for arms, e.g., "/dev/ttyUSB0"
+  std::vector<std::string> arm_ips;        // IP addresses for arms, e.g., "192.168.1.2"
   std::vector<int> camera_indices;         // Camera device indices, e.g., 0, 1, 2, 3
 };
 
@@ -252,26 +252,78 @@ BenchmarkResult run_benchmark(const BenchmarkConfig& cfg) {
     std::vector<std::shared_ptr<trossen::hw::PolledProducer>> all_producers;
 
     // Create arm producers
+    // Storage for arm drivers (to maintain ownership during benchmark)
+    std::vector<std::unique_ptr<trossen_arm::TrossenArmDriver>> arm_drivers;
+
     if (cfg.num_arms > 0 && cfg.arm_rate_hz > 0) {
       auto arm_period = std::chrono::milliseconds(1000 / cfg.arm_rate_hz);
 
       if (g_use_hardware) {
-        // TODO(hardware-integration): Use real arm hardware
-        // TrossenArmProducer requires libtrossen_arm::TrossenArmDriver initialization
-        // For now, fall back to mock producers when hardware mode is enabled
-        std::cout << "\\n⚠ WARNING: Hardware arm support not yet implemented.\\n";
-        std::cout << "           Using mock arm producers instead.\\n\\n";
+        // Use real arm hardware with TrossenArmDriver
+        bool all_arms_configured = true;
 
-        // Use mock arm producers as fallback
-        for (uint32_t i = 0; i < cfg.num_arms; ++i) {
-          TeleopMockJointStateProducer::Config arm_cfg;
-          arm_cfg.num_joints = 6;
-          arm_cfg.id = "arm_" + std::to_string(i);
-
-          auto producer = std::make_shared<TeleopMockJointStateProducer>(arm_cfg);
-          all_producers.push_back(producer);
-          mgr.add_producer(producer, arm_period);
+        // Check if we have enough IP addresses configured
+        if (cfg.num_arms > cfg.arm_ips.size()) {
+          result.status = "FAIL";
+          result.failure_reason = "Not enough arm IPs configured";
+          std::cout << "✗ FAIL (missing arm IPs)\n";
+          return result;
         }
+
+        // Initialize and configure each arm driver
+        for (uint32_t i = 0; i < cfg.num_arms; ++i) {
+          try {
+            auto driver = std::make_unique<trossen_arm::TrossenArmDriver>();
+            
+            // Configure the arm (using WIDOWX AI model with follower end effector)
+            driver->configure(
+              trossen_arm::Model::wxai_v0,
+              trossen_arm::StandardEndEffector::wxai_v0_follower,
+              cfg.arm_ips[i],
+              true);  // verbose = true for debugging
+
+            // Adjust gripper joint limits for tolerance
+            auto joint_limits = driver->get_joint_limits();
+            joint_limits[driver->get_num_joints() - 1].position_tolerance = 0.01;
+            driver->set_joint_limits(joint_limits);
+
+            // Set to position mode and move to staged position
+            driver->set_all_modes(trossen_arm::Mode::position);
+            const std::vector<double> STAGED_POSITIONS = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
+            driver->set_all_positions(STAGED_POSITIONS, 2.0f, false);
+
+            // Create producer for this arm
+            TrossenArmProducer::Config arm_cfg;
+            arm_cfg.stream_id = "arm_" + std::to_string(i);
+            arm_cfg.use_device_time = false;
+
+            // Wrap driver in shared_ptr (non-owning wrapper)
+            auto driver_shared = std::shared_ptr<trossen_arm::TrossenArmDriver>(
+              driver.get(), [](trossen_arm::TrossenArmDriver*){});
+
+            auto producer = std::make_shared<TrossenArmProducer>(driver_shared, arm_cfg);
+            all_producers.push_back(producer);
+            mgr.add_producer(producer, arm_period);
+
+            // Store driver for lifetime management
+            arm_drivers.push_back(std::move(driver));
+
+          } catch (const std::exception& e) {
+            std::cout << "✗ FAIL (arm " << i << " init failed: " << e.what() << ")\n";
+            result.status = "FAIL";
+            result.failure_reason = "Arm " + std::to_string(i) + " init failed: " + e.what();
+            all_arms_configured = false;
+            break;
+          }
+        }
+
+        if (!all_arms_configured) {
+          return result;
+        }
+
+        // Wait for arms to reach staged positions
+        std::this_thread::sleep_for(std::chrono::milliseconds(2100));
+
       } else {
         // Use mock arm producers
         for (uint32_t i = 0; i < cfg.num_arms; ++i) {
@@ -551,9 +603,10 @@ int main(int argc, char** argv) {
       std::cout << "\n";
       std::cout << "Hardware Configuration:\n";
       std::cout << "  When using --hardware, ensure:\n";
-      std::cout << "  - 4x arms are connected on serial ports\n";
+      std::cout << "  - 4x WidowX AI arms are on network (default IPs: 192.168.1.10-13)\n";
       std::cout << "  - 4x cameras are connected (device indices 0-3)\n";
       std::cout << "  - You have proper permissions for devices\n";
+      std::cout << "  - Modify arm_ips in main() to match your arm IP addresses\n";
       std::cout << "\n";
       return 0;
     }
@@ -585,11 +638,11 @@ int main(int argc, char** argv) {
   print_header();
 
   // Hardware configuration (modify these based on your actual hardware setup)
-  std::vector<std::string> arm_ports = {
-      "/dev/ttyUSB0",
-      "/dev/ttyUSB1",
-      "/dev/ttyUSB2",
-      "/dev/ttyUSB3"
+  std::vector<std::string> arm_ips = {
+      "192.168.1.10",
+      "192.168.1.11",
+      "192.168.1.12",
+      "192.168.1.13"
   };
   std::vector<int> camera_indices = {0, 1, 2, 3};
 
@@ -733,7 +786,7 @@ int main(int argc, char** argv) {
 
   // Add hardware configuration to all tests
   for (auto& cfg : configs) {
-    cfg.arm_ports = arm_ports;
+    cfg.arm_ips = arm_ips;
     cfg.camera_indices = camera_indices;
   }
 
