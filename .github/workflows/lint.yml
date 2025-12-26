@@ -11,7 +11,7 @@ env:
   SKIP: no-commit-to-branch
 
 jobs:
-  ruff:
+  lint:
     runs-on: ubuntu-latest
     steps:
 
