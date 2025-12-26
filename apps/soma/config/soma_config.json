@@ -1,0 +1,16 @@
+{
+  "session_manager": {
+    "type": "session_manager",
+    "max_episodes": 10,
+    "max_duration": 10.0,
+    "backend_type": "mcap"
+  },
+  "mcap_backend": {
+    "type": "mcap_backend",
+    "robot_name": "/robot/joint_states",
+    "chunk_size_bytes": 4194304,
+    "compression": "zstd",
+    "dataset_id": "soma_dataset",
+    "episode_index": 0
+  }
+}
