@@ -93,6 +93,27 @@ void OpenCvCameraComponent::configure(const nlohmann::json& config) {
   std::cout << "Camera " << get_identifier() << " configured: "
             << width_ << "x" << height_ << " @ " << fps_
             << " FPS, FOURCC=" << fourcc_chars << std::endl;
+
+  // Parse optional warmup_frames parameter
+  if (config.contains("warmup_frames")) {
+    warmup_frames_ = config.at("warmup_frames").get<int>();
+  }
+
+  // Perform warmup: discard initial frames to allow camera to stabilize
+  if (warmup_frames_ > 0) {
+    std::cout << "Warming up camera " << get_identifier() << ": discarding "
+              << warmup_frames_ << " frames..." << std::endl;
+    cv::Mat warmup_frame;
+    int discarded = 0;
+    for (int i = 0; i < warmup_frames_; ++i) {
+      if (capture_->read(warmup_frame)) {
+        ++discarded;
+      } else {
+        std::cerr << "Warning: Failed to read warmup frame " << i << std::endl;
+      }
+    }
+    std::cout << "Warmup complete: discarded " << discarded << " frames" << std::endl;
+  }
 }
 
 nlohmann::json OpenCvCameraComponent::get_info() const {

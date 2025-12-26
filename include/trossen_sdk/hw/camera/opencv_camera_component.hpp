@@ -41,7 +41,8 @@ public:
    *   "width": 640,
    *   "height": 480,
    *   "fps": 30,
-   *   "backend": "v4l2"  // optional, defaults to auto
+   *   "backend": "v4l2",      // optional, defaults to auto
+   *   "warmup_frames": 10     // optional, number of frames to discard after opening
    * }
    *
    * @param config JSON configuration object
@@ -100,6 +101,9 @@ private:
 
   /// @brief OpenCV backend API (e.g., CAP_V4L2, CAP_ANY)
   int backend_ = cv::CAP_ANY;
+
+  /// @brief Number of warmup frames to discard after opening
+  int warmup_frames_ = 0;
 };
 
 }  // namespace trossen::hw::camera
