@@ -8,6 +8,7 @@
 #include <string>
 
 #include "trossen_sdk/hw/camera/opencv_camera_component.hpp"
+#include "trossen_sdk/hw/hardware_registry.hpp"
 
 namespace trossen::hw::camera {
 
@@ -119,5 +120,7 @@ nlohmann::json OpenCvCameraComponent::get_info() const {
 bool OpenCvCameraComponent::is_opened() const {
   return capture_ && capture_->isOpened();
 }
+
+REGISTER_HARDWARE(OpenCvCameraComponent, "opencv_camera")
 
 }  // namespace trossen::hw::camera

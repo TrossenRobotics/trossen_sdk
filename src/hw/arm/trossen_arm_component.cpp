@@ -4,6 +4,7 @@
  */
 
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
+#include "trossen_sdk/hw/hardware_registry.hpp"
 #include <stdexcept>
 #include <string>
 
@@ -67,5 +68,7 @@ nlohmann::json TrossenArmComponent::get_info() const {
 
   return info;
 }
+
+REGISTER_HARDWARE(TrossenArmComponent, "trossen_arm")
 
 }  // namespace trossen::hw::arm
