@@ -24,7 +24,8 @@ void HardwareRegistry::register_hardware(const std::string& type, FactoryFunc fa
 std::shared_ptr<HardwareComponent> HardwareRegistry::create(
   const std::string& type,
   const std::string& identifier,
-  const nlohmann::json& config)
+  const nlohmann::json& config,
+  bool mark_active)
 {
   auto& registry = get_registry();
   auto it = registry.find(type);
@@ -42,6 +43,11 @@ std::shared_ptr<HardwareComponent> HardwareRegistry::create(
     throw std::runtime_error(
       "Failed to configure hardware '" + identifier + "' of type '" + type + "': " +
       e.what());
+  }
+
+  // Optionally register in active hardware registry
+  if (mark_active) {
+    ActiveHardwareRegistry::register_active(identifier, hardware);
   }
 
   return hardware;
