@@ -51,8 +51,8 @@ public:
     /// @brief Prefer device timestamp if available
     bool use_device_time{true};
 
-    /// @brief Seconds to warm up (discard frames) after device open before emitting
-    double warmup_seconds{0.0};
+    /// @brief Number of warmup frames to discard after device open before emitting
+    int warmup_frames{30};
 
     /// @brief Preferred FOURCC pixel formats (in order). Default: MJPG, YUYV
     std::vector<int32_t> preferred_fourcc = {
@@ -130,13 +130,6 @@ public:
    * @brief Destructor
    */
   ~OpenCvCameraProducer() override;
-
-  /**
-   * @brief Perform a blocking warmup (open device if needed, discard frames for warmup_seconds)
-   *
-   * @return true on success
-   */
-  bool warmup();
 
   /**
    * @brief Poll the producer for new data and emit records via the callback

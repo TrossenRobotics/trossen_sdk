@@ -99,29 +99,22 @@ bool OpenCvCameraProducer::open_if_needed() {
               << cfg_.fps << " but device reports " << eff_fps << std::endl;
   }
   opened_ = true;
-  return true;
-}
 
-bool OpenCvCameraProducer::warmup() {
-  // TODO(lukeschmitt-tr): check that received frames are valid and match requested configuration
-  if (!open_if_needed()) {
-    return false;
-  }
-  if (cfg_.warmup_seconds <= 0.0) {
-    return true;
-  }
-  auto warmup_end =
-    std::chrono::steady_clock::now() + std::chrono::duration<double>(cfg_.warmup_seconds);
-  cv::Mat frame;
-  while (std::chrono::steady_clock::now() < warmup_end) {
-    if (!cap_.read(frame)) {
-      ++stats_.dropped;
-      continue;
+  // Perform warmup: discard initial frames to allow camera to stabilize
+  if (cfg_.warmup_frames > 0) {
+    std::cout << "Warming up camera (device " << cfg_.device_index
+              << "): discarding " << cfg_.warmup_frames << " frames..." << std::endl;
+    cv::Mat warmup_frame;
+    for (int i = 0; i < cfg_.warmup_frames; ++i) {
+      if (cap_.read(warmup_frame)) {
+        ++stats_.warmup_discarded;
+      } else {
+        std::cerr << "Warning: Failed to read warmup frame " << i << std::endl;
+      }
     }
-    ++stats_.warmup_discarded;
-    // Sleep a bit to avoid tight busy loop
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    std::cout << "Warmup complete: discarded " << stats_.warmup_discarded << " frames" << std::endl;
   }
+
   return true;
 }
 
