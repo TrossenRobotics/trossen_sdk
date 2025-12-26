@@ -5,13 +5,18 @@ build:
 	cd build && cmake .. && make -j$(NPROC)
 .PHONY: build
 
+build/all:
+	mkdir -p build
+	cd build && cmake .. -DBUILD_APPS=ON && make -j$(NPROC) all
+.PHONY: build/all
+
 install: build
 	cd build && make install
 .PHONY: install
 
-run-example: build
-	./build/examples/widowxai
-.PHONY: run-example
+run: build/all
+	./build/apps/soma/soma
+.PHONY: run
 
 test:
 	mkdir -p build
