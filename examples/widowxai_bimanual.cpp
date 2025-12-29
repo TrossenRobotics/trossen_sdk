@@ -379,7 +379,6 @@ int main(int argc, char** argv) {
       cam_cfg.height = cfg.camera_height;
       cam_cfg.fps = cfg.camera_fps;
       cam_cfg.use_device_time = false;
-      cam_cfg.warmup_frames = 30;
 
       auto cam_prod = std::make_shared<trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
       camera_producers.push_back(cam_prod);

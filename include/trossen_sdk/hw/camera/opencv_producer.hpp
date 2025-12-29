@@ -51,9 +51,6 @@ public:
     /// @brief Prefer device timestamp if available
     bool use_device_time{true};
 
-    /// @brief Number of warmup frames to discard after device open before emitting
-    int warmup_frames{30};
-
     /// @brief Preferred FOURCC pixel formats (in order). Default: MJPG, YUYV
     std::vector<int32_t> preferred_fourcc = {
       cv::VideoWriter::fourcc('M', 'J', 'P', 'G'),

@@ -219,7 +219,6 @@ int SomaApp::run() {
     cam_cfg.height = config_.camera_height;
     cam_cfg.fps = config_.camera_fps;
     cam_cfg.use_device_time = false;
-    cam_cfg.warmup_frames = 30;
 
     auto cam_prod = std::make_shared<trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
     mgr.add_producer(cam_prod, camera_period);

@@ -100,21 +100,6 @@ bool OpenCvCameraProducer::open_if_needed() {
   }
   opened_ = true;
 
-  // Perform warmup: discard initial frames to allow camera to stabilize
-  if (cfg_.warmup_frames > 0) {
-    std::cout << "Warming up camera (device " << cfg_.device_index
-              << "): discarding " << cfg_.warmup_frames << " frames..." << std::endl;
-    cv::Mat warmup_frame;
-    for (int i = 0; i < cfg_.warmup_frames; ++i) {
-      if (cap_.read(warmup_frame)) {
-        ++stats_.warmup_discarded;
-      } else {
-        std::cerr << "Warning: Failed to read warmup frame " << i << std::endl;
-      }
-    }
-    std::cout << "Warmup complete: discarded " << stats_.warmup_discarded << " frames" << std::endl;
-  }
-
   return true;
 }
 

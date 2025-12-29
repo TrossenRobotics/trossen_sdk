@@ -283,7 +283,6 @@ int main(int argc, char** argv) {
     cam_cfg.height = cfg.camera_height;
     cam_cfg.fps = cfg.camera_fps;
     cam_cfg.use_device_time = false;
-    cam_cfg.warmup_frames = 30;
     camera_producer = std::make_shared<trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
     std::cout << "  ✓ OpenCV camera producer (" << cfg.camera_fps << " Hz, "
               << cfg.camera_width << "x" << cfg.camera_height << ")\n";
