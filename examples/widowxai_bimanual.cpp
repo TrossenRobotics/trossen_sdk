@@ -379,18 +379,8 @@ int main(int argc, char** argv) {
       cam_cfg.height = cfg.camera_height;
       cam_cfg.fps = cfg.camera_fps;
       cam_cfg.use_device_time = false;
-      cam_cfg.warmup_seconds = 2.0;
 
       auto cam_prod = std::make_shared<trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
-
-      // Warmup camera before registering
-      std::cout << "    Warming up camera " << i
-                << " (/dev/video" << cfg.camera_indices[i] << ")...\n";
-      if (!cam_prod->warmup()) {
-        std::cerr << "Failed to warmup camera " << i << "\n";
-        return 1;
-      }
-
       camera_producers.push_back(cam_prod);
       mgr.add_producer(cam_prod, camera_period);
       std::cout << "  ✓ Camera " << i << " producer (" << cfg.camera_fps << " Hz, "
