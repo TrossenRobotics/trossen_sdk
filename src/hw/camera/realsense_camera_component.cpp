@@ -3,7 +3,7 @@
  * @brief Implementation of RealsenseCameraComponent
  */
 
- #include <iostream>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 

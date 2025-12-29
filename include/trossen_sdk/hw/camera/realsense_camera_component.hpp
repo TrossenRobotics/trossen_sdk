@@ -90,7 +90,7 @@ private:
   rs2::pipeline_profile profile;
 
   /// @brief Camera device index
-  std::string serial_number = "012345678";
+  std::string serial_number = "unspecified";
 
   /// @brief Configured width
   int width_ = 640;
