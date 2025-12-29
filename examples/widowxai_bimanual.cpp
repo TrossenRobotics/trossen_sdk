@@ -34,12 +34,17 @@
 #include <vector>
 
 #include "libtrossen_arm/trossen_arm.hpp"
-#include "trossen_sdk/runtime/session_manager.hpp"
+#include "nlohmann/json.hpp"
+#include "trossen_sdk/hw/active_hardware_registry.hpp"
 #include "trossen_sdk/hw/arm/arm_producer.hpp"
-#include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
-#include "trossen_sdk/hw/camera/opencv_producer.hpp"
+#include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
+#include "trossen_sdk/hw/camera/opencv_producer.hpp"
+#include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/runtime/producer_registry.hpp"
+#include "trossen_sdk/runtime/session_manager.hpp"
 
 #include "./demo_utils.hpp"
 
@@ -176,10 +181,14 @@ int main(int argc, char** argv) {
   // Create root directory
   std::filesystem::create_directories(cfg.root);
 
-  std::unique_ptr<trossen_arm::TrossenArmDriver> leader_left_driver;
-  std::unique_ptr<trossen_arm::TrossenArmDriver> leader_right_driver;
-  std::unique_ptr<trossen_arm::TrossenArmDriver> follower_left_driver;
-  std::unique_ptr<trossen_arm::TrossenArmDriver> follower_right_driver;
+  // ──────────────────────────────────────────────────────────
+  // Initialize hardware (if not using mock)
+  // ──────────────────────────────────────────────────────────
+
+  std::shared_ptr<trossen_arm::TrossenArmDriver> leader_left_driver;
+  std::shared_ptr<trossen_arm::TrossenArmDriver> leader_right_driver;
+  std::shared_ptr<trossen_arm::TrossenArmDriver> follower_left_driver;
+  std::shared_ptr<trossen_arm::TrossenArmDriver> follower_right_driver;
 
   std::vector<double> leader_left_starting_pos;
   std::vector<double> leader_right_starting_pos;
@@ -191,88 +200,39 @@ int main(int argc, char** argv) {
   if (!cfg.use_mock) {
     std::cout << "Initializing hardware...\n";
 
-    // Initialize all 4 arms
-    leader_left_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
-    leader_right_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
-    follower_left_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
-    follower_right_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
+    // Create leader left via registry
+    nlohmann::json leader_left_hw_cfg = {
+      {"ip_address", cfg.leader_left_ip},
+      {"model", "wxai_v0"},
+      {"end_effector", "wxai_v0_leader"}
+    };
+    auto leader_left_component = trossen::hw::HardwareRegistry::create(
+      "trossen_arm", "leader_left", leader_left_hw_cfg, true);
+    auto leader_left_comp_typed = std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(
+      leader_left_component);
+    leader_left_driver = leader_left_comp_typed->get_hardware();
+    std::cout << "  ✓ Leader Left configured (" << cfg.leader_left_ip << ")\n";
 
-    // Configure Leader Left
-    try {
-      leader_left_driver->configure(
-        trossen_arm::Model::wxai_v0,
-        trossen_arm::StandardEndEffector::wxai_v0_leader,
-        cfg.leader_left_ip,
-        true);
-      std::cout << "  ✓ Leader Left configured (" << cfg.leader_left_ip << ")\n";
-    } catch (const std::exception& e) {
-      std::cerr << "Failed to configure Leader Left: " << e.what() << "\n";
-      return 1;
-    }
+    // Create leader right via registry
+    nlohmann::json leader_right_hw_cfg = {
+      {"ip_address", cfg.leader_right_ip},
+      {"model", "wxai_v0"},
+      {"end_effector", "wxai_v0_leader"}
+    };
+    auto leader_right_component = trossen::hw::HardwareRegistry::create(
+      "trossen_arm", "leader_right", leader_right_hw_cfg, true);
+    auto leader_right_comp_typed =
+      std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(leader_right_component);
+    leader_right_driver = leader_right_comp_typed->get_hardware();
+    std::cout << "  ✓ Leader Right configured (" << cfg.leader_right_ip << ")\n";
 
-    // Configure Leader Right
-    try {
-      leader_right_driver->configure(
-        trossen_arm::Model::wxai_v0,
-        trossen_arm::StandardEndEffector::wxai_v0_leader,
-        cfg.leader_right_ip,
-        true);
-      std::cout << "  ✓ Leader Right configured (" << cfg.leader_right_ip << ")\n";
-    } catch (const std::exception& e) {
-      std::cerr << "Failed to configure Leader Right: " << e.what() << "\n";
-      return 1;
-    }
-
-    // Configure Follower Left
-    try {
-      follower_left_driver->configure(
-        trossen_arm::Model::wxai_v0,
-        trossen_arm::StandardEndEffector::wxai_v0_follower,
-        cfg.follower_left_ip,
-        true);
-      std::cout << "  ✓ Follower Left configured (" << cfg.follower_left_ip << ")\n";
-    } catch (const std::exception& e) {
-      std::cerr << "Failed to configure Follower Left: " << e.what() << "\n";
-      return 1;
-    }
-
-    // Configure Follower Right
-    try {
-      follower_right_driver->configure(
-        trossen_arm::Model::wxai_v0,
-        trossen_arm::StandardEndEffector::wxai_v0_follower,
-        cfg.follower_right_ip,
-        true);
-      std::cout << "  ✓ Follower Right configured (" << cfg.follower_right_ip << ")\n";
-    } catch (const std::exception& e) {
-      std::cerr << "Failed to configure Follower Right: " << e.what() << "\n";
-      return 1;
-    }
-
-    // Adjust follower joint limits for gripper tolerance
-    auto left_limits = follower_left_driver->get_joint_limits();
-    left_limits[follower_left_driver->get_num_joints() - 1].position_tolerance = 0.01;
-    follower_left_driver->set_joint_limits(left_limits);
-
-    auto right_limits = follower_right_driver->get_joint_limits();
-    right_limits[follower_right_driver->get_num_joints() - 1].position_tolerance = 0.01;
-    follower_right_driver->set_joint_limits(right_limits);
-
-    // Set all arms to position mode and stage them
+    // Stage leader arms to starting positions
     leader_left_driver->set_all_modes(trossen_arm::Mode::position);
     leader_right_driver->set_all_modes(trossen_arm::Mode::position);
-    follower_left_driver->set_all_modes(trossen_arm::Mode::position);
-    follower_right_driver->set_all_modes(trossen_arm::Mode::position);
-
-    // Stage all arms to their starting positions
     leader_left_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
     leader_right_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
-    follower_left_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
-    follower_right_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
-
     std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-
-    std::cout << "  ✓ All arms staged to starting positions\n";
+    std::cout << "  ✓ Leader arms staged to starting positions\n";
   }
 
   trossen::runtime::SessionManager mgr;
@@ -283,6 +243,10 @@ int main(int argc, char** argv) {
     std::cout << "  (Resuming from existing episodes in directory)\n";
   }
   std::cout << "\n";
+
+  // ──────────────────────────────────────────────────────────
+  // Create and register producers
+  // ──────────────────────────────────────────────────────────
 
   std::cout << "Creating producers...\n";
 
@@ -316,36 +280,72 @@ int main(int argc, char** argv) {
     mgr.add_producer(right_prod, joint_period);
     std::cout << "  ✓ Mock follower right producer (" << cfg.joint_rate_hz << " Hz)\n";
   } else {
-    // Real follower left producer
-    trossen::hw::arm::TrossenArmProducer::Config left_cfg;
-    left_cfg.stream_id = "follower_left/joint_states";
-    left_cfg.use_device_time = false;
+    // Create follower left via registry
+    nlohmann::json left_hw_cfg = {
+      {"ip_address", cfg.follower_left_ip},
+      {"model", "wxai_v0"},
+      {"end_effector", "wxai_v0_follower"}
+    };
+    auto left_component = trossen::hw::HardwareRegistry::create(
+      "trossen_arm", "follower_left", left_hw_cfg, true);
+    auto left_comp_typed = std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(
+      left_component);
+    follower_left_driver = left_comp_typed->get_hardware();
+    std::cout << "  ✓ Follower Left configured (" << cfg.follower_left_ip << ")\n";
 
-    auto follower_left_shared = std::shared_ptr<trossen_arm::TrossenArmDriver>(
-      follower_left_driver.get(), [](trossen_arm::TrossenArmDriver*){});
+    // Create follower right via registry
+    nlohmann::json right_hw_cfg = {
+      {"ip_address", cfg.follower_right_ip},
+      {"model", "wxai_v0"},
+      {"end_effector", "wxai_v0_follower"}
+    };
+    auto right_component = trossen::hw::HardwareRegistry::create(
+      "trossen_arm", "follower_right", right_hw_cfg, true);
+    auto right_comp_typed = std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(
+      right_component);
+    follower_right_driver = right_comp_typed->get_hardware();
+    std::cout << "  ✓ Follower Right configured (" << cfg.follower_right_ip << ")\n";
 
-    auto left_prod = std::make_shared<trossen::hw::arm::TrossenArmProducer>(
-      follower_left_shared, left_cfg);
+    // Adjust follower joint limits for gripper tolerance and stage
+    auto left_limits = follower_left_driver->get_joint_limits();
+    left_limits[follower_left_driver->get_num_joints() - 1].position_tolerance = 0.01;
+    follower_left_driver->set_joint_limits(left_limits);
+    follower_left_driver->set_all_modes(trossen_arm::Mode::position);
+    follower_left_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+
+    auto right_limits = follower_right_driver->get_joint_limits();
+    right_limits[follower_right_driver->get_num_joints() - 1].position_tolerance = 0.01;
+    follower_right_driver->set_joint_limits(right_limits);
+    follower_right_driver->set_all_modes(trossen_arm::Mode::position);
+    follower_right_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+
+    // Wait for both followers to reach position
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+    std::cout << "  ✓ Followers staged to starting positions\n";
+
+    // Create producers via registry
+    nlohmann::json left_prod_cfg = {
+      {"stream_id", "follower_left/joint_states"},
+      {"use_device_time", false}
+    };
+    auto left_prod = trossen::runtime::ProducerRegistry::create(
+      "trossen_arm", left_component, left_prod_cfg);
     joint_producers.push_back(left_prod);
     mgr.add_producer(left_prod, joint_period);
     std::cout << "  ✓ Follower Left producer (" << cfg.joint_rate_hz << " Hz)\n";
 
-    // Real follower right producer
-    trossen::hw::arm::TrossenArmProducer::Config right_cfg;
-    right_cfg.stream_id = "follower_right/joint_states";
-    right_cfg.use_device_time = false;
-
-    auto follower_right_shared = std::shared_ptr<trossen_arm::TrossenArmDriver>(
-      follower_right_driver.get(), [](trossen_arm::TrossenArmDriver*){});
-
-    auto right_prod = std::make_shared<trossen::hw::arm::TrossenArmProducer>(
-      follower_right_shared, right_cfg);
+    nlohmann::json right_prod_cfg = {
+      {"stream_id", "follower_right/joint_states"},
+      {"use_device_time", false}
+    };
+    auto right_prod = trossen::runtime::ProducerRegistry::create(
+      "trossen_arm", right_component, right_prod_cfg);
     joint_producers.push_back(right_prod);
     mgr.add_producer(right_prod, joint_period);
     std::cout << "  ✓ Follower Right producer (" << cfg.joint_rate_hz << " Hz)\n";
   }
 
-  // Camera producers (4 cameras)
+  // Camera producers
   std::vector<std::shared_ptr<trossen::hw::PolledProducer>> camera_producers;
   auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
 

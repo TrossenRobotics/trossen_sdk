@@ -13,9 +13,10 @@
 
 #include "libtrossen_arm/trossen_arm.hpp"
 
-#include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
+#include "trossen_sdk/hw/hardware_component.hpp"
+#include "trossen_sdk/hw/producer_base.hpp"
 
 namespace trossen::hw::arm {
 
@@ -62,12 +63,15 @@ public:
   };
 
   /**
-   * @brief Construct a TrossenArmProducer
+   * @brief Construct a TrossenArmProducer from hardware component
    *
-   * @param driver Shared pointer to an initialized TrossenArmDriver instance
-   * @param cfg Configuration parameters
+   * @param hardware Hardware component (must be TrossenArmComponent)
+   * @param config JSON configuration with fields: stream_id, use_device_time
+   * @throws std::invalid_argument if hardware is null or wrong type
    */
-  TrossenArmProducer(std::shared_ptr<trossen_arm::TrossenArmDriver> driver, Config cfg);
+  TrossenArmProducer(
+    std::shared_ptr<hw::HardwareComponent> hardware,
+    const nlohmann::json& config);
 
   /**
    * @brief Destructor
