@@ -11,14 +11,56 @@
 #include <utility>
 #include <vector>
 
+#include "trossen_sdk/hw/camera/opencv_camera_component.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
+#include "trossen_sdk/runtime/producer_registry.hpp"
 
 namespace trossen::hw::camera {
 
-OpenCvCameraProducer::OpenCvCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
+OpenCvCameraProducer::OpenCvCameraProducer(
+  std::shared_ptr<HardwareComponent> hardware,
+  const nlohmann::json& config)
+{
+  // Validate hardware type
+  auto camera_component = std::dynamic_pointer_cast<OpenCvCameraComponent>(hardware);
+  if (!camera_component) {
+    throw std::runtime_error(
+      "OpenCvCameraProducer requires OpenCvCameraComponent, got: " + hardware->get_type());
+  }
+
+  // Extract the underlying VideoCapture from the component
+  cap_ = camera_component->get_hardware();
+  if (!cap_) {
+    throw std::runtime_error("OpenCvCameraComponent has null VideoCapture");
+  }
+
+  // Parse JSON config into internal Config struct
+  cfg_.device_index = camera_component->get_device_index();
+  cfg_.stream_id = config.value("stream_id", "camera" + std::to_string(cfg_.device_index));
+  cfg_.encoding = config.value("encoding", "bgr8");
+  cfg_.width = config.value("width", 0);
+  cfg_.height = config.value("height", 0);
+  cfg_.fps = config.value("fps", 0);
+  cfg_.use_device_time = config.value("use_device_time", true);
+  cfg_.enforce_requested_fps = config.value("enforce_requested_fps", true);
+
+  // Parse preferred_fourcc if provided
+  if (config.contains("preferred_fourcc") && config["preferred_fourcc"].is_array()) {
+    cfg_.preferred_fourcc.clear();
+    for (const auto& fourcc_str : config["preferred_fourcc"]) {
+      if (fourcc_str.is_string()) {
+        std::string s = fourcc_str.get<std::string>();
+        if (s.length() == 4) {
+          int32_t code = cv::VideoWriter::fourcc(s[0], s[1], s[2], s[3]);
+          cfg_.preferred_fourcc.push_back(code);
+        }
+      }
+    }
+  }
+
   // Populate metadata
   metadata_.type = "opencv_camera";
-  metadata_.id = "opencv_camera_" + std::to_string(cfg_.device_index);
+  metadata_.id = cfg_.stream_id;
   metadata_.name = cfg_.stream_id;
   metadata_.description = "Produces camera frames from a physical camera device using OpenCV";
   metadata_.width = cfg_.width;
@@ -30,88 +72,16 @@ OpenCvCameraProducer::OpenCvCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   metadata_.has_audio = false;
 }
 
-OpenCvCameraProducer::~OpenCvCameraProducer() {
-  if (opened_) {
-    cap_.release();
-  }
-}
-
-bool OpenCvCameraProducer::open_if_needed() {
-  if (opened_) return true;
-  if (!cap_.open(cfg_.device_index, cv::CAP_V4L2)) {
-    std::cerr << "Failed to open camera index " << cfg_.device_index << std::endl;
-    return false;
-  }
-  // Attempt pixel format (FOURCC) negotiation if a preference list was provided.
-  // We do this immediately after opening and before setting resolution/FPS so driver
-  // can reconfigure cleanly.
-  if (!cfg_.preferred_fourcc.empty()) {
-    for (size_t i = 0; i < cfg_.preferred_fourcc.size(); ++i) {
-      int32_t code = cfg_.preferred_fourcc[i];
-      // Break out early if already in desired format (avoid redundant set calls)
-      double current_fourcc = cap_.get(cv::CAP_PROP_FOURCC);
-      if (static_cast<int32_t>(current_fourcc) == code) {
-        break;  // already negotiated
-      }
-      if (!cap_.set(cv::CAP_PROP_FOURCC, static_cast<double>(code))) {
-        char c0 = static_cast<char>(code & 0xFF);
-        char c1 = static_cast<char>((code >> 8) & 0xFF);
-        char c2 = static_cast<char>((code >> 16) & 0xFF);
-        char c3 = static_cast<char>((code >> 24) & 0xFF);
-        std::cerr << "Failed to set FOURCC=" << c0 << c1 << c2 << c3
-                  << " (index " << i << ")" << std::endl;
-        continue;
-      }
-      // Re-read to verify which format we actually got.
-      double after = cap_.get(cv::CAP_PROP_FOURCC);
-      if (static_cast<int32_t>(after) == code) {
-        char c0 = static_cast<char>(code & 0xFF);
-        char c1 = static_cast<char>((code >> 8) & 0xFF);
-        char c2 = static_cast<char>((code >> 16) & 0xFF);
-        char c3 = static_cast<char>((code >> 24) & 0xFF);
-        std::cout << "Negotiated FOURCC=" << c0 << c1 << c2 << c3
-                  << " (preference " << i << ")" << std::endl;
-        break;  // stop after first successful preference
-      }
-    }
-  }
-  if (cfg_.width > 0 && !cap_.set(cv::CAP_PROP_FRAME_WIDTH, cfg_.width)) {
-    std::cerr << "Failed to set width=" << cfg_.width << std::endl; return false; }
-  if (cfg_.height > 0 && !cap_.set(cv::CAP_PROP_FRAME_HEIGHT, cfg_.height)) {
-    std::cerr << "Failed to set height=" << cfg_.height << std::endl; return false; }
-  if (cfg_.fps > 0 && !cap_.set(cv::CAP_PROP_FPS, cfg_.fps)) {
-    std::cerr << "Failed to set fps=" << cfg_.fps << std::endl; return false; }
-
-  double eff_w = cap_.get(cv::CAP_PROP_FRAME_WIDTH);
-  double eff_h = cap_.get(cv::CAP_PROP_FRAME_HEIGHT);
-  double eff_fps = cap_.get(cv::CAP_PROP_FPS);
-  double fourcc = cap_.get(cv::CAP_PROP_FOURCC);
-  char fourcc_chars[] = {
-    static_cast<char>(static_cast<int>(fourcc) & 0xFF),
-    static_cast<char>((static_cast<int>(fourcc) >> 8) & 0xFF),
-    static_cast<char>((static_cast<int>(fourcc) >> 16) & 0xFF),
-    static_cast<char>((static_cast<int>(fourcc) >> 24) & 0xFF),
-    '\0'};
-  std::cout << "Camera opened: " << eff_w << "x" << eff_h << " @ " << eff_fps
-            << " FPS FOURCC=" << fourcc_chars << std::endl;
-  if (cfg_.fps > 0 && static_cast<int>(eff_fps) != cfg_.fps) {
-    std::cerr << "Warning: requested fps="
-              << cfg_.fps << " but device reports " << eff_fps << std::endl;
-  }
-  opened_ = true;
-
-  return true;
-}
-
 void OpenCvCameraProducer::poll(
   const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
 {
   // TODO(lukeschmitt-tr): silently fails if cannot open
-  if (!open_if_needed()) {
+  if (!cap_ || !cap_->isOpened()) {
     return;
   }
+
   auto img = std::make_shared<data::ImageRecord>();
-  if (!cap_.read(img->image)) {
+  if (!cap_->read(img->image)) {
     ++stats_.dropped;
     return;
   }
@@ -169,5 +139,8 @@ void OpenCvCameraProducer::poll(
     next_health_report_frame_ += interval;
   }
 }
+
+// Register with ProducerRegistry
+REGISTER_PRODUCER(OpenCvCameraProducer, "opencv_camera")
 
 }  // namespace trossen::hw::camera

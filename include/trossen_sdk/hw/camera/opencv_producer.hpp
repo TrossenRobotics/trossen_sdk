@@ -14,9 +14,11 @@
 
 #include "opencv2/core.hpp"
 #include "opencv2/videoio.hpp"
+#include "nlohmann/json.hpp"
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
+#include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
 namespace trossen::hw::camera {
@@ -117,16 +119,13 @@ public:
   };
 
   /**
-   * @brief Construct an OpenCvCameraProducer
+   * @brief Construct a OpenCvCameraComponent from hardware component
    *
-   * @param cfg Configuration parameters
+   * @param hardware Hardware component (must be OpenCvCameraComponent)
+   * @param config JSON configuration
+   * @throws std::invalid_argument if hardware is null or wrong type
    */
-  explicit OpenCvCameraProducer(Config cfg);
-
-  /**
-   * @brief Destructor
-   */
-  ~OpenCvCameraProducer() override;
+  OpenCvCameraProducer(std::shared_ptr<HardwareComponent> hardware, const nlohmann::json& config);
 
   /**
    * @brief Poll the producer for new data and emit records via the callback
@@ -145,18 +144,11 @@ public:
   }
 
 protected:
-  /**
-   * @brief Open the device if not already opened
-   *
-   * @return true on successful open or already opened, false on failure
-   */
-  bool open_if_needed();
-
   /// @brief Configuration parameters
   Config cfg_;
 
   /// @brief Capture handle
-  cv::VideoCapture cap_;
+  std::shared_ptr<cv::VideoCapture> cap_;
 
 private:
   /// @brief Producer metadata
