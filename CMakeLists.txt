@@ -39,6 +39,7 @@ if(TROSSEN_ENABLE_REALSENSE)
   target_sources(trossen_sdk PRIVATE
     src/hw/camera/realsense_producer.cpp
     src/hw/camera/realsense_depth_producer.cpp
+    src/hw/camera/realsense_camera_component.cpp
   )
   target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_REALSENSE)
 
