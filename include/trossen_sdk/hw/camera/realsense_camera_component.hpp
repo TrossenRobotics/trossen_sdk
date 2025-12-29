@@ -89,7 +89,7 @@ private:
   // Used for getting actual stream parameters after starting the pipeline
   rs2::pipeline_profile profile;
 
-  /// @brief Camera device index
+  /// @brief Camera serial number
   std::string serial_number = "unspecified";
 
   /// @brief Configured width
