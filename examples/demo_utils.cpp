@@ -151,36 +151,31 @@ bool interruptible_sleep(std::chrono::duration<double> duration) {
   return true;
 }
 
-uint64_t monitor_episode(
+runtime::SessionManager::Stats monitor_episode(
   runtime::SessionManager& mgr,
   std::chrono::duration<double> update_interval,
   std::chrono::duration<double> sleep_interval)
 {
   auto last_update = std::chrono::steady_clock::now();
-  uint64_t last_record_count = 0;
+  runtime::SessionManager::Stats last_stats;
+  runtime::SessionManager::Stats saved_stats;
 
   while (mgr.is_episode_active() && !g_stop_requested) {
     auto now = std::chrono::steady_clock::now();
     if (now - last_update >= update_interval) {
       auto stats = mgr.stats();
       print_stats_line(stats);
-      last_record_count = stats.records_written_current;
+      last_stats = stats;
       last_update = now;
+      if (last_stats.records_written_current != 0 &&
+          last_stats.records_written_current !=
+            saved_stats.records_written_current) {
+        saved_stats = last_stats;
+      }
     }
     std::this_thread::sleep_for(sleep_interval);
   }
-
-  // Get final count
-  if (mgr.is_episode_active()) {
-    last_record_count = mgr.stats().records_written_current;
-  } else {
-    auto final_stats = mgr.stats();
-    if (final_stats.records_written_current > 0) {
-      last_record_count = final_stats.records_written_current;
-    }
-  }
-
-  return last_record_count;
+  return saved_stats;
 }
 
 std::string generate_episode_path(
