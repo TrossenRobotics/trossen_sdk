@@ -12,11 +12,13 @@
 #include <string>
 #include <vector>
 
+#include "nlohmann/json.hpp"
 #include "opencv2/imgproc.hpp"
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
 #include "trossen_sdk/hw/camera/realsense_frame_cache.hpp"
+#include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
 namespace trossen::hw::camera {
@@ -116,22 +118,12 @@ public:
   /**
    * @brief Construct an RealsenseCameraProducer
    *
-   * @param camera Shared pointer to an rs2::pipeline object
-   * @param cfg Configuration parameters
+   * @param hardware Hardware component (must be RealsenseCameraComponent)
+   * @param config JSON configuration
    */
-  explicit RealsenseCameraProducer(std::shared_ptr<RealsenseFrameCache> cache, Config cfg);
-
-  /**
-   * @brief Destructor
-   */
-  ~RealsenseCameraProducer() override;
-
-  /**
-   * @brief Perform a blocking warmup (open device if needed, discard frames for warmup_seconds)
-   *
-   * @return true on success
-   */
-  bool warmup();
+  RealsenseCameraProducer(
+    std::shared_ptr<HardwareComponent> hardware,
+    const nlohmann::json& config);
 
   /**
    * @brief Poll the producer for new data and emit records via the callback
@@ -150,13 +142,6 @@ public:
   }
 
 protected:
-  /**
-   * @brief Open the device if not already opened
-   *
-   * @return true on successful open or already opened, false on failure
-   */
-  bool open_if_needed();
-
   /// @brief Configuration parameters
   Config cfg_;
 
