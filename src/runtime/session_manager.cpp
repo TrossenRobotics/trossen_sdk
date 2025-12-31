@@ -361,4 +361,25 @@ void SessionManager::monitor_duration() {
   }
 }
 
+void SessionManager::print_episode_header() {
+  std::cout << "\n╔════════════════════════════════════════════════════════════╗\n";
+  std::cout << "║  Episode " << next_episode_index_ << " | Target Duration: ";
+  if (cfg_->max_duration.has_value()) {
+    std::cout << cfg_->max_duration->count() << "s";
+  } else {
+    std::cout << "unlimited";
+  }
+
+  // Calculate padding to align right edge
+  const std::size_t episode_len = std::to_string(next_episode_index_).length();
+  const std::size_t duration_len = cfg_->max_duration.has_value()
+    ? std::to_string(cfg_->max_duration->count()).length()
+    : static_cast<std::size_t>(9);
+  const std::size_t total_len = episode_len + duration_len;
+  const std::size_t padding_len = (41 > total_len) ? (41 - total_len) : 0;
+  std::string padding(padding_len, ' ');
+  std::cout << padding << "║\n";
+  std::cout << "╚════════════════════════════════════════════════════════════╝\n";
+}
+
 }  // namespace trossen::runtime

@@ -314,7 +314,7 @@ int main(int argc, char** argv) {
     }
 
     // Display episode header
-    trossen::demo::print_episode_header(mgr.stats().current_episode_index, cfg.duration_s);
+    mgr.print_episode_header();
 
     // Sync follower to leader's current position before recording
     if (!cfg.use_mock) {

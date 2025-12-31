@@ -28,17 +28,6 @@ void install_signal_handler() {
   std::signal(SIGINT, signal_handler);
 }
 
-void print_episode_header(uint32_t index, int duration_s) {
-  std::cout << "\n╔════════════════════════════════════════════════════════════╗\n";
-  std::cout << "║  Episode " << index << " | Target Duration: " << duration_s << "s";
-
-  // Calculate padding to align right edge
-  std::string padding(
-    41 - std::to_string(index).length() - std::to_string(duration_s).length(), ' ');
-  std::cout << padding << "║\n";
-  std::cout << "╚════════════════════════════════════════════════════════════╝\n";
-}
-
 void print_stats_line(const runtime::SessionManager::Stats& stats) {
   std::cout << "\r[Episode " << stats.current_episode_index << "] "
             << "Elapsed: " << std::fixed << std::setprecision(1) << stats.elapsed.count() << "s"
