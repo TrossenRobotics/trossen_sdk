@@ -183,6 +183,30 @@ public:
    */
   void print_episode_header();
 
+  /**
+  * @brief Print a single line of episode statistics (updates in place)
+  *
+  * Uses carriage return to overwrite the previous line for smooth updates.
+  *
+  * @param stats Session manager statistics
+  */
+  void print_stats_line(const Stats& stats);
+
+  /**
+  * @brief Pausable sleep that respects stop requests
+  *
+  * Sleeps for the specified duration but checks g_stop_requested
+  * periodically and returns early if stop is requested.
+  * Also, keeps a track of stats while monitoring the episode.
+  *
+  * @param update_interval How often to print stats
+  * @param sleep_interval How long to sleep between checks
+  * @return true if completed normally, false if interrupted by stop request
+  */
+  Stats monitor_episode(
+    std::chrono::duration<double> update_interval = std::chrono::milliseconds(500),
+    std::chrono::duration<double> sleep_interval = std::chrono::milliseconds(100));
+
 private:
   /// @brief Configuration
   std::shared_ptr<trossen::configuration::SessionManagerConfig> cfg_;

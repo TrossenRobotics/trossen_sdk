@@ -58,15 +58,6 @@ void install_signal_handler();
 void print_episode_header(uint32_t index, int duration_s);
 
 /**
- * @brief Print a single line of episode statistics (updates in place)
- *
- * Uses carriage return to overwrite the previous line for smooth updates.
- *
- * @param stats Session manager statistics
- */
-void print_stats_line(const runtime::SessionManager::Stats& stats);
-
-/**
  * @brief Print episode completion summary
  *
  * @param file_path Path to the recorded episode
@@ -134,21 +125,6 @@ bool perform_sanity_check(
  * @return true if completed normally, false if interrupted by stop request
  */
 bool interruptible_sleep(std::chrono::duration<double> duration);
-
-/**
- * @brief Pausable sleep that respects stop requests
- *
- * Sleeps for the specified duration but checks g_stop_requested
- * periodically and returns early if stop is requested.
- *
- * @param update_interval How often to print stats
- * @param sleep_interval How long to sleep between checks
- * @return true if completed normally, false if interrupted by stop request
- */
-runtime::SessionManager::Stats monitor_episode(
-  runtime::SessionManager& mgr,
-  std::chrono::duration<double> update_interval = std::chrono::milliseconds(500),
-  std::chrono::duration<double> sleep_interval = std::chrono::milliseconds(100));
 
 /**
  * @brief Generate episode file path

@@ -467,7 +467,7 @@ int main(int argc, char** argv) {
     }
 
     // Monitor loop: display stats while episode is active
-    trossen::runtime::SessionManager::Stats last_stats = trossen::demo::monitor_episode(mgr);
+    trossen::runtime::SessionManager::Stats last_stats = mgr.monitor_episode();
 
     // Stop episode and wait for teleop thread
     if (mgr.is_episode_active()) {
