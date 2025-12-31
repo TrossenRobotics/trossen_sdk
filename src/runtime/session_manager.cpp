@@ -89,6 +89,8 @@ bool SessionManager::start_episode() {
     std::cerr << "Episode already active. Call stop_episode() first." << std::endl;
     return false;
   }
+  // Start a timer to measure pre-processing duration
+  auto prep_start_time = std::chrono::steady_clock::now();
 
   ProducerMetadataList producer_metadata;
 
@@ -182,13 +184,19 @@ bool SessionManager::start_episode() {
     monitoring_active_ = true;
     monitor_thread_ = std::thread([this]() { monitor_duration(); });
   }
-
+  // Measure and report pre-processing duration
+  auto prep_end_time = std::chrono::steady_clock::now();
+  preprocessing_duration_s_ =
+    std::chrono::duration<double>(prep_end_time - prep_start_time).count();
   std::cout << "Episode " << next_episode_index_ << " started." << std::endl;
 
   return true;
 }
 
 void SessionManager::stop_episode() {
+  // Start timer to measure shutdown duration
+  auto shutdown_start_time = std::chrono::steady_clock::now();
+
   // First, signal monitoring thread to stop (if any)
   monitoring_active_ = false;
 
@@ -232,6 +240,10 @@ void SessionManager::stop_episode() {
   ++total_episodes_completed_;
   ++next_episode_index_;
 
+  // Measure and report shutdown duration
+  auto shutdown_end_time = std::chrono::steady_clock::now();
+  auto shutdown_duration = shutdown_end_time - shutdown_start_time;
+  postprocess_duration_s_ = std::chrono::duration<double>(shutdown_duration).count();
   std::cout << "\nEpisode stopped. Total completed: " << total_episodes_completed_
             << ", Next index: " << next_episode_index_ << std::endl;
 
@@ -306,6 +318,12 @@ SessionManager::Stats SessionManager::stats() const {
     } else {
       s.records_written_current = 0;
     }
+    if (preprocessing_duration_s_ > 0.0) {
+      s.preprocessing_duration_s = preprocessing_duration_s_;
+    }
+    if (postprocess_duration_s_ > 0.0) {
+      s.postprocess_duration_s = postprocess_duration_s_;
+    }
   } else {
     s.elapsed = std::chrono::duration<double>(0);
     s.remaining = std::nullopt;
@@ -313,6 +331,7 @@ SessionManager::Stats SessionManager::stats() const {
   }
 
   s.total_episodes_completed = total_episodes_completed_;
+
 
   return s;
 }
