@@ -108,6 +108,13 @@ public:
   bool is_episode_active() const;
 
   /**
+    * @brief Check if the final stats are emitted
+    *
+    * @return true if final stats have been emitted, false otherwise
+    */
+  bool are_final_stats_emitted() const;
+
+  /**
    * @brief Wait for auto-stop signal (if max_duration is set)
    *
    * @param timeout Maximum time to wait (default: wait indefinitely)
@@ -156,6 +163,9 @@ public:
     /// @brief Episodes finished this session
     uint64_t total_episodes_completed;
 
+    /// @brief Duration of episode recording
+    std::optional<double> recording_duration_s;
+
     /// @brief Duration of episode preprocessing (seconds)
     std::optional<double> preprocessing_duration_s;
 
@@ -198,6 +208,12 @@ private:
   /// @brief Duration of last shutdown phase (seconds)
   double postprocess_duration_s_{0.0};
 
+  /// @brief Final elapsed time when episode stopped
+  std::chrono::duration<double> final_elapsed_{0};
+
+  /// @brief Final record count when episode stopped
+  uint64_t final_records_written_{0};
+
   /// @brief Monitoring thread for duration-based auto-stop
   std::thread monitor_thread_;
 
@@ -206,6 +222,9 @@ private:
 
   /// @brief Flag indicating that auto-stop was triggered by monitor thread
   std::atomic<bool> auto_stop_triggered_{false};
+
+  /// @brief Flag indicating that episode final statistics were emitted
+  mutable std::atomic<bool> stats_emitted_{false};
 
   /// @brief Condition variable for auto-stop signaling
   std::condition_variable auto_stop_cv_;

@@ -89,6 +89,9 @@ bool SessionManager::start_episode() {
     std::cerr << "Episode already active. Call stop_episode() first." << std::endl;
     return false;
   }
+  // Make sure stats_emitted_ is reset for new episode
+  stats_emitted_.store(false);
+
   // Start a timer to measure pre-processing duration
   auto prep_start_time = std::chrono::steady_clock::now();
 
@@ -222,6 +225,12 @@ void SessionManager::stop_episode() {
     scheduler_.reset();
   }
 
+  // Get the final record count before stopping sink
+  if (current_sink_) {
+    final_records_written_ = current_sink_->processed_count() - episode_start_record_count_;
+  } else {
+    final_records_written_ = 0;
+  }
   // Stop sink - drain queue and write all pending records
   if (current_sink_) {
     current_sink_->stop();
@@ -263,6 +272,10 @@ bool SessionManager::is_episode_active() const {
   return episode_active_;
 }
 
+bool SessionManager::are_final_stats_emitted() const {
+  return stats_emitted_.load();
+}
+
 bool SessionManager::wait_for_auto_stop(std::chrono::milliseconds timeout) {
   std::unique_lock<std::mutex> lock(auto_stop_mutex_);
 
@@ -296,7 +309,7 @@ SessionManager::Stats SessionManager::stats() const {
   s.current_episode_index = next_episode_index_;
   s.episode_active = episode_active_;
 
-  if (episode_active_) {
+  if (episode_active_ || !stats_emitted_.load()) {
     auto now = std::chrono::steady_clock::now();
     s.elapsed = std::chrono::duration<double>(now - episode_start_time_);
 
@@ -316,13 +329,18 @@ SessionManager::Stats SessionManager::stats() const {
       uint64_t current_count = current_sink_->processed_count();
       s.records_written_current = current_count - episode_start_record_count_;
     } else {
-      s.records_written_current = 0;
+      s.records_written_current = final_records_written_;
     }
     if (preprocessing_duration_s_ > 0.0) {
       s.preprocessing_duration_s = preprocessing_duration_s_;
     }
     if (postprocess_duration_s_ > 0.0) {
       s.postprocess_duration_s = postprocess_duration_s_;
+    }
+    if (!stats_emitted_.load() && !episode_active_) {
+      s.recording_duration_s = s.elapsed.count() -
+        (preprocessing_duration_s_ + postprocess_duration_s_);
+      stats_emitted_.store(true);
     }
   } else {
     s.elapsed = std::chrono::duration<double>(0);
@@ -367,11 +385,6 @@ void SessionManager::monitor_duration() {
 
       // Stop monitoring first
       monitoring_active_ = false;
-
-      // Detach this thread so it can clean itself up
-      if (monitor_thread_.joinable()) {
-        monitor_thread_.detach();
-      }
 
       // Call stop_episode() directly from this thread
       stop_episode();
