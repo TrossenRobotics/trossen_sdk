@@ -456,6 +456,7 @@ bool setup_arm_recording(
     return true;
 }
 
+// Set up full system recording (cameras + arms + teleop if applicable)
 bool setup_full_system_recording(
     std::shared_ptr<ActiveSession> active_session,
     const std::string& system_id,
