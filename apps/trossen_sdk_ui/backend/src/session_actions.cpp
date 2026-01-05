@@ -66,7 +66,8 @@ bool validate_hardware_for_action(
             });
         if (prod_it != configs.producers.end()) {
             system_producers.push_back(*prod_it);
-            std::cout << "      ✓ FOUND: stream_id='" << prod_it->stream_id << "' type='" << prod_it->type << "'" << std::endl;
+            std::cout << "      ✓ FOUND: stream_id='" << prod_it->stream_id
+                      << "' type='" << prod_it->type << "'" << std::endl;
         } else {
             std::cout << "      ✗ NOT FOUND in configs.producers" << std::endl;
         }
@@ -87,7 +88,8 @@ bool validate_hardware_for_action(
 
                     // Check that both leader and follower are configured
                     if (prod.leader_name.empty() || prod.follower_name.empty()) {
-                        error = "SO101 teleop producer must have both leader_name and follower_name configured";
+                        error = "SO101 teleop producer must have both "
+                                "leader_name and follower_name configured";
                         return false;
                     }
 
@@ -108,7 +110,8 @@ bool validate_hardware_for_action(
             }
 
             if (so101_count != 1) {
-                error = "SO101 teleoperation requires exactly 1 SO101 teleop producer. Found: " + std::to_string(so101_count);
+                error = "SO101 teleoperation requires exactly 1 SO101 "
+                        "teleop producer. Found: " + std::to_string(so101_count);
                 return false;
             }
 
@@ -130,7 +133,8 @@ bool validate_hardware_for_action(
 
                     // Check that both leader and follower are configured
                     if (prod.leader_name.empty() || prod.follower_name.empty()) {
-                        error = "WidowX teleop producer must have both leader_name and follower_name configured";
+                        error = "WidowX teleop producer must have both "
+                                "leader_name and follower_name configured";
                         return false;
                     }
 
@@ -151,7 +155,8 @@ bool validate_hardware_for_action(
             }
 
             if (widowx_count != 1) {
-                error = "WidowX teleoperation requires exactly 1 WidowX teleop producer. Found: " + std::to_string(widowx_count);
+                error = "WidowX teleoperation requires exactly 1 WidowX "
+                        "teleop producer. Found: " + std::to_string(widowx_count);
                 return false;
             }
 
@@ -252,8 +257,12 @@ bool setup_so101_teleop(
                 return false;
             }
 
-            auto leader_so101 = std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(leader_comp);
-            auto follower_so101 = std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(follower_comp);
+            auto leader_so101 =
+                std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(
+                    leader_comp);
+            auto follower_so101 =
+                std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(
+                    follower_comp);
 
             if (!leader_so101 || !follower_so101) {
                 error = "Failed to cast to SO101ArmComponent";
@@ -277,7 +286,7 @@ bool setup_so101_teleop(
                 leader_driver, follower_driver, teleop_cfg);
 
             // Register with 30Hz polling rate
-            auto teleop_period = std::chrono::milliseconds(33); // ~30Hz
+            auto teleop_period = std::chrono::milliseconds(33);  // ~30Hz
             active_session->manager->add_producer(teleop_producer, teleop_period);
 
             // Store drivers to keep them alive
@@ -293,7 +302,8 @@ bool setup_so101_teleop(
             auto test_leader = leader_driver->get_joint_positions(false);
             auto test_follower = follower_driver->get_joint_positions(false);
 
-            auto leader_positions = leader_driver->get_joint_positions(false);  // false = raw values
+            // false = raw values
+            auto leader_positions = leader_driver->get_joint_positions(false);
             std::cout << "  Leader RAW positions: [";
             for (size_t i = 0; i < leader_positions.size(); ++i) {
                 std::cout << leader_positions[i];
@@ -306,9 +316,11 @@ bool setup_so101_teleop(
             std::cout << "  ✓ Synced follower to leader position" << std::endl;
 
             // Start teleoperation thread (100Hz control loop)
-            // This runs continuously across all episodes until manually stopped
+            // This runs continuously across all episodes until manually
+            // stopped
             active_session->teleop_active = true;
-            active_session->teleop_thread = std::thread([leader_driver, follower_driver, active_session]() {
+            active_session->teleop_thread = std::thread(
+                [leader_driver, follower_driver, active_session]() {
                 std::cout << "  ✓ Teleoperation loop started" << std::endl;
 
                 int loop_count = 0;
@@ -339,7 +351,7 @@ bool setup_widowx_teleop(
     std::cout << "Setting up WidowX teleoperation session..." << std::endl;
     error = "WidowX teleoperation not yet implemented";
     return false;
-    // TODO: Implement WidowX teleop setup
+    // TODO(trossen): Implement WidowX teleop setup
 }
 
 bool setup_camera_recording(
@@ -375,12 +387,15 @@ bool setup_camera_recording(
         const auto& prod = *prod_it;
 
         if (prod.type == "opencv_camera") {
-            // TODO: Implement OpenCV camera producer instantiation
+            // TODO(trossen): Implement OpenCV camera producer instantiation
             // Need to get camera component from ActiveHardwareRegistry
             // Create OpenCvCameraProducer and register with SessionManager
-            std::cout << "OpenCV camera producer not yet implemented: " << prod.stream_id << std::endl;
-        } else if (prod.type == "realsense_color" || prod.type == "realsense_depth") {
-            std::cout << "RealSense camera producer not yet implemented: " << prod.stream_id << std::endl;
+            std::cout << "OpenCV camera producer not yet implemented: "
+                      << prod.stream_id << std::endl;
+        } else if (prod.type == "realsense_color" ||
+                   prod.type == "realsense_depth") {
+            std::cout << "RealSense camera producer not yet implemented: "
+                      << prod.stream_id << std::endl;
         }
     }
 
@@ -426,8 +441,9 @@ bool setup_arm_recording(
         const auto& prod = *prod_it;
 
         if (prod.type == "teleop_so101_arm" || prod.type == "teleop_widowx_arm") {
-            std::cout << "Arm recording not yet implemented: " << prod.stream_id << std::endl;
-            // TODO: only using arm producers without cams
+            std::cout << "Arm recording not yet implemented: " << prod.stream_id
+                      << std::endl;
+            // TODO(trossen): only using arm producers without cams
         }
     }
 
@@ -481,8 +497,12 @@ bool setup_full_system_recording(
                 continue;
             }
 
-            auto leader_so101 = std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(leader_comp);
-            auto follower_so101 = std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(follower_comp);
+            auto leader_so101 =
+                std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(
+                    leader_comp);
+            auto follower_so101 =
+                std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(
+                    follower_comp);
 
             if (!leader_so101 || !follower_so101) {
                 std::cout << "Failed to cast SO101 components: " << prod.stream_id << std::endl;
@@ -505,22 +525,28 @@ bool setup_full_system_recording(
             auto teleop_producer = std::make_shared<trossen::hw::arm::TeleopSO101ArmProducer>(
                 leader_driver, follower_driver, teleop_cfg);
 
-            auto teleop_period = std::chrono::milliseconds(33); // ~30Hz
+            auto teleop_period = std::chrono::milliseconds(33);  // ~30Hz
             active_session->manager->add_producer(teleop_producer, teleop_period);
 
             active_session->arm_drivers.push_back(leader_driver);
             active_session->arm_drivers.push_back(follower_driver);
 
             producers_added++;
-            std::cout << "Registered SO101 teleop producer: " << prod.stream_id << std::endl;
+            std::cout << "Registered SO101 teleop producer: " << prod.stream_id
+                      << std::endl;
         } else if (prod.type == "teleop_widowx_arm") {
-            std::cout << "WidowX producer not yet implemented: " << prod.stream_id << std::endl;
+            std::cout << "WidowX producer not yet implemented: "
+                      << prod.stream_id << std::endl;
         } else if (prod.type == "opencv_camera") {
-            std::cout << "OpenCV camera producer not yet implemented: " << prod.stream_id << std::endl;
-        } else if (prod.type == "realsense_color" || prod.type == "realsense_depth") {
-            std::cout << "RealSense producer not yet implemented: " << prod.stream_id << std::endl;
+            std::cout << "OpenCV camera producer not yet implemented: "
+                      << prod.stream_id << std::endl;
+        } else if (prod.type == "realsense_color" ||
+                   prod.type == "realsense_depth") {
+            std::cout << "RealSense producer not yet implemented: "
+                      << prod.stream_id << std::endl;
         } else {
-            std::cout << "Unknown producer type: " << prod.type << " (" << prod.stream_id << ")" << std::endl;
+            std::cout << "Unknown producer type: " << prod.type << " ("
+                      << prod.stream_id << ")" << std::endl;
         }
     }
 
@@ -529,8 +555,9 @@ bool setup_full_system_recording(
         return false;
     }
 
-    std::cout << "Registered " << producers_added << " producers for full system recording" << std::endl;
+    std::cout << "Registered " << producers_added
+              << " producers for full system recording" << std::endl;
     return true;
 }
 
-} // namespace trossen::backend
+}  // namespace trossen::backend
