@@ -49,11 +49,17 @@ SessionManager::SessionManager(){
 }
 
 SessionManager::~SessionManager() {
-  // Ensure monitoring thread is stopped
+  // Ensure monitoring threads are stopped
   monitoring_active_ = false;
   if (monitor_thread_.joinable()) {
     monitor_thread_.join();
   }
+
+  async_monitoring_active_ = false;
+  if (async_monitor_thread_.joinable()) {
+    async_monitor_thread_.join();
+  }
+
   shutdown();
 }
 
@@ -266,6 +272,15 @@ void SessionManager::stop_episode() {
     }
   }
   auto_stop_cv_.notify_all();
+
+  // Invoke callback if set (after episode is fully stopped and stats are available)
+  // Note: We do this outside the main lock to avoid blocking episode operations
+  // The callback will call stats() which has its own locking
+  if (episode_complete_callback_) {
+    // Get final stats to pass to callback
+    Stats final_stats = stats();
+    episode_complete_callback_(final_stats);
+  }
 }
 
 bool SessionManager::is_episode_active() const {
@@ -352,6 +367,11 @@ SessionManager::Stats SessionManager::stats() const {
 
 
   return s;
+}
+
+void SessionManager::set_episode_complete_callback(EpisodeCompleteCallback callback) {
+  std::lock_guard<std::mutex> lock(episode_mutex_);
+  episode_complete_callback_ = std::move(callback);
 }
 
 std::shared_ptr<io::Backend> SessionManager::create_backend(
@@ -447,6 +467,43 @@ SessionManager::Stats SessionManager::monitor_episode(
     std::this_thread::sleep_for(sleep_interval);
   }
   return last_stats;
+}
+
+void SessionManager::start_async_monitoring(
+  std::chrono::duration<double> update_interval,
+  std::chrono::duration<double> sleep_interval)
+{
+  // Stop any existing async monitoring
+  if (async_monitoring_active_) {
+    get_async_monitor_stats();
+  }
+
+  async_monitoring_active_ = true;
+  async_monitor_thread_ = std::thread([this, update_interval, sleep_interval]() {
+    // Run monitor_episode in background thread
+    Stats final_stats = monitor_episode(update_interval, sleep_interval);
+
+    // Store final stats
+    {
+      std::lock_guard<std::mutex> lock(async_monitor_mutex_);
+      async_monitor_final_stats_ = final_stats;
+    }
+
+    async_monitoring_active_ = false;
+  });
+}
+
+SessionManager::Stats SessionManager::get_async_monitor_stats() {
+  // Stop async monitoring if active
+  async_monitoring_active_ = false;
+
+  if (async_monitor_thread_.joinable()) {
+    async_monitor_thread_.join();
+  }
+
+  // Return the final stats
+  std::lock_guard<std::mutex> lock(async_monitor_mutex_);
+  return async_monitor_final_stats_;
 }
 
 }  // namespace trossen::runtime
