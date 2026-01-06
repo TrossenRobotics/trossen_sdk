@@ -21,6 +21,7 @@ const PRODUCER_TYPES = [
   { value: 'opencv_camera', label: 'OpenCV Camera', icon: Video, requiresHardware: 'camera' },
   { value: 'realsense_color', label: 'RealSense Color', icon: Video, requiresHardware: 'camera' },
   { value: 'realsense_depth', label: 'RealSense Depth', icon: Video, requiresHardware: 'camera' },
+  { value: 'widowx_arm', label: 'WidowX Arm', icon: Cpu, requiresHardware: 'robot' },
   { value: 'teleop_widowx_arm', label: 'Teleop WidowX Arm', icon: Cpu, requiresHardware: 'robot' },
   { value: 'teleop_so101_arm', label: 'Teleop SO101 Arm', icon: Cpu, requiresHardware: 'robot' }
 ];
@@ -32,39 +33,26 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
 
   const [producerType, setProducerType] = useState('opencv_camera');
   const [producerForm, setProducerForm] = useState<any>({
-    stream_id: '',
-    // OpenCV Camera
+    // Camera-based producers
     camera_name: '',
-    device_index: 0,
-    encoding: 'bgr8',
-    width: 640,
-    height: 480,
-    fps: 30,
-    use_device_time: true,
-    enforce_requested_fps: true,
-    // RealSense
-    serial_number: '',
-    warmup_seconds: 2.0,
-    // Teleop SO101/WidowX
+    // Single arm producers
+    arm_name: '',
+    // Teleop arm producers
     leader_name: '',
-    follower_name: ''
+    follower_name: '',
+    // Optional fields
+    enforce_requested_fps: true,
+    warmup_seconds: 2.0
   });
 
   const resetForm = () => {
     setProducerForm({
-      stream_id: '',
       camera_name: '',
-      device_index: 0,
-      encoding: 'bgr8',
-      width: 640,
-      height: 480,
-      fps: 30,
-      use_device_time: true,
-      enforce_requested_fps: true,
-      serial_number: '',
-      warmup_seconds: 2.0,
+      arm_name: '',
       leader_name: '',
-      follower_name: ''
+      follower_name: '',
+      enforce_requested_fps: true,
+      warmup_seconds: 2.0
     });
     setProducerType('opencv_camera');
     setEditingId(null);
@@ -74,20 +62,18 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
   const handleCreateProducer = async () => {
     setError('');
 
-    if (!producerForm.stream_id.trim()) {
-      setError('Stream ID is required');
-      return;
-    }
-
     // Validate based on producer type
-    if (producerType === 'opencv_camera' && !producerForm.camera_name) {
-      setError('Camera selection is required');
-      return;
+    if (producerType === 'opencv_camera' ||
+        producerType === 'realsense_color' ||
+        producerType === 'realsense_depth') {
+      if (!producerForm.camera_name) {
+        setError('Camera selection is required');
+        return;
+      }
     }
 
-    if ((producerType === 'realsense_color' || producerType === 'realsense_depth') &&
-        !producerForm.serial_number.trim()) {
-      setError('RealSense serial number is required');
+    if (producerType === 'widowx_arm' && !producerForm.arm_name) {
+      setError('Arm selection is required');
       return;
     }
 
@@ -98,12 +84,34 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
     }
 
     try {
-      const producerData = {
-        id: editingId || Date.now().toString(),
-        name: producerForm.stream_id,  // Use stream_id as the name
-        type: producerType,
-        config: buildProducerConfig()
+      const producerData: any = {
+        type: producerType
       };
+
+      // Add camera-specific fields
+      if (producerType === 'opencv_camera' ||
+          producerType === 'realsense_color' ||
+          producerType === 'realsense_depth') {
+        producerData.camera_name = producerForm.camera_name;
+        if (producerType === 'opencv_camera' && producerForm.enforce_requested_fps !== undefined) {
+          producerData.enforce_requested_fps = producerForm.enforce_requested_fps;
+        }
+        if ((producerType === 'realsense_color' || producerType === 'realsense_depth') &&
+            producerForm.warmup_seconds !== undefined) {
+          producerData.warmup_seconds = producerForm.warmup_seconds;
+        }
+      }
+
+      // Add single arm fields
+      if (producerType === 'widowx_arm') {
+        producerData.arm_name = producerForm.arm_name;
+      }
+
+      // Add teleop arm-specific fields
+      if (producerType === 'teleop_widowx_arm' || producerType === 'teleop_so101_arm') {
+        producerData.leader_name = producerForm.leader_name;
+        producerData.follower_name = producerForm.follower_name;
+      }
 
       const endpoint = editingId
         ? `${BACKEND_URL}/configure/producer/${editingId}`
@@ -130,52 +138,16 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
     }
   };
 
-  const buildProducerConfig = () => {
-    const config: any = {
-      stream_id: producerForm.stream_id,
-      use_device_time: producerForm.use_device_time
-    };
-
-    if (producerType === 'opencv_camera') {
-      config.camera_name = producerForm.camera_name;
-      config.device_index = producerForm.device_index;
-      config.encoding = producerForm.encoding;
-      config.width = producerForm.width;
-      config.height = producerForm.height;
-      config.fps = producerForm.fps;
-      config.enforce_requested_fps = producerForm.enforce_requested_fps;
-    } else if (producerType === 'realsense_color' || producerType === 'realsense_depth') {
-      config.serial_number = producerForm.serial_number;
-      config.encoding = producerForm.encoding;
-      config.width = producerForm.width;
-      config.height = producerForm.height;
-      config.fps = producerForm.fps;
-      config.warmup_seconds = producerForm.warmup_seconds;
-    } else if (producerType === 'teleop_widowx_arm' || producerType === 'teleop_so101_arm') {
-      config.leader_name = producerForm.leader_name;
-      config.follower_name = producerForm.follower_name;
-    }
-
-    return config;
-  };
-
   const handleEditProducer = (producer: Producer) => {
     setEditingId(producer.id);
     setProducerType(producer.type);
 
-    const data = producer.config || producer; // Fallback to config if it exists, otherwise use producer directly
+    const data = producer.config || producer;
 
     setProducerForm({
-      stream_id: data.stream_id || producer.name || '',
       camera_name: data.camera_name || '',
-      device_index: data.device_index || 0,
-      encoding: data.encoding || 'bgr8',
-      width: data.width || 640,
-      height: data.height || 480,
-      fps: data.fps || 30,
-      use_device_time: data.use_device_time !== undefined ? data.use_device_time : true,
+      arm_name: data.arm_name || '',
       enforce_requested_fps: data.enforce_requested_fps !== undefined ? data.enforce_requested_fps : true,
-      serial_number: data.serial_number || '',
       warmup_seconds: data.warmup_seconds || 2.0,
       leader_name: data.leader_name || '',
       follower_name: data.follower_name || ''
@@ -245,7 +217,7 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
                 </div>
                 <div>
                   <p className="text-gray-900">{producer.name}</p>
-                  <p className="text-gray-600">{getProducerTypeLabel(producer.type)} | Stream: {producer.stream_id || (producer.config && producer.config.stream_id) || producer.id}</p>
+                  <p className="text-gray-600">{getProducerTypeLabel(producer.type)} | ID: {producer.id}</p>
                 </div>
               </div>
               <div className="flex items-center gap-3">
@@ -296,18 +268,6 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
                 </select>
               </div>
 
-              <div>
-                <label className="block text-gray-700 mb-2">Stream ID (Producer Name) *</label>
-                <input
-                  type="text"
-                  placeholder="e.g., camera_main, left_arm, wrist_camera"
-                  value={producerForm.stream_id}
-                  onChange={(e) => setProducerForm({ ...producerForm, stream_id: e.target.value })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-                <p className="text-sm text-gray-500 mt-1">This identifies the data stream in recordings</p>
-              </div>
-
               {/* OpenCV Camera Fields */}
               {producerType === 'opencv_camera' && (
                 <>
@@ -323,57 +283,7 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
                         <option key={cam.name} value={cam.name}>{cam.name}</option>
                       ))}
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-gray-700 mb-2">Device Index</label>
-                    <input
-                      type="number"
-                      value={producerForm.device_index}
-                      onChange={(e) => setProducerForm({ ...producerForm, device_index: parseInt(e.target.value) })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                    <p className="text-sm text-gray-500 mt-1">Camera device index (usually 0, 1, 2...)</p>
-                  </div>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-gray-700 mb-2">Width</label>
-                      <input
-                        type="number"
-                        value={producerForm.width}
-                        onChange={(e) => setProducerForm({ ...producerForm, width: parseInt(e.target.value) })}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-gray-700 mb-2">Height</label>
-                      <input
-                        type="number"
-                        value={producerForm.height}
-                        onChange={(e) => setProducerForm({ ...producerForm, height: parseInt(e.target.value) })}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-gray-700 mb-2">FPS</label>
-                      <input
-                        type="number"
-                        value={producerForm.fps}
-                        onChange={(e) => setProducerForm({ ...producerForm, fps: parseInt(e.target.value) })}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-gray-700 mb-2">Encoding</label>
-                    <select
-                      value={producerForm.encoding}
-                      onChange={(e) => setProducerForm({ ...producerForm, encoding: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    >
-                      <option value="bgr8">BGR8</option>
-                      <option value="rgb8">RGB8</option>
-                      <option value="mono8">Mono8</option>
-                    </select>
+                    <p className="text-sm text-gray-500 mt-1">Settings (device, resolution, fps) will be taken from the configured camera</p>
                   </div>
                   <div>
                     <label className="flex items-center gap-2">
@@ -394,63 +304,18 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
               {(producerType === 'realsense_color' || producerType === 'realsense_depth') && (
                 <>
                   <div>
-                    <label className="block text-gray-700 mb-2">Serial Number *</label>
-                    <input
-                      type="text"
-                      placeholder="e.g., 218622274938"
-                      value={producerForm.serial_number}
-                      onChange={(e) => setProducerForm({ ...producerForm, serial_number: e.target.value })}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                    />
-                  </div>
-                  <div className="grid grid-cols-3 gap-4">
-                    <div>
-                      <label className="block text-gray-700 mb-2">Width</label>
-                      <input
-                        type="number"
-                        value={producerForm.width}
-                        onChange={(e) => setProducerForm({ ...producerForm, width: parseInt(e.target.value) })}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-gray-700 mb-2">Height</label>
-                      <input
-                        type="number"
-                        value={producerForm.height}
-                        onChange={(e) => setProducerForm({ ...producerForm, height: parseInt(e.target.value) })}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-gray-700 mb-2">FPS</label>
-                      <input
-                        type="number"
-                        value={producerForm.fps}
-                        onChange={(e) => setProducerForm({ ...producerForm, fps: parseInt(e.target.value) })}
-                        className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-gray-700 mb-2">Encoding</label>
+                    <label className="block text-gray-700 mb-2">Camera *</label>
                     <select
-                      value={producerForm.encoding}
-                      onChange={(e) => setProducerForm({ ...producerForm, encoding: e.target.value })}
+                      value={producerForm.camera_name}
+                      onChange={(e) => setProducerForm({ ...producerForm, camera_name: e.target.value })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
-                      {producerType === 'realsense_depth' ? (
-                        <>
-                          <option value="16UC1">16UC1 (Depth)</option>
-                          <option value="mono8">Mono8</option>
-                        </>
-                      ) : (
-                        <>
-                          <option value="bgr8">BGR8</option>
-                          <option value="rgb8">RGB8</option>
-                        </>
-                      )}
+                      <option value="">Select a camera</option>
+                      {cameras.map((cam: any) => (
+                        <option key={cam.name} value={cam.name}>{cam.name}</option>
+                      ))}
                     </select>
+                    <p className="text-sm text-gray-500 mt-1">Settings (serial number, resolution, fps) will be taken from the configured camera</p>
                   </div>
                   <div>
                     <label className="block text-gray-700 mb-2">Warmup Seconds</label>
@@ -461,6 +326,26 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
                       onChange={(e) => setProducerForm({ ...producerForm, warmup_seconds: parseFloat(e.target.value) })}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     />
+                    <p className="text-sm text-gray-500 mt-1">Time to wait for camera to stabilize</p>
+                  </div>
+                </>
+              )}
+
+              {/* Single Arm Producer Fields */}
+              {producerType === 'widowx_arm' && (
+                <>
+                  <div>
+                    <label className="block text-gray-700 mb-2">Arm *</label>
+                    <select
+                      value={producerForm.arm_name}
+                      onChange={(e) => setProducerForm({ ...producerForm, arm_name: e.target.value })}
+                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    >
+                      <option value="">Select an arm</option>
+                      {robots.map((robot: any) => (
+                        <option key={robot.name} value={robot.name}>{robot.name}</option>
+                      ))}
+                    </select>
                   </div>
                 </>
               )}
@@ -496,7 +381,6 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
                   </div>
                 </>
               )}
-              {/* Use device timestamp is now automatic - always true */}
             </div>
             <div className="p-6 border-t border-gray-200 flex justify-end gap-3">
               <button

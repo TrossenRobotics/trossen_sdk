@@ -270,28 +270,220 @@ int main() {
         try {
             json request_data = json::parse(req.body);
 
-            // Read current data
-            auto configs = config_manager.get_configurations();
-            json data = configs.to_json();
+            // Read raw JSON directly to avoid re-serialization
+            std::ifstream file("data.json");
+            json data;
+            if (file.is_open()) {
+                file >> data;
+                file.close();
+            } else {
+                res.status = 500;
+                res.set_content(
+                    json{{"success", false},
+                         {"error", "Failed to read data file"}}.dump(2),
+                    "application/json");
+                return;
+            }
 
             // Ensure producers array exists
             if (!data.contains("producers")) {
                 data["producers"] = json::array();
             }
 
-            // Validate id exists
-            if (!request_data.contains("id")) {
+            // Validate type exists
+            if (!request_data.contains("type")) {
                 res.status = 400;
                 res.set_content(
                     json{{"success", false},
-                         {"error", "Producer id is required"}}.dump(2),
+                         {"error", "Producer type is required"}}.dump(2),
                     "application/json");
                 return;
             }
 
-            std::string producer_id = request_data["id"];
+            std::string producer_type = request_data["type"];
+            json producer_config;
+
+            // Handle camera-based producers
+            if (producer_type == "opencv_camera" ||
+                producer_type == "realsense_color" ||
+                producer_type == "realsense_depth") {
+                if (!request_data.contains("camera_name")) {
+                    res.status = 400;
+                    res.set_content(
+                        json{{"success", false},
+                             {"error", "camera_name is required"}}.dump(2),
+                        "application/json");
+                    return;
+                }
+
+                std::string camera_name = request_data["camera_name"];
+
+                // Find camera by name in cameras array
+                bool camera_found = false;
+                for (const auto& cam : data["cameras"]) {
+                    if (cam.contains("name") && cam["name"] == camera_name) {
+                        // Use camera's ID as producer ID
+                        producer_config["id"] = cam["id"];
+                        producer_config["type"] = producer_type;
+                        producer_config["name"] = camera_name;
+                        producer_config["camera_name"] = camera_name;
+
+                        // Copy relevant fields from camera config
+                        if (cam.contains("device_index")) {
+                            producer_config["device_index"] = cam["device_index"];
+                        }
+                        if (cam.contains("serial_number")) {
+                            producer_config["serial_number"] = cam["serial_number"];
+                        }
+                        if (cam.contains("width")) {
+                            producer_config["width"] = cam["width"];
+                        }
+                        if (cam.contains("height")) {
+                            producer_config["height"] = cam["height"];
+                        }
+                        if (cam.contains("fps")) {
+                            producer_config["fps"] = cam["fps"];
+                        }
+                        if (cam.contains("encoding")) {
+                            producer_config["encoding"] = cam["encoding"];
+                        }
+                        if (cam.contains("use_device_time")) {
+                            producer_config["use_device_time"] = cam["use_device_time"];
+                        } else {
+                            producer_config["use_device_time"] = true;
+                        }
+
+                        // Add producer-specific fields if provided
+                        if (request_data.contains("enforce_requested_fps")) {
+                            producer_config["enforce_requested_fps"] =
+                                request_data["enforce_requested_fps"];
+                        }
+                        if (request_data.contains("warmup_seconds")) {
+                            producer_config["warmup_seconds"] =
+                                request_data["warmup_seconds"];
+                        }
+
+                        camera_found = true;
+                        break;
+                    }
+                }
+
+                if (!camera_found) {
+                    res.status = 400;
+                    res.set_content(
+                        json{{"success", false},
+                             {"error", "Camera not found: " + camera_name}}.dump(2),
+                        "application/json");
+                    return;
+                }
+            } else if (producer_type == "widowx_arm") {
+                // Handle single arm producer
+                if (!request_data.contains("arm_name")) {
+                    res.status = 400;
+                    res.set_content(
+                        json{{"success", false},
+                             {"error", "arm_name is required"}}.dump(2),
+                        "application/json");
+                    return;
+                }
+
+                std::string arm_name = request_data["arm_name"];
+
+                // Find arm by name
+                bool arm_found = false;
+                std::string arm_id;
+
+                for (const auto& arm : data["arms"]) {
+                    if (arm.contains("name") && arm["name"] == arm_name) {
+                        arm_found = true;
+                        arm_id = arm["id"];
+                        break;
+                    }
+                }
+
+                if (!arm_found) {
+                    res.status = 400;
+                    res.set_content(
+                        json{{"success", false},
+                             {"error", "Arm not found: " + arm_name}}.dump(2),
+                        "application/json");
+                    return;
+                }
+
+                // Use arm's ID as producer ID
+                producer_config["id"] = arm_id;
+                producer_config["type"] = producer_type;
+                producer_config["name"] = arm_name;
+                producer_config["arm_name"] = arm_name;
+                producer_config["use_device_time"] = true;
+            } else if (producer_type == "teleop_widowx_arm" ||
+                       producer_type == "teleop_so101_arm") {
+                // Handle arm-based producers (teleop)
+                if (!request_data.contains("leader_name") ||
+                    !request_data.contains("follower_name")) {
+                    res.status = 400;
+                    res.set_content(
+                        json{{"success", false},
+                             {"error", "leader_name and follower_name are required"}}.dump(2),
+                        "application/json");
+                    return;
+                }
+
+                std::string leader_name = request_data["leader_name"];
+                std::string follower_name = request_data["follower_name"];
+
+                // Find leader and follower arms
+                bool leader_found = false;
+                bool follower_found = false;
+                std::string leader_id;
+
+                for (const auto& arm : data["arms"]) {
+                    if (arm.contains("name")) {
+                        if (arm["name"] == leader_name) {
+                            leader_found = true;
+                            leader_id = arm["id"];
+                        }
+                        if (arm["name"] == follower_name) {
+                            follower_found = true;
+                        }
+                    }
+                }
+
+                if (!leader_found) {
+                    res.status = 400;
+                    res.set_content(
+                        json{{"success", false},
+                             {"error", "Leader arm not found: " + leader_name}}.dump(2),
+                        "application/json");
+                    return;
+                }
+                if (!follower_found) {
+                    res.status = 400;
+                    res.set_content(
+                        json{{"success", false},
+                             {"error", "Follower arm not found: " + follower_name}}.dump(2),
+                        "application/json");
+                    return;
+                }
+
+                // Use leader arm's ID as producer ID
+                producer_config["id"] = leader_id;
+                producer_config["type"] = producer_type;
+                producer_config["name"] = leader_name + "_" + follower_name + "_teleop";
+                producer_config["leader_name"] = leader_name;
+                producer_config["follower_name"] = follower_name;
+                producer_config["use_device_time"] = true;
+            } else {
+                res.status = 400;
+                res.set_content(
+                    json{{"success", false},
+                         {"error", "Unknown producer type: " + producer_type}}.dump(2),
+                    "application/json");
+                return;
+            }
 
             // Check for duplicate id
+            std::string producer_id = producer_config["id"];
             for (const auto& producer : data["producers"]) {
                 if (producer.contains("id") && producer["id"] == producer_id) {
                     res.status = 400;
@@ -303,23 +495,8 @@ int main() {
                 }
             }
 
-            // Flatten structure: if config exists, merge it to top level
-            json flattened = request_data;
-            if (request_data.contains("config")) {
-                for (auto& [key, value] : request_data["config"].items()) {
-                    flattened[key] = value;
-                }
-                // Remove the nested config object
-                flattened.erase("config");
-            }
-
-            // Ensure stream_id exists at top level (fallback to id if not provided)
-            if (!flattened.contains("stream_id")) {
-                flattened["stream_id"] = producer_id;
-            }
-
-            // Add flattened producer
-            data["producers"].push_back(flattened);
+            // Add producer
+            data["producers"].push_back(producer_config);
 
             // Save back to file
             config_manager.save_raw_json(data);
@@ -327,10 +504,10 @@ int main() {
             res.set_content(
                 json{{"success", true},
                      {"message", "Producer created successfully"},
-                     {"producer", flattened}}.dump(2),
+                     {"producer", producer_config}}.dump(2),
                 "application/json");
             std::cout << "POST /configure/producer - Producer created: "
-                      << flattened.value("name", "unnamed") << " (id: "
+                      << producer_config.value("name", "unnamed") << " (id: "
                       << producer_id << ")" << std::endl;
         } catch (const std::exception& e) {
             res.status = 400;
@@ -349,8 +526,20 @@ int main() {
             std::string producer_id = req.matches[1];
             json request_data = json::parse(req.body);
 
-            auto configs = config_manager.get_configurations();
-            json data = configs.to_json();
+            // Read raw JSON directly to avoid re-serialization
+            std::ifstream file("data.json");
+            json data;
+            if (file.is_open()) {
+                file >> data;
+                file.close();
+            } else {
+                res.status = 500;
+                res.set_content(
+                    json{{"success", false},
+                         {"error", "Failed to read data file"}}.dump(2),
+                    "application/json");
+                return;
+            }
 
             if (!data.contains("producers")) {
                 res.status = 404;
@@ -360,32 +549,19 @@ int main() {
                 return;
             }
 
-            // Flatten structure: if config exists, merge it to top level
-            json flattened = request_data;
-            if (request_data.contains("config")) {
-                for (auto& [key, value] : request_data["config"].items()) {
-                    flattened[key] = value;
-                }
-                flattened.erase("config");
-            }
-
-            // Ensure stream_id exists
-            if (!flattened.contains("stream_id") && flattened.contains("id")) {
-                flattened["stream_id"] = flattened["id"];
-            }
-
-            // Find and update producer by id
-            bool found = false;
+            // Find existing producer
+            int producer_index = -1;
+            json existing_producer;
             for (size_t i = 0; i < data["producers"].size(); ++i) {
                 if (data["producers"][i].contains("id") &&
                     data["producers"][i]["id"] == producer_id) {
-                    data["producers"][i] = flattened;
-                    found = true;
+                    producer_index = i;
+                    existing_producer = data["producers"][i];
                     break;
                 }
             }
 
-            if (!found) {
+            if (producer_index == -1) {
                 res.status = 404;
                 res.set_content(
                     json{{"success", false}, {"error", "Producer not found"}}.dump(2),
@@ -393,12 +569,118 @@ int main() {
                 return;
             }
 
+            // Build updated producer config based on type
+            std::string producer_type = request_data.contains("type")
+                ? request_data["type"]
+                : existing_producer["type"];
+
+            json updated_config;
+            updated_config["id"] = producer_id;
+            updated_config["type"] = producer_type;
+            updated_config["name"] = existing_producer["name"];
+
+            // Handle camera-based producers
+            if (producer_type == "opencv_camera" ||
+                producer_type == "realsense_color" ||
+                producer_type == "realsense_depth") {
+                std::string camera_name = request_data.contains("camera_name")
+                    ? request_data["camera_name"].get<std::string>()
+                    : existing_producer.value("camera_name", "");
+
+                // Find camera by name
+                bool camera_found = false;
+                for (const auto& cam : data["cameras"]) {
+                    if (cam.contains("name") && cam["name"] == camera_name) {
+                        updated_config["camera_name"] = camera_name;
+                        updated_config["name"] = camera_name;
+
+                        // Copy camera fields
+                        if (cam.contains("device_index")) {
+                            updated_config["device_index"] = cam["device_index"];
+                        }
+                        if (cam.contains("serial_number")) {
+                            updated_config["serial_number"] = cam["serial_number"];
+                        }
+                        if (cam.contains("width")) {
+                            updated_config["width"] = cam["width"];
+                        }
+                        if (cam.contains("height")) {
+                            updated_config["height"] = cam["height"];
+                        }
+                        if (cam.contains("fps")) {
+                            updated_config["fps"] = cam["fps"];
+                        }
+                        if (cam.contains("encoding")) {
+                            updated_config["encoding"] = cam["encoding"];
+                        }
+                        if (cam.contains("use_device_time")) {
+                            updated_config["use_device_time"] = cam["use_device_time"];
+                        } else {
+                            updated_config["use_device_time"] = true;
+                        }
+
+                        // Producer-specific fields
+                        if (request_data.contains("enforce_requested_fps")) {
+                            updated_config["enforce_requested_fps"] =
+                                request_data["enforce_requested_fps"];
+                        } else if (existing_producer.contains("enforce_requested_fps")) {
+                            updated_config["enforce_requested_fps"] =
+                                existing_producer["enforce_requested_fps"];
+                        }
+                        if (request_data.contains("warmup_seconds")) {
+                            updated_config["warmup_seconds"] =
+                                request_data["warmup_seconds"];
+                        } else if (existing_producer.contains("warmup_seconds")) {
+                            updated_config["warmup_seconds"] =
+                                existing_producer["warmup_seconds"];
+                        }
+
+                        camera_found = true;
+                        break;
+                    }
+                }
+
+                if (!camera_found) {
+                    res.status = 400;
+                    res.set_content(
+                        json{{"success", false},
+                             {"error", "Camera not found: " + camera_name}}.dump(2),
+                        "application/json");
+                    return;
+                }
+            } else if (producer_type == "widowx_arm") {
+                // Handle single arm producer
+                std::string arm_name = request_data.contains("arm_name")
+                    ? request_data["arm_name"].get<std::string>()
+                    : existing_producer.value("arm_name", "");
+
+                updated_config["arm_name"] = arm_name;
+                updated_config["name"] = arm_name;
+                updated_config["use_device_time"] = true;
+            } else if (producer_type == "teleop_widowx_arm" ||
+                       producer_type == "teleop_so101_arm") {
+                // Handle teleop producers
+                std::string leader_name = request_data.contains("leader_name")
+                    ? request_data["leader_name"].get<std::string>()
+                    : existing_producer.value("leader_name", "");
+                std::string follower_name = request_data.contains("follower_name")
+                    ? request_data["follower_name"].get<std::string>()
+                    : existing_producer.value("follower_name", "");
+
+                updated_config["leader_name"] = leader_name;
+                updated_config["follower_name"] = follower_name;
+                updated_config["name"] = leader_name + "_" + follower_name + "_teleop";
+                updated_config["use_device_time"] = true;
+            }
+
+            // Update producer
+            data["producers"][producer_index] = updated_config;
             config_manager.save_raw_json(data);
 
             res.set_content(
                 json{{"success", true},
                      {"message", "Producer updated successfully"},
-                     {"producer", flattened}}.dump(2),
+                     {"producer", updated_config}}.dump(2),
                 "application/json");
             std::cout << "PUT /configure/producer/" << producer_id
                       << " - Producer updated" << std::endl;
@@ -418,8 +700,20 @@ int main() {
         try {
             std::string producer_id = req.matches[1];
 
-            auto configs = config_manager.get_configurations();
-            json data = configs.to_json();
+            // Read raw JSON directly to avoid re-serialization
+            std::ifstream file("data.json");
+            json data;
+            if (file.is_open()) {
+                file >> data;
+                file.close();
+            } else {
+                res.status = 500;
+                res.set_content(
+                    json{{"success", false},
+                         {"error", "Failed to read data file"}}.dump(2),
+                    "application/json");
+                return;
+            }
 
             if (!data.contains("producers")) {
                 res.status = 404;
