@@ -36,7 +36,7 @@ export function RecordPage() {
   const [sessionForm, setSessionForm] = useState({
     name: '',
     systemId: '',
-    action: 'teleop_so101' as 'teleop_so101' | 'teleop_widowx' | 'record_cameras' | 'record_arms' | 'record_full',
+    action: 'teleop_so101' as 'teleop_so101' | 'teleop_widowx' | 'teleop_widowx_bimanual',
     numEpisodes: 10,
     episodeDuration: 60,
     backendType: 'mcap' as 'mcap' | 'lerobot'
@@ -591,10 +591,8 @@ export function RecordPage() {
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
                   <option value="teleop_so101">SO101 Teleoperation</option>
-                  <option value="teleop_widowx">WidowX Teleoperation</option>
-                  <option value="record_cameras">Record Cameras Only</option>
-                  <option value="record_arms">Record Arms Only</option>
-                  <option value="record_full">Record Full System</option>
+                  <option value="teleop_widowx">WidowX Teleoperation (Single Pair)</option>
+                  <option value="teleop_widowx_bimanual">WidowX Teleoperation (Bimanual)</option>
                 </select>
                 <p className="text-sm text-gray-500 mt-1">
                   Choose the type of recording session to perform

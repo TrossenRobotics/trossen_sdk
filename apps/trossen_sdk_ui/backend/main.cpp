@@ -318,7 +318,7 @@ int main() {
 
                 std::string camera_name = request_data["camera_name"];
 
-                // Find camera by name in cameras array
+                // Find camera by name in cameras array and save its ID
                 bool camera_found = false;
                 for (const auto& cam : data["cameras"]) {
                     if (cam.contains("name") && cam["name"] == camera_name) {
@@ -326,7 +326,7 @@ int main() {
                         producer_config["id"] = cam["id"];
                         producer_config["type"] = producer_type;
                         producer_config["name"] = camera_name;
-                        producer_config["camera_name"] = camera_name;
+                        producer_config["camera_id"] = cam["id"];  // Save camera ID, not name
 
                         // Copy relevant fields from camera config
                         if (cam.contains("device_index")) {
@@ -414,7 +414,7 @@ int main() {
                 producer_config["id"] = arm_id;
                 producer_config["type"] = producer_type;
                 producer_config["name"] = arm_name;
-                producer_config["arm_name"] = arm_name;
+                producer_config["arm_id"] = arm_id;  // Save arm ID, not name
                 producer_config["use_device_time"] = true;
             } else if (producer_type == "teleop_widowx_arm" ||
                        producer_type == "teleop_so101_arm") {
@@ -432,10 +432,11 @@ int main() {
                 std::string leader_name = request_data["leader_name"];
                 std::string follower_name = request_data["follower_name"];
 
-                // Find leader and follower arms
+                // Find leader and follower arms and get their IDs
                 bool leader_found = false;
                 bool follower_found = false;
                 std::string leader_id;
+                std::string follower_id;
 
                 for (const auto& arm : data["arms"]) {
                     if (arm.contains("name")) {
@@ -445,6 +446,7 @@ int main() {
                         }
                         if (arm["name"] == follower_name) {
                             follower_found = true;
+                            follower_id = arm["id"];
                         }
                     }
                 }
@@ -466,12 +468,12 @@ int main() {
                     return;
                 }
 
-                // Use leader arm's ID as producer ID
-                producer_config["id"] = leader_id;
+                // Use combined IDs as producer ID for uniqueness
+                producer_config["id"] = leader_id + "_" + follower_id + "_teleop";
                 producer_config["type"] = producer_type;
                 producer_config["name"] = leader_name + "_" + follower_name + "_teleop";
-                producer_config["leader_name"] = leader_name;
-                producer_config["follower_name"] = follower_name;
+                producer_config["leader_id"] = leader_id;
+                producer_config["follower_id"] = follower_id;
                 producer_config["use_device_time"] = true;
             } else {
                 res.status = 400;
@@ -659,17 +661,36 @@ int main() {
                 updated_config["use_device_time"] = true;
             } else if (producer_type == "teleop_widowx_arm" ||
                        producer_type == "teleop_so101_arm") {
-                // Handle teleop producers
+                // Handle teleop producers - need to look up IDs
                 std::string leader_name = request_data.contains("leader_name")
                     ? request_data["leader_name"].get<std::string>()
-                    : existing_producer.value("leader_name", "");
+                    : "";
                 std::string follower_name = request_data.contains("follower_name")
                     ? request_data["follower_name"].get<std::string>()
-                    : existing_producer.value("follower_name", "");
+                    : "";
 
-                updated_config["leader_name"] = leader_name;
-                updated_config["follower_name"] = follower_name;
-                updated_config["name"] = leader_name + "_" + follower_name + "_teleop";
+                // Find leader and follower IDs from arms array
+                std::string leader_id = existing_producer.value("leader_id", "");
+                std::string follower_id = existing_producer.value("follower_id", "");
+
+                if (!leader_name.empty() || !follower_name.empty()) {
+                    for (const auto& arm : data["arms"]) {
+                        if (arm.contains("name")) {
+                            if (!leader_name.empty() && arm["name"] == leader_name) {
+                                leader_id = arm["id"];
+                            }
+                            if (!follower_name.empty() && arm["name"] == follower_name) {
+                                follower_id = arm["id"];
+                            }
+                        }
+                    }
+                }
+
+                updated_config["leader_id"] = leader_id;
+                updated_config["follower_id"] = follower_id;
+                if (!leader_name.empty() && !follower_name.empty()) {
+                    updated_config["name"] = leader_name + "_" + follower_name + "_teleop";
+                }
                 updated_config["use_device_time"] = true;
             }
 
@@ -1154,8 +1175,8 @@ int main() {
                             active_session, session.system_id, setup_error);
                         break;
 
-                    case trossen::backend::SessionAction::RECORD_CAMERAS_ONLY:
-                        setup_success = trossen::backend::setup_camera_recording(
+                    case trossen::backend::SessionAction::TELEOP_WIDOWX_BIMANUAL:
+                        setup_success = trossen::backend::setup_widowx_bimanual_teleop(
                             active_session, session.system_id, setup_error);
                         break;
 
@@ -1544,7 +1565,7 @@ int main() {
         try {
             int index = std::stoi(req.matches[1]);
             json request_data = json::parse(req.body);
-            std::string arm_id = request_data["name"];
+            std::string arm_id = request_data["id"];  // Use ID, not name
 
             std::string error;
             if (trossen::backend::connect_arm(
@@ -1579,7 +1600,7 @@ int main() {
         try {
             int index = std::stoi(req.matches[1]);
             json request_data = json::parse(req.body);
-            std::string arm_id = request_data["name"];
+            std::string arm_id = request_data["id"];  // Use ID, not name
 
             std::string error;
             if (trossen::backend::disconnect_arm(arm_id, error)) {
@@ -1611,10 +1632,30 @@ int main() {
     // GET /hardware/status
     svr.Get("/hardware/status", [](const Request&, Response& res) {
         try {
+            // Get all hardware status keyed by ID
             json all_statuses = trossen::backend::get_all_hardware_status();
-            res.set_content(all_statuses.dump(2), "application/json");
+
+            // Load configurations to map IDs to names
+            auto configs = config_manager.get_configurations();
+            json status_by_name;
+
+            // Map camera status by name
+            for (const auto& camera : configs.cameras) {
+                if (all_statuses.contains(camera.id)) {
+                    status_by_name[camera.name] = all_statuses[camera.id];
+                }
+            }
+
+            // Map arm status by name
+            for (const auto& arm : configs.arms) {
+                if (all_statuses.contains(arm.id)) {
+                    status_by_name[arm.name] = all_statuses[arm.id];
+                }
+            }
+
+            res.set_content(status_by_name.dump(2), "application/json");
             std::cout << "GET /hardware/status - Retrieved status for "
-                      << all_statuses.size()
+                      << status_by_name.size()
                       << " hardware components" << std::endl;
         } catch (const std::exception& e) {
             res.status = 500;
@@ -1634,11 +1675,6 @@ int main() {
                 json data;
                 file >> data;
                 file.close();
-
-                // Ensure producers array exists
-                if (!data.contains("producers")) {
-                    data["producers"] = json::array();
-                }
 
                 res.set_content(data.dump(2), "application/json");
                 std::cout

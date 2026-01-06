@@ -9,6 +9,7 @@
 #include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/so101_teleop_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/arm_producer.hpp"
+#include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include <iostream>
 #include <algorithm>
 
@@ -19,7 +20,7 @@ namespace trossen::backend {
 SessionAction string_to_action(const std::string& action_str) {
     if (action_str == "teleop_so101") return SessionAction::TELEOP_SO101;
     if (action_str == "teleop_widowx") return SessionAction::TELEOP_WIDOWX;
-    if (action_str == "record_cameras") return SessionAction::RECORD_CAMERAS_ONLY;
+    if (action_str == "teleop_widowx_bimanual") return SessionAction::TELEOP_WIDOWX_BIMANUAL;
 
     throw std::runtime_error("Unknown session action: " + action_str);
 }
@@ -28,7 +29,7 @@ std::string action_to_string(SessionAction action) {
     switch (action) {
         case SessionAction::TELEOP_SO101: return "teleop_so101";
         case SessionAction::TELEOP_WIDOWX: return "teleop_widowx";
-        case SessionAction::RECORD_CAMERAS_ONLY: return "record_cameras";
+        case SessionAction::TELEOP_WIDOWX_BIMANUAL: return "teleop_widowx_bimanual";
         default: return "unknown";
     }
 }
@@ -86,21 +87,21 @@ bool validate_hardware_for_action(
                     so101_count++;
 
                     // Check that both leader and follower are configured
-                    if (prod.leader_name.empty() || prod.follower_name.empty()) {
+                    if (prod.leader_id.empty() || prod.follower_id.empty()) {
                         error = "SO101 teleop producer must have both "
-                                "leader_name and follower_name configured";
+                                "leader_id and follower_id configured";
                         return false;
                     }
 
-                    // Verify the arms are connected
-                    if (g_arm_status.find(prod.leader_name) == g_arm_status.end() ||
-                        !g_arm_status[prod.leader_name].is_connected) {
-                        error = "Leader arm not connected: " + prod.leader_name;
+                    // Verify the arms are connected by ID
+                    if (g_arm_status.find(prod.leader_id) == g_arm_status.end() ||
+                        !g_arm_status[prod.leader_id].is_connected) {
+                        error = "Leader arm not connected: " + prod.leader_id;
                         return false;
                     }
-                    if (g_arm_status.find(prod.follower_name) == g_arm_status.end() ||
-                        !g_arm_status[prod.follower_name].is_connected) {
-                        error = "Follower arm not connected: " + prod.follower_name;
+                    if (g_arm_status.find(prod.follower_id) == g_arm_status.end() ||
+                        !g_arm_status[prod.follower_id].is_connected) {
+                        error = "Follower arm not connected: " + prod.follower_id;
                         return false;
                     }
 
@@ -126,26 +127,30 @@ bool validate_hardware_for_action(
             int widowx_count = 0;
             bool has_valid_config = false;
 
+            std::cout << "  Validating TELEOP_WIDOWX: checking "
+                      << system_producers.size() << " producers" << std::endl;
             for (const auto& prod : system_producers) {
-                if (prod.type == "teleop_arm") {
+                std::cout << "    Producer type: '" << prod.type << "'" << std::endl;
+                if (prod.type == "teleop_widowx_arm") {
                     widowx_count++;
+                    std::cout << "    ✓ Found WidowX teleop producer!" << std::endl;
 
                     // Check that both leader and follower are configured
-                    if (prod.leader_name.empty() || prod.follower_name.empty()) {
+                    if (prod.leader_id.empty() || prod.follower_id.empty()) {
                         error = "WidowX teleop producer must have both "
-                                "leader_name and follower_name configured";
+                                "leader_id and follower_id configured";
                         return false;
                     }
 
-                    // Verify the arms are connected
-                    if (g_arm_status.find(prod.leader_name) == g_arm_status.end() ||
-                        !g_arm_status[prod.leader_name].is_connected) {
-                        error = "Leader arm not connected: " + prod.leader_name;
+                    // Verify the arms are connected by ID
+                    if (g_arm_status.find(prod.leader_id) == g_arm_status.end() ||
+                        !g_arm_status[prod.leader_id].is_connected) {
+                        error = "Leader arm not connected: " + prod.leader_id;
                         return false;
                     }
-                    if (g_arm_status.find(prod.follower_name) == g_arm_status.end() ||
-                        !g_arm_status[prod.follower_name].is_connected) {
-                        error = "Follower arm not connected: " + prod.follower_name;
+                    if (g_arm_status.find(prod.follower_id) == g_arm_status.end() ||
+                        !g_arm_status[prod.follower_id].is_connected) {
+                        error = "Follower arm not connected: " + prod.follower_id;
                         return false;
                     }
 
@@ -166,17 +171,49 @@ bool validate_hardware_for_action(
             break;
         }
 
-        case SessionAction::RECORD_CAMERAS_ONLY: {
-            // Need at least one camera producer
-            int camera_count = std::count_if(system_producers.begin(), system_producers.end(),
-                [](const trossen::config::ProducerConfig& p) {
-                    return p.type == "opencv_camera" ||
-                           p.type == "realsense_color" ||
-                           p.type == "realsense_depth";
-                });
+        case SessionAction::TELEOP_WIDOWX_BIMANUAL: {
+            // Needs 2 WidowX teleop producers (2 pairs of arms)
+            int widowx_count = 0;
+            std::vector<std::string> all_arms;
 
-            if (camera_count == 0) {
-                error = "Camera recording requires at least one camera producer";
+            for (const auto& prod : system_producers) {
+                if (prod.type == "teleop_widowx_arm") {
+                    widowx_count++;
+
+                    // Check that both leader and follower are configured
+                    if (prod.leader_id.empty() || prod.follower_id.empty()) {
+                        error = "WidowX teleop producer must have both "
+                                "leader_id and follower_id configured";
+                        return false;
+                    }
+
+                    // Verify the arms are connected by ID
+                    if (g_arm_status.find(prod.leader_id) == g_arm_status.end() ||
+                        !g_arm_status[prod.leader_id].is_connected) {
+                        error = "Leader arm not connected: " + prod.leader_id;
+                        return false;
+                    }
+                    if (g_arm_status.find(prod.follower_id) == g_arm_status.end() ||
+                        !g_arm_status[prod.follower_id].is_connected) {
+                        error = "Follower arm not connected: " + prod.follower_id;
+                        return false;
+                    }
+
+                    all_arms.push_back(prod.leader_id);
+                    all_arms.push_back(prod.follower_id);
+                }
+            }
+
+            if (widowx_count != 2) {
+                error = "WidowX bimanual teleoperation requires exactly 2 WidowX "
+                        "teleop producers. Found: " + std::to_string(widowx_count);
+                return false;
+            }
+
+            // Verify no duplicate arms
+            std::sort(all_arms.begin(), all_arms.end());
+            if (std::adjacent_find(all_arms.begin(), all_arms.end()) != all_arms.end()) {
+                error = "WidowX bimanual teleoperation: duplicate arm names detected";
                 return false;
             }
             break;
@@ -209,24 +246,68 @@ bool setup_so101_teleop(
         return false;
     }
 
-    // Find SO101 teleop producer
+    std::shared_ptr<SO101ArmDriver> leader_driver;
+    std::shared_ptr<SO101ArmDriver> follower_driver;
+    std::string teleop_stream_id;
+    bool use_device_time = true;
+
+    // Loop through ALL producers in the system
+    std::cout << "Creating producers from system configuration..." << std::endl;
+    int camera_count = 0;
+    int arm_count = 0;
+
     for (const auto& producer_id : system_it->producers) {
         auto prod_it = std::find_if(configs.producers.begin(), configs.producers.end(),
             [&producer_id](const trossen::config::ProducerConfig& p) {
                 return p.id == producer_id;
             });
 
-        if (prod_it != configs.producers.end() && prod_it->type == "teleop_so101_arm") {
-            const auto& prod = *prod_it;
+        if (prod_it == configs.producers.end()) continue;
 
-            std::string leader_name = prod.leader_name;
-            std::string follower_name = prod.follower_name;
-            std::string id = prod.id;
-            bool use_device_time = prod.use_device_time;
+        const auto& prod = *prod_it;
 
-            // Get drivers from ActiveHardwareRegistry
-            auto leader_comp = trossen::hw::ActiveHardwareRegistry::get(leader_name);
-            auto follower_comp = trossen::hw::ActiveHardwareRegistry::get(follower_name);
+        // Create camera producers
+        if (prod.type == "opencv_camera") {
+            // Look up camera configuration by ID
+            auto cam_it = std::find_if(configs.cameras.begin(), configs.cameras.end(),
+                [&prod](const trossen::config::CameraConfig& c) {
+                    return c.id == prod.camera_id;
+                });
+
+            if (cam_it == configs.cameras.end()) {
+                std::cerr << "Warning: Camera not found for producer: "
+                          << prod.camera_id << std::endl;
+                continue;
+            }
+
+            const auto& cam = *cam_it;
+            trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
+            cam_cfg.device_index = cam.device_index;
+            cam_cfg.stream_id = prod.id;
+            cam_cfg.width = cam.width;
+            cam_cfg.height = cam.height;
+            cam_cfg.height = cam.height;
+            cam_cfg.fps = cam.fps;
+            cam_cfg.use_device_time = prod.use_device_time;
+
+            auto camera_producer = std::make_shared<
+                trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
+
+            auto camera_period = std::chrono::milliseconds(
+                static_cast<int>(1000.0f / cam.fps));
+            active_session->manager->add_producer(
+                camera_producer, camera_period);
+            camera_count++;
+            std::cout << "  ✓ Registered camera producer: "
+                      << cam.name << std::endl;
+        } else if (prod.type == "teleop_so101_arm") {
+            // Handle SO101 teleop producer
+            teleop_stream_id = prod.id;
+            use_device_time = prod.use_device_time;
+
+            // Get drivers from ActiveHardwareRegistry using IDs
+            auto leader_comp = trossen::hw::ActiveHardwareRegistry::get(prod.leader_id);
+            auto follower_comp = trossen::hw::ActiveHardwareRegistry::get(prod.follower_id);
 
             if (!leader_comp || !follower_comp) {
                 error = "Failed to get SO101 components from registry";
@@ -234,90 +315,85 @@ bool setup_so101_teleop(
             }
 
             auto leader_so101 =
-                std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(
-                    leader_comp);
+                std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(leader_comp);
             auto follower_so101 =
-                std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(
-                    follower_comp);
+                std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(follower_comp);
 
             if (!leader_so101 || !follower_so101) {
                 error = "Failed to cast to SO101ArmComponent";
                 return false;
             }
 
-            auto leader_driver = leader_so101->get_driver();
-            auto follower_driver = follower_so101->get_driver();
+            leader_driver = leader_so101->get_driver();
+            follower_driver = follower_so101->get_driver();
 
             if (!leader_driver || !follower_driver) {
                 error = "Failed to get SO101 drivers";
                 return false;
             }
 
-            // Create SO101 teleop producer
+            // Store drivers to keep them alive
+            active_session->arm_drivers.push_back(leader_driver);
+            active_session->arm_drivers.push_back(follower_driver);
+
+            // Create and register SO101 teleop producer
             trossen::hw::arm::TeleopSO101ArmProducer::Config teleop_cfg;
-            teleop_cfg.stream_id = id;
+            teleop_cfg.stream_id = teleop_stream_id;
             teleop_cfg.use_device_time = use_device_time;
 
             auto teleop_producer = std::make_shared<
                 trossen::hw::arm::TeleopSO101ArmProducer>(
                     leader_driver, follower_driver, teleop_cfg);
 
-            // Register with 30Hz polling rate
             auto teleop_period = std::chrono::milliseconds(33);  // ~30Hz
             active_session->manager->add_producer(teleop_producer, teleop_period);
-
-            // Store drivers to keep them alive
-            active_session->arm_drivers.push_back(leader_driver);
-            active_session->arm_drivers.push_back(follower_driver);
-
-            std::cout << "  ✓ Registered SO101 teleop producer: " << id << std::endl;
-
-            // Give servos time to initialize after connection
-            std::cout << "  Waiting for servos to initialize..." << std::endl;
-            std::this_thread::sleep_for(std::chrono::milliseconds(500));
-
-            auto test_leader = leader_driver->get_joint_positions(false);
-            auto test_follower = follower_driver->get_joint_positions(false);
-
-            // false = raw values
-            auto leader_positions = leader_driver->get_joint_positions(false);
-            std::cout << "  Leader RAW positions: [";
-            for (size_t i = 0; i < leader_positions.size(); ++i) {
-                std::cout << leader_positions[i];
-                if (i < leader_positions.size() - 1) std::cout << ", ";
-            }
-            std::cout << "]" << std::endl;
-
-            follower_driver->set_joint_positions(leader_positions, false);
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            std::cout << "  ✓ Synced follower to leader position" << std::endl;
-
-            // Start teleoperation thread (100Hz control loop)
-            // This runs continuously across all episodes until manually
-            // stopped
-            active_session->teleop_active = true;
-            active_session->teleop_thread = std::thread(
-                [leader_driver, follower_driver, active_session]() {
-                std::cout << "  ✓ Teleoperation loop started" << std::endl;
-
-                int loop_count = 0;
-                while (active_session->teleop_active) {
-                    auto leader_positions = leader_driver->get_joint_positions(false);
-
-                    follower_driver->set_joint_positions(leader_positions, false);
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
-                    loop_count++;
-                }
-
-                std::cout << "  ✓ Teleoperation loop stopped" << std::endl;
-            });
-
-            return true;
+            arm_count++;
+            std::cout << "  ✓ Registered SO101 teleop producer: " << prod.id << std::endl;
         }
     }
 
-    error = "No SO101 teleop producer found in system";
-    return false;
+    if (arm_count == 0) {
+        error = "No SO101 teleop producer found in system";
+        return false;
+    }
+
+    std::cout << "Producers created: " << arm_count << " arm(s), "
+              << camera_count << " camera(s)" << std::endl;
+
+    // Sync follower to leader's current position before starting
+    std::cout << "Syncing follower to leader position..." << std::endl;
+    auto leader_positions = leader_driver->get_joint_positions(false);
+    follower_driver->set_joint_positions(leader_positions, false);
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::cout << "  ✓ Follower synced to leader" << std::endl;
+
+    // Start teleoperation thread (runs continuously, mirrors leader to follower)
+    active_session->teleop_active = true;
+    active_session->teleop_thread = std::thread([leader_driver, follower_driver, active_session]() {
+        std::cout << "SO101 teleoperation thread started" << std::endl;
+
+        while (active_session->teleop_active) {
+            // Check if we should freeze (waiting for next episode)
+            if (active_session->waiting_for_next.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+
+            try {
+                auto leader_pos = leader_driver->get_joint_positions(false);
+                follower_driver->set_joint_positions(leader_pos, false);
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));  // 100Hz
+            } catch (const std::exception& e) {
+                std::cerr << "Error in SO101 teleop thread: " << e.what() << std::endl;
+                break;
+            }
+        }
+
+        std::cout << "SO101 teleoperation thread stopped" << std::endl;
+    });
+
+    std::cout << "  ✓ SO101 teleoperation ready" << std::endl;
+    return true;
 }
 
 bool setup_widowx_teleop(
@@ -339,96 +415,201 @@ bool setup_widowx_teleop(
         return false;
     }
 
-    // Find teleop_arm producer in configuration
+    std::shared_ptr<trossen_arm::TrossenArmDriver> leader_driver;
+    std::shared_ptr<trossen_arm::TrossenArmDriver> follower_driver;
     std::string teleop_stream_id;
-    std::string leader_arm_id, follower_arm_id;
     bool use_device_time = true;
+
+    // Loop through ALL producers in the system
+    std::cout << "Creating producers from system configuration..." << std::endl;
+    int camera_count = 0;
+    int arm_count = 0;
 
     for (const auto& producer_id : system_it->producers) {
         auto prod_it = std::find_if(configs.producers.begin(), configs.producers.end(),
             [&producer_id](const trossen::config::ProducerConfig& p) {
                 return p.id == producer_id;
             });
-        if (prod_it != configs.producers.end() && prod_it->type == "teleop_arm") {
-            teleop_stream_id = prod_it->id;
-            leader_arm_id = prod_it->leader_name;
-            follower_arm_id = prod_it->follower_name;
-            use_device_time = prod_it->use_device_time;
-            break;
+
+        if (prod_it == configs.producers.end()) continue;
+
+        const auto& prod = *prod_it;
+
+        // Create camera producers
+        if (prod.type == "opencv_camera") {
+            // Look up camera configuration by ID
+            auto cam_it = std::find_if(configs.cameras.begin(), configs.cameras.end(),
+                [&prod](const trossen::config::CameraConfig& c) {
+                    return c.id == prod.camera_id;
+                });
+
+            if (cam_it == configs.cameras.end()) {
+                std::cerr << "Warning: Camera not found for producer: "
+                          << prod.camera_id << std::endl;
+                continue;
+            }
+
+            const auto& cam = *cam_it;
+            trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
+            cam_cfg.device_index = cam.device_index;
+            cam_cfg.stream_id = prod.id;
+            cam_cfg.encoding = cam.encoding;
+            cam_cfg.width = cam.width;
+            cam_cfg.height = cam.height;
+            cam_cfg.fps = cam.fps;
+            cam_cfg.use_device_time = prod.use_device_time;
+
+            auto camera_producer = std::make_shared<
+                trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
+
+            auto camera_period = std::chrono::milliseconds(
+                static_cast<int>(1000.0f / cam.fps));
+            active_session->manager->add_producer(
+                camera_producer, camera_period);
+            camera_count++;
+            std::cout << "  ✓ Registered camera producer: "
+                      << cam.name << std::endl;
+        } else if (prod.type == "teleop_widowx_arm") {
+            // Handle WidowX teleop producer
+            teleop_stream_id = prod.id;
+            use_device_time = prod.use_device_time;
+
+            // Get hardware components from registry using IDs
+            auto leader_comp = trossen::hw::ActiveHardwareRegistry::get(prod.leader_id);
+            auto follower_comp = trossen::hw::ActiveHardwareRegistry::get(prod.follower_id);
+
+            if (!leader_comp || !follower_comp) {
+                error = "WidowX arms not found in hardware registry";
+                return false;
+            }
+
+            // Cast to TrossenArmComponent and extract drivers
+            auto leader_trossen =
+                std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(leader_comp);
+            auto follower_trossen =
+                std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(follower_comp);
+
+            if (!leader_trossen || !follower_trossen) {
+                error = "Failed to cast components to TrossenArmComponent";
+                return false;
+            }
+
+            leader_driver = leader_trossen->get_hardware();
+            follower_driver = follower_trossen->get_hardware();
+
+            if (!leader_driver || !follower_driver) {
+                error = "Failed to get arm drivers from components";
+                return false;
+            }
+
+            // Store drivers to keep them alive
+            active_session->widowx_drivers.push_back(leader_driver);
+            active_session->widowx_drivers.push_back(follower_driver);
+
+            // Set leader to external_effort mode (gravity compensation) for teleoperation
+            std::cout << "  Setting leader to external_effort mode..." << std::endl;
+            leader_driver->set_all_modes(trossen_arm::Mode::external_effort);
+            leader_driver->set_all_external_efforts(
+                std::vector<double>(leader_driver->get_num_joints(), 0.0),
+                0.0,
+                false);
+
+            // Set follower to position mode
+            follower_driver->set_all_modes(trossen_arm::Mode::position);
+
+            // Create and register the teleop producer
+            trossen::hw::arm::TeleopTrossenArmProducer::Config teleop_cfg;
+            teleop_cfg.stream_id = teleop_stream_id;
+            teleop_cfg.use_device_time = use_device_time;
+
+            auto teleop_producer = std::make_shared<
+                trossen::hw::arm::TeleopTrossenArmProducer>(
+                    leader_driver, follower_driver, teleop_cfg);
+
+            auto teleop_period = std::chrono::milliseconds(5);  // 200Hz
+            active_session->manager->add_producer(teleop_producer, teleop_period);
+            arm_count++;
+            std::cout << "  ✓ Registered WidowX teleop producer: " << prod.id << std::endl;
         }
     }
 
-    if (teleop_stream_id.empty()) {
-        error = "No teleop_arm producer found in system configuration";
+    if (arm_count == 0) {
+        error = "No WidowX teleop producer found in system";
         return false;
     }
 
-    // Get hardware components from registry
-    auto leader_comp = trossen::hw::ActiveHardwareRegistry::get(leader_arm_id);
-    auto follower_comp = trossen::hw::ActiveHardwareRegistry::get(follower_arm_id);
+    std::cout << "Producers created: " << arm_count << " arm(s), "
+              << camera_count << " camera(s)" << std::endl;
 
-    if (!leader_comp || !follower_comp) {
-        error = "WidowX arms not found in hardware registry";
-        return false;
-    }
+    const float moving_time_s = 2.0f;
+    const std::vector<double> STAGED_POSITIONS = {
+        0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0
+    };
 
-    // Cast to TrossenArmComponent and extract drivers
-    auto leader_trossen =
-        std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(
-            leader_comp);
-    auto follower_trossen =
-        std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(
-            follower_comp);
+    // Stage both arms to ready position
+    std::cout << "Staging arms to ready position..." << std::endl;
+    leader_driver->set_all_modes(trossen_arm::Mode::position);
+    follower_driver->set_all_modes(trossen_arm::Mode::position);
+    leader_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    follower_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+    std::cout << "  ✓ Arms staged to ready position" << std::endl;
 
-    if (!leader_trossen || !follower_trossen) {
-        error = "Failed to cast components to TrossenArmComponent";
-        return false;
-    }
+    // Move follower to mirror leader's current position
+    std::cout << "Syncing follower to leader position..." << std::endl;
+    auto leader_positions = leader_driver->get_all_positions();
+    follower_driver->set_all_positions(leader_positions, moving_time_s, false);
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
 
-    auto leader_driver = leader_trossen->get_hardware();
-    auto follower_driver = follower_trossen->get_hardware();
+    // Set leader back to external_effort mode for teleoperation
+    leader_driver->set_all_modes(trossen_arm::Mode::external_effort);
+    leader_driver->set_all_external_efforts(
+        std::vector<double>(leader_driver->get_num_joints(), 0.0),
+        0.0,
+        false);
+    std::cout << "  ✓ Follower synced to leader" << std::endl;
 
-    if (!leader_driver || !follower_driver) {
-        error = "Failed to get arm drivers from components";
-        return false;
-    }
-
-    // Store drivers in active session
-    active_session->widowx_drivers.push_back(leader_driver);
-    active_session->widowx_drivers.push_back(follower_driver);
-
-    // Create and register the teleop producer
-    trossen::hw::arm::TeleopTrossenArmProducer::Config teleop_cfg;
-    teleop_cfg.stream_id = teleop_stream_id;
-    teleop_cfg.use_device_time = use_device_time;
-
-    auto teleop_producer = std::make_shared<
-        trossen::hw::arm::TeleopTrossenArmProducer>(
-            leader_driver, follower_driver, teleop_cfg);
-
-    active_session->manager->add_producer(
-        teleop_producer, std::chrono::milliseconds(1));
-    std::cout << "  ✓ Registered WidowX teleop producer: " << teleop_stream_id << std::endl;
-
-    // Start teleoperation thread with freeze logic
+    // Start teleoperation thread (runs continuously, mirrors leader to follower)
     active_session->teleop_active = true;
     active_session->teleop_thread = std::thread([active_session]() {
-        std::cout << "Starting WidowX teleoperation thread..." << std::endl;
+        std::cout << "WidowX teleoperation thread started" << std::endl;
 
-        auto leader_driver = active_session->widowx_drivers[0];
-        auto follower_driver = active_session->widowx_drivers[1];
+        auto leader = active_session->widowx_drivers[0];
+        auto follower = active_session->widowx_drivers[1];
+        bool was_frozen = false;
 
         while (active_session->teleop_active) {
             // Check if we should freeze (waiting for next episode)
             if (active_session->waiting_for_next.load()) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                if (!was_frozen) {
+                    // Lock both arms in position mode to prevent movement
+                    std::cout << "  Freezing WidowX arms (waiting for next episode)..."
+                              << std::endl;
+                    leader->set_all_modes(trossen_arm::Mode::position);
+                    follower->set_all_modes(trossen_arm::Mode::position);
+                    was_frozen = true;
+                }
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(10));
                 continue;
+            }
+
+            // Unfreeze - restore external_effort mode for leader
+            if (was_frozen) {
+                std::cout << "  Resuming WidowX teleoperation..." << std::endl;
+                leader->set_all_modes(trossen_arm::Mode::external_effort);
+                leader->set_all_external_efforts(
+                    std::vector<double>(leader->get_num_joints(), 0.0),
+                    0.0,
+                    false);
+                follower->set_all_modes(trossen_arm::Mode::position);
+                was_frozen = false;
             }
 
             try {
                 // Mirror leader arm positions to follower
-                auto positions = leader_driver->get_all_positions();
-                follower_driver->set_all_positions(positions, 0.0f, false);
+                auto positions = leader->get_all_positions();
+                follower->set_all_positions(positions, 0.0f, false);
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             } catch (const std::exception& e) {
                 std::cerr << "Error in WidowX teleop thread: " << e.what() << std::endl;
@@ -437,8 +618,44 @@ bool setup_widowx_teleop(
         }
 
         std::cout << "WidowX teleoperation thread stopped" << std::endl;
+
+        // Reset arms to rest position if all episodes complete
+        if (active_session->all_episodes_complete) {
+            std::cout << "Resetting WidowX arms to rest position..." << std::endl;
+            const float moving_time_s = 2.0f;
+            const std::vector<double> STAGED_POSITIONS = {
+                0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0
+            };
+
+            try {
+                auto leader = active_session->widowx_drivers[0];
+                auto follower = active_session->widowx_drivers[1];
+
+                // Set to position mode
+                leader->set_all_modes(trossen_arm::Mode::position);
+                follower->set_all_modes(trossen_arm::Mode::position);
+
+                // Move to staged positions
+                leader->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+                follower->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+                std::this_thread::sleep_for(
+                    std::chrono::duration<float>(moving_time_s + 0.1f));
+
+                // Move to sleep position (all zeros)
+                std::vector<double> sleep_position(leader->get_num_joints(), 0.0);
+                leader->set_all_positions(sleep_position, moving_time_s, false);
+                follower->set_all_positions(sleep_position, moving_time_s, false);
+                std::this_thread::sleep_for(
+                    std::chrono::duration<float>(moving_time_s + 0.1f));
+
+                std::cout << "  ✓ Arms returned to rest position" << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "Error resetting arms: " << e.what() << std::endl;
+            }
+        }
     });
 
+    std::cout << "  ✓ WidowX teleoperation ready" << std::endl;
     return true;
 }
 
@@ -496,6 +713,323 @@ bool setup_camera_recording(
     return true;
 }
 
+bool setup_widowx_bimanual_teleop(
+    std::shared_ptr<ActiveSession> active_session,
+    const std::string& system_id,
+    std::string& error)
+{
+    std::cout << "Setting up WidowX bimanual teleoperation session..." << std::endl;
 
+    // Get system configuration
+    auto configs = config_manager.get_configurations();
+    auto system_it = std::find_if(configs.systems.begin(), configs.systems.end(),
+        [&system_id](const trossen::config::HardwareSystem& s) {
+            return s.id == system_id;
+        });
+
+    if (system_it == configs.systems.end()) {
+        error = "Hardware system not found";
+        return false;
+    }
+
+    struct TeleopPairConfig {
+        std::string stream_id;
+        std::string leader_id;
+        std::string follower_id;
+        bool use_device_time;
+    };
+    std::vector<TeleopPairConfig> pairs;
+
+    // Loop through ALL producers in the system
+    std::cout << "Creating producers from system configuration..." << std::endl;
+    int camera_count = 0;
+    int arm_count = 0;
+
+    for (const auto& producer_id : system_it->producers) {
+        auto prod_it = std::find_if(configs.producers.begin(), configs.producers.end(),
+            [&producer_id](const trossen::config::ProducerConfig& p) {
+                return p.id == producer_id;
+            });
+
+        if (prod_it == configs.producers.end()) continue;
+
+        const auto& prod = *prod_it;
+
+        // Create camera producers
+        if (prod.type == "opencv_camera") {
+            // Look up camera configuration by ID
+            auto cam_it = std::find_if(configs.cameras.begin(), configs.cameras.end(),
+                [&prod](const trossen::config::CameraConfig& c) {
+                    return c.id == prod.camera_id;
+                });
+
+            if (cam_it == configs.cameras.end()) {
+                std::cerr << "Warning: Camera not found for producer: "
+                          << prod.camera_id << std::endl;
+                continue;
+            }
+
+            const auto& cam = *cam_it;
+            trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
+            cam_cfg.device_index = cam.device_index;
+            cam_cfg.stream_id = prod.id;
+            cam_cfg.encoding = cam.encoding;
+            cam_cfg.width = cam.width;
+            cam_cfg.height = cam.height;
+            cam_cfg.fps = cam.fps;
+            cam_cfg.use_device_time = prod.use_device_time;
+
+            auto camera_producer = std::make_shared<
+                trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
+
+            auto camera_period = std::chrono::milliseconds(
+                static_cast<int>(1000.0f / cam.fps));
+            active_session->manager->add_producer(camera_producer, camera_period);
+            camera_count++;
+            std::cout << "  ✓ Registered camera producer: " << cam.name << std::endl;
+        } else if (prod.type == "teleop_widowx_arm") {
+            // Collect WidowX teleop producers
+            TeleopPairConfig pair;
+            pair.stream_id = prod.id;
+            pair.leader_id = prod.leader_id;
+            pair.follower_id = prod.follower_id;
+            pair.use_device_time = prod.use_device_time;
+            pairs.push_back(pair);
+        }
+    }
+
+    if (pairs.size() != 2) {
+        error = "Expected exactly 2 WidowX teleop producers, found: " +
+                std::to_string(pairs.size());
+        return false;
+    }
+
+    // Setup both teleop pairs
+    for (size_t i = 0; i < pairs.size(); ++i) {
+        const auto& pair = pairs[i];
+
+        // Get hardware components from registry using IDs
+        auto leader_comp = trossen::hw::ActiveHardwareRegistry::get(pair.leader_id);
+        auto follower_comp = trossen::hw::ActiveHardwareRegistry::get(pair.follower_id);
+
+        if (!leader_comp || !follower_comp) {
+            error = "WidowX arms not found in hardware registry for pair " +
+                    std::to_string(i + 1);
+            return false;
+        }
+
+        // Cast to TrossenArmComponent and extract drivers
+        auto leader_trossen =
+            std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(leader_comp);
+        auto follower_trossen =
+            std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(follower_comp);
+
+        if (!leader_trossen || !follower_trossen) {
+            error = "Failed to cast components to TrossenArmComponent for pair " +
+                    std::to_string(i + 1);
+            return false;
+        }
+
+        auto leader_driver = leader_trossen->get_hardware();
+        auto follower_driver = follower_trossen->get_hardware();
+
+        if (!leader_driver || !follower_driver) {
+            error = "Failed to get arm drivers from components for pair " +
+                    std::to_string(i + 1);
+            return false;
+        }
+
+        // Store drivers in active session
+        active_session->widowx_drivers.push_back(leader_driver);
+        active_session->widowx_drivers.push_back(follower_driver);
+
+        // Set leader to external_effort mode (gravity compensation)
+        std::cout << "  Setting leader " << (i + 1) << " to external_effort mode..." << std::endl;
+        leader_driver->set_all_modes(trossen_arm::Mode::external_effort);
+        leader_driver->set_all_external_efforts(
+            std::vector<double>(leader_driver->get_num_joints(), 0.0),
+            0.0,
+            false);
+
+        // Set follower to position mode
+        follower_driver->set_all_modes(trossen_arm::Mode::position);
+
+        // Create and register the teleop producer for this pair
+        trossen::hw::arm::TeleopTrossenArmProducer::Config teleop_cfg;
+        teleop_cfg.stream_id = pair.stream_id;
+        teleop_cfg.use_device_time = pair.use_device_time;
+
+        auto teleop_producer = std::make_shared<
+            trossen::hw::arm::TeleopTrossenArmProducer>(
+                leader_driver, follower_driver, teleop_cfg);
+
+        auto teleop_period = std::chrono::milliseconds(5);  // 200Hz
+        active_session->manager->add_producer(teleop_producer, teleop_period);
+        arm_count++;
+        std::cout << "  ✓ Registered WidowX teleop producer " << (i + 1)
+                  << ": " << pair.stream_id << std::endl;
+    }
+
+    std::cout << "Producers created: " << arm_count << " arm pair(s), "
+              << camera_count << " camera(s)" << std::endl;
+
+    const float moving_time_s = 2.0f;
+    const std::vector<double> STAGED_POSITIONS = {
+        0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0
+    };
+
+    auto leader1 = active_session->widowx_drivers[0];
+    auto follower1 = active_session->widowx_drivers[1];
+    auto leader2 = active_session->widowx_drivers[2];
+    auto follower2 = active_session->widowx_drivers[3];
+
+    // Stage all arms to ready position
+    std::cout << "Staging all arms to ready position..." << std::endl;
+    leader1->set_all_modes(trossen_arm::Mode::position);
+    follower1->set_all_modes(trossen_arm::Mode::position);
+    leader2->set_all_modes(trossen_arm::Mode::position);
+    follower2->set_all_modes(trossen_arm::Mode::position);
+    leader1->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    follower1->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    leader2->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    follower2->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+    std::cout << "  ✓ All arms staged to ready position" << std::endl;
+
+    // Sync both pairs: move followers to mirror leaders' current positions
+    std::cout << "Syncing followers to leaders' positions..." << std::endl;
+
+    // Lock leaders temporarily
+    leader1->set_all_modes(trossen_arm::Mode::position);
+    leader2->set_all_modes(trossen_arm::Mode::position);
+
+    auto leader1_pos = leader1->get_all_positions();
+    auto leader2_pos = leader2->get_all_positions();
+
+    follower1->set_all_positions(leader1_pos, moving_time_s, false);
+    follower2->set_all_positions(leader2_pos, moving_time_s, false);
+
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+
+    // Unlock leaders back to external_effort mode
+    leader1->set_all_modes(trossen_arm::Mode::external_effort);
+    leader1->set_all_external_efforts(
+        std::vector<double>(leader1->get_num_joints(), 0.0), 0.0, false);
+
+    leader2->set_all_modes(trossen_arm::Mode::external_effort);
+    leader2->set_all_external_efforts(
+        std::vector<double>(leader2->get_num_joints(), 0.0), 0.0, false);
+
+    std::cout << "  ✓ Both followers synced to leaders" << std::endl;
+
+    // Start bimanual teleoperation thread
+    active_session->teleop_active = true;
+    active_session->teleop_thread = std::thread([active_session]() {
+        std::cout << "WidowX bimanual teleoperation thread started" << std::endl;
+
+        // We have 4 drivers: [leader1, follower1, leader2, follower2]
+        auto leader1 = active_session->widowx_drivers[0];
+        auto follower1 = active_session->widowx_drivers[1];
+        auto leader2 = active_session->widowx_drivers[2];
+        auto follower2 = active_session->widowx_drivers[3];
+        bool was_frozen = false;
+
+        while (active_session->teleop_active) {
+            // Check if we should freeze (waiting for next episode)
+            if (active_session->waiting_for_next.load()) {
+                if (!was_frozen) {
+                    // Lock all arms in position mode to prevent movement
+                    std::cout << "  Freezing WidowX bimanual arms "
+                              << "(waiting for next episode)..." << std::endl;
+                    leader1->set_all_modes(trossen_arm::Mode::position);
+                    follower1->set_all_modes(trossen_arm::Mode::position);
+                    leader2->set_all_modes(trossen_arm::Mode::position);
+                    follower2->set_all_modes(trossen_arm::Mode::position);
+                    was_frozen = true;
+                }
+                std::this_thread::sleep_for(
+                    std::chrono::milliseconds(10));
+                continue;
+            }
+
+            // Unfreeze - restore external_effort mode for leaders
+            if (was_frozen) {
+                std::cout << "  Resuming WidowX bimanual teleoperation..." << std::endl;
+                leader1->set_all_modes(trossen_arm::Mode::external_effort);
+                leader1->set_all_external_efforts(
+                    std::vector<double>(leader1->get_num_joints(), 0.0), 0.0, false);
+                leader2->set_all_modes(trossen_arm::Mode::external_effort);
+                leader2->set_all_external_efforts(
+                    std::vector<double>(leader2->get_num_joints(), 0.0), 0.0, false);
+                follower1->set_all_modes(trossen_arm::Mode::position);
+                follower2->set_all_modes(trossen_arm::Mode::position);
+                was_frozen = false;
+            }
+
+            try {
+                // Mirror both pairs simultaneously
+                auto positions1 = leader1->get_all_positions();
+                follower1->set_all_positions(positions1, 0.0f, false);
+
+                auto positions2 = leader2->get_all_positions();
+                follower2->set_all_positions(positions2, 0.0f, false);
+
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            } catch (const std::exception& e) {
+                std::cerr << "Error in WidowX bimanual teleop thread: "
+                          << e.what() << std::endl;
+                break;
+            }
+        }
+
+        std::cout << "WidowX bimanual teleoperation thread stopped" << std::endl;
+
+        // Reset arms to rest position if all episodes complete
+        if (active_session->all_episodes_complete) {
+            std::cout << "Resetting WidowX bimanual arms to rest position..." << std::endl;
+            const float moving_time_s = 2.0f;
+            const std::vector<double> STAGED_POSITIONS = {
+                0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0
+            };
+
+            try {
+                auto leader1 = active_session->widowx_drivers[0];
+                auto follower1 = active_session->widowx_drivers[1];
+                auto leader2 = active_session->widowx_drivers[2];
+                auto follower2 = active_session->widowx_drivers[3];
+
+                // Set all to position mode
+                leader1->set_all_modes(trossen_arm::Mode::position);
+                follower1->set_all_modes(trossen_arm::Mode::position);
+                leader2->set_all_modes(trossen_arm::Mode::position);
+                follower2->set_all_modes(trossen_arm::Mode::position);
+
+                // Move to staged positions
+                leader1->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+                follower1->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+                leader2->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+                follower2->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+                std::this_thread::sleep_for(
+                    std::chrono::duration<float>(moving_time_s + 0.1f));
+
+                // Move to sleep position (all zeros)
+                std::vector<double> sleep_position(leader1->get_num_joints(), 0.0);
+                leader1->set_all_positions(sleep_position, moving_time_s, false);
+                follower1->set_all_positions(sleep_position, moving_time_s, false);
+                leader2->set_all_positions(sleep_position, moving_time_s, false);
+                follower2->set_all_positions(sleep_position, moving_time_s, false);
+                std::this_thread::sleep_for(
+                    std::chrono::duration<float>(moving_time_s + 0.1f));
+
+                std::cout << "  ✓ All arms returned to rest position" << std::endl;
+            } catch (const std::exception& e) {
+                std::cerr << "Error resetting bimanual arms: " << e.what() << std::endl;
+            }
+        }
+    });
+
+    std::cout << "  ✓ WidowX bimanual teleoperation ready" << std::endl;
+    return true;
+}
 
 }  // namespace trossen::backend

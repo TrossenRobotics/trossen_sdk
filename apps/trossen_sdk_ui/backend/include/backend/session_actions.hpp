@@ -22,7 +22,7 @@ namespace trossen::backend {
 enum class SessionAction {
     TELEOP_SO101,
     TELEOP_WIDOWX,
-    RECORD_CAMERAS_ONLY
+    TELEOP_WIDOWX_BIMANUAL
 };
 
 // Active session state
@@ -62,6 +62,11 @@ bool setup_so101_teleop(
     std::string& error);
 
 bool setup_widowx_teleop(
+    std::shared_ptr<ActiveSession> active_session,
+    const std::string& system_id,
+    std::string& error);
+
+bool setup_widowx_bimanual_teleop(
     std::shared_ptr<ActiveSession> active_session,
     const std::string& system_id,
     std::string& error);
