@@ -449,7 +449,7 @@ int main(int argc, char** argv) {
     std::cout << "Recording...\n";
 
     // Start async stats monitoring in SessionManager (runs in background thread)
-    // mgr.start_async_monitoring();
+    mgr.start_async_monitoring();
 
     // Teleop loop (if using hardware)
     std::thread teleop_thread;
@@ -474,7 +474,7 @@ int main(int argc, char** argv) {
     }
 
     // Get final stats from async monitoring (this will join the thread)
-    // trossen::runtime::SessionManager::Stats last_stats = mgr.get_async_monitor_stats();
+    trossen::runtime::SessionManager::Stats last_stats = mgr.get_async_monitor_stats();
 
     // Wait for teleop thread to finish
     if (!cfg.use_mock && teleop_thread.joinable()) {
@@ -490,24 +490,24 @@ int main(int argc, char** argv) {
     std::string file_path = trossen::demo::generate_episode_path(
       cfg.root,
       recording_episode_index);
-    // trossen::demo::print_episode_summary(file_path, last_stats);
+    trossen::demo::print_episode_summary(file_path, last_stats);
 
     // ──────────────────────────────────────────────────────────
     // Sanity check: verify expected record counts
     // ──────────────────────────────────────────────────────────
 
-    // trossen::demo::SanityCheckConfig sanity_cfg{
-    //   last_stats.recording_duration_s.value_or(0.0),
-    //   1,  // 1 joint producer (follower)
-    //   cfg.joint_rate_hz,
-    //   1,  // 1 camera
-    //   cfg.camera_fps,
-    //   5.0  // 5% tolerance
-    // };
-    // trossen::demo::perform_sanity_check(
-    //   recording_episode_index,
-    //   last_stats.records_written_current,
-    //   sanity_cfg);
+    trossen::demo::SanityCheckConfig sanity_cfg{
+      last_stats.recording_duration_s.value_or(0.0),
+      1,  // 1 joint producer (follower)
+      cfg.joint_rate_hz,
+      1,  // 1 camera
+      cfg.camera_fps,
+      5.0  // 5% tolerance
+    };
+    trossen::demo::perform_sanity_check(
+      recording_episode_index,
+      last_stats.records_written_current,
+      sanity_cfg);
 
     // Check if user requested stop
     if (trossen::demo::g_stop_requested) {
