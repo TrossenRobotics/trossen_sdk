@@ -20,6 +20,7 @@ add_library(trossen_sdk SHARED
   src/hw/hardware_registry.cpp
   src/hw/active_hardware_registry.cpp
   src/hw/arm/trossen_arm_component.cpp
+  src/hw/arm/so101_arm_component.cpp
   src/hw/arm/arm_producer.cpp
   src/hw/arm/teleop_arm_producer.cpp
   src/hw/arm/mock_joint_producer.cpp

@@ -101,10 +101,22 @@ bool connect_arm(
                 std::make_shared<trossen::hw::arm::TrossenArmComponent>(
                     arm_id);
 
+            // Map end_effector value to full SDK format
+            std::string sdk_end_effector;
+            std::string stored_end_effector = config.value("end_effector", "follower");
+            if (stored_end_effector == "leader") {
+                sdk_end_effector = "wxai_v0_leader";
+            } else if (stored_end_effector == "follower") {
+                sdk_end_effector = "wxai_v0_follower";
+            } else {
+                // Assume it's already in the correct format
+                sdk_end_effector = stored_end_effector;
+            }
+
             nlohmann::json arm_config = {
                 {"ip_address", config["serv_ip"]},
                 {"model", "wxai_v0"},
-                {"end_effector", config["end_effector"]}
+                {"end_effector", sdk_end_effector}
             };
             arm->configure(arm_config);
 

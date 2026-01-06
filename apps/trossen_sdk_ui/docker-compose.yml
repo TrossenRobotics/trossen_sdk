@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ../..
+      dockerfile: apps/trossen_sdk_ui/backend/Dockerfile
+    container_name: trossen_backend
+    user: "1000:20"  # Run as host user (uid:dialout gid) for device access
+    environment:
+      - HOME=/home/trossen-ai
+    volumes:
+      - ./backend/data.json:/app/data.json
+      - /home/trossen-ai/.cache/trossen_sdk:/home/trossen-ai/.cache/trossen_sdk
+      - /dev:/dev
+    privileged: true
+    network_mode: host
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: trossen_frontend
+    network_mode: host
+    environment:
+      - BACKEND_URL=http://localhost:8080
+    depends_on:
+      - backend
+    restart: unless-stopped

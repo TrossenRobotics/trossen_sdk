@@ -4,6 +4,7 @@
 #include <sstream>
 #include <chrono>
 #include <iomanip>
+#include <random>
 
 // SDK includes for validation
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
@@ -11,13 +12,27 @@
 
 namespace trossen::config {
 
+// Helper function to generate a unique ID
+static std::string generate_unique_id() {
+    static std::random_device rd;
+    static std::mt19937 gen(rd());
+    static std::uniform_int_distribution<> dis(0, 15);
+    static const char* hex_chars = "0123456789abcdef";
+
+    std::string id;
+    for (int i = 0; i < 16; i++) {
+        id += hex_chars[dis(gen)];
+    }
+    return id;
+}
+
 // CameraConfig JSON conversion
 nlohmann::json CameraConfig::to_json() const {
     return {
+        {"id", id},
         {"type", type},
         {"name", name},
         {"device_index", device_index},
-        {"stream_id", stream_id},
         {"encoding", encoding},
         {"width", width},
         {"height", height},
@@ -29,10 +44,10 @@ nlohmann::json CameraConfig::to_json() const {
 
 CameraConfig CameraConfig::from_json(const nlohmann::json& j) {
     CameraConfig config;
+    config.id = j.value("id", "");
     config.type = j.value("type", "opencv");
     config.name = j.value("name", "camera");
     config.device_index = j.value("device_index", 0);
-    config.stream_id = j.value("stream_id", "camera0");
     config.encoding = j.value("encoding", "bgr8");
     config.width = j.value("width", 640);
     config.height = j.value("height", 480);
@@ -45,6 +60,7 @@ CameraConfig CameraConfig::from_json(const nlohmann::json& j) {
 // ArmConfig JSON conversion
 nlohmann::json ArmConfig::to_json() const {
     nlohmann::json j = {
+        {"id", id},
         {"type", type},
         {"name", name}
     };
@@ -62,6 +78,7 @@ nlohmann::json ArmConfig::to_json() const {
 
 ArmConfig ArmConfig::from_json(const nlohmann::json& j) {
     ArmConfig config;
+    config.id = j.value("id", "");
     config.type = j.value("type", "");
     config.name = j.value("name", "arm");
     config.end_effector = j.value("end_effector", "");
@@ -95,18 +112,12 @@ HardwareSystem HardwareSystem::from_json(const nlohmann::json& j) {
 // ProducerConfig JSON conversion
 nlohmann::json ProducerConfig::to_json() const {
     return {
-        {"id", stream_id},  // Output id field (using stream_id which holds the producer ID)
-        {"stream_id", stream_id},
+        {"id", id},
         {"type", type},
         {"leader_name", leader_name},
         {"follower_name", follower_name},
         {"camera_name", camera_name},
-        {"serial_number", serial_number},
-        {"device_index", device_index},
-        {"width", width},
-        {"height", height},
-        {"fps", fps},
-        {"encoding", encoding},
+        {"arm_name", arm_name},
         {"use_device_time", use_device_time},
         {"enforce_requested_fps", enforce_requested_fps},
         {"warmup_seconds", warmup_seconds}
@@ -119,17 +130,12 @@ ProducerConfig ProducerConfig::from_json(const nlohmann::json& j) {
     // Handle nested config structure from frontend
     const nlohmann::json& cfg = j.contains("config") ? j["config"] : j;
 
-    config.stream_id = j.value("id", cfg.value("stream_id", ""));
+    config.id = j.value("id", cfg.value("id", ""));
     config.type = j.value("type", "");  // Type is at top level
     config.leader_name = cfg.value("leader_name", "");
     config.follower_name = cfg.value("follower_name", "");
     config.camera_name = cfg.value("camera_name", "");
-    config.serial_number = cfg.value("serial_number", "");
-    config.device_index = cfg.value("device_index", 0);
-    config.width = cfg.value("width", 640);
-    config.height = cfg.value("height", 480);
-    config.fps = cfg.value("fps", 30);
-    config.encoding = cfg.value("encoding", "bgr8");
+    config.arm_name = cfg.value("arm_name", "");
     config.use_device_time = cfg.value("use_device_time", false);
     config.enforce_requested_fps = cfg.value("enforce_requested_fps", true);
     config.warmup_seconds = cfg.value("warmup_seconds", 2.0);
@@ -315,15 +321,15 @@ bool ConfigManager::validate_opencv_camera(const CameraConfig& config, std::stri
         return false;
     }
 
-    if (config.stream_id.empty()) {
-        error = "stream_id is required";
+    if (config.id.empty()) {
+        error = "id is required";
         return false;
     }
 
     try {
         trossen::hw::camera::OpenCvCameraProducer::Config sdk_cfg;
         sdk_cfg.device_index = config.device_index;
-        sdk_cfg.stream_id = config.stream_id;
+        sdk_cfg.stream_id = config.id;  // Use id as stream_id
         sdk_cfg.encoding = config.encoding;
         sdk_cfg.width = config.width;
         sdk_cfg.height = config.height;
@@ -421,38 +427,50 @@ bool ConfigManager::validate_widowx_arm(const ArmConfig& config, std::string& er
 bool ConfigManager::add_camera_config(const CameraConfig& config, std::string& error) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (!validate_camera_config(config, error)) {
+    // Create a copy and generate ID if needed
+    CameraConfig new_config = config;
+    if (new_config.id.empty()) {
+        new_config.id = generate_unique_id();
+    }
+
+    if (!validate_camera_config(new_config, error)) {
         return false;
     }
 
     // Check for duplicate names
     for (const auto& cam : configs_.cameras) {
-        if (cam.name == config.name) {
-            error = "Camera with name '" + config.name + "' already exists";
+        if (cam.name == new_config.name) {
+            error = "Camera with name '" + new_config.name + "' already exists";
             return false;
         }
     }
 
-    configs_.cameras.push_back(config);
+    configs_.cameras.push_back(new_config);
     return save_to_file();
 }
 
 bool ConfigManager::add_arm_config(const ArmConfig& config, std::string& error) {
     std::lock_guard<std::mutex> lock(mutex_);
 
-    if (!validate_arm_config(config, error)) {
+    // Create a copy and generate ID if needed
+    ArmConfig new_config = config;
+    if (new_config.id.empty()) {
+        new_config.id = generate_unique_id();
+    }
+
+    if (!validate_arm_config(new_config, error)) {
         return false;
     }
 
     // Check for duplicate names
     for (const auto& arm : configs_.arms) {
-        if (arm.name == config.name) {
-            error = "Arm with name '" + config.name + "' already exists";
+        if (arm.name == new_config.name) {
+            error = "Arm with name '" + new_config.name + "' already exists";
             return false;
         }
     }
 
-    configs_.arms.push_back(config);
+    configs_.arms.push_back(new_config);
     return save_to_file();
 }
 

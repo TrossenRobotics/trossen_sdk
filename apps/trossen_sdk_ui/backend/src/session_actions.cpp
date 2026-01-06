@@ -4,8 +4,11 @@
 #include "trossen_sdk/hw/active_hardware_registry.hpp"
 #include "trossen_sdk/hw/arm/so101_arm_component.hpp"
 #include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
+#include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
+#include "libtrossen_arm/trossen_arm.hpp"
 #include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/so101_teleop_arm_producer.hpp"
+#include "trossen_sdk/hw/arm/arm_producer.hpp"
 #include <iostream>
 #include <algorithm>
 
@@ -17,8 +20,6 @@ SessionAction string_to_action(const std::string& action_str) {
     if (action_str == "teleop_so101") return SessionAction::TELEOP_SO101;
     if (action_str == "teleop_widowx") return SessionAction::TELEOP_WIDOWX;
     if (action_str == "record_cameras") return SessionAction::RECORD_CAMERAS_ONLY;
-    if (action_str == "record_arms") return SessionAction::RECORD_ARMS_ONLY;
-    if (action_str == "record_full") return SessionAction::RECORD_FULL_SYSTEM;
 
     throw std::runtime_error("Unknown session action: " + action_str);
 }
@@ -28,8 +29,6 @@ std::string action_to_string(SessionAction action) {
         case SessionAction::TELEOP_SO101: return "teleop_so101";
         case SessionAction::TELEOP_WIDOWX: return "teleop_widowx";
         case SessionAction::RECORD_CAMERAS_ONLY: return "record_cameras";
-        case SessionAction::RECORD_ARMS_ONLY: return "record_arms";
-        case SessionAction::RECORD_FULL_SYSTEM: return "record_full";
         default: return "unknown";
     }
 }
@@ -62,11 +61,11 @@ bool validate_hardware_for_action(
         auto prod_it = std::find_if(configs.producers.begin(), configs.producers.end(),
             [&producer_id](const trossen::config::ProducerConfig& p) {
                 // Match by stream_id which contains the producer ID from JSON
-                return p.stream_id == producer_id;
+                return p.id == producer_id;
             });
         if (prod_it != configs.producers.end()) {
             system_producers.push_back(*prod_it);
-            std::cout << "      ✓ FOUND: stream_id='" << prod_it->stream_id
+            std::cout << "      ✓ FOUND: id='" << prod_it->id
                       << "' type='" << prod_it->type << "'" << std::endl;
         } else {
             std::cout << "      ✗ NOT FOUND in configs.producers" << std::endl;
@@ -128,7 +127,7 @@ bool validate_hardware_for_action(
             bool has_valid_config = false;
 
             for (const auto& prod : system_producers) {
-                if (prod.type == "teleop_widowx_arm") {
+                if (prod.type == "teleop_arm") {
                     widowx_count++;
 
                     // Check that both leader and follower are configured
@@ -183,29 +182,6 @@ bool validate_hardware_for_action(
             break;
         }
 
-        case SessionAction::RECORD_ARMS_ONLY: {
-            // Need at least one arm producer
-            int arm_count = std::count_if(system_producers.begin(), system_producers.end(),
-                [](const trossen::config::ProducerConfig& p) {
-                    return p.type == "teleop_so101_arm" || p.type == "teleop_widowx_arm";
-                });
-
-            if (arm_count == 0) {
-                error = "Arm recording requires at least one arm producer";
-                return false;
-            }
-            break;
-        }
-
-        case SessionAction::RECORD_FULL_SYSTEM: {
-            // No specific requirements, just need some producers
-            if (system_producers.empty()) {
-                error = "System has no producers configured";
-                return false;
-            }
-            break;
-        }
-
         default:
             error = "Unknown session action";
             return false;
@@ -237,7 +213,7 @@ bool setup_so101_teleop(
     for (const auto& producer_id : system_it->producers) {
         auto prod_it = std::find_if(configs.producers.begin(), configs.producers.end(),
             [&producer_id](const trossen::config::ProducerConfig& p) {
-                return p.stream_id == producer_id;
+                return p.id == producer_id;
             });
 
         if (prod_it != configs.producers.end() && prod_it->type == "teleop_so101_arm") {
@@ -245,7 +221,7 @@ bool setup_so101_teleop(
 
             std::string leader_name = prod.leader_name;
             std::string follower_name = prod.follower_name;
-            std::string stream_id = prod.stream_id;
+            std::string id = prod.id;
             bool use_device_time = prod.use_device_time;
 
             // Get drivers from ActiveHardwareRegistry
@@ -279,11 +255,12 @@ bool setup_so101_teleop(
 
             // Create SO101 teleop producer
             trossen::hw::arm::TeleopSO101ArmProducer::Config teleop_cfg;
-            teleop_cfg.stream_id = stream_id;
+            teleop_cfg.stream_id = id;
             teleop_cfg.use_device_time = use_device_time;
 
-            auto teleop_producer = std::make_shared<trossen::hw::arm::TeleopSO101ArmProducer>(
-                leader_driver, follower_driver, teleop_cfg);
+            auto teleop_producer = std::make_shared<
+                trossen::hw::arm::TeleopSO101ArmProducer>(
+                    leader_driver, follower_driver, teleop_cfg);
 
             // Register with 30Hz polling rate
             auto teleop_period = std::chrono::milliseconds(33);  // ~30Hz
@@ -293,7 +270,7 @@ bool setup_so101_teleop(
             active_session->arm_drivers.push_back(leader_driver);
             active_session->arm_drivers.push_back(follower_driver);
 
-            std::cout << "  ✓ Registered SO101 teleop producer: " << stream_id << std::endl;
+            std::cout << "  ✓ Registered SO101 teleop producer: " << id << std::endl;
 
             // Give servos time to initialize after connection
             std::cout << "  Waiting for servos to initialize..." << std::endl;
@@ -349,9 +326,120 @@ bool setup_widowx_teleop(
     std::string& error)
 {
     std::cout << "Setting up WidowX teleoperation session..." << std::endl;
-    error = "WidowX teleoperation not yet implemented";
-    return false;
-    // TODO(trossen): Implement WidowX teleop setup
+
+    // Get system configuration
+    auto configs = config_manager.get_configurations();
+    auto system_it = std::find_if(configs.systems.begin(), configs.systems.end(),
+        [&system_id](const trossen::config::HardwareSystem& s) {
+            return s.id == system_id;
+        });
+
+    if (system_it == configs.systems.end()) {
+        error = "Hardware system not found";
+        return false;
+    }
+
+    // Find teleop_arm producer in configuration
+    std::string teleop_stream_id;
+    std::string leader_arm_id, follower_arm_id;
+    bool use_device_time = true;
+
+    for (const auto& producer_id : system_it->producers) {
+        auto prod_it = std::find_if(configs.producers.begin(), configs.producers.end(),
+            [&producer_id](const trossen::config::ProducerConfig& p) {
+                return p.id == producer_id;
+            });
+        if (prod_it != configs.producers.end() && prod_it->type == "teleop_arm") {
+            teleop_stream_id = prod_it->id;
+            leader_arm_id = prod_it->leader_name;
+            follower_arm_id = prod_it->follower_name;
+            use_device_time = prod_it->use_device_time;
+            break;
+        }
+    }
+
+    if (teleop_stream_id.empty()) {
+        error = "No teleop_arm producer found in system configuration";
+        return false;
+    }
+
+    // Get hardware components from registry
+    auto leader_comp = trossen::hw::ActiveHardwareRegistry::get(leader_arm_id);
+    auto follower_comp = trossen::hw::ActiveHardwareRegistry::get(follower_arm_id);
+
+    if (!leader_comp || !follower_comp) {
+        error = "WidowX arms not found in hardware registry";
+        return false;
+    }
+
+    // Cast to TrossenArmComponent and extract drivers
+    auto leader_trossen =
+        std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(
+            leader_comp);
+    auto follower_trossen =
+        std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(
+            follower_comp);
+
+    if (!leader_trossen || !follower_trossen) {
+        error = "Failed to cast components to TrossenArmComponent";
+        return false;
+    }
+
+    auto leader_driver = leader_trossen->get_hardware();
+    auto follower_driver = follower_trossen->get_hardware();
+
+    if (!leader_driver || !follower_driver) {
+        error = "Failed to get arm drivers from components";
+        return false;
+    }
+
+    // Store drivers in active session
+    active_session->widowx_drivers.push_back(leader_driver);
+    active_session->widowx_drivers.push_back(follower_driver);
+
+    // Create and register the teleop producer
+    trossen::hw::arm::TeleopTrossenArmProducer::Config teleop_cfg;
+    teleop_cfg.stream_id = teleop_stream_id;
+    teleop_cfg.use_device_time = use_device_time;
+
+    auto teleop_producer = std::make_shared<
+        trossen::hw::arm::TeleopTrossenArmProducer>(
+            leader_driver, follower_driver, teleop_cfg);
+
+    active_session->manager->add_producer(
+        teleop_producer, std::chrono::milliseconds(1));
+    std::cout << "  ✓ Registered WidowX teleop producer: " << teleop_stream_id << std::endl;
+
+    // Start teleoperation thread with freeze logic
+    active_session->teleop_active = true;
+    active_session->teleop_thread = std::thread([active_session]() {
+        std::cout << "Starting WidowX teleoperation thread..." << std::endl;
+
+        auto leader_driver = active_session->widowx_drivers[0];
+        auto follower_driver = active_session->widowx_drivers[1];
+
+        while (active_session->teleop_active) {
+            // Check if we should freeze (waiting for next episode)
+            if (active_session->waiting_for_next.load()) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                continue;
+            }
+
+            try {
+                // Mirror leader arm positions to follower
+                auto positions = leader_driver->get_all_positions();
+                follower_driver->set_all_positions(positions, 0.0f, false);
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+            } catch (const std::exception& e) {
+                std::cerr << "Error in WidowX teleop thread: " << e.what() << std::endl;
+                break;
+            }
+        }
+
+        std::cout << "WidowX teleoperation thread stopped" << std::endl;
+    });
+
+    return true;
 }
 
 bool setup_camera_recording(
@@ -379,7 +467,7 @@ bool setup_camera_recording(
     for (const auto& producer_id : system_it->producers) {
         auto prod_it = std::find_if(configs.producers.begin(), configs.producers.end(),
             [&producer_id](const trossen::config::ProducerConfig& p) {
-                return p.stream_id == producer_id;
+                return p.id == producer_id;
             });
 
         if (prod_it == configs.producers.end()) continue;
@@ -391,11 +479,11 @@ bool setup_camera_recording(
             // Need to get camera component from ActiveHardwareRegistry
             // Create OpenCvCameraProducer and register with SessionManager
             std::cout << "OpenCV camera producer not yet implemented: "
-                      << prod.stream_id << std::endl;
+                      << prod.id << std::endl;
         } else if (prod.type == "realsense_color" ||
                    prod.type == "realsense_depth") {
             std::cout << "RealSense camera producer not yet implemented: "
-                      << prod.stream_id << std::endl;
+                      << prod.id << std::endl;
         }
     }
 
@@ -408,157 +496,6 @@ bool setup_camera_recording(
     return true;
 }
 
-bool setup_arm_recording(
-    std::shared_ptr<ActiveSession> active_session,
-    const std::string& system_id,
-    std::string& error)
-{
-    std::cout << "Setting up arm recording session..." << std::endl;
 
-    // Get system configuration
-    auto configs = config_manager.get_configurations();
-    auto system_it = std::find_if(configs.systems.begin(), configs.systems.end(),
-        [&system_id](const trossen::config::HardwareSystem& s) {
-            return s.id == system_id;
-        });
-
-    if (system_it == configs.systems.end()) {
-        error = "Hardware system not found";
-        return false;
-    }
-
-    int producers_added = 0;
-
-    // Instantiate all arm producers in the system (without teleoperation)
-    for (const auto& producer_id : system_it->producers) {
-        auto prod_it = std::find_if(configs.producers.begin(), configs.producers.end(),
-            [&producer_id](const trossen::config::ProducerConfig& p) {
-                return p.stream_id == producer_id;
-            });
-
-        if (prod_it == configs.producers.end()) continue;
-
-        const auto& prod = *prod_it;
-
-        if (prod.type == "teleop_so101_arm" || prod.type == "teleop_widowx_arm") {
-            std::cout << "Arm recording not yet implemented: " << prod.stream_id
-                      << std::endl;
-            // TODO(trossen): only using arm producers without cams
-        }
-    }
-
-    if (producers_added == 0) {
-        error = "No arm producers were instantiated";
-        return false;
-    }
-
-    std::cout << "  ✓ Registered " << producers_added << " arm producers" << std::endl;
-    return true;
-}
-
-// Set up full system recording (cameras + arms + teleop if applicable)
-bool setup_full_system_recording(
-    std::shared_ptr<ActiveSession> active_session,
-    const std::string& system_id,
-    std::string& error)
-{
-    std::cout << "Setting up full system recording session..." << std::endl;
-
-    // Get system configuration
-    auto configs = config_manager.get_configurations();
-    auto system_it = std::find_if(configs.systems.begin(), configs.systems.end(),
-        [&system_id](const trossen::config::HardwareSystem& s) {
-            return s.id == system_id;
-        });
-
-    if (system_it == configs.systems.end()) {
-        error = "Hardware system not found";
-        return false;
-    }
-
-    int producers_added = 0;
-
-    for (const auto& producer_id : system_it->producers) {
-        auto prod_it = std::find_if(configs.producers.begin(), configs.producers.end(),
-            [&producer_id](const trossen::config::ProducerConfig& p) {
-                return p.stream_id == producer_id;
-            });
-
-        if (prod_it == configs.producers.end()) continue;
-
-        const auto& prod = *prod_it;
-
-        if (prod.type == "teleop_so101_arm") {
-            // Get hardware from registry
-            auto leader_comp = trossen::hw::ActiveHardwareRegistry::get(prod.leader_name);
-            auto follower_comp = trossen::hw::ActiveHardwareRegistry::get(prod.follower_name);
-
-            if (!leader_comp || !follower_comp) {
-                std::cout << "SO101 hardware not connected: " << prod.stream_id << std::endl;
-                continue;
-            }
-
-            auto leader_so101 =
-                std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(
-                    leader_comp);
-            auto follower_so101 =
-                std::dynamic_pointer_cast<trossen::hw::arm::SO101ArmComponent>(
-                    follower_comp);
-
-            if (!leader_so101 || !follower_so101) {
-                std::cout << "Failed to cast SO101 components: " << prod.stream_id << std::endl;
-                continue;
-            }
-
-            auto leader_driver = leader_so101->get_driver();
-            auto follower_driver = follower_so101->get_driver();
-
-            if (!leader_driver || !follower_driver) {
-                std::cout << "Failed to get SO101 drivers: " << prod.stream_id << std::endl;
-                continue;
-            }
-
-            // Create producer
-            trossen::hw::arm::TeleopSO101ArmProducer::Config teleop_cfg;
-            teleop_cfg.stream_id = prod.stream_id;
-            teleop_cfg.use_device_time = prod.use_device_time;
-
-            auto teleop_producer = std::make_shared<trossen::hw::arm::TeleopSO101ArmProducer>(
-                leader_driver, follower_driver, teleop_cfg);
-
-            auto teleop_period = std::chrono::milliseconds(33);  // ~30Hz
-            active_session->manager->add_producer(teleop_producer, teleop_period);
-
-            active_session->arm_drivers.push_back(leader_driver);
-            active_session->arm_drivers.push_back(follower_driver);
-
-            producers_added++;
-            std::cout << "Registered SO101 teleop producer: " << prod.stream_id
-                      << std::endl;
-        } else if (prod.type == "teleop_widowx_arm") {
-            std::cout << "WidowX producer not yet implemented: "
-                      << prod.stream_id << std::endl;
-        } else if (prod.type == "opencv_camera") {
-            std::cout << "OpenCV camera producer not yet implemented: "
-                      << prod.stream_id << std::endl;
-        } else if (prod.type == "realsense_color" ||
-                   prod.type == "realsense_depth") {
-            std::cout << "RealSense producer not yet implemented: "
-                      << prod.stream_id << std::endl;
-        } else {
-            std::cout << "Unknown producer type: " << prod.type << " ("
-                      << prod.stream_id << ")" << std::endl;
-        }
-    }
-
-    if (producers_added == 0) {
-        error = "No producers were instantiated";
-        return false;
-    }
-
-    std::cout << "Registered " << producers_added
-              << " producers for full system recording" << std::endl;
-    return true;
-}
 
 }  // namespace trossen::backend
