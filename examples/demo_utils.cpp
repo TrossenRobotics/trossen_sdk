@@ -57,8 +57,9 @@ void print_episode_summary(const std::string& file_path, runtime::SessionManager
   // Prepare all the values as strings
   std::string records_str = std::to_string(stats.records_written_current);
 
-  std::string duration_str =
-      std::to_string(static_cast<int>(stats.elapsed.count())) + "s";
+  std::ostringstream duration_ss;
+  duration_ss << std::fixed << std::setprecision(1) << stats.elapsed.count() << "s";
+  std::string duration_str = duration_ss.str();
 
   std::string setup_str =
       stats.preprocessing_duration_s.has_value()
@@ -72,10 +73,13 @@ void print_episode_summary(const std::string& file_path, runtime::SessionManager
                 stats.postprocess_duration_s.value()) + "s"
           : "";
 
+  std::string actual_duration_str =
+      std::to_string(stats.recording_duration_s.value_or(0.0)) + "s";
+
   std::string rate_str =
       stats.elapsed.count() > 0
           ? std::to_string(static_cast<int>(
-                stats.records_written_current / stats.elapsed.count())) +
+                stats.records_written_current / stats.recording_duration_s.value_or(0.0))) +
                 " records/s"
           : "";
 
@@ -111,6 +115,8 @@ void print_episode_summary(const std::string& file_path, runtime::SessionManager
   // Data rows
   print_row("Records Written:", records_str);
   print_row("Duration:", duration_str);
+
+  print_row("Actual Duration:", actual_duration_str);
 
   if (!setup_str.empty()) {
     print_row("Pre-Processing Time:", setup_str);
@@ -261,27 +267,21 @@ runtime::SessionManager::Stats monitor_episode(
 {
   auto last_update = std::chrono::steady_clock::now();
   runtime::SessionManager::Stats last_stats;
-  runtime::SessionManager::Stats saved_stats;
 
-  while (mgr.is_episode_active() && !g_stop_requested) {
+  while (!mgr.are_final_stats_emitted()) {
     auto now = std::chrono::steady_clock::now();
     if (now - last_update >= update_interval) {
       auto stats = mgr.stats();
       print_stats_line(stats);
       last_stats = stats;
       last_update = now;
-      if (last_stats.records_written_current != 0 &&
-          last_stats.records_written_current !=
-            saved_stats.records_written_current) {
-        saved_stats = last_stats;
-      }
     }
     // TODO(shantanuparab-tr): We might miss records written in the last sleep interval.
     // Consider using condition variable or similar mechanism for better accuracy.
     // Make sure this is fixed with asynchronous episode monitoring implementation.
     std::this_thread::sleep_for(sleep_interval);
   }
-  return saved_stats;
+  return last_stats;
 }
 
 std::string generate_episode_path(

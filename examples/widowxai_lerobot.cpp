@@ -488,7 +488,7 @@ int main(int argc, char** argv) {
     // ──────────────────────────────────────────────────────────
 
     trossen::demo::SanityCheckConfig sanity_cfg{
-      last_stats.elapsed.count(),
+      last_stats.recording_duration_s.value_or(0.0),
       1,  // 1 joint producer (follower)
       cfg.joint_rate_hz,
       1,  // 1 camera
