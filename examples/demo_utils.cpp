@@ -43,9 +43,123 @@ void print_stats_line(const runtime::SessionManager::Stats& stats) {
   std::cout << std::flush;
 }
 
-void print_episode_summary(const std::string& file_path, uint64_t records) {
-  std::cout << "\n✓ Episode complete: " << records << " records written\n";
-  std::cout << "  File: " << file_path << "\n";
+void print_episode_summary(const std::string& file_path, runtime::SessionManager::Stats stats) {
+  // Helper to repeat a string n times
+  auto repeat_str = [](const std::string& s, size_t n) {
+    std::string result;
+    result.reserve(s.length() * n);
+    for (size_t i = 0; i < n; ++i) {
+      result += s;
+    }
+    return result;
+  };
+
+  // Prepare all the values as strings
+  std::string records_str = std::to_string(stats.records_written_current);
+
+  std::string duration_str =
+      std::to_string(static_cast<int>(stats.elapsed.count())) + "s";
+
+  std::string setup_str =
+      stats.preprocessing_duration_s.has_value()
+          ? std::to_string(
+                stats.preprocessing_duration_s.value()) + "s"
+          : "";
+
+  std::string shutdown_str =
+      stats.postprocess_duration_s.has_value()
+          ? std::to_string(
+                stats.postprocess_duration_s.value()) + "s"
+          : "";
+
+  std::string rate_str =
+      stats.elapsed.count() > 0
+          ? std::to_string(static_cast<int>(
+                stats.records_written_current / stats.elapsed.count())) +
+                " records/s"
+          : "";
+
+  // Calculate the maximum value length needed
+  size_t max_value_len = records_str.length();
+  max_value_len = std::max(max_value_len, duration_str.length());
+  if (!setup_str.empty()) max_value_len = std::max(max_value_len, setup_str.length());
+  if (!shutdown_str.empty()) max_value_len = std::max(max_value_len, shutdown_str.length());
+  if (!rate_str.empty()) max_value_len = std::max(max_value_len, rate_str.length());
+  // Label column width (longest label + padding)
+  const size_t label_width = 21;  // "Records Written:     " is 21 chars
+  // Calculate minimum box width based on content
+  size_t min_box_width = 2 + label_width + max_value_len + 2;
+  // Include file path length in calculation
+  size_t file_path_width = 9 + file_path.length();  // "│ File: " (7) + path + " │" (2)
+  // Title width
+  std::string title = " ✓ Episode " + std::to_string(stats.current_episode_index) + " Summary";
+  size_t title_width = 2 + title.length();  // "│" + title + "│"
+  // Use the maximum of all width requirements
+  const size_t box_width = std::max({min_box_width, file_path_width, title_width});
+  // Top border
+  std::cout << "\n┌" << repeat_str("─", box_width - 2) << "┐\n";
+  // Title line
+  std::cout << "│" << title << std::string(box_width - 2 - title.length(), ' ') << "│\n";
+  // Separator
+  std::cout << "├" << repeat_str("─", box_width - 2) << "┤\n";
+  // Helper lambda to print a row
+  auto print_row = [&](const std::string& label, const std::string& value) {
+    std::cout << "│ " << std::setw(label_width) << std::left << label
+              << std::setw(max_value_len) << std::left << value << " │\n";
+  };
+
+  // Data rows
+  print_row("Records Written:", records_str);
+  print_row("Duration:", duration_str);
+
+  if (!setup_str.empty()) {
+    print_row("Pre-Processing Time:", setup_str);
+  }
+
+  if (!shutdown_str.empty()) {
+    print_row("Post-Processing Time:", shutdown_str);
+  }
+
+  if (!rate_str.empty()) {
+    print_row("Average Rate:", rate_str);
+  }
+
+  // Separator before file path
+  std::cout << "├" << repeat_str("─", box_width - 2) << "┤\n";
+
+  // File path (display full path)
+  // Limit the "File" line to at most 100 characters (including borders)
+  const size_t max_line_len = 100;
+  const std::string prefix = "│ File: ";
+  const std::string suffix = "│";
+
+  // Compute max length available for the file path
+  size_t max_path_len = (max_line_len > prefix.size() + suffix.size())
+                          ? (max_line_len - prefix.size() - suffix.size())
+                          : 0;
+
+  std::string display_path = file_path;
+  if (display_path.size() > max_path_len) {
+    if (max_path_len <= 3) {
+      display_path = display_path.substr(0, max_path_len);
+    } else {
+      size_t keep = max_path_len - 3;
+      size_t front = keep / 2;
+      size_t back = keep - front;
+      display_path = display_path.substr(0, front) + "..." +
+                     display_path.substr(display_path.size() - back);
+    }
+  }
+
+  // Pad up to the smaller of box_width or 100 to keep alignment where possible
+  size_t target_len = std::min(box_width, max_line_len);
+  size_t current_len = prefix.size() + display_path.size() + suffix.size();
+  size_t pad = (current_len < target_len) ? (target_len - current_len) : 0;
+
+  std::cout << prefix << display_path << std::string(pad, ' ') << suffix << "\n";
+
+  // Bottom border
+  std::cout << "└" << repeat_str("─", box_width - 2) << "┘\n";
 }
 
 void print_config_banner(

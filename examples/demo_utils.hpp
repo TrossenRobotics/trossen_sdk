@@ -72,7 +72,7 @@ void print_stats_line(const runtime::SessionManager::Stats& stats);
  * @param file_path Path to the recorded episode
  * @param records Number of records written
  */
-void print_episode_summary(const std::string& file_path, uint64_t records);
+void print_episode_summary(const std::string& file_path, runtime::SessionManager::Stats stats);
 
 /**
  * @brief Print application configuration banner

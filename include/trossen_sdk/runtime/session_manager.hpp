@@ -155,6 +155,12 @@ public:
 
     /// @brief Episodes finished this session
     uint64_t total_episodes_completed;
+
+    /// @brief Duration of episode preprocessing (seconds)
+    std::optional<double> preprocessing_duration_s;
+
+    /// @brief Duration of episode shutdown (seconds)
+    std::optional<double> postprocess_duration_s;
   };
 
   /**
@@ -185,6 +191,12 @@ private:
 
   /// @brief Sink's processed_count() at the start of current episode (for delta tracking)
   uint64_t episode_start_record_count_{0};
+
+  /// @brief Duration of last preprocessing phase (seconds)
+  double preprocessing_duration_s_{0.0};
+
+  /// @brief Duration of last shutdown phase (seconds)
+  double postprocess_duration_s_{0.0};
 
   /// @brief Monitoring thread for duration-based auto-stop
   std::thread monitor_thread_;

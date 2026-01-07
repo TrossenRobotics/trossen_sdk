@@ -370,7 +370,7 @@ int main(int argc, char** argv) {
     std::string file_path = trossen::demo::generate_episode_path(
       cfg.root,
       recording_episode_index);
-    trossen::demo::print_episode_summary(file_path, last_stats.records_written_current);
+    trossen::demo::print_episode_summary(file_path, last_stats);
 
     // ──────────────────────────────────────────────────────────
     // Sanity check: verify expected record counts
