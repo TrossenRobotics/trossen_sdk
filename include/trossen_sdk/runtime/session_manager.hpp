@@ -162,6 +162,11 @@ public:
    */
   Stats stats() const;
 
+  /**
+   * @brief Print episode header to console
+   */
+  void print_episode_header();
+
 private:
   /// @brief Configuration
   std::shared_ptr<trossen::configuration::SessionManagerConfig> cfg_;

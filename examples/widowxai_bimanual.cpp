@@ -432,7 +432,7 @@ int main(int argc, char** argv) {
     }
 
     // Display episode header
-    trossen::demo::print_episode_header(mgr.stats().current_episode_index, cfg.duration_s);
+    mgr.print_episode_header();
 
     // Start episode
     if (!mgr.start_episode()) {

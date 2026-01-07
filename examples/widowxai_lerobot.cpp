@@ -417,6 +417,9 @@ int main(int argc, char** argv) {
       break;
     }
 
+    // Display episode header
+    mgr.print_episode_header();
+
     // Lock the leader arm, move the follower arm to mirror the leader's current position, and
     // unlock the leader
     if (!cfg.use_mock) {
