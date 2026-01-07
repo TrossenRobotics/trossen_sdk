@@ -350,7 +350,7 @@ int main(int argc, char** argv) {
     }
 
     // Monitor loop: display stats while episode is active
-    uint64_t last_record_count = trossen::demo::monitor_episode(mgr);
+    trossen::runtime::SessionManager::Stats last_stats = trossen::demo::monitor_episode(mgr);
 
     // Stop episode and wait for teleop thread
     if (mgr.is_episode_active()) {
@@ -370,21 +370,24 @@ int main(int argc, char** argv) {
     std::string file_path = trossen::demo::generate_episode_path(
       cfg.root,
       recording_episode_index);
-    trossen::demo::print_episode_summary(file_path, last_record_count);
+    trossen::demo::print_episode_summary(file_path, last_stats.records_written_current);
 
     // ──────────────────────────────────────────────────────────
     // Sanity check: verify expected record counts
     // ──────────────────────────────────────────────────────────
 
     trossen::demo::SanityCheckConfig sanity_cfg{
-      actual_duration,
+      last_stats.elapsed.count(),
       1,  // 1 joint producer (follower)
       cfg.joint_rate_hz,
       1,  // 1 camera
       cfg.camera_fps,
       5.0  // 5% tolerance
     };
-    trossen::demo::perform_sanity_check(recording_episode_index, last_record_count, sanity_cfg);
+    trossen::demo::perform_sanity_check(
+      recording_episode_index,
+      last_stats.records_written_current,
+      sanity_cfg);
 
     // Check if user requested stop
     if (trossen::demo::g_stop_requested) {

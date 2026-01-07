@@ -145,7 +145,7 @@ bool interruptible_sleep(std::chrono::duration<double> duration);
  * @param sleep_interval How long to sleep between checks
  * @return true if completed normally, false if interrupted by stop request
  */
-uint64_t monitor_episode(
+runtime::SessionManager::Stats monitor_episode(
   runtime::SessionManager& mgr,
   std::chrono::duration<double> update_interval = std::chrono::milliseconds(500),
   std::chrono::duration<double> sleep_interval = std::chrono::milliseconds(100));
