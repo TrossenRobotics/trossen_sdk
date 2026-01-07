@@ -13,25 +13,26 @@
 
 namespace trossen::configuration {
 
+// Trossen backend specific constants
+inline constexpr char TROSSEN_DEFAULT_DROP_POLICY[] = "DropNewest";
+
 struct TrossenBackendConfig : public BaseConfig {
-  std::string root{"/data/trossen"};
-  int encoder_threads{1};
-  int max_image_queue{0};
-  int png_compression_level{3};
-  std::string drop_policy{"DropNewest"};
+  std::string root{trossen::io::backends::get_default_root_path().string()};
+  int encoder_threads{trossen::io::backends::DEFAULT_ENCODER_THREADS};
+  int max_image_queue{trossen::io::backends::DEFAULT_MAX_IMAGE_QUEUE};
+  int png_compression_level{trossen::io::backends::DEFAULT_PNG_COMPRESSION_LEVEL};
+  std::string drop_policy{TROSSEN_DEFAULT_DROP_POLICY};
 
   std::string type() const override { return "trossen_backend"; }
 
   static TrossenBackendConfig from_json(const nlohmann::json& j) {
     TrossenBackendConfig c;
-    c.root = j.value("root", "");
-    if (c.root.empty()) {
-        c.root = trossen::io::backends::get_default_root_path().string();
-    }
-    c.encoder_threads = j.value("encoder_threads", 1);
-    c.max_image_queue = j.value("max_image_queue", 0);
-    c.png_compression_level = j.value("png_compression_level", 3);
-    c.drop_policy = j.value("drop_policy", "DropNewest");
+    if (j.contains("root")) j.at("root").get_to(c.root);
+    if (j.contains("encoder_threads")) j.at("encoder_threads").get_to(c.encoder_threads);
+    if (j.contains("max_image_queue")) j.at("max_image_queue").get_to(c.max_image_queue);
+    if (j.contains("png_compression_level"))
+      j.at("png_compression_level").get_to(c.png_compression_level);
+    if (j.contains("drop_policy")) j.at("drop_policy").get_to(c.drop_policy);
 
     return c;
   }

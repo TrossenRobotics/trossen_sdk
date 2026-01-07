@@ -46,37 +46,20 @@ SessionManager::SessionManager(){
     std::cout << "Backend Type: (none)" << std::endl;
   }
   std::cout << "==========================================================" << std::endl;
-  // TODO(shantanuparab-tr): Move this logic to a backend utility function
-  // Validate required configuration
-  // if (cfg_->base_path.empty()) {
-  //   throw std::invalid_argument("SessionConfig::base_path cannot be empty");
-  // }
-
-  // // Create base directory if it doesn't exist
-  // if (!std::filesystem::exists(cfg_->base_path)) {
-  //   // TODO(lukeschmitt-tr): Handle potential errors
-  //   std::filesystem::create_directories(cfg_->base_path);
-  // }
-
-  // // Auto-generate dataset_id if not provided
-  // if (cfg_->dataset_id.empty()) {
-  //   // TODO(lukeschmitt-tr): Generate UUID (for now, use timestamp-based ID)
-  //   auto now = std::chrono::system_clock::now();
-  //   auto time_t_now = std::chrono::system_clock::to_time_t(now);
-  //   std::ostringstream oss;
-  //   // Format: dataset_YYYYMMDD_HHMMSS in local time
-  //   oss << "dataset_" << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S");
-  //   cfg_->dataset_id = oss.str();
-  //   std::cout << "Auto-generated dataset_id: " << cfg_->dataset_id << std::endl;
-  // }
 }
 
 SessionManager::~SessionManager() {
-  // Ensure monitoring thread is stopped
+  // Ensure monitoring threads are stopped
   monitoring_active_ = false;
   if (monitor_thread_.joinable()) {
     monitor_thread_.join();
   }
+
+  async_monitoring_active_ = false;
+  if (async_monitor_thread_.joinable()) {
+    async_monitor_thread_.join();
+  }
+
   shutdown();
 }
 
@@ -112,6 +95,11 @@ bool SessionManager::start_episode() {
     std::cerr << "Episode already active. Call stop_episode() first." << std::endl;
     return false;
   }
+  // Make sure stats_emitted_ is reset for new episode
+  stats_emitted_.store(false);
+
+  // Start a timer to measure pre-processing duration
+  auto prep_start_time = std::chrono::steady_clock::now();
 
   ProducerMetadataList producer_metadata;
 
@@ -205,13 +193,19 @@ bool SessionManager::start_episode() {
     monitoring_active_ = true;
     monitor_thread_ = std::thread([this]() { monitor_duration(); });
   }
-
+  // Measure and report pre-processing duration
+  auto prep_end_time = std::chrono::steady_clock::now();
+  preprocessing_duration_s_ =
+    std::chrono::duration<double>(prep_end_time - prep_start_time).count();
   std::cout << "Episode " << next_episode_index_ << " started." << std::endl;
 
   return true;
 }
 
 void SessionManager::stop_episode() {
+  // Start timer to measure shutdown duration
+  auto shutdown_start_time = std::chrono::steady_clock::now();
+
   // First, signal monitoring thread to stop (if any)
   monitoring_active_ = false;
 
@@ -237,6 +231,12 @@ void SessionManager::stop_episode() {
     scheduler_.reset();
   }
 
+  // Get the final record count before stopping sink
+  if (current_sink_) {
+    final_records_written_ = current_sink_->processed_count() - episode_start_record_count_;
+  } else {
+    final_records_written_ = 0;
+  }
   // Stop sink - drain queue and write all pending records
   if (current_sink_) {
     current_sink_->stop();
@@ -255,6 +255,10 @@ void SessionManager::stop_episode() {
   ++total_episodes_completed_;
   ++next_episode_index_;
 
+  // Measure and report shutdown duration
+  auto shutdown_end_time = std::chrono::steady_clock::now();
+  auto shutdown_duration = shutdown_end_time - shutdown_start_time;
+  postprocess_duration_s_ = std::chrono::duration<double>(shutdown_duration).count();
   std::cout << "\nEpisode stopped. Total completed: " << total_episodes_completed_
             << ", Next index: " << next_episode_index_ << std::endl;
 
@@ -268,10 +272,23 @@ void SessionManager::stop_episode() {
     }
   }
   auto_stop_cv_.notify_all();
+
+  // Invoke callback if set (after episode is fully stopped and stats are available)
+  // Note: We do this outside the main lock to avoid blocking episode operations
+  // The callback will call stats() which has its own locking
+  if (episode_complete_callback_) {
+    // Get final stats to pass to callback
+    Stats final_stats = stats();
+    episode_complete_callback_(final_stats);
+  }
 }
 
 bool SessionManager::is_episode_active() const {
   return episode_active_;
+}
+
+bool SessionManager::are_final_stats_emitted() const {
+  return stats_emitted_.load();
 }
 
 bool SessionManager::wait_for_auto_stop(std::chrono::milliseconds timeout) {
@@ -307,7 +324,7 @@ SessionManager::Stats SessionManager::stats() const {
   s.current_episode_index = next_episode_index_;
   s.episode_active = episode_active_;
 
-  if (episode_active_) {
+  if (episode_active_ || !stats_emitted_.load()) {
     auto now = std::chrono::steady_clock::now();
     s.elapsed = std::chrono::duration<double>(now - episode_start_time_);
 
@@ -327,7 +344,18 @@ SessionManager::Stats SessionManager::stats() const {
       uint64_t current_count = current_sink_->processed_count();
       s.records_written_current = current_count - episode_start_record_count_;
     } else {
-      s.records_written_current = 0;
+      s.records_written_current = final_records_written_;
+    }
+    if (preprocessing_duration_s_ > 0.0) {
+      s.preprocessing_duration_s = preprocessing_duration_s_;
+    }
+    if (postprocess_duration_s_ > 0.0) {
+      s.postprocess_duration_s = postprocess_duration_s_;
+    }
+    if (!stats_emitted_.load() && !episode_active_) {
+      s.recording_duration_s = s.elapsed.count() -
+        (preprocessing_duration_s_ + postprocess_duration_s_);
+      stats_emitted_.store(true);
     }
   } else {
     s.elapsed = std::chrono::duration<double>(0);
@@ -337,7 +365,13 @@ SessionManager::Stats SessionManager::stats() const {
 
   s.total_episodes_completed = total_episodes_completed_;
 
+
   return s;
+}
+
+void SessionManager::set_episode_complete_callback(EpisodeCompleteCallback callback) {
+  std::lock_guard<std::mutex> lock(episode_mutex_);
+  episode_complete_callback_ = std::move(callback);
 }
 
 std::shared_ptr<io::Backend> SessionManager::create_backend(
@@ -372,16 +406,108 @@ void SessionManager::monitor_duration() {
       // Stop monitoring first
       monitoring_active_ = false;
 
-      // Detach this thread so it can clean itself up
-      if (monitor_thread_.joinable()) {
-        monitor_thread_.detach();
-      }
-
       // Call stop_episode() directly from this thread
       stop_episode();
       break;
     }
   }
+}
+
+void SessionManager::print_episode_header() {
+  std::cout << "\n╔════════════════════════════════════════════════════════════╗\n";
+  std::cout << "║  Episode " << next_episode_index_ << " | Target Duration: ";
+  if (cfg_->max_duration.has_value()) {
+    std::cout << cfg_->max_duration->count() << "s";
+  } else {
+    std::cout << "unlimited";
+  }
+
+  // Calculate padding to align right edge
+  const std::size_t episode_len = std::to_string(next_episode_index_).length();
+  const std::size_t duration_len = cfg_->max_duration.has_value()
+    ? std::to_string(cfg_->max_duration->count()).length()
+    : static_cast<std::size_t>(9);
+  const std::size_t total_len = episode_len + duration_len;
+  const std::size_t padding_len = (41 > total_len) ? (41 - total_len) : 0;
+  std::string padding(padding_len, ' ');
+  std::cout << padding << "║\n";
+  std::cout << "╚════════════════════════════════════════════════════════════╝\n";
+}
+
+void SessionManager::print_stats_line(const SessionManager::Stats& stats) {
+  std::cout << "\r[Episode " << stats.current_episode_index << "] "
+            << "Elapsed: " << std::fixed << std::setprecision(1) << stats.elapsed.count() << "s"
+            << " | Records: " << stats.records_written_current;
+
+  if (stats.remaining.has_value() && stats.remaining->count() > 0) {
+    std::cout << " | Remaining: " << std::fixed << std::setprecision(1)
+              << stats.remaining->count() << "s";
+  } else {
+    std::cout << " | Duration: unlimited";
+  }
+
+  std::cout << std::flush;
+}
+
+SessionManager::Stats SessionManager::monitor_episode(
+  std::chrono::duration<double> update_interval,
+  std::chrono::duration<double> sleep_interval,
+  bool print_stats)
+{
+  auto last_update = std::chrono::steady_clock::now();
+  SessionManager::Stats last_stats;
+
+  while (!are_final_stats_emitted()) {
+    auto now = std::chrono::steady_clock::now();
+    if (now - last_update >= update_interval) {
+      SessionManager::Stats stats_ = stats();
+      if (print_stats) {
+        print_stats_line(stats_);
+      }
+      last_stats = stats_;
+      last_update = now;
+    }
+    std::this_thread::sleep_for(sleep_interval);
+  }
+  return last_stats;
+}
+
+void SessionManager::start_async_monitoring(
+  std::chrono::duration<double> update_interval,
+  std::chrono::duration<double> sleep_interval,
+  bool print_stats)
+{
+  // Stop any existing async monitoring
+  if (async_monitoring_active_) {
+    get_async_monitor_stats();
+  }
+
+  async_monitoring_active_ = true;
+  async_monitor_thread_ = std::thread([this, update_interval, sleep_interval, print_stats]() {
+    // Run monitor_episode in background thread
+    Stats final_stats = monitor_episode(update_interval, sleep_interval, print_stats);
+
+    // Store final stats
+    {
+      std::lock_guard<std::mutex> lock(async_monitor_mutex_);
+      async_monitor_final_stats_ = final_stats;
+    }
+
+    async_monitoring_active_ = false;
+  });
+}
+
+SessionManager::Stats SessionManager::get_async_monitor_stats() {
+  // Stop async monitoring if active
+  async_monitoring_active_ = false;
+
+  if (async_monitor_thread_.joinable()) {
+    async_monitor_thread_.join();
+  }
+
+  // Return the final stats
+  std::lock_guard<std::mutex> lock(async_monitor_mutex_);
+  return async_monitor_final_stats_;
 }
 
 }  // namespace trossen::runtime

@@ -1,18 +1,18 @@
 /**
- * @file so101_lerobot.cpp
- * @brief Complete SO101 demo with Session Manager, MCAP backend, and OpenCV camera
+ * @file widowxai_lerobot_async.cpp
+ * @brief Demo for Trossen AI Solo with Mock/Hardware arms, Session Manager, LeRobot backend, and OpenCV camera (asynchronous monitoring)
  *
  * This demo combines:
- * - SO101 hardware (leader + follower arms)
+ * - Trossen AI Solo hardware (leader + follower arms)
  * - Session Manager for multi-episode recording
- * - MCAP backend for data storage
+ * - LeRobot backend for data storage
  * - OpenCV camera producer for image capture
  * - Configurable episode count and duration
  *
  * Usage:
- *   ./so101_teleop
- *   ./so101_teleop --root /data/recordings
- *   ./so101_teleop --mock  # Use mock producers for testing without hardware
+ *   ./widowxai_lerobot_async
+ *   ./widowxai_lerobot_async --root-dir /data/recordings
+ *   ./widowxai_lerobot_async --mock  # Use mock producers for testing without hardware
  */
 
 #include <chrono>
@@ -23,12 +23,16 @@
 #include <thread>
 #include <vector>
 
-#include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
+#include "libtrossen_arm/trossen_arm.hpp"
 #include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
-#include "trossen_sdk/hw/arm/so101_teleop_arm_producer.hpp"
+#include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
+#include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
+#include "trossen_sdk/hw/camera/realsense_depth_producer.hpp"
+#include "trossen_sdk/hw/camera/realsense_frame_cache.hpp"
+#include "trossen_sdk/hw/camera/realsense_producer.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
@@ -41,8 +45,6 @@
 // ────────────────────────────────────────────────────────────
 
 struct Config {
-  int duration_s = 10;
-  int episodes = 1;
   std::string dataset_id = "";  // empty = auto-generate
   std::string root = trossen::io::backends::get_default_root_path().string();
   std::string repository_id = "TrossenRoboticsCommunity";  // Valid only for LeRobot backend
@@ -50,15 +52,15 @@ struct Config {
   bool show_help = false;
 
   // Camera settings
-  int camera_index = 4;
+  int camera_index = 2;
   int camera_width = 1920;
   int camera_height = 1080;
   int camera_fps = 30;
 
   // Arm settings
   float joint_rate_hz = 30.0f;
-  std::string leader_port = "/dev/ttyACM1";
-  std::string follower_port = "/dev/ttyACM0";
+  std::string leader_ip = "192.168.1.2";
+  std::string follower_ip = "192.168.1.4";
 
   // Dataset backend type
   std::string backend_type = "mcap";
@@ -68,26 +70,24 @@ void print_usage(const char* prog_name) {
   std::cout
     << "Usage: " << prog_name << " [options]\n\n"
     << "Options:\n"
-    << "  --duration <seconds>     Duration per episode (default: 10)\n"
-    << "  --episodes <count>       Number of episodes to record (default: 1)\n"
     << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
     << "  --root <path>            Root directory for episodes (default: ~/.cache/trossen_sdk/)\n"
     << "  --repository-id <string> Repository identifier (default: TrossenRoboticsCommunity, "
     << "only for LeRobot backend)\n"
     << "  --mock                   Use mock producers instead of real hardware\n"
-    << "  --camera-index <num>     Camera device index (default: 4, i.e., /dev/video4)\n"
+    << "  --camera-index <num>     Camera device index (default: 2, i.e., /dev/video2)\n"
     << "  --camera-width <pixels>  Camera width (default: 1920)\n"
     << "  --camera-height <pixels> Camera height (default: 1080)\n"
     << "  --camera-fps <fps>       Camera frame rate (default: 30)\n"
     << "  --joint-rate <hz>        Joint state capture rate (default: 30)\n"
-    << "  --leader-port <port>     Leader arm serial port (default: /dev/ttyACM1)\n"
-    << "  --follower-port <port>   Follower arm serial port (default: /dev/ttyACM0)\n"
+    << "  --leader-ip <ip>         Leader arm IP (default: 192.168.1.2)\n"
+    << "  --follower-ip <ip>       Follower arm IP (default: 192.168.1.4)\n"
     << "  --backend <type>         Dataset backend type (default: mcap)\n"
     << "  --help                   Show this help message\n\n"
     << "Examples:\n"
-    << "  " << prog_name << " --duration 10 --episodes 5\n"
-    << "  " << prog_name << " --mock --duration 5 --episodes 3\n"
-    << "  " << prog_name << " --dataset-id so101_demo_001 --root /data/recordings\n";
+    << "  " << prog_name << "\n"
+    << "  " << prog_name << " --mock\n"
+    << "  " << prog_name << " --dataset-id solo_demo_001 --root /data/recordings\n";
 }
 
 Config parse_args(int argc, char** argv) {
@@ -97,10 +97,6 @@ Config parse_args(int argc, char** argv) {
     if (arg == "--help" || arg == "-h") {
       cfg.show_help = true;
       return cfg;
-    } else if (arg == "--duration" && i + 1 < argc) {
-      cfg.duration_s = std::max(1, std::atoi(argv[++i]));
-    } else if (arg == "--episodes" && i + 1 < argc) {
-      cfg.episodes = std::max(1, std::atoi(argv[++i]));
     } else if (arg == "--dataset-id" && i + 1 < argc) {
       cfg.dataset_id = argv[++i];
     } else if (arg == "--root" && i + 1 < argc) {
@@ -119,10 +115,10 @@ Config parse_args(int argc, char** argv) {
       cfg.camera_fps = std::max(1, std::atoi(argv[++i]));
     } else if (arg == "--joint-rate" && i + 1 < argc) {
       cfg.joint_rate_hz = std::max(1.0f, static_cast<float>(std::atof(argv[++i])));
-    } else if (arg == "--leader-port" && i + 1 < argc) {
-      cfg.leader_port = argv[++i];
-    } else if (arg == "--follower-port" && i + 1 < argc) {
-      cfg.follower_port = argv[++i];
+    } else if (arg == "--leader-ip" && i + 1 < argc) {
+      cfg.leader_ip = argv[++i];
+    } else if (arg == "--follower-ip" && i + 1 < argc) {
+      cfg.follower_ip = argv[++i];
     } else if (arg == "--backend" && i + 1 < argc) {
       cfg.backend_type = argv[++i];
     } else {
@@ -155,8 +151,6 @@ int main(int argc, char** argv) {
   // Print configuration
   std::vector<std::string> config_lines = {
     "Mode:                 " + std::string(cfg.use_mock ? "Mock (no hardware)" : "Hardware"),
-    "Duration per episode: " + std::to_string(cfg.duration_s) + "s",
-    "Number of episodes:   " + std::to_string(cfg.episodes),
     "Dataset ID:           " + (cfg.dataset_id.empty() ? "<auto-generate>" : cfg.dataset_id),
     "Root directory:       " + cfg.root,
     "Repository ID:        " + cfg.repository_id,
@@ -164,8 +158,8 @@ int main(int argc, char** argv) {
   };
 
   if (!cfg.use_mock) {
-    config_lines.push_back("Leader Port:          " + cfg.leader_port);
-    config_lines.push_back("Follower Port:        " + cfg.follower_port);
+    config_lines.push_back("Leader IP:            " + cfg.leader_ip);
+    config_lines.push_back("Follower IP:          " + cfg.follower_ip);
   }
 
   config_lines.push_back("Joint rate:           " + std::to_string(cfg.joint_rate_hz) + " Hz");
@@ -174,7 +168,7 @@ int main(int argc, char** argv) {
     " @ " + std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
     " @ " + std::to_string(cfg.camera_fps) + " fps");
 
-  trossen::demo::print_config_banner("SO101 LeRobot Complete Demo", config_lines);
+  trossen::demo::print_config_banner("Trossen AI LeRobot Solo Complete Demo", config_lines);
 
   // Install signal handler for graceful shutdown
   trossen::demo::install_signal_handler();
@@ -186,39 +180,53 @@ int main(int argc, char** argv) {
   // Initialize hardware (if not using mock)
   // ──────────────────────────────────────────────────────────
 
-  std::shared_ptr<SO101ArmDriver> leader_driver;
-  std::shared_ptr<SO101ArmDriver> follower_driver;
+  std::unique_ptr<trossen_arm::TrossenArmDriver> leader_driver;
+  std::unique_ptr<trossen_arm::TrossenArmDriver> follower_driver;
+  const float moving_time_s = 2.0f;
 
   if (!cfg.use_mock) {
     std::cout << "Initializing hardware...\n";
 
-    // Create and configure leader driver
-    leader_driver = std::make_shared<SO101ArmDriver>();
-    if (!leader_driver->configure(SO101EndEffector::leader, cfg.leader_port)) {
-      std::cerr << "Failed to configure leader on " << cfg.leader_port << "\n";
+    leader_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
+    follower_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
+
+    try {
+      leader_driver->configure(
+        trossen_arm::Model::wxai_v0,
+        trossen_arm::StandardEndEffector::wxai_v0_leader,
+        cfg.leader_ip,
+        true);
+      std::cout << "  ✓ Leader arm configured (" << cfg.leader_ip << ")\n";
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to configure leader: " << e.what() << "\n";
       return 1;
     }
 
-    // Create and configure follower driver
-    follower_driver = std::make_shared<SO101ArmDriver>();
-    if (!follower_driver->configure(SO101EndEffector::follower, cfg.follower_port)) {
-      std::cerr << "Failed to configure follower on " << cfg.follower_port << "\n";
+    try {
+      follower_driver->configure(
+        trossen_arm::Model::wxai_v0,
+        trossen_arm::StandardEndEffector::wxai_v0_follower,
+        cfg.follower_ip,
+        true);
+      std::cout << "  ✓ Follower arm configured (" << cfg.follower_ip << ")\n";
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to configure follower: " << e.what() << "\n";
       return 1;
     }
 
-    // Connect to leader
-    if (!leader_driver->connect()) {
-      std::cerr << "Failed to connect to leader on " << cfg.leader_port << "\n";
-      return 1;
-    }
-    std::cout << "  ✓ Leader arm connected (" << cfg.leader_port << ")\n";
+    // Adjust follower joint limits for gripper tolerance
+    auto joint_limits = follower_driver->get_joint_limits();
+    joint_limits[follower_driver->get_num_joints() - 1].position_tolerance = 0.01;
+    follower_driver->set_joint_limits(joint_limits);
 
-    // Connect to follower
-    if (!follower_driver->connect()) {
-      std::cerr << "Failed to connect to follower on " << cfg.follower_port << "\n";
-      return 1;
-    }
-    std::cout << "  ✓ Follower arm connected (" << cfg.follower_port << ")\n";
+    // Move arms to staged positions
+    leader_driver->set_all_modes(trossen_arm::Mode::position);
+    follower_driver->set_all_modes(trossen_arm::Mode::position);
+    leader_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+    follower_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+
+    std::cout << "  ✓ Arms staged to starting positions\n";
   }
 
   trossen::runtime::SessionManager mgr;
@@ -242,19 +250,26 @@ int main(int argc, char** argv) {
     trossen::hw::arm::TeleopMockJointStateProducer::Config joint_cfg{
       6,                              // num_joints
       cfg.joint_rate_hz,              // rate_hz
-      "teleop_robot/joint_states",    // stream_id
+      "teleop_robot/joint_states",        // stream_id
       1.0                             // motion_scale
     };
     joint_producer = std::make_shared<trossen::hw::arm::TeleopMockJointStateProducer>(joint_cfg);
     std::cout << "  ✓ Mock joint state producer (" << cfg.joint_rate_hz << " Hz, 6 joints)\n";
   } else {
-    trossen::hw::arm::TeleopSO101ArmProducer::Config joint_cfg;
+    trossen::hw::arm::TeleopTrossenArmProducer::Config joint_cfg;
     joint_cfg.stream_id = "teleop_robot/joint_states";
     joint_cfg.use_device_time = false;
 
-    joint_producer = std::make_shared<trossen::hw::arm::TeleopSO101ArmProducer>(
-      leader_driver, follower_driver, joint_cfg);
-    std::cout << "  ✓ SO101 arm producer (" << cfg.joint_rate_hz << " Hz)\n";
+    // Wrap follower_driver in shared_ptr (non-owning wrapper since we manage lifetime)
+    auto follower_shared = std::shared_ptr<trossen_arm::TrossenArmDriver>(
+      follower_driver.get(), [](trossen_arm::TrossenArmDriver*){});
+
+    auto leader_shared = std::shared_ptr<trossen_arm::TrossenArmDriver>(
+      leader_driver.get(), [](trossen_arm::TrossenArmDriver*){});
+
+    joint_producer = std::make_shared<trossen::hw::arm::TeleopTrossenArmProducer>(
+      leader_shared, follower_shared, joint_cfg);
+    std::cout << "  ✓ Follower arm producer (" << cfg.joint_rate_hz << " Hz)\n";
   }
 
   auto joint_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.joint_rate_hz));
@@ -291,23 +306,112 @@ int main(int argc, char** argv) {
   auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
   mgr.add_producer(camera_producer, camera_period);
 
+  // TODO(shantanuparab-tr): Add this to configurations after main executable is created
+  // // Create a Realsense Camera Producer (Hardcoded configuration for demo purposes)
+
+  // trossen::hw::camera::RealsenseCameraProducer::Config realsense_cfg;
+  // realsense_cfg.serial_number = "218622274938";  // Replace with your camera's serial number
+  // realsense_cfg.stream_id = "realsense_camera0";
+  // realsense_cfg.encoding = "bgr8";
+  // realsense_cfg.width = 640;
+  // realsense_cfg.height = 480;
+  // realsense_cfg.fps = 30;
+  // realsense_cfg.use_device_time = true;
+  // realsense_cfg.warmup_seconds = 2.0;
+
+  // // Create Realsense config
+  // rs2::config cam_cfg;
+
+  // // Create a realsense pipeline
+  // rs2::pipeline realsense_pipeline;
+  // auto camera_ = std::make_shared<rs2::pipeline>(realsense_pipeline);
+
+  // // Enable the device using the unique ID
+  // if (!realsense_cfg.serial_number.empty()) {
+  //   cam_cfg.enable_device(realsense_cfg.serial_number);
+  // } else {
+  //   std::cout << "Unique ID is empty. Cannot connect to RealSense camera: "
+  //     << realsense_cfg.stream_id << std::endl;
+  //   throw std::runtime_error("Unique ID is empty for camera: " + realsense_cfg.stream_id);
+  // }
+
+  // // Enable the color stream as default
+  // cam_cfg.enable_stream(RS2_STREAM_COLOR, realsense_cfg.width, realsense_cfg.height,
+  //                   RS2_FORMAT_RGB8, realsense_cfg.fps);
+
+  // // Make this conditional to enable depth stream
+  // cam_cfg.enable_stream(RS2_STREAM_DEPTH, realsense_cfg.width, realsense_cfg.height,
+  //                   RS2_FORMAT_Z16, realsense_cfg.fps);
+  // try {
+  //   // Start the camera pipeline
+  //   rs2::pipeline_profile profile = camera_->start(cam_cfg);
+  // } catch (const rs2::error& e) {
+  //   std::cout << "Failed to enable device with Unique ID: " << realsense_cfg.serial_number
+  //             << ". Error: " << e.what() << ". Listing all available cameras." << std::endl;
+  //   std::cout << "Available cameras listed above. Please check outputs folder to get "
+  //       "Available cameras listed above. Please check outputs folder to get "
+  //       "images associated "
+  //       "with each camera." << std::endl;
+  //   throw std::runtime_error(
+  //       "Unique ID (serial number) is required to connect to RealSense camera");
+  // }
+
+  // auto frame_cache = std::make_shared<trossen::hw::camera::RealsenseFrameCache>(camera_, 2);
+
+  // auto realsense_producer =
+  //   std::make_shared<trossen::hw::camera::RealsenseCameraProducer>(frame_cache, realsense_cfg);
+
+  // auto realsense_period = std::chrono::milliseconds(static_cast<int>(1000.0f / 30.0f));
+
+  // mgr.add_producer(realsense_producer, realsense_period);
+  // std::cout << "  ✓ Realsense camera producer (30 Hz, 640x480)\n";
+
+  // trossen::hw::camera::RealsenseDepthCameraProducer::Config realsense_depth_cfg;
+  // // Replace with your camera's serial number
+  // realsense_depth_cfg.serial_number = "218622274938";
+  // realsense_depth_cfg.stream_id = "realsense_depth_camera0";
+  // realsense_depth_cfg.encoding = "16UC1";
+  // realsense_depth_cfg.width = 640;
+  // realsense_depth_cfg.height = 480;
+  // realsense_depth_cfg.fps = 30;
+  // realsense_depth_cfg.use_device_time = true;
+  // realsense_depth_cfg.warmup_seconds = 2.0;
+
+  // auto realsense_depth_producer =
+  //   std::make_shared<trossen::hw::camera::RealsenseDepthCameraProducer>(
+  //     frame_cache,
+  //     realsense_depth_cfg);
+  // mgr.add_producer(realsense_depth_producer, realsense_period);
+  // std::cout << "  ✓ Realsense depth camera producer (30 Hz, 640x480)\n";
+
   std::cout << "\nProducers registered. Ready to record.\n";
 
   // ──────────────────────────────────────────────────────────
-  // Ready for teleoperation
+  // Enable teleop mode (if using hardware)
   // ──────────────────────────────────────────────────────────
 
   if (!cfg.use_mock) {
-    std::cout << "\n!! SO101 arms ready for teleoperation !!\n";
-    std::cout << "   Leader: will read positions from operator\n";
+    std::cout << "\n!! Enabling teleop mode !!\n";
+    std::cout << "   Leader: gravity compensation (external_effort mode)\n";
     std::cout << "   Follower: will mirror leader positions\n\n";
+
+    leader_driver->set_all_modes(trossen_arm::Mode::external_effort);
+    leader_driver->set_all_external_efforts(
+      std::vector<double>(leader_driver->get_num_joints(), 0.0),
+      0.0,
+      false);
   }
+
+  // TODO(shantanuparab-tr): Create a method for checking if all the hardware
+  // producers are ready before starting the recording. For now, adding a sleep.
+  // Sleep briefly to ensure everything is settled
+  std::this_thread::sleep_for(std::chrono::seconds(5));
 
   // ──────────────────────────────────────────────────────────
   // Recording loop: record requested number of episodes
   // ──────────────────────────────────────────────────────────
 
-  for (int ep = 0; ep < cfg.episodes; ++ep) {
+  while (true) {
     if (trossen::demo::g_stop_requested) {
       std::cout << "\n\nStopping at user request (Ctrl+C).\n";
       break;
@@ -316,11 +420,18 @@ int main(int argc, char** argv) {
     // Display episode header
     mgr.print_episode_header();
 
-    // Sync follower to leader's current position before recording
+    // Lock the leader arm, move the follower arm to mirror the leader's current position, and
+    // unlock the leader
     if (!cfg.use_mock) {
-      auto leader_positions = leader_driver->get_joint_positions();
-      follower_driver->set_joint_positions(leader_positions);
-      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+      leader_driver->set_all_modes(trossen_arm::Mode::position);
+      auto leader_positions = leader_driver->get_all_positions();
+      follower_driver->set_all_positions(leader_positions, moving_time_s, false);
+      std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+      leader_driver->set_all_modes(trossen_arm::Mode::external_effort);
+      leader_driver->set_all_external_efforts(
+        std::vector<double>(leader_driver->get_num_joints(), 0.0),
+        0.0,
+        false);
     }
 
     // Start episode
@@ -337,27 +448,35 @@ int main(int argc, char** argv) {
 
     std::cout << "Recording...\n";
 
+    // Start async stats monitoring in SessionManager (runs in background thread)
+    mgr.start_async_monitoring();
+
     // Teleop loop (if using hardware)
     std::thread teleop_thread;
     if (!cfg.use_mock) {
       teleop_thread = std::thread([&]() {
         while (mgr.is_episode_active() && !trossen::demo::g_stop_requested) {
-          auto leader_positions = leader_driver->get_joint_positions();
-          follower_driver->set_joint_positions(leader_positions);
-          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+          auto leader_js = leader_driver->get_all_positions();
+          follower_driver->set_all_positions(leader_js, 0.0f, false);
+          std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
       });
     }
 
-    // Blocking monitor call: keeps the main thread alive while the episode is recording,
-    // prevents threads from joining before data is collected, and updates/prints status logs.
-    trossen::runtime::SessionManager::Stats last_stats = mgr.monitor_episode();
+    // Main thread can now do other work or just wait for completion
+    // Use wait_for_auto_stop() to detect when episode completes (auto or manual)
+    // This respects the max_duration setting from config and returns when episode ends
+    mgr.wait_for_auto_stop();
 
-    // Stop episode and wait for teleop thread
-    if (mgr.is_episode_active()) {
+    // If Ctrl+C was pressed, ensure episode is stopped
+    if (trossen::demo::g_stop_requested && mgr.is_episode_active()) {
       mgr.stop_episode();
     }
 
+    // Get final stats from async monitoring (this will join the thread)
+    trossen::runtime::SessionManager::Stats last_stats = mgr.get_async_monitor_stats();
+
+    // Wait for teleop thread to finish
     if (!cfg.use_mock && teleop_thread.joinable()) {
       teleop_thread.join();
     }
@@ -378,7 +497,7 @@ int main(int argc, char** argv) {
     // ──────────────────────────────────────────────────────────
 
     trossen::demo::SanityCheckConfig sanity_cfg{
-      last_stats.elapsed.count(),
+      last_stats.recording_duration_s.value_or(0.0),
       1,  // 1 joint producer (follower)
       cfg.joint_rate_hz,
       1,  // 1 camera
@@ -395,14 +514,6 @@ int main(int argc, char** argv) {
       std::cout << "\nStopping at user request (Ctrl+C).\n";
       break;
     }
-
-    // Pause between episodes (unless this was the last one)
-    if (ep < cfg.episodes - 1) {
-      std::cout << "\nPausing for 1 second before next episode...\n";
-      if (!trossen::demo::interruptible_sleep(std::chrono::seconds(1))) {
-        break;  // Stop requested during pause
-      }
-    }
   }
 
   // ──────────────────────────────────────────────────────────
@@ -411,12 +522,23 @@ int main(int argc, char** argv) {
 
   mgr.shutdown();
 
-  // Disconnect SO101 arms
+  // Return arms to staging and then sleep position (if using hardware)
   if (!cfg.use_mock && leader_driver && follower_driver) {
-    std::cout << "\nDisconnecting SO101 arms...\n";
-    leader_driver->disconnect();
-    follower_driver->disconnect();
-    std::cout << "  ✓ Arms disconnected\n";
+    std::cout << "\nReturning arms to starting positions...\n";
+    leader_driver->set_all_modes(trossen_arm::Mode::position);
+    leader_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+    follower_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+    leader_driver->set_all_positions(
+      std::vector<double>(leader_driver->get_num_joints(), 0.0),
+      moving_time_s,
+      false);
+    follower_driver->set_all_positions(
+      std::vector<double>(follower_driver->get_num_joints(), 0.0),
+      moving_time_s,
+      false);
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+    std::cout << "Arms returned to sleep position.\n";
   }
 
   auto final_stats = mgr.stats();

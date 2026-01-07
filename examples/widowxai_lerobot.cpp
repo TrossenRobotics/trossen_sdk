@@ -10,8 +10,8 @@
  * - Configurable episode count and duration
  *
  * Usage:
- *   ./widowxai_lerobot --episodes 5 --duration 10
- *   ./widowxai_lerobot --episodes 3 --duration 5 --root-dir /data/recordings
+ *   ./widowxai_lerobot
+ *   ./widowxai_lerobot --root-dir /data/recordings
  *   ./widowxai_lerobot --mock  # Use mock producers for testing without hardware
  */
 
@@ -45,8 +45,6 @@
 // ────────────────────────────────────────────────────────────
 
 struct Config {
-  int duration_s = 10;
-  int episodes = 3;
   std::string dataset_id = "";  // empty = auto-generate
   std::string root = trossen::io::backends::get_default_root_path().string();
   std::string repository_id = "TrossenRoboticsCommunity";  // Valid only for LeRobot backend
@@ -72,8 +70,6 @@ void print_usage(const char* prog_name) {
   std::cout
     << "Usage: " << prog_name << " [options]\n\n"
     << "Options:\n"
-    << "  --duration <seconds>     Duration per episode (default: 10)\n"
-    << "  --episodes <count>       Number of episodes to record (default: 3)\n"
     << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
     << "  --root <path>            Root directory for episodes (default: ~/.cache/trossen_sdk/)\n"
     << "  --repository-id <string> Repository identifier (default: TrossenRoboticsCommunity, "
@@ -89,8 +85,8 @@ void print_usage(const char* prog_name) {
     << "  --backend <type>         Dataset backend type (default: mcap)\n"
     << "  --help                   Show this help message\n\n"
     << "Examples:\n"
-    << "  " << prog_name << " --duration 10 --episodes 5\n"
-    << "  " << prog_name << " --mock --duration 5 --episodes 3\n"
+    << "  " << prog_name << "\n"
+    << "  " << prog_name << " --mock\n"
     << "  " << prog_name << " --dataset-id solo_demo_001 --root /data/recordings\n";
 }
 
@@ -101,10 +97,6 @@ Config parse_args(int argc, char** argv) {
     if (arg == "--help" || arg == "-h") {
       cfg.show_help = true;
       return cfg;
-    } else if (arg == "--duration" && i + 1 < argc) {
-      cfg.duration_s = std::max(1, std::atoi(argv[++i]));
-    } else if (arg == "--episodes" && i + 1 < argc) {
-      cfg.episodes = std::max(1, std::atoi(argv[++i]));
     } else if (arg == "--dataset-id" && i + 1 < argc) {
       cfg.dataset_id = argv[++i];
     } else if (arg == "--root" && i + 1 < argc) {
@@ -159,8 +151,6 @@ int main(int argc, char** argv) {
   // Print configuration
   std::vector<std::string> config_lines = {
     "Mode:                 " + std::string(cfg.use_mock ? "Mock (no hardware)" : "Hardware"),
-    "Duration per episode: " + std::to_string(cfg.duration_s) + "s",
-    "Number of episodes:   " + std::to_string(cfg.episodes),
     "Dataset ID:           " + (cfg.dataset_id.empty() ? "<auto-generate>" : cfg.dataset_id),
     "Root directory:       " + cfg.root,
     "Repository ID:        " + cfg.repository_id,
@@ -316,82 +306,83 @@ int main(int argc, char** argv) {
   auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
   mgr.add_producer(camera_producer, camera_period);
 
-  // Create a Realsense Camera Producer (Hardcoded configuration for demo purposes)
+  // TODO(shantanuparab-tr): Add this to configurations after main executable is created
+  // // Create a Realsense Camera Producer (Hardcoded configuration for demo purposes)
 
-  trossen::hw::camera::RealsenseCameraProducer::Config realsense_cfg;
-  realsense_cfg.serial_number = "218622274938";  // Replace with your camera's serial number
-  realsense_cfg.stream_id = "realsense_camera0";
-  realsense_cfg.encoding = "bgr8";
-  realsense_cfg.width = 640;
-  realsense_cfg.height = 480;
-  realsense_cfg.fps = 30;
-  realsense_cfg.use_device_time = true;
-  realsense_cfg.warmup_seconds = 2.0;
+  // trossen::hw::camera::RealsenseCameraProducer::Config realsense_cfg;
+  // realsense_cfg.serial_number = "218622274938";  // Replace with your camera's serial number
+  // realsense_cfg.stream_id = "realsense_camera0";
+  // realsense_cfg.encoding = "bgr8";
+  // realsense_cfg.width = 640;
+  // realsense_cfg.height = 480;
+  // realsense_cfg.fps = 30;
+  // realsense_cfg.use_device_time = true;
+  // realsense_cfg.warmup_seconds = 2.0;
 
-  // Create Realsense config
-  rs2::config cam_cfg;
+  // // Create Realsense config
+  // rs2::config cam_cfg;
 
-  // Create a realsense pipeline
-  rs2::pipeline realsense_pipeline;
-  auto camera_ = std::make_shared<rs2::pipeline>(realsense_pipeline);
+  // // Create a realsense pipeline
+  // rs2::pipeline realsense_pipeline;
+  // auto camera_ = std::make_shared<rs2::pipeline>(realsense_pipeline);
 
-  // Enable the device using the unique ID
-  if (!realsense_cfg.serial_number.empty()) {
-    cam_cfg.enable_device(realsense_cfg.serial_number);
-  } else {
-    std::cout << "Unique ID is empty. Cannot connect to RealSense camera: "
-      << realsense_cfg.stream_id << std::endl;
-    throw std::runtime_error("Unique ID is empty for camera: " + realsense_cfg.stream_id);
-  }
+  // // Enable the device using the unique ID
+  // if (!realsense_cfg.serial_number.empty()) {
+  //   cam_cfg.enable_device(realsense_cfg.serial_number);
+  // } else {
+  //   std::cout << "Unique ID is empty. Cannot connect to RealSense camera: "
+  //     << realsense_cfg.stream_id << std::endl;
+  //   throw std::runtime_error("Unique ID is empty for camera: " + realsense_cfg.stream_id);
+  // }
 
-  // Enable the color stream as default
-  cam_cfg.enable_stream(RS2_STREAM_COLOR, realsense_cfg.width, realsense_cfg.height,
-                    RS2_FORMAT_RGB8, realsense_cfg.fps);
+  // // Enable the color stream as default
+  // cam_cfg.enable_stream(RS2_STREAM_COLOR, realsense_cfg.width, realsense_cfg.height,
+  //                   RS2_FORMAT_RGB8, realsense_cfg.fps);
 
-  // Make this conditional to enable depth stream
-  cam_cfg.enable_stream(RS2_STREAM_DEPTH, realsense_cfg.width, realsense_cfg.height,
-                    RS2_FORMAT_Z16, realsense_cfg.fps);
-  try {
-    // Start the camera pipeline
-    rs2::pipeline_profile profile = camera_->start(cam_cfg);
-  } catch (const rs2::error& e) {
-    std::cout << "Failed to enable device with Unique ID: " << realsense_cfg.serial_number
-              << ". Error: " << e.what() << ". Listing all available cameras." << std::endl;
-    std::cout << "Available cameras listed above. Please check outputs folder to get "
-        "Available cameras listed above. Please check outputs folder to get "
-        "images associated "
-        "with each camera." << std::endl;
-    throw std::runtime_error(
-        "Unique ID (serial number) is required to connect to RealSense camera");
-  }
+  // // Make this conditional to enable depth stream
+  // cam_cfg.enable_stream(RS2_STREAM_DEPTH, realsense_cfg.width, realsense_cfg.height,
+  //                   RS2_FORMAT_Z16, realsense_cfg.fps);
+  // try {
+  //   // Start the camera pipeline
+  //   rs2::pipeline_profile profile = camera_->start(cam_cfg);
+  // } catch (const rs2::error& e) {
+  //   std::cout << "Failed to enable device with Unique ID: " << realsense_cfg.serial_number
+  //             << ". Error: " << e.what() << ". Listing all available cameras." << std::endl;
+  //   std::cout << "Available cameras listed above. Please check outputs folder to get "
+  //       "Available cameras listed above. Please check outputs folder to get "
+  //       "images associated "
+  //       "with each camera." << std::endl;
+  //   throw std::runtime_error(
+  //       "Unique ID (serial number) is required to connect to RealSense camera");
+  // }
 
-  auto frame_cache = std::make_shared<trossen::hw::camera::RealsenseFrameCache>(camera_, 2);
+  // auto frame_cache = std::make_shared<trossen::hw::camera::RealsenseFrameCache>(camera_, 2);
 
-  auto realsense_producer =
-    std::make_shared<trossen::hw::camera::RealsenseCameraProducer>(frame_cache, realsense_cfg);
+  // auto realsense_producer =
+  //   std::make_shared<trossen::hw::camera::RealsenseCameraProducer>(frame_cache, realsense_cfg);
 
-  auto realsense_period = std::chrono::milliseconds(static_cast<int>(1000.0f / 30.0f));
+  // auto realsense_period = std::chrono::milliseconds(static_cast<int>(1000.0f / 30.0f));
 
-  mgr.add_producer(realsense_producer, realsense_period);
-  std::cout << "  ✓ Realsense camera producer (30 Hz, 640x480)\n";
+  // mgr.add_producer(realsense_producer, realsense_period);
+  // std::cout << "  ✓ Realsense camera producer (30 Hz, 640x480)\n";
 
-  trossen::hw::camera::RealsenseDepthCameraProducer::Config realsense_depth_cfg;
+  // trossen::hw::camera::RealsenseDepthCameraProducer::Config realsense_depth_cfg;
+  // // Replace with your camera's serial number
+  // realsense_depth_cfg.serial_number = "218622274938";
+  // realsense_depth_cfg.stream_id = "realsense_depth_camera0";
+  // realsense_depth_cfg.encoding = "16UC1";
+  // realsense_depth_cfg.width = 640;
+  // realsense_depth_cfg.height = 480;
+  // realsense_depth_cfg.fps = 30;
+  // realsense_depth_cfg.use_device_time = true;
+  // realsense_depth_cfg.warmup_seconds = 2.0;
 
-  realsense_depth_cfg.serial_number = "218622274938";  // Replace with your camera's serial number
-  realsense_depth_cfg.stream_id = "realsense_depth_camera0";
-  realsense_depth_cfg.encoding = "16UC1";
-  realsense_depth_cfg.width = 640;
-  realsense_depth_cfg.height = 480;
-  realsense_depth_cfg.fps = 30;
-  realsense_depth_cfg.use_device_time = true;
-  realsense_depth_cfg.warmup_seconds = 2.0;
-
-  auto realsense_depth_producer =
-    std::make_shared<trossen::hw::camera::RealsenseDepthCameraProducer>(
-      frame_cache,
-      realsense_depth_cfg);
-  mgr.add_producer(realsense_depth_producer, realsense_period);
-  std::cout << "  ✓ Realsense depth camera producer (30 Hz, 640x480)\n";
+  // auto realsense_depth_producer =
+  //   std::make_shared<trossen::hw::camera::RealsenseDepthCameraProducer>(
+  //     frame_cache,
+  //     realsense_depth_cfg);
+  // mgr.add_producer(realsense_depth_producer, realsense_period);
+  // std::cout << "  ✓ Realsense depth camera producer (30 Hz, 640x480)\n";
 
   std::cout << "\nProducers registered. Ready to record.\n";
 
@@ -420,14 +411,14 @@ int main(int argc, char** argv) {
   // Recording loop: record requested number of episodes
   // ──────────────────────────────────────────────────────────
 
-  for (int ep = 0; ep < cfg.episodes; ++ep) {
+  while (true) {
     if (trossen::demo::g_stop_requested) {
       std::cout << "\n\nStopping at user request (Ctrl+C).\n";
       break;
     }
 
     // Display episode header
-    trossen::demo::print_episode_header(mgr.stats().current_episode_index, cfg.duration_s);
+    mgr.print_episode_header();
 
     // Lock the leader arm, move the follower arm to mirror the leader's current position, and
     // unlock the leader
@@ -469,8 +460,9 @@ int main(int argc, char** argv) {
       });
     }
 
-    // Monitor loop: display stats while episode is active
-    uint64_t last_record_count = trossen::demo::monitor_episode(mgr);
+    // Blocking monitor call: keeps the main thread alive while the episode is recording,
+    // prevents threads from joining before data is collected, and updates/prints status logs.
+    trossen::runtime::SessionManager::Stats last_stats = mgr.monitor_episode();
 
     // Stop episode and wait for teleop thread
     if (mgr.is_episode_active()) {
@@ -490,34 +482,29 @@ int main(int argc, char** argv) {
     std::string file_path = trossen::demo::generate_episode_path(
       cfg.root,
       recording_episode_index);
-    trossen::demo::print_episode_summary(file_path, last_record_count);
+    trossen::demo::print_episode_summary(file_path, last_stats);
 
     // ──────────────────────────────────────────────────────────
     // Sanity check: verify expected record counts
     // ──────────────────────────────────────────────────────────
 
     trossen::demo::SanityCheckConfig sanity_cfg{
-      actual_duration,
+      last_stats.recording_duration_s.value_or(0.0),
       1,  // 1 joint producer (follower)
       cfg.joint_rate_hz,
       1,  // 1 camera
       cfg.camera_fps,
       5.0  // 5% tolerance
     };
-    trossen::demo::perform_sanity_check(recording_episode_index, last_record_count, sanity_cfg);
+    trossen::demo::perform_sanity_check(
+      recording_episode_index,
+      last_stats.records_written_current,
+      sanity_cfg);
 
     // Check if user requested stop
     if (trossen::demo::g_stop_requested) {
       std::cout << "\nStopping at user request (Ctrl+C).\n";
       break;
-    }
-
-    // Pause between episodes (unless this was the last one)
-    if (ep < cfg.episodes - 1) {
-      std::cout << "\nPausing for 1 second before next episode...\n";
-      if (!trossen::demo::interruptible_sleep(std::chrono::seconds(1))) {
-        break;  // Stop requested during pause
-      }
     }
   }
 

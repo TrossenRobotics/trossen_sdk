@@ -14,6 +14,7 @@
 #include <chrono>
 #include <condition_variable>
 #include <filesystem>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -108,6 +109,13 @@ public:
   bool is_episode_active() const;
 
   /**
+    * @brief Check if the final stats are emitted
+    *
+    * @return true if final stats have been emitted, false otherwise
+    */
+  bool are_final_stats_emitted() const;
+
+  /**
    * @brief Wait for auto-stop signal (if max_duration is set)
    *
    * @param timeout Maximum time to wait (default: wait indefinitely)
@@ -155,12 +163,102 @@ public:
 
     /// @brief Episodes finished this session
     uint64_t total_episodes_completed;
+
+    /// @brief Duration of episode recording
+    std::optional<double> recording_duration_s;
+
+    /// @brief Duration of episode preprocessing (seconds)
+    std::optional<double> preprocessing_duration_s;
+
+    /// @brief Duration of episode shutdown (seconds)
+    std::optional<double> postprocess_duration_s;
   };
 
   /**
    * @brief Get current statistics
    */
   Stats stats() const;
+
+  /**
+   * @brief Callback type for episode completion notification
+   *
+   * Invoked when an episode completes (either by auto-stop or manual stop).
+   * Receives final statistics for the completed episode.
+   */
+  using EpisodeCompleteCallback = std::function<void(const Stats&)>;
+
+  /**
+   * @brief Set callback to be invoked when episode completes
+   *
+   * @param callback Function to call with final stats when episode ends
+   *
+   * The callback is invoked from the monitoring thread or from stop_episode().
+   * It should be thread-safe and should not block for extended periods.
+   */
+  void set_episode_complete_callback(EpisodeCompleteCallback callback);
+
+  /**
+   * @brief Print episode header to console
+   */
+  void print_episode_header();
+
+  /**
+  * @brief Print a single line of episode statistics (updates in place)
+  *
+  * Uses carriage return to overwrite the previous line for smooth updates.
+  *
+  * @param stats Session manager statistics
+  */
+  void print_stats_line(const Stats& stats);
+
+  /**
+  * @brief Pausable sleep that respects stop requests
+  *
+  * Sleeps for the specified duration but checks g_stop_requested
+  * periodically and returns early if stop is requested.
+  * Also, keeps a track of stats while monitoring the episode.
+  *
+  * @param update_interval How often to update stats (and print if enabled)
+  * @param sleep_interval How long to sleep between checks
+  * @param print_stats Whether to print stats to console (default: false)
+  * @return true if completed normally, false if interrupted by stop request
+  */
+  Stats monitor_episode(
+    std::chrono::duration<double> update_interval = std::chrono::milliseconds(500),
+    std::chrono::duration<double> sleep_interval = std::chrono::milliseconds(100),
+    bool print_stats = false);
+
+  /**
+   * @brief Start asynchronous stats monitoring in background thread
+   *
+   * Launches a thread that continuously monitors episode statistics.
+   * This allows the main thread to remain free for other operations.
+   * The monitoring thread will automatically stop when the episode ends.
+   *
+   * @param update_interval How often to update stats (and print if enabled) (default: 500ms)
+   * @param sleep_interval Sleep duration between stat checks (default: 100ms)
+   * @param print_stats Whether to print stats to console (default: false)
+   *
+   * @note This is non-blocking. Stats are printed in the background if print_stats is true.
+   * @note Call get_async_monitor_stats() to retrieve final stats after episode completes.
+   */
+  void start_async_monitoring(
+    std::chrono::duration<double> update_interval = std::chrono::milliseconds(500),
+    std::chrono::duration<double> sleep_interval = std::chrono::milliseconds(100),
+    bool print_stats = false);
+
+  /**
+   * @brief Stop async monitoring and retrieve final stats
+   *
+   * Stops the async monitoring thread (if running) and returns the final
+   * statistics captured during monitoring.
+   *
+   * @return Final episode statistics from monitoring
+   *
+   * @note This will block until the monitoring thread completes.
+   * @note Safe to call even if async monitoring wasn't started.
+   */
+  Stats get_async_monitor_stats();
 
 private:
   /// @brief Configuration
@@ -181,14 +279,44 @@ private:
   /// @brief Sink's processed_count() at the start of current episode (for delta tracking)
   uint64_t episode_start_record_count_{0};
 
+  /// @brief Duration of last preprocessing phase (seconds)
+  double preprocessing_duration_s_{0.0};
+
+  /// @brief Duration of last shutdown phase (seconds)
+  double postprocess_duration_s_{0.0};
+
+  /// @brief Final elapsed time when episode stopped
+  std::chrono::duration<double> final_elapsed_{0};
+
+  /// @brief Final record count when episode stopped
+  uint64_t final_records_written_{0};
+
   /// @brief Monitoring thread for duration-based auto-stop
   std::thread monitor_thread_;
 
   /// @brief Flag to control monitoring thread lifecycle
   std::atomic<bool> monitoring_active_{false};
 
+  /// @brief Async stats monitoring thread
+  std::thread async_monitor_thread_;
+
+  /// @brief Flag to control async monitoring thread lifecycle
+  std::atomic<bool> async_monitoring_active_{false};
+
+  /// @brief Final stats from async monitoring
+  Stats async_monitor_final_stats_;
+
+  /// @brief Mutex to protect async monitor stats
+  mutable std::mutex async_monitor_mutex_;
+
   /// @brief Flag indicating that auto-stop was triggered by monitor thread
   std::atomic<bool> auto_stop_triggered_{false};
+
+  /// @brief Flag indicating that episode final statistics were emitted
+  mutable std::atomic<bool> stats_emitted_{false};
+
+  /// @brief Callback invoked when episode completes
+  EpisodeCompleteCallback episode_complete_callback_;
 
   /// @brief Condition variable for auto-stop signaling
   std::condition_variable auto_stop_cv_;

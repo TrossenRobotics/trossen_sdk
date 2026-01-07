@@ -23,6 +23,26 @@ inline std::filesystem::path get_default_root_path() {
   }
 }
 
+/**
+ * @brief Auto-generate a dataset ID based on the current timestamp
+ * @return Generated dataset ID string
+ */
+inline std::string auto_generate_dataset_id() {
+  // Generate a timestamp-based dataset ID
+  auto now = std::chrono::system_clock::now();
+  auto time_t_now = std::chrono::system_clock::to_time_t(now);
+  std::ostringstream oss;
+  // Format: dataset_YYYYMMDD_HHMMSS in local time
+  oss << "dataset_" << std::put_time(std::localtime(&time_t_now), "%Y%m%d_%H%M%S");
+  return oss.str();
+}
+
+// Common constants used across multiple backends
+inline constexpr int DEFAULT_ENCODER_THREADS = 1;
+inline constexpr int DEFAULT_MAX_IMAGE_QUEUE = 0;
+inline constexpr int DEFAULT_PNG_COMPRESSION_LEVEL = 3;
+inline constexpr char DEFAULT_ROBOT_NAME[] = "trossen_ai_stationary";
+
 }  // namespace trossen::io::backends
 
 #endif  // INCLUDE_TROSSEN_SDK_IO_BACKEND_UTILS_HPP_

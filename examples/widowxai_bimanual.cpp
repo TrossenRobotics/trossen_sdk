@@ -72,8 +72,6 @@ void print_usage(const char* prog_name) {
   std::cout
     << "Usage: " << prog_name << " [options]\n\n"
     << "Options:\n"
-    << "  --duration <seconds>     Duration per episode (default: 10)\n"
-    << "  --episodes <count>       Number of episodes to record (default: 3)\n"
     << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
     << "  --root <path>            Root directory for episodes (default: ~/.cache/trossen_sdk/)\n"
     << "  --mock                   Use mock producers instead of real hardware\n"
@@ -90,8 +88,8 @@ void print_usage(const char* prog_name) {
     << "  Follower Right: 192.168.1.4 (recorded)\n"
     << "  Cameras:        /dev/video0, /dev/video2, /dev/video4, /dev/video6\n\n"
     << "Examples:\n"
-    << "  " << prog_name << " --duration 10 --episodes 5\n"
-    << "  " << prog_name << " --mock --duration 5 --episodes 3\n"
+    << "  " << prog_name << "\n"
+    << "  " << prog_name << " --mock\n"
     << "  " << prog_name << " --dataset-id stationary_demo_001 --root /data/recordings\n";
 }
 
@@ -140,8 +138,6 @@ int main(int argc, char** argv) {
   // Print configuration
   std::vector<std::string> config_lines = {
     "Mode:                 " + std::string(cfg.use_mock ? "Mock (no hardware)" : "Hardware"),
-    "Duration per episode: " + std::to_string(cfg.duration_s) + "s",
-    "Number of episodes:   " + std::to_string(cfg.episodes),
     "Dataset ID:           " + (cfg.dataset_id.empty() ? "<auto-generate>" : cfg.dataset_id),
     "Root directory:       " + cfg.root,
     "Backend:              " + cfg.backend_type
@@ -391,7 +387,7 @@ int main(int argc, char** argv) {
   std::cout << "\nProducers registered. Ready to record.\n";
   std::cout << "  Recording: 2 follower arms + 4 cameras = 6 data streams\n";
 
-  for (int ep = 0; ep < cfg.episodes; ++ep) {
+  while (true) {
     if (trossen::demo::g_stop_requested) {
       std::cout << "\n\nStopping at user request (Ctrl+C).\n";
       break;
@@ -436,7 +432,7 @@ int main(int argc, char** argv) {
     }
 
     // Display episode header
-    trossen::demo::print_episode_header(mgr.stats().current_episode_index, cfg.duration_s);
+    mgr.print_episode_header();
 
     // Start episode
     if (!mgr.start_episode()) {
@@ -470,8 +466,9 @@ int main(int argc, char** argv) {
       });
     }
 
-    // Monitor loop: display stats while episode is active
-    uint64_t last_record_count = trossen::demo::monitor_episode(mgr);
+    // Blocking monitor call: keeps the main thread alive while the episode is recording,
+    // prevents threads from joining before data is collected, and updates/prints status logs.
+    trossen::runtime::SessionManager::Stats last_stats = mgr.monitor_episode();
 
     // Stop episode and wait for teleop thread
     if (mgr.is_episode_active()) {
@@ -491,31 +488,22 @@ int main(int argc, char** argv) {
     std::string file_path = trossen::demo::generate_episode_path(
       cfg.root,
       recording_episode_index);
-    trossen::demo::print_episode_summary(file_path, last_record_count);
+    trossen::demo::print_episode_summary(file_path, last_stats);
 
     trossen::demo::SanityCheckConfig sanity_cfg{
-      actual_duration,
+      last_stats.elapsed.count(),
       2,  // 2 joint producers (follower left + follower right)
       cfg.joint_rate_hz,
       static_cast<int>(cfg.camera_indices.size()),  // 4 cameras
       cfg.camera_fps,
       5.0  // 5% tolerance
     };
-    perform_sanity_check(recording_episode_index, last_record_count, sanity_cfg);
+    perform_sanity_check(recording_episode_index, last_stats.records_written_current, sanity_cfg);
 
     // Check if user requested stop
     if (trossen::demo::g_stop_requested) {
       std::cout << "\nStopping at user request (Ctrl+C).\n";
       break;
-    }
-
-    // Pause between episodes (unless this was the last one)
-    if (ep < cfg.episodes - 1) {
-      std::cout << "\nPausing for 1 second before next episode...\n";
-      if (!trossen::demo::interruptible_sleep(std::chrono::seconds(1))) {
-        // Stop requested during pause
-        break;
-      }
     }
   }
 
