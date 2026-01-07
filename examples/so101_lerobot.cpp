@@ -10,8 +10,8 @@
  * - Configurable episode count and duration
  *
  * Usage:
- *   ./so101_teleop --episodes 5 --duration 10
- *   ./so101_teleop --episodes 3 --duration 5 --root /data/recordings
+ *   ./so101_teleop
+ *   ./so101_teleop --root /data/recordings
  *   ./so101_teleop --mock  # Use mock producers for testing without hardware
  */
 

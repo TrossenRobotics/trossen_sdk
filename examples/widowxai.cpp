@@ -10,8 +10,8 @@
  * - Configurable episode count and duration
  *
  * Usage:
- *   ./widowxai --episodes 5 --duration 10
- *   ./widowxai --episodes 3 --duration 5 --root /data/recordings
+ *   ./widowxai
+ *   ./widowxai --root /data/recordings
  *   ./widowxai --mock  # Use mock producers for testing without hardware
  */
 
@@ -39,8 +39,6 @@
 // ────────────────────────────────────────────────────────────
 
 struct Config {
-  int duration_s = 10;
-  int episodes = 3;
   std::string dataset_id = "";  // empty = auto-generate
   std::string root = trossen::io::backends::get_default_root_path().string();
   bool use_mock = false;
@@ -65,8 +63,6 @@ void print_usage(const char* prog_name) {
   std::cout
     << "Usage: " << prog_name << " [options]\n\n"
     << "Options:\n"
-    << "  --duration <seconds>     Duration per episode (default: 10)\n"
-    << "  --episodes <count>       Number of episodes to record (default: 3)\n"
     << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
     << "  --root <path>            Root directory for episodes (default: ~/.cache/trossen_sdk/)\n"
     << "  --mock                   Use mock producers instead of real hardware\n"
@@ -80,8 +76,8 @@ void print_usage(const char* prog_name) {
     << "  --backend <type>         Dataset backend type (default: mcap)\n"
     << "  --help                   Show this help message\n\n"
     << "Examples:\n"
-    << "  " << prog_name << " --duration 10 --episodes 5\n"
-    << "  " << prog_name << " --mock --duration 5 --episodes 3\n"
+    << "  " << prog_name << "\n"
+    << "  " << prog_name << " --mock\n"
     << "  " << prog_name << " --dataset-id solo_demo_001 --root /data/recordings\n";
 }
 
@@ -92,10 +88,6 @@ Config parse_args(int argc, char** argv) {
     if (arg == "--help" || arg == "-h") {
       cfg.show_help = true;
       return cfg;
-    } else if (arg == "--duration" && i + 1 < argc) {
-      cfg.duration_s = std::max(1, std::atoi(argv[++i]));
-    } else if (arg == "--episodes" && i + 1 < argc) {
-      cfg.episodes = std::max(1, std::atoi(argv[++i]));
     } else if (arg == "--dataset-id" && i + 1 < argc) {
       cfg.dataset_id = argv[++i];
     } else if (arg == "--root" && i + 1 < argc) {
@@ -140,8 +132,6 @@ int main(int argc, char** argv) {
   // Print configuration
   std::vector<std::string> config_lines = {
     "Mode:                 " + std::string(cfg.use_mock ? "Mock (no hardware)" : "Hardware"),
-    "Duration per episode: " + std::to_string(cfg.duration_s) + "s",
-    "Number of episodes:   " + std::to_string(cfg.episodes),
     "Dataset ID:           " + (cfg.dataset_id.empty() ? "<auto-generate>" : cfg.dataset_id),
     "Root directory:       " + cfg.root,
     "Backend:              " + cfg.backend_type
@@ -315,14 +305,11 @@ int main(int argc, char** argv) {
   // Recording loop: record requested number of episodes
   // ──────────────────────────────────────────────────────────
 
-  for (int ep = 0; ep < cfg.episodes; ++ep) {
+  while (true) {
     if (trossen::demo::g_stop_requested) {
       std::cout << "\n\nStopping at user request (Ctrl+C).\n";
       break;
     }
-
-    // Display episode header
-    trossen::demo::print_episode_header(mgr.stats().current_episode_index, cfg.duration_s);
 
     // Lock the leader arm, move the follower arm to mirror the leader's current position, and
     // unlock the leader
@@ -408,14 +395,6 @@ int main(int argc, char** argv) {
     if (trossen::demo::g_stop_requested) {
       std::cout << "\nStopping at user request (Ctrl+C).\n";
       break;
-    }
-
-    // Pause between episodes (unless this was the last one)
-    if (ep < cfg.episodes - 1) {
-      std::cout << "\nPausing for 1 second before next episode...\n";
-      if (!trossen::demo::interruptible_sleep(std::chrono::seconds(1))) {
-        break;  // Stop requested during pause
-      }
     }
   }
 
