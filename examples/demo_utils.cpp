@@ -173,6 +173,9 @@ runtime::SessionManager::Stats monitor_episode(
         saved_stats = last_stats;
       }
     }
+    // TODO(shantanuparab-tr): We might miss records written in the last sleep interval.
+    // Consider using condition variable or similar mechanism for better accuracy.
+    // Make sure this is fixed with asynchronous episode monitoring implementation.
     std::this_thread::sleep_for(sleep_interval);
   }
   return saved_stats;
