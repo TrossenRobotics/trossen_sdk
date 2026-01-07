@@ -1496,7 +1496,7 @@ int main() {
         try {
             int index = std::stoi(req.matches[1]);
             json request_data = json::parse(req.body);
-            std::string camera_id = request_data["name"];
+            std::string camera_id = request_data["id"];
 
             std::string error;
             if (trossen::backend::connect_camera(
@@ -1531,7 +1531,7 @@ int main() {
         try {
             int index = std::stoi(req.matches[1]);
             json request_data = json::parse(req.body);
-            std::string camera_id = request_data["name"];
+            std::string camera_id = request_data["id"];
 
             std::string error;
             if (trossen::backend::disconnect_camera(camera_id, error)) {
