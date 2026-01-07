@@ -460,8 +460,9 @@ int main(int argc, char** argv) {
       });
     }
 
-    // Monitor loop: display stats while episode is active
-    trossen::runtime::SessionManager::Stats last_stats = trossen::demo::monitor_episode(mgr);
+    // Blocking monitor call: keeps the main thread alive while the episode is recording,
+    // prevents threads from joining before data is collected, and updates/prints status logs.
+    trossen::runtime::SessionManager::Stats last_stats = mgr.monitor_episode();
 
     // Stop episode and wait for teleop thread
     if (mgr.is_episode_active()) {

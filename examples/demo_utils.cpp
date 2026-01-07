@@ -28,21 +28,6 @@ void install_signal_handler() {
   std::signal(SIGINT, signal_handler);
 }
 
-void print_stats_line(const runtime::SessionManager::Stats& stats) {
-  std::cout << "\r[Episode " << stats.current_episode_index << "] "
-            << "Elapsed: " << std::fixed << std::setprecision(1) << stats.elapsed.count() << "s"
-            << " | Records: " << stats.records_written_current;
-
-  if (stats.remaining.has_value() && stats.remaining->count() > 0) {
-    std::cout << " | Remaining: " << std::fixed << std::setprecision(1)
-              << stats.remaining->count() << "s";
-  } else {
-    std::cout << " | Duration: unlimited";
-  }
-
-  std::cout << std::flush;
-}
-
 void print_episode_summary(const std::string& file_path, runtime::SessionManager::Stats stats) {
   // Helper to repeat a string n times
   auto repeat_str = [](const std::string& s, size_t n) {

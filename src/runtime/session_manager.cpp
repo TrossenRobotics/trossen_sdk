@@ -414,4 +414,39 @@ void SessionManager::print_episode_header() {
   std::cout << "╚════════════════════════════════════════════════════════════╝\n";
 }
 
+void SessionManager::print_stats_line(const SessionManager::Stats& stats) {
+  std::cout << "\r[Episode " << stats.current_episode_index << "] "
+            << "Elapsed: " << std::fixed << std::setprecision(1) << stats.elapsed.count() << "s"
+            << " | Records: " << stats.records_written_current;
+
+  if (stats.remaining.has_value() && stats.remaining->count() > 0) {
+    std::cout << " | Remaining: " << std::fixed << std::setprecision(1)
+              << stats.remaining->count() << "s";
+  } else {
+    std::cout << " | Duration: unlimited";
+  }
+
+  std::cout << std::flush;
+}
+
+SessionManager::Stats SessionManager::monitor_episode(
+  std::chrono::duration<double> update_interval,
+  std::chrono::duration<double> sleep_interval)
+{
+  auto last_update = std::chrono::steady_clock::now();
+  SessionManager::Stats last_stats;
+
+  while (!are_final_stats_emitted()) {
+    auto now = std::chrono::steady_clock::now();
+    if (now - last_update >= update_interval) {
+      SessionManager::Stats stats_ = stats();
+      print_stats_line(stats_);
+      last_stats = stats_;
+      last_update = now;
+    }
+    std::this_thread::sleep_for(sleep_interval);
+  }
+  return last_stats;
+}
+
 }  // namespace trossen::runtime
