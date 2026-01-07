@@ -218,30 +218,34 @@ public:
   * periodically and returns early if stop is requested.
   * Also, keeps a track of stats while monitoring the episode.
   *
-  * @param update_interval How often to print stats
+  * @param update_interval How often to update stats (and print if enabled)
   * @param sleep_interval How long to sleep between checks
+  * @param print_stats Whether to print stats to console (default: false)
   * @return true if completed normally, false if interrupted by stop request
   */
   Stats monitor_episode(
     std::chrono::duration<double> update_interval = std::chrono::milliseconds(500),
-    std::chrono::duration<double> sleep_interval = std::chrono::milliseconds(100));
+    std::chrono::duration<double> sleep_interval = std::chrono::milliseconds(100),
+    bool print_stats = false);
 
   /**
    * @brief Start asynchronous stats monitoring in background thread
    *
-   * Launches a thread that continuously monitors and prints episode statistics.
+   * Launches a thread that continuously monitors episode statistics.
    * This allows the main thread to remain free for other operations.
    * The monitoring thread will automatically stop when the episode ends.
    *
-   * @param update_interval How often to update and print stats (default: 500ms)
+   * @param update_interval How often to update stats (and print if enabled) (default: 500ms)
    * @param sleep_interval Sleep duration between stat checks (default: 100ms)
+   * @param print_stats Whether to print stats to console (default: false)
    *
-   * @note This is non-blocking. Stats are printed in the background.
+   * @note This is non-blocking. Stats are printed in the background if print_stats is true.
    * @note Call get_async_monitor_stats() to retrieve final stats after episode completes.
    */
   void start_async_monitoring(
     std::chrono::duration<double> update_interval = std::chrono::milliseconds(500),
-    std::chrono::duration<double> sleep_interval = std::chrono::milliseconds(100));
+    std::chrono::duration<double> sleep_interval = std::chrono::milliseconds(100),
+    bool print_stats = false);
 
   /**
    * @brief Stop async monitoring and retrieve final stats

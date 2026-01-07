@@ -245,30 +245,6 @@ bool interruptible_sleep(std::chrono::duration<double> duration) {
   return true;
 }
 
-runtime::SessionManager::Stats monitor_episode(
-  runtime::SessionManager& mgr,
-  std::chrono::duration<double> update_interval,
-  std::chrono::duration<double> sleep_interval)
-{
-  auto last_update = std::chrono::steady_clock::now();
-  runtime::SessionManager::Stats last_stats;
-
-  while (!mgr.are_final_stats_emitted()) {
-    auto now = std::chrono::steady_clock::now();
-    if (now - last_update >= update_interval) {
-      auto stats = mgr.stats();
-      print_stats_line(stats);
-      last_stats = stats;
-      last_update = now;
-    }
-    // TODO(shantanuparab-tr): We might miss records written in the last sleep interval.
-    // Consider using condition variable or similar mechanism for better accuracy.
-    // Make sure this is fixed with asynchronous episode monitoring implementation.
-    std::this_thread::sleep_for(sleep_interval);
-  }
-  return last_stats;
-}
-
 std::string generate_episode_path(
   const std::string& output_dir,
   uint32_t episode_index,

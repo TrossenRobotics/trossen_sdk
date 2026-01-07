@@ -451,7 +451,8 @@ void SessionManager::print_stats_line(const SessionManager::Stats& stats) {
 
 SessionManager::Stats SessionManager::monitor_episode(
   std::chrono::duration<double> update_interval,
-  std::chrono::duration<double> sleep_interval)
+  std::chrono::duration<double> sleep_interval,
+  bool print_stats)
 {
   auto last_update = std::chrono::steady_clock::now();
   SessionManager::Stats last_stats;
@@ -460,7 +461,9 @@ SessionManager::Stats SessionManager::monitor_episode(
     auto now = std::chrono::steady_clock::now();
     if (now - last_update >= update_interval) {
       SessionManager::Stats stats_ = stats();
-      print_stats_line(stats_);
+      if (print_stats) {
+        print_stats_line(stats_);
+      }
       last_stats = stats_;
       last_update = now;
     }
@@ -471,7 +474,8 @@ SessionManager::Stats SessionManager::monitor_episode(
 
 void SessionManager::start_async_monitoring(
   std::chrono::duration<double> update_interval,
-  std::chrono::duration<double> sleep_interval)
+  std::chrono::duration<double> sleep_interval,
+  bool print_stats)
 {
   // Stop any existing async monitoring
   if (async_monitoring_active_) {
@@ -479,9 +483,9 @@ void SessionManager::start_async_monitoring(
   }
 
   async_monitoring_active_ = true;
-  async_monitor_thread_ = std::thread([this, update_interval, sleep_interval]() {
+  async_monitor_thread_ = std::thread([this, update_interval, sleep_interval, print_stats]() {
     // Run monitor_episode in background thread
-    Stats final_stats = monitor_episode(update_interval, sleep_interval);
+    Stats final_stats = monitor_episode(update_interval, sleep_interval, print_stats);
 
     // Store final stats
     {

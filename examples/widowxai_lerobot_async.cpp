@@ -1,18 +1,18 @@
 /**
- * @file widowxai_lerobot.cpp
- * @brief Complete Trossen AI Solo demo with Session Manager, MCAP backend, and OpenCV camera
+ * @file widowxai_lerobot_async.cpp
+ * @brief Demo for Trossen AI Solo with Mock/Hardware arms, Session Manager, LeRobot backend, and OpenCV camera (asynchronous monitoring)
  *
  * This demo combines:
  * - Trossen AI Solo hardware (leader + follower arms)
  * - Session Manager for multi-episode recording
- * - MCAP backend for data storage
+ * - LeRobot backend for data storage
  * - OpenCV camera producer for image capture
  * - Configurable episode count and duration
  *
  * Usage:
- *   ./widowxai_lerobot
- *   ./widowxai_lerobot --root-dir /data/recordings
- *   ./widowxai_lerobot --mock  # Use mock producers for testing without hardware
+ *   ./widowxai_lerobot_async
+ *   ./widowxai_lerobot_async --root-dir /data/recordings
+ *   ./widowxai_lerobot_async --mock  # Use mock producers for testing without hardware
  */
 
 #include <chrono>
