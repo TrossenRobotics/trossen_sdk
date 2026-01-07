@@ -37,20 +37,11 @@ inline std::string auto_generate_dataset_id() {
   return oss.str();
 }
 
-// Constants for default variables
-constexpr int DEFAULT_ENCODER_THREADS = 1;
-constexpr int DEFAULT_MAX_IMAGE_QUEUE = 0;
-constexpr int DEFAULT_PNG_COMPRESSION_LEVEL = 3;
-constexpr bool DEFAULT_OVERWRITE_EXISTING = false;
-constexpr bool DEFAULT_ENCODE_VIDEOS = false;
-constexpr char DEFAULT_TASK_NAME[] = "perform a generic task";
-constexpr char DEFAULT_REPOSITORY_ID[] = "TrossenRoboticsCommunity";
-constexpr char DEFAULT_ROBOT_NAME[] = "trossen_ai_stationary";
-constexpr float DEFAULT_FPS = 30.0f;
-constexpr int DEFAULT_CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
-constexpr char DEFAULT_COMPRESSION[] = "";
-constexpr char DEFAULT_DROP_POLICY[] = "DropNewest";
-constexpr int DEFAULT_EPISODE_INDEX = 0;
+// Common constants used across multiple backends
+inline constexpr int DEFAULT_ENCODER_THREADS = 1;
+inline constexpr int DEFAULT_MAX_IMAGE_QUEUE = 0;
+inline constexpr int DEFAULT_PNG_COMPRESSION_LEVEL = 3;
+inline constexpr char DEFAULT_ROBOT_NAME[] = "trossen_ai_stationary";
 
 }  // namespace trossen::io::backends
 

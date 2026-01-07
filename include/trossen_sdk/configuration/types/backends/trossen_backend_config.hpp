@@ -13,12 +13,15 @@
 
 namespace trossen::configuration {
 
+// Trossen backend specific constants
+inline constexpr char TROSSEN_DEFAULT_DROP_POLICY[] = "DropNewest";
+
 struct TrossenBackendConfig : public BaseConfig {
   std::string root{trossen::io::backends::get_default_root_path().string()};
   int encoder_threads{trossen::io::backends::DEFAULT_ENCODER_THREADS};
   int max_image_queue{trossen::io::backends::DEFAULT_MAX_IMAGE_QUEUE};
   int png_compression_level{trossen::io::backends::DEFAULT_PNG_COMPRESSION_LEVEL};
-  std::string drop_policy{trossen::io::backends::DEFAULT_DROP_POLICY};
+  std::string drop_policy{TROSSEN_DEFAULT_DROP_POLICY};
 
   std::string type() const override { return "trossen_backend"; }
 

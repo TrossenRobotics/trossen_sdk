@@ -13,11 +13,15 @@
 
 namespace trossen::configuration {
 
+// MCAP backend specific constants
+inline constexpr int MCAP_DEFAULT_CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
+inline constexpr char MCAP_DEFAULT_COMPRESSION[] = "";
+
 struct McapBackendConfig : public BaseConfig {
   std::string root{trossen::io::backends::get_default_root_path().string()};
   std::string robot_name{trossen::io::backends::DEFAULT_ROBOT_NAME};
-  int chunk_size_bytes{trossen::io::backends::DEFAULT_CHUNK_SIZE_BYTES};
-  std::string compression{trossen::io::backends::DEFAULT_COMPRESSION};
+  int chunk_size_bytes{MCAP_DEFAULT_CHUNK_SIZE_BYTES};
+  std::string compression{MCAP_DEFAULT_COMPRESSION};
   std::string dataset_id{trossen::io::backends::auto_generate_dataset_id()};
   // TODO(shantanuparab-tr): Remove episode index if not being used
   int episode_index{0};
