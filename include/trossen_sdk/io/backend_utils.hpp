@@ -25,6 +25,7 @@ inline std::filesystem::path get_default_root_path() {
 
 /**
  * @brief Auto-generate a dataset ID based on the current timestamp
+ * @return Generated dataset ID string
  */
 inline std::string auto_generate_dataset_id() {
   // Generate a timestamp-based dataset ID
