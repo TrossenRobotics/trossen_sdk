@@ -29,3 +29,8 @@ target_link_libraries(backend_registry_demo trossen_sdk)
 # Hardware registry demo
 add_executable(hardware_registry_demo hardware_registry_demo.cpp)
 target_link_libraries(hardware_registry_demo trossen_sdk)
+
+# Trossen AI Solo demo Async
+find_package(libtrossen_arm)
+add_executable(widowxai_lerobot_async widowxai_lerobot_async.cpp)
+target_link_libraries(widowxai_lerobot_async demo_utils trossen_sdk libtrossen_arm)
