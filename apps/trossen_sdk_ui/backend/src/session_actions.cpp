@@ -290,8 +290,24 @@ bool setup_so101_teleop(
             cam_cfg.fps = cam.fps;
             cam_cfg.use_device_time = prod.use_device_time;
 
+            // TODO(user): Once OpenCvCameraProducer supports taking
+            // OpenCvCameraComponent directly, use the already-connected camera from
+            // ActiveHardwareRegistry (like arm producers do) to avoid device-busy
+            // errors from attempting to open camera twice.
             auto camera_producer = std::make_shared<
                 trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
+
+            // Replace the above with this once
+            // OpenCvCameraProducer(shared_ptr<OpenCvCameraComponent>) is available:
+            // auto hw_component = trossen::hw::ActiveHardwareRegistry::get(prod.camera_id);
+            // auto camera_component = std::dynamic_pointer_cast<
+            //     trossen::hw::camera::OpenCvCameraComponent>(hw_component);
+            // if (!camera_component) {
+            //     std::cerr << "Failed to get camera component from registry" << std::endl;
+            //     continue;
+            // }
+            // auto camera_producer = std::make_shared<
+            //     trossen::hw::camera::OpenCvCameraProducer>(camera_component);
 
             auto camera_period = std::chrono::milliseconds(
                 static_cast<int>(1000.0f / cam.fps));
@@ -459,8 +475,24 @@ bool setup_widowx_teleop(
             cam_cfg.fps = cam.fps;
             cam_cfg.use_device_time = prod.use_device_time;
 
+            // TODO(user): Once OpenCvCameraProducer supports taking
+            // OpenCvCameraComponent directly, use the already-connected camera from
+            // ActiveHardwareRegistry (like arm producers do) to avoid device-busy
+            // errors from attempting to open camera twice.
             auto camera_producer = std::make_shared<
                 trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
+
+            // Replace the above with this once
+            // OpenCvCameraProducer(shared_ptr<OpenCvCameraComponent>) is available:
+            // auto hw_component = trossen::hw::ActiveHardwareRegistry::get(prod.camera_id);
+            // auto camera_component = std::dynamic_pointer_cast<
+            //     trossen::hw::camera::OpenCvCameraComponent>(hw_component);
+            // if (!camera_component) {
+            //     std::cerr << "Failed to get camera component from registry" << std::endl;
+            //     continue;
+            // }
+            // auto camera_producer = std::make_shared<
+            //     trossen::hw::camera::OpenCvCameraProducer>(camera_component);
 
             auto camera_period = std::chrono::milliseconds(
                 static_cast<int>(1000.0f / cam.fps));
@@ -692,9 +724,7 @@ bool setup_camera_recording(
         const auto& prod = *prod_it;
 
         if (prod.type == "opencv_camera") {
-            // TODO(trossen): Implement OpenCV camera producer instantiation
-            // Need to get camera component from ActiveHardwareRegistry
-            // Create OpenCvCameraProducer and register with SessionManager
+            // TODO(trossen): Implement just testing camera recording script
             std::cout << "OpenCV camera producer not yet implemented: "
                       << prod.id << std::endl;
         } else if (prod.type == "realsense_color" ||
@@ -779,8 +809,24 @@ bool setup_widowx_bimanual_teleop(
             cam_cfg.fps = cam.fps;
             cam_cfg.use_device_time = prod.use_device_time;
 
+            // TODO(user): Once OpenCvCameraProducer supports taking
+            // OpenCvCameraComponent directly, use the already-connected camera from
+            // ActiveHardwareRegistry (like arm producers do) to avoid device-busy
+            // errors from attempting to open camera twice.
             auto camera_producer = std::make_shared<
                 trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
+
+            // Replace the above with this once
+            // OpenCvCameraProducer(shared_ptr<OpenCvCameraComponent>) is available:
+            // auto hw_component = trossen::hw::ActiveHardwareRegistry::get(prod.camera_id);
+            // auto camera_component = std::dynamic_pointer_cast<
+            //     trossen::hw::camera::OpenCvCameraComponent>(hw_component);
+            // if (!camera_component) {
+            //     std::cerr << "Failed to get camera component from registry" << std::endl;
+            //     continue;
+            // }
+            // auto camera_producer = std::make_shared<
+            //     trossen::hw::camera::OpenCvCameraProducer>(camera_component);
 
             auto camera_period = std::chrono::milliseconds(
                 static_cast<int>(1000.0f / cam.fps));
