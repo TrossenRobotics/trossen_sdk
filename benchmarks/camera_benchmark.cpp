@@ -1,8 +1,8 @@
 /**
  * @file camera_benchmark.cpp
- * @brief Benchmark tool to find performance bottlenecks in mock camera producers
+ * @brief Benchmark tool to find performance bottlenecks in mock and real camera producers
  *
- * This tool tests mock camera performance across different configurations:
+ * This tool tests mock and real camera performance across different configurations:
  * - FPS: 15, 30, 60, 90, 120
  * - Resolutions: 640x480, 1280x720, 1920x1080, 2560x1440, 3840x2160
  * - Number of cameras: 1, 2, 4, 8
