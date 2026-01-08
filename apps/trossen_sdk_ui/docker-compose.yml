@@ -7,6 +7,9 @@ services:
       dockerfile: apps/trossen_sdk_ui/backend/Dockerfile
     container_name: trossen_backend
     user: "1000:20"  # Run as host user (uid:dialout gid) for device access
+    group_add:
+      - "44"  # video group for camera access
+      - "46"  # plugdev group for camera access
     environment:
       - HOME=/home/trossen-ai
     volumes:
