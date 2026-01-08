@@ -44,8 +44,9 @@ struct BenchmarkConfig {
   uint32_t num_cameras;
   double duration_s;
   double tolerance_percent;
+  int64_t absolute_tolerance_frames;
   bool use_mock;
-  int camera_start_index;  // Starting device index for OpenCV cameras
+  std::vector<int> camera_indices;
 };
 
 struct BenchmarkResult {
@@ -68,7 +69,7 @@ void print_header(bool use_mock) {
                                              "OpenCV (real hardware)") << "\n";
   std::cout << "\n";
   std::cout << "Testing configurations to find performance bottlenecks:\n";
-  std::cout << "  - FPS: 15, 30, 60, 90, 120\n";
+  std::cout << "  - FPS: 15, 30, 60, 90, 120 (tested up to hardware support)\n";
   std::cout << "  - Resolutions: 640x480, 1280x720, 1920x1080, 2560x1440, 3840x2160\n";
   std::cout << "  - Cameras: 1, 2, 4, 8\n";
   std::cout << "  - Tolerance: Hybrid (max of 1% relative or 3 frames absolute)\n";
@@ -114,7 +115,7 @@ BenchmarkResult run_benchmark(const BenchmarkConfig& cfg) {
   static int test_counter = 0;
   std::string dataset_id = "bench_" + std::to_string(test_counter++);
 
-  // SessionManager loads config from GlobalConfig (sdk_config.json)
+  // SessionManager loads config from GlobalConfig (benchmark_config.json)
   trossen::runtime::SessionManager mgr;
 
   // Create camera producers (mock or OpenCV)
@@ -134,23 +135,23 @@ BenchmarkResult run_benchmark(const BenchmarkConfig& cfg) {
       cam_cfg.drop_probability = 0.0;
       producer = std::make_shared<trossen::hw::camera::MockCameraProducer>(cam_cfg);
     } else {
+      if (i >= cfg.camera_indices.size()) {
+        result.status = "Not enough camera indices provided for " +
+                        std::to_string(cfg.num_cameras) + " cameras";
+        result.passed = false;
+        return result;
+      }
+
       trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
-      cam_cfg.device_index = cfg.camera_start_index + i;
-      cam_cfg.stream_id = "camera_" + std::to_string(i);
+      cam_cfg.device_index = cfg.camera_indices[i];
+      cam_cfg.stream_id = "camera_" + std::to_string(cfg.camera_indices[i]);
       cam_cfg.encoding = "bgr8";
       cam_cfg.width = cfg.width;
       cam_cfg.height = cfg.height;
       cam_cfg.fps = cfg.fps;
       cam_cfg.use_device_time = false;
-      cam_cfg.warmup_seconds = 1.0;
 
-      auto opencv_cam = std::make_shared<trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
-      if (!opencv_cam->warmup()) {
-        result.status = "Failed to warmup camera " + std::to_string(i);
-        result.passed = false;
-        return result;
-      }
-      producer = opencv_cam;
+      producer = std::make_shared<trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
     }
 
     camera_producers.push_back(producer);
@@ -207,10 +208,10 @@ BenchmarkResult run_benchmark(const BenchmarkConfig& cfg) {
                              100.0;
 
   // Hybrid tolerance: Pass if lost_frames ≤ max(α · expected_frames, β)
-  // α = relative tolerance (1% = 0.01)
-  // β = absolute tolerance (3 frames)
-  double alpha = cfg.tolerance_percent / 100.0;  // Convert 1% to 0.01
-  int64_t beta = 3;  // Absolute tolerance: allow up to 3 frames lost
+  // α = relative tolerance (e.g., 1% = 0.01)
+  // β = absolute tolerance (configurable frames)
+  double alpha = cfg.tolerance_percent / 100.0;
+  int64_t beta = cfg.absolute_tolerance_frames;
 
   double relative_threshold = alpha * result.expected_records;
   int64_t max_allowed_loss = static_cast<int64_t>(
@@ -230,156 +231,196 @@ int main(int argc, char** argv) {
   std::signal(SIGTERM, signal_handler);
 
   // Parse command-line arguments
-  bool use_mock = true;  // Default to mock for safety
-  int camera_start_index = 0;  // Default camera device index
+  bool use_mock = false;  // Default to real cameras
 
   for (int i = 1; i < argc; ++i) {
     std::string arg(argv[i]);
     if (arg == "--mock") {
       use_mock = true;
-    } else if (arg == "--opencv" || arg == "--real") {
-      use_mock = false;
-    } else if (arg == "--camera-index" && i + 1 < argc) {
-      camera_start_index = std::atoi(argv[++i]);
     } else if (arg == "--help" || arg == "-h") {
-      std::cout << "Usage: " << argv[0] << " [options]\n\n";
+      std::cout << "Usage: " << argv[0] << " [--mock]\n\n";
       std::cout << "Options:\n";
-      std::cout << "  --mock              Use mock cameras (default)\n";
-      std::cout << "  --opencv, --real    Use real OpenCV cameras\n";
-      std::cout << "  --camera-index <N>  Starting camera device index (default: 0)\n";
+      std::cout << "  --mock              Use mock cameras (default: uses real OpenCV cameras)\n";
       std::cout << "  --help, -h          Show this help message\n\n";
+      std::cout << "Configuration:\n";
+      std::cout << "  Edit benchmarks/benchmark_config.json to configure:\n";
+      std::cout << "  - camera_indices: Device indices for OpenCV cameras\n";
+      std::cout << "  - test_configurations: FPS, resolutions, camera counts to test\n";
+      std::cout << "  - test_duration_seconds: Duration for each test\n";
+      std::cout << "  - tolerance_percent: Relative tolerance for pass/fail\n";
+      std::cout << "  - absolute_tolerance_frames: Absolute frame tolerance\n\n";
       std::cout << "Examples:\n";
-      std::cout << "  " << argv[0] << " --mock\n";
-      std::cout << "  " << argv[0] << " --opencv --camera-index 4\n";
+      std::cout << "  " << argv[0] << "              # Run with OpenCV cameras\n";
+      std::cout << "  " << argv[0] << " --mock       # Run with mock cameras\n";
       return 0;
     }
   }
 
   // Load configuration from benchmark_config.json
   std::string config_file = "benchmarks/benchmark_config.json";
-  nlohmann::json j = trossen::configuration::JsonLoader::load(config_file);
-  trossen::configuration::GlobalConfig::instance().load_from_json(j);
+
+  std::vector<int> camera_indices;
+  double duration;
+  double tolerance;
+  int64_t absolute_tolerance;
+  nlohmann::json bench_cfg;
+
+  try {
+    nlohmann::json j = trossen::configuration::JsonLoader::load(config_file);
+    std::cout << "Loaded JSON successfully\n";
+
+    // Extract benchmark config before loading to GlobalConfig
+    if (!j.contains("benchmark")) {
+      std::cerr << "Error: 'benchmark' section not found in config file\n";
+      return 1;
+    }
+    bench_cfg = j["benchmark"];
+    j.erase("benchmark");  // Remove benchmark section before loading into GlobalConfig
+
+    trossen::configuration::GlobalConfig::instance().load_from_json(j);
+    std::cout << "Loaded GlobalConfig successfully\n";
+
+    // Parse benchmark configuration
+    camera_indices = bench_cfg["camera_indices"].get<std::vector<int>>();
+    duration = bench_cfg["test_duration_seconds"].get<double>();
+    tolerance = bench_cfg["tolerance_percent"].get<double>();
+    absolute_tolerance = bench_cfg["absolute_tolerance_frames"].get<int64_t>();
+    std::cout << "Parsed benchmark config successfully\n";
+  } catch (const std::exception& e) {
+    std::cerr << "Error loading configuration: " << e.what() << "\n";
+    return 1;
+  }
 
   print_header(use_mock);
 
-  // Test configurations
-  std::vector<uint32_t> fps_values = {15, 30, 60, 90, 120};
-  std::vector<std::pair<uint32_t, uint32_t>> resolutions = {
-    {640, 480},      // VGA
-    {1280, 720},     // 720p
-    {1920, 1080},    // 1080p
-    {2560, 1440},    // 1440p
-    {3840, 2160}     // 4K
-  };
-  std::vector<uint32_t> camera_counts = {1, 2, 4, 8};
-
-  double duration = 3.0;  // 3 seconds per test
-  double tolerance = 1.0;  // 1% tolerance (strict performance validation)
+  if (!use_mock) {
+    std::cout << "Using OpenCV cameras with device indices: ";
+    for (size_t i = 0; i < camera_indices.size(); ++i) {
+      std::cout << camera_indices[i];
+      if (i < camera_indices.size() - 1) std::cout << ", ";
+    }
+    std::cout << "\n\n";
+  }
 
   std::vector<BenchmarkResult> all_results;
 
-  // Quick test: sweep FPS at 1080p with 1 camera
-  std::cout << "══════════════════════════════════════════════════════════════════════════\n";
-  std::cout << "TEST 1: FPS Sweep (1920x1080, 1 camera)\n";
-  std::cout << "══════════════════════════════════════════════════════════════════════════\n";
-  print_result_header();
+  // Run test configurations from JSON
+  auto test_configs = bench_cfg["test_configurations"];
 
-  for (uint32_t fps : fps_values) {
-    if (g_stop_requested) break;
+  for (const auto& test_config : test_configs) {
+    std::string test_name = test_config["name"].get<std::string>();
 
-    BenchmarkConfig cfg;
-    cfg.fps = fps;
-    cfg.width = 1920;
-    cfg.height = 1080;
-    cfg.num_cameras = 1;
-    cfg.duration_s = duration;
-    cfg.tolerance_percent = tolerance;
-    cfg.use_mock = use_mock;
-    cfg.camera_start_index = camera_start_index;
+    std::cout << "══════════════════════════════════════════════════════════════════════════\n";
+    std::cout << "TEST: " << test_name << "\n";
+    std::cout << "══════════════════════════════════════════════════════════════════════════\n";
+    print_result_header();
 
-    auto result = run_benchmark(cfg);
-    all_results.push_back(result);
-    print_result(result);
-  }
+    // Check what type of test this is
+    if (test_config.contains("fps_values") && test_config.contains("width") &&
+        test_config.contains("height") && test_config.contains("num_cameras")) {
+      // FPS sweep test
+      std::vector<uint32_t> fps_values = test_config["fps_values"].get<std::vector<uint32_t>>();
+      uint32_t width = test_config["width"].get<uint32_t>();
+      uint32_t height = test_config["height"].get<uint32_t>();
+      uint32_t num_cameras = test_config["num_cameras"].get<uint32_t>();
 
-  std::cout << "\n";
+      for (uint32_t fps : fps_values) {
+        if (g_stop_requested) break;
 
-  // Resolution test: sweep resolutions at 30 FPS with 1 camera
-  std::cout << "══════════════════════════════════════════════════════════════════════════\n";
-  std::cout << "TEST 2: Resolution Sweep (30 FPS, 1 camera)\n";
-  std::cout << "══════════════════════════════════════════════════════════════════════════\n";
-  print_result_header();
+        BenchmarkConfig cfg;
+        cfg.fps = fps;
+        cfg.width = width;
+        cfg.height = height;
+        cfg.num_cameras = num_cameras;
+        cfg.duration_s = duration;
+        cfg.tolerance_percent = tolerance;
+        cfg.absolute_tolerance_frames = absolute_tolerance;
+        cfg.use_mock = use_mock;
+        cfg.camera_indices = camera_indices;
 
-  for (auto [width, height] : resolutions) {
-    if (g_stop_requested) break;
+        auto result = run_benchmark(cfg);
+        all_results.push_back(result);
+        print_result(result);
+      }
+    } else if (test_config.contains("resolutions")) {
+      // Resolution sweep test
+      std::vector<uint32_t> fps_values = test_config["fps_values"].get<std::vector<uint32_t>>();
+      uint32_t num_cameras = test_config["num_cameras"].get<uint32_t>();
 
-    BenchmarkConfig cfg;
-    cfg.fps = 30;
-    cfg.width = width;
-    cfg.height = height;
-    cfg.num_cameras = 1;
-    cfg.duration_s = duration;
-    cfg.tolerance_percent = tolerance;
-    cfg.use_mock = use_mock;
-    cfg.camera_start_index = camera_start_index;
+      for (const auto& res : test_config["resolutions"]) {
+        if (g_stop_requested) break;
 
-    auto result = run_benchmark(cfg);
-    all_results.push_back(result);
-    print_result(result);
-  }
+        uint32_t width = res["width"].get<uint32_t>();
+        uint32_t height = res["height"].get<uint32_t>();
 
-  std::cout << "\n";
+        for (uint32_t fps : fps_values) {
+          BenchmarkConfig cfg;
+          cfg.fps = fps;
+          cfg.width = width;
+          cfg.height = height;
+          cfg.num_cameras = num_cameras;
+          cfg.duration_s = duration;
+          cfg.tolerance_percent = tolerance;
+          cfg.absolute_tolerance_frames = absolute_tolerance;
+          cfg.use_mock = use_mock;
+          cfg.camera_indices = camera_indices;
 
-  // Camera count test: sweep camera count at 30 FPS 1080p
-  std::cout << "══════════════════════════════════════════════════════════════════════════\n";
-  std::cout << "TEST 3: Camera Count Sweep (30 FPS, 1920x1080)\n";
-  std::cout << "══════════════════════════════════════════════════════════════════════════\n";
-  print_result_header();
+          auto result = run_benchmark(cfg);
+          all_results.push_back(result);
+          print_result(result);
+        }
+      }
+    } else if (test_config.contains("camera_counts")) {
+      std::vector<uint32_t> fps_values = test_config["fps_values"].get<std::vector<uint32_t>>();
+      uint32_t width = test_config["width"].get<uint32_t>();
+      uint32_t height = test_config["height"].get<uint32_t>();
+      std::vector<uint32_t> camera_counts =
+          test_config["camera_counts"].get<std::vector<uint32_t>>();
 
-  for (uint32_t num_cameras : camera_counts) {
-    if (g_stop_requested) break;
+      for (uint32_t num_cameras : camera_counts) {
+      for (uint32_t num_cameras : camera_counts) {
+        if (g_stop_requested) break;
 
-    BenchmarkConfig cfg;
-    cfg.fps = 30;
-    cfg.width = 1920;
-    cfg.height = 1080;
-    cfg.num_cameras = num_cameras;
-    cfg.duration_s = duration;
-    cfg.tolerance_percent = tolerance;
-    cfg.use_mock = use_mock;
-    cfg.camera_start_index = camera_start_index;
+        for (uint32_t fps : fps_values) {
+          BenchmarkConfig cfg;
+          cfg.fps = fps;
+          cfg.width = width;
+          cfg.height = height;
+          cfg.num_cameras = num_cameras;
+          cfg.duration_s = duration;
+          cfg.tolerance_percent = tolerance;
+          cfg.absolute_tolerance_frames = absolute_tolerance;
+          cfg.use_mock = use_mock;
+          cfg.camera_indices = camera_indices;
 
-    auto result = run_benchmark(cfg);
-    all_results.push_back(result);
-    print_result(result);
-  }
+          auto result = run_benchmark(cfg);
+          all_results.push_back(result);
+          print_result(result);
+        }
+      }
+    } else if (test_config.contains("tests")) {
+      // Specific test configurations
+      for (const auto& test : test_config["tests"]) {
+        if (g_stop_requested) break;
 
-  std::cout << "\n";
+        BenchmarkConfig cfg;
+        cfg.fps = test["fps"].get<uint32_t>();
+        cfg.width = test["width"].get<uint32_t>();
+        cfg.height = test["height"].get<uint32_t>();
+        cfg.num_cameras = test["num_cameras"].get<uint32_t>();
+        cfg.duration_s = duration;
+        cfg.tolerance_percent = tolerance;
+        cfg.absolute_tolerance_frames = absolute_tolerance;
+        cfg.use_mock = use_mock;
+        cfg.camera_indices = camera_indices;
 
-  // High stress test: high FPS + high resolution + multiple cameras
-  std::cout << "══════════════════════════════════════════════════════════════════════════\n";
-  std::cout << "TEST 4: High Stress Tests\n";
-  std::cout << "══════════════════════════════════════════════════════════════════════════\n";
-  print_result_header();
-  std::vector<BenchmarkConfig> stress_tests = {
-    {60, 1920, 1080, 2, duration, tolerance, use_mock,
-     camera_start_index},  // 60 FPS, 1080p, 2 cameras
-    {60, 1920, 1080, 4, duration, tolerance, use_mock,
-     camera_start_index},  // 60 FPS, 1080p, 4 cameras
-    {90, 1920, 1080, 2, duration, tolerance, use_mock,
-     camera_start_index},  // 90 FPS, 1080p, 2 cameras
-    {120, 1280, 720, 2, duration, tolerance, use_mock,
-     camera_start_index},  // 120 FPS, 720p, 2 cameras
-    {30, 3840, 2160, 2, duration, tolerance, use_mock,
-     camera_start_index}   // 30 FPS, 4K, 2 cameras
-  };
+        auto result = run_benchmark(cfg);
+        all_results.push_back(result);
+        print_result(result);
+      }
+    }
 
-  for (const auto& cfg : stress_tests) {
-    if (g_stop_requested) break;
-
-    auto result = run_benchmark(cfg);
-    all_results.push_back(result);
-    print_result(result);
+    std::cout << "\n";
   }
 
   std::cout << "\n";
