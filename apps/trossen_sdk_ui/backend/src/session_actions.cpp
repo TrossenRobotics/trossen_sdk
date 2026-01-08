@@ -12,6 +12,7 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include <iostream>
 #include <algorithm>
+#include <string>
 
 extern trossen::config::ConfigManager config_manager;
 
@@ -283,7 +284,7 @@ bool setup_so101_teleop(
             const auto& cam = *cam_it;
             trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
             cam_cfg.device_index = cam.device_index;
-            cam_cfg.stream_id = prod.id;
+            cam_cfg.stream_id = "opencv_camera_" + std::to_string(cam.device_index);
             cam_cfg.width = cam.width;
             cam_cfg.height = cam.height;
             cam_cfg.height = cam.height;
@@ -468,7 +469,7 @@ bool setup_widowx_teleop(
             const auto& cam = *cam_it;
             trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
             cam_cfg.device_index = cam.device_index;
-            cam_cfg.stream_id = prod.id;
+            cam_cfg.stream_id = "opencv_camera_" + std::to_string(cam.device_index);
             cam_cfg.encoding = cam.encoding;
             cam_cfg.width = cam.width;
             cam_cfg.height = cam.height;
@@ -802,7 +803,7 @@ bool setup_widowx_bimanual_teleop(
             const auto& cam = *cam_it;
             trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
             cam_cfg.device_index = cam.device_index;
-            cam_cfg.stream_id = prod.id;
+            cam_cfg.stream_id = "opencv_camera_" + std::to_string(cam.device_index);
             cam_cfg.encoding = cam.encoding;
             cam_cfg.width = cam.width;
             cam_cfg.height = cam.height;

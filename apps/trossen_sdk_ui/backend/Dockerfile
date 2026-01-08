@@ -82,7 +82,14 @@ RUN apt-get update && apt-get install -y \
     wget \
     lsb-release \
     libopencv-dev \
+    software-properties-common \
     && rm -rf /var/lib/apt/lists/*
+
+# Add PPA with ffmpeg that includes SVT-AV1 support
+RUN add-apt-repository ppa:ubuntuhandbook1/ffmpeg6 -y && \
+    apt-get update && \
+    apt-get install -y ffmpeg && \
+    rm -rf /var/lib/apt/lists/*
 
 # Install Arrow C++ runtime libraries
 RUN wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb && \

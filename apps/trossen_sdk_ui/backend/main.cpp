@@ -1121,8 +1121,14 @@ int main() {
 
             // Add backend configuration based on type
             if (session.backend_type == "lerobot") {
+                // Get home directory for storage root
+                const char* home = std::getenv("HOME");
+                std::string storage_root = home ? std::string(home) + "/.cache/trossen_sdk"
+                                                : "/tmp/trossen_sdk";
+
                 global_config["lerobot_backend"] = {
                     {"type", "lerobot_backend"},
+                    {"root", storage_root},
                     {"encoder_threads", 2},
                     {"max_image_queue", 10},
                     {"png_compression_level", 5},
