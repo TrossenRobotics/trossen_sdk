@@ -422,6 +422,76 @@ export function Configuration() {
     }));
   };
 
+  const handleClearAllCameras = async () => {
+    if (!confirm(`Are you sure you want to delete all ${cameras.length} cameras?`)) {
+      return;
+    }
+
+    try {
+      // Delete cameras in reverse order to maintain indices
+      for (let i = cameras.length - 1; i >= 0; i--) {
+        await fetch(`${BACKEND_URL}/configure/camera/${i}`, {
+          method: 'DELETE',
+        });
+      }
+      await fetchConfigurations();
+    } catch (err) {
+      alert(`Failed to clear cameras: ${err instanceof Error ? err.message : 'Network error'}`);
+    }
+  };
+
+  const handleClearAllRobots = async () => {
+    if (!confirm(`Are you sure you want to delete all ${robots.length} robots?`)) {
+      return;
+    }
+
+    try {
+      // Delete robots in reverse order to maintain indices
+      for (let i = robots.length - 1; i >= 0; i--) {
+        await fetch(`${BACKEND_URL}/configure/arm/${i}`, {
+          method: 'DELETE',
+        });
+      }
+      await fetchConfigurations();
+    } catch (err) {
+      alert(`Failed to clear robots: ${err instanceof Error ? err.message : 'Network error'}`);
+    }
+  };
+
+  const handleClearAllProducers = async () => {
+    if (!confirm(`Are you sure you want to delete all ${producers.length} producers?`)) {
+      return;
+    }
+
+    try {
+      for (const producer of producers) {
+        await fetch(`${BACKEND_URL}/configure/producer/${producer.id}`, {
+          method: 'DELETE',
+        });
+      }
+      await fetchConfigurations();
+    } catch (err) {
+      alert(`Failed to clear producers: ${err instanceof Error ? err.message : 'Network error'}`);
+    }
+  };
+
+  const handleClearAllSystems = async () => {
+    if (!confirm(`Are you sure you want to delete all ${systems.length} hardware systems?`)) {
+      return;
+    }
+
+    try {
+      for (const system of systems) {
+        await fetch(`${BACKEND_URL}/configure/system/${system.id}`, {
+          method: 'DELETE',
+        });
+      }
+      await fetchConfigurations();
+    } catch (err) {
+      alert(`Failed to clear systems: ${err instanceof Error ? err.message : 'Network error'}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -489,18 +559,28 @@ export function Configuration() {
           <div>
             <div className="p-6 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-gray-900">Configured Cameras</h3>
-              <button
-                id="add-camera-button"
-                onClick={() => {
-                  setEditingCameraIndex(null);
-                  setCameraForm({ type: 'opencv', name: '', device_index: 0, width: 640, height: 480, fps: 30 });
-                  setShowCameraModal(true);
-                }}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Add Camera
-              </button>
+              <div className="flex gap-2">
+                {cameras.length > 0 && (
+                  <button
+                    onClick={handleClearAllCameras}
+                    className="px-3 py-1.5 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors border border-red-200"
+                  >
+                    Clear All
+                  </button>
+                )}
+                <button
+                  id="add-camera-button"
+                  onClick={() => {
+                    setEditingCameraIndex(null);
+                    setCameraForm({ type: 'opencv', name: '', device_index: 0, width: 640, height: 480, fps: 30 });
+                    setShowCameraModal(true);
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Camera
+                </button>
+              </div>
             </div>
             <div className="divide-y divide-gray-200">
               {cameras.map((camera, index) => {
@@ -561,20 +641,30 @@ export function Configuration() {
           <div id="robots-section">
             <div className="p-6 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-gray-900">Configured Robots</h3>
-              <button
-                id="add-robot-button"
-                onClick={() => {
-                  setEditingRobotIndex(null);
-                  setRobotType('SO101');
-                  setSO101Form({ type: 'so101', name: '', end_effector: '', port: '/dev/ttyUSB0' });
-                  setWidowxForm({ type: 'widowx', name: '', end_effector: 'wxai_v0_leader', serv_ip: '' });
-                  setShowRobotModal(true);
-                }}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Add Robot
-              </button>
+              <div className="flex gap-2">
+                {robots.length > 0 && (
+                  <button
+                    onClick={handleClearAllRobots}
+                    className="px-3 py-1.5 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors border border-red-200"
+                  >
+                    Clear All
+                  </button>
+                )}
+                <button
+                  id="add-robot-button"
+                  onClick={() => {
+                    setEditingRobotIndex(null);
+                    setRobotType('SO101');
+                    setSO101Form({ type: 'so101', name: '', end_effector: '', port: '/dev/ttyUSB0' });
+                    setWidowxForm({ type: 'widowx', name: '', end_effector: 'wxai_v0_leader', serv_ip: '' });
+                    setShowRobotModal(true);
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Robot
+                </button>
+              </div>
             </div>
             <div className="divide-y divide-gray-200">
               {robots.map((robot, index) => {
@@ -650,14 +740,24 @@ export function Configuration() {
           <div>
             <div className="p-6 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-gray-900">Hardware Systems</h3>
-              <button
-                id="add-system-button"
-                onClick={() => setShowSystemModal(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Create System
-              </button>
+              <div className="flex gap-2">
+                {systems.length > 0 && (
+                  <button
+                    onClick={handleClearAllSystems}
+                    className="px-3 py-1.5 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors border border-red-200"
+                  >
+                    Clear All
+                  </button>
+                )}
+                <button
+                  id="add-system-button"
+                  onClick={() => setShowSystemModal(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Create System
+                </button>
+              </div>
             </div>
             <div className="divide-y divide-gray-200">
               {systems.length === 0 ? (

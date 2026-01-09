@@ -176,6 +176,23 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
     }
   };
 
+  const handleClearAllProducers = async () => {
+    if (!confirm(`Are you sure you want to delete all ${producers.length} producers?`)) {
+      return;
+    }
+
+    try {
+      for (const producer of producers) {
+        await fetch(`${BACKEND_URL}/configure/producer/${producer.id}`, {
+          method: 'DELETE',
+        });
+      }
+      onRefresh();
+    } catch (err) {
+      alert('Failed to clear producers: ' + err);
+    }
+  };
+
   const getProducerTypeLabel = (type: string) => {
     const producerType = PRODUCER_TYPES.find(pt => pt.value === type);
     return producerType ? producerType.label : type;
@@ -194,17 +211,27 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
     <div>
       <div className="p-6 border-b border-gray-200 flex justify-between items-center">
         <h3 className="text-gray-900">Configured Producers</h3>
-        <button
-          id="add-producer-button"
-          onClick={() => {
-            resetForm();
-            setShowModal(true);
-          }}
-          className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-        >
-          <Plus className="w-4 h-4" />
-          Add Producer
-        </button>
+        <div className="flex gap-2">
+          {producers.length > 0 && (
+            <button
+              onClick={handleClearAllProducers}
+              className="px-3 py-1.5 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors border border-red-200"
+            >
+              Clear All
+            </button>
+          )}
+          <button
+            id="add-producer-button"
+            onClick={() => {
+              resetForm();
+              setShowModal(true);
+            }}
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+          >
+            <Plus className="w-4 h-4" />
+            Add Producer
+          </button>
+        </div>
       </div>
       <div className="divide-y divide-gray-200">
         {producers.map((producer) => {
@@ -362,7 +389,15 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
                       <option value="">Select leader robot</option>
-                      {robots.map((robot: any) => (
+                      {robots.filter((robot: any) => {
+                        // Filter for leader end effectors based on producer type
+                        if (producerType === 'teleop_widowx_arm') {
+                          return robot.end_effector === 'wxai_v0_leader';
+                        } else if (producerType === 'teleop_so101_arm') {
+                          return robot.end_effector === 'leader';
+                        }
+                        return false;
+                      }).map((robot: any) => (
                         <option key={robot.name} value={robot.name}>{robot.name}</option>
                       ))}
                     </select>
@@ -375,7 +410,15 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                     >
                       <option value="">Select follower robot</option>
-                      {robots.map((robot: any) => (
+                      {robots.filter((robot: any) => {
+                        // Filter for follower end effectors based on producer type
+                        if (producerType === 'teleop_widowx_arm') {
+                          return robot.end_effector === 'wxai_v0_follower';
+                        } else if (producerType === 'teleop_so101_arm') {
+                          return robot.end_effector === 'follower';
+                        }
+                        return false;
+                      }).map((robot: any) => (
                         <option key={robot.name} value={robot.name}>{robot.name}</option>
                       ))}
                     </select>
