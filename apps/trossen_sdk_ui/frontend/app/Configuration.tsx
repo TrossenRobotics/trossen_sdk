@@ -77,6 +77,14 @@ export function Configuration() {
   });
 
   useEffect(() => {
+    // Read tab from URL query parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const tabParam = urlParams.get('tab');
+    if (tabParam && ['cameras', 'robots', 'producers', 'systems', 'arms'].includes(tabParam)) {
+      // Map 'arms' to 'robots' for consistency
+      setActiveTab(tabParam === 'arms' ? 'robots' : tabParam as TabType);
+    }
+
     fetchConfigurations();
     fetchHardwareStatus();
   }, []);
