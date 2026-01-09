@@ -378,7 +378,6 @@ int main(int argc, char** argv) {
           test_config["camera_counts"].get<std::vector<uint32_t>>();
 
       for (uint32_t num_cameras : camera_counts) {
-      for (uint32_t num_cameras : camera_counts) {
         if (g_stop_requested) break;
 
         for (uint32_t fps : fps_values) {
