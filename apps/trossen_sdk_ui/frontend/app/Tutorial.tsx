@@ -11,7 +11,7 @@ export const startWidowXTutorial = () => {
       {
         element: '#tutorial-button',
         popover: {
-          title: 'Welcome to SOMA! 🤖',
+          title: 'Welcome to SOMA',
           description: 'This tutorial will guide you through setting up a WidowX teleop leader-follower recording session. Let\'s get started!',
           side: 'bottom',
           align: 'start'
@@ -20,7 +20,7 @@ export const startWidowXTutorial = () => {
       {
         popover: {
           title: 'Tutorial Overview',
-          description: 'We\'ll walk through these steps:\n\n1️⃣ Configure two WidowX robots (leader & follower)\n2️⃣ Set up a camera\n3️⃣ Create producers to read robot data\n4️⃣ Create a hardware system\n5️⃣ Start recording your teleop session\n\nLet\'s begin by going to the Configuration page.',
+          description: 'We will walk through these steps:<ol><li>Configure two WidowX robots (leader and follower)</li><li>Set up a camera</li><li>Create producers to read robot data</li><li>Create a hardware system</li><li>Start recording your teleop session</li></ol>Let\'s begin by going to the Configuration page.',
         }
       },
       {
@@ -75,7 +75,7 @@ export const startWidowXTutorial = () => {
         element: '#robot-modal-form',
         popover: {
           title: 'Configure Leader Robot',
-          description: 'Fill out the form:\n\n1. Select "WidowX" as robot type\n2. Name it "leader"\n3. Select "wxai_v0_leader" as end effector\n4. Enter your robot\'s IP address\n5. Click "Add Robot"\n\nThe form will close and you can add the follower robot next.',
+          description: 'Fill out the form:<ol><li>Select "WidowX" as robot type</li><li>Name it "leader"</li><li>Select "wxai_v0_leader" as end effector</li><li>Enter your robot\'s IP address</li><li>Click "Add Robot"</li></ol>The form will close and you can add the follower robot next.',
           side: 'right',
         },
         onHighlighted: () => {
@@ -104,7 +104,7 @@ export const startWidowXTutorial = () => {
         element: '#robots-section',
         popover: {
           title: 'Add Follower Robot & Connect',
-          description: 'Now:\n\n1. Click "+ Add Robot" again\n2. Select "WidowX" as robot type\n3. Name it "follower"\n4. Select "wxai_v0_follower" as end effector\n5. Enter the follower\'s IP address\n6. Click "Add Robot"\n7. Click "Connect" on BOTH robot cards\n\nClick "Next" when both robots are connected.',
+          description: 'Now:<ol><li>Click "+ Add Robot" again</li><li>Select "WidowX" as robot type</li><li>Name it "follower"</li><li>Select "wxai_v0_follower" as end effector</li><li>Enter the follower\'s IP address</li><li>Click "Add Robot"</li><li>Click "Connect" on BOTH robot cards</li></ol>Click "Next" when both robots are connected.',
           side: 'top',
         }
       },
@@ -148,7 +148,7 @@ export const startWidowXTutorial = () => {
         element: '#producer-modal-form',
         popover: {
           title: 'Configure Teleop Producer',
-          description: 'Fill out the form:\n\n1. Select "Teleop WidowX Arm" as producer type\n2. Select "leader" as the Leader Robot\n3. Select "follower" as the Follower Robot\n4. Click "Add Producer"\n\nThis creates a producer that reads data from both arms during teleoperation.',
+          description: 'Fill out the form:<ol><li>Select "Teleop WidowX Arm" as producer type</li><li>Select "leader" as the Leader Robot</li><li>Select "follower" as the Follower Robot</li><li>Click "Add Producer"</li></ol>This creates a producer that reads data from both arms during teleoperation.',
           side: 'right',
         },
         onHighlighted: () => {
@@ -211,7 +211,7 @@ export const startWidowXTutorial = () => {
         element: '#system-modal-form',
         popover: {
           title: 'Configure Hardware System',
-          description: 'Fill out the form:\n\n1. Name it "widowx_teleop"\n2. Select your teleop producer from the list\n3. Click "Add System"\n\nThis creates a complete recording configuration.',
+          description: 'Fill out the form:<ol><li>Name it "widowx_teleop"</li><li>Select your teleop producer from the list</li><li>Click "Add System"</li></ol>This creates a complete recording configuration.',
           side: 'right',
         },
         onHighlighted: () => {
@@ -268,7 +268,7 @@ export const startWidowXTutorial = () => {
         element: '#session-modal-form',
         popover: {
           title: 'Configure Recording Session',
-          description: 'Fill out the form:\n\n1. Name: "my_first_recording"\n2. System: Select "widowx_teleop"\n3. Action: "Teleop WidowX"\n4. Episodes: 5\n5. Duration: 30 seconds\n6. Backend: "mcap" or "lerobot"\n\nClick "Create Session" when ready.',
+          description: 'Fill out the form:<ol><li>Name: "my_first_recording"</li><li>System: Select "widowx_teleop"</li><li>Action: "Teleop WidowX"</li><li>Episodes: 5</li><li>Duration: 30 seconds</li><li>Backend: "mcap" or "lerobot"</li></ol>Click "Create Session" when ready.',
           side: 'right',
         },
         onHighlighted: () => {
@@ -295,22 +295,32 @@ export const startWidowXTutorial = () => {
         element: '.tutorial-session-card',
         popover: {
           title: 'Your Recording Session',
-          description: 'Your session is ready! The card shows:\n\n• Session name and status\n• Hardware configuration\n• Episode settings\n• Start/Stop recording buttons\n\nYou can now click "Start Recording" to begin capturing data. Move the leader robot and the follower will mirror it while recording!',
+          description: 'Your session is ready. The card shows:<ul><li>Session name and status</li><li>Hardware configuration</li><li>Episode settings</li><li>Start and Stop recording buttons</li></ul>You can now click "Start Recording" to begin capturing data. Move the leader robot and the follower will mirror it while recording.',
           side: 'top',
         }
       },
       {
         element: '.tutorial-monitor-button',
         popover: {
-          title: 'Monitor Dashboard (Optional)',
-          description: 'Click "Monitor" to open a real-time dashboard showing:\n\n• Live camera feeds (if configured)\n• Robot joint positions\n• Episode progress\n• Recording status\n• Data rates\n\nThis helps verify everything is working during recording.',
+          title: 'Monitor Dashboard',
+          description: 'Click "Monitor" to open a real-time dashboard showing:<ul><li>Live camera feeds (if configured)</li><li>Robot joint positions</li><li>Episode progress</li><li>Recording status</li><li>Data rates</li></ul>This helps verify everything is working during recording.',
           side: 'left',
+        },
+        onHighlighted: () => {
+          const monitorButton = document.querySelector('.tutorial-monitor-button') as HTMLElement;
+          if (monitorButton) {
+            const handleClick = () => {
+              setTimeout(() => driverObj.moveNext(), 300);
+              monitorButton.removeEventListener('click', handleClick);
+            };
+            monitorButton.addEventListener('click', handleClick);
+          }
         }
       },
       {
         popover: {
-          title: 'Tutorial Complete! 🎉',
-          description: 'You\'re all set! Here\'s a quick recap:\n\n✅ Configured leader & follower robots\n✅ Added a camera\n✅ Created producers for all hardware\n✅ Created a hardware system\n✅ Ready to record teleop sessions\n\nYou can restart this tutorial anytime by clicking the "Tutorial" button in the navigation bar.\n\nHappy recording!',
+          title: 'Tutorial Complete',
+          description: 'You are all set. Here is a quick recap:<ul><li>Configured leader and follower robots</li><li>Added a camera</li><li>Created producers for all hardware</li><li>Created a hardware system</li><li>Ready to record teleop sessions</li></ul>You can restart this tutorial anytime by clicking the "Tutorial" button in the navigation bar.',
         }
       },
     ],

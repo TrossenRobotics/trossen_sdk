@@ -260,3 +260,13 @@ sudo docker exec -it trossen_backend ls -la /dev/video*
 # Verify permissions
 sudo docker exec -it trossen_backend groups
 ```
+
+---
+
+## Reference Links
+
+- [Docker Compose Documentation](https://docs.docker.com/compose/) - Container orchestration and configuration reference
+- [Node.js Installation Guide](https://nodejs.org/en/download/package-manager) - Installing Node.js and npm on various systems
+- [CMake Installation](https://cmake.org/install/) - Installing CMake build system
+- [Linux Device Permissions](https://wiki.archlinux.org/title/Udev) - Understanding udev rules and device access
+- [Vite Troubleshooting](https://vite.dev/guide/troubleshooting) - Common development server issues and solutions
