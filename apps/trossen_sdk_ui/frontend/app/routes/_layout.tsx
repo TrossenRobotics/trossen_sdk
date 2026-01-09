@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from "react-router";
-import { HomeIcon, Settings, Video } from "lucide-react";
+import { HomeIcon, Settings, Video, GraduationCap } from "lucide-react";
+import { startWidowXTutorial } from "../Tutorial";
 
 export default function Layout() {
   return (
@@ -51,6 +52,15 @@ export default function Layout() {
                 <Video className="w-4 h-4" />
                 Record
               </NavLink>
+              <button
+                id="tutorial-button"
+                onClick={() => startWidowXTutorial()}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg font-medium transition-colors text-green-600 hover:bg-green-50 border border-green-200 ml-2"
+                title="Start interactive tutorial"
+              >
+                <GraduationCap className="w-4 h-4" />
+                Tutorial
+              </button>
             </nav>
           </div>
         </div>

@@ -195,6 +195,7 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
       <div className="p-6 border-b border-gray-200 flex justify-between items-center">
         <h3 className="text-gray-900">Configured Producers</h3>
         <button
+          id="add-producer-button"
           onClick={() => {
             resetForm();
             setShowModal(true);
@@ -242,7 +243,7 @@ export function ProducerTab({ producers, cameras, robots, onRefresh }: ProducerT
       {/* Create/Edit Producer Modal */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div id="producer-modal-form" className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200">
               <h3 className="text-gray-900">
                 {editingId ? 'Edit Producer' : 'Create New Producer'}

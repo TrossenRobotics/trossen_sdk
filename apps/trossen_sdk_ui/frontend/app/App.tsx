@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { Dashboard } from './Dashboard';
 import { Configuration } from './Configuration';
 import { RecordPage } from './RecordPage';
+import { startWidowXTutorial } from './Tutorial';
+import { GraduationCap } from 'lucide-react';
 
 type Page = 'dashboard' | 'configuration' | 'record';
 
@@ -48,6 +50,15 @@ export default function App() {
                 }`}
               >
                 Record
+              </button>
+              <button
+                id="tutorial-button"
+                onClick={() => startWidowXTutorial(setCurrentPage)}
+                className="px-4 py-2 rounded-lg transition-colors text-green-600 hover:bg-green-50 flex items-center gap-2 ml-2 border border-green-200"
+                title="Start interactive tutorial"
+              >
+                <GraduationCap className="w-4 h-4" />
+                Tutorial
               </button>
             </nav>
           </div>

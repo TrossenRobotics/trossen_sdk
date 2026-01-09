@@ -433,6 +433,7 @@ export function Configuration() {
       <div className="border-b border-gray-200">
         <nav className="flex gap-8">
           <button
+            id="cameras-tab"
             onClick={() => setActiveTab('cameras')}
             className={`pb-4 border-b-2 transition-colors flex items-center gap-2 ${
               activeTab === 'cameras'
@@ -444,6 +445,7 @@ export function Configuration() {
             Cameras
           </button>
           <button
+            id="robots-tab"
             onClick={() => setActiveTab('robots')}
             className={`pb-4 border-b-2 transition-colors flex items-center gap-2 ${
               activeTab === 'robots'
@@ -455,6 +457,7 @@ export function Configuration() {
             Robots
           </button>
           <button
+            id="producers-tab"
             onClick={() => setActiveTab('producers')}
             className={`pb-4 border-b-2 transition-colors flex items-center gap-2 ${
               activeTab === 'producers'
@@ -466,6 +469,7 @@ export function Configuration() {
             Producers
           </button>
           <button
+            id="systems-tab"
             onClick={() => setActiveTab('systems')}
             className={`pb-4 border-b-2 transition-colors flex items-center gap-2 ${
               activeTab === 'systems'
@@ -486,6 +490,7 @@ export function Configuration() {
             <div className="p-6 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-gray-900">Configured Cameras</h3>
               <button
+                id="add-camera-button"
                 onClick={() => {
                   setEditingCameraIndex(null);
                   setCameraForm({ type: 'opencv', name: '', device_index: 0, width: 640, height: 480, fps: 30 });
@@ -553,10 +558,11 @@ export function Configuration() {
         )}
 
         {activeTab === 'robots' && (
-          <div>
+          <div id="robots-section">
             <div className="p-6 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-gray-900">Configured Robots</h3>
               <button
+                id="add-robot-button"
                 onClick={() => {
                   setEditingRobotIndex(null);
                   setRobotType('SO101');
@@ -645,6 +651,7 @@ export function Configuration() {
             <div className="p-6 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-gray-900">Hardware Systems</h3>
               <button
+                id="add-system-button"
                 onClick={() => setShowSystemModal(true)}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
               >
@@ -794,7 +801,7 @@ export function Configuration() {
       {/* Add Robot Modal */}
       {showRobotModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-lg w-full">
+          <div id="robot-modal-form" className="bg-white rounded-lg max-w-lg w-full">
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <h3 className="text-gray-900">{editingRobotIndex !== null ? 'Edit' : 'Add New'} Robot</h3>
               <button
@@ -928,7 +935,7 @@ export function Configuration() {
       {/* Create System Modal */}
       {showSystemModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div id="system-modal-form" className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <h3 className="text-gray-900">{editingSystemId ? 'Edit' : 'Create'} Hardware System</h3>
               <button
