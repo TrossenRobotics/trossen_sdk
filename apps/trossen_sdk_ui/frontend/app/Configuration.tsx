@@ -52,6 +52,7 @@ export function Configuration() {
     type: 'opencv',
     name: '',
     device_index: 0,
+    serial_number: '',
     width: 640,
     height: 480,
     fps: 30,
@@ -131,7 +132,7 @@ export function Configuration() {
 
       if (response.ok) {
         await fetchConfigurations();
-        setCameraForm({ type: 'opencv', name: '', device_index: 0, width: 640, height: 480, fps: 30 });
+        setCameraForm({ type: 'opencv', name: '', device_index: 0, serial_number: '', width: 640, height: 480, fps: 30 });
         setShowCameraModal(false);
         setEditingCameraIndex(null);
       } else {
@@ -149,7 +150,8 @@ export function Configuration() {
     setCameraForm({
       type: camera.type,
       name: camera.name,
-      device_index: camera.device_index,
+      device_index: camera.device_index || 0,
+      serial_number: camera.serial_number || '',
       width: camera.width,
       height: camera.height,
       fps: camera.fps,
@@ -261,6 +263,13 @@ export function Configuration() {
 
   const handleConnectCamera = async (index: number) => {
     const camera = cameras[index];
+
+    // Check if it's a RealSense camera
+    if (camera.type === 'realsense') {
+      alert('RealSense camera support has not been implemented yet.');
+      return;
+    }
+
     try {
       const response = await fetch(`${BACKEND_URL}/hardware/camera/${index}/connect`, {
         method: 'POST',
@@ -349,6 +358,16 @@ export function Configuration() {
 
   const handleCreateSystem = async () => {
     try {
+      // Check for duplicate system name
+      const duplicateSystem = systems.find(
+        system => system.name === systemForm.name && system.id !== editingSystemId
+      );
+
+      if (duplicateSystem) {
+        alert(`A hardware system with the name "${systemForm.name}" already exists. Please choose a different name.`);
+        return;
+      }
+
       const newSystem: HardwareSystem = {
         id: editingSystemId || Date.now().toString(),
         name: systemForm.name,
@@ -572,7 +591,7 @@ export function Configuration() {
                   id="add-camera-button"
                   onClick={() => {
                     setEditingCameraIndex(null);
-                    setCameraForm({ type: 'opencv', name: '', device_index: 0, width: 640, height: 480, fps: 30 });
+                    setCameraForm({ type: 'opencv', name: '', device_index: 0, serial_number: '', width: 640, height: 480, fps: 30 });
                     setShowCameraModal(true);
                   }}
                   className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
@@ -815,7 +834,7 @@ export function Configuration() {
                 onClick={() => {
                   setShowCameraModal(false);
                   setEditingCameraIndex(null);
-                  setCameraForm({ type: 'opencv', name: '', device_index: 0, width: 640, height: 480, fps: 30 });
+                  setCameraForm({ type: 'opencv', name: '', device_index: 0, serial_number: '', width: 640, height: 480, fps: 30 });
                 }}
                 className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
@@ -823,6 +842,18 @@ export function Configuration() {
               </button>
             </div>
             <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-gray-700 mb-2">Camera Type</label>
+                <select
+                  value={cameraForm.type}
+                  onChange={(e) => setCameraForm({ ...cameraForm, type: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="opencv">OpenCV</option>
+                  <option value="realsense">RealSense</option>
+                </select>
+              </div>
+
               <div>
                 <label className="block text-gray-700 mb-2">Camera Name</label>
                 <input
@@ -834,15 +865,28 @@ export function Configuration() {
                 />
               </div>
 
-              <div>
-                <label className="block text-gray-700 mb-2">Device Index</label>
-                <input
-                  type="number"
-                  value={cameraForm.device_index}
-                  onChange={(e) => setCameraForm({ ...cameraForm, device_index: parseInt(e.target.value) || 0 })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
+              {cameraForm.type === 'opencv' ? (
+                <div>
+                  <label className="block text-gray-700 mb-2">Device Index</label>
+                  <input
+                    type="number"
+                    value={cameraForm.device_index}
+                    onChange={(e) => setCameraForm({ ...cameraForm, device_index: parseInt(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-gray-700 mb-2">Serial Number</label>
+                  <input
+                    type="text"
+                    value={cameraForm.serial_number}
+                    onChange={(e) => setCameraForm({ ...cameraForm, serial_number: e.target.value })}
+                    placeholder="e.g., 123456789"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -880,7 +924,7 @@ export function Configuration() {
                 onClick={() => {
                   setShowCameraModal(false);
                   setEditingCameraIndex(null);
-                  setCameraForm({ type: 'opencv', name: '', device_index: 0, width: 640, height: 480, fps: 30 });
+                  setCameraForm({ type: 'opencv', name: '', device_index: 0, serial_number: '', width: 640, height: 480, fps: 30 });
                 }}
                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
