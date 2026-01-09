@@ -6,8 +6,8 @@ This guide will help you set up the Trossen SDK development environment on Ubunt
 
 - **Operating System**: Ubuntu 20.04 or later (Ubuntu 24.04+ recommended for full feature support)
 - **Compiler**: GCC with C++17 support
-- **CMake**: Version 3.10 or higher
-- **Architecture**: x86_64 (AMD64)
+- **CMake**: 3.10 or later
+- **Architecture**: x86_64 (amd64) or arm64
 
 ## Prerequisites
 
@@ -31,7 +31,6 @@ Install the essential libraries required by the SDK:
 
 ```bash
 sudo apt-get install -y \
-  build-essential \
   cmake \
   libopencv-dev \
   libprotobuf-dev \
@@ -118,44 +117,20 @@ Now you're ready to build the SDK:
 git clone https://github.com/TrossenRobotics/trossen_sdk.git
 cd trossen_sdk
 
-# Create build directory
-mkdir -p build
-cd build
-
-# OR without RealSense support:
-cmake ..
-
-# Safest Option
+# Use makefile targets for clean build experience
 make realsense
-
-# Build the SDK
-make -j$(nproc)
-
-
-## Step 6: Run Tests (Optional)
-
-To verify your installation, you can run the test suite:
+# Builds tend to fail if realsense is not used, we plan on fixing this in the future
+```
+In order to clean up your build use
 
 ```bash
-cd build
-cmake -DTROSSEN_ENABLE_REALSENSE=ON -DBUILD_TESTING=ON ..
-ctest --output-on-failure
+make clean
 ```
+
+Note: We will add more build guides with testing and other flags.
 
 ## Build Options
 
-The SDK supports several CMake options:
-
-- `-DTROSSEN_ENABLE_REALSENSE=ON`: Enable Intel RealSense camera support
-- `-DBUILD_TESTING=ON`: Build unit tests
-- `-DCMAKE_BUILD_TYPE=Release`: Build optimized release version
-- `-DCMAKE_BUILD_TYPE=Debug`: Build debug version with symbols
-
-Example with multiple options:
-
-```bash
-cmake -DTROSSEN_ENABLE_REALSENSE=ON -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release ..
-```
 
 ## Quick Start After Installation
 
@@ -223,16 +198,6 @@ The LeRobot dataset encoding function uses the `libsvtav1` encoder by default, w
 
 For most use cases, `libx264` provides excellent video encoding quality and compatibility.
 
-## Uninstalling
-
-To remove the installed SDK:
-
-```bash
-cd build
-sudo make uninstall  # If supported by the build system
-```
-
-Or manually remove installed files (check `install_manifest.txt` in the build directory).
 
 ## Getting Help
 
