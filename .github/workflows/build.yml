@@ -76,9 +76,9 @@ jobs:
     - name: Build SDK
       run: |
         mkdir -p build
-        cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON .. && make -j$(nproc)
+        cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON -DTROSSEN_ENABLE_ZED=OFF .. && make -j$(nproc)
 
     - name: Run Tests
       run: |
         mkdir -p build
-        cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON -DBUILD_TESTING=ON .. && ctest --output-on-failure
+        cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON -DTROSSEN_ENABLE_ZED=OFF -DBUILD_TESTING=ON .. && ctest --output-on-failure
