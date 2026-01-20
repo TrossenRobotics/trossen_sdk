@@ -30,9 +30,20 @@
 #include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
+
+#ifdef TROSSEN_ENABLE_ZED
+#include "trossen_sdk/hw/camera/zed_producer.hpp"
+#include "trossen_sdk/hw/camera/zed_depth_producer.hpp"
+#include "trossen_sdk/hw/camera/zed_camera_component.hpp"
+#include "trossen_sdk/hw/camera/zed_frame_cache.hpp"
+#endif
+
+#ifdef TROSSEN_ENABLE_REALSENSE
+#include "trossen_sdk/hw/camera/realsense_producer.hpp"
 #include "trossen_sdk/hw/camera/realsense_depth_producer.hpp"
 #include "trossen_sdk/hw/camera/realsense_frame_cache.hpp"
-#include "trossen_sdk/hw/camera/realsense_producer.hpp"
+#endif
+
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
@@ -52,6 +63,7 @@ struct Config {
   bool show_help = false;
 
   // Camera settings
+  std::string camera_type = "zed";  // mock, opencv, realsense, zed
   int camera_index = 2;
   int camera_width = 1920;
   int camera_height = 1080;
@@ -75,7 +87,8 @@ void print_usage(const char* prog_name) {
     << "  --repository-id <string> Repository identifier (default: TrossenRoboticsCommunity, "
     << "only for LeRobot backend)\n"
     << "  --mock                   Use mock producers instead of real hardware\n"
-    << "  --camera-index <num>     Camera device index (default: 2, i.e., /dev/video2)\n"
+    << "  --camera <type>          Camera type: mock, opencv, realsense, zed (default: zed)\n"
+    << "  --camera-index <num>     Camera device index for opencv (default: 2, i.e., /dev/video2)\n"
     << "  --camera-width <pixels>  Camera width (default: 1920)\n"
     << "  --camera-height <pixels> Camera height (default: 1080)\n"
     << "  --camera-fps <fps>       Camera frame rate (default: 30)\n"
@@ -87,6 +100,8 @@ void print_usage(const char* prog_name) {
     << "Examples:\n"
     << "  " << prog_name << "\n"
     << "  " << prog_name << " --mock\n"
+    << "  " << prog_name << " --camera realsense\n"
+    << "  " << prog_name << " --camera opencv --camera-index 0\n"
     << "  " << prog_name << " --dataset-id solo_demo_001 --root /data/recordings\n";
 }
 
@@ -105,6 +120,8 @@ Config parse_args(int argc, char** argv) {
       cfg.repository_id = argv[++i];
     } else if (arg == "--mock") {
       cfg.use_mock = true;
+    } else if (arg == "--camera" && i + 1 < argc) {
+      cfg.camera_type = argv[++i];
     } else if (arg == "--camera-index" && i + 1 < argc) {
       cfg.camera_index = std::atoi(argv[++i]);
     } else if (arg == "--camera-width" && i + 1 < argc) {
@@ -148,13 +165,17 @@ int main(int argc, char** argv) {
   auto j = trossen::configuration::JsonLoader::load("config/sdk_config.json");
   trossen::configuration::GlobalConfig::instance().load_from_json(j);
 
+  // Note: --mock flag only affects robot hardware, not camera
+  // Use --camera mock to explicitly use mock camera
+
   // Print configuration
   std::vector<std::string> config_lines = {
     "Mode:                 " + std::string(cfg.use_mock ? "Mock (no hardware)" : "Hardware"),
     "Dataset ID:           " + (cfg.dataset_id.empty() ? "<auto-generate>" : cfg.dataset_id),
     "Root directory:       " + cfg.root,
     "Repository ID:        " + cfg.repository_id,
-    "Backend:              " + cfg.backend_type
+    "Backend:              " + cfg.backend_type,
+    "Camera Type:          " + cfg.camera_type
   };
 
   if (!cfg.use_mock) {
@@ -163,10 +184,22 @@ int main(int argc, char** argv) {
   }
 
   config_lines.push_back("Joint rate:           " + std::to_string(cfg.joint_rate_hz) + " Hz");
-  config_lines.push_back(
-    "Camera:               /dev/video" + std::to_string(cfg.camera_index) +
-    " @ " + std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
-    " @ " + std::to_string(cfg.camera_fps) + " fps");
+
+  // Add camera-specific info
+  if (cfg.camera_type == "opencv") {
+    config_lines.push_back(
+      "Camera:               /dev/video" + std::to_string(cfg.camera_index) +
+      " @ " + std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
+      " @ " + std::to_string(cfg.camera_fps) + " fps");
+  } else if (cfg.camera_type == "mock") {
+    config_lines.push_back(
+      "Camera:               Mock (" +
+      std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
+      " @ " + std::to_string(cfg.camera_fps) + " fps)");
+  } else {
+    // For ZED and RealSense, just show the type (details will be shown during setup)
+    config_lines.push_back("Camera:               " + cfg.camera_type);
+  }
 
   trossen::demo::print_config_banner("Trossen AI LeRobot Solo Complete Demo", config_lines);
 
@@ -275,9 +308,24 @@ int main(int argc, char** argv) {
   auto joint_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.joint_rate_hz));
   mgr.add_producer(joint_producer, joint_period);
 
-  // Camera producer (OpenCV or mock)
+  // Camera producer setup
+
+  std::cout << "\nSetting up camera producer (type: " << cfg.camera_type << ")...\n";
+
   std::shared_ptr<trossen::hw::PolledProducer> camera_producer;
-  if (cfg.use_mock) {
+  std::shared_ptr<trossen::hw::PolledProducer> depth_producer;  // Optional depth producer
+  auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
+
+  // Component storage (must outlive producers)
+#ifdef TROSSEN_ENABLE_ZED
+  std::shared_ptr<trossen::hw::camera::ZedCameraComponent> zed_component;
+#endif
+#ifdef TROSSEN_ENABLE_REALSENSE
+  std::shared_ptr<rs2::pipeline> rs_pipeline_ptr;
+#endif
+
+  if (cfg.camera_type == "mock") {
+    // Mock Camera
     trossen::hw::camera::MockCameraProducer::Config cam_cfg;
     cam_cfg.width = cfg.camera_width;
     cam_cfg.height = cfg.camera_height;
@@ -289,7 +337,9 @@ int main(int argc, char** argv) {
     camera_producer = std::make_shared<trossen::hw::camera::MockCameraProducer>(cam_cfg);
     std::cout << "  ✓ Mock camera producer (" << cfg.camera_fps << " Hz, "
               << cfg.camera_width << "x" << cfg.camera_height << ")\n";
-  } else {
+
+  } else if (cfg.camera_type == "opencv") {
+    // OpenCV Camera
     trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
     cam_cfg.device_index = cfg.camera_index;
     cam_cfg.stream_id = "camera_main";
@@ -300,89 +350,180 @@ int main(int argc, char** argv) {
     cam_cfg.use_device_time = false;
     camera_producer = std::make_shared<trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
     std::cout << "  ✓ OpenCV camera producer (" << cfg.camera_fps << " Hz, "
-              << cfg.camera_width << "x" << cfg.camera_height << ")\n";
+              << cfg.camera_width << "x" << cfg.camera_height << ", /dev/video"
+              << cfg.camera_index << ")\n";
+
+#ifdef TROSSEN_ENABLE_REALSENSE
+  } else if (cfg.camera_type == "realsense") {
+    // RealSense Camera
+    // Note: This section can be customized with command-line args if needed
+    std::string serial_number = "";  // Empty = use any available camera
+    int rs_width = 640;
+    int rs_height = 480;
+    int rs_fps = 30;
+    bool enable_depth = true;
+
+    // Create RealSense config
+    rs2::config cam_cfg;
+    rs2::pipeline rs_pipeline;
+    rs_pipeline_ptr = std::make_shared<rs2::pipeline>(rs_pipeline);
+
+    // Enable the device using serial number (if provided)
+    if (!serial_number.empty()) {
+      cam_cfg.enable_device(serial_number);
+    }
+
+    // Enable color and depth streams
+    cam_cfg.enable_stream(RS2_STREAM_COLOR, rs_width, rs_height, RS2_FORMAT_RGB8, rs_fps);
+    if (enable_depth) {
+      cam_cfg.enable_stream(RS2_STREAM_DEPTH, rs_width, rs_height, RS2_FORMAT_Z16, rs_fps);
+    }
+
+    // Start the camera pipeline
+    try {
+      rs2::pipeline_profile profile = rs_pipeline_ptr->start(cam_cfg);
+      auto dev = profile.get_device();
+      serial_number = std::string(dev.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER));
+      std::cout << "  ✓ RealSense camera opened (SN: " << serial_number << ")\n";
+    } catch (const rs2::error& e) {
+      std::cerr << "Failed to start RealSense camera: " << e.what() << "\n";
+      return 1;
+    }
+
+    // Create frame cache (consumer count = 2 if depth enabled, else 1)
+    int consumer_count = enable_depth ? 2 : 1;
+    auto frame_cache =
+      std::make_shared<trossen::hw::camera::RealsenseFrameCache>(rs_pipeline_ptr, consumer_count);
+
+    // Create color producer
+    trossen::hw::camera::RealsenseCameraProducer::Config rs_cfg;
+    rs_cfg.serial_number = serial_number;
+    rs_cfg.stream_id = "realsense_camera_main";
+    rs_cfg.encoding = "bgr8";
+    rs_cfg.width = rs_width;
+    rs_cfg.height = rs_height;
+    rs_cfg.fps = rs_fps;
+    rs_cfg.use_device_time = true;
+    rs_cfg.warmup_seconds = 2.0;
+
+    camera_producer =
+      std::make_shared<trossen::hw::camera::RealsenseCameraProducer>(frame_cache, rs_cfg);
+    std::cout << "  ✓ RealSense color producer (" << rs_fps << " Hz, "
+              << rs_width << "x" << rs_height << ")\n";
+
+    // Create depth producer (if enabled)
+    if (enable_depth) {
+      trossen::hw::camera::RealsenseDepthCameraProducer::Config rs_depth_cfg;
+      rs_depth_cfg.serial_number = serial_number;
+      rs_depth_cfg.stream_id = "realsense_depth_camera_main";
+      rs_depth_cfg.encoding = "16UC1";
+      rs_depth_cfg.width = rs_width;
+      rs_depth_cfg.height = rs_height;
+      rs_depth_cfg.fps = rs_fps;
+      rs_depth_cfg.use_device_time = true;
+      rs_depth_cfg.warmup_seconds = 2.0;
+
+      depth_producer =
+        std::make_shared<trossen::hw::camera::RealsenseDepthCameraProducer>(
+          frame_cache, rs_depth_cfg);
+      std::cout << "  ✓ RealSense depth producer (" << rs_fps << " Hz, "
+                << rs_width << "x" << rs_height << ")\n";
+    }
+#endif
+
+#ifdef TROSSEN_ENABLE_ZED
+  } else if (cfg.camera_type == "zed") {
+    // ────────────── ZED Camera ──────────────
+    // Note: This section can be customized with command-line args if needed
+    std::string resolution = "SVGA";  // SVGA, HD720, HD1080, HD2K
+    int zed_fps = 30;
+    bool enable_depth = true;
+    std::string depth_mode = "PERFORMANCE";  // PERFORMANCE, QUALITY, ULTRA, NEURAL
+
+    // Create ZED camera component (must outlive producers)
+    zed_component = std::make_shared<trossen::hw::camera::ZedCameraComponent>("zed_main");
+
+    nlohmann::json zed_config = {
+      {"resolution", resolution},
+      {"fps", zed_fps},
+      {"use_depth", enable_depth},
+      {"depth_mode", depth_mode}
+    };
+
+    zed_component->configure(zed_config);
+    auto zed_cache = zed_component->get_hardware();
+    int serial_number = zed_component->get_serial_number();
+
+    // Create ZED color producer
+    trossen::hw::camera::ZedCameraProducer::Config zed_cfg;
+    zed_cfg.serial_number = serial_number;
+    zed_cfg.stream_id = "zed_camera_main";
+    zed_cfg.encoding = "bgr8";
+    zed_cfg.width = 672;   // Actual resolution depends on camera model
+    zed_cfg.height = 376;
+    zed_cfg.fps = zed_fps;
+    zed_cfg.use_device_time = true;
+    zed_cfg.warmup_seconds = 1.0;
+
+    camera_producer = std::make_shared<trossen::hw::camera::ZedCameraProducer>(zed_cache, zed_cfg);
+
+    // Perform warmup
+    auto zed_producer =
+      std::dynamic_pointer_cast<trossen::hw::camera::ZedCameraProducer>(camera_producer);
+    if (zed_producer) {
+      zed_producer->warmup();
+    }
+
+    std::cout << "  ✓ ZED color producer (" << zed_fps << " Hz, " << resolution
+              << ", SN: " << serial_number << ")\n";
+
+    // Create ZED depth producer (if enabled)
+    if (enable_depth) {
+      trossen::hw::camera::ZedDepthCameraProducer::Config zed_depth_cfg;
+      zed_depth_cfg.serial_number = serial_number;
+      zed_depth_cfg.stream_id = "zed_depth_camera_main";
+      zed_depth_cfg.encoding = "16UC1";
+      zed_depth_cfg.width = 672;
+      zed_depth_cfg.height = 376;
+      zed_depth_cfg.fps = zed_fps;
+      zed_depth_cfg.use_device_time = true;
+      zed_depth_cfg.warmup_seconds = 1.0;
+
+      depth_producer =
+        std::make_shared<trossen::hw::camera::ZedDepthCameraProducer>(zed_cache, zed_depth_cfg);
+
+      // Perform warmup for depth
+      if (depth_producer) {
+        auto zed_depth =
+          std::dynamic_pointer_cast<trossen::hw::camera::ZedDepthCameraProducer>(depth_producer);
+        if (zed_depth) {
+          zed_depth->warmup();
+        }
+      }
+
+      std::cout << "  ✓ ZED depth producer (" << zed_fps << " Hz, " << resolution
+                << ", mode: " << depth_mode << ")\n";
+    }
+#endif
+
+  } else {
+    std::cerr << "Error: Unknown camera type '" << cfg.camera_type << "'\n";
+    std::cerr << "Supported types: mock, opencv";
+#ifdef TROSSEN_ENABLE_REALSENSE
+    std::cerr << ", realsense";
+#endif
+#ifdef TROSSEN_ENABLE_ZED
+    std::cerr << ", zed";
+#endif
+    std::cerr << "\n";
+    return 1;
   }
 
-  auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
+  // Register camera producer(s)
   mgr.add_producer(camera_producer, camera_period);
-
-  // TODO(shantanuparab-tr): Add this to configurations after main executable is created
-  // // Create a Realsense Camera Producer (Hardcoded configuration for demo purposes)
-
-  // trossen::hw::camera::RealsenseCameraProducer::Config realsense_cfg;
-  // realsense_cfg.serial_number = "218622274938";  // Replace with your camera's serial number
-  // realsense_cfg.stream_id = "realsense_camera0";
-  // realsense_cfg.encoding = "bgr8";
-  // realsense_cfg.width = 640;
-  // realsense_cfg.height = 480;
-  // realsense_cfg.fps = 30;
-  // realsense_cfg.use_device_time = true;
-  // realsense_cfg.warmup_seconds = 2.0;
-
-  // // Create Realsense config
-  // rs2::config cam_cfg;
-
-  // // Create a realsense pipeline
-  // rs2::pipeline realsense_pipeline;
-  // auto camera_ = std::make_shared<rs2::pipeline>(realsense_pipeline);
-
-  // // Enable the device using the unique ID
-  // if (!realsense_cfg.serial_number.empty()) {
-  //   cam_cfg.enable_device(realsense_cfg.serial_number);
-  // } else {
-  //   std::cout << "Unique ID is empty. Cannot connect to RealSense camera: "
-  //     << realsense_cfg.stream_id << std::endl;
-  //   throw std::runtime_error("Unique ID is empty for camera: " + realsense_cfg.stream_id);
-  // }
-
-  // // Enable the color stream as default
-  // cam_cfg.enable_stream(RS2_STREAM_COLOR, realsense_cfg.width, realsense_cfg.height,
-  //                   RS2_FORMAT_RGB8, realsense_cfg.fps);
-
-  // // Make this conditional to enable depth stream
-  // cam_cfg.enable_stream(RS2_STREAM_DEPTH, realsense_cfg.width, realsense_cfg.height,
-  //                   RS2_FORMAT_Z16, realsense_cfg.fps);
-  // try {
-  //   // Start the camera pipeline
-  //   rs2::pipeline_profile profile = camera_->start(cam_cfg);
-  // } catch (const rs2::error& e) {
-  //   std::cout << "Failed to enable device with Unique ID: " << realsense_cfg.serial_number
-  //             << ". Error: " << e.what() << ". Listing all available cameras." << std::endl;
-  //   std::cout << "Available cameras listed above. Please check outputs folder to get "
-  //       "Available cameras listed above. Please check outputs folder to get "
-  //       "images associated "
-  //       "with each camera." << std::endl;
-  //   throw std::runtime_error(
-  //       "Unique ID (serial number) is required to connect to RealSense camera");
-  // }
-
-  // auto frame_cache = std::make_shared<trossen::hw::camera::RealsenseFrameCache>(camera_, 2);
-
-  // auto realsense_producer =
-  //   std::make_shared<trossen::hw::camera::RealsenseCameraProducer>(frame_cache, realsense_cfg);
-
-  // auto realsense_period = std::chrono::milliseconds(static_cast<int>(1000.0f / 30.0f));
-
-  // mgr.add_producer(realsense_producer, realsense_period);
-  // std::cout << "  ✓ Realsense camera producer (30 Hz, 640x480)\n";
-
-  // trossen::hw::camera::RealsenseDepthCameraProducer::Config realsense_depth_cfg;
-  // // Replace with your camera's serial number
-  // realsense_depth_cfg.serial_number = "218622274938";
-  // realsense_depth_cfg.stream_id = "realsense_depth_camera0";
-  // realsense_depth_cfg.encoding = "16UC1";
-  // realsense_depth_cfg.width = 640;
-  // realsense_depth_cfg.height = 480;
-  // realsense_depth_cfg.fps = 30;
-  // realsense_depth_cfg.use_device_time = true;
-  // realsense_depth_cfg.warmup_seconds = 2.0;
-
-  // auto realsense_depth_producer =
-  //   std::make_shared<trossen::hw::camera::RealsenseDepthCameraProducer>(
-  //     frame_cache,
-  //     realsense_depth_cfg);
-  // mgr.add_producer(realsense_depth_producer, realsense_period);
-  // std::cout << "  ✓ Realsense depth camera producer (30 Hz, 640x480)\n";
+  if (depth_producer) {
+    mgr.add_producer(depth_producer, camera_period);
+  }
 
   std::cout << "\nProducers registered. Ready to record.\n";
 
@@ -488,11 +629,14 @@ int main(int argc, char** argv) {
     // Sanity check: verify expected record counts
     // ──────────────────────────────────────────────────────────
 
+    // Calculate expected camera count (1 or 2 depending on depth)
+    int camera_count = depth_producer ? 2 : 1;
+
     trossen::demo::SanityCheckConfig sanity_cfg{
       last_stats.recording_duration_s.value_or(0.0),
       1,  // 1 joint producer (follower)
       cfg.joint_rate_hz,
-      1,  // 1 camera
+      camera_count,
       cfg.camera_fps,
       5.0  // 5% tolerance
     };
