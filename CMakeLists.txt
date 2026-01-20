@@ -8,6 +8,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(TROSSEN_ENABLE_REALSENSE "Enable Intel RealSense support" OFF)
+option(TROSSEN_ENABLE_ZED "Enable ZED camera support" ON)
 
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
@@ -41,12 +42,26 @@ if(TROSSEN_ENABLE_REALSENSE)
     src/hw/camera/realsense_depth_producer.cpp
     src/hw/camera/realsense_camera_component.cpp
   )
-  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_REALSENSE)
+  target_compile_definitions(trossen_sdk PUBLIC TROSSEN_ENABLE_REALSENSE)
 
   # Find RealSense dependencies first
   find_package(fastcdr REQUIRED)
   find_package(fastrtps REQUIRED)
   find_package(realsense2 REQUIRED)
+endif()
+
+if(TROSSEN_ENABLE_ZED)
+  message(STATUS "ZED camera support enabled")
+  target_sources(trossen_sdk PRIVATE
+    src/hw/camera/zed_producer.cpp
+    src/hw/camera/zed_depth_producer.cpp
+    src/hw/camera/zed_camera_component.cpp
+  )
+  target_compile_definitions(trossen_sdk PUBLIC TROSSEN_ENABLE_ZED)
+
+  # Find ZED SDK
+  find_package(ZED 4 REQUIRED)
+  find_package(CUDA REQUIRED)
 endif()
 
 # Add architecture-specific CMAKE_PREFIX_PATH
@@ -175,6 +190,10 @@ target_link_libraries(
 )
 if(TROSSEN_ENABLE_REALSENSE)
   target_link_libraries(trossen_sdk PUBLIC realsense2::realsense2)
+endif()
+if(TROSSEN_ENABLE_ZED)
+  target_link_libraries(trossen_sdk PUBLIC ${ZED_LIBRARIES} ${CUDA_LIBRARIES})
+  target_include_directories(trossen_sdk PUBLIC ${ZED_INCLUDE_DIRS} ${CUDA_INCLUDE_DIRS})
 endif()
 
 # List proto files for MCAP backend
