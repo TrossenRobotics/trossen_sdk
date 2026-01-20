@@ -13,6 +13,10 @@
 
 namespace trossen::hw::camera {
 
+// ZED depth filtering confidence thresholds (0-100: lower=permissive, higher=strict)
+constexpr int ZED_DEFAULT_CONFIDENCE_THRESHOLD = 50;          // General depth confidence
+constexpr int ZED_DEFAULT_TEXTURE_CONFIDENCE_THRESHOLD = 100;  // Texture-based filtering
+
 /**
  * @brief Frame cache for ZED camera to share frames between color and depth producers
  *
@@ -49,8 +53,8 @@ public:
     if (!has_grabbed_) {
       // Add runtime parameters for grab() - required for proper operation
       sl::RuntimeParameters runtime_params;
-      runtime_params.confidence_threshold = 50;
-      runtime_params.texture_confidence_threshold = 100;
+      runtime_params.confidence_threshold = ZED_DEFAULT_CONFIDENCE_THRESHOLD;
+      runtime_params.texture_confidence_threshold = ZED_DEFAULT_TEXTURE_CONFIDENCE_THRESHOLD;
 
       last_error_ = camera_->grab(runtime_params);
       has_grabbed_ = true;
