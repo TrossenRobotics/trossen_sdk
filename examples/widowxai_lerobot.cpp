@@ -459,8 +459,8 @@ int main(int argc, char** argv) {
     zed_cfg.serial_number = serial_number;
     zed_cfg.stream_id = "zed_camera_main";
     zed_cfg.encoding = "bgr8";
-    zed_cfg.width = 672;   // Actual resolution depends on camera model
-    zed_cfg.height = 376;
+    zed_cfg.width = 0;   // 0 = use camera default resolution
+    zed_cfg.height = 0;
     zed_cfg.fps = zed_fps;
     zed_cfg.use_device_time = true;
     zed_cfg.warmup_seconds = 1.0;
@@ -483,8 +483,8 @@ int main(int argc, char** argv) {
       zed_depth_cfg.serial_number = serial_number;
       zed_depth_cfg.stream_id = "zed_depth_camera_main";
       zed_depth_cfg.encoding = "16UC1";
-      zed_depth_cfg.width = 672;
-      zed_depth_cfg.height = 376;
+      zed_depth_cfg.width = 0;  // 0 = use camera default resolution
+      zed_depth_cfg.height = 0;
       zed_depth_cfg.fps = zed_fps;
       zed_depth_cfg.use_device_time = true;
       zed_depth_cfg.warmup_seconds = 1.0;

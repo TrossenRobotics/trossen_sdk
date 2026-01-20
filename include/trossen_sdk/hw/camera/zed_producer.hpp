@@ -40,10 +40,10 @@ public:
     std::string encoding{"bgr8"};
 
     /// @brief Desired image width (pixels)
-    int width{672};
+    int width{0};
 
     /// @brief Desired image height (pixels)
-    int height{376};
+    int height{0};
 
     /// @brief Desired frame rate (fps)
     int fps{30};
