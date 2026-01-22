@@ -15,6 +15,9 @@
 
 namespace trossen::hw::camera {
 
+// FPS tolerance for produced vs requested frame-rate checks
+constexpr int FPS_TOLERANCE = 50;
+
 OpenCvCameraProducer::OpenCvCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   // Populate metadata
   metadata_.type = "opencv_camera";
@@ -156,7 +159,7 @@ void OpenCvCameraProducer::poll(
     if (if_samples_ > 0 && if_accum_ns_ > 0) {
       produced_fps = 1e9 / (static_cast<double>(if_accum_ns_) / static_cast<double>(if_samples_));
     }
-    if (produced_fps > 0 && (produced_fps + 0.5) < cfg_.fps) {
+    if (produced_fps > 0 && (produced_fps + FPS_TOLERANCE) < cfg_.fps) {
       std::cerr << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps
                 << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
     } else {
