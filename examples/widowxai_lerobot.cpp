@@ -32,16 +32,16 @@
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 
 #ifdef TROSSEN_ENABLE_ZED
-#include "trossen_sdk/hw/camera/zed_producer.hpp"
-#include "trossen_sdk/hw/camera/zed_depth_producer.hpp"
 #include "trossen_sdk/hw/camera/zed_camera_component.hpp"
+#include "trossen_sdk/hw/camera/zed_depth_producer.hpp"
 #include "trossen_sdk/hw/camera/zed_frame_cache.hpp"
+#include "trossen_sdk/hw/camera/zed_producer.hpp"
 #endif
 
 #ifdef TROSSEN_ENABLE_REALSENSE
-#include "trossen_sdk/hw/camera/realsense_producer.hpp"
 #include "trossen_sdk/hw/camera/realsense_depth_producer.hpp"
 #include "trossen_sdk/hw/camera/realsense_frame_cache.hpp"
+#include "trossen_sdk/hw/camera/realsense_producer.hpp"
 #endif
 
 #include "trossen_sdk/io/backend_utils.hpp"
