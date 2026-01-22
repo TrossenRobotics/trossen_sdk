@@ -63,7 +63,7 @@ struct Config {
   bool show_help = false;
 
   // Camera settings
-  std::string camera_type = "zed";  // mock, opencv, realsense, zed
+  std::string camera_type = "opencv";  // mock, opencv, realsense, zed
   int camera_index = 2;
   int camera_width = 1920;
   int camera_height = 1080;
@@ -87,7 +87,7 @@ void print_usage(const char* prog_name) {
     << "  --repository-id <string> Repository identifier (default: TrossenRoboticsCommunity, "
     << "only for LeRobot backend)\n"
     << "  --mock                   Use mock producers instead of real hardware\n"
-    << "  --camera <type>          Camera type: mock, opencv, realsense, zed (default: zed)\n"
+    << "  --camera_type            Camera type: mock, opencv, realsense, zed (default: opencv)\n"
     << "  --camera-index <num>     Camera device index for opencv (default: 2, i.e., /dev/video2)\n"
     << "  --camera-width <pixels>  Camera width (default: 1920)\n"
     << "  --camera-height <pixels> Camera height (default: 1080)\n"
@@ -100,8 +100,8 @@ void print_usage(const char* prog_name) {
     << "Examples:\n"
     << "  " << prog_name << "\n"
     << "  " << prog_name << " --mock\n"
-    << "  " << prog_name << " --camera realsense\n"
-    << "  " << prog_name << " --camera opencv --camera-index 0\n"
+    << "  " << prog_name << " --camera_type realsense\n"
+    << "  " << prog_name << " --camera_type opencv --camera-index 0\n"
     << "  " << prog_name << " --dataset-id solo_demo_001 --root /data/recordings\n";
 }
 
@@ -120,7 +120,7 @@ Config parse_args(int argc, char** argv) {
       cfg.repository_id = argv[++i];
     } else if (arg == "--mock") {
       cfg.use_mock = true;
-    } else if (arg == "--camera" && i + 1 < argc) {
+    } else if (arg == "--camera_type" && i + 1 < argc) {
       cfg.camera_type = argv[++i];
     } else if (arg == "--camera-index" && i + 1 < argc) {
       cfg.camera_index = std::atoi(argv[++i]);
