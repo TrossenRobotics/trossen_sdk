@@ -14,7 +14,7 @@
 namespace trossen::hw::camera {
 
 // FPS tolerance for produced vs requested frame-rate checks
-constexpr int FPS_TOLERANCE = 50;
+constexpr double FPS_TOLERANCE = 0.5;
 
 ZedCameraProducer::ZedCameraProducer(
   std::shared_ptr<ZedFrameCache> frame_cache, Config cfg)

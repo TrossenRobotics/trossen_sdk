@@ -13,7 +13,7 @@
 namespace trossen::hw::camera {
 
 // FPS tolerance for produced vs requested frame-rate checks
-constexpr int FPS_TOLERANCE = 50;
+constexpr double FPS_TOLERANCE = 0.5;
 
 RealsenseCameraProducer::RealsenseCameraProducer(
   std::shared_ptr<trossen::hw::camera::RealsenseFrameCache> frame_cache, Config cfg)

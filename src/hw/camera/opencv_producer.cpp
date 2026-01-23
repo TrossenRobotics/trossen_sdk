@@ -16,7 +16,7 @@
 namespace trossen::hw::camera {
 
 // FPS tolerance for produced vs requested frame-rate checks
-constexpr int FPS_TOLERANCE = 50;
+constexpr double FPS_TOLERANCE = 0.5;
 
 OpenCvCameraProducer::OpenCvCameraProducer(Config cfg) : cfg_(std::move(cfg)) {
   // Populate metadata
