@@ -45,21 +45,28 @@ Development mode allows hot-reloading for both frontend and backend, making it i
 # Navigate to the project root
 cd /path/to/trossen_sdk
 
-# Create and enter build directory
+# Clean build directory if you encounter compiler issues
+rm -rf build
 mkdir -p build && cd build
 
-# Configure CMake with the SDK UI app enabled
-cmake .. -DCMAKE_BUILD_TYPE=Debug
+# Configure CMake (ensure correct compiler is used)
+cmake .. -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=g++
+
+# Build the trossen_sdk library first
+make -j$(nproc) trossen_sdk
 
 # Build the backend
+cd apps/trossen_sdk_ui/backend
+mkdir -p build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=Debug
 make -j$(nproc)
 ```
 
 #### Run the Backend
 ```bash
-# From the build directory, run the backend executable
-cd apps/trossen_sdk_ui/backend
-./trossen_sdk_ui_backend
+# From the backend build directory
+cd /path/to/trossen_sdk/apps/trossen_sdk_ui/backend/build
+./trossen_backend
 
 # The backend will start on port 8080
 # API endpoint: http://localhost:8080
@@ -117,8 +124,8 @@ For the best development experience, run both frontend and backend simultaneousl
 
 **Terminal 1 - Backend:**
 ```bash
-cd /path/to/trossen_sdk/build/apps/trossen_sdk_ui/backend
-./trossen_sdk_ui_backend
+cd /path/to/trossen_sdk/apps/trossen_sdk_ui/backend/build
+./trossen_backend
 ```
 
 **Terminal 2 - Frontend:**

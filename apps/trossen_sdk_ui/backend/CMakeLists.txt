@@ -31,7 +31,9 @@ add_executable(trossen_backend
 # Include directories
 target_include_directories(trossen_backend PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/include
+    ${CMAKE_SOURCE_DIR}/../../../include
+    ${CMAKE_SOURCE_DIR}/../../../build/_deps/foxglove-src/include
+    ${CMAKE_SOURCE_DIR}/../../../build/_deps/scservo-src/src
     ${OpenCV_INCLUDE_DIRS}
     /usr/local/include
     /usr/local/include/ftservo
@@ -46,6 +48,11 @@ target_link_libraries(trossen_backend
     ssl
     crypto
     ${OpenCV_LIBS}
+)
+
+# Add link directory for trossen_sdk
+target_link_directories(trossen_backend PRIVATE
+    ${CMAKE_SOURCE_DIR}/../../../build
 )
 
 # Install target
