@@ -17,13 +17,6 @@ namespace trossen::hw::camera {
 constexpr int ZED_DEFAULT_CONFIDENCE_THRESHOLD = 50;          // General depth confidence
 constexpr int ZED_DEFAULT_TEXTURE_CONFIDENCE_THRESHOLD = 100;  // Texture-based filtering
 
-/**
- * @brief Frame cache for ZED camera to share frames between color and depth producers
- *
- * Similar to RealsenseFrameCache, this class ensures that when multiple producers
- * (e.g., color and depth) need frames from the same camera, we only call grab() once
- * and share the result.
- */
 class ZedFrameCache {
 public:
   /**

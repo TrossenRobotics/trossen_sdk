@@ -44,7 +44,8 @@ public:
    *   "resolution": "SVGA",        // VGA, SVGA, HD720, HD1080, HD2K
    *   "fps": 30,                   // Camera frame rate
    *   "use_depth": false,          // Enable depth computation
-   *   "depth_mode": "NONE"         // NONE, PERFORMANCE, QUALITY, ULTRA, NEURAL
+   *   "depth_mode": "NONE",        // NONE, PERFORMANCE, QUALITY, ULTRA, NEURAL
+   *   "warmup_seconds": 0.0        // Seconds to warm up (discard initial frames)
    * }
    *
    * @param config JSON configuration object
@@ -103,6 +104,16 @@ public:
   int get_height() const { return height_; }
 
 private:
+  /**
+   * @brief Perform warmup by discarding initial frames
+   *
+   * Called automatically after camera is opened in configure().
+   * Includes error handling to prevent infinite loops.
+   *
+   * @return true on success, false on failure
+   */
+  bool warmup();
+
   /// @brief ZED camera instance
   std::shared_ptr<sl::Camera> camera_;
 
@@ -129,6 +140,9 @@ private:
 
   /// @brief Actual image height (from camera calibration)
   int height_{0};
+
+  /// @brief Seconds to warm up (discard initial frames)
+  double warmup_seconds_{0.0};
 };
 
 }  // namespace trossen::hw::camera

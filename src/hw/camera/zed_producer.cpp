@@ -52,36 +52,6 @@ ZedCameraProducer::~ZedCameraProducer() {
   }
 }
 
-bool ZedCameraProducer::warmup() {
-  if (cfg_.warmup_seconds <= 0.0) {
-    return true;
-  }
-
-  std::cout << "ZedCameraProducer: Warming up for " << cfg_.warmup_seconds << " seconds...\n";
-
-  auto start = std::chrono::steady_clock::now();
-  int warmup_frames = 0;
-
-  while (true) {
-    auto now = std::chrono::steady_clock::now();
-    double elapsed = std::chrono::duration<double>(now - start).count();
-    if (elapsed >= cfg_.warmup_seconds) {
-      break;
-    }
-
-    // Grab and discard frames
-    sl::ERROR_CODE err = frame_cache_->grab();
-    if (err == sl::ERROR_CODE::SUCCESS) {
-      warmup_frames++;
-    }
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(5));
-  }
-
-  std::cout << "ZedCameraProducer: Warmup complete, discarded " << warmup_frames << " frames\n";
-  return true;
-}
-
 void ZedCameraProducer::poll(
   const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
 {

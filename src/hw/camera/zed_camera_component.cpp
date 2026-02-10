@@ -3,9 +3,11 @@
  * @brief Implementation of ZedCameraComponent
  */
 
+#include <chrono>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #include "trossen_sdk/hw/camera/zed_camera_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
@@ -68,6 +70,10 @@ void ZedCameraComponent::configure(const nlohmann::json& config) {
     depth_mode_ = parse_depth_mode(mode_str);
   }
 
+  if (config.contains("warmup_seconds")) {
+    warmup_seconds_ = config.at("warmup_seconds").get<double>();
+  }
+
   // Create camera instance
   camera_ = std::make_shared<sl::Camera>();
 
@@ -115,6 +121,12 @@ void ZedCameraComponent::configure(const nlohmann::json& config) {
   std::cout << "  Model: " << sl::toString(cam_info.camera_model) << "\n";
   std::cout << "  Resolution: " << width_ << "x" << height_ << " @ " << fps_ << " FPS\n";
   std::cout << "  Depth: " << (use_depth_ ? "Enabled" : "Disabled") << "\n";
+
+  // Perform warmup (discard initial frames for stabilization)
+  if (!warmup()) {
+    throw std::runtime_error(
+      "ZedCameraComponent: Warmup failed for camera " + get_identifier());
+  }
 }
 
 nlohmann::json ZedCameraComponent::get_info() const {
@@ -135,6 +147,46 @@ nlohmann::json ZedCameraComponent::get_info() const {
 
 bool ZedCameraComponent::is_opened() const {
   return camera_ && camera_->isOpened();
+}
+
+bool ZedCameraComponent::warmup() {
+  if (warmup_seconds_ <= 0.0) {
+    return true;
+  }
+
+  std::cout << "ZedCameraComponent: Warming up for " << warmup_seconds_ << " seconds...\n";
+
+  auto start = std::chrono::steady_clock::now();
+  int warmup_frames = 0;
+  int consecutive_errors = 0;
+  constexpr int MAX_CONSECUTIVE_ERRORS = 50;  // Prevent infinite loop on persistent errors
+
+  while (true) {
+    auto now = std::chrono::steady_clock::now();
+    double elapsed = std::chrono::duration<double>(now - start).count();
+    if (elapsed >= warmup_seconds_) {
+      break;
+    }
+
+    // Grab and discard frames
+    sl::ERROR_CODE err = frame_cache_->grab();
+    if (err == sl::ERROR_CODE::SUCCESS) {
+      warmup_frames++;
+      consecutive_errors = 0;  // Reset error counter on success
+    } else {
+      consecutive_errors++;
+      if (consecutive_errors >= MAX_CONSECUTIVE_ERRORS) {
+        std::cerr << "ZedCameraComponent: Warmup failed after " << MAX_CONSECUTIVE_ERRORS
+                  << " consecutive errors. Last error: " << sl::toString(err) << "\n";
+        return false;
+      }
+    }
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+
+  std::cout << "ZedCameraComponent: Warmup complete, discarded " << warmup_frames << " frames\n";
+  return true;
 }
 
 REGISTER_HARDWARE(ZedCameraComponent, "zed_camera")

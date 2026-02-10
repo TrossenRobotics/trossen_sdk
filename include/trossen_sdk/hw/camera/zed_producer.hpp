@@ -51,9 +51,6 @@ public:
     /// @brief Prefer device timestamp if available
     bool use_device_time{true};
 
-    /// @brief Seconds to warm up (discard frames) after device open before emitting
-    double warmup_seconds{0.0};
-
     /// @brief Whether to enforce the requested fps (may reduce if device cannot keep up)
     bool enforce_requested_fps = true;
   };
@@ -143,13 +140,6 @@ public:
   std::shared_ptr<ProducerMetadata> metadata() const override {
     return std::make_shared<ZedCameraProducerMetadata>(metadata_);
   }
-
-  /**
-   * @brief Perform warmup (discard initial frames)
-   *
-   * @return true on success, false on failure
-   */
-  bool warmup();
 
 private:
   /// @brief Frame cache shared with other producers

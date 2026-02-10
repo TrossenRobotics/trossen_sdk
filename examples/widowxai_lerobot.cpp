@@ -447,7 +447,8 @@ int main(int argc, char** argv) {
       {"resolution", resolution},
       {"fps", zed_fps},
       {"use_depth", enable_depth},
-      {"depth_mode", depth_mode}
+      {"depth_mode", depth_mode},
+      {"warmup_seconds", 1.0}
     };
 
     zed_component->configure(zed_config);
@@ -463,16 +464,8 @@ int main(int argc, char** argv) {
     zed_cfg.height = 0;
     zed_cfg.fps = zed_fps;
     zed_cfg.use_device_time = true;
-    zed_cfg.warmup_seconds = 1.0;
 
     camera_producer = std::make_shared<trossen::hw::camera::ZedCameraProducer>(zed_cache, zed_cfg);
-
-    // Perform warmup
-    auto zed_producer =
-      std::dynamic_pointer_cast<trossen::hw::camera::ZedCameraProducer>(camera_producer);
-    if (zed_producer) {
-      zed_producer->warmup();
-    }
 
     std::cout << "  ✓ ZED color producer (" << zed_fps << " Hz, " << resolution
               << ", SN: " << serial_number << ")\n";
@@ -487,19 +480,9 @@ int main(int argc, char** argv) {
       zed_depth_cfg.height = 0;
       zed_depth_cfg.fps = zed_fps;
       zed_depth_cfg.use_device_time = true;
-      zed_depth_cfg.warmup_seconds = 1.0;
 
       depth_producer =
         std::make_shared<trossen::hw::camera::ZedDepthCameraProducer>(zed_cache, zed_depth_cfg);
-
-      // Perform warmup for depth
-      if (depth_producer) {
-        auto zed_depth =
-          std::dynamic_pointer_cast<trossen::hw::camera::ZedDepthCameraProducer>(depth_producer);
-        if (zed_depth) {
-          zed_depth->warmup();
-        }
-      }
 
       std::cout << "  ✓ ZED depth producer (" << zed_fps << " Hz, " << resolution
                 << ", mode: " << depth_mode << ")\n";
