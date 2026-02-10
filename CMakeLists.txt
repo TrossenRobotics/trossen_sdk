@@ -8,7 +8,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 option(TROSSEN_ENABLE_REALSENSE "Enable Intel RealSense support" OFF)
-option(TROSSEN_ENABLE_ZED "Enable ZED camera support" ON)
+option(TROSSEN_ENABLE_ZED "Enable ZED camera support" OFF)
 
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
