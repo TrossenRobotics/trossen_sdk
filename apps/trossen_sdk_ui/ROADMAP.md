@@ -92,7 +92,7 @@ This document tracks bugs, features, and improvements needed for the Beta releas
   - On startup, check for incomplete sessions
 
 #### 11. Data Export Validation
-- **Status:** Not Started
+- **Status:** Complete
 - **Description:** Verify exported MCAP/LeRobot datasets are valid and complete
 - **Requirements:**
   - Post-recording validation step
@@ -148,7 +148,7 @@ This document tracks bugs, features, and improvements needed for the Beta releas
 ### Long-term Vision
 
 #### 20. Cloud Storage Integration
-- **Description:** Upload recorded datasets directly to S3, GCS, or Azure
+- **Description:** Upload recorded datasets directly to AWS
 
 #### 21. Dataset Analytics Dashboard
 - **Description:** Visualize dataset statistics (episode count, duration, action distribution)

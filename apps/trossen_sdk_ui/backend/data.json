@@ -111,6 +111,447 @@
       "session_id": "1767738348637",
       "session_name": "Demo 2",
       "timestamp": "1767743150553"
+    },
+    {
+      "description": "Session created with 2 episodes @ 10s each",
+      "event_type": "created",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767886436049"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767886441286"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767886468721"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767886478056"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767886990387"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767887003006"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767887007214"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767887168745"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767887188258"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767887192465"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767887465051"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767887476865"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767887481075"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767887878824"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767887890641"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767887894851"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767888424546"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767888436158"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767888440369"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767889196346"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767889214169"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767889218739"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767890527035"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767890555074"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767890569516"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767891341080"
+    },
+    {
+      "description": "All 5 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767891477124"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767891483679"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767904138099"
+    },
+    {
+      "description": "All 5 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767904260719"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767904268849"
+    },
+    {
+      "description": "Session created with 1 episodes @ 10s each",
+      "event_type": "created",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767904684051"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767904695405"
+    },
+    {
+      "description": "All 1 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767904705515"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767904732977"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767905108428"
+    },
+    {
+      "description": "All 1 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767905118537"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767905122746"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767905361958"
+    },
+    {
+      "description": "All 1 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767905372067"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767905400391"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767905887963"
+    },
+    {
+      "description": "All 1 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767905898071"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767904684047",
+      "session_name": "Test Session",
+      "timestamp": "1767905902280"
+    },
+    {
+      "description": "Session created with 1 episodes @ 10s each",
+      "event_type": "created",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906061447"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906078389"
+    },
+    {
+      "description": "All 1 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906088502"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906092714"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906332609"
+    },
+    {
+      "description": "All 1 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906343620"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906347832"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906701527"
+    },
+    {
+      "description": "All 1 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906712438"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906716650"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906839452"
+    },
+    {
+      "description": "All 1 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906851463"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767906855676"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767907076903"
+    },
+    {
+      "description": "All 1 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767907092132"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767906061443",
+      "session_name": "Test1",
+      "timestamp": "1767907096344"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767907186358"
+    },
+    {
+      "description": "All 5 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767907376288"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767886436046",
+      "session_name": "Stationary",
+      "timestamp": "1767907380893"
     }
   ],
   "arms": [
@@ -159,7 +600,7 @@
   ],
   "cameras": [
     {
-      "device_index": 6,
+      "device_index": 18,
       "enable_depth": false,
       "encoding": "bgr8",
       "fps": 30,
@@ -195,7 +636,7 @@
       "width": 640
     },
     {
-      "device_index": 18,
+      "device_index": 6,
       "enable_depth": false,
       "encoding": "bgr8",
       "fps": 30,
@@ -271,37 +712,26 @@
   ],
   "sessions": [
     {
-      "action": "teleop_widowx",
-      "backend_type": "mcap",
+      "action": "teleop_widowx_bimanual",
+      "backend_type": "lerobot",
       "cameras": [],
-      "episode_duration": 10.0,
-      "id": "1767738308213",
-      "name": "Demo 1",
-      "num_episodes": 2,
+      "episode_duration": 20.0,
+      "id": "1767886436046",
+      "name": "Stationary",
+      "num_episodes": 5,
       "robots": [],
-      "system_id": "1767737254566"
+      "system_id": "1767886405551"
     },
     {
       "action": "teleop_widowx_bimanual",
-      "backend_type": "mcap",
+      "backend_type": "lerobot",
       "cameras": [],
       "episode_duration": 10.0,
-      "id": "1767738348637",
-      "name": "Demo 2",
-      "num_episodes": 2,
+      "id": "1767906061443",
+      "name": "Test1",
+      "num_episodes": 1,
       "robots": [],
-      "system_id": "1767738229980"
-    },
-    {
-      "action": "teleop_so101",
-      "backend_type": "mcap",
-      "cameras": [],
-      "episode_duration": 10.0,
-      "id": "1767738366589",
-      "name": "Demo 3",
-      "num_episodes": 2,
-      "robots": [],
-      "system_id": "1767738270628"
+      "system_id": "1767886405551"
     }
   ],
   "systems": [
@@ -313,18 +743,22 @@
       ]
     },
     {
-      "id": "1767738229980",
-      "name": "Demo 2 bimanual teleop",
-      "producers": [
-        "b4a9217fa0ea9a64_7c35b061a0b6310f_teleop",
-        "eab888cdc0e4576d_654ff638792a83e6_teleop"
-      ]
-    },
-    {
       "id": "1767738270628",
       "name": "Demo 3 so101 teleop",
       "producers": [
         "cd7b9f682cea7c67_2d6619c09ef2b6d8_teleop"
+      ]
+    },
+    {
+      "id": "1767886405551",
+      "name": "Stationary",
+      "producers": [
+        "cc4a4734cfda2daa",
+        "7656a72361e3d6db",
+        "66055ee4fb432afb",
+        "eab888cdc0e4576d_654ff638792a83e6_teleop",
+        "b4a9217fa0ea9a64_7c35b061a0b6310f_teleop",
+        "0a2795068e060269"
       ]
     }
   ]
