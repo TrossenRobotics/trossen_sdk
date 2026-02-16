@@ -25,14 +25,19 @@
 #include <vector>
 
 #include "libtrossen_arm/trossen_arm.hpp"
-#include "trossen_sdk/runtime/session_manager.hpp"
+#include "nlohmann/json.hpp"
 #include "trossen_sdk/hw/arm/arm_producer.hpp"
-#include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
-#include "trossen_sdk/hw/camera/opencv_producer.hpp"
+#include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
+#include "trossen_sdk/hw/camera/opencv_producer.hpp"
+#include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/hw/active_hardware_registry.hpp"
+#include "trossen_sdk/runtime/producer_registry.hpp"
+#include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/runtime/session_manager.hpp"
 
-#include "demo_utils.hpp"
+#include "./demo_utils.hpp"
 
 // ────────────────────────────────────────────────────────────
 // Command-line configuration
@@ -160,53 +165,32 @@ int main(int argc, char** argv) {
   // Initialize hardware (if not using mock)
   // ──────────────────────────────────────────────────────────
 
-  std::unique_ptr<trossen_arm::TrossenArmDriver> leader_driver;
-  std::unique_ptr<trossen_arm::TrossenArmDriver> follower_driver;
+  std::shared_ptr<trossen_arm::TrossenArmDriver> leader_driver;  // Managed by component
+  std::shared_ptr<trossen_arm::TrossenArmDriver> follower_driver;  // Managed by component
   const float moving_time_s = 2.0f;
 
   if (!cfg.use_mock) {
     std::cout << "Initializing hardware...\n";
 
-    leader_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
-    follower_driver = std::make_unique<trossen_arm::TrossenArmDriver>();
+    // Create leader arm via registry
+    nlohmann::json leader_hw_cfg = {
+      {"ip_address", cfg.leader_ip},
+      {"model", "wxai_v0"},
+      {"end_effector", "wxai_v0_leader"}
+    };
 
-    try {
-      leader_driver->configure(
-        trossen_arm::Model::wxai_v0,
-        trossen_arm::StandardEndEffector::wxai_v0_leader,
-        cfg.leader_ip,
-        true);
-      std::cout << "  ✓ Leader arm configured (" << cfg.leader_ip << ")\n";
-    } catch (const std::exception& e) {
-      std::cerr << "Failed to configure leader: " << e.what() << "\n";
-      return 1;
-    }
+    auto leader_component = trossen::hw::HardwareRegistry::create(
+      "trossen_arm", "leader_arm", leader_hw_cfg, true);
+    auto leader_comp_typed = std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(
+      leader_component);
+    leader_driver = leader_comp_typed->get_hardware();
+    std::cout << "  ✓ Leader arm configured (" << cfg.leader_ip << ")\n";
 
-    try {
-      follower_driver->configure(
-        trossen_arm::Model::wxai_v0,
-        trossen_arm::StandardEndEffector::wxai_v0_follower,
-        cfg.follower_ip,
-        true);
-      std::cout << "  ✓ Follower arm configured (" << cfg.follower_ip << ")\n";
-    } catch (const std::exception& e) {
-      std::cerr << "Failed to configure follower: " << e.what() << "\n";
-      return 1;
-    }
-
-    // Adjust follower joint limits for gripper tolerance
-    auto joint_limits = follower_driver->get_joint_limits();
-    joint_limits[follower_driver->get_num_joints() - 1].position_tolerance = 0.01;
-    follower_driver->set_joint_limits(joint_limits);
-
-    // Move arms to staged positions
+    // Stage leader to starting position
     leader_driver->set_all_modes(trossen_arm::Mode::position);
-    follower_driver->set_all_modes(trossen_arm::Mode::position);
     leader_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
-    follower_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
     std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-
-    std::cout << "  ✓ Arms staged to starting positions\n";
+    std::cout << "  ✓ Leader staged to starting position\n";
   }
 
   trossen::runtime::SessionManager mgr;
@@ -236,24 +220,52 @@ int main(int argc, char** argv) {
     joint_producer = std::make_shared<trossen::hw::arm::MockJointStateProducer>(joint_cfg);
     std::cout << "  ✓ Mock joint state producer (" << cfg.joint_rate_hz << " Hz, 6 joints)\n";
   } else {
-    trossen::hw::arm::TrossenArmProducer::Config joint_cfg;
-    joint_cfg.stream_id = "follower/joint_states";
-    joint_cfg.use_device_time = false;
+    // Create follower arm via registry
+    nlohmann::json hw_cfg = {
+      {"ip_address", cfg.follower_ip},
+      {"model", "wxai_v0"},
+      {"end_effector", "wxai_v0_follower"}
+    };
 
-    // Wrap follower_driver in shared_ptr (non-owning wrapper since we manage lifetime)
-    auto follower_shared = std::shared_ptr<trossen_arm::TrossenArmDriver>(
-      follower_driver.get(), [](trossen_arm::TrossenArmDriver*){});
+    auto arm_component = trossen::hw::HardwareRegistry::create(
+      "trossen_arm", "follower_arm", hw_cfg, true);
 
-    joint_producer = std::make_shared<trossen::hw::arm::TrossenArmProducer>(
-      follower_shared, joint_cfg);
+    // Get driver from component for control loop
+    auto arm_comp_typed = std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(
+      arm_component);
+    follower_driver = arm_comp_typed->get_hardware();
+
+    std::cout << "  ✓ Follower arm configured (" << cfg.follower_ip << ")\n";
+
+    // Adjust follower joint limits for gripper tolerance
+    auto joint_limits = follower_driver->get_joint_limits();
+    joint_limits[follower_driver->get_num_joints() - 1].position_tolerance = 0.01;
+    follower_driver->set_joint_limits(joint_limits);
+
+    // Move follower to staged position
+    follower_driver->set_all_modes(trossen_arm::Mode::position);
+    follower_driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+    std::cout << "  ✓ Follower staged to starting position\n";
+
+    // Create producer via registry
+    nlohmann::json prod_cfg = {
+      {"stream_id", "follower/joint_states"},
+      {"use_device_time", false}
+    };
+
+    joint_producer = trossen::runtime::ProducerRegistry::create(
+      "trossen_arm", arm_component, prod_cfg);
+
     std::cout << "  ✓ Follower arm producer (" << cfg.joint_rate_hz << " Hz)\n";
   }
 
   auto joint_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.joint_rate_hz));
   mgr.add_producer(joint_producer, joint_period);
 
-  // Camera producer (OpenCV or mock)
+  // Camera producer
   std::shared_ptr<trossen::hw::PolledProducer> camera_producer;
+  auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
   if (cfg.use_mock) {
     trossen::hw::camera::MockCameraProducer::Config cam_cfg;
     cam_cfg.width = cfg.camera_width;
@@ -280,7 +292,6 @@ int main(int argc, char** argv) {
               << cfg.camera_width << "x" << cfg.camera_height << ")\n";
   }
 
-  auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
   mgr.add_producer(camera_producer, camera_period);
 
   std::cout << "\nProducers registered. Ready to record.\n";
