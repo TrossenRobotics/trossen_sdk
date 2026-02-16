@@ -17,8 +17,90 @@ This guide covers running the Trossen SDK UI in development mode and using Docke
 - Node.js 18+ and npm
 - CMake 3.20+
 - C++17 compatible compiler
-- Docker and Docker Compose
+- Docker Engine and Docker Compose
 - Hardware access permissions (user must be in `dialout` group for serial devices)
+
+### Cleaning Up Existing Docker Installation (Optional)
+
+If you want to start with a completely clean Docker environment for testing these instructions, follow these steps:
+
+```bash
+# Stop all running containers
+[ -n "$(sudo docker ps -aq)" ] && sudo docker stop $(sudo docker ps -aq) || true
+
+# Remove all containers
+[ -n "$(sudo docker ps -aq)" ] && sudo docker rm $(sudo docker ps -aq) || true
+
+# Remove all images
+[ -n "$(sudo docker images -q)" ] && sudo docker rmi -f $(sudo docker images -q) || true
+
+# Remove all volumes
+[ -n "$(sudo docker volume ls -q)" ] && sudo docker volume rm $(sudo docker volume ls -q) || true
+
+# Remove all networks (except default ones)
+sudo docker network prune -f
+
+# Clean up build cache and unused data
+sudo docker system prune -a --volumes -f
+
+# Uninstall Docker packages
+sudo apt-get purge -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+sudo apt-get autoremove -y
+
+# Remove Docker data directories
+sudo rm -rf /var/lib/docker
+sudo rm -rf /var/lib/containerd
+sudo rm -rf /etc/docker
+sudo rm -rf ~/.docker
+
+# Remove Docker repository and GPG key
+sudo rm -f /etc/apt/sources.list.d/docker.list
+sudo rm -f /etc/apt/keyrings/docker.gpg
+
+# Remove user from docker group (ignore errors if not in group)
+sudo deluser $USER docker || true
+```
+
+**Warning**: This completely removes Docker and all associated data. Only use this if you want to start from scratch.
+
+### Installing Docker
+
+Docker Compose is integrated into the Docker CLI as a plugin. Follow these steps to install Docker with Compose:
+
+```bash
+# Update package index
+sudo apt-get update
+
+# Install prerequisites
+sudo apt-get install -y \
+    ca-certificates \
+    curl \
+    gnupg \
+    lsb-release
+
+# Add Docker's official GPG key
+sudo mkdir -p /etc/apt/keyrings
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg | sudo gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+
+# Set up Docker repository
+echo \
+  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+  $(lsb_release -cs) stable" | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+
+# Install Docker Engine with Compose plugin
+
+sudo apt-get update
+sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+
+# Verify installation
+docker --version
+docker compose version
+
+# Add your user to the docker group (optional, to run without sudo)
+sudo usermod -aG docker $USER
+# Log out and log back in for group changes to take effect
+```
+
 
 ### Hardware Setup
 - USB access to SO101 arms (serial ports)
@@ -154,13 +236,25 @@ Dockers packages the entire application for production deployment with container
 cd /path/to/trossen_sdk/apps/trossen_sdk_ui
 
 # Build and start all containers
-sudo docker-compose up -d --build
+sudo docker compose up -d --build
 
 # View logs
-sudo docker-compose logs -f
+sudo docker compose logs -f
 
 # Stop containers
-sudo docker-compose down
+sudo docker compose down
+```
+
+### Access the Application
+
+**Frontend:**
+```
+http://localhost:3000
+```
+
+**Backend:**
+```
+http://localhost:8080
 ```
 
 ### Individual Container Management
@@ -168,18 +262,18 @@ sudo docker-compose down
 #### Rebuild Specific Container
 ```bash
 # Rebuild only backend
-sudo docker-compose build backend
-sudo docker-compose up -d backend
+sudo docker compose build backend
+sudo docker compose up -d backend
 
 # Rebuild only frontend
-sudo docker-compose build frontend
-sudo docker-compose up -d frontend
+sudo docker compose build frontend
+sudo docker compose up -d frontend
 ```
 
 #### View Container Status
 ```bash
 # List running containers
-sudo docker-compose ps
+sudo docker compose ps
 
 # View resource usage
 sudo docker stats trossen_backend trossen_frontend
@@ -190,7 +284,7 @@ sudo docker stats trossen_backend trossen_frontend
 #### Backend Configuration
 Edit `backend/data.json` and restart the backend:
 ```bash
-sudo docker-compose restart backend
+sudo docker compose restart backend
 ```
 
 Changes to `data.json` persist because it's mounted as a volume.
@@ -198,7 +292,7 @@ Changes to `data.json` persist because it's mounted as a volume.
 #### Frontend Environment Variables
 Edit `docker-compose.yml` environment section and recreate container:
 ```bash
-sudo docker-compose up -d --force-recreate frontend
+sudo docker compose up -d --force-recreate frontend
 ```
 
 ---
@@ -244,13 +338,13 @@ npm install
 #### Containers Won't Start
 ```bash
 # Check logs
-sudo docker-compose logs backend
-sudo docker-compose logs frontend
+sudo docker compose logs backend
+sudo docker compose logs frontend
 
 # Remove old containers and rebuild
-sudo docker-compose down
+sudo docker compose down
 sudo docker system prune -f
-sudo docker-compose up -d --build
+sudo docker compose up -d --build
 ```
 
 #### Permission Denied on /dev
@@ -272,6 +366,7 @@ sudo docker exec -it trossen_backend groups
 
 ## Reference Links
 
+- [Docker Installation Guide](https://docs.docker.com/engine/install/ubuntu/) - Official Docker Engine installation for Ubuntu
 - [Docker Compose Documentation](https://docs.docker.com/compose/) - Container orchestration and configuration reference
 - [Node.js Installation Guide](https://nodejs.org/en/download/package-manager) - Installing Node.js and npm on various systems
 - [CMake Installation](https://cmake.org/install/) - Installing CMake build system
