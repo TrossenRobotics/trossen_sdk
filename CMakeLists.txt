@@ -33,6 +33,7 @@ add_library(trossen_sdk SHARED
   src/hw/camera/mock_producer.cpp
   src/hw/camera/mock_synced_producer.cpp
   src/runtime/session_manager.cpp
+  src/runtime/producer_registry.cpp
 )
 
 if(TROSSEN_ENABLE_REALSENSE)
