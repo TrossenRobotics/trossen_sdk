@@ -98,8 +98,8 @@ RUN wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --shor
     ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb && \
     apt-get update && \
     apt-get install -y --no-install-recommends \
-    libarrow2200 \
-    libparquet2200 && \
+    libarrow2300 \
+    libparquet2300 && \
     rm -rf /var/lib/apt/lists/* && \
     rm apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 
