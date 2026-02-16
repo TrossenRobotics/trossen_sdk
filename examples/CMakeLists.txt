@@ -31,9 +31,11 @@ add_executable(hardware_registry_demo hardware_registry_demo.cpp)
 target_link_libraries(hardware_registry_demo trossen_sdk)
 
 # Trossen AI Solo demo Async
-find_package(libtrossen_arm)
-add_executable(widowxai_lerobot_async widowxai_lerobot_async.cpp)
-target_link_libraries(widowxai_lerobot_async demo_utils trossen_sdk libtrossen_arm)
+# TODO (shantanuparab-tr): This example is broken due to the producer registry changes.
+# We need to update the example to use the new producer registry API.
+# find_package(libtrossen_arm)
+# add_executable(widowxai_lerobot_async widowxai_lerobot_async.cpp)
+# target_link_libraries(widowxai_lerobot_async demo_utils trossen_sdk libtrossen_arm)
 
 # Producer registry demo
 add_executable(producer_registry_demo producer_registry_demo.cpp)
