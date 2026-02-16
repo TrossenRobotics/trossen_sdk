@@ -154,6 +154,43 @@ cd /path/to/trossen_sdk/apps/trossen_sdk_ui/backend/build
 # API endpoint: http://localhost:8080
 ```
 
+#### Rebuilding After Code Changes
+
+The backend is compiled C++, **not** hot-reloaded. When you modify backend source files (`.cpp`, `.hpp`, `CMakeLists.txt`), you **must recompile** before changes take effect.
+
+**Option 1: Quick Rebuild Script (Recommended)**
+```bash
+# From the backend directory
+cd /path/to/trossen_sdk/apps/trossen_sdk_ui/backend
+./dev_rebuild.sh
+```
+This script rebuilds and restarts the backend automatically.
+
+**Option 2: Auto-Watch Mode (Advanced)**
+```bash
+# Install inotify-tools first (one-time setup)
+sudo apt-get install inotify-tools
+
+# From the backend directory
+cd /path/to/trossen_sdk/apps/trossen_sdk_ui/backend
+./dev_watch.sh
+```
+This watches for file changes and automatically rebuilds/restarts the backend when you save files.
+
+**Option 3: Manual Rebuild**
+```bash
+# Navigate to backend build directory
+cd /path/to/trossen_sdk/apps/trossen_sdk_ui/backend/build
+
+# Rebuild (only recompiles changed files)
+make -j$(nproc)
+
+# Restart the backend (Ctrl+C to stop, then rerun)
+./trossen_backend
+```
+
+**Note:** Only the `data.json` configuration file can be modified without recompiling. For code changes, always rebuild first.
+
 #### Backend Configuration
 The backend reads from `data.json` in the same directory as the executable. This file acts as the database and contains:
 - Camera configurations
@@ -204,8 +241,17 @@ The development server features:
 
 For the best development experience, run both frontend and backend simultaneously in separate terminals:
 
-**Terminal 1 - Backend:**
+**Terminal 1 - Backend (Choose one method):**
 ```bash
+# Quick rebuild script (rebuilds then runs once)
+cd /path/to/trossen_sdk/apps/trossen_sdk_ui/backend
+./dev_rebuild.sh
+
+# OR auto-watch mode (rebuilds automatically on file changes)
+cd /path/to/trossen_sdk/apps/trossen_sdk_ui/backend
+./dev_watch.sh
+
+# OR manual execution
 cd /path/to/trossen_sdk/apps/trossen_sdk_ui/backend/build
 ./trossen_backend
 ```
@@ -215,6 +261,14 @@ cd /path/to/trossen_sdk/apps/trossen_sdk_ui/backend/build
 cd /path/to/trossen_sdk/apps/trossen_sdk_ui/frontend
 npm run dev
 ```
+
+**Development Workflow:**
+- **Frontend changes**: Automatic - just save the file (hot-reload)
+- **Backend changes with watch mode**: Automatic - just save the file (auto-rebuilds)
+- **Backend changes manual mode**:
+  1. Stop backend (Ctrl+C in Terminal 1)
+  2. Run `./dev_rebuild.sh` or `make -j$(nproc)` in the build directory
+  3. Restart `./trossen_backend`
 
 ---
 
@@ -245,6 +299,25 @@ sudo docker compose logs -f
 sudo docker compose down
 ```
 
+#### ⚠️ Important: Applying Code Changes
+
+**The Docker containers build a snapshot of your code.** When you modify backend or frontend source files, you **must rebuild** the affected containers for changes to take effect:
+
+```bash
+# After modifying backend code (C++, headers, CMakeLists.txt)
+sudo docker compose build backend
+sudo docker compose up -d backend
+
+# After modifying frontend code (TypeScript, React components, CSS)
+sudo docker compose build frontend
+sudo docker compose up -d frontend
+
+# Or rebuild everything if you changed both
+sudo docker compose up -d --build
+```
+
+The containers do **NOT** have hot-reloading or live code updates. Each code change requires a rebuild.
+
 ### Access the Application
 
 **Frontend:**
@@ -259,15 +332,35 @@ http://localhost:8080
 
 ### Individual Container Management
 
-#### Rebuild Specific Container
+#### Rebuild After Code Changes
+
+**Always rebuild when you modify source code:**
+
 ```bash
-# Rebuild only backend
+# Backend code changes (C++, headers, CMakeLists.txt)
 sudo docker compose build backend
 sudo docker compose up -d backend
 
-# Rebuild only frontend
+# Frontend code changes (TypeScript, React, CSS)
 sudo docker compose build frontend
 sudo docker compose up -d frontend
+
+# Both changed
+sudo docker compose up -d --build
+```
+
+#### Configuration Changes (No Rebuild Needed)
+
+For configuration-only changes that don't require rebuilding:
+
+```bash
+# Backend configuration (data.json only)
+# The file is volume-mounted, so just restart
+sudo docker compose restart backend
+
+# Frontend environment variables
+# Edit docker-compose.yml, then recreate
+sudo docker compose up -d --force-recreate frontend
 ```
 
 #### View Container Status
