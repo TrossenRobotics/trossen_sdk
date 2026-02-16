@@ -345,7 +345,9 @@ int main(int argc, char** argv) {
     std::cout << "  ✓ Follower Right producer (" << cfg.joint_rate_hz << " Hz)\n";
   }
 
+  // ──────────────────────────────────────────────────────────
   // Camera producers
+  // ──────────────────────────────────────────────────────────
   std::vector<std::shared_ptr<trossen::hw::PolledProducer>> camera_producers;
   auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
 
@@ -367,16 +369,31 @@ int main(int argc, char** argv) {
       std::cout << "  ✓ Mock camera " << i << " producer (" << cfg.camera_fps << " Hz, "
                 << cfg.camera_width << "x" << cfg.camera_height << ")\n";
     } else {
-      trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
-      cam_cfg.device_index = cfg.camera_indices[i];
-      cam_cfg.stream_id = "camera_" + std::to_string(i) + "/image";
-      cam_cfg.encoding = "bgr8";
-      cam_cfg.width = cfg.camera_width;
-      cam_cfg.height = cfg.camera_height;
-      cam_cfg.fps = cfg.camera_fps;
-      cam_cfg.use_device_time = false;
+      // Create hardware component via registry
+      nlohmann::json hw_cfg = {
+        {"device_index", cfg.camera_indices[i]},
+        {"width", cfg.camera_width},
+        {"height", cfg.camera_height},
+        {"fps", cfg.camera_fps},
+        {"backend", "v4l2"}
+      };
 
-      auto cam_prod = std::make_shared<trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
+      auto camera_component = trossen::hw::HardwareRegistry::create(
+        "opencv_camera", "camera_" + std::to_string(i), hw_cfg);
+
+      // Create producer via registry
+      nlohmann::json prod_cfg = {
+        {"stream_id", "camera_" + std::to_string(i) + "/image"},
+        {"encoding", "bgr8"},
+        {"use_device_time", false},
+        {"width", cfg.camera_width},
+        {"height", cfg.camera_height},
+        {"fps", cfg.camera_fps}
+      };
+
+      auto cam_prod = trossen::runtime::ProducerRegistry::create(
+        "opencv_camera", camera_component, prod_cfg);
+
       camera_producers.push_back(cam_prod);
       mgr.add_producer(cam_prod, camera_period);
       std::cout << "  ✓ Camera " << i << " producer (" << cfg.camera_fps << " Hz, "
