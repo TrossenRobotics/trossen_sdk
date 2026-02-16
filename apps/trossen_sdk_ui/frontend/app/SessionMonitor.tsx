@@ -35,6 +35,8 @@ export function SessionMonitor({ session, onClose, onFinish }: SessionMonitorPro
   const [isFinishing, setIsFinishing] = useState(false);
   const [allEpisodesComplete, setAllEpisodesComplete] = useState(false);
   const [completionElapsedTime, setCompletionElapsedTime] = useState<number | null>(null);
+  const [waitingForNext, setWaitingForNext] = useState(false);
+  const [isContinuing, setIsContinuing] = useState(false);
 
   // Poll for stats every 500ms
   useEffect(() => {
@@ -63,6 +65,9 @@ export function SessionMonitor({ session, onClose, onFinish }: SessionMonitorPro
 
             // Check if all episodes are complete
             const isComplete = stats.all_episodes_complete || (!stats.episode_active && stats.total_episodes_completed >= session.episodes);
+
+            // Check if waiting for user to continue to next episode
+            setWaitingForNext(stats.waiting_for_next || false);
 
             // If just completed, capture the elapsed time
             if (isComplete && !allEpisodesComplete) {
@@ -98,6 +103,32 @@ export function SessionMonitor({ session, onClose, onFinish }: SessionMonitorPro
     } catch (err) {
       console.error('Failed to finish session:', err);
       setIsFinishing(false);
+    }
+  };
+
+  const handleContinueNextEpisode = async () => {
+    setIsContinuing(true);
+    try {
+      const response = await fetch(`${BACKEND_URL}/session/${session.id}/next`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        }
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        throw new Error(data.error || 'Failed to continue to next episode');
+      }
+
+      const data = await response.json();
+      console.log('Continue to next episode:', data);
+      setWaitingForNext(false);
+    } catch (err) {
+      console.error('Failed to continue to next episode:', err);
+      alert('Failed to continue to next episode. Please check the console for details.');
+    } finally {
+      setIsContinuing(false);
     }
   };
   return (
@@ -189,6 +220,22 @@ export function SessionMonitor({ session, onClose, onFinish }: SessionMonitorPro
                 <p className="text-green-800 font-semibold">
                   All {session.episodes} episodes completed! Click Finish to process and save the session.
                 </p>
+              </div>
+            )}
+
+            {/* Waiting for Next Episode Message */}
+            {waitingForNext && !allEpisodesComplete && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mt-4">
+                <p className="text-blue-800 font-semibold mb-3">
+                  Episode {currentStats.totalEpisodesCompleted} completed! Ready to start episode {currentStats.totalEpisodesCompleted + 1} of {session.episodes}.
+                </p>
+                <button
+                  onClick={handleContinueNextEpisode}
+                  disabled={isContinuing}
+                  className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed"
+                >
+                  {isContinuing ? 'Starting...' : `Continue to Episode ${currentStats.totalEpisodesCompleted + 1}`}
+                </button>
               </div>
             )}
           </div>

@@ -111,13 +111,14 @@ HardwareSystem HardwareSystem::from_json(const nlohmann::json& j) {
 
 // ProducerConfig JSON conversion
 nlohmann::json ProducerConfig::to_json() const {
-    return {
+    return nlohmann::json{
         {"id", id},
+        {"name", name},
         {"type", type},
-        {"leader_name", leader_name},
-        {"follower_name", follower_name},
-        {"camera_name", camera_name},
-        {"arm_name", arm_name},
+        {"leader_id", leader_id},
+        {"follower_id", follower_id},
+        {"camera_id", camera_id},
+        {"arm_id", arm_id},
         {"use_device_time", use_device_time},
         {"enforce_requested_fps", enforce_requested_fps},
         {"warmup_seconds", warmup_seconds}
@@ -131,11 +132,12 @@ ProducerConfig ProducerConfig::from_json(const nlohmann::json& j) {
     const nlohmann::json& cfg = j.contains("config") ? j["config"] : j;
 
     config.id = j.value("id", cfg.value("id", ""));
+    config.name = j.value("name", cfg.value("name", ""));
     config.type = j.value("type", "");  // Type is at top level
-    config.leader_name = cfg.value("leader_name", "");
-    config.follower_name = cfg.value("follower_name", "");
-    config.camera_name = cfg.value("camera_name", "");
-    config.arm_name = cfg.value("arm_name", "");
+    config.leader_id = cfg.value("leader_id", "");
+    config.follower_id = cfg.value("follower_id", "");
+    config.camera_id = cfg.value("camera_id", "");
+    config.arm_id = cfg.value("arm_id", "");
     config.use_device_time = cfg.value("use_device_time", false);
     config.enforce_requested_fps = cfg.value("enforce_requested_fps", true);
     config.warmup_seconds = cfg.value("warmup_seconds", 2.0);
@@ -256,9 +258,17 @@ Configurations Configurations::from_json(const nlohmann::json& j) {
     }
 
     if (j.contains("producers") && j["producers"].is_array()) {
+        std::cout << "DEBUG: Found producers array with " << j["producers"].size()
+                  << " items" << std::endl;
         for (const auto& prod_json : j["producers"]) {
-            configs.producers.push_back(ProducerConfig::from_json(prod_json));
+            auto prod = ProducerConfig::from_json(prod_json);
+            std::cout << "Loading producer: id='" << prod.id
+                      << "', type='" << prod.type
+                      << "', name='" << prod.name << "'" << std::endl;
+            configs.producers.push_back(prod);
         }
+    } else {
+        std::cout << "DEBUG: No producers array found in JSON or not an array" << std::endl;
     }
 
     if (j.contains("sessions") && j["sessions"].is_array()) {
@@ -886,6 +896,7 @@ bool ConfigManager::load_from_file() {
         configs_ = Configurations::from_json(j);
         std::cout << "Loaded " << configs_.cameras.size() << " cameras, "
                   << configs_.arms.size() << " arms, "
+                  << configs_.producers.size() << " producers, "
                   << configs_.systems.size() << " systems, and "
                   << configs_.sessions.size() << " sessions from "
                   << data_file_ << std::endl;

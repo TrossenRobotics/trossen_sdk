@@ -60,11 +60,12 @@ struct HardwareSystem {
 // Producer configuration
 struct ProducerConfig {
     std::string id;    // Unique identifier (also used as stream_id)
+    std::string name;  // Display name for frontend
     std::string type;  // Producer type
-    std::string leader_name;  // For teleop producers
-    std::string follower_name;  // For teleop producers
-    std::string camera_name;  // For camera producers (references CameraConfig.id)
-    std::string arm_name;  // For arm producers (references ArmConfig.id)
+    std::string leader_id;  // For teleop producers (references ArmConfig.id)
+    std::string follower_id;  // For teleop producers (references ArmConfig.id)
+    std::string camera_id;  // For camera producers (references CameraConfig.id)
+    std::string arm_id;  // For arm producers (references ArmConfig.id)
     bool use_device_time;
     bool enforce_requested_fps;
     double warmup_seconds;

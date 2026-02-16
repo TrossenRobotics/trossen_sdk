@@ -1,5 +1,118 @@
 {
-  "activities": [],
+  "activities": [
+    {
+      "description": "Session created with 2 episodes @ 10s each",
+      "event_type": "created",
+      "session_id": "1767738308213",
+      "session_name": "Demo 1",
+      "timestamp": "1767738308216"
+    },
+    {
+      "description": "Session created with 2 episodes @ 10s each",
+      "event_type": "created",
+      "session_id": "1767738348637",
+      "session_name": "Demo 2",
+      "timestamp": "1767738348639"
+    },
+    {
+      "description": "Session created with 2 episodes @ 10s each",
+      "event_type": "created",
+      "session_id": "1767738366589",
+      "session_name": "Demo 3",
+      "timestamp": "1767738366591"
+    },
+    {
+      "description": "Recording started - teleop_widowx",
+      "event_type": "started",
+      "session_id": "1767738308213",
+      "session_name": "Demo 1",
+      "timestamp": "1767741705744"
+    },
+    {
+      "description": "Recording started - teleop_widowx",
+      "event_type": "started",
+      "session_id": "1767738308213",
+      "session_name": "Demo 1",
+      "timestamp": "1767742144424"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767738308213",
+      "session_name": "Demo 1",
+      "timestamp": "1767742167846"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767738308213",
+      "session_name": "Demo 1",
+      "timestamp": "1767742176252"
+    },
+    {
+      "description": "Recording started - teleop_widowx",
+      "event_type": "started",
+      "session_id": "1767738308213",
+      "session_name": "Demo 1",
+      "timestamp": "1767742671445"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767738308213",
+      "session_name": "Demo 1",
+      "timestamp": "1767742696570"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767738308213",
+      "session_name": "Demo 1",
+      "timestamp": "1767742707815"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767738348637",
+      "session_name": "Demo 2",
+      "timestamp": "1767742729102"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767738348637",
+      "session_name": "Demo 2",
+      "timestamp": "1767742755219"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767738348637",
+      "session_name": "Demo 2",
+      "timestamp": "1767742767400"
+    },
+    {
+      "description": "Recording started - teleop_widowx_bimanual",
+      "event_type": "started",
+      "session_id": "1767738348637",
+      "session_name": "Demo 2",
+      "timestamp": "1767743122256"
+    },
+    {
+      "description": "All 2 episodes completed",
+      "event_type": "completed",
+      "session_id": "1767738348637",
+      "session_name": "Demo 2",
+      "timestamp": "1767743144276"
+    },
+    {
+      "description": "Session data processed and finalized",
+      "event_type": "processed",
+      "session_id": "1767738348637",
+      "session_name": "Demo 2",
+      "timestamp": "1767743150553"
+    }
+  ],
   "arms": [
     {
       "end_effector": "follower",
@@ -96,81 +209,122 @@
   ],
   "producers": [
     {
-      "camera_name": "bottom cam",
-      "device_index": 24,
-      "encoding": "bgr8",
+      "camera_id": "cc4a4734cfda2daa",
       "enforce_requested_fps": true,
-      "fps": 30,
-      "height": 480,
       "id": "cc4a4734cfda2daa",
       "name": "bottom cam",
       "type": "opencv_camera",
       "use_device_time": false,
-      "width": 640
+      "warmup_seconds": 0.0
     },
     {
-      "camera_name": "top cam",
-      "device_index": 12,
-      "encoding": "bgr8",
+      "camera_id": "7656a72361e3d6db",
       "enforce_requested_fps": true,
-      "fps": 30,
-      "height": 480,
       "id": "7656a72361e3d6db",
       "name": "top cam",
       "type": "opencv_camera",
       "use_device_time": false,
-      "width": 640
+      "warmup_seconds": 0.0
     },
     {
-      "camera_name": "left arm cam",
-      "device_index": 18,
-      "encoding": "bgr8",
+      "camera_id": "66055ee4fb432afb",
       "enforce_requested_fps": true,
-      "fps": 30,
-      "height": 480,
       "id": "66055ee4fb432afb",
       "name": "left arm cam",
       "type": "opencv_camera",
       "use_device_time": false,
-      "width": 640
+      "warmup_seconds": 0.0
     },
     {
-      "follower_name": "widowx Follower Right",
-      "id": "eab888cdc0e4576d",
-      "leader_name": "widowx Leader Right",
+      "follower_id": "654ff638792a83e6",
+      "id": "eab888cdc0e4576d_654ff638792a83e6_teleop",
+      "leader_id": "eab888cdc0e4576d",
       "name": "widowx Leader Right_widowx Follower Right_teleop",
       "type": "teleop_widowx_arm",
       "use_device_time": true
     },
     {
-      "follower_name": "widowx Follower Left",
-      "id": "b4a9217fa0ea9a64",
-      "leader_name": "widowx Leader Left",
+      "follower_id": "7c35b061a0b6310f",
+      "id": "b4a9217fa0ea9a64_7c35b061a0b6310f_teleop",
+      "leader_id": "b4a9217fa0ea9a64",
       "name": "widowx Leader Left_widowx Follower Left_teleop",
       "type": "teleop_widowx_arm",
       "use_device_time": true
     },
     {
-      "camera_name": "right arm cam",
-      "device_index": 6,
-      "encoding": "bgr8",
+      "camera_id": "0a2795068e060269",
       "enforce_requested_fps": true,
-      "fps": 30,
-      "height": 480,
       "id": "0a2795068e060269",
       "name": "right arm cam",
       "type": "opencv_camera",
       "use_device_time": false,
-      "width": 640
+      "warmup_seconds": 0.0
+    },
+    {
+      "follower_id": "2d6619c09ef2b6d8",
+      "id": "cd7b9f682cea7c67_2d6619c09ef2b6d8_teleop",
+      "leader_id": "cd7b9f682cea7c67",
+      "name": "so101 Leader_so101 Follower_teleop",
+      "type": "teleop_so101_arm",
+      "use_device_time": true
     }
   ],
-  "sessions": [],
+  "sessions": [
+    {
+      "action": "teleop_widowx",
+      "backend_type": "mcap",
+      "cameras": [],
+      "episode_duration": 10.0,
+      "id": "1767738308213",
+      "name": "Demo 1",
+      "num_episodes": 2,
+      "robots": [],
+      "system_id": "1767737254566"
+    },
+    {
+      "action": "teleop_widowx_bimanual",
+      "backend_type": "mcap",
+      "cameras": [],
+      "episode_duration": 10.0,
+      "id": "1767738348637",
+      "name": "Demo 2",
+      "num_episodes": 2,
+      "robots": [],
+      "system_id": "1767738229980"
+    },
+    {
+      "action": "teleop_so101",
+      "backend_type": "mcap",
+      "cameras": [],
+      "episode_duration": 10.0,
+      "id": "1767738366589",
+      "name": "Demo 3",
+      "num_episodes": 2,
+      "robots": [],
+      "system_id": "1767738270628"
+    }
+  ],
   "systems": [
     {
       "id": "1767737254566",
       "name": "Demo 1 widowx teleop",
       "producers": [
-        "eab888cdc0e4576d"
+        "eab888cdc0e4576d_654ff638792a83e6_teleop"
+      ]
+    },
+    {
+      "id": "1767738229980",
+      "name": "Demo 2 bimanual teleop",
+      "producers": [
+        "b4a9217fa0ea9a64_7c35b061a0b6310f_teleop",
+        "eab888cdc0e4576d_654ff638792a83e6_teleop"
+      ]
+    },
+    {
+      "id": "1767738270628",
+      "name": "Demo 3 so101 teleop",
+      "producers": [
+        "cd7b9f682cea7c67_2d6619c09ef2b6d8_teleop"
       ]
     }
   ]
