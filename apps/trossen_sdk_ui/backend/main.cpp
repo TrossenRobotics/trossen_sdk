@@ -865,16 +865,6 @@ int main() {
                             active_session, session.system_id, setup_error);
                         break;
 
-                    case trossen::backend::SessionAction::RECORD_ARMS_ONLY:
-                        setup_success = trossen::backend::setup_arm_recording(
-                            active_session, session.system_id, setup_error);
-                        break;
-
-                    case trossen::backend::SessionAction::RECORD_FULL_SYSTEM:
-                        setup_success = trossen::backend::setup_full_system_recording(
-                            active_session, session.system_id, setup_error);
-                        break;
-
                     default:
                         setup_error = "Unknown session action";
                         break;
@@ -910,65 +900,69 @@ int main() {
             }
 
             // Start episode manager thread to handle multiple episodes
+            // with manual progression
             active_session->episode_manager_active = true;
+            active_session->waiting_for_next = false;  // Start first episode immediately
             active_session->episode_manager_thread = std::thread([active_session]() {
-                std::cout << "  ✓ Episode manager thread started" << std::endl;
+                std::cout << "  ✓ Episode manager thread started (manual progression mode)"
+                          << std::endl;
 
                 while (active_session->episode_manager_active) {
-                    if (active_session->manager->is_episode_active()) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-                        continue;
-                    }
+                    // Check if current episode is complete
+                    if (!active_session->manager->is_episode_active()) {
+                        auto stats = active_session->manager->stats();
 
-                    // Check if we should start another episode
-                    auto stats = active_session->manager->stats();
-                    if (stats.total_episodes_completed <
-                            active_session->max_episodes &&
-                        active_session->episode_manager_active) {
-                        std::cout << "  → Episode "
-                                  << stats.total_episodes_completed
-                                  << " complete. Pausing for 5 seconds before starting episode "
-                                  << (stats.total_episodes_completed + 1) << " of "
-                                  << active_session->max_episodes << std::endl;
+                        if (stats.total_episodes_completed < active_session->max_episodes) {
+                            // Episode finished - wait for user to click "Next" button
+                            std::cout << "  → Episode " << stats.total_episodes_completed
+                                      << " complete. Waiting for user to start episode "
+                                      << (stats.total_episodes_completed + 1) << " of "
+                                      << active_session->max_episodes << std::endl;
 
-                        // Stop the current episode to halt producers during reset period
-                        active_session->manager->stop_episode();
+                            active_session->waiting_for_next = true;
 
-                        // 5 second pause between episodes (producers are stopped)
-                        std::this_thread::sleep_for(std::chrono::seconds(5));
+                            // Wait for user to trigger next episode via /session/:id/next endpoint
+                            while (active_session->waiting_for_next &&
+                                   active_session->episode_manager_active) {
+                                std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                            }
 
-                        if (!active_session->manager->start_episode()) {
-                            std::cerr
-                                << "  ✗ Failed to start episode "
-                                << (stats.total_episodes_completed + 1)
-                                << std::endl;
-                            active_session->episode_manager_active = false;
+                            // User clicked "Next" - start next episode
+                            if (active_session->episode_manager_active) {
+                                if (!active_session->manager->start_episode()) {
+                                    std::cerr << "  ✗ Failed to start episode "
+                                              << (stats.total_episodes_completed + 1)
+                                              << std::endl;
+                                    active_session->episode_manager_active = false;
+                                    break;
+                                }
+                                std::cout << "  ✓ Starting episode "
+                                          << (stats.total_episodes_completed + 1)
+                                          << std::endl;
+                            }
+                        } else {
+                            // All episodes complete
+                            std::cout << "  ✓ All " << active_session->max_episodes
+                                      << " episodes complete!" << std::endl;
+
+                            config_manager.log_activity(
+                                active_session->session_id,
+                                active_session->session_name,
+                                "completed",
+                                "All " + std::to_string(active_session->max_episodes) +
+                                " episodes completed");
+
+                            if (active_session->teleop_active) {
+                                active_session->teleop_active = false;
+                                std::cout << "  → Stopping teleoperation thread..." << std::endl;
+                            }
+
+                            active_session->all_episodes_complete = true;
                             break;
                         }
-                    } else {
-                        // All episodes complete - stop teleop and mark as complete
-                        std::cout << "  ✓ All " << active_session->max_episodes
-                                  << " episodes complete!" << std::endl;
-
-                        // Log completion activity
-                        config_manager.log_activity(
-                            active_session->session_id,
-                            active_session->session_name,
-                            "completed",
-                            "All " +
-                            std::to_string(active_session->max_episodes) +
-                            " episodes completed");
-
-                        if (active_session->teleop_active) {
-                            active_session->teleop_active = false;
-                            std::cout
-                                << "  → Stopping teleoperation thread..."
-                                << std::endl;
-                        }
-
-                        active_session->all_episodes_complete = true;
-                        break;
                     }
+
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
 
                 std::cout << "  ✓ Episode manager thread stopped" << std::endl;
@@ -1101,7 +1095,7 @@ int main() {
                     {"records_written_current", stats.records_written_current},
                     {"total_episodes_completed", stats.total_episodes_completed},
                     {"all_episodes_complete", active_session->all_episodes_complete.load()},
-                    {"paused", active_session->paused.load()}
+                    {"waiting_for_next", active_session->waiting_for_next.load()}
                 }}
             };
 
@@ -1123,6 +1117,62 @@ int main() {
                      {"error", std::string("Error: ") + e.what()}}.dump(2),
                 "application/json");
             std::cerr << "GET /session/stats - Error: " << e.what() << std::endl;
+        }
+    });
+
+    // POST /session/:id/next - Start next episode (manual progression)
+    svr.Post(R"(/session/([^/]+)/next)", [](const Request& req, Response& res) {
+        try {
+            std::string session_id = req.matches[1];
+
+            auto it = active_sessions.find(session_id);
+            if (it == active_sessions.end()) {
+                res.status = 404;
+                res.set_content(
+                    json{{"success", false},
+                         {"error", "Session not active"}}.dump(2),
+                    "application/json");
+                return;
+            }
+
+            auto& active_session = it->second;
+
+            // Check if we're waiting for next episode
+            if (!active_session->waiting_for_next) {
+                res.status = 400;
+                res.set_content(
+                    json{{"success", false},
+                         {"error", "Session is not waiting for next episode"}}.dump(2),
+                    "application/json");
+                return;
+            }
+
+            // Check if all episodes are complete
+            if (active_session->all_episodes_complete) {
+                res.status = 400;
+                res.set_content(
+                    json{{"success", false},
+                         {"error", "All episodes are complete"}}.dump(2),
+                    "application/json");
+                return;
+            }
+
+            // Signal episode manager to start next episode
+            active_session->waiting_for_next = false;
+
+            res.set_content(
+                json{{"success", true},
+                     {"message", "Starting next episode"}}.dump(2),
+                "application/json");
+            std::cout << "POST /session/" << session_id
+                      << "/next - Starting next episode" << std::endl;
+        } catch (const std::exception& e) {
+            res.status = 500;
+            res.set_content(
+                json{{"success", false},
+                     {"error", std::string("Error: ") + e.what()}}.dump(2),
+                "application/json");
+            std::cerr << "POST /session/next - Error: " << e.what() << std::endl;
         }
     });
 

@@ -1,0 +1,86 @@
+{
+  "activities": [],
+  "arms": [
+    {
+      "end_effector": "follower",
+      "id": "",
+      "name": "so101 Follower",
+      "port": "/dev/ttyACM2",
+      "type": "so101"
+    },
+    {
+      "end_effector": "wxai_v0_leader",
+      "id": "",
+      "name": "WidowX Leader",
+      "serv_ip": "192.168.1.2",
+      "type": "widowx"
+    },
+    {
+      "end_effector": "wxai_v0_follower",
+      "id": "",
+      "name": "WidowX Follower",
+      "serv_ip": "192.168.1.4",
+      "type": "widowx"
+    },
+    {
+      "end_effector": "leader",
+      "id": "",
+      "name": "so101 Leader",
+      "port": "/dev/ttyACM0",
+      "type": "so101"
+    }
+  ],
+  "cameras": [
+    {
+      "device_index": 6,
+      "enable_depth": false,
+      "encoding": "bgr8",
+      "fps": 30,
+      "height": 480,
+      "id": "0a2795068e060269",
+      "name": "right arm cam",
+      "type": "opencv",
+      "use_device_time": false,
+      "width": 640
+    },
+    {
+      "device_index": 24,
+      "enable_depth": false,
+      "encoding": "bgr8",
+      "fps": 30,
+      "height": 480,
+      "id": "cc4a4734cfda2daa",
+      "name": "bottom cam",
+      "type": "opencv",
+      "use_device_time": false,
+      "width": 640
+    },
+    {
+      "device_index": 12,
+      "enable_depth": false,
+      "encoding": "bgr8",
+      "fps": 30,
+      "height": 480,
+      "id": "7656a72361e3d6db",
+      "name": "top cam",
+      "type": "opencv",
+      "use_device_time": false,
+      "width": 640
+    },
+    {
+      "device_index": 18,
+      "enable_depth": false,
+      "encoding": "bgr8",
+      "fps": 30,
+      "height": 480,
+      "id": "66055ee4fb432afb",
+      "name": "left arm cam",
+      "type": "opencv",
+      "use_device_time": false,
+      "width": 640
+    }
+  ],
+  "producers": [],
+  "sessions": [],
+  "systems": []
+}
