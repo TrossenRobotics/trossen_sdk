@@ -326,83 +326,42 @@ int main(int argc, char** argv) {
   auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
   mgr.add_producer(camera_producer, camera_period);
 
-  // TODO(shantanuparab-tr): Add this to configurations after main executable is created
-  // // Create a Realsense Camera Producer (Hardcoded configuration for demo purposes)
+  // ──────────────────────────────────────────────────────────
+  // RealSense camera producer
+  // ──────────────────────────────────────────────────────────
 
-  // trossen::hw::camera::RealsenseCameraProducer::Config realsense_cfg;
-  // realsense_cfg.serial_number = "218622274938";  // Replace with your camera's serial number
-  // realsense_cfg.stream_id = "realsense_camera0";
-  // realsense_cfg.encoding = "bgr8";
-  // realsense_cfg.width = 640;
-  // realsense_cfg.height = 480;
-  // realsense_cfg.fps = 30;
-  // realsense_cfg.use_device_time = true;
-  // realsense_cfg.warmup_seconds = 2.0;
+  // Create hardware component via registry
+  nlohmann::json rs_hw_cfg = {
+    {"serial_number", "218622274938"},  // Replace with your camera's serial number
+    {"width", 640},
+    {"height", 480},
+    {"fps", 30},
+    {"use_depth", true},
+    {"force_hardware_reset", false}
+  };
 
-  // // Create Realsense config
-  // rs2::config cam_cfg;
+  auto realsense_component = trossen::hw::HardwareRegistry::create(
+    "realsense_camera", "realsense_0", rs_hw_cfg);
 
-  // // Create a realsense pipeline
-  // rs2::pipeline realsense_pipeline;
-  // auto camera_ = std::make_shared<rs2::pipeline>(realsense_pipeline);
+  // Create color producer via registry
+  nlohmann::json rs_prod_cfg = {
+    {"stream_id", "realsense_camera0"},
+    {"encoding", "bgr8"},
+    {"use_device_time", true},
+    {"width", 640},
+    {"height", 480},
+    {"fps", 30}
+  };
 
-  // // Enable the device using the unique ID
-  // if (!realsense_cfg.serial_number.empty()) {
-  //   cam_cfg.enable_device(realsense_cfg.serial_number);
-  // } else {
-  //   std::cout << "Unique ID is empty. Cannot connect to RealSense camera: "
-  //     << realsense_cfg.stream_id << std::endl;
-  //   throw std::runtime_error("Unique ID is empty for camera: " + realsense_cfg.stream_id);
-  // }
+  auto realsense_producer = trossen::runtime::ProducerRegistry::create(
+    "realsense_camera", realsense_component, rs_prod_cfg);
 
-  // // Enable the color stream as default
-  // cam_cfg.enable_stream(RS2_STREAM_COLOR, realsense_cfg.width, realsense_cfg.height,
-  //                   RS2_FORMAT_RGB8, realsense_cfg.fps);
+  auto realsense_period = std::chrono::milliseconds(static_cast<int>(1000.0f / 30.0f));
+  mgr.add_producer(realsense_producer, realsense_period);
+  std::cout << "  ✓ Realsense camera producer (30 Hz, 640x480)\n";
 
-  // // Make this conditional to enable depth stream
-  // cam_cfg.enable_stream(RS2_STREAM_DEPTH, realsense_cfg.width, realsense_cfg.height,
-  //                   RS2_FORMAT_Z16, realsense_cfg.fps);
-  // try {
-  //   // Start the camera pipeline
-  //   rs2::pipeline_profile profile = camera_->start(cam_cfg);
-  // } catch (const rs2::error& e) {
-  //   std::cout << "Failed to enable device with Unique ID: " << realsense_cfg.serial_number
-  //             << ". Error: " << e.what() << ". Listing all available cameras." << std::endl;
-  //   std::cout << "Available cameras listed above. Please check outputs folder to get "
-  //       "Available cameras listed above. Please check outputs folder to get "
-  //       "images associated "
-  //       "with each camera." << std::endl;
-  //   throw std::runtime_error(
-  //       "Unique ID (serial number) is required to connect to RealSense camera");
-  // }
-
-  // auto frame_cache = std::make_shared<trossen::hw::camera::RealsenseFrameCache>(camera_, 2);
-
-  // auto realsense_producer =
-  //   std::make_shared<trossen::hw::camera::RealsenseCameraProducer>(frame_cache, realsense_cfg);
-
-  // auto realsense_period = std::chrono::milliseconds(static_cast<int>(1000.0f / 30.0f));
-
-  // mgr.add_producer(realsense_producer, realsense_period);
-  // std::cout << "  ✓ Realsense camera producer (30 Hz, 640x480)\n";
-
-  // trossen::hw::camera::RealsenseDepthCameraProducer::Config realsense_depth_cfg;
-  // // Replace with your camera's serial number
-  // realsense_depth_cfg.serial_number = "218622274938";
-  // realsense_depth_cfg.stream_id = "realsense_depth_camera0";
-  // realsense_depth_cfg.encoding = "16UC1";
-  // realsense_depth_cfg.width = 640;
-  // realsense_depth_cfg.height = 480;
-  // realsense_depth_cfg.fps = 30;
-  // realsense_depth_cfg.use_device_time = true;
-  // realsense_depth_cfg.warmup_seconds = 2.0;
-
-  // auto realsense_depth_producer =
-  //   std::make_shared<trossen::hw::camera::RealsenseDepthCameraProducer>(
-  //     frame_cache,
-  //     realsense_depth_cfg);
-  // mgr.add_producer(realsense_depth_producer, realsense_period);
-  // std::cout << "  ✓ Realsense depth camera producer (30 Hz, 640x480)\n";
+  // TODO: Add RealsenseDepthCameraProducer to registry pattern
+  // For now, depth producer still uses old pattern - needs separate refactoring
 
   std::cout << "\nProducers registered. Ready to record.\n";
 

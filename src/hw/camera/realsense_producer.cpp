@@ -1,6 +1,8 @@
-// This is a testfile to create a script to test the realsense camera producer.
-// This is to verify that the realsense sdk can be integrated properly from the CmakeLists.txt
-// and that the realsense camera producer can be compiled without errors.
+/**
+ * @file realsense_producer.cpp
+ * @brief Implementation of RealsenseCameraProducer that emits camera frames from a physical camera
+ * device using RealSense SDK.
+ */
 
 #include <iostream>
 #include <memory>
@@ -8,17 +10,43 @@
 #include <utility>
 #include <vector>
 
+#include "trossen_sdk/hw/camera/realsense_camera_component.hpp"
 #include "trossen_sdk/hw/camera/realsense_producer.hpp"
+#include "trossen_sdk/runtime/producer_registry.hpp"
 
 namespace trossen::hw::camera {
 
 RealsenseCameraProducer::RealsenseCameraProducer(
-  std::shared_ptr<trossen::hw::camera::RealsenseFrameCache> frame_cache, Config cfg)
-  : frame_cache_(std::move(frame_cache)),
-    cfg_(std::move(cfg)) {
+  std::shared_ptr<HardwareComponent> hardware,
+  const nlohmann::json& config)
+{
+  // Validate hardware type
+  auto camera_component = std::dynamic_pointer_cast<RealsenseCameraComponent>(hardware);
+  if (!camera_component) {
+    throw std::runtime_error(
+      "RealsenseCameraProducer requires RealsenseCameraComponent, got: " + hardware->get_type());
+  }
+
+  // Extract the underlying RealsenseFrameCache from the component
+  frame_cache_ = camera_component->get_hardware();
+  if (!frame_cache_) {
+    throw std::runtime_error("RealsenseCameraComponent has null RealsenseFrameCache");
+  }
+
+  // Parse JSON config into internal Config struct
+  cfg_.serial_number = camera_component->get_serial_number();
+  cfg_.stream_id = config.value("stream_id", "realsense_camera_" + cfg_.serial_number);
+  cfg_.encoding = config.value("encoding", "bgr8");
+  cfg_.width = config.value("width", 0);
+  cfg_.height = config.value("height", 0);
+  cfg_.fps = config.value("fps", 0);
+  cfg_.use_device_time = config.value("use_device_time", true);
+  cfg_.warmup_seconds = config.value("warmup_seconds", 0.0);
+  cfg_.enforce_requested_fps = config.value("enforce_requested_fps", true);
+
   // Populate metadata
   metadata_.type = "realsense_camera";
-  metadata_.id = "realsense_camera_" + cfg_.serial_number;
+  metadata_.id = cfg_.stream_id;
   metadata_.name = cfg_.stream_id;
   metadata_.description = "Produces camera frames from a physical camera device using Realsense";
   metadata_.width = cfg_.width;
@@ -30,15 +58,14 @@ RealsenseCameraProducer::RealsenseCameraProducer(
   metadata_.has_audio = false;
 }
 
-RealsenseCameraProducer::~RealsenseCameraProducer() {
-  if (opened_) {
-    std::cout << "Stopping RealSense camera: " << metadata_.name << std::endl;
-  }
-}
-
 void RealsenseCameraProducer::poll(
   const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
 {
+  // TODO(lukeschmitt-tr): silently fails if cannot open
+  if (!frame_cache_) {
+    return;
+  }
+
   auto img = std::make_shared<data::ImageRecord>();
 
   rs2::frameset frames;
@@ -125,5 +152,8 @@ void RealsenseCameraProducer::poll(
     next_health_report_frame_ += interval;
   }
 }
+
+// Register with ProducerRegistry
+REGISTER_PRODUCER(RealsenseCameraProducer, "realsense_camera")
 
 }  // namespace trossen::hw::camera
