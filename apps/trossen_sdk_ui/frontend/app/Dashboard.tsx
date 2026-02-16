@@ -109,31 +109,7 @@ export function Dashboard() {
 
       {/* Stats Grid */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-600">Cameras</p>
-              <p className="text-gray-900 mt-1">{configurations.cameras.length} Configured</p>
-            </div>
-            <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center">
-              <Camera className="w-6 h-6 text-blue-600" />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-600">Robots</p>
-              <p className="text-gray-900 mt-1">{configurations.arms.length} Configured</p>
-            </div>
-            <div className="w-12 h-12 bg-green-50 rounded-lg flex items-center justify-center">
-              <Cpu className="w-6 h-6 text-green-600" />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <a href="/configuration?tab=systems" className="bg-white rounded-lg border border-gray-200 p-6 hover:border-purple-300 hover:shadow-md transition-all cursor-pointer">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600">Hardware Systems</p>
@@ -143,9 +119,9 @@ export function Dashboard() {
               <HardDrive className="w-6 h-6 text-purple-600" />
             </div>
           </div>
-        </div>
+        </a>
 
-        <div className="bg-white rounded-lg border border-gray-200 p-6">
+        <a href="/configuration?tab=producers" className="bg-white rounded-lg border border-gray-200 p-6 hover:border-orange-300 hover:shadow-md transition-all cursor-pointer">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-gray-600">Producers</p>
@@ -155,7 +131,31 @@ export function Dashboard() {
               <Box className="w-6 h-6 text-orange-600" />
             </div>
           </div>
-        </div>
+        </a>
+
+        <a href="/configuration?tab=arms" className="bg-white rounded-lg border border-gray-200 p-6 hover:border-green-300 hover:shadow-md transition-all cursor-pointer">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-gray-600">Robots</p>
+              <p className="text-gray-900 mt-1">{configurations.arms.length} Configured</p>
+            </div>
+            <div className="w-12 h-12 bg-green-50 rounded-lg flex items-center justify-center">
+              <Cpu className="w-6 h-6 text-green-600" />
+            </div>
+          </div>
+        </a>
+
+        <a href="/configuration?tab=cameras" className="bg-white rounded-lg border border-gray-200 p-6 hover:border-blue-300 hover:shadow-md transition-all cursor-pointer">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-gray-600">Cameras</p>
+              <p className="text-gray-900 mt-1">{configurations.cameras.length} Configured</p>
+            </div>
+            <div className="w-12 h-12 bg-blue-50 rounded-lg flex items-center justify-center">
+              <Camera className="w-6 h-6 text-blue-600" />
+            </div>
+          </div>
+        </a>
       </div>
 
       {/* Recent Activity */}

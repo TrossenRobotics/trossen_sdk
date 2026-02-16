@@ -52,6 +52,7 @@ export function Configuration() {
     type: 'opencv',
     name: '',
     device_index: 0,
+    serial_number: '',
     width: 640,
     height: 480,
     fps: 30,
@@ -77,6 +78,14 @@ export function Configuration() {
   });
 
   useEffect(() => {
+    // Read tab from URL query parameter
+    const urlParams = new URLSearchParams(window.location.search);
+    const tabParam = urlParams.get('tab');
+    if (tabParam && ['cameras', 'robots', 'producers', 'systems', 'arms'].includes(tabParam)) {
+      // Map 'arms' to 'robots' for consistency
+      setActiveTab(tabParam === 'arms' ? 'robots' : tabParam as TabType);
+    }
+
     fetchConfigurations();
     fetchHardwareStatus();
   }, []);
@@ -123,7 +132,7 @@ export function Configuration() {
 
       if (response.ok) {
         await fetchConfigurations();
-        setCameraForm({ type: 'opencv', name: '', device_index: 0, width: 640, height: 480, fps: 30 });
+        setCameraForm({ type: 'opencv', name: '', device_index: 0, serial_number: '', width: 640, height: 480, fps: 30 });
         setShowCameraModal(false);
         setEditingCameraIndex(null);
       } else {
@@ -141,7 +150,8 @@ export function Configuration() {
     setCameraForm({
       type: camera.type,
       name: camera.name,
-      device_index: camera.device_index,
+      device_index: camera.device_index || 0,
+      serial_number: camera.serial_number || '',
       width: camera.width,
       height: camera.height,
       fps: camera.fps,
@@ -253,6 +263,13 @@ export function Configuration() {
 
   const handleConnectCamera = async (index: number) => {
     const camera = cameras[index];
+
+    // Check if it's a RealSense camera
+    if (camera.type === 'realsense') {
+      alert('RealSense camera support has not been implemented yet.');
+      return;
+    }
+
     try {
       const response = await fetch(`${BACKEND_URL}/hardware/camera/${index}/connect`, {
         method: 'POST',
@@ -341,6 +358,16 @@ export function Configuration() {
 
   const handleCreateSystem = async () => {
     try {
+      // Check for duplicate system name
+      const duplicateSystem = systems.find(
+        system => system.name === systemForm.name && system.id !== editingSystemId
+      );
+
+      if (duplicateSystem) {
+        alert(`A hardware system with the name "${systemForm.name}" already exists. Please choose a different name.`);
+        return;
+      }
+
       const newSystem: HardwareSystem = {
         id: editingSystemId || Date.now().toString(),
         name: systemForm.name,
@@ -414,6 +441,76 @@ export function Configuration() {
     }));
   };
 
+  const handleClearAllCameras = async () => {
+    if (!confirm(`Are you sure you want to delete all ${cameras.length} cameras?`)) {
+      return;
+    }
+
+    try {
+      // Delete cameras in reverse order to maintain indices
+      for (let i = cameras.length - 1; i >= 0; i--) {
+        await fetch(`${BACKEND_URL}/configure/camera/${i}`, {
+          method: 'DELETE',
+        });
+      }
+      await fetchConfigurations();
+    } catch (err) {
+      alert(`Failed to clear cameras: ${err instanceof Error ? err.message : 'Network error'}`);
+    }
+  };
+
+  const handleClearAllRobots = async () => {
+    if (!confirm(`Are you sure you want to delete all ${robots.length} robots?`)) {
+      return;
+    }
+
+    try {
+      // Delete robots in reverse order to maintain indices
+      for (let i = robots.length - 1; i >= 0; i--) {
+        await fetch(`${BACKEND_URL}/configure/arm/${i}`, {
+          method: 'DELETE',
+        });
+      }
+      await fetchConfigurations();
+    } catch (err) {
+      alert(`Failed to clear robots: ${err instanceof Error ? err.message : 'Network error'}`);
+    }
+  };
+
+  const handleClearAllProducers = async () => {
+    if (!confirm(`Are you sure you want to delete all ${producers.length} producers?`)) {
+      return;
+    }
+
+    try {
+      for (const producer of producers) {
+        await fetch(`${BACKEND_URL}/configure/producer/${producer.id}`, {
+          method: 'DELETE',
+        });
+      }
+      await fetchConfigurations();
+    } catch (err) {
+      alert(`Failed to clear producers: ${err instanceof Error ? err.message : 'Network error'}`);
+    }
+  };
+
+  const handleClearAllSystems = async () => {
+    if (!confirm(`Are you sure you want to delete all ${systems.length} hardware systems?`)) {
+      return;
+    }
+
+    try {
+      for (const system of systems) {
+        await fetch(`${BACKEND_URL}/configure/system/${system.id}`, {
+          method: 'DELETE',
+        });
+      }
+      await fetchConfigurations();
+    } catch (err) {
+      alert(`Failed to clear systems: ${err instanceof Error ? err.message : 'Network error'}`);
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
@@ -425,6 +522,7 @@ export function Configuration() {
       <div className="border-b border-gray-200">
         <nav className="flex gap-8">
           <button
+            id="cameras-tab"
             onClick={() => setActiveTab('cameras')}
             className={`pb-4 border-b-2 transition-colors flex items-center gap-2 ${
               activeTab === 'cameras'
@@ -436,6 +534,7 @@ export function Configuration() {
             Cameras
           </button>
           <button
+            id="robots-tab"
             onClick={() => setActiveTab('robots')}
             className={`pb-4 border-b-2 transition-colors flex items-center gap-2 ${
               activeTab === 'robots'
@@ -447,6 +546,7 @@ export function Configuration() {
             Robots
           </button>
           <button
+            id="producers-tab"
             onClick={() => setActiveTab('producers')}
             className={`pb-4 border-b-2 transition-colors flex items-center gap-2 ${
               activeTab === 'producers'
@@ -458,6 +558,7 @@ export function Configuration() {
             Producers
           </button>
           <button
+            id="systems-tab"
             onClick={() => setActiveTab('systems')}
             className={`pb-4 border-b-2 transition-colors flex items-center gap-2 ${
               activeTab === 'systems'
@@ -477,17 +578,28 @@ export function Configuration() {
           <div>
             <div className="p-6 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-gray-900">Configured Cameras</h3>
-              <button
-                onClick={() => {
-                  setEditingCameraIndex(null);
-                  setCameraForm({ type: 'opencv', name: '', device_index: 0, width: 640, height: 480, fps: 30 });
-                  setShowCameraModal(true);
-                }}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Add Camera
-              </button>
+              <div className="flex gap-2">
+                {cameras.length > 0 && (
+                  <button
+                    onClick={handleClearAllCameras}
+                    className="px-3 py-1.5 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors border border-red-200"
+                  >
+                    Clear All
+                  </button>
+                )}
+                <button
+                  id="add-camera-button"
+                  onClick={() => {
+                    setEditingCameraIndex(null);
+                    setCameraForm({ type: 'opencv', name: '', device_index: 0, serial_number: '', width: 640, height: 480, fps: 30 });
+                    setShowCameraModal(true);
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Camera
+                </button>
+              </div>
             </div>
             <div className="divide-y divide-gray-200">
               {cameras.map((camera, index) => {
@@ -545,22 +657,33 @@ export function Configuration() {
         )}
 
         {activeTab === 'robots' && (
-          <div>
+          <div id="robots-section">
             <div className="p-6 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-gray-900">Configured Robots</h3>
-              <button
-                onClick={() => {
-                  setEditingRobotIndex(null);
-                  setRobotType('SO101');
-                  setSO101Form({ type: 'so101', name: '', end_effector: '', port: '/dev/ttyUSB0' });
-                  setWidowxForm({ type: 'widowx', name: '', end_effector: 'wxai_v0_leader', serv_ip: '' });
-                  setShowRobotModal(true);
-                }}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Add Robot
-              </button>
+              <div className="flex gap-2">
+                {robots.length > 0 && (
+                  <button
+                    onClick={handleClearAllRobots}
+                    className="px-3 py-1.5 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors border border-red-200"
+                  >
+                    Clear All
+                  </button>
+                )}
+                <button
+                  id="add-robot-button"
+                  onClick={() => {
+                    setEditingRobotIndex(null);
+                    setRobotType('SO101');
+                    setSO101Form({ type: 'so101', name: '', end_effector: '', port: '/dev/ttyUSB0' });
+                    setWidowxForm({ type: 'widowx', name: '', end_effector: 'wxai_v0_leader', serv_ip: '' });
+                    setShowRobotModal(true);
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Add Robot
+                </button>
+              </div>
             </div>
             <div className="divide-y divide-gray-200">
               {robots.map((robot, index) => {
@@ -636,13 +759,24 @@ export function Configuration() {
           <div>
             <div className="p-6 border-b border-gray-200 flex justify-between items-center">
               <h3 className="text-gray-900">Hardware Systems</h3>
-              <button
-                onClick={() => setShowSystemModal(true)}
-                className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" />
-                Create System
-              </button>
+              <div className="flex gap-2">
+                {systems.length > 0 && (
+                  <button
+                    onClick={handleClearAllSystems}
+                    className="px-3 py-1.5 text-sm text-red-600 hover:text-red-700 hover:bg-red-50 rounded-md transition-colors border border-red-200"
+                  >
+                    Clear All
+                  </button>
+                )}
+                <button
+                  id="add-system-button"
+                  onClick={() => setShowSystemModal(true)}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                >
+                  <Plus className="w-4 h-4" />
+                  Create System
+                </button>
+              </div>
             </div>
             <div className="divide-y divide-gray-200">
               {systems.length === 0 ? (
@@ -700,7 +834,7 @@ export function Configuration() {
                 onClick={() => {
                   setShowCameraModal(false);
                   setEditingCameraIndex(null);
-                  setCameraForm({ type: 'opencv', name: '', device_index: 0, width: 640, height: 480, fps: 30 });
+                  setCameraForm({ type: 'opencv', name: '', device_index: 0, serial_number: '', width: 640, height: 480, fps: 30 });
                 }}
                 className="p-2 text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
               >
@@ -708,6 +842,18 @@ export function Configuration() {
               </button>
             </div>
             <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-gray-700 mb-2">Camera Type</label>
+                <select
+                  value={cameraForm.type}
+                  onChange={(e) => setCameraForm({ ...cameraForm, type: e.target.value })}
+                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                >
+                  <option value="opencv">OpenCV</option>
+                  <option value="realsense">RealSense</option>
+                </select>
+              </div>
+
               <div>
                 <label className="block text-gray-700 mb-2">Camera Name</label>
                 <input
@@ -719,15 +865,28 @@ export function Configuration() {
                 />
               </div>
 
-              <div>
-                <label className="block text-gray-700 mb-2">Device Index</label>
-                <input
-                  type="number"
-                  value={cameraForm.device_index}
-                  onChange={(e) => setCameraForm({ ...cameraForm, device_index: parseInt(e.target.value) || 0 })}
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
+              {cameraForm.type === 'opencv' ? (
+                <div>
+                  <label className="block text-gray-700 mb-2">Device Index</label>
+                  <input
+                    type="number"
+                    value={cameraForm.device_index}
+                    onChange={(e) => setCameraForm({ ...cameraForm, device_index: parseInt(e.target.value) || 0 })}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              ) : (
+                <div>
+                  <label className="block text-gray-700 mb-2">Serial Number</label>
+                  <input
+                    type="text"
+                    value={cameraForm.serial_number}
+                    onChange={(e) => setCameraForm({ ...cameraForm, serial_number: e.target.value })}
+                    placeholder="e.g., 123456789"
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  />
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -765,7 +924,7 @@ export function Configuration() {
                 onClick={() => {
                   setShowCameraModal(false);
                   setEditingCameraIndex(null);
-                  setCameraForm({ type: 'opencv', name: '', device_index: 0, width: 640, height: 480, fps: 30 });
+                  setCameraForm({ type: 'opencv', name: '', device_index: 0, serial_number: '', width: 640, height: 480, fps: 30 });
                 }}
                 className="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 transition-colors"
               >
@@ -786,7 +945,7 @@ export function Configuration() {
       {/* Add Robot Modal */}
       {showRobotModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-lg w-full">
+          <div id="robot-modal-form" className="bg-white rounded-lg max-w-lg w-full">
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <h3 className="text-gray-900">{editingRobotIndex !== null ? 'Edit' : 'Add New'} Robot</h3>
               <button
@@ -920,7 +1079,7 @@ export function Configuration() {
       {/* Create System Modal */}
       {showSystemModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div id="system-modal-form" className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200 flex items-center justify-between">
               <h3 className="text-gray-900">{editingSystemId ? 'Edit' : 'Create'} Hardware System</h3>
               <button

@@ -148,3 +148,13 @@ Routes are defined by files in `app/routes/`:
 | `dashboard.tsx` | `/dashboard` | Dashboard |
 | `configuration.tsx` | `/configuration` | Configuration |
 | `record.tsx` | `/record` | Recording page |
+
+---
+
+## Reference Links
+
+- [React 19 Documentation](https://react.dev/) - Official React documentation and API reference
+- [React Router v7 Guide](https://reactrouter.com/en/main) - File-based routing and data loading patterns
+- [Vite Guide](https://vite.dev/guide/) - Build tool configuration and optimization
+- [Tailwind CSS Documentation](https://tailwindcss.com/docs) - Utility-first CSS framework reference
+- [shadcn/ui Components](https://ui.shadcn.com/) - Accessible component library with examples

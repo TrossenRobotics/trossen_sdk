@@ -400,13 +400,14 @@ export function RecordPage() {
   };
 
   return (
-    <div className="space-y-6">
+    <div id="record-page" className="space-y-6">
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-gray-900">Recording Sessions</h2>
           <p className="text-gray-600 mt-1">Create and manage your data recording sessions</p>
         </div>
         <button
+          id="new-session-button"
           onClick={() => {
             resetForm();
             setShowSessionModal(true);
@@ -425,8 +426,8 @@ export function RecordPage() {
         </div>
       ) : (
         <div className="space-y-4">
-          {sessions.map((session) => (
-            <div key={session.id} className="bg-white rounded-lg border border-gray-200 p-6">
+          {sessions.map((session, index) => (
+            <div key={session.id} className={`bg-white rounded-lg border border-gray-200 p-6 ${index === 0 ? 'tutorial-session-card' : ''}`}>
               <div className="flex items-start justify-between">
                 <div className="flex-1">
                   <div className="flex items-center gap-3 mb-2">
@@ -486,7 +487,7 @@ export function RecordPage() {
                   ) : null}
                   <button
                     onClick={() => setMonitorSessionId(session.id)}
-                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2"
+                    className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 tutorial-monitor-button"
                   >
                     <Eye className="w-4 h-4" />
                     Monitor
@@ -534,7 +535,7 @@ export function RecordPage() {
       {/* Create/Edit Session Modal */}
       {showSessionModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-          <div className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+          <div id="session-modal-form" className="bg-white rounded-lg max-w-2xl w-full max-h-[90vh] overflow-y-auto">
             <div className="p-6 border-b border-gray-200">
               <h3 className="text-gray-900">
                 {editingSessionId ? 'Edit Recording Session' : 'Create New Recording Session'}

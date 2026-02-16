@@ -298,3 +298,13 @@ Add methods to `ConfigManager` class following existing patterns for cameras/arm
 ### 2. Add API Endpoints
 
 Follow pattern from camera/arm endpoints in `main.cpp`.
+
+---
+
+## Reference Links
+
+- [cpp-httplib Documentation](https://github.com/yhirose/cpp-httplib) - HTTP server library API reference and examples
+- [nlohmann/json Documentation](https://json.nlohmann.me/) - Modern C++ JSON library usage guide
+- [CMake Tutorial](https://cmake.org/cmake/help/latest/guide/tutorial/index.html) - Build system configuration and best practices
+- [REST API Best Practices](https://restfulapi.net/) - RESTful API design principles and conventions
+- [C++ Concurrency Guide](https://en.cppreference.com/w/cpp/thread) - Threading primitives and synchronization reference
