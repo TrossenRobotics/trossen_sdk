@@ -1,0 +1,203 @@
+{
+  "trossen_solo_ai": {
+    "type": "trossen_solo_ai",
+    "robot_name": "trossen_solo_ai_v1",
+    "arms": [
+      {
+        "model": "wxai_v0",
+        "ip_address": "192.168.1.2",
+        "end_effector": "wxai_v0_leader",
+        "clear_error": true,
+        "joint_rate_hz": 200.0,
+        "id": "leader_arm"
+      },
+      {
+        "model": "wxai_v0",
+        "ip_address": "192.168.1.4",
+        "end_effector": "wxai_v0_follower",
+        "clear_error": true,
+        "joint_rate_hz": 200.0,
+        "id": "follower_arm"
+      }
+    ],
+    "cameras": [
+      {
+        "type": "realsense",
+        "unique_device_id": "",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "encoding": "rgb8",
+        "enable_depth": false,
+        "id": "cam_main"
+      },
+      {
+        "type": "realsense",
+        "unique_device_id": "",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "encoding": "rgb8",
+        "enable_depth": false,
+        "id": "cam_wrist"
+      }
+    ]
+  },
+  "trossen_stationary_ai": {
+    "type": "trossen_stationary_ai",
+    "robot_name": "trossen_stationary_ai_v1",
+    "arms": [
+      {
+        "model": "wxai_v0",
+        "ip_address": "192.168.1.2",
+        "end_effector": "wxai_v0_leader",
+        "clear_error": true,
+        "joint_rate_hz": 200.0,
+        "id": "left_leader"
+      },
+      {
+        "model": "wxai_v0",
+        "ip_address": "192.168.1.3",
+        "end_effector": "wxai_v0_leader",
+        "clear_error": true,
+        "joint_rate_hz": 200.0,
+        "id": "right_leader"
+      },
+      {
+        "model": "wxai_v0",
+        "ip_address": "192.168.1.4",
+        "end_effector": "wxai_v0_follower",
+        "clear_error": true,
+        "joint_rate_hz": 200.0,
+        "id": "left_follower"
+      },
+      {
+        "model": "wxai_v0",
+        "ip_address": "192.168.1.5",
+        "end_effector": "wxai_v0_follower",
+        "clear_error": true,
+        "joint_rate_hz": 200.0,
+        "id": "right_follower"
+      }
+    ],
+    "cameras": [
+      {
+        "type": "realsense",
+        "unique_device_id": "",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "encoding": "rgb8",
+        "enable_depth": false,
+        "id": "cam_high"
+      },
+      {
+        "type": "realsense",
+        "unique_device_id": "",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "encoding": "rgb8",
+        "enable_depth": false,
+        "id": "cam_low"
+      },
+      {
+        "type": "realsense",
+        "unique_device_id": "",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "encoding": "rgb8",
+        "enable_depth": false,
+        "id": "cam_left_wrist"
+      },
+      {
+        "type": "realsense",
+        "unique_device_id": "",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "encoding": "rgb8",
+        "enable_depth": false,
+        "id": "cam_right_wrist"
+      }
+    ]
+  },
+  "trossen_mobile_ai": {
+    "type": "trossen_mobile_ai",
+    "robot_name": "trossen_mobile_ai_v1",
+    "arms": [
+      {
+        "model": "wxai_v0",
+        "ip_address": "192.168.1.2",
+        "end_effector": "wxai_v0_leader",
+        "clear_error": true,
+        "joint_rate_hz": 200.0,
+        "id": "left_leader"
+      },
+      {
+        "model": "wxai_v0",
+        "ip_address": "192.168.1.3",
+        "end_effector": "wxai_v0_leader",
+        "clear_error": true,
+        "joint_rate_hz": 200.0,
+        "id": "right_leader"
+      },
+      {
+        "model": "wxai_v0",
+        "ip_address": "192.168.1.4",
+        "end_effector": "wxai_v0_follower",
+        "clear_error": true,
+        "joint_rate_hz": 200.0,
+        "id": "left_follower"
+      },
+      {
+        "model": "wxai_v0",
+        "ip_address": "192.168.1.5",
+        "end_effector": "wxai_v0_follower",
+        "clear_error": true,
+        "joint_rate_hz": 200.0,
+        "id": "right_follower"
+      }
+    ],
+    "cameras": [
+      {
+        "type": "realsense",
+        "unique_device_id": "",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "encoding": "rgb8",
+        "enable_depth": false,
+        "id": "cam_high"
+      },
+      {
+        "type": "realsense",
+        "unique_device_id": "",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "encoding": "rgb8",
+        "enable_depth": false,
+        "id": "cam_left_wrist"
+      },
+      {
+        "type": "realsense",
+        "unique_device_id": "",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "encoding": "rgb8",
+        "enable_depth": false,
+        "id": "cam_right_wrist"
+      }
+    ],
+    "mobile_base": {
+      "type": "tracer",
+      "max_linear_velocity": 1.0,
+      "max_angular_velocity": 2.0,
+      "update_rate": 50.0,
+      "id": "mobile_base"
+    }
+  }
+}

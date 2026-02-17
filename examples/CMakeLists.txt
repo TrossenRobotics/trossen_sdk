@@ -40,3 +40,15 @@ target_link_libraries(hardware_registry_demo trossen_sdk)
 # Producer registry demo
 add_executable(producer_registry_demo producer_registry_demo.cpp)
 target_link_libraries(producer_registry_demo trossen_sdk)
+
+# Trossen AI Solo demo
+add_executable(trossen_solo_ai_demo trossen_solo_ai_demo.cpp)
+target_link_libraries(trossen_solo_ai_demo trossen_sdk)
+
+# Trossen Stationary AI demo
+add_executable(trossen_stationary_ai_demo trossen_stationary_ai_demo.cpp)
+target_link_libraries(trossen_stationary_ai_demo trossen_sdk)
+
+# Trossen Mobile AI demo
+add_executable(trossen_mobile_ai_demo trossen_mobile_ai_demo.cpp)
+target_link_libraries(trossen_mobile_ai_demo trossen_sdk)
