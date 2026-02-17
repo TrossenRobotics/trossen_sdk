@@ -17,7 +17,7 @@ namespace trossen::configuration {
  * Supports various mobile base types for navigation and manipulation
  */
 struct MobileBaseConfig {
-  /// MobileBase type (e.g., "tracer", "scout", "custom")
+  /// MobileBase type (e.g., "slate", "tracer", "scout", "custom"). Defaults to "slate".
   std::string type{"slate"};
 
   /// Maximum linear velocity in m/s
@@ -41,12 +41,8 @@ struct MobileBaseConfig {
     MobileBaseConfig c;
 
     if (j.contains("type")) j.at("type").get_to(c.type);
-    if (j.contains("max_linear_velocity")) {
-      j.at("max_linear_velocity").get_to(c.max_linear_velocity);
-    }
-    if (j.contains("max_angular_velocity")) {
-      j.at("max_angular_velocity").get_to(c.max_angular_velocity);
-    }
+    if (j.contains("max_linear_velocity")) j.at("max_linear_velocity").get_to(c.max_linear_velocity);
+    if (j.contains("max_angular_velocity")) j.at("max_angular_velocity").get_to(c.max_angular_velocity);
     if (j.contains("update_rate")) j.at("update_rate").get_to(c.update_rate);
     if (j.contains("id")) j.at("id").get_to(c.id);
 

@@ -21,7 +21,7 @@ struct CameraConfig {
   std::string type{"opencv"};
 
   /// Unique device identifier: serial number for RealSense,
-  //  device index as string for OpenCV (e.g., "0", "1")
+  /// device index as string for OpenCV (e.g., "0", "1")
   std::string unique_device_id{"0"};
 
   /// Image width in pixels
@@ -63,7 +63,10 @@ struct CameraConfig {
       j.at("serial_number").get_to(c.unique_device_id);
     } else if (j.contains("device_index")) {
       // Backward compatibility: map device_index to unique_device_id
-      c.unique_device_id = std::to_string(j.at("device_index").get<int>());
+      int device_index = j.at("device_index").get<int>();
+      if (device_index >= 0) {
+        c.unique_device_id = std::to_string(device_index);
+      }
     }
 
     if (j.contains("width")) j.at("width").get_to(c.width);
