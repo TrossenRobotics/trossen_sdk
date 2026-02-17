@@ -8,7 +8,7 @@
         "ip_address": "192.168.1.2",
         "end_effector": "wxai_v0_leader",
         "clear_error": true,
-        "joint_rate_hz": 200.0,
+        "joint_rate_hz": 30.0,
         "id": "leader_arm"
       },
       {
@@ -16,14 +16,14 @@
         "ip_address": "192.168.1.4",
         "end_effector": "wxai_v0_follower",
         "clear_error": true,
-        "joint_rate_hz": 200.0,
+        "joint_rate_hz": 30.0,
         "id": "follower_arm"
       }
     ],
     "cameras": [
       {
-        "type": "realsense",
-        "unique_device_id": "",
+        "type": "realsense_camera",
+        "unique_device_id": "128422271347",
         "width": 640,
         "height": 480,
         "fps": 30,
@@ -32,8 +32,8 @@
         "id": "cam_main"
       },
       {
-        "type": "realsense",
-        "unique_device_id": "",
+        "type": "realsense_camera",
+        "unique_device_id": "218622270304",
         "width": 640,
         "height": 480,
         "fps": 30,
@@ -92,7 +92,7 @@
         "id": "cam_high"
       },
       {
-        "type": "realsense",
+        "type": "realsense_camera",
         "unique_device_id": "",
         "width": 640,
         "height": 480,
@@ -102,7 +102,7 @@
         "id": "cam_low"
       },
       {
-        "type": "realsense",
+        "type": "realsense_camera",
         "unique_device_id": "",
         "width": 640,
         "height": 480,
@@ -112,7 +112,7 @@
         "id": "cam_left_wrist"
       },
       {
-        "type": "realsense",
+        "type": "realsense_camera",
         "unique_device_id": "",
         "width": 640,
         "height": 480,
@@ -162,7 +162,7 @@
     ],
     "cameras": [
       {
-        "type": "realsense",
+        "type": "realsense_camera",
         "unique_device_id": "",
         "width": 640,
         "height": 480,
@@ -172,7 +172,7 @@
         "id": "cam_high"
       },
       {
-        "type": "realsense",
+        "type": "realsense_camera",
         "unique_device_id": "",
         "width": 640,
         "height": 480,
@@ -182,7 +182,7 @@
         "id": "cam_left_wrist"
       },
       {
-        "type": "realsense",
+        "type": "realsense_camera",
         "unique_device_id": "",
         "width": 640,
         "height": 480,

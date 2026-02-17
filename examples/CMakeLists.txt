@@ -48,7 +48,7 @@ target_link_libraries(producer_registry_demo trossen_sdk)
 
 # Trossen AI Solo demo
 add_executable(trossen_solo_ai_demo trossen_solo_ai_demo.cpp)
-target_link_libraries(trossen_solo_ai_demo trossen_sdk)
+target_link_libraries(trossen_solo_ai_demo demo_utils trossen_sdk libtrossen_arm)
 
 # Trossen Stationary AI demo
 add_executable(trossen_stationary_ai_demo trossen_stationary_ai_demo.cpp)
