@@ -13,9 +13,11 @@
 #include <vector>
 
 #include "libtrossen_arm/trossen_arm.hpp"
+#include "nlohmann/json.hpp"
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
+#include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
 namespace trossen::hw::arm {
@@ -79,9 +81,21 @@ public:
   };
 
   /**
-   * @brief Construct a TeleopTrossenArmProducer
+   * @brief Construct a TeleopTrossenArmProducer from TeleopArmComponent (registry pattern)
    *
-   * @param driver Shared pointer to an initialized TrossenArmDriver instance
+   * @param hardware TeleopArmComponent containing leader and follower arms
+   * @param config JSON configuration with fields: stream_id, use_device_time
+   * @throws std::invalid_argument if hardware is null or wrong type
+   */
+  TeleopTrossenArmProducer(
+    std::shared_ptr<hw::HardwareComponent> hardware,
+    const nlohmann::json& config);
+
+  /**
+   * @brief Construct a TeleopTrossenArmProducer directly from drivers
+   *
+   * @param leader_driver Shared pointer to an initialized leader TrossenArmDriver instance
+   * @param follower_driver Shared pointer to an initialized follower TrossenArmDriver instance
    * @param cfg Configuration parameters
    */
   TeleopTrossenArmProducer(

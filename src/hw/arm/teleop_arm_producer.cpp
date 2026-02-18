@@ -7,12 +7,77 @@
 #include <algorithm>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 #include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
+#include "trossen_sdk/hw/arm/teleop_arm_component.hpp"
+#include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
+#include "trossen_sdk/hw/active_hardware_registry.hpp"
+#include "trossen_sdk/runtime/producer_registry.hpp"
 
 namespace trossen::hw::arm {
 
+// Registry-compatible constructor
+TeleopTrossenArmProducer::TeleopTrossenArmProducer(
+  std::shared_ptr<hw::HardwareComponent> hardware,
+  const nlohmann::json& config)
+{
+  // Validate hardware component
+  if (!hardware) {
+    throw std::invalid_argument(
+      "TeleopTrossenArmProducer: hardware component cannot be null");
+  }
+  auto teleop_component = std::dynamic_pointer_cast<TeleopArmComponent>(hardware);
+  if (!teleop_component) {
+    throw std::invalid_argument(
+      "TeleopTrossenArmProducer: hardware must be TeleopArmComponent, got: " +
+      hardware->get_type());
+  }
+
+  // Extract leader and follower drivers from TeleopArmComponent
+  auto drivers = teleop_component->get_hardware();
+  leader_driver_ = drivers.leader;
+  follower_driver_ = drivers.follower;
+
+  if (!leader_driver_) {
+    throw std::invalid_argument(
+      "TeleopTrossenArmProducer: TeleopArmComponent has null leader driver");
+  }
+  if (!follower_driver_) {
+    throw std::invalid_argument(
+      "TeleopTrossenArmProducer: TeleopArmComponent has null follower driver");
+  }
+
+  // Parse JSON config
+  cfg_.stream_id = config.value("stream_id", "teleop_arm");
+  cfg_.use_device_time = config.value("use_device_time", false);
+
+  // Preallocate buffers based on number of joints
+  act_d_.resize(leader_driver_->get_num_joints());
+  obs_d_.resize(follower_driver_->get_num_joints());
+
+  // Initial read to populate robot_output state
+  leader_robot_output_ = leader_driver_->get_robot_output();
+  follower_robot_output_ = follower_driver_->get_robot_output();
+
+  // Populate metadata
+  metadata_.type = "teleop_arm";
+  metadata_.id = cfg_.stream_id;
+  metadata_.name = "Teleop Trossen Arm Producer";
+  metadata_.description =
+    "Produces teleoperation joint states from leader and follower "
+    "Trossen Arms via TrossenArmDriver";
+  metadata_.robot_name = "Trossen AI Bimanual";
+  metadata_.action_feature_names =
+    {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
+  metadata_.observation_feature_names =
+    {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
+  metadata_.action_dtype = "float32";
+  metadata_.observation_dtype = "float32";
+}
+
+// Direct driver constructor
 TeleopTrossenArmProducer::TeleopTrossenArmProducer(
   std::shared_ptr<trossen_arm::TrossenArmDriver> leader_driver,
   std::shared_ptr<trossen_arm::TrossenArmDriver> follower_driver,
@@ -89,5 +154,8 @@ void TeleopTrossenArmProducer::poll(
   emit(rec);
   ++stats_.produced;
 }
+
+// Register producer with registry
+REGISTER_PRODUCER(TeleopTrossenArmProducer, "teleop_arm")
 
 }  // namespace trossen::hw::arm
