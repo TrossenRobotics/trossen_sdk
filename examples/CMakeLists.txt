@@ -30,6 +30,11 @@ target_link_libraries(backend_registry_demo trossen_sdk)
 add_executable(hardware_registry_demo hardware_registry_demo.cpp)
 target_link_libraries(hardware_registry_demo trossen_sdk)
 
+# Teleop Arm Component demo
+find_package(libtrossen_arm)
+add_executable(teleop_arm_component_demo teleop_arm_component_demo.cpp)
+target_link_libraries(teleop_arm_component_demo trossen_sdk libtrossen_arm)
+
 # Trossen AI Solo demo Async
 # TODO (shantanuparab-tr): This example is broken due to the producer registry changes.
 # We need to update the example to use the new producer registry API.
