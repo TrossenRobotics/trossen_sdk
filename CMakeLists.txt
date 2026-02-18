@@ -24,6 +24,8 @@ add_library(trossen_sdk SHARED
   src/hw/arm/so101_arm_component.cpp
   src/hw/arm/arm_producer.cpp
   src/hw/arm/teleop_arm_producer.cpp
+  src/hw/arm/teleop_solo_arm_producer.cpp
+  src/hw/arm/teleop_stationary_arm_producer.cpp
   src/hw/arm/mock_joint_producer.cpp
   src/hw/arm/teleop_mock_joint_producer.cpp
   src/hw/arm/so101_arm_driver.cpp
