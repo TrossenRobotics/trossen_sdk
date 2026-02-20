@@ -22,6 +22,11 @@ find_package(libtrossen_arm)
 add_executable(widowxai_bimanual widowxai_bimanual.cpp)
 target_link_libraries(widowxai_bimanual demo_utils trossen_sdk libtrossen_arm)
 
+# Bimanual AI Kit with RealSense demo
+find_package(libtrossen_arm)
+add_executable(widowxai_bimanual_realsense widowxai_bimanual_realsense.cpp)
+target_link_libraries(widowxai_bimanual_realsense demo_utils trossen_sdk libtrossen_arm)
+
 # Backend registry demo
 add_executable(backend_registry_demo backend_registry_demo.cpp)
 target_link_libraries(backend_registry_demo trossen_sdk)
@@ -40,3 +45,12 @@ target_link_libraries(hardware_registry_demo trossen_sdk)
 # Producer registry demo
 add_executable(producer_registry_demo producer_registry_demo.cpp)
 target_link_libraries(producer_registry_demo trossen_sdk)
+
+# MCAP replay demo
+find_package(libtrossen_arm)
+add_executable(replay_mcap_jointstate replay_mcap_jointstate.cpp)
+target_include_directories(replay_mcap_jointstate PRIVATE
+  ${mcap_SOURCE_DIR}/cpp/mcap/include
+)
+target_compile_definitions(replay_mcap_jointstate PRIVATE MCAP_IMPLEMENTATION)
+target_link_libraries(replay_mcap_jointstate demo_utils trossen_sdk libtrossen_arm zstd lz4)

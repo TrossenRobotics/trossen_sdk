@@ -111,6 +111,15 @@ FetchContent_Declare(
 message(STATUS "Fetching Foxglove SDK v${FOXGLOVE_VERSION} for ${FOXGLOVE_ARCH}...")
 FetchContent_MakeAvailable(foxglove)
 
+# Fetch MCAP C++ library for reading MCAP files
+FetchContent_Declare(
+  mcap
+  GIT_REPOSITORY https://github.com/foxglove/mcap.git
+  GIT_TAG releases/cpp/v1.4.0
+  SOURCE_SUBDIR cpp
+)
+FetchContent_MakeAvailable(mcap)
+
 # Find all Foxglove SDK source files
 file(GLOB FOXGLOVE_SOURCES CONFIGURE_DEPENDS
   "${foxglove_SOURCE_DIR}/src/*.cpp"
