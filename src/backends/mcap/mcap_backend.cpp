@@ -136,8 +136,8 @@ void McapBackend::close() {
     return;
   }
   // Close channels
-  if (joint_channel_) {
-    joint_channel_->close();
+  for (auto& [stream_id, channel] : joint_channels_) {
+    channel.close();
   }
   for (auto& [name, channel] : image_channels_) {
     channel.close();
@@ -190,9 +190,10 @@ void McapBackend::write_batch(std::span<const data::RecordBase* const> records) 
   }
 }
 
-void McapBackend::ensure_jointstate_channel() {
-  // Check if the channel already exists
-  if (joint_channel_.has_value()) {
+void McapBackend::ensure_jointstate_channel(const std::string& stream_id) {
+  // Check if the channel already exists for this stream
+  auto it = joint_channels_.find(stream_id);
+  if (it != joint_channels_.end()) {
     return;
   }
 
@@ -203,21 +204,21 @@ void McapBackend::ensure_jointstate_channel() {
   schema.data = reinterpret_cast<const std::byte*>(schema_data_.data());
   schema.data_len = schema_data_.size();
 
-  // Create channel
+  // Create channel with stream-specific topic
   auto channel_result = foxglove::RawChannel::create(
-    mcapdefs::joint_state_topic(cfg_->robot_name),
+    mcapdefs::joint_state_topic(stream_id),
     "protobuf",
     schema,
     context_,
     std::nullopt);
 
   if (!channel_result.has_value()) {
-    std::cerr << "Failed to create joint state channel: "
+    std::cerr << "Failed to create joint state channel for " << stream_id << ": "
               << foxglove::strerror(channel_result.error()) << "\n";
     return;
   }
 
-  joint_channel_ = std::move(channel_result.value());
+  joint_channels_.emplace(stream_id, std::move(channel_result.value()));
 }
 
 void McapBackend::ensure_image_channel(const std::string& camera_name) {
@@ -257,7 +258,16 @@ void McapBackend::ensure_image_channel_with_metadata(
 }
 
 void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
-  ensure_jointstate_channel();
+  // Ensure channel exists for this stream
+  ensure_jointstate_channel(js.id);
+
+  // Look up the channel for this stream
+  auto it = joint_channels_.find(js.id);
+  if (it == joint_channels_.end()) {
+    std::cerr << "Failed to find joint state channel for stream: " << js.id << "\n";
+    return;
+  }
+
   trossen_sdk::msg::JointState out;
   auto* ts = out.mutable_ts();
 
@@ -281,13 +291,14 @@ void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
   std::string payload;
   out.SerializeToString(&payload);
 
-  auto st = joint_channel_->log(
+  auto st = it->second.log(
     reinterpret_cast<const std::byte*>(payload.data()),
     payload.size(),
     js.ts.realtime.to_ns());
 
   if (st != foxglove::FoxgloveError::Ok) {
-    std::cerr << "Failed to write joint state: " << foxglove::strerror(st) << "\n";
+    std::cerr << "Failed to write joint state for " << js.id << ": "
+              << foxglove::strerror(st) << "\n";
   } else {
     ++stats_.joint_states_written;
   }

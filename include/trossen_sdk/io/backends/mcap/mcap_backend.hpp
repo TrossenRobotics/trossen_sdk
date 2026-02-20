@@ -137,9 +137,11 @@ private:
     const std::unordered_map<std::string, std::string>& metadata);
 
   /**
-   * @brief Ensure the joint state channel exists
+   * @brief Ensure the joint state channel exists for a given stream ID
+   *
+   * @param stream_id Stream identifier (e.g., "leader_left", "follower_right")
    */
-  void ensure_jointstate_channel();
+  void ensure_jointstate_channel(const std::string& stream_id);
 
   /**
    * @brief Write an image record
@@ -187,8 +189,8 @@ private:
   /// @brief Helper to identify depth encodings
   static bool is_depth_encoding(const std::string& enc);
 
-  /// @brief Joint state channel
-  std::optional<foxglove::RawChannel> joint_channel_;
+  /// @brief Map of joint state channels by stream ID
+  std::unordered_map<std::string, foxglove::RawChannel> joint_channels_;
 
   /// @brief Statistics about written records
   Stats stats_{};
