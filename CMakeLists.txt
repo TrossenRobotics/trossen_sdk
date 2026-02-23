@@ -215,9 +215,30 @@ foreach(PROTO_FILE ${TROSSEN_PROTO_FILES})
   list(APPEND TROSSEN_PROTO_HDRS ${PROTO_HDR})
 endforeach()
 
+# Generate RawImage protobuf separately for examples
+set(RAWIMAGE_PROTO ${TROSSEN_PROTO_PATH}/foxglove/RawImage.proto)
+set(RAWIMAGE_PROTO_SRC ${CMAKE_CURRENT_BINARY_DIR}/include/trossen_sdk/io/backends/mcap/proto/foxglove/RawImage.pb.cc)
+set(RAWIMAGE_PROTO_HDR ${CMAKE_CURRENT_BINARY_DIR}/include/trossen_sdk/io/backends/mcap/proto/foxglove/RawImage.pb.h)
+file(MAKE_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/include/trossen_sdk/io/backends/mcap/proto/foxglove)
+add_custom_command(
+  OUTPUT ${RAWIMAGE_PROTO_SRC} ${RAWIMAGE_PROTO_HDR}
+  COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+  ARGS --cpp_out=${CMAKE_CURRENT_BINARY_DIR}/include/trossen_sdk/io/backends/mcap/proto
+       --proto_path=${TROSSEN_PROTO_PATH}
+       ${RAWIMAGE_PROTO}
+  DEPENDS ${RAWIMAGE_PROTO}
+  COMMENT "Running cpp protocol buffer compiler on ${RAWIMAGE_PROTO}"
+)
+list(APPEND TROSSEN_PROTO_SRCS ${RAWIMAGE_PROTO_SRC})
+list(APPEND TROSSEN_PROTO_HDRS ${RAWIMAGE_PROTO_HDR})
+
 target_sources(trossen_sdk PRIVATE ${TROSSEN_PROTO_SRCS} ${TROSSEN_PROTO_HDRS})
 target_link_libraries(trossen_sdk PUBLIC ${Protobuf_LIBRARIES})
-target_include_directories(trossen_sdk PUBLIC ${Protobuf_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+target_include_directories(trossen_sdk PUBLIC
+  ${Protobuf_INCLUDE_DIRS}
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ${CMAKE_CURRENT_BINARY_DIR}/include/trossen_sdk/io/backends/mcap/proto
+)
 
 target_include_directories(trossen_sdk PUBLIC
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
