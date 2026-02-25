@@ -49,13 +49,18 @@ struct Config {
   std::string root = trossen::io::backends::get_default_root_path().string();
 
   // Camera settings
-  std::string camera_serial = "128422271347";  // RealSense camera serial number
-  int camera_width = 1280;
-  int camera_height = 720;
+  std::vector<std::string> camera_serials = {
+    "128422271347",  // Camera 0
+    "218622270304",  // Camera 1 - TODO: Add your serial number
+    "218622274938",  // Camera 2 - TODO: Add your serial number
+    "130322272628"   // Camera 3 - TODO: Add your serial number
+  };
+  int camera_width = 640;
+  int camera_height = 480;
   int camera_fps = 30;
 
   // Arm settings
-  float joint_rate_hz = 200.0f;
+  float joint_rate_hz = 30.0f;
   std::string leader_left_ip = "192.168.1.3";
   std::string leader_right_ip = "192.168.1.2";
   std::string follower_left_ip = "192.168.1.5";
@@ -85,7 +90,10 @@ int main(int argc, char** argv) {
     "Follower Left IP:     " + cfg.follower_left_ip + " (recorded)",
     "Follower Right IP:    " + cfg.follower_right_ip + " (recorded)",
     "Joint rate:           " + std::to_string(cfg.joint_rate_hz) + " Hz (all 4 arms)",
-    "Camera Serial:        " + cfg.camera_serial,
+    "Camera 0 Serial:      " + cfg.camera_serials[0],
+    "Camera 1 Serial:      " + cfg.camera_serials[1],
+    "Camera 2 Serial:      " + cfg.camera_serials[2],
+    "Camera 3 Serial:      " + cfg.camera_serials[3],
     "Camera Resolution:    " + std::to_string(cfg.camera_width) + "x" +
     std::to_string(cfg.camera_height) + " @ " + std::to_string(cfg.camera_fps) + " fps (RGB)"
   };
@@ -257,42 +265,50 @@ int main(int argc, char** argv) {
   std::cout << "  ✓ Follower Right producer (" << cfg.joint_rate_hz << " Hz)\n";
 
   // ──────────────────────────────────────────────────────────
-  // RealSense Camera producer (RGB only)
+  // RealSense Camera producers (RGB only) - 4 cameras
   // ──────────────────────────────────────────────────────────
   auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
 
-  // Create hardware component for RealSense camera
-  nlohmann::json camera_hw_cfg = {
-    {"serial_number", cfg.camera_serial},
-    {"width", cfg.camera_width},
-    {"height", cfg.camera_height},
-    {"fps", cfg.camera_fps},
-    {"use_depth", false},
-    {"force_hardware_reset", false}
-  };
+  std::vector<std::shared_ptr<trossen::hw::HardwareComponent>> camera_components;
+  std::vector<std::shared_ptr<trossen::hw::PolledProducer>> camera_producers;
 
-  auto camera_component = trossen::hw::HardwareRegistry::create(
-    "realsense_camera", "camera_0", camera_hw_cfg);
-  std::cout << "  ✓ RealSense camera hardware initialized (" << cfg.camera_serial << ")\n";
+  for (size_t i = 0; i < cfg.camera_serials.size(); ++i) {
+    // Create hardware component for RealSense camera
+    nlohmann::json camera_hw_cfg = {
+      {"serial_number", cfg.camera_serials[i]},
+      {"width", cfg.camera_width},
+      {"height", cfg.camera_height},
+      {"fps", cfg.camera_fps},
+      {"use_depth", false},
+      {"force_hardware_reset", false}
+    };
 
-  // Create RGB producer
-  nlohmann::json rgb_prod_cfg = {
-    {"stream_id", "camera_0"},
-    {"encoding", "bgr8"},
-    {"use_device_time", true},
-    {"width", cfg.camera_width},
-    {"height", cfg.camera_height},
-    {"fps", cfg.camera_fps}
-  };
+    auto camera_component = trossen::hw::HardwareRegistry::create(
+      "realsense_camera", "camera_" + std::to_string(i), camera_hw_cfg);
+    camera_components.push_back(camera_component);
+    std::cout << "  ✓ RealSense camera " << i << " hardware initialized ("
+              << cfg.camera_serials[i] << ")\n";
 
-  auto rgb_prod = trossen::runtime::ProducerRegistry::create(
-    "realsense_camera", camera_component, rgb_prod_cfg);
-  mgr.add_producer(rgb_prod, camera_period);
-  std::cout << "  ✓ RealSense camera producer (" << cfg.camera_fps << " Hz, "
-            << cfg.camera_width << "x" << cfg.camera_height << " RGB)\n";
+    // Create RGB producer
+    nlohmann::json rgb_prod_cfg = {
+      {"stream_id", "camera_" + std::to_string(i)},
+      {"encoding", "bgr8"},
+      {"use_device_time", true},
+      {"width", cfg.camera_width},
+      {"height", cfg.camera_height},
+      {"fps", cfg.camera_fps}
+    };
+
+    auto rgb_prod = trossen::runtime::ProducerRegistry::create(
+      "realsense_camera", camera_component, rgb_prod_cfg);
+    camera_producers.push_back(rgb_prod);
+    mgr.add_producer(rgb_prod, camera_period);
+    std::cout << "  ✓ RealSense camera " << i << " producer (" << cfg.camera_fps << " Hz, "
+              << cfg.camera_width << "x" << cfg.camera_height << " RGB)\n";
+  }
 
   std::cout << "\nProducers registered. Ready to record.\n";
-  std::cout << "  Recording: 4 arms (all leaders + followers) + 1 RealSense camera\n";
+  std::cout << "  Recording: 4 arms (all leaders + followers) + 4 RealSense cameras\n";
 
   while (true) {
     if (trossen::demo::g_stop_requested) {
@@ -399,7 +415,7 @@ int main(int argc, char** argv) {
       last_stats.elapsed.count(),
       4,  // 4 joint producers (all arms)
       cfg.joint_rate_hz,
-      1,  // 1 RealSense camera (RGB only)
+      4,  // 4 RealSense cameras (RGB only)
       cfg.camera_fps,
       5.0  // 5% tolerance
     };
@@ -454,7 +470,7 @@ int main(int argc, char** argv) {
 
   auto final_stats = mgr.stats();
   std::vector<std::string> extra_info = {
-    "Data streams:         4 arms (all recorded) + 1 RealSense camera (RGB)"
+    "Data streams:         4 arms (all recorded) + 4 RealSense cameras (RGB)"
   };
   trossen::demo::print_final_summary(
     final_stats.total_episodes_completed,
