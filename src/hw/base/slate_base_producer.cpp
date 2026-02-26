@@ -53,7 +53,7 @@ void SlateBaseProducer::poll(const std::function<void(std::shared_ptr<data::Reco
   if (!driver_) {
     return;
   }
-
+  driver_->update_state();
   // Read chassis data from driver
   driver_->read(chassis_data_);
 
