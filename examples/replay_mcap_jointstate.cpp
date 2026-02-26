@@ -20,6 +20,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
 #include <thread>
 #include <vector>
@@ -28,6 +29,7 @@
 #include "mcap/reader.hpp"
 #include "nlohmann/json.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
+#include "trossen_sdk/hw/base/slate_base_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
@@ -42,9 +44,16 @@ struct ArmConfig {
   std::string end_effector;
 };
 
+struct SlateConfig {
+  std::string stream_id;
+  bool reset_odometry = false;
+  bool enable_torque = true;
+};
+
 struct ReplayConfig {
   std::string mcap_file;
   std::vector<ArmConfig> arms;
+  std::vector<SlateConfig> slates;
   float playback_speed = 1.0f;  // 1.0 = real-time, 2.0 = 2x speed, 0.5 = half speed
 };
 
@@ -83,6 +92,11 @@ int main(int argc, char** argv) {
     {"follower_right", "192.168.1.4", "wxai_v0", "wxai_v0_follower"}
   };
 
+  // Configure SLATE bases for replay (if detected in MCAP)
+  cfg.slates = {
+    {"slate_base", false, true}  // Stream ID must match MCAP file
+  };
+
   // Print configuration
   std::vector<std::string> config_lines = {
     "MCAP file:        " + cfg.mcap_file,
@@ -105,6 +119,7 @@ int main(int argc, char** argv) {
 
   std::map<std::string, std::shared_ptr<trossen_arm::TrossenArmDriver>> drivers;
   std::map<std::string, std::shared_ptr<trossen::hw::HardwareComponent>> components;
+  std::map<std::string, std::shared_ptr<trossen_slate::TrossenSlate>> slate_drivers;
 
   std::cout << "Initializing hardware...\n";
 
@@ -188,6 +203,7 @@ int main(int argc, char** argv) {
   struct JointStateMessage {
     uint64_t timestamp_ns;
     std::vector<double> positions;
+    std::vector<double> velocities;
   };
 
   std::map<std::string, std::vector<JointStateMessage>> messages_by_stream;
@@ -200,7 +216,8 @@ int main(int argc, char** argv) {
               << channel_ptr->schemaId << ", ID: " << channel_id << ")\n";
   }
 
-  // Map channel IDs to stream IDs
+  // Map channel IDs to stream IDs and detect SLATE bases
+  std::set<std::string> slate_stream_ids;
   for (const auto& [channel_id, channel_ptr] : reader.channels()) {
     std::string topic = channel_ptr->topic;
     // Extract stream_id from topic (format: "{stream_id}/joints/state")
@@ -235,12 +252,7 @@ int main(int argc, char** argv) {
 
     const std::string& stream_id = it->second;
 
-    // Check if we have a driver for this stream
-    if (drivers.find(stream_id) == drivers.end()) {
-      continue;  // Skip streams we don't have hardware for
-    }
-
-    // Parse protobuf message
+    // Parse protobuf message (parse ALL joint state messages, not just arms)
     trossen_sdk::msg::JointState js_msg;
     if (!js_msg.ParseFromArray(
           reinterpret_cast<const char*>(messageView.message.data),
@@ -255,6 +267,16 @@ int main(int argc, char** argv) {
     for (auto v : js_msg.positions()) {
       js.positions.push_back(static_cast<double>(v));
     }
+    for (auto v : js_msg.velocities()) {
+      js.velocities.push_back(static_cast<double>(v));
+    }
+
+    // Detect SLATE bases (have velocities but no positions)
+    // Velocities can be 2 values [linear_x, angular_z] or 3 values [linear_x, linear_y, angular_z]
+    if (js.positions.empty() && !js.velocities.empty() &&
+        (js.velocities.size() == 2 || js.velocities.size() == 3)) {
+      slate_stream_ids.insert(stream_id);
+    }
 
     messages_by_stream[stream_id].push_back(js);
     ++total_messages;
@@ -263,6 +285,42 @@ int main(int argc, char** argv) {
   std::cout << "  ✓ Parsed " << total_messages << " joint state messages\n";
   for (const auto& [stream_id, messages] : messages_by_stream) {
     std::cout << "    - " << stream_id << ": " << messages.size() << " messages\n";
+  }
+
+  // Initialize SLATE bases if detected
+  if (!slate_stream_ids.empty()) {
+    std::cout << "\nInitializing SLATE bases...\n";
+    for (const auto& stream_id : slate_stream_ids) {
+      // Check if we have config for this SLATE
+      bool found_config = false;
+      for (const auto& slate_cfg : cfg.slates) {
+        if (slate_cfg.stream_id == stream_id) {
+          found_config = true;
+          try {
+            auto slate_component =
+              std::make_shared<trossen::hw::base::SlateBaseComponent>(stream_id);
+            nlohmann::json hw_cfg = {
+              {"reset_odometry", slate_cfg.reset_odometry},
+              {"enable_torque", slate_cfg.enable_torque}
+            };
+            slate_component->configure(hw_cfg);
+            auto slate_driver = slate_component->get_driver();
+            if (slate_driver) {
+              slate_drivers[stream_id] = slate_driver;
+              std::cout << "  ✓ " << stream_id << " initialized\n";
+            } else {
+              std::cerr << "  ✗ Failed to get driver for " << stream_id << "\n";
+            }
+          } catch (const std::exception& e) {
+            std::cerr << "  ✗ Failed to initialize " << stream_id << ": " << e.what() << "\n";
+          }
+          break;
+        }
+      }
+      if (!found_config) {
+        std::cout << "  ⓘ Skipping " << stream_id << " (no configuration provided)\n";
+      }
+    }
   }
 
   // Calculate actual frequency from timestamps
@@ -292,6 +350,11 @@ int main(int argc, char** argv) {
   }
   std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
   std::cout << "  ✓ Arms moved to starting positions\n";
+
+  // SLATE bases start at zero velocity
+  if (!slate_drivers.empty()) {
+    std::cout << "  ✓ SLATE bases ready (starting from zero velocity)\n";
+  }
 
   std::cout << "\nStarting replay in 3 seconds...\n";
   std::cout << "Press Ctrl+C to stop\n\n";
@@ -339,10 +402,43 @@ int main(int argc, char** argv) {
 
       if (idx < messages.size()) {
         const auto& msg = messages[idx];
-        drivers[stream_id]->set_all_positions(msg.positions, 0.0f, false);
-        ++idx;
-        ++messages_replayed;
-        all_streams_done = false;
+
+        // Check if this is an arm or a SLATE base (skip if neither)
+        if (drivers.find(stream_id) != drivers.end()) {
+          // Arm: send position commands
+          drivers[stream_id]->set_all_positions(msg.positions, 0.0f, false);
+          ++idx;
+          ++messages_replayed;
+          all_streams_done = false;
+        } else if (slate_drivers.find(stream_id) != slate_drivers.end()) {
+          // SLATE base: send velocity commands
+          // Format: velocities[0] = linear_x, velocities[1] = angular_z (2 values)
+          // Or: velocities[0] = linear_x, velocities[1] = linear_y,
+          //     velocities[2] = angular_z (3 values)
+          if (msg.velocities.size() >= 2) {
+            base_driver::ChassisData cmd_data = {};
+            cmd_data.cmd_vel_x = static_cast<float>(msg.velocities[0]);
+
+            if (msg.velocities.size() == 2) {
+              // 2-value format: [linear_x, angular_z]
+              cmd_data.cmd_vel_y = 0.0f;
+              cmd_data.cmd_vel_z = static_cast<float>(msg.velocities[1]);
+            } else {
+              // 3-value format: [linear_x, linear_y, angular_z]
+              cmd_data.cmd_vel_y = static_cast<float>(msg.velocities[1]);
+              cmd_data.cmd_vel_z = static_cast<float>(msg.velocities[2]);
+            }
+
+            cmd_data.light_state = static_cast<uint32_t>(LightState::WHITE);
+            slate_drivers[stream_id]->write(cmd_data);
+          }
+          ++idx;
+          ++messages_replayed;
+          all_streams_done = false;
+        } else {
+          // Stream has no driver, skip it
+          ++idx;
+        }
       }
     }
 
@@ -376,6 +472,19 @@ int main(int argc, char** argv) {
       false);
   }
   std::this_thread::sleep_for(std::chrono::seconds(2));
+
+  // Stop SLATE bases
+  if (!slate_drivers.empty()) {
+    std::cout << "Stopping SLATE bases...\n";
+    for (auto& [stream_id, driver] : slate_drivers) {
+      base_driver::ChassisData stop_cmd = {};
+      stop_cmd.cmd_vel_x = 0.0f;
+      stop_cmd.cmd_vel_y = 0.0f;
+      stop_cmd.cmd_vel_z = 0.0f;
+      stop_cmd.light_state = static_cast<uint32_t>(LightState::GREEN);
+      driver->write(stop_cmd);
+    }
+  }
 
   std::cout << "Done!\n";
 
