@@ -35,8 +35,7 @@ public:
    * Expected JSON format:
    * {
    *   "reset_odometry": false,        // Optional: Reset odometry on init (default: false)
-   *   "enable_torque": true,          // Optional: Enable motor torque (default: true)
-   *   "enable_charging": false        // Optional: Enable charging (default: false)
+   *   "enable_torque": true           // Optional: Enable motor torque (default: true)
    * }
    *
    * @param config JSON configuration object
@@ -69,7 +68,6 @@ private:
   std::shared_ptr<trossen_slate::TrossenSlate> driver_;
   bool reset_odometry_{false};
   bool enable_torque_{true};
-  bool enable_charging_{false};
 };
 
 }  // namespace trossen::hw::base

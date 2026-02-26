@@ -14,7 +14,6 @@ void SlateBaseComponent::configure(const nlohmann::json& config) {
   // Parse optional configuration parameters
   reset_odometry_ = config.value("reset_odometry", false);
   enable_torque_ = config.value("enable_torque", true);
-  enable_charging_ = config.value("enable_charging", false);
 
   // Create driver
   driver_ = std::make_shared<trossen_slate::TrossenSlate>();
@@ -25,13 +24,6 @@ void SlateBaseComponent::configure(const nlohmann::json& config) {
     throw std::runtime_error("Failed to initialize SLATE base: " + init_result);
   }
   std::cout << "SLATE base initialized: " << init_result << std::endl;
-
-  // Configure charging
-  std::string charging_result;
-  if (!driver_->enable_charging(enable_charging_, charging_result)) {
-    throw std::runtime_error("Failed to configure charging: " + charging_result);
-  }
-  std::cout << "SLATE charging configured: " << charging_result << std::endl;
 
   // Configure motor torque
   std::string torque_result;
@@ -47,11 +39,9 @@ nlohmann::json SlateBaseComponent::get_info() const {
   info["type"] = get_type();
   info["reset_odometry"] = reset_odometry_;
   info["enable_torque"] = enable_torque_;
-  info["enable_charging"] = enable_charging_;
 
   if (driver_) {
     info["connected"] = true;
-    info["charge"] = driver_->get_charge();
     info["voltage"] = driver_->get_voltage();
     info["current"] = driver_->get_current();
 
