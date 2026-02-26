@@ -28,6 +28,7 @@ add_library(trossen_sdk SHARED
   src/hw/arm/so101_arm_driver.cpp
   src/hw/arm/feetech_bus.cpp
   src/hw/arm/so101_teleop_arm_producer.cpp
+  src/hw/base/slate_base_component.cpp
   src/hw/camera/opencv_camera_component.cpp
   src/hw/camera/opencv_producer.cpp
   src/hw/camera/mock_producer.cpp
@@ -173,8 +174,23 @@ FetchContent_MakeAvailable(SCServo)
 # Add SCServo src subdirectory to build the library
 add_subdirectory(${scservo_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/scservo-build)
 
+
+# Trossen Slate Package
+
+FetchContent_Declare(
+  trossen_slate
+  SYSTEM
+  GIT_REPOSITORY https://github.com/Interbotix/trossen_slate.git
+  GIT_TAG ef6354e5bd6a39a49ca9952bb5ad7f277b7527e5
+)
+
+# Set BUILD_WITH_ROS option before making trossen_slate available
+set(BUILD_WITH_ROS OFF CACHE BOOL "Build trossen_slate without ROS" FORCE)
+FetchContent_MakeAvailable(trossen_slate)
+
 # Use the FetchContent source directory for include paths
 target_include_directories(trossen_sdk PUBLIC ${scservo_SOURCE_DIR}/src)
+target_include_directories(trossen_sdk PUBLIC ${trossen_slate_SOURCE_DIR}/include)
 
 target_link_libraries(
   trossen_sdk PUBLIC
@@ -183,7 +199,9 @@ target_link_libraries(
   Parquet::parquet_shared
   libtrossen_arm
   SCServo
+  trossen_slate
 )
+
 if(TROSSEN_ENABLE_REALSENSE)
   target_link_libraries(trossen_sdk PUBLIC realsense2::realsense2)
 endif()
