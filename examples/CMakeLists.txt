@@ -27,6 +27,11 @@ find_package(libtrossen_arm)
 add_executable(widowxai_bimanual_realsense widowxai_bimanual_realsense.cpp)
 target_link_libraries(widowxai_bimanual_realsense demo_utils trossen_sdk libtrossen_arm)
 
+# Solo AI Kit demo (1 leader + 1 follower + 2 cameras)
+find_package(libtrossen_arm)
+add_executable(trossen_solo_ai trossen_solo_ai.cpp)
+target_link_libraries(trossen_solo_ai demo_utils trossen_sdk libtrossen_arm)
+
 # Backend registry demo
 add_executable(backend_registry_demo backend_registry_demo.cpp)
 target_link_libraries(backend_registry_demo trossen_sdk)
