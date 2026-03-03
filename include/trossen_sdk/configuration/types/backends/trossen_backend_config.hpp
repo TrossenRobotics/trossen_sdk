@@ -27,7 +27,11 @@ struct TrossenBackendConfig : public BaseConfig {
 
   static TrossenBackendConfig from_json(const nlohmann::json& j) {
     TrossenBackendConfig c;
-    if (j.contains("root")) j.at("root").get_to(c.root);
+    if (j.contains("root")) {
+      std::string raw_root;
+      j.at("root").get_to(raw_root);
+      c.root = trossen::io::backends::expand_user(raw_root).string();
+    }
     if (j.contains("encoder_threads")) j.at("encoder_threads").get_to(c.encoder_threads);
     if (j.contains("max_image_queue")) j.at("max_image_queue").get_to(c.max_image_queue);
     if (j.contains("png_compression_level"))

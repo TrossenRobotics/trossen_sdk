@@ -11,6 +11,30 @@
 namespace trossen::io::backends {
 
 /**
+ * @brief Expand a leading ~ in a path to the user's home directory
+ * @param path The path string that may start with ~
+ * @return The expanded path with ~ replaced by $HOME, or the original path
+ *
+ * Analogous to Python's os.path.expanduser(). Only expands a leading "~"
+ * or "~/"; other occurrences of ~ are left unchanged.
+ */
+inline std::filesystem::path expand_user(const std::string& path) {
+  if (path.empty() || path[0] != '~') {
+    return std::filesystem::path(path);
+  }
+  // Only expand bare "~" or "~/..." (not "~user/...")
+  if (path.size() > 1 && path[1] != '/') {
+    return std::filesystem::path(path);
+  }
+  const char* home = std::getenv("HOME");
+  if (!home) {
+    return std::filesystem::path(path);
+  }
+  // "~" → home, "~/foo" → home / "foo"
+  return std::filesystem::path(home) / path.substr(path.size() > 1 ? 2 : 1);
+}
+
+/**
  * @brief Safely get the default root path for dataset storage
  */
 inline std::filesystem::path get_default_root_path() {

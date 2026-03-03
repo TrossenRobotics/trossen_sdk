@@ -32,7 +32,11 @@ struct McapBackendConfig : public BaseConfig {
     McapBackendConfig c;
 
     // Only override if present in JSON
-    if (j.contains("root")) j.at("root").get_to(c.root);
+    if (j.contains("root")) {
+      std::string raw_root;
+      j.at("root").get_to(raw_root);
+      c.root = trossen::io::backends::expand_user(raw_root).string();
+    }
     if (j.contains("robot_name")) j.at("robot_name").get_to(c.robot_name);
     if (j.contains("chunk_size_bytes")) j.at("chunk_size_bytes").get_to(c.chunk_size_bytes);
     if (j.contains("compression")) j.at("compression").get_to(c.compression);
