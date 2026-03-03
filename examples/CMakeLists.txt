@@ -22,14 +22,14 @@ find_package(libtrossen_arm)
 add_executable(widowxai_bimanual widowxai_bimanual.cpp)
 target_link_libraries(widowxai_bimanual demo_utils trossen_sdk libtrossen_arm)
 
-# Bimanual AI Kit with RealSense demo
+# Bimanual AI Kit with RealSense demo (Stationary)
 find_package(libtrossen_arm)
-add_executable(widowxai_bimanual_realsense widowxai_bimanual_realsense.cpp)
-target_link_libraries(widowxai_bimanual_realsense demo_utils trossen_sdk libtrossen_arm)
+add_executable(trossen_stationary_ai stationary/trossen_stationary_ai.cpp)
+target_link_libraries(trossen_stationary_ai demo_utils trossen_sdk libtrossen_arm)
 
 # Solo AI Kit demo (1 leader + 1 follower + 2 cameras)
 find_package(libtrossen_arm)
-add_executable(trossen_solo_ai trossen_solo_ai.cpp)
+add_executable(trossen_solo_ai solo/trossen_solo_ai.cpp)
 target_link_libraries(trossen_solo_ai demo_utils trossen_sdk libtrossen_arm)
 
 # Backend registry demo
@@ -53,8 +53,8 @@ target_link_libraries(producer_registry_demo trossen_sdk)
 
 # Bimanual AI Kit with Mobile Base demo
 find_package(libtrossen_arm)
-add_executable(widowxai_bimanual_mobile widowxai_bimanual_mobile.cpp)
-target_link_libraries(widowxai_bimanual_mobile demo_utils trossen_sdk libtrossen_arm)
+add_executable(trossen_mobile_ai mobile/trossen_mobile_ai.cpp)
+target_link_libraries(trossen_mobile_ai demo_utils trossen_sdk libtrossen_arm)
 
 # MCAP replay demo
 find_package(libtrossen_arm)
