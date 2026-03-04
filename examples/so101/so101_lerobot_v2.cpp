@@ -35,7 +35,7 @@
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 
-#include "./demo_utils.hpp"
+#include "../demo_utils.hpp"
 
 
 // ────────────────────────────────────────────────────────────
@@ -145,14 +145,13 @@ int main(int argc, char** argv) {
     print_usage(argv[0]);
     return 0;
   }
-  if (!std::filesystem::exists("config/sdk_config.json")) {
-    std::cerr << "Error: config/sdk_config.json not found!" << std::endl;
-    return 1;
-  }
-
-  // Create and load global configuration
-  auto j = trossen::configuration::JsonLoader::load("config/sdk_config.json");
-  trossen::configuration::GlobalConfig::instance().load_from_json(j);
+  // TODO(so101): This example is not yet fully functional. It needs to be migrated to use
+  // examples/so101/config.json with DataCollectionConfig::from_json() following the pattern
+  // in examples/solo/, examples/stationary/, and examples/mobile/. The hand-rolled CLI parser
+  // above should also be replaced with trossen::configuration::CliParser.
+  std::cerr << "Error: so101_teleop is not yet functional.\n"
+            << "See examples/so101/so101_lerobot_v2.cpp for the migration TODO.\n";
+  return 1;
 
   // Print configuration
   std::vector<std::string> config_lines = {

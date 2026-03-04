@@ -25,7 +25,7 @@
  * @code
  * {
  *   "_notes": ["..."],
- *   "robot_name": "stationary_ai",
+ *   "robot_name": "trossen_stationary_ai",
  *   "hardware": {
  *     "arms":    { "<id>": { "ip_address": "...", "model": "...", "end_effector": "..." }, ... },
  *     "cameras": [ { "id": "...", "type": "realsense_camera", "serial_number": "...", ... }, ... ],

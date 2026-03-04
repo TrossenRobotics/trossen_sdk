@@ -38,7 +38,7 @@ TeleopTrossenArmProducer::TeleopTrossenArmProducer(
     "Produces teleoperation joint states from leader and follower "
     "Trossen Arms via TrossenArmDriver";
   // TODO(shantanuparab-tr): Extract from driver/User Config
-  metadata_.robot_name = "Trossen AI Bimanual";
+  metadata_.robot_name = "trossen_stationary_ai";
   metadata_.action_feature_names =
     {"joint1", "joint2", "joint3", "joint4", "joint5", "joint6", "gripper"};
   metadata_.observation_feature_names =

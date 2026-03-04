@@ -5,7 +5,7 @@
     "  ./build/examples/trossen_mcap_to_lerobot_v2 --help"
   ],
 
-  "robot_name": "stationary_ai",
+  "robot_name": "trossen_stationary_ai",
 
   "hardware": {
     "arms": {

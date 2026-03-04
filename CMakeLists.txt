@@ -254,6 +254,9 @@ target_include_directories(trossen_sdk PUBLIC
 # Examples
 add_subdirectory(examples)
 
+# Scripts (offline data-processing tools; built after examples so demo_utils is available)
+add_subdirectory(scripts)
+
 # Testing
 option(BUILD_TESTING "Build the testing tree" ON)
 if(BUILD_TESTING)

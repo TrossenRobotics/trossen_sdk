@@ -219,7 +219,8 @@ inline bool create_initial_info_json(
     const std::string& robot_name,
     const nlohmann::ordered_json& features,
     int fps = 30,
-    const std::string& codebase_version = "v2.1") {
+    const std::string& codebase_version = "v2.1",
+    int chunk_size = 1000) {
   namespace fs = std::filesystem;
 
   fs::path info_path = meta_dir / JSON_INFO;
@@ -243,7 +244,7 @@ inline bool create_initial_info_json(
   info_json["total_videos"] = 0;
   info_json["total_tasks"] = 1;
   info_json["total_chunks"] = 1;
-  info_json["chunks_size"] = 1000;
+  info_json["chunks_size"] = chunk_size;
 
   // Data splits (initially empty)
   info_json["splits"]["train"] = "0:0";
@@ -297,13 +298,18 @@ inline bool update_info_json(
   }
 
   // Update episode count
-  info_json["total_episodes"] = info_json.value("total_episodes", 0) + 1;
+  int total_episodes = info_json.value("total_episodes", 0) + 1;
+  info_json["total_episodes"] = total_episodes;
 
   // Update total videos
   info_json["total_videos"] = info_json.value("total_videos", 0) + num_videos;
 
   // Update total frames
   info_json["total_frames"] = info_json.value("total_frames", 0) + episode_frame_count;
+
+  // Recompute total_chunks = ceil(total_episodes / chunks_size)
+  int chunks_size = info_json.value("chunks_size", 1000);
+  info_json["total_chunks"] = (total_episodes + chunks_size - 1) / chunks_size;
 
   // Update splits (simple logic: all episodes go to train)
   std::string train_split = info_json["splits"].value("train", "0:0");
