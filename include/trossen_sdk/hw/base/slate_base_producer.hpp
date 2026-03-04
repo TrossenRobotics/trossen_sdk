@@ -22,10 +22,11 @@
 namespace trossen::hw::base {
 
 /**
- * @brief Producer that emits velocity states from SLATE mobile base
+ * @brief Producer that emits 2D pose and velocity from the SLATE mobile base.
  *
- * Stores linear velocity (x, y) and angular velocity (z) in the JointStateRecord
- * velocity vector as [vel_x, vel_y, vel_z].
+ * Reads odometry (odom_x, odom_y, odom_z) and body-frame velocity
+ * (vel_x, vel_y, vel_z) from the SLATE driver and emits an Odometry2DRecord
+ * per poll cycle.
  */
 class SlateBaseProducer : public ::trossen::hw::PolledProducer {
 public:
@@ -76,10 +77,10 @@ public:
   ~SlateBaseProducer() override = default;
 
   /**
-   * @brief Poll the driver for the latest velocity states and emit a JointStateRecord
+   * @brief Poll the driver for the latest state and emit a MobileBaseRecord.
    *
-   * Stores velocity data in the velocity vector as [vel_x, vel_y, vel_z].
-   * Position and effort vectors remain empty.
+   * Reads odom_x/y/z (pose) and vel_x/y/z (body-frame velocity) from the
+   * SLATE driver and populates a MobileBaseRecord.
    *
    * @param emit Callback to invoke for each produced record
    */

@@ -62,22 +62,19 @@ void SlateBaseProducer::poll(const std::function<void(std::shared_ptr<data::Reco
   ts.monotonic = data::now_mono();
   ts.realtime = data::now_real();
 
-  // Create and populate JointStateRecord with velocity data
-  auto rec = std::make_shared<data::JointStateRecord>();
+  // Populate Odometry2DRecord with pose (odom) and body-frame velocity
+  auto rec = std::make_shared<data::Odometry2DRecord>();
   rec->ts = ts;
   rec->seq = seq_++;
   rec->id = cfg_.stream_id;
 
-  // Store velocities: [linear_x, linear_y, angular_z]
-  rec->velocities.clear();
-  rec->velocities.reserve(3);
-  rec->velocities.push_back(chassis_data_.vel_x);
-  rec->velocities.push_back(chassis_data_.vel_y);
-  rec->velocities.push_back(chassis_data_.vel_z);
+  rec->pose_x     = chassis_data_.odom_x;
+  rec->pose_y     = chassis_data_.odom_y;
+  rec->pose_theta = chassis_data_.odom_z;
 
-  // Leave positions and efforts empty
-  rec->positions.clear();
-  rec->efforts.clear();
+  rec->vel_x     = chassis_data_.vel_x;
+  rec->vel_y     = chassis_data_.vel_y;
+  rec->vel_theta = chassis_data_.vel_z;
 
   // Emit the record
   emit(rec);

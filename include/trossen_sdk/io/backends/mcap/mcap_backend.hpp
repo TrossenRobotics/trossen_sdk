@@ -43,6 +43,9 @@ public:
     /// @brief Number of joint state records written
     uint64_t joint_states_written{0};
 
+    /// @brief Number of 2D odometry records written
+    uint64_t odometry_2d_written{0};
+
     /// @brief Number of image records written
     uint64_t images_written{0};
 
@@ -147,6 +150,13 @@ private:
   foxglove::RawChannel* ensure_jointstate_channel(const std::string& stream_id);
 
   /**
+   * @brief Ensure the 2D odometry channel exists for a given stream ID
+   *
+   * @param stream_id Stream identifier (e.g., "base")
+   */
+  void ensure_odometry_2d_channel(const std::string& stream_id);
+
+  /**
    * @brief Write an image record
    *
    * @param img Image record to write
@@ -161,6 +171,13 @@ private:
   void write_jointstate_record(const data::JointStateRecord& js);
 
   /**
+   * @brief Write a 2D odometry record
+   *
+   * @param odom 2D odometry record to write
+   */
+  void write_odometry_2d_record(const data::Odometry2DRecord& odom);
+
+  /**
    * @brief Register protobuf schemas once
    */
   void register_schemas_once();
@@ -171,8 +188,11 @@ private:
   /// @brief Foxglove MCAP writer instance
   std::optional<foxglove::McapWriter> writer_;
 
-  /// @brief Protobuf schema for images
+  /// @brief Serialised FileDescriptorSet for the JointState protobuf schema
   std::string schema_data_;
+
+  /// @brief Serialised FileDescriptorSet for the Odometry2D protobuf schema
+  std::string odometry_2d_schema_data_;
 
   /// @brief Output file path
   std::filesystem::path path_;
@@ -194,6 +214,9 @@ private:
 
   /// @brief Map of joint state channels by stream ID
   std::unordered_map<std::string, foxglove::RawChannel> joint_channels_;
+
+  /// @brief Map of 2D odometry channels by stream ID
+  std::unordered_map<std::string, foxglove::RawChannel> odometry_2d_channels_;
 
   /// @brief Statistics about written records
   Stats stats_{};
