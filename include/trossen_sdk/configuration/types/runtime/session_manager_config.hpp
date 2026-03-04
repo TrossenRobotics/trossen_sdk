@@ -17,7 +17,7 @@ namespace trossen::configuration {
 struct SessionManagerConfig : public BaseConfig {
   std::optional<std::chrono::duration<double>> max_duration{std::chrono::seconds(20)};
   std::optional<uint32_t> max_episodes{std::nullopt};
-  std::string backend_type{"mcap"};
+  std::string backend_type{"trossen_mcap"};
 
   std::string type() const override { return "session_manager"; }
 

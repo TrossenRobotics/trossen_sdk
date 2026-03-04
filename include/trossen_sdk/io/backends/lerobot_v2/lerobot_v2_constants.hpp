@@ -1,10 +1,10 @@
 /**
- * @file lerobot_constants.hpp
- * @brief Constants for LeRobot backend
+ * @file lerobot_v2_constants.hpp
+ * @brief Constants for LeRobotV2 backend
  */
 
-#ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT__LEROBOT_CONSTANTS_HPP_
-#define TROSSEN_SDK__IO__BACKENDS__LEROBOT__LEROBOT_CONSTANTS_HPP_
+#ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2__LEROBOT_V2_CONSTANTS_HPP_
+#define TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2__LEROBOT_V2_CONSTANTS_HPP_
 
 namespace trossen::io::backends {
 
@@ -73,7 +73,7 @@ const char VIDEO_PATH[] = "videos/chunk-{:03d}/{}/episode_{:06d}.mp4";
 /// @brief Image path format
 const char IMAGE_PATH[] = "images/chunk-{:03d}/{}/episode_{:06d}/image_{:06d}.jpg";
 
-// Metadata Path Formats (For Compatibility with LeRobot)
+// Metadata Path Formats (For Compatibility with LeRobotV2)
 
 /// @brief Data path format for metadata
 const char DATA_PATH_META[] = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet";
@@ -85,4 +85,4 @@ const char VIDEO_PATH_META[] =
 
 }  // namespace trossen::io::backends
 
-#endif  // TROSSEN_SDK__IO__BACKENDS__LEROBOT__LEROBOT_CONSTANTS_HPP_
+#endif  // TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2__LEROBOT_V2_CONSTANTS_HPP_

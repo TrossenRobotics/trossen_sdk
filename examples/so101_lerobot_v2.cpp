@@ -1,11 +1,11 @@
 /**
  * @file so101_lerobot.cpp
- * @brief Complete SO101 demo with Session Manager, MCAP backend, and OpenCV camera
+ * @brief Complete SO101 demo with Session Manager, TrossenMCAP backend, and OpenCV camera
  *
  * This demo combines:
  * - SO101 hardware (leader + follower arms)
  * - Session Manager for multi-episode recording
- * - MCAP backend for data storage
+ * - TrossenMCAP backend for data storage
  * - OpenCV camera producer for image capture
  * - Configurable episode count and duration
  *
@@ -47,7 +47,7 @@ struct Config {
   int episodes = 1;
   std::string dataset_id = "";  // empty = auto-generate
   std::string root = trossen::io::backends::get_default_root_path().string();
-  std::string repository_id = "TrossenRoboticsCommunity";  // Valid only for LeRobot backend
+  std::string repository_id = "TrossenRoboticsCommunity";  // Valid only for LeRobotV2 backend
   bool use_mock = false;
   bool show_help = false;
 
@@ -63,7 +63,7 @@ struct Config {
   std::string follower_port = "/dev/ttyACM0";
 
   // Dataset backend type
-  std::string backend_type = "mcap";
+  std::string backend_type = "trossen_mcap";
 };
 
 void print_usage(const char* prog_name) {
@@ -75,7 +75,7 @@ void print_usage(const char* prog_name) {
     << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
     << "  --root <path>            Root directory for episodes (default: ~/.cache/trossen_sdk/)\n"
     << "  --repository-id <string> Repository identifier (default: TrossenRoboticsCommunity, "
-    << "only for LeRobot backend)\n"
+    << "only for LeRobotV2 backend)\n"
     << "  --mock                   Use mock producers instead of real hardware\n"
     << "  --camera-index <num>     Camera device index (default: 4, i.e., /dev/video4)\n"
     << "  --camera-width <pixels>  Camera width (default: 1920)\n"
@@ -176,7 +176,7 @@ int main(int argc, char** argv) {
     " @ " + std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
     " @ " + std::to_string(cfg.camera_fps) + " fps");
 
-  trossen::demo::print_config_banner("SO101 LeRobot Complete Demo", config_lines);
+  trossen::demo::print_config_banner("SO101 LeRobotV2 Complete Demo", config_lines);
 
   // Install signal handler for graceful shutdown
   trossen::demo::install_signal_handler();

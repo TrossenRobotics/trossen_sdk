@@ -1,10 +1,10 @@
 /**
-* @file lerobot_backend_config.hpp
-* @brief Configuration for LeRobot backend
+* @file lerobot_v2_backend_config.hpp
+* @brief Configuration for LeRobotV2 backend
 */
 
-#ifndef TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_BACKEND_CONFIG_HPP_
-#define TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_BACKEND_CONFIG_HPP_
+#ifndef TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_V2_BACKEND_CONFIG_HPP_
+#define TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_V2_BACKEND_CONFIG_HPP_
 
 #include "trossen_sdk/configuration/base_config.hpp"
 #include "trossen_sdk/configuration/config_registry.hpp"
@@ -13,33 +13,33 @@
 
 namespace trossen::configuration {
 
-// LeRobot backend specific constants
-inline constexpr bool LEROBOT_DEFAULT_OVERWRITE_EXISTING = false;
-inline constexpr bool LEROBOT_DEFAULT_ENCODE_VIDEOS = false;
-inline constexpr char LEROBOT_DEFAULT_TASK_NAME[] = "perform a generic task";
-inline constexpr char LEROBOT_DEFAULT_REPOSITORY_ID[] = "TrossenRoboticsCommunity";
-inline constexpr float LEROBOT_DEFAULT_FPS = 30.0f;
-inline constexpr int LEROBOT_DEFAULT_EPISODE_INDEX = 0;
+// LeRobotV2 backend specific constants
+inline constexpr bool LEROBOT_V2_DEFAULT_OVERWRITE_EXISTING = false;
+inline constexpr bool LEROBOT_V2_DEFAULT_ENCODE_VIDEOS = false;
+inline constexpr char LEROBOT_V2_DEFAULT_TASK_NAME[] = "perform a generic task";
+inline constexpr char LEROBOT_V2_DEFAULT_REPOSITORY_ID[] = "TrossenRoboticsCommunity";
+inline constexpr float LEROBOT_V2_DEFAULT_FPS = 30.0f;
+inline constexpr int LEROBOT_V2_DEFAULT_EPISODE_INDEX = 0;
 
-struct LeRobotBackendConfig : public BaseConfig {
+struct LeRobotV2BackendConfig : public BaseConfig {
   int encoder_threads{trossen::io::backends::DEFAULT_ENCODER_THREADS};
   int max_image_queue{trossen::io::backends::DEFAULT_MAX_IMAGE_QUEUE};
   int png_compression_level{trossen::io::backends::DEFAULT_PNG_COMPRESSION_LEVEL};
-  bool overwrite_existing{LEROBOT_DEFAULT_OVERWRITE_EXISTING};
-  bool encode_videos{LEROBOT_DEFAULT_ENCODE_VIDEOS};
-  std::string task_name{LEROBOT_DEFAULT_TASK_NAME};
-  std::string repository_id{LEROBOT_DEFAULT_REPOSITORY_ID};
+  bool overwrite_existing{LEROBOT_V2_DEFAULT_OVERWRITE_EXISTING};
+  bool encode_videos{LEROBOT_V2_DEFAULT_ENCODE_VIDEOS};
+  std::string task_name{LEROBOT_V2_DEFAULT_TASK_NAME};
+  std::string repository_id{LEROBOT_V2_DEFAULT_REPOSITORY_ID};
   std::string dataset_id{trossen::io::backends::auto_generate_dataset_id()};
   std::string root{trossen::io::backends::get_default_root_path().string()};
   // TODO(shantanuparab-tr): DRemove episode index if not being used
-  int episode_index{LEROBOT_DEFAULT_EPISODE_INDEX};
+  int episode_index{LEROBOT_V2_DEFAULT_EPISODE_INDEX};
   std::string robot_name{trossen::io::backends::DEFAULT_ROBOT_NAME};
-  float fps{LEROBOT_DEFAULT_FPS};
+  float fps{LEROBOT_V2_DEFAULT_FPS};
 
-  std::string type() const override { return "lerobot_backend"; }
+  std::string type() const override { return "lerobot_v2_backend"; }
 
-  static LeRobotBackendConfig from_json(const nlohmann::json& j) {
-    LeRobotBackendConfig c;  // All defaults already set by member initializers
+  static LeRobotV2BackendConfig from_json(const nlohmann::json& j) {
+    LeRobotV2BackendConfig c;  // All defaults already set by member initializers
 
     // Only override if present in JSON
     if (j.contains("root")) {
@@ -64,8 +64,8 @@ struct LeRobotBackendConfig : public BaseConfig {
   }
 };
 
-REGISTER_CONFIG(LeRobotBackendConfig, "lerobot_backend");
+REGISTER_CONFIG(LeRobotV2BackendConfig, "lerobot_v2_backend");
 
 }  // namespace trossen::configuration
 
-#endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_BACKEND_CONFIG_HPP_
+#endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_V2_BACKEND_CONFIG_HPP_

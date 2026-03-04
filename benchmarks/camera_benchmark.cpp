@@ -24,7 +24,7 @@
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
-#include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 

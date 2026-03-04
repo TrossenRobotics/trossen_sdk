@@ -3,10 +3,10 @@
     "type": "session_manager",
     "max_episodes": 10,
     "max_duration": 10.0,
-    "backend_type": "mcap"
+    "backend_type": "trossen_mcap"
   },
-  "mcap_backend": {
-    "type": "mcap_backend",
+  "trossen_mcap_backend": {
+    "type": "trossen_mcap_backend",
     "robot_name": "/robot/joint_states",
     "chunk_size_bytes": 4194304,
     "compression": "zstd",

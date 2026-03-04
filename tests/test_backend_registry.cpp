@@ -14,13 +14,13 @@
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
-#include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/io/backends/null/null_backend.hpp"
 
 using trossen::io::BackendRegistry;
 using trossen::io::Backend;
 using trossen::io::backends::NullBackend;
-using trossen::io::backends::McapBackend;
+using trossen::io::backends::TrossenMCAPBackend;
 
 // Test fixture to load configuration before running tests
 class BackendRegistryTest : public ::testing::Test {
@@ -48,8 +48,8 @@ class BackendRegistryTest : public ::testing::Test {
 
 // Test that common backend types are registered
 TEST_F(BackendRegistryTest, CommonBackendsAreRegistered) {
-  EXPECT_TRUE(BackendRegistry::is_registered("lerobot"));
-  EXPECT_TRUE(BackendRegistry::is_registered("mcap"));
+  EXPECT_TRUE(BackendRegistry::is_registered("lerobot_v2"));
+  EXPECT_TRUE(BackendRegistry::is_registered("trossen_mcap"));
   EXPECT_TRUE(BackendRegistry::is_registered("null"));
   EXPECT_TRUE(BackendRegistry::is_registered("trossen"));
 }
@@ -85,13 +85,13 @@ TEST_F(BackendRegistryTest, CreateNullBackend) {
   EXPECT_EQ(null_backend->count(), 1);
 }
 
-// Test creating an McapBackend through the registry
-TEST_F(BackendRegistryTest, CreateMcapBackend) {
-  auto backend = BackendRegistry::create("mcap");
+// Test creating a TrossenMCAPBackend through the registry
+TEST_F(BackendRegistryTest, CreateTrossenMCAPBackend) {
+  auto backend = BackendRegistry::create("trossen_mcap");
   ASSERT_NE(backend, nullptr);
 
-  // Verify it's actually an McapBackend
-  auto* mcap_backend = dynamic_cast<McapBackend*>(backend.get());
+  // Verify it's actually a TrossenMCAPBackend
+  auto* mcap_backend = dynamic_cast<TrossenMCAPBackend*>(backend.get());
   ASSERT_NE(mcap_backend, nullptr);
 }
 
@@ -108,12 +108,12 @@ TEST_F(BackendRegistryTest, MultipleBackendsWithDifferentConfigs) {
   // Both should be independent
   EXPECT_NE(backend1.get(), backend2.get());
 
-  auto backend3 = BackendRegistry::create("mcap");
+  auto backend3 = BackendRegistry::create("trossen_mcap");
   ASSERT_NE(backend3, nullptr);
 
   // Should be different types
   EXPECT_EQ(dynamic_cast<NullBackend*>(backend3.get()), nullptr);
-  EXPECT_EQ(dynamic_cast<McapBackend*>(backend1.get()), nullptr);
+  EXPECT_EQ(dynamic_cast<TrossenMCAPBackend*>(backend1.get()), nullptr);
 }
 
 // Test that base Backend::Config works with proper downcasting

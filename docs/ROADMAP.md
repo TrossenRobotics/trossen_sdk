@@ -5,7 +5,7 @@ This document outlines the planned features and improvements for the Trossen Dat
 ## Goals
 
 - Provide a flexible and extensible SDK for recording and playing back robot data
-- Support multiple backends for data storage (e.g., LeRobot, MCAP)
+- Support multiple backends for data storage (e.g., LeRobotV2, TrossenMCAP)
 - Enable easy integration with various data sources and sinks
 - Ensure high performance and low latency for real-time, data intensive applications
 - Provide instrumentation and metrics for performance monitoring
@@ -22,7 +22,7 @@ This document outlines the planned features and improvements for the Trossen Dat
 
 ### Backends
 
-- [ ] LeRobot Backend
+- [ ] LeRobotV2 Backend
 - [x] MCAP Backend
 - [ ] Trossen Backend
 - [ ] Basic Custom Backend
@@ -53,7 +53,7 @@ This document outlines the planned features and improvements for the Trossen Dat
 ## Improvements
 
 - [ ] Synchronization of multiple data streams based on timestamps
-- [ ] Conversion utilities between different data formats (e.g., MCAP->LeRobot)
+- [ ] Conversion utilities between different data formats (e.g., TrossenMCAP->LeRobotV2)
 - [ ] Calibration data handling and storage
 
 ## Documentation

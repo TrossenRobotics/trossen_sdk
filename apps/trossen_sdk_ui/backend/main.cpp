@@ -1120,14 +1120,14 @@ int main() {
             };
 
             // Add backend configuration based on type
-            if (session.backend_type == "lerobot") {
+            if (session.backend_type == "lerobot_v2") {
                 // Get home directory for storage root
                 const char* home = std::getenv("HOME");
                 std::string storage_root = home ? std::string(home) + "/.cache/trossen_sdk"
                                                 : "/tmp/trossen_sdk";
 
-                global_config["lerobot_backend"] = {
-                    {"type", "lerobot_backend"},
+                global_config["lerobot_v2_backend"] = {
+                    {"type", "lerobot_v2_backend"},
                     {"root", storage_root},
                     {"encoder_threads", 2},
                     {"max_image_queue", 10},
@@ -1142,8 +1142,8 @@ int main() {
                     {"fps", 30.0}
                 };
             } else {  // mcap
-                global_config["mcap_backend"] = {
-                    {"type", "mcap_backend"},
+                global_config["trossen_mcap_backend"] = {
+                    {"type", "trossen_mcap_backend"},
                     {"robot_name", "/robot/joint_states"},
                     {"chunk_size_bytes", 4194304},
                     {"compression", "zstd"},

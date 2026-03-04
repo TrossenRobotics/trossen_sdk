@@ -1,18 +1,18 @@
 /**
- * @file widowxai_lerobot_async.cpp
- * @brief Demo for Trossen AI Solo with Mock/Hardware arms, Session Manager, LeRobot backend, and OpenCV camera (asynchronous monitoring)
+ * @file widowxai_lerobot.cpp
+ * @brief Complete Trossen AI Solo demo with Session Manager, TrossenMCAP backend, and OpenCV camera
  *
  * This demo combines:
  * - Trossen AI Solo hardware (leader + follower arms)
  * - Session Manager for multi-episode recording
- * - LeRobot backend for data storage
+ * - TrossenMCAP backend for data storage
  * - OpenCV camera producer for image capture
  * - Configurable episode count and duration
  *
  * Usage:
- *   ./widowxai_lerobot_async
- *   ./widowxai_lerobot_async --root-dir /data/recordings
- *   ./widowxai_lerobot_async --mock  # Use mock producers for testing without hardware
+ *   ./widowxai_lerobot
+ *   ./widowxai_lerobot --root-dir /data/recordings
+ *   ./widowxai_lerobot --mock  # Use mock producers for testing without hardware
  */
 
 #include <chrono>
@@ -33,6 +33,8 @@
 #include "trossen_sdk/hw/camera/realsense_depth_producer.hpp"
 #include "trossen_sdk/hw/camera/realsense_frame_cache.hpp"
 #include "trossen_sdk/hw/camera/realsense_producer.hpp"
+#include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
@@ -47,7 +49,7 @@
 struct Config {
   std::string dataset_id = "";  // empty = auto-generate
   std::string root = trossen::io::backends::get_default_root_path().string();
-  std::string repository_id = "TrossenRoboticsCommunity";  // Valid only for LeRobot backend
+  std::string repository_id = "TrossenRoboticsCommunity";  // Valid only for LeRobotV2 backend
   bool use_mock = false;
   bool show_help = false;
 
@@ -63,7 +65,7 @@ struct Config {
   std::string follower_ip = "192.168.1.4";
 
   // Dataset backend type
-  std::string backend_type = "mcap";
+  std::string backend_type = "trossen_mcap";
 };
 
 void print_usage(const char* prog_name) {
@@ -73,7 +75,7 @@ void print_usage(const char* prog_name) {
     << "  --dataset-id <string>    Dataset identifier (default: auto-generate UUID)\n"
     << "  --root <path>            Root directory for episodes (default: ~/.cache/trossen_sdk/)\n"
     << "  --repository-id <string> Repository identifier (default: TrossenRoboticsCommunity, "
-    << "only for LeRobot backend)\n"
+    << "only for LeRobotV2 backend)\n"
     << "  --mock                   Use mock producers instead of real hardware\n"
     << "  --camera-index <num>     Camera device index (default: 2, i.e., /dev/video2)\n"
     << "  --camera-width <pixels>  Camera width (default: 1920)\n"
@@ -168,7 +170,7 @@ int main(int argc, char** argv) {
     " @ " + std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
     " @ " + std::to_string(cfg.camera_fps) + " fps");
 
-  trossen::demo::print_config_banner("Trossen AI LeRobot Solo Complete Demo", config_lines);
+  trossen::demo::print_config_banner("Trossen AI LeRobotV2 Solo Complete Demo", config_lines);
 
   // Install signal handler for graceful shutdown
   trossen::demo::install_signal_handler();
@@ -275,7 +277,9 @@ int main(int argc, char** argv) {
   auto joint_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.joint_rate_hz));
   mgr.add_producer(joint_producer, joint_period);
 
-  // Camera producer (OpenCV or mock)
+  // ──────────────────────────────────────────────────────────
+  // Camera producer
+  // ──────────────────────────────────────────────────────────
   std::shared_ptr<trossen::hw::PolledProducer> camera_producer;
   if (cfg.use_mock) {
     trossen::hw::camera::MockCameraProducer::Config cam_cfg;
@@ -290,15 +294,31 @@ int main(int argc, char** argv) {
     std::cout << "  ✓ Mock camera producer (" << cfg.camera_fps << " Hz, "
               << cfg.camera_width << "x" << cfg.camera_height << ")\n";
   } else {
-    trossen::hw::camera::OpenCvCameraProducer::Config cam_cfg;
-    cam_cfg.device_index = cfg.camera_index;
-    cam_cfg.stream_id = "camera_main";
-    cam_cfg.encoding = "bgr8";
-    cam_cfg.width = cfg.camera_width;
-    cam_cfg.height = cfg.camera_height;
-    cam_cfg.fps = cfg.camera_fps;
-    cam_cfg.use_device_time = false;
-    camera_producer = std::make_shared<trossen::hw::camera::OpenCvCameraProducer>(cam_cfg);
+    // Create hardware component via registry
+    nlohmann::json hw_cfg = {
+      {"device_index", cfg.camera_index},
+      {"width", cfg.camera_width},
+      {"height", cfg.camera_height},
+      {"fps", cfg.camera_fps},
+      {"backend", "v4l2"}
+    };
+
+    auto camera_component = trossen::hw::HardwareRegistry::create(
+      "opencv_camera", "camera_main", hw_cfg);
+
+    // Create producer via registry
+    nlohmann::json prod_cfg = {
+      {"stream_id", "camera_main"},
+      {"encoding", "bgr8"},
+      {"use_device_time", false},
+      {"width", cfg.camera_width},
+      {"height", cfg.camera_height},
+      {"fps", cfg.camera_fps}
+    };
+
+    camera_producer = trossen::runtime::ProducerRegistry::create(
+      "opencv_camera", camera_component, prod_cfg);
+
     std::cout << "  ✓ OpenCV camera producer (" << cfg.camera_fps << " Hz, "
               << cfg.camera_width << "x" << cfg.camera_height << ")\n";
   }
@@ -306,83 +326,39 @@ int main(int argc, char** argv) {
   auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
   mgr.add_producer(camera_producer, camera_period);
 
-  // TODO(shantanuparab-tr): Add this to configurations after main executable is created
-  // // Create a Realsense Camera Producer (Hardcoded configuration for demo purposes)
+  // ──────────────────────────────────────────────────────────
+  // RealSense camera producer
+  // ──────────────────────────────────────────────────────────
 
-  // trossen::hw::camera::RealsenseCameraProducer::Config realsense_cfg;
-  // realsense_cfg.serial_number = "218622274938";  // Replace with your camera's serial number
-  // realsense_cfg.stream_id = "realsense_camera0";
-  // realsense_cfg.encoding = "bgr8";
-  // realsense_cfg.width = 640;
-  // realsense_cfg.height = 480;
-  // realsense_cfg.fps = 30;
-  // realsense_cfg.use_device_time = true;
-  // realsense_cfg.warmup_seconds = 2.0;
+  // Create hardware component via registry
+  nlohmann::json rs_hw_cfg = {
+    {"serial_number", "218622274938"},  // Replace with your camera's serial number
+    {"width", 640},
+    {"height", 480},
+    {"fps", 30},
+    {"use_depth", true},
+    {"force_hardware_reset", false}
+  };
 
-  // // Create Realsense config
-  // rs2::config cam_cfg;
+  auto realsense_component = trossen::hw::HardwareRegistry::create(
+    "realsense_camera", "realsense_0", rs_hw_cfg);
 
-  // // Create a realsense pipeline
-  // rs2::pipeline realsense_pipeline;
-  // auto camera_ = std::make_shared<rs2::pipeline>(realsense_pipeline);
+  // Create color producer via registry
+  nlohmann::json rs_prod_cfg = {
+    {"stream_id", "realsense_camera0"},
+    {"encoding", "bgr8"},
+    {"use_device_time", true},
+    {"width", 640},
+    {"height", 480},
+    {"fps", 30}
+  };
 
-  // // Enable the device using the unique ID
-  // if (!realsense_cfg.serial_number.empty()) {
-  //   cam_cfg.enable_device(realsense_cfg.serial_number);
-  // } else {
-  //   std::cout << "Unique ID is empty. Cannot connect to RealSense camera: "
-  //     << realsense_cfg.stream_id << std::endl;
-  //   throw std::runtime_error("Unique ID is empty for camera: " + realsense_cfg.stream_id);
-  // }
+  auto realsense_producer = trossen::runtime::ProducerRegistry::create(
+    "realsense_camera", realsense_component, rs_prod_cfg);
 
-  // // Enable the color stream as default
-  // cam_cfg.enable_stream(RS2_STREAM_COLOR, realsense_cfg.width, realsense_cfg.height,
-  //                   RS2_FORMAT_RGB8, realsense_cfg.fps);
-
-  // // Make this conditional to enable depth stream
-  // cam_cfg.enable_stream(RS2_STREAM_DEPTH, realsense_cfg.width, realsense_cfg.height,
-  //                   RS2_FORMAT_Z16, realsense_cfg.fps);
-  // try {
-  //   // Start the camera pipeline
-  //   rs2::pipeline_profile profile = camera_->start(cam_cfg);
-  // } catch (const rs2::error& e) {
-  //   std::cout << "Failed to enable device with Unique ID: " << realsense_cfg.serial_number
-  //             << ". Error: " << e.what() << ". Listing all available cameras." << std::endl;
-  //   std::cout << "Available cameras listed above. Please check outputs folder to get "
-  //       "Available cameras listed above. Please check outputs folder to get "
-  //       "images associated "
-  //       "with each camera." << std::endl;
-  //   throw std::runtime_error(
-  //       "Unique ID (serial number) is required to connect to RealSense camera");
-  // }
-
-  // auto frame_cache = std::make_shared<trossen::hw::camera::RealsenseFrameCache>(camera_, 2);
-
-  // auto realsense_producer =
-  //   std::make_shared<trossen::hw::camera::RealsenseCameraProducer>(frame_cache, realsense_cfg);
-
-  // auto realsense_period = std::chrono::milliseconds(static_cast<int>(1000.0f / 30.0f));
-
-  // mgr.add_producer(realsense_producer, realsense_period);
-  // std::cout << "  ✓ Realsense camera producer (30 Hz, 640x480)\n";
-
-  // trossen::hw::camera::RealsenseDepthCameraProducer::Config realsense_depth_cfg;
-  // // Replace with your camera's serial number
-  // realsense_depth_cfg.serial_number = "218622274938";
-  // realsense_depth_cfg.stream_id = "realsense_depth_camera0";
-  // realsense_depth_cfg.encoding = "16UC1";
-  // realsense_depth_cfg.width = 640;
-  // realsense_depth_cfg.height = 480;
-  // realsense_depth_cfg.fps = 30;
-  // realsense_depth_cfg.use_device_time = true;
-  // realsense_depth_cfg.warmup_seconds = 2.0;
-
-  // auto realsense_depth_producer =
-  //   std::make_shared<trossen::hw::camera::RealsenseDepthCameraProducer>(
-  //     frame_cache,
-  //     realsense_depth_cfg);
-  // mgr.add_producer(realsense_depth_producer, realsense_period);
-  // std::cout << "  ✓ Realsense depth camera producer (30 Hz, 640x480)\n";
+  auto realsense_period = std::chrono::milliseconds(static_cast<int>(1000.0f / 30.0f));
+  mgr.add_producer(realsense_producer, realsense_period);
+  std::cout << "  ✓ Realsense camera producer (30 Hz, 640x480)\n";
 
   std::cout << "\nProducers registered. Ready to record.\n";
 
@@ -448,9 +424,6 @@ int main(int argc, char** argv) {
 
     std::cout << "Recording...\n";
 
-    // Start async stats monitoring in SessionManager (runs in background thread)
-    mgr.start_async_monitoring();
-
     // Teleop loop (if using hardware)
     std::thread teleop_thread;
     if (!cfg.use_mock) {
@@ -463,20 +436,15 @@ int main(int argc, char** argv) {
       });
     }
 
-    // Main thread can now do other work or just wait for completion
-    // Use wait_for_auto_stop() to detect when episode completes (auto or manual)
-    // This respects the max_duration setting from config and returns when episode ends
-    mgr.wait_for_auto_stop();
+    // Blocking monitor call: keeps the main thread alive while the episode is recording,
+    // prevents threads from joining before data is collected, and updates/prints status logs.
+    trossen::runtime::SessionManager::Stats last_stats = mgr.monitor_episode();
 
-    // If Ctrl+C was pressed, ensure episode is stopped
-    if (trossen::demo::g_stop_requested && mgr.is_episode_active()) {
+    // Stop episode and wait for teleop thread
+    if (mgr.is_episode_active()) {
       mgr.stop_episode();
     }
 
-    // Get final stats from async monitoring (this will join the thread)
-    trossen::runtime::SessionManager::Stats last_stats = mgr.get_async_monitor_stats();
-
-    // Wait for teleop thread to finish
     if (!cfg.use_mock && teleop_thread.joinable()) {
       teleop_thread.join();
     }

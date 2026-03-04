@@ -1,14 +1,14 @@
 /**
- * @file mcap_schemas.hpp
- * @brief MCAP topic naming conventions and schema helpers
+ * @file trossen_mcap_schemas.hpp
+ * @brief TrossenMCAP topic naming conventions and schema helpers
  */
 
- #ifndef TROSSEN_SDK__IO__BACKENDS__MCAP__MCAP_SCHEMAS_HPP_
- #define TROSSEN_SDK__IO__BACKENDS__MCAP__MCAP_SCHEMAS_HPP_
+ #ifndef TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__TROSSEN_MCAP_SCHEMAS_HPP_
+ #define TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__TROSSEN_MCAP_SCHEMAS_HPP_
 
 #include <string>
 
-namespace trossen::mcapdefs {
+namespace trossen::trossen_mcap_defs {
 
 // Topic naming conventions (helpers only)
 // Image topic: /cameras/<camera_name>/image
@@ -55,6 +55,6 @@ inline std::string odometry_2d_topic(const std::string& stream_id) {
   return stream_id + "/odom/state";
 }
 
-}  // namespace trossen::mcapdefs
+}  // namespace trossen::trossen_mcap_defs
 
-#endif  // TROSSEN_SDK__IO__BACKENDS__MCAP__MCAP_SCHEMAS_HPP_
+#endif  // TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__TROSSEN_MCAP_SCHEMAS_HPP_

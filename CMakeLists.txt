@@ -12,8 +12,8 @@ option(TROSSEN_ENABLE_REALSENSE "Enable Intel RealSense support" OFF)
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
   src/backends/trossen/trossen_backend.cpp
-  src/backends/lerobot/lerobot_backend.cpp
-  src/backends/mcap/mcap_backend.cpp
+  src/backends/lerobot_v2/lerobot_v2_backend.cpp
+  src/backends/trossen_mcap/trossen_mcap_backend.cpp
   src/backends/null/null_backend.cpp
   src/configuration/global_config.cpp
   src/configuration/loaders/json_loader.cpp
@@ -209,8 +209,8 @@ if(TROSSEN_ENABLE_REALSENSE)
   target_link_libraries(trossen_sdk PUBLIC realsense2::realsense2)
 endif()
 
-# List proto files for MCAP backend
-set(TROSSEN_PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include/trossen_sdk/io/backends/mcap/proto)
+# List proto files for TrossenMCAP backend
+set(TROSSEN_PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include/trossen_sdk/io/backends/trossen_mcap/proto)
 set(PROTOBUF_IMPORT_DIRS ${TROSSEN_PROTO_PATH})
 set(TROSSEN_PROTO_FILES
   ${TROSSEN_PROTO_PATH}/JointState.proto
@@ -243,7 +243,7 @@ target_link_libraries(trossen_sdk PUBLIC ${Protobuf_LIBRARIES})
 target_include_directories(trossen_sdk PUBLIC
   ${Protobuf_INCLUDE_DIRS}
   ${CMAKE_CURRENT_BINARY_DIR}
-  ${CMAKE_CURRENT_BINARY_DIR}/include/trossen_sdk/io/backends/mcap/proto
+  ${CMAKE_CURRENT_BINARY_DIR}/include/trossen_sdk/io/backends/trossen_mcap/proto
 )
 
 target_include_directories(trossen_sdk PUBLIC

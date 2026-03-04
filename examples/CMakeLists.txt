@@ -4,7 +4,7 @@ target_link_libraries(demo_utils PUBLIC trossen_sdk)
 target_include_directories(demo_utils PUBLIC ${CMAKE_CURRENT_SOURCE_DIR})
 
 # SO101 demo
-add_executable(so101_teleop so101_lerobot.cpp)
+add_executable(so101_teleop so101_lerobot_v2.cpp)
 target_link_libraries(so101_teleop demo_utils trossen_sdk)
 
 # Trossen AI Solo demo
@@ -12,10 +12,10 @@ find_package(libtrossen_arm)
 add_executable(widowxai widowxai.cpp)
 target_link_libraries(widowxai demo_utils trossen_sdk libtrossen_arm)
 
-# Trossen AI Solo demo
+# Trossen AI Solo demo (LeRobotV2 backend)
 find_package(libtrossen_arm)
-add_executable(widowxai_lerobot widowxai_lerobot.cpp)
-target_link_libraries(widowxai_lerobot demo_utils trossen_sdk libtrossen_arm)
+add_executable(widowxai_lerobot_v2 widowxai_lerobot_v2.cpp)
+target_link_libraries(widowxai_lerobot_v2 demo_utils trossen_sdk libtrossen_arm)
 
 # Stationary AI Kit demo
 find_package(libtrossen_arm)
@@ -44,8 +44,8 @@ target_link_libraries(hardware_registry_demo trossen_sdk)
 # TODO (shantanuparab-tr): This example is broken due to the producer registry changes.
 # We need to update the example to use the new producer registry API.
 # find_package(libtrossen_arm)
-# add_executable(widowxai_lerobot_async widowxai_lerobot_async.cpp)
-# target_link_libraries(widowxai_lerobot_async demo_utils trossen_sdk libtrossen_arm)
+# add_executable(widowxai_lerobot_v2_async widowxai_lerobot_v2_async.cpp)
+# target_link_libraries(widowxai_lerobot_v2_async demo_utils trossen_sdk libtrossen_arm)
 
 # Producer registry demo
 add_executable(producer_registry_demo producer_registry_demo.cpp)
@@ -56,20 +56,20 @@ find_package(libtrossen_arm)
 add_executable(trossen_mobile_ai mobile/trossen_mobile_ai.cpp)
 target_link_libraries(trossen_mobile_ai demo_utils trossen_sdk libtrossen_arm)
 
-# MCAP replay demo
+# TrossenMCAP replay demo
 find_package(libtrossen_arm)
-add_executable(replay_mcap_jointstate replay_mcap_jointstate.cpp)
-target_include_directories(replay_mcap_jointstate PRIVATE
+add_executable(replay_trossen_mcap_jointstate replay_trossen_mcap_jointstate.cpp)
+target_include_directories(replay_trossen_mcap_jointstate PRIVATE
   ${mcap_SOURCE_DIR}/cpp/mcap/include
 )
-target_compile_definitions(replay_mcap_jointstate PRIVATE MCAP_IMPLEMENTATION)
-target_link_libraries(replay_mcap_jointstate demo_utils trossen_sdk libtrossen_arm zstd lz4)
+target_compile_definitions(replay_trossen_mcap_jointstate PRIVATE MCAP_IMPLEMENTATION)
+target_link_libraries(replay_trossen_mcap_jointstate demo_utils trossen_sdk libtrossen_arm zstd lz4)
 
-# MCAP to LeRobot converter with statistics
-add_executable(mcap_to_lerobot mcap_to_lerobot.cpp)
-target_include_directories(mcap_to_lerobot PRIVATE
+# TrossenMCAP to LeRobotV2 converter with statistics
+add_executable(trossen_mcap_to_lerobot_v2 trossen_mcap_to_lerobot_v2.cpp)
+target_include_directories(trossen_mcap_to_lerobot_v2 PRIVATE
   ${mcap_SOURCE_DIR}/cpp/mcap/include
   ${CMAKE_BINARY_DIR}  # For generated protobuf headers
 )
-target_compile_definitions(mcap_to_lerobot PRIVATE MCAP_IMPLEMENTATION)
-target_link_libraries(mcap_to_lerobot demo_utils trossen_sdk arrow parquet zstd lz4 protobuf ${OpenCV_LIBS})
+target_compile_definitions(trossen_mcap_to_lerobot_v2 PRIVATE MCAP_IMPLEMENTATION)
+target_link_libraries(trossen_mcap_to_lerobot_v2 demo_utils trossen_sdk arrow parquet zstd lz4 protobuf ${OpenCV_LIBS})

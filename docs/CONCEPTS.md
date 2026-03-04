@@ -82,8 +82,8 @@ Each backend implements:
 
 Available backends include:
 
-- **`McapBackend`**: Writes data to MCAP files with compression support
-- **`LeRobotBackend`**: Writes data in LeRobot dataset format with video encoding
+- **`TrossenMCAPBackend`**: Writes data to TrossenMCAP files with compression support
+- **`LeRobotV2Backend`**: Writes data in LeRobotV2 dataset format with video encoding
 - **`TrossenBackend`**: Custom Trossen format (not fully implemented yet)
 - **`NullBackend`**: Discards all data (useful for testing)
 
@@ -166,8 +166,8 @@ Key features:
 
 Registered backend types:
 
-- `"mcap"` → `McapBackend`
-- `"lerobot"` → `LeRobotBackend`
+- `"trossen_mcap"` → `TrossenMCAPBackend`
+- `"lerobot_v2"` → `LeRobotV2Backend`
 - `"trossen"` → `TrossenBackend`
 - `"null"` → `NullBackend`
 

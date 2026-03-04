@@ -84,7 +84,7 @@ struct RecordingSession {
     std::string action;  // Session action
     int num_episodes;
     double episode_duration;  // Duration in seconds
-    std::string backend_type;  // Backend type: "mcap" or "lerobot"
+    std::string backend_type;  // Backend type: "trossen_mcap" or "lerobot_v2"
 
     nlohmann::json to_json() const;
     static RecordingSession from_json(const nlohmann::json& j);

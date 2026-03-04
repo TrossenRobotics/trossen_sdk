@@ -1,10 +1,10 @@
 /**
- * @file mcap_backend_config.hpp
- * @brief Configuration for MCAP backend
+ * @file trossen_mcap_backend_config.hpp
+ * @brief Configuration for TrossenMCAP backend
  */
 
-#ifndef TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__MCAP_BACKEND_CONFIG_HPP_
-#define TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__MCAP_BACKEND_CONFIG_HPP_
+#ifndef TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__TROSSEN_MCAP_BACKEND_CONFIG_HPP_
+#define TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__TROSSEN_MCAP_BACKEND_CONFIG_HPP_
 
 #include "trossen_sdk/configuration/base_config.hpp"
 #include "trossen_sdk/configuration/config_registry.hpp"
@@ -13,23 +13,23 @@
 
 namespace trossen::configuration {
 
-// MCAP backend specific constants
-inline constexpr int MCAP_DEFAULT_CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
-inline constexpr char MCAP_DEFAULT_COMPRESSION[] = "";
+// TrossenMCAP backend specific constants
+inline constexpr int TROSSEN_MCAP_DEFAULT_CHUNK_SIZE_BYTES = 4 * 1024 * 1024;
+inline constexpr char TROSSEN_MCAP_DEFAULT_COMPRESSION[] = "";
 
-struct McapBackendConfig : public BaseConfig {
+struct TrossenMCAPBackendConfig : public BaseConfig {
   std::string root{trossen::io::backends::get_default_root_path().string()};
   std::string robot_name{trossen::io::backends::DEFAULT_ROBOT_NAME};
-  int chunk_size_bytes{MCAP_DEFAULT_CHUNK_SIZE_BYTES};
-  std::string compression{MCAP_DEFAULT_COMPRESSION};
+  int chunk_size_bytes{TROSSEN_MCAP_DEFAULT_CHUNK_SIZE_BYTES};
+  std::string compression{TROSSEN_MCAP_DEFAULT_COMPRESSION};
   std::string dataset_id{trossen::io::backends::auto_generate_dataset_id()};
   // TODO(shantanuparab-tr): Remove episode index if not being used
   int episode_index{0};
 
-  std::string type() const override { return "mcap_backend"; }
+  std::string type() const override { return "trossen_mcap_backend"; }
 
-  static  McapBackendConfig from_json(const nlohmann::json& j) {
-    McapBackendConfig c;
+  static TrossenMCAPBackendConfig from_json(const nlohmann::json& j) {
+    TrossenMCAPBackendConfig c;
 
     // Only override if present in JSON
     if (j.contains("root")) {
@@ -47,8 +47,8 @@ struct McapBackendConfig : public BaseConfig {
   }
 };
 
-REGISTER_CONFIG(McapBackendConfig, "mcap_backend");
+REGISTER_CONFIG(TrossenMCAPBackendConfig, "trossen_mcap_backend");
 
 }  // namespace trossen::configuration
 
-#endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__MCAP_BACKEND_CONFIG_HPP_
+#endif  // TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__TROSSEN_MCAP_BACKEND_CONFIG_HPP_

@@ -1,6 +1,6 @@
 /**
- * @file mcap_backend.cpp
- * @brief Implementation of McapBackend for Trossen SDK.
+ * @file trossen_mcap_backend.cpp
+ * @brief Implementation of TrossenMCAPBackend for Trossen SDK.
  */
 
 #include <chrono>
@@ -15,21 +15,21 @@
 #include "Odometry2D.pb.h"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
-#include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/version.hpp"
 
 namespace trossen::io::backends {
 
-REGISTER_BACKEND(McapBackend, "mcap")
+REGISTER_BACKEND(TrossenMCAPBackend, "trossen_mcap")
 
-McapBackend::McapBackend(
+TrossenMCAPBackend::TrossenMCAPBackend(
   const ProducerMetadataList&)
   : io::Backend() {
-  // This allows us to access the global configuration for the Mcap backend
+  // This allows us to access the global configuration for the TrossenMCAP backend
   // without passing it explicitly.
   cfg_ = trossen::configuration::GlobalConfig::instance()
-           .get_as<trossen::configuration::McapBackendConfig>(
-             "mcap_backend");
+           .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+             "trossen_mcap_backend");
   if (!cfg_) {
         std::cerr << "Backend config not found!" << std::endl;
         return;
@@ -39,7 +39,7 @@ McapBackend::McapBackend(
       cfg_->root = trossen::io::backends::get_default_root_path().string();
   }
   // Print the stored values
-  std::cout << "================= MCAP Backend Config =================" << std::endl;
+  std::cout << "================= TrossenMCAP Backend Config =================" << std::endl;
   std::cout << "Root Dir: " << cfg_->root << std::endl;
   std::cout << "Robot Name: " << cfg_->robot_name << std::endl;
   std::cout << "Chunk Size Bytes: " << cfg_->chunk_size_bytes << std::endl;
@@ -48,14 +48,14 @@ McapBackend::McapBackend(
   std::cout << "Episode Index: " << cfg_->episode_index << std::endl;
   std::cout << "======================================================" << std::endl;
   }
-McapBackend::~McapBackend() { close(); }
+TrossenMCAPBackend::~TrossenMCAPBackend() { close(); }
 
-void McapBackend::preprocess_episode()
+void TrossenMCAPBackend::preprocess_episode()
 {
   // No-op Delete If not needed
 }
 
-bool McapBackend::open() {
+bool TrossenMCAPBackend::open() {
   std::scoped_lock lk(writer_mutex_);
 
   // Early return if already opened
@@ -131,7 +131,7 @@ bool McapBackend::open() {
   return true;
 }
 
-void McapBackend::close() {
+void TrossenMCAPBackend::close() {
   std::scoped_lock lk(writer_mutex_);
   if (!opened_) {
     return;
@@ -154,17 +154,18 @@ void McapBackend::close() {
   }
   joint_channels_.clear();
   image_channels_.clear();
+  odometry_2d_channels_.clear();
   opened_ = false;
 }
 
-void McapBackend::flush() {
+void TrossenMCAPBackend::flush() {
   std::scoped_lock lk(writer_mutex_);
   if (!opened_) {
     return;
   }
 }
 
-void McapBackend::write(const data::RecordBase& record) {
+void TrossenMCAPBackend::write(const data::RecordBase& record) {
   std::scoped_lock lk(writer_mutex_);
   if (!opened_) return;
 
@@ -185,7 +186,7 @@ void McapBackend::write(const data::RecordBase& record) {
   }
 }
 
-void McapBackend::write_batch(std::span<const data::RecordBase* const> records) {
+void TrossenMCAPBackend::write_batch(std::span<const data::RecordBase* const> records) {
   // Acquire once for the batch to avoid per-message lock/unlock churn
   std::scoped_lock lk(writer_mutex_);
   if (!opened_) return;
@@ -205,7 +206,7 @@ void McapBackend::write_batch(std::span<const data::RecordBase* const> records) 
   }
 }
 
-foxglove::RawChannel* McapBackend::ensure_jointstate_channel(const std::string& stream_id) {
+foxglove::RawChannel* TrossenMCAPBackend::ensure_jointstate_channel(const std::string& stream_id) {
   auto it = joint_channels_.find(stream_id);
   if (it != joint_channels_.end()) {
     return &it->second;
@@ -220,7 +221,7 @@ foxglove::RawChannel* McapBackend::ensure_jointstate_channel(const std::string& 
 
   // Create channel with stream-specific topic
   auto channel_result = foxglove::RawChannel::create(
-    mcapdefs::joint_state_topic(stream_id),
+    trossen_mcap_defs::joint_state_topic(stream_id),
     "protobuf",
     schema,
     context_,
@@ -236,11 +237,11 @@ foxglove::RawChannel* McapBackend::ensure_jointstate_channel(const std::string& 
   return &inserted_it->second;
 }
 
-foxglove::RawChannel* McapBackend::ensure_image_channel(const std::string& camera_name) {
+foxglove::RawChannel* TrossenMCAPBackend::ensure_image_channel(const std::string& camera_name) {
   return ensure_image_channel_with_metadata(camera_name, { {"stream_type", "color"} });
 }
 
-foxglove::RawChannel* McapBackend::ensure_image_channel_with_metadata(
+foxglove::RawChannel* TrossenMCAPBackend::ensure_image_channel_with_metadata(
   const std::string& camera_name,
   const std::unordered_map<std::string, std::string>& metadata) {
   auto it = image_channels_.find(camera_name);
@@ -256,7 +257,7 @@ foxglove::RawChannel* McapBackend::ensure_image_channel_with_metadata(
 
   // Create channel
   auto channel_result = foxglove::RawChannel::create(
-    mcapdefs::image_topic(camera_name),
+    trossen_mcap_defs::image_topic(camera_name),
     "protobuf",
     schema,
     context_,
@@ -272,7 +273,7 @@ foxglove::RawChannel* McapBackend::ensure_image_channel_with_metadata(
   return &inserted_it->second;
 }
 
-void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
+void TrossenMCAPBackend::write_jointstate_record(const data::JointStateRecord& js) {
   auto* channel = ensure_jointstate_channel(js.id);
   if (!channel) {
     return;
@@ -314,10 +315,10 @@ void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
   }
 }
 
-void McapBackend::ensure_odometry_2d_channel(const std::string& stream_id) {
+foxglove::RawChannel* TrossenMCAPBackend::ensure_odometry_2d_channel(const std::string& stream_id) {
   auto it = odometry_2d_channels_.find(stream_id);
   if (it != odometry_2d_channels_.end()) {
-    return;
+    return &it->second;
   }
 
   foxglove::Schema schema;
@@ -327,7 +328,7 @@ void McapBackend::ensure_odometry_2d_channel(const std::string& stream_id) {
   schema.data_len = schema_data_odom2d_.size();
 
   auto channel_result = foxglove::RawChannel::create(
-    mcapdefs::odometry_2d_topic(stream_id),
+    trossen_mcap_defs::odometry_2d_topic(stream_id),
     "protobuf",
     schema,
     context_,
@@ -336,18 +337,16 @@ void McapBackend::ensure_odometry_2d_channel(const std::string& stream_id) {
   if (!channel_result.has_value()) {
     std::cerr << "Failed to create odometry 2D channel for " << stream_id << ": "
               << foxglove::strerror(channel_result.error()) << "\n";
-    return;
+    return nullptr;
   }
 
-  odometry_2d_channels_.emplace(stream_id, std::move(channel_result.value()));
+  auto [inserted_it, _] = odometry_2d_channels_.emplace(stream_id, std::move(channel_result.value()));
+  return &inserted_it->second;
 }
 
-void McapBackend::write_odometry_2d_record(const data::Odometry2DRecord& odom) {
-  ensure_odometry_2d_channel(odom.id);
-
-  auto it = odometry_2d_channels_.find(odom.id);
-  if (it == odometry_2d_channels_.end()) {
-    std::cerr << "Failed to find odometry 2D channel for stream: " << odom.id << "\n";
+void TrossenMCAPBackend::write_odometry_2d_record(const data::Odometry2DRecord& odom) {
+  auto* channel = ensure_odometry_2d_channel(odom.id);
+  if (!channel) {
     return;
   }
 
@@ -377,7 +376,7 @@ void McapBackend::write_odometry_2d_record(const data::Odometry2DRecord& odom) {
   std::string payload;
   out.SerializeToString(&payload);
 
-  auto st = it->second.log(
+  auto st = channel->log(
     reinterpret_cast<const std::byte*>(payload.data()),
     payload.size(),
     odom.ts.realtime.to_ns());
@@ -390,10 +389,10 @@ void McapBackend::write_odometry_2d_record(const data::Odometry2DRecord& odom) {
   }
 }
 
-void McapBackend::write_image_record(const data::ImageRecord& img) {
+void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
   // Determine if this is a depth frame based on encoding or topic
   const bool depth =
-    is_depth_encoding(img.encoding) || is_depth_topic(mcapdefs::image_topic(img.id));
+    is_depth_encoding(img.encoding) || is_depth_topic(trossen_mcap_defs::image_topic(img.id));
   foxglove::RawChannel* channel = nullptr;
   if (depth) {
     // Depth metadata; attempt to parse scale if provided in encoding (future) - for now leave
@@ -434,7 +433,7 @@ void McapBackend::write_image_record(const data::ImageRecord& img) {
   imsg.data.assign(data_ptr, data_ptr + data_size);
 
   // Encode to buffer
-  std::vector<uint8_t> payload(MCAP_INITIAL_ENCODED_BUFFER_SIZE);
+  std::vector<uint8_t> payload(TROSSEN_MCAP_INITIAL_ENCODED_BUFFER_SIZE);
   size_t encoded_len = 0;
   auto encode_result = imsg.encode(payload.data(), payload.size(), &encoded_len);
 
@@ -465,7 +464,7 @@ void McapBackend::write_image_record(const data::ImageRecord& img) {
   }
 }
 
-void McapBackend::register_schemas_once() {
+void TrossenMCAPBackend::register_schemas_once() {
   const auto* pool = google::protobuf::DescriptorPool::generated_pool();
 
   // Helper: build a self-contained FileDescriptorSet for one root .proto file
@@ -501,22 +500,22 @@ void McapBackend::register_schemas_once() {
   };
 
   schema_data_js_ = build_schema_blob(
-    "trossen_sdk/io/backends/mcap/proto/JointState.proto");
+    "trossen_sdk/io/backends/trossen_mcap/proto/JointState.proto");
   schema_data_odom2d_ = build_schema_blob(
-    "trossen_sdk/io/backends/mcap/proto/Odometry2D.proto");
+    "trossen_sdk/io/backends/trossen_mcap/proto/Odometry2D.proto");
 }
 
-bool McapBackend::is_depth_topic(const std::string& topic) {
+bool TrossenMCAPBackend::is_depth_topic(const std::string& topic) {
   // Simple heuristic: contains "/depth/" before final name
   return topic.find("/depth/") != std::string::npos;
 }
 
-bool McapBackend::is_depth_encoding(const std::string& enc) {
+bool TrossenMCAPBackend::is_depth_encoding(const std::string& enc) {
   return enc == "depth16" || enc == "32FC1" || enc == "16UC1";  // allow alias
 }
 
 
-uint32_t McapBackend::scan_existing_episodes() {
+uint32_t TrossenMCAPBackend::scan_existing_episodes() {
   std::filesystem::path base_path = std::filesystem::path(cfg_->root) / cfg_->dataset_id;
   // If directory doesn't exist, return 0
   if (!std::filesystem::exists(base_path)) {

@@ -35,7 +35,7 @@ public:
   /**
    * @brief Register a backend factory function
    *
-   * @param type Backend type string (e.g., "mcap", "lerobot")
+   * @param type Backend type string (e.g., "trossen_mcap", "lerobot_v2")
    * @param factory Factory function that creates backend instances
    *
    * @throws std::runtime_error if type is already registered

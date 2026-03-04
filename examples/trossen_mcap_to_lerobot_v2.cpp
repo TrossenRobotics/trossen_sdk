@@ -1,19 +1,19 @@
 /**
- * @file mcap_to_lerobot.cpp
- * @brief Convert MCAP joint state recordings to LeRobot-compatible format with stats
+ * @file trossen_mcap_to_lerobot_v2.cpp
+ * @brief Convert TrossenMCAP joint state recordings to LeRobotV2-compatible format with stats
  *
  * This tool combines MCAP to Parquet conversion and dataset statistics computation:
  * 1. Reads joint state data from MCAP files
- * 2. Converts to LeRobot V2 Parquet format
+ * 2. Converts to LeRobotV2 Parquet format
  * 3. Extracts camera images and encodes videos
  * 4. Computes and updates dataset statistics
  *
  * Usage:
- *   ./mcap_to_lerobot <path_to_mcap_file_or_folder> [dataset_root_dir]
+ *   ./trossen_mcap_to_lerobot_v2 <path_to_mcap_file_or_folder> [dataset_root_dir]
  *
  * Example:
- *   ./mcap_to_lerobot ~/datasets/episode_000000.mcap ~/lerobot_datasets
- *   ./mcap_to_lerobot ~/datasets/ ~/lerobot_datasets
+ *   ./trossen_mcap_to_lerobot_v2 ~/datasets/episode_000000.mcap ~/lerobot_v2_datasets
+ *   ./trossen_mcap_to_lerobot_v2 ~/datasets/ ~/lerobot_v2_datasets
  */
 
 #include <arrow/api.h>
@@ -42,12 +42,12 @@
 #include "RawImage.pb.h"
 #include "mcap/reader.hpp"
 #include "nlohmann/json.hpp"
-#include "trossen_sdk/io/backends/lerobot/lerobot_constants.hpp"
-#include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
+#include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_constants.hpp"
+#include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
-#include "trossen_sdk/configuration/types/backends/lerobot_backend_config.hpp"
+#include "trossen_sdk/configuration/types/backends/lerobot_v2_backend_config.hpp"
 
 struct JointStateMessage {
   uint64_t timestamp_ns;
@@ -63,10 +63,10 @@ struct Odometry2DMessage {
 };
 
 /**
- * @brief Configuration for LeRobot dataset conversion
+ * @brief Configuration for LeRobotV2 dataset conversion
  *
  * The folder structure is: dataset_root / repository_id / dataset_id / [data, images, videos, meta]
- * Example: ~/lerobot_datasets/trossen_robotics/widowxai_bimanual/data/chunk-000/episode_000000.parquet
+ * Example: ~/lerobot_v2_datasets/trossen_robotics/widowxai_bimanual/data/chunk-000/episode_000000.parquet
  */
 struct ParquetConfig {
   std::string mcap_file;
@@ -247,13 +247,13 @@ int main(int argc, char** argv) {
     std::cerr << "  Single file:  " << argv[0]
               << " ~/datasets/episode_000000.mcap\n";
     std::cerr << "  Full folder:  " << argv[0] << " ~/datasets/\n";
-    std::cerr << "  Custom path:  " << argv[0] << " ~/datasets/ ~/lerobot_datasets\n";
+    std::cerr << "  Custom path:  " << argv[0] << " ~/datasets/ ~/lerobot_v2_datasets\n";
     std::cerr << "  Custom IDs:   " << argv[0]
-              << " ~/datasets/ ~/lerobot_datasets my_org my_dataset\n";
+              << " ~/datasets/ ~/lerobot_v2_datasets my_org my_dataset\n";
     std::cerr << "\nThe script will:\n";
     std::cerr << "  1. Load repository_id and dataset_id from "
-              << "config/sdk_config.json (lerobot_backend section)\n";
-    std::cerr << "  2. Convert MCAP recordings to LeRobot V2 Parquet format\n";
+              << "config/sdk_config.json (lerobot_v2_backend section)\n";
+    std::cerr << "  2. Convert TrossenMCAP recordings to LeRobotV2 Parquet format\n";
     std::cerr << "  3. Extract camera images and encode MP4 videos\n";
     std::cerr << "  4. Generate metadata files (info.json, tasks.jsonl, episodes.jsonl)\n";
     std::cerr << "  5. Compute and update dataset statistics\n";
@@ -277,11 +277,11 @@ int main(int argc, char** argv) {
   auto j = trossen::configuration::JsonLoader::load(config_path);
   trossen::configuration::GlobalConfig::instance().load_from_json(j);
 
-  // Get LeRobot backend config
+  // Get LeRobotV2 backend config
   auto lerobot_config =
       trossen::configuration::GlobalConfig::instance()
-          .get_as<trossen::configuration::LeRobotBackendConfig>(
-              "lerobot_backend");
+          .get_as<trossen::configuration::LeRobotV2BackendConfig>(
+              "lerobot_v2_backend");
 
   // Use values from config, but allow command-line override
   std::string dataset_root_dir;
@@ -495,7 +495,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
   cfg.episode_index = episode_index;
 
-  // Create LeRobot folder structure: dataset_root / repo_id / dataset_name
+  // Create LeRobotV2 folder structure: dataset_root / repo_id / dataset_name
   fs::path full_dataset_path = fs::path(cfg.dataset_root) / cfg.repository_id / cfg.dataset_id;
 
   cfg.output_dir = full_dataset_path.string();
@@ -523,9 +523,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       "Output Parquet:   " + cfg.output_file,
       "Arms/Cameras:     Auto-detect from MCAP"};
 
-  trossen::demo::print_config_banner("MCAP to LeRobot Converter", config_lines);
+  trossen::demo::print_config_banner("TrossenMCAP to LeRobotV2 Converter", config_lines);
 
-  std::cout << "\nCreating LeRobot dataset structure...\n";
+  std::cout << "\nCreating LeRobotV2 dataset structure...\n";
 
   fs::path data_dir = full_dataset_path / trossen::io::backends::DATA_PATH_DIR / chunk_dir_name;
   fs::path images_dir = full_dataset_path / trossen::io::backends::IMAGES_DIR / chunk_dir_name;
@@ -1302,7 +1302,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   // ──────────────────────────────────────────────────────────
-  // Generate LeRobot metadata files
+  // Generate LeRobotV2 metadata files
   // ──────────────────────────────────────────────────────────
 
   std::cout << "\nGenerating metadata files...\n";
@@ -1422,7 +1422,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return 1;
   }
 
-  std::cout << "\n✓ Successfully created LeRobot V2 dataset episode!\n";
+  std::cout << "\n✓ Successfully created LeRobotV2 dataset episode!\n";
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
 
   return 0;

@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
   // Populate GlobalConfig so SessionManager picks up session + backend settings
   cfg.populate_global_config();
 
-  // Derive data root path from the MCAP backend config
+  // Derive data root path from the TrossenMCAP backend config
   const std::string root = cfg.mcap_backend.root;
 
   // Derive per-type rates from the producer list

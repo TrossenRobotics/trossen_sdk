@@ -1,11 +1,11 @@
 /**
  * @file widowxai.cpp
- * @brief Complete Trossen AI Solo demo with Session Manager, MCAP backend, and OpenCV camera
+ * @brief Complete Trossen AI Solo demo with Session Manager, TrossenMCAP backend, and OpenCV camera
  *
  * This demo combines:
  * - Trossen AI Solo hardware (leader + follower arms)
  * - Session Manager for multi-episode recording
- * - MCAP backend for data storage
+ * - TrossenMCAP backend for data storage
  * - OpenCV camera producer for image capture
  * - Configurable episode count and duration
  *
@@ -61,7 +61,7 @@ struct Config {
   std::string follower_ip = "192.168.1.4";
 
   // Dataset backend type
-  std::string backend_type = "mcap";
+  std::string backend_type = "trossen_mcap";
 };
 
 void print_usage(const char* prog_name) {
