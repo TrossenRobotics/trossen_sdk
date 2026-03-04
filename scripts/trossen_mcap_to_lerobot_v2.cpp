@@ -595,6 +595,33 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return 1;
   }
 
+  // Read trossen_sdk_recording metadata (contains dataset_info with joint names, camera specs)
+  nlohmann::json mcap_dataset_info;
+  auto* data_source = reader.dataSource();
+  const auto& meta_indexes = reader.metadataIndexes();
+  auto range = meta_indexes.equal_range("trossen_sdk_recording");
+  for (auto it = range.first; it != range.second; ++it) {
+    mcap::Record raw_record;
+    auto rs = mcap::McapReader::ReadRecord(*data_source, it->second.offset, &raw_record);
+    if (!rs.ok()) continue;
+    mcap::Metadata meta_record;
+    rs = mcap::McapReader::ParseMetadata(raw_record, &meta_record);
+    if (!rs.ok()) continue;
+    auto info_it = meta_record.metadata.find("dataset_info");
+    if (info_it != meta_record.metadata.end()) {
+      try {
+        mcap_dataset_info = nlohmann::json::parse(info_it->second);
+        std::cout << "  ✓ Found MCAP dataset_info metadata\n";
+        if (mcap_dataset_info.contains("robot_name")) {
+          cfg.robot_name = mcap_dataset_info["robot_name"].get<std::string>();
+          std::cout << "    Robot name from MCAP: " << cfg.robot_name << "\n";
+        }
+      } catch (const std::exception& e) {
+        std::cerr << "  Warning: Failed to parse dataset_info metadata: " << e.what() << "\n";
+      }
+    }
+  }
+
   std::map<mcap::ChannelId, std::string> channel_id_to_stream;
   std::map<mcap::ChannelId, std::string> camera_channels;
   mcap::ChannelId slate_base_channel_id = 0;
@@ -1350,16 +1377,38 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
     }
 
-    // Build observation.state feature
-    nlohmann::json obs_names = nlohmann::json::array();
-    for (const auto& follower_stream : cfg.follower_streams) {
-      std::string arm_name = follower_stream;
+    // Helper: get joint names for a stream from MCAP metadata, or fall back to positional names
+    auto get_joint_names = [&](const std::string& stream_id, int n) -> nlohmann::json {
+      if (!mcap_dataset_info.empty() &&
+          mcap_dataset_info.contains("streams") &&
+          mcap_dataset_info["streams"].contains(stream_id) &&
+          mcap_dataset_info["streams"][stream_id].contains("joint_names")) {
+        return mcap_dataset_info["streams"][stream_id]["joint_names"];
+      }
+      // Fallback: generate positional names prefixed with arm name (stripped of role prefix)
+      nlohmann::json names = nlohmann::json::array();
+      std::string arm_name = stream_id;
       size_t underscore_pos = arm_name.find('_');
       if (underscore_pos != std::string::npos) {
         arm_name = arm_name.substr(underscore_pos + 1);
       }
-      for (int i = 0; i < joints_per_stream; ++i) {
-        obs_names.push_back(arm_name + "_joint_" + std::to_string(i));
+      for (int i = 0; i < n; ++i) {
+        names.push_back(arm_name + "_joint_" + std::to_string(i));
+      }
+      return names;
+    };
+
+    // Base velocity names (from MCAP metadata or default)
+    std::vector<std::string> base_vel_names = {"linear_vel", "angular_vel"};
+    if (!mcap_dataset_info.empty() && mcap_dataset_info.contains("base_velocity_names")) {
+      base_vel_names = mcap_dataset_info["base_velocity_names"].get<std::vector<std::string>>();
+    }
+
+    // Build observation.state feature
+    nlohmann::json obs_names = nlohmann::json::array();
+    for (const auto& follower_stream : cfg.follower_streams) {
+      for (const auto& n : get_joint_names(follower_stream, joints_per_stream)) {
+        obs_names.push_back(n);
       }
     }
 
@@ -1367,9 +1416,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
     // Add base velocities at the end if mobile robot
     if (has_slate_base) {
-      obs_names.push_back("linear_vel");
-      obs_names.push_back("angular_vel");
-      obs_state_dim += 2;
+      for (const auto& n : base_vel_names) obs_names.push_back(n);
+      obs_state_dim += static_cast<int>(base_vel_names.size());
     }
 
     features["observation.state"]["dtype"] = "float32";
@@ -1379,13 +1427,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     // Build action feature
     nlohmann::json action_names = nlohmann::json::array();
     for (const auto& leader_stream : cfg.leader_streams) {
-      std::string arm_name = leader_stream;
-      size_t underscore_pos = arm_name.find('_');
-      if (underscore_pos != std::string::npos) {
-        arm_name = arm_name.substr(underscore_pos + 1);
-      }
-      for (int i = 0; i < joints_per_stream; ++i) {
-        action_names.push_back(arm_name + "_joint_" + std::to_string(i));
+      for (const auto& n : get_joint_names(leader_stream, joints_per_stream)) {
+        action_names.push_back(n);
       }
     }
 
@@ -1393,9 +1436,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
     // Add base velocities at the end if mobile robot
     if (has_slate_base) {
-      action_names.push_back("linear_vel");
-      action_names.push_back("angular_vel");
-      action_dim += 2;
+      for (const auto& n : base_vel_names) action_names.push_back(n);
+      action_dim += static_cast<int>(base_vel_names.size());
     }
     features["action"]["dtype"] = "float32";
     features["action"]["shape"] = nlohmann::json::array({action_dim});
@@ -1405,16 +1447,36 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     for (const auto& [channel_id, camera_name] : camera_channels) {
       std::string obs_key = "observation.images." + camera_name;
       features[obs_key]["dtype"] = "video";
-      features[obs_key]["shape"] = nlohmann::json::array({480, 640, 3});
       features[obs_key]["names"] = nlohmann::json::array({"height", "width", "channels"});
-      features[obs_key]["info"]["video.fps"] = 30.0;
-      features[obs_key]["info"]["video.height"] = 480;
-      features[obs_key]["info"]["video.width"] = 640;
-      features[obs_key]["info"]["video.channels"] = 3;
-      features[obs_key]["info"]["video.codec"] = "av1";
-      features[obs_key]["info"]["video.pix_fmt"] = "yuv420p";
-      features[obs_key]["info"]["video.is_depth_map"] = false;
-      features[obs_key]["info"]["has_audio"] = false;
+
+      // Use camera specs from MCAP metadata if available, otherwise fall back to defaults
+      if (!mcap_dataset_info.empty() &&
+          mcap_dataset_info.contains("cameras") &&
+          mcap_dataset_info["cameras"].contains(camera_name)) {
+        const auto& cam = mcap_dataset_info["cameras"][camera_name];
+        int h = cam.value("height", 480);
+        int w = cam.value("width", 640);
+        int ch = cam.value("channels", 3);
+        features[obs_key]["shape"] = nlohmann::json::array({h, w, ch});
+        features[obs_key]["info"]["video.fps"] = cam.value("fps", 30);
+        features[obs_key]["info"]["video.height"] = h;
+        features[obs_key]["info"]["video.width"] = w;
+        features[obs_key]["info"]["video.channels"] = ch;
+        features[obs_key]["info"]["video.codec"] = cam.value("codec", "av1");
+        features[obs_key]["info"]["video.pix_fmt"] = cam.value("pix_fmt", "yuv420p");
+        features[obs_key]["info"]["video.is_depth_map"] = cam.value("is_depth_map", false);
+        features[obs_key]["info"]["has_audio"] = cam.value("has_audio", false);
+      } else {
+        features[obs_key]["shape"] = nlohmann::json::array({480, 640, 3});
+        features[obs_key]["info"]["video.fps"] = 30.0;
+        features[obs_key]["info"]["video.height"] = 480;
+        features[obs_key]["info"]["video.width"] = 640;
+        features[obs_key]["info"]["video.channels"] = 3;
+        features[obs_key]["info"]["video.codec"] = "av1";
+        features[obs_key]["info"]["video.pix_fmt"] = "yuv420p";
+        features[obs_key]["info"]["video.is_depth_map"] = false;
+        features[obs_key]["info"]["has_audio"] = false;
+      }
     }
 
     // Add standard metadata features (timestamp, frame_index, episode_index, index, task_index)

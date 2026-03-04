@@ -221,6 +221,9 @@ private:
 
   /// @brief Statistics about written records
   Stats stats_{};
+
+  /// @brief Cached producer metadata for writing dataset info to MCAP on open
+  ProducerMetadataList producer_metadata_;
 };
 
 }  // namespace trossen::io::backends
