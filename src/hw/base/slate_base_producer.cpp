@@ -68,13 +68,13 @@ void SlateBaseProducer::poll(const std::function<void(std::shared_ptr<data::Reco
   rec->seq = seq_++;
   rec->id = cfg_.stream_id;
 
-  rec->pose_x     = chassis_data_.odom_x;
-  rec->pose_y     = chassis_data_.odom_y;
-  rec->pose_theta = chassis_data_.odom_z;
+  rec->pose.x     = chassis_data_.odom_x;
+  rec->pose.y     = chassis_data_.odom_y;
+  rec->pose.theta = chassis_data_.odom_z;
 
-  rec->vel_x     = chassis_data_.vel_x;
-  rec->vel_y     = chassis_data_.vel_y;
-  rec->vel_theta = chassis_data_.vel_z;
+  rec->twist.linear_x  = chassis_data_.vel_x;
+  rec->twist.linear_y  = chassis_data_.vel_y;
+  rec->twist.angular_z = chassis_data_.vel_z;
 
   // Emit the record
   emit(rec);

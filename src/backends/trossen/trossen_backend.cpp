@@ -198,19 +198,19 @@ void TrossenBackend::write_odometry_2d(const data::Odometry2DRecord& mb) {
     odometry_2d_csv_
       << "monotonic_ns,realtime_ns,id,"
       << "pose_x,pose_y,pose_theta,"
-      << "vel_x,vel_y,vel_theta\n";
+      << "twist_linear_x,twist_linear_y,twist_angular_z\n";
     odometry_2d_header_written_ = true;
   }
   odometry_2d_csv_
     << mb.ts.monotonic.to_ns() << ','
     << mb.ts.realtime.to_ns()  << ','
     << mb.id                   << ','
-    << std::setprecision(6) << mb.pose_x     << ','
-    << std::setprecision(6) << mb.pose_y     << ','
-    << std::setprecision(6) << mb.pose_theta << ','
-    << std::setprecision(6) << mb.vel_x      << ','
-    << std::setprecision(6) << mb.vel_y      << ','
-    << std::setprecision(6) << mb.vel_theta  << '\n';
+    << std::setprecision(6) << mb.pose.x     << ','
+    << std::setprecision(6) << mb.pose.y     << ','
+    << std::setprecision(6) << mb.pose.theta << ','
+    << std::setprecision(6) << mb.twist.linear_x  << ','
+    << std::setprecision(6) << mb.twist.linear_y  << ','
+    << std::setprecision(6) << mb.twist.angular_z << '\n';
 }
 
 void TrossenBackend::write_image(const data::RecordBase& base) {

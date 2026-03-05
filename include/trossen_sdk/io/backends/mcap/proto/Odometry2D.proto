@@ -3,8 +3,31 @@ package trossen_sdk.msg;
 
 import "Timestamp.proto";
 
-// 2D odometry state: pose and body-frame velocity.
-// Follows Nav2 nav_msgs/Odometry conventions.
+// 2D pose: position (x, y) and heading angle (theta).
+message Pose2D {
+  // Position along x-axis (m)
+  float x = 1;
+
+  // Position along y-axis (m)
+  float y = 2;
+
+  // Heading angle (rad)
+  float theta = 3;
+}
+
+// 2D body-frame twist: linear velocities and angular velocity.
+message Twist2D {
+  // Linear velocity along x (m/s)
+  float linear_x = 1;
+
+  // Linear velocity along y (m/s)
+  float linear_y = 2;
+
+  // Angular velocity around z (rad/s)
+  float angular_z = 3;
+}
+
+// 2D odometry state (pose + velocity), mirroring nav_msgs/Odometry.
 message Odometry2D {
   // Dual (monotonic + realtime) timestamp of the record
   trossen_sdk.Timestamp ts = 1;
@@ -12,21 +35,9 @@ message Odometry2D {
   // Sequence number of the record
   uint64 seq = 2;
 
-  // Odometry x position (m)
-  float pose_x = 3;
+  // Pose in the odom frame
+  Pose2D pose = 3;
 
-  // Odometry y position (m)
-  float pose_y = 4;
-
-  // Odometry heading angle (rad)
-  float pose_theta = 5;
-
-  // Linear velocity along x (m/s)
-  float vel_x = 6;
-
-  // Linear velocity along y (m/s)
-  float vel_y = 7;
-
-  // Angular velocity around z (rad/s)
-  float vel_theta = 8;
+  // Body-frame twist
+  Twist2D twist = 4;
 }

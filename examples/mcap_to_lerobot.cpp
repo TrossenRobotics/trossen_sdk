@@ -684,8 +684,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
       Odometry2DMessage msg;
       msg.timestamp_ns = messageView.message.logTime;
-      msg.vel_x = static_cast<double>(odom_msg.vel_x());
-      msg.vel_theta = static_cast<double>(odom_msg.vel_theta());
+      msg.vel_x = static_cast<double>(odom_msg.twist().linear_x());
+      msg.vel_theta = static_cast<double>(odom_msg.twist().angular_z());
       slate_base_messages.push_back(msg);
       ++total_messages;
       continue;

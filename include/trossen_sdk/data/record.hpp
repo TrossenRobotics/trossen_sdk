@@ -172,35 +172,28 @@ struct TeleopJointStateRecord : public RecordBase {
 };
 
 /**
- * @brief 2D odometry state (pose + velocity).
- *
- * Pose fields mirror Nav2 nav_msgs/Odometry convention:
- *   x, y      – position in the odom frame (metres)
- *   theta     – heading angle (radians)
- *
- * Velocity fields are body-frame twists:
- *   vel_x     – linear velocity along x (m/s)
- *   vel_y     – linear velocity along y (m/s)
- *   vel_theta – angular velocity around z (rad/s)
+ * @brief 2D odometry state (pose + velocity), mirroring nav_msgs/Odometry.
  */
 struct Odometry2DRecord : public RecordBase {
-  /// @brief Odometry x position (m)
-  float pose_x{0.f};
+  /// @brief 2D pose in the odom frame.
+  struct Pose {
+    /// @brief Position along x-axis (m)
+    float x{0.f};
+    /// @brief Position along y-axis (m)
+    float y{0.f};
+    /// @brief Heading angle (rad)
+    float theta{0.f};
+  } pose;
 
-  /// @brief Odometry y position (m)
-  float pose_y{0.f};
-
-  /// @brief Odometry heading angle (rad)
-  float pose_theta{0.f};
-
-  /// @brief Linear velocity along x (m/s)
-  float vel_x{0.f};
-
-  /// @brief Linear velocity along y (m/s)
-  float vel_y{0.f};
-
-  /// @brief Angular velocity around z (rad/s)
-  float vel_theta{0.f};
+  /// @brief Body-frame twist.
+  struct Twist {
+    /// @brief Linear velocity along x (m/s)
+    float linear_x{0.f};
+    /// @brief Linear velocity along y (m/s)
+    float linear_y{0.f};
+    /// @brief Angular velocity around z (rad/s)
+    float angular_z{0.f};
+  } twist;
 };
 
 /**

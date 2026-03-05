@@ -363,12 +363,16 @@ void McapBackend::write_odometry_2d_record(const data::Odometry2DRecord& odom) {
   real->set_nanos(odom.ts.realtime.nsec);
 
   out.set_seq(odom.seq);
-  out.set_pose_x(odom.pose_x);
-  out.set_pose_y(odom.pose_y);
-  out.set_pose_theta(odom.pose_theta);
-  out.set_vel_x(odom.vel_x);
-  out.set_vel_y(odom.vel_y);
-  out.set_vel_theta(odom.vel_theta);
+
+  auto* pose = out.mutable_pose();
+  pose->set_x(odom.pose.x);
+  pose->set_y(odom.pose.y);
+  pose->set_theta(odom.pose.theta);
+
+  auto* twist = out.mutable_twist();
+  twist->set_linear_x(odom.twist.linear_x);
+  twist->set_linear_y(odom.twist.linear_y);
+  twist->set_angular_z(odom.twist.angular_z);
 
   std::string payload;
   out.SerializeToString(&payload);
