@@ -285,7 +285,6 @@ int main(int argc, char** argv) {
     mgr.print_episode_header();
 
     if (!mgr.start_episode()) {
-      std::cerr << "[FAILED] Failed to start episode " << mgr.stats().current_episode_index << "\n";
       break;
     }
 

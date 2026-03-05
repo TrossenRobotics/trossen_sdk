@@ -238,7 +238,8 @@ static void print_usage(const char* program) {
             << "containing MCAP files\n";
   std::cerr << "\nOptions:\n";
   std::cerr << "  --config <path>              Config JSON file\n";
-  std::cerr << "                               (default: scripts/mcap_to_lerobot_config.json)\n";
+  std::cerr << "                               "
+            << "(default: scripts/trossen_mcap_to_lerobot_v2/config.json)\n";
   std::cerr << "  --set KEY=VALUE              Override a config value (repeatable)\n";
   std::cerr << "                               e.g. --set lerobot_v2_backend.dataset_id=my_ds\n";
   std::cerr << "  --dump-config                Print resolved config and exit\n";
@@ -251,7 +252,7 @@ static void print_usage(const char* program) {
             << " --set lerobot_v2_backend.root=~/out"
             << " --set lerobot_v2_backend.dataset_id=my_ds\n";
   std::cerr << "\nThe script will:\n";
-  std::cerr << "  1. Load settings from scripts/mcap_to_lerobot_config.json "
+  std::cerr << "  1. Load settings from scripts/trossen_mcap_to_lerobot_v2/config.json "
             << "(lerobot_v2_backend section)\n";
   std::cerr << "  2. Convert TrossenMCAP recordings to LeRobotV2 Parquet format\n";
   std::cerr << "  3. Extract camera images and encode MP4 videos\n";
@@ -272,17 +273,9 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  const auto& pos_args = cli.get_positional();
-  if (pos_args.empty()) {
-    print_usage(argv[0]);
-    return 1;
-  }
-
-  fs::path input_path(pos_args[0]);
-
-  // Load conversion configuration
+  // Load config before positional check so --dump-config works without an input path
   const std::string config_path =
-      cli.get_string("config", "scripts/mcap_to_lerobot_config.json");
+      cli.get_string("config", "scripts/trossen_mcap_to_lerobot_v2/config.json");
 
   if (!fs::exists(config_path)) {
     std::cerr << "Error: config file not found: " << config_path << "\n";
@@ -300,6 +293,14 @@ int main(int argc, char** argv) {
     trossen::configuration::dump_config(j, "TrossenMCAP to LeRobotV2 Config");
     return 0;
   }
+
+  const auto& pos_args = cli.get_positional();
+  if (pos_args.empty()) {
+    print_usage(argv[0]);
+    return 1;
+  }
+
+  fs::path input_path(pos_args[0]);
 
   trossen::configuration::GlobalConfig::instance().load_from_json(j);
 

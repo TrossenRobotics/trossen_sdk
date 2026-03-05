@@ -132,7 +132,8 @@ bool SessionManager::start_episode() {
   // TODO(lukeschmitt-tr): This "end of recording" check could be moved elsewhere - right now it
   // will stop recording on episode N+1 start attempt
   if (cfg_->max_episodes.has_value() && next_episode_index_ >= cfg_->max_episodes.value()) {
-    std::cerr << "Max episodes (" << cfg_->max_episodes.value() << ") reached." << std::endl;
+    std::cout << "Already has " << next_episode_index_ << "/"
+              << cfg_->max_episodes.value() << " episodes. Collection complete." << std::endl;
     return false;
   }
 

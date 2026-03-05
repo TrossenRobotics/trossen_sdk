@@ -105,7 +105,8 @@ int main(int argc, char** argv) {
   if (cli.has_flag("help")) {
     std::cerr << "Usage: " << argv[0] << " <path_to_mcap_file> [options]\n";
     std::cerr << "\nOptions:\n";
-    std::cerr << "  --config <path>   Config JSON (default: scripts/replay_config.json)\n";
+    std::cerr << "  --config <path>   Config JSON "
+              << "(default: scripts/replay_trossen_mcap_jointstate/config.json)\n";
     std::cerr << "  --set KEY=VALUE   Override config value (repeatable)\n";
     std::cerr << "  --speed <float>   Playback speed multiplier\n";
     std::cerr << "  --help            Show this help\n";
@@ -124,7 +125,8 @@ int main(int argc, char** argv) {
   }
 
   // Load config
-  const std::string config_path = cli.get_string("config", "scripts/replay_config.json");
+  const std::string config_path =
+      cli.get_string("config", "scripts/replay_trossen_mcap_jointstate/config.json");
   if (!fs::exists(config_path)) {
     std::cerr << "Error: config file not found: " << config_path << "\n";
     std::cerr << "Run from the repository root or use --config <path>.\n";
