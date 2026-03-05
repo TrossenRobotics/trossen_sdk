@@ -9,7 +9,7 @@
 
 namespace trossen::configuration {
 
-// ─── HardwareConfig ──────────────────────────────────────────────────────────
+// --- HardwareConfig ----------------------------------------------------------
 
 HardwareConfig HardwareConfig::from_json(const nlohmann::json& j) {
   HardwareConfig c;

@@ -24,7 +24,7 @@ public:
 
   void configure(const nlohmann::json& config) override {
     num_joints_ = config.value("num_joints", 6);
-    std::cout << "  ✓ Configured " << get_identifier()
+    std::cout << "  [ok] Configured " << get_identifier()
               << " (" << num_joints_ << " joints)\n";
   }
 
@@ -44,7 +44,7 @@ public:
   MockArmProducer(std::shared_ptr<MockArmComponent> hw, const nlohmann::json& config)
     : hardware_(hw) {
     stream_id_ = config.value("stream_id", "joint_states");
-    std::cout << "  ✓ Created MockArmProducer for " << hardware_->get_identifier()
+    std::cout << "  [ok] Created MockArmProducer for " << hardware_->get_identifier()
               << " (stream: " << stream_id_ << ")\n";
   }
 
@@ -75,7 +75,7 @@ public:
   explicit SyntheticProducer(const nlohmann::json& config) {
     stream_id_ = config.value("stream_id", "synthetic");
     frequency_ = config.value("frequency", 1.0);
-    std::cout << "  ✓ Created SyntheticProducer (stream: " << stream_id_
+    std::cout << "  [ok] Created SyntheticProducer (stream: " << stream_id_
               << ", freq: " << frequency_ << " Hz)\n";
   }
 
@@ -193,11 +193,11 @@ int main() {
 
   arm_producer->poll(emit_callback);
   synth_producer->poll(emit_callback);
-  std::cout << "  ✓ Emitted " << emit_count << " records\n";
+  std::cout << "  [ok] Emitted " << emit_count << " records\n";
 
   // Cleanup
   trossen::hw::ActiveHardwareRegistry::clear();
 
-  std::cout << "\n✓ Demo complete!\n\n";
+  std::cout << "\n[ok] Demo complete!\n\n";
   return 0;
 }

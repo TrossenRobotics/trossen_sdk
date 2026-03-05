@@ -8,7 +8,7 @@
 #include "libtrossen_arm/trossen_arm.hpp"
 #include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/so101_teleop_arm_producer.hpp"
-#include "trossen_sdk/hw/arm/arm_producer.hpp"
+#include "trossen_sdk/hw/arm/trossen_arm_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include <iostream>
 #include <algorithm>
@@ -67,10 +67,10 @@ bool validate_hardware_for_action(
             });
         if (prod_it != configs.producers.end()) {
             system_producers.push_back(*prod_it);
-            std::cout << "      ✓ FOUND: id='" << prod_it->id
+            std::cout << "      [ok] FOUND: id='" << prod_it->id
                       << "' type='" << prod_it->type << "'" << std::endl;
         } else {
-            std::cout << "      ✗ NOT FOUND in configs.producers" << std::endl;
+            std::cout << "      [FAILED] NOT FOUND in configs.producers" << std::endl;
         }
     }
 
@@ -134,7 +134,7 @@ bool validate_hardware_for_action(
                 std::cout << "    Producer type: '" << prod.type << "'" << std::endl;
                 if (prod.type == "teleop_widowx_arm") {
                     widowx_count++;
-                    std::cout << "    ✓ Found WidowX teleop producer!" << std::endl;
+                    std::cout << "    [ok] Found WidowX teleop producer!" << std::endl;
 
                     // Check that both leader and follower are configured
                     if (prod.leader_id.empty() || prod.follower_id.empty()) {
@@ -315,7 +315,7 @@ bool setup_so101_teleop(
             active_session->manager->add_producer(
                 camera_producer, camera_period);
             camera_count++;
-            std::cout << "  ✓ Registered camera producer: "
+            std::cout << "  [ok] Registered camera producer: "
                       << cam.name << std::endl;
         } else if (prod.type == "teleop_so101_arm") {
             // Handle SO101 teleop producer
@@ -365,7 +365,7 @@ bool setup_so101_teleop(
             auto teleop_period = std::chrono::milliseconds(33);  // ~30Hz
             active_session->manager->add_producer(teleop_producer, teleop_period);
             arm_count++;
-            std::cout << "  ✓ Registered SO101 teleop producer: " << prod.id << std::endl;
+            std::cout << "  [ok] Registered SO101 teleop producer: " << prod.id << std::endl;
         }
     }
 
@@ -382,7 +382,7 @@ bool setup_so101_teleop(
     auto leader_positions = leader_driver->get_joint_positions(false);
     follower_driver->set_joint_positions(leader_positions, false);
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    std::cout << "  ✓ Follower synced to leader" << std::endl;
+    std::cout << "  [ok] Follower synced to leader" << std::endl;
 
     // Start teleoperation thread (runs continuously, mirrors leader to follower)
     active_session->teleop_active = true;
@@ -409,7 +409,7 @@ bool setup_so101_teleop(
         std::cout << "SO101 teleoperation thread stopped" << std::endl;
     });
 
-    std::cout << "  ✓ SO101 teleoperation ready" << std::endl;
+    std::cout << "  [ok] SO101 teleoperation ready" << std::endl;
     return true;
 }
 
@@ -500,7 +500,7 @@ bool setup_widowx_teleop(
             active_session->manager->add_producer(
                 camera_producer, camera_period);
             camera_count++;
-            std::cout << "  ✓ Registered camera producer: "
+            std::cout << "  [ok] Registered camera producer: "
                       << cam.name << std::endl;
         } else if (prod.type == "teleop_widowx_arm") {
             // Handle WidowX teleop producer
@@ -562,7 +562,7 @@ bool setup_widowx_teleop(
             auto teleop_period = std::chrono::milliseconds(5);  // 200Hz
             active_session->manager->add_producer(teleop_producer, teleop_period);
             arm_count++;
-            std::cout << "  ✓ Registered WidowX teleop producer: " << prod.id << std::endl;
+            std::cout << "  [ok] Registered WidowX teleop producer: " << prod.id << std::endl;
         }
     }
 
@@ -586,7 +586,7 @@ bool setup_widowx_teleop(
     leader_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
     follower_driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
     std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-    std::cout << "  ✓ Arms staged to ready position" << std::endl;
+    std::cout << "  [ok] Arms staged to ready position" << std::endl;
 
     // Move follower to mirror leader's current position
     std::cout << "Syncing follower to leader position..." << std::endl;
@@ -600,7 +600,7 @@ bool setup_widowx_teleop(
         std::vector<double>(leader_driver->get_num_joints(), 0.0),
         0.0,
         false);
-    std::cout << "  ✓ Follower synced to leader" << std::endl;
+    std::cout << "  [ok] Follower synced to leader" << std::endl;
 
     // Start teleoperation thread (runs continuously, mirrors leader to follower)
     active_session->teleop_active = true;
@@ -681,14 +681,14 @@ bool setup_widowx_teleop(
                 std::this_thread::sleep_for(
                     std::chrono::duration<float>(moving_time_s + 0.1f));
 
-                std::cout << "  ✓ Arms returned to rest position" << std::endl;
+                std::cout << "  [ok] Arms returned to rest position" << std::endl;
             } catch (const std::exception& e) {
                 std::cerr << "Error resetting arms: " << e.what() << std::endl;
             }
         }
     });
 
-    std::cout << "  ✓ WidowX teleoperation ready" << std::endl;
+    std::cout << "  [ok] WidowX teleoperation ready" << std::endl;
     return true;
 }
 
@@ -740,7 +740,7 @@ bool setup_camera_recording(
         return false;
     }
 
-    std::cout << "  ✓ Registered " << producers_added << " camera producers" << std::endl;
+    std::cout << "  [ok] Registered " << producers_added << " camera producers" << std::endl;
     return true;
 }
 
@@ -833,7 +833,7 @@ bool setup_widowx_bimanual_teleop(
                 static_cast<int>(1000.0f / cam.fps));
             active_session->manager->add_producer(camera_producer, camera_period);
             camera_count++;
-            std::cout << "  ✓ Registered camera producer: " << cam.name << std::endl;
+            std::cout << "  [ok] Registered camera producer: " << cam.name << std::endl;
         } else if (prod.type == "teleop_widowx_arm") {
             // Collect WidowX teleop producers
             TeleopPairConfig pair;
@@ -913,7 +913,7 @@ bool setup_widowx_bimanual_teleop(
         auto teleop_period = std::chrono::milliseconds(5);  // 200Hz
         active_session->manager->add_producer(teleop_producer, teleop_period);
         arm_count++;
-        std::cout << "  ✓ Registered WidowX teleop producer " << (i + 1)
+        std::cout << "  [ok] Registered WidowX teleop producer " << (i + 1)
                   << ": " << pair.stream_id << std::endl;
     }
 
@@ -941,7 +941,7 @@ bool setup_widowx_bimanual_teleop(
     leader2->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
     follower2->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
     std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-    std::cout << "  ✓ All arms staged to ready position" << std::endl;
+    std::cout << "  [ok] All arms staged to ready position" << std::endl;
 
     // Sync both pairs: move followers to mirror leaders' current positions
     std::cout << "Syncing followers to leaders' positions..." << std::endl;
@@ -967,7 +967,7 @@ bool setup_widowx_bimanual_teleop(
     leader2->set_all_external_efforts(
         std::vector<double>(leader2->get_num_joints(), 0.0), 0.0, false);
 
-    std::cout << "  ✓ Both followers synced to leaders" << std::endl;
+    std::cout << "  [ok] Both followers synced to leaders" << std::endl;
 
     // Start bimanual teleoperation thread
     active_session->teleop_active = true;
@@ -1068,14 +1068,14 @@ bool setup_widowx_bimanual_teleop(
                 std::this_thread::sleep_for(
                     std::chrono::duration<float>(moving_time_s + 0.1f));
 
-                std::cout << "  ✓ All arms returned to rest position" << std::endl;
+                std::cout << "  [ok] All arms returned to rest position" << std::endl;
             } catch (const std::exception& e) {
                 std::cerr << "Error resetting bimanual arms: " << e.what() << std::endl;
             }
         }
     });
 
-    std::cout << "  ✓ WidowX bimanual teleoperation ready" << std::endl;
+    std::cout << "  [ok] WidowX bimanual teleoperation ready" << std::endl;
     return true;
 }
 

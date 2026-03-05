@@ -1,10 +1,4 @@
 {
-  "_comment": [
-    "TODO: This config file is a placeholder for the future SO101 migration.",
-    "The so101_lerobot_v2.cpp example should be migrated to use DataCollectionConfig::from_json()",
-    "following the pattern used in examples/solo/, examples/stationary/, and examples/mobile/.",
-    "See those directories for reference config structure with hardware.arms, producers, etc."
-  ],
   "session": {
     "max_episodes": 1,
     "episode_duration_s": 10,

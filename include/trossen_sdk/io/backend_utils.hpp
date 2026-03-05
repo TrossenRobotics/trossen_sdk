@@ -30,7 +30,7 @@ inline std::filesystem::path expand_user(const std::string& path) {
   if (!home) {
     return std::filesystem::path(path);
   }
-  // "~" → home, "~/foo" → home / "foo"
+  // "~" -> home, "~/foo" -> home / "foo"
   return std::filesystem::path(home) / path.substr(path.size() > 1 ? 2 : 1);
 }
 

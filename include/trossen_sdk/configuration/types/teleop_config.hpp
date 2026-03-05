@@ -14,7 +14,7 @@
 namespace trossen::configuration {
 
 /**
- * @brief A single leader→follower arm pairing for teleoperation
+ * @brief A single leader->follower arm pairing for teleoperation
  */
 struct TeleoperationPair {
   /// @brief Key in hardware.arms map for the leader arm
@@ -54,7 +54,7 @@ struct TeleoperationConfig {
   /// @brief Teleoperation control loop rate in Hz
   float rate_hz{1000.0f};
 
-  /// @brief Leader→follower pairings
+  /// @brief Leader->follower pairings
   std::vector<TeleoperationPair> pairs;
 
   static TeleoperationConfig from_json(const nlohmann::json& j) {

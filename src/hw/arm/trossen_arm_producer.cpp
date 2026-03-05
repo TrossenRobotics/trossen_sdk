@@ -9,7 +9,7 @@
 #include <utility>
 #include <stdexcept>
 
-#include "trossen_sdk/hw/arm/arm_producer.hpp"
+#include "trossen_sdk/hw/arm/trossen_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
 

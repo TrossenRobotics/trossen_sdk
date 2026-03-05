@@ -1,11 +1,5 @@
 {
-  "_notes": [
-    "Data is recorded exclusively in TrossenMCAP format.",
-    "To convert recorded TrossenMCAP data to LeRobotV2 format, run:",
-    "  ./build/examples/trossen_mcap_to_lerobot_v2 --help"
-  ],
-
-  "robot_name": "trossen_stationary_ai",
+  "robot_name": "trossen_mobile_ai",
 
   "hardware": {
     "arms": {
@@ -39,27 +33,24 @@
         "fps":           30
       },
       {
-        "id":            "camera_low",
+        "id":            "camera_left_wrist",
         "serial_number": "218622270304",
         "width":         640,
         "height":        480,
         "fps":           30
       },
       {
-        "id":            "camera_left_wrist",
+        "id":            "camera_right_wrist",
         "serial_number": "218622274938",
         "width":         640,
         "height":        480,
         "fps":           30
-      },
-      {
-        "id":            "camera_right_wrist",
-        "serial_number": "130322272628",
-        "width":         640,
-        "height":        480,
-        "fps":           30
       }
-    ]
+    ],
+    "mobile_base": {
+      "reset_odometry": false,
+      "enable_torque":  false
+    }
   },
 
   "producers": [
@@ -92,17 +83,16 @@
       "use_device_time": false
     },
     {
-      "type":            "realsense_camera",
-      "hardware_id":     "camera_high",
-      "stream_id":       "camera_high",
+      "type":            "slate_base",
+      "hardware_id":     "slate_base",
+      "stream_id":       "slate_base",
       "poll_rate_hz":    30.0,
-      "encoding":        "bgr8",
-      "use_device_time": true
+      "use_device_time": false
     },
     {
       "type":            "realsense_camera",
-      "hardware_id":     "camera_low",
-      "stream_id":       "camera_low",
+      "hardware_id":     "camera_high",
+      "stream_id":       "camera_high",
       "poll_rate_hz":    30.0,
       "encoding":        "bgr8",
       "use_device_time": true
@@ -136,14 +126,14 @@
 
   "backend": {
     "root":             "~/.trossen_sdk",
-    "dataset_id":       "stationary_dataset",
+    "dataset_id":       "mobile_dataset",
     "compression":      "",
     "chunk_size_bytes": 4194304
   },
 
   "session": {
-    "max_duration": 20.0,
-    "max_episodes": 5,
-    "backend_type": "trossen_mcap"
+    "max_duration":  20.0,
+    "max_episodes":  5,
+    "backend_type":  "trossen_mcap"
   }
 }

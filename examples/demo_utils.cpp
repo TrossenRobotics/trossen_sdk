@@ -81,7 +81,7 @@ void print_episode_summary(const std::string& file_path, runtime::SessionManager
   // Include file path length in calculation
   size_t file_path_width = 9 + file_path.length();  // "│ File: " (7) + path + " │" (2)
   // Title width
-  std::string title = " ✓ Episode " + std::to_string(stats.current_episode_index) + " Summary";
+  std::string title = " Episode " + std::to_string(stats.current_episode_index) + " Summary";
   size_t title_width = 2 + title.length();  // "│" + title + "│"
   // Use the maximum of all width requirements
   const size_t box_width = std::max({min_box_width, file_path_width, title_width});
@@ -218,10 +218,10 @@ bool perform_sanity_check(
                  actual_records <= static_cast<uint64_t>(max_expected));
 
   if (passed) {
-    std::cout << "  Status:               ✓ PASS (within "
+    std::cout << "  Status:               PASS (within "
               << config.tolerance_percent << "% tolerance)\n";
   } else {
-    std::cout << "  Status:               ✗ WARNING (outside expected range)\n";
+    std::cout << "  Status:               WARNING (outside expected range)\n";
     double deviation =
       100.0 * (static_cast<double>(actual_records) - expected_total) / expected_total;
     std::cout << "  Deviation:            " << std::fixed << std::setprecision(1)

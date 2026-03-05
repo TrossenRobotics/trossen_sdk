@@ -212,14 +212,14 @@ int main(int argc, char** argv) {
       std::cerr << "Failed to connect to leader on " << cfg.leader_port << "\n";
       return 1;
     }
-    std::cout << "  ✓ Leader arm connected (" << cfg.leader_port << ")\n";
+    std::cout << "  [ok] Leader arm connected (" << cfg.leader_port << ")\n";
 
     // Connect to follower
     if (!follower_driver->connect()) {
       std::cerr << "Failed to connect to follower on " << cfg.follower_port << "\n";
       return 1;
     }
-    std::cout << "  ✓ Follower arm connected (" << cfg.follower_port << ")\n";
+    std::cout << "  [ok] Follower arm connected (" << cfg.follower_port << ")\n";
   }
 
   trossen::runtime::SessionManager mgr;
@@ -247,7 +247,7 @@ int main(int argc, char** argv) {
       1.0                             // motion_scale
     };
     joint_producer = std::make_shared<trossen::hw::arm::TeleopMockJointStateProducer>(joint_cfg);
-    std::cout << "  ✓ Mock joint state producer (" << cfg.joint_rate_hz << " Hz, 6 joints)\n";
+    std::cout << "  [ok] Mock joint state producer (" << cfg.joint_rate_hz << " Hz, 6 joints)\n";
   } else {
     trossen::hw::arm::TeleopSO101ArmProducer::Config joint_cfg;
     joint_cfg.stream_id = "teleop_robot/joint_states";
@@ -255,7 +255,7 @@ int main(int argc, char** argv) {
 
     joint_producer = std::make_shared<trossen::hw::arm::TeleopSO101ArmProducer>(
       leader_driver, follower_driver, joint_cfg);
-    std::cout << "  ✓ SO101 arm producer (" << cfg.joint_rate_hz << " Hz)\n";
+    std::cout << "  [ok] SO101 arm producer (" << cfg.joint_rate_hz << " Hz)\n";
   }
 
   auto joint_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.joint_rate_hz));
@@ -275,7 +275,7 @@ int main(int argc, char** argv) {
     cam_cfg.pattern = trossen::hw::camera::MockCameraProducer::Pattern::Gradient;
     cam_cfg.warmup_frames = 3;
     camera_producer = std::make_shared<trossen::hw::camera::MockCameraProducer>(cam_cfg);
-    std::cout << "  ✓ Mock camera producer (" << cfg.camera_fps << " Hz, "
+    std::cout << "  [ok] Mock camera producer (" << cfg.camera_fps << " Hz, "
               << cfg.camera_width << "x" << cfg.camera_height << ")\n";
   } else {
     // Create hardware component via registry
@@ -303,7 +303,7 @@ int main(int argc, char** argv) {
     camera_producer = trossen::runtime::ProducerRegistry::create(
       "opencv_camera", camera_component, prod_cfg);
 
-    std::cout << "  ✓ OpenCV camera producer (" << cfg.camera_fps << " Hz, "
+    std::cout << "  [ok] OpenCV camera producer (" << cfg.camera_fps << " Hz, "
               << cfg.camera_width << "x" << cfg.camera_height << ")\n";
   }
 
@@ -344,7 +344,7 @@ int main(int argc, char** argv) {
 
     // Start episode
     if (!mgr.start_episode()) {
-      std::cerr << "✗ Failed to start episode " << mgr.stats().current_episode_index << "\n";
+      std::cerr << "[FAILED] Failed to start episode " << mgr.stats().current_episode_index << "\n";
       break;
     }
 
@@ -435,7 +435,7 @@ int main(int argc, char** argv) {
     std::cout << "\nDisconnecting SO101 arms...\n";
     leader_driver->disconnect();
     follower_driver->disconnect();
-    std::cout << "  ✓ Arms disconnected\n";
+    std::cout << "  [ok] Arms disconnected\n";
   }
 
   auto final_stats = mgr.stats();

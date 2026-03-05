@@ -189,19 +189,19 @@ int main(int argc, char** argv) {
       component);
 
     if (!arm_component) {
-      std::cerr << "  ✗ Failed to create component for " << arm_cfg.stream_id << "\n";
+      std::cerr << "  [FAILED] Failed to create component for " << arm_cfg.stream_id << "\n";
       continue;
     }
 
     auto driver = arm_component->get_hardware();
     if (!driver) {
-      std::cerr << "  ✗ Failed to get driver for " << arm_cfg.stream_id << "\n";
+      std::cerr << "  [FAILED] Failed to get driver for " << arm_cfg.stream_id << "\n";
       continue;
     }
 
     drivers[arm_cfg.stream_id] = driver;
     components[arm_cfg.stream_id] = component;
-    std::cout << "  ✓ " << arm_cfg.stream_id << " initialized (" << arm_cfg.ip_address << ")\n";
+    std::cout << "  [ok] " << arm_cfg.stream_id << " initialized (" << arm_cfg.ip_address << ")\n";
   }
 
   if (drivers.empty()) {
@@ -222,7 +222,7 @@ int main(int argc, char** argv) {
     driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
   }
   std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-  std::cout << "  ✓ Arms staged to ready position\n";
+  std::cout << "  [ok] Arms staged to ready position\n";
 
   // ──────────────────────────────────────────────────────────
   // Read MCAP file and parse joint states
@@ -323,7 +323,7 @@ int main(int argc, char** argv) {
     ++total_messages;
   }
 
-  std::cout << "  ✓ Parsed " << total_messages << " joint state messages\n";
+  std::cout << "  [ok] Parsed " << total_messages << " joint state messages\n";
   for (const auto& [stream_id, messages] : messages_by_stream) {
     std::cout << "    - " << stream_id << ": " << messages.size() << " messages\n";
   }
@@ -347,18 +347,19 @@ int main(int argc, char** argv) {
             auto slate_driver = slate_component->get_driver();
             if (slate_driver) {
               slate_drivers[stream_id] = slate_driver;
-              std::cout << "  ✓ " << stream_id << " initialized\n";
+              std::cout << "  [ok] " << stream_id << " initialized\n";
             } else {
-              std::cerr << "  ✗ Failed to get driver for " << stream_id << "\n";
+              std::cerr << "  [FAILED] Failed to get driver for " << stream_id << "\n";
             }
           } catch (const std::exception& e) {
-            std::cerr << "  ✗ Failed to initialize " << stream_id << ": " << e.what() << "\n";
+            std::cerr << "  [FAILED] Failed to initialize " << stream_id
+                      << ": " << e.what() << "\n";
           }
           break;
         }
       }
       if (!found_config) {
-        std::cout << "  ⓘ Skipping " << stream_id << " (no configuration provided)\n";
+        std::cout << "  [info] Skipping " << stream_id << " (no configuration provided)\n";
       }
     }
   }
@@ -388,10 +389,10 @@ int main(int argc, char** argv) {
     }
   }
   std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-  std::cout << "  ✓ Arms moved to starting positions\n";
+  std::cout << "  [ok] Arms moved to starting positions\n";
 
   if (!slate_drivers.empty()) {
-    std::cout << "  ✓ SLATE bases ready (starting from zero velocity)\n";
+    std::cout << "  [ok] SLATE bases ready (starting from zero velocity)\n";
   }
 
   std::cout << "\nStarting replay in 3 seconds...\n";

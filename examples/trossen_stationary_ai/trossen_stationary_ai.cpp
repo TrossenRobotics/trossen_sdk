@@ -1,29 +1,28 @@
 /**
- * @file trossen_mobile_ai.cpp
- * @brief Bimanual AI Kit demo — 4 arms + SLATE mobile base with config-driven setup
+ * @file trossen_stationary_ai.cpp
+ * @brief Bimanual AI Kit demo - 4 arms + RealSense cameras with config-driven setup
  *
- * Records all 4 arms (both leaders and followers) along with SLATE mobile base
- * velocity data and RealSense cameras. All hardware parameters, session settings,
- * and teleop setup are driven by a single JSON config file with optional CLI overrides.
+ * Records all 4 arms (both leaders and followers) along with RealSense cameras.
+ * All hardware parameters, session settings, and teleop setup are driven by a
+ * single JSON config file with optional CLI overrides.
  *
  * Usage:
- *   ./trossen_mobile_ai [OPTIONS]
+ *   ./trossen_stationary_ai [OPTIONS]
  *
  *   --config PATH       Path to robot config JSON
- *                       [default: examples/mobile/config.json]
+ *                       [default: examples/trossen_stationary_ai/config.json]
  *   --set KEY=VALUE     Override a config value using dot notation (repeatable)
  *   --dump-config       Print merged config as JSON and exit
  *   --help              Show this help and exit
  *
  * Examples:
- *   ./trossen_mobile_ai
- *   ./trossen_mobile_ai --config examples/mobile/config.json
- *   ./trossen_mobile_ai --set hardware.arms.leader_left.ip_address=10.0.0.1
- *   ./trossen_mobile_ai --set session.max_duration=30 --set producers.mobile_base.poll_rate_hz=60
- *   ./trossen_mobile_ai --dump-config
+ *   ./trossen_stationary_ai
+ *   ./trossen_stationary_ai --config examples/trossen_stationary_ai/config.json
+ *   ./trossen_stationary_ai --set hardware.arms.leader_left.ip_address=10.0.0.1
+ *   ./trossen_stationary_ai --set session.max_duration=30 --set session.backend_type=lerobot
+ *   ./trossen_stationary_ai --dump-config
  */
 
-#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -38,11 +37,8 @@
 #include "trossen_sdk/configuration/cli_parser.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/configuration/data_collection_config.hpp"
-#include "trossen_sdk/hw/active_hardware_registry.hpp"
-#include "trossen_sdk/hw/arm/arm_producer.hpp"
+#include "trossen_sdk/hw/arm/trossen_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
-#include "trossen_sdk/hw/base/slate_base_component.hpp"
-#include "trossen_sdk/hw/base/slate_base_producer.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
@@ -56,14 +52,14 @@ static void print_usage(const char* program) {
     "\n"
     "Options:\n"
     "  --config PATH      Path to robot config JSON\n"
-    "                     [default: examples/mobile/config.json]\n"
+    "                     [default: examples/trossen_stationary_ai/config.json]\n"
     "  --set KEY=VALUE    Override a config value using dot notation (repeatable)\n"
     "  --dump-config      Print merged config as JSON and exit\n"
     "  --help             Show this help and exit\n"
     "\n"
     "Examples:\n"
     "  " << program << "\n"
-    "  " << program << " --config examples/mobile/config.json\n"
+    "  " << program << " --config examples/trossen_stationary_ai/config.json\n"
     "  " << program << " --set hardware.arms.leader_left.ip_address=10.0.0.1\n"
     "  " << program << " --set session.max_duration=30\n"
     "  " << program << " --dump-config\n";
@@ -78,7 +74,7 @@ int main(int argc, char** argv) {
   }
 
   const std::string config_path =
-    cli.get_string("config", "examples/mobile/config.json");
+    cli.get_string("config", "examples/trossen_stationary_ai/config.json");
 
   if (!std::filesystem::exists(config_path)) {
     std::cerr << "Error: config file not found: " << config_path << "\n";
@@ -93,7 +89,7 @@ int main(int argc, char** argv) {
   }
 
   if (cli.has_flag("dump-config")) {
-    trossen::configuration::dump_config(j, "Trossen Mobile AI Kit Config");
+    trossen::configuration::dump_config(j, "Trossen Stationary AI Kit Config");
     return 0;
   }
 
@@ -109,7 +105,6 @@ int main(int argc, char** argv) {
   // Derive per-type rates from the producer list
   float joint_rate_hz = 30.0f;
   float camera_fps = 30.0f;
-  float base_rate_hz = 30.0f;
   for (const auto& p : cfg.producers) {
     if (p.type == "trossen_arm") {
       joint_rate_hz = p.poll_rate_hz;
@@ -119,12 +114,6 @@ int main(int argc, char** argv) {
   for (const auto& p : cfg.producers) {
     if (p.type == "realsense_camera" || p.type == "opencv_camera") {
       camera_fps = p.poll_rate_hz;
-      break;
-    }
-  }
-  for (const auto& p : cfg.producers) {
-    if (p.type == "slate_base") {
-      base_rate_hz = p.poll_rate_hz;
       break;
     }
   }
@@ -140,9 +129,6 @@ int main(int argc, char** argv) {
       "Arm [" + id + "]:  " + arm.ip_address + " (" + arm.end_effector + ")");
   }
   config_lines.push_back("Joint rate:           " + std::to_string(joint_rate_hz) + " Hz");
-  if (cfg.hardware.mobile_base.has_value()) {
-    config_lines.push_back("Mobile base rate:     " + std::to_string(base_rate_hz) + " Hz");
-  }
   for (const auto& cam : cfg.hardware.cameras) {
     config_lines.push_back(
       "Camera [" + cam.id + "]:  " + cam.serial_number + "  " +
@@ -154,7 +140,7 @@ int main(int argc, char** argv) {
     std::string(cfg.teleop.enabled ? "enabled" : "disabled") +
     " (" + std::to_string(cfg.teleop.pairs.size()) + " pairs)");
 
-  trossen::demo::print_config_banner("Trossen Mobile AI Kit Demo Usage", config_lines);
+  trossen::demo::print_config_banner("Trossen Stationary AI Kit Demo Usage", config_lines);
 
   trossen::demo::install_signal_handler();
   std::filesystem::create_directories(root);
@@ -173,17 +159,7 @@ int main(int argc, char** argv) {
       "trossen_arm", id, arm_cfg.to_json(), true);
     arm_components[id] =
       std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(component);
-    std::cout << "  ✓ Arm [" << id << "] configured (" << arm_cfg.ip_address << ")\n";
-  }
-
-  // Initialize SLATE mobile base (if configured)
-  std::shared_ptr<trossen::hw::HardwareComponent> slate_base_component;
-  if (cfg.hardware.mobile_base.has_value()) {
-    slate_base_component =
-      std::make_shared<trossen::hw::base::SlateBaseComponent>("slate_base");
-    slate_base_component->configure(cfg.hardware.mobile_base->to_json());
-    trossen::hw::ActiveHardwareRegistry::register_active("slate_base", slate_base_component);
-    std::cout << "  ✓ SLATE mobile base configured\n";
+    std::cout << "  [ok] Arm [" << id << "] configured (" << arm_cfg.ip_address << ")\n";
   }
 
   // Stage all arms to starting positions
@@ -194,7 +170,7 @@ int main(int argc, char** argv) {
     driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
   }
   std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-  std::cout << "  ✓ All arms staged to starting positions\n";
+  std::cout << "  [ok] All arms staged to starting positions\n";
 
   // Adjust gripper tolerance for follower arms
   for (const auto& pair : cfg.teleop.pairs) {
@@ -230,14 +206,11 @@ int main(int argc, char** argv) {
       cam_cfg.type, cam_cfg.id, cam_cfg.to_json());
     camera_components[cam_cfg.id] = cam_component;
     camera_cfg_map[cam_cfg.id] = &cam_cfg;
-    std::cout << "  ✓ Camera [" << cam_cfg.id << "] initialized ("
+    std::cout << "  [ok] Camera [" << cam_cfg.id << "] initialized ("
               << cam_cfg.serial_number << ")\n";
   }
 
   std::cout << "Creating producers...\n";
-
-  // base_prod must outlive the loop — used later in the velocity thread
-  std::shared_ptr<trossen::hw::PolledProducer> base_prod;
 
   // One producer per entry in the producers list
   for (const auto& prod_cfg : cfg.producers) {
@@ -250,15 +223,8 @@ int main(int argc, char** argv) {
         arm_components.at(prod_cfg.hardware_id),
         prod_cfg.to_registry_json());
       mgr.add_producer(prod, period);
-      std::cout << "  ✓ Arm producer [" << prod_cfg.stream_id << "] ("
+      std::cout << "  [ok] Arm producer [" << prod_cfg.stream_id << "] ("
                 << prod_cfg.poll_rate_hz << " Hz)\n";
-    } else if (prod_cfg.type == "slate_base" && slate_base_component) {
-      base_prod = trossen::runtime::ProducerRegistry::create(
-        "slate_base",
-        slate_base_component,
-        prod_cfg.to_registry_json());
-      mgr.add_producer(base_prod, period);
-      std::cout << "  ✓ Mobile base producer (" << prod_cfg.poll_rate_hz << " Hz)\n";
     } else if (prod_cfg.type == "realsense_camera" || prod_cfg.type == "opencv_camera") {
       const auto* cam = camera_cfg_map.at(prod_cfg.hardware_id);
       auto prod = trossen::runtime::ProducerRegistry::create(
@@ -266,7 +232,7 @@ int main(int argc, char** argv) {
         camera_components.at(prod_cfg.hardware_id),
         prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
       mgr.add_producer(prod, period);
-      std::cout << "  ✓ Camera producer [" << prod_cfg.stream_id << "] ("
+      std::cout << "  [ok] Camera producer [" << prod_cfg.stream_id << "] ("
                 << prod_cfg.poll_rate_hz << " Hz, "
                 << cam->width << "x" << cam->height << ")\n";
     }
@@ -300,7 +266,7 @@ int main(int argc, char** argv) {
           leader_driver->get_all_positions(), moving_time_s, false);
       }
       std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-      std::cout << "  ✓ Followers moved to match leaders\n";
+      std::cout << "  [ok] Followers moved to match leaders\n";
 
       std::cout << "\n!! Enabling teleop mode !!\n";
       for (const auto& pair : cfg.teleop.pairs) {
@@ -312,7 +278,7 @@ int main(int argc, char** argv) {
         driver->set_all_modes(trossen_arm::Mode::external_effort);
         driver->set_all_external_efforts(
           std::vector<double>(driver->get_num_joints(), 0.0), 0.0, false);
-        std::cout << "   " << pair.leader << ": gravity compensation → "
+        std::cout << "   " << pair.leader << ": gravity compensation -> "
                   << pair.follower << " will mirror\n";
       }
       std::cout << "\n";
@@ -321,7 +287,7 @@ int main(int argc, char** argv) {
     mgr.print_episode_header();
 
     if (!mgr.start_episode()) {
-      std::cerr << "✗ Failed to start episode " << mgr.stats().current_episode_index << "\n";
+      std::cerr << "[FAILED] Failed to start episode " << mgr.stats().current_episode_index << "\n";
       break;
     }
 
@@ -349,17 +315,6 @@ int main(int argc, char** argv) {
       }
     });
 
-    // Velocity polling thread keeps base_prod active during the episode
-    std::thread velocity_thread([&]() {
-      if (!base_prod) {
-        return;
-      }
-      while (mgr.is_episode_active() && !trossen::demo::g_stop_requested) {
-        base_prod->poll([](std::shared_ptr<trossen::data::RecordBase>) {});
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-      }
-    });
-
     trossen::runtime::SessionManager::Stats last_stats = mgr.monitor_episode();
 
     if (mgr.is_episode_active()) {
@@ -367,9 +322,6 @@ int main(int argc, char** argv) {
     }
     if (teleop_thread.joinable()) {
       teleop_thread.join();
-    }
-    if (velocity_thread.joinable()) {
-      velocity_thread.join();
     }
 
     const double actual_duration =
@@ -419,9 +371,8 @@ int main(int argc, char** argv) {
   const auto final_stats = mgr.stats();
   std::vector<std::string> extra_info = {
     "Data streams:         " +
-      std::to_string(cfg.hardware.arms.size()) + " arms" +
-      (slate_base_component ? " + mobile base velocity" : "") +
-      " + " + std::to_string(cfg.hardware.cameras.size()) + " cameras"
+      std::to_string(cfg.hardware.arms.size()) + " arms + " +
+      std::to_string(cfg.hardware.cameras.size()) + " cameras"
   };
   trossen::demo::print_final_summary(
     final_stats.total_episodes_completed, root, extra_info);

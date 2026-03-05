@@ -398,7 +398,7 @@ int main(int argc, char** argv) {
       successful++;
     } else {
       failed++;
-      std::cerr << "\n✗ Failed to process: " << mcap_path.string() << "\n";
+      std::cerr << "\n[FAILED] Failed to process: " << mcap_path.string() << "\n";
     }
   }
 
@@ -480,7 +480,7 @@ int main(int argc, char** argv) {
               stats_file << episode_stats.dump() << "\n";
             }
             stats_file.close();
-            std::cout << "  ✓ Updated " << stats_path.filename().string() << " with "
+            std::cout << "  [ok] Updated " << stats_path.filename().string() << " with "
                       << all_stats.size() << " episode(s)\n";
           } else {
             std::cerr << "  Warning: Failed to write statistics file\n";
@@ -565,10 +565,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     fs::create_directories(videos_dir);
     fs::create_directories(meta_dir);
 
-    std::cout << "  ✓ Created data directory:   " << data_dir.string() << "\n";
-    std::cout << "  ✓ Created images directory: " << images_dir.string() << "\n";
-    std::cout << "  ✓ Created videos directory: " << videos_dir.string() << "\n";
-    std::cout << "  ✓ Created meta directory:   " << meta_dir.string() << "\n";
+    std::cout << "  [ok] Created data directory:   " << data_dir.string() << "\n";
+    std::cout << "  [ok] Created images directory: " << images_dir.string() << "\n";
+    std::cout << "  [ok] Created videos directory: " << videos_dir.string() << "\n";
+    std::cout << "  [ok] Created meta directory:   " << meta_dir.string() << "\n";
   } catch (const std::exception& e) {
     std::cerr << "Error: Failed to create directories: " << e.what() << "\n";
     return 1;
@@ -630,9 +630,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       try {
         // Parse the JSON string into our mcap_dataset_info object
         mcap_dataset_info = nlohmann::json::parse(info_it->second);
-        std::cout << "  ✓ Found MCAP dataset_info metadata\n";
-
-        // Update robot name from metadata if available
+        std::cout << "  [ok] Found MCAP dataset_info metadata\n";
         if (mcap_dataset_info.contains("robot_name")) {
           cfg.robot_name = mcap_dataset_info["robot_name"].get<std::string>();
           std::cout << "    Robot name from MCAP: " << cfg.robot_name << "\n";
@@ -673,7 +671,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
       slate_base_channel_id = channel_id;
       has_slate_base = true;
-      std::cout << "    ✓ Found odometry stream for mobile robot: " << stream_id << "\n";
+      std::cout << "    [ok] Found odometry stream for mobile robot: " << stream_id << "\n";
       continue;
     }
 
@@ -688,10 +686,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
       if (stream_id.find("leader") != std::string::npos) {
         detected_leader_streams.push_back(stream_id);
-        std::cout << "    ✓ Detected leader stream: " << stream_id << "\n";
+        std::cout << "    [ok] Detected leader stream: " << stream_id << "\n";
       } else if (stream_id.find("follower") != std::string::npos) {
         detected_follower_streams.push_back(stream_id);
-        std::cout << "    ✓ Detected follower stream: " << stream_id << "\n";
+        std::cout << "    [ok] Detected follower stream: " << stream_id << "\n";
       }
     }
 
@@ -717,7 +715,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     std::sort(detected_follower_streams.begin(), detected_follower_streams.end());
     cfg.leader_streams = detected_leader_streams;
     cfg.follower_streams = detected_follower_streams;
-    std::cout << "\n  ✓ Auto-detected configuration:\n";
+    std::cout << "\n  [ok] Auto-detected configuration:\n";
     std::cout << "    Leader streams (" << cfg.leader_streams.size() << "): ";
     for (const auto& s : cfg.leader_streams) std::cout << s << " ";
     std::cout << "\n    Follower streams (" << cfg.follower_streams.size() << "): ";
@@ -737,7 +735,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     if (!all_streams.empty()) {
       cfg.leader_streams = all_streams;
       cfg.follower_streams = all_streams;
-      std::cout << "\n  ✓ Single robot mode detected " << all_streams.size() << " stream(s):\n    ";
+      std::cout << "\n  [ok] Single robot mode detected " << all_streams.size()
+                << " stream(s):\n    ";
       for (const auto& s : all_streams) std::cout << s << " ";
       std::cout << "\n";
     } else {
@@ -814,7 +813,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
   }
 
-  std::cout << "  ✓ Parsed " << total_messages << " joint state messages\n";
+  std::cout << "  [ok] Parsed " << total_messages << " joint state messages\n";
   for (const auto& [stream_id, messages] : messages_by_stream) {
     std::cout << "    - " << stream_id << ": " << messages.size() << " messages\n";
   }
@@ -823,7 +822,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   if (total_images > 0) {
-    std::cout << "  ✓ Found " << total_images << " camera images\n";
+    std::cout << "  [ok] Found " << total_images << " camera images\n";
     for (const auto& [camera_name, count] : camera_image_counts) {
       std::cout << "    - " << camera_name << ": " << count << " images\n";
     }
@@ -840,7 +839,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       uint64_t last_ts = first_stream_messages.back().timestamp_ns;
       double duration_s = (last_ts - first_ts) / 1e9;
       double actual_fps = (first_stream_messages.size() - 1) / duration_s;
-      std::cout << "  ✓ Detected joint state frequency: " << std::fixed << std::setprecision(1)
+      std::cout << "  [ok] Detected joint state frequency: " << std::fixed << std::setprecision(1)
                 << actual_fps << " Hz (using 30.0 Hz for sync)\n";
     }
   }
@@ -852,7 +851,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       uint64_t last_ts = first_camera_timestamps.back();
       double duration_s = (last_ts - first_ts) / 1e9;
       double actual_camera_fps = (first_camera_timestamps.size() - 1) / duration_s;
-      std::cout << "  ✓ Detected camera frequency: " << std::fixed << std::setprecision(1)
+      std::cout << "  [ok] Detected camera frequency: " << std::fixed << std::setprecision(1)
                 << actual_camera_fps << " fps (using 30.0 fps for sync)\n";
     }
   }
@@ -879,11 +878,11 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
   std::cout << "  Joint dimensions per stream: " << joints_per_stream << "\n";
   std::cout << "  Action dimension: " << action_dim << " (" << cfg.leader_streams.size()
-            << " stream(s) × " << joints_per_stream;
+            << " stream(s) x " << joints_per_stream;
   if (has_slate_base) std::cout << " + 2 base velocities";
   std::cout << ")\n";
   std::cout << "  Observation dimension: " << obs_dim << " (" << cfg.follower_streams.size()
-            << " stream(s) × " << joints_per_stream;
+            << " stream(s) x " << joints_per_stream;
   if (has_slate_base) std::cout << " + 2 base velocities";
   std::cout << ")\n";
 
@@ -1149,7 +1148,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
   }
 
-  std::cout << "\r  ✓ Wrote " << rows_written << " rows";
+  std::cout << "\r  [ok] Wrote " << rows_written << " rows";
   if (rows_skipped > 0) {
     std::cout << " (skipped " << rows_skipped << " misaligned)";
   }
@@ -1172,7 +1171,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return 1;
   }
 
-  std::cout << "\n✓ Successfully created Parquet file: " << cfg.output_file << "\n";
+  std::cout << "\n[ok] Successfully created Parquet file: " << cfg.output_file << "\n";
   std::cout << "\nSummary:\n";
   std::cout << "  Total frames:      " << rows_written << "\n";
   std::cout << "  Episode index:     " << cfg.episode_index << "\n";
@@ -1322,7 +1321,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
     }
 
-    std::cout << "\r  ✓ Saved " << images_saved << " images                    \n";
+    std::cout << "\r  [ok] Saved " << images_saved << " images                    \n";
     for (const auto& [camera_name, count] : camera_frame_indices) {
       std::cout << "    - " << camera_name << ": " << count << " images\n";
     }
@@ -1371,16 +1370,16 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
         auto duration =
             std::chrono::duration_cast<std::chrono::milliseconds>(encode_end - encode_start)
                 .count();
-        std::cout << " ✓ (" << (duration / 1000.0) << "s)\n";
+        std::cout << " [ok] (" << (duration / 1000.0) << "s)\n";
         videos_created++;
       } else {
-        std::cout << " ✗ Failed (exit code " << ret << ")\n";
+        std::cout << " [FAILED] Failed (exit code " << ret << ")\n";
         std::cerr << "    Command: " << ffmpeg_cmd.str() << "\n";
       }
     }
 
     if (videos_created > 0) {
-      std::cout << "  ✓ Created " << videos_created << " video(s)\n";
+      std::cout << "  [ok] Created " << videos_created << " video(s)\n";
     } else {
       std::cout << "  Warning: No videos were created\n";
     }
@@ -1521,7 +1520,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       return 1;
     }
 
-    std::cout << "  ✓ Created " << info_path.string() << "\n";
+    std::cout << "  [ok] Created " << info_path.string() << "\n";
   }
 
   // Use utility functions to write metadata
@@ -1529,12 +1528,12 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
   if (trossen::io::backends::write_episode_metadata(
           meta_dir, cfg.episode_index, cfg.task_name, 0, rows_written, num_cameras)) {
-    std::cout << "  ✓ Updated " << info_path.string() << "\n";
-    std::cout << "  ✓ Created/Updated "
+    std::cout << "  [ok] Updated " << info_path.string() << "\n";
+    std::cout << "  [ok] Created/Updated "
               << (meta_dir / trossen::io::backends::JSONL_TASKS).string() << "\n";
-    std::cout << "  ✓ Appended to "
+    std::cout << "  [ok] Appended to "
               << (meta_dir / trossen::io::backends::JSONL_EPISODES).string() << "\n";
-    std::cout << "  ✓ Appended to "
+    std::cout << "  [ok] Appended to "
               << (meta_dir / trossen::io::backends::JSONL_EPISODE_STATS).string()
               << "\n";
   } else {
@@ -1542,7 +1541,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return 1;
   }
 
-  std::cout << "\n✓ Successfully created LeRobotV2 dataset episode!\n";
+  std::cout << "\n[ok] Successfully created LeRobotV2 dataset episode!\n";
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
 
   return 0;
