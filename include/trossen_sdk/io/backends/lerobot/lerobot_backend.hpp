@@ -237,7 +237,7 @@ inline bool create_initial_info_json(
   info_json["robot_type"] = robot_name;
   info_json["fps"] = fps;
 
-  // Counters (initialized to zero)
+  // Counters
   info_json["total_episodes"] = 0;
   info_json["total_frames"] = 0;
   info_json["total_videos"] = 0;
