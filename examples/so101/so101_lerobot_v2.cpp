@@ -35,7 +35,7 @@
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 
-#include "../demo_utils.hpp"
+#include "trossen_sdk/utils/app_utils.hpp"
 
 
 // ────────────────────────────────────────────────────────────
@@ -146,9 +146,10 @@ int main(int argc, char** argv) {
     return 0;
   }
   // TODO(so101): This example is not yet fully functional. It needs to be migrated to use
-  // examples/so101/config.json with DataCollectionConfig::from_json() following the pattern
-  // in examples/solo/, examples/stationary/, and examples/mobile/. The hand-rolled CLI parser
-  // above should also be replaced with trossen::configuration::CliParser.
+  // examples/so101/config.json with SdkConfig::from_json() following the pattern
+  // in examples/trossen_solo_ai/, examples/trossen_stationary_ai/, and examples/trossen_mobile_ai/.
+  // The hand-rolled CLI parser above should also be replaced with
+  // trossen::configuration::CliParser.
   std::cerr << "Error: so101_teleop is not yet functional.\n"
             << "See examples/so101/so101_lerobot_v2.cpp for the migration TODO.\n";
   return 1;
@@ -175,10 +176,10 @@ int main(int argc, char** argv) {
     " @ " + std::to_string(cfg.camera_width) + "x" + std::to_string(cfg.camera_height) +
     " @ " + std::to_string(cfg.camera_fps) + " fps");
 
-  trossen::demo::print_config_banner("SO101 LeRobotV2 Complete Demo", config_lines);
+  trossen::utils::print_config_banner("SO101 LeRobotV2 Complete Demo", config_lines);
 
   // Install signal handler for graceful shutdown
-  trossen::demo::install_signal_handler();
+  trossen::utils::install_signal_handler();
 
   // Create root directory
   std::filesystem::create_directories(cfg.root);
@@ -212,14 +213,14 @@ int main(int argc, char** argv) {
       std::cerr << "Failed to connect to leader on " << cfg.leader_port << "\n";
       return 1;
     }
-    std::cout << "  ✓ Leader arm connected (" << cfg.leader_port << ")\n";
+    std::cout << "  [ok] Leader arm connected (" << cfg.leader_port << ")\n";
 
     // Connect to follower
     if (!follower_driver->connect()) {
       std::cerr << "Failed to connect to follower on " << cfg.follower_port << "\n";
       return 1;
     }
-    std::cout << "  ✓ Follower arm connected (" << cfg.follower_port << ")\n";
+    std::cout << "  [ok] Follower arm connected (" << cfg.follower_port << ")\n";
   }
 
   trossen::runtime::SessionManager mgr;
@@ -247,7 +248,7 @@ int main(int argc, char** argv) {
       1.0                             // motion_scale
     };
     joint_producer = std::make_shared<trossen::hw::arm::TeleopMockJointStateProducer>(joint_cfg);
-    std::cout << "  ✓ Mock joint state producer (" << cfg.joint_rate_hz << " Hz, 6 joints)\n";
+    std::cout << "  [ok] Mock joint state producer (" << cfg.joint_rate_hz << " Hz, 6 joints)\n";
   } else {
     trossen::hw::arm::TeleopSO101ArmProducer::Config joint_cfg;
     joint_cfg.stream_id = "teleop_robot/joint_states";
@@ -255,7 +256,7 @@ int main(int argc, char** argv) {
 
     joint_producer = std::make_shared<trossen::hw::arm::TeleopSO101ArmProducer>(
       leader_driver, follower_driver, joint_cfg);
-    std::cout << "  ✓ SO101 arm producer (" << cfg.joint_rate_hz << " Hz)\n";
+    std::cout << "  [ok] SO101 arm producer (" << cfg.joint_rate_hz << " Hz)\n";
   }
 
   auto joint_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.joint_rate_hz));
@@ -275,7 +276,7 @@ int main(int argc, char** argv) {
     cam_cfg.pattern = trossen::hw::camera::MockCameraProducer::Pattern::Gradient;
     cam_cfg.warmup_frames = 3;
     camera_producer = std::make_shared<trossen::hw::camera::MockCameraProducer>(cam_cfg);
-    std::cout << "  ✓ Mock camera producer (" << cfg.camera_fps << " Hz, "
+    std::cout << "  [ok] Mock camera producer (" << cfg.camera_fps << " Hz, "
               << cfg.camera_width << "x" << cfg.camera_height << ")\n";
   } else {
     // Create hardware component via registry
@@ -303,7 +304,7 @@ int main(int argc, char** argv) {
     camera_producer = trossen::runtime::ProducerRegistry::create(
       "opencv_camera", camera_component, prod_cfg);
 
-    std::cout << "  ✓ OpenCV camera producer (" << cfg.camera_fps << " Hz, "
+    std::cout << "  [ok] OpenCV camera producer (" << cfg.camera_fps << " Hz, "
               << cfg.camera_width << "x" << cfg.camera_height << ")\n";
   }
 
@@ -327,7 +328,7 @@ int main(int argc, char** argv) {
   // ──────────────────────────────────────────────────────────
 
   for (int ep = 0; ep < cfg.episodes; ++ep) {
-    if (trossen::demo::g_stop_requested) {
+    if (trossen::utils::g_stop_requested) {
       std::cout << "\n\nStopping at user request (Ctrl+C).\n";
       break;
     }
@@ -344,7 +345,6 @@ int main(int argc, char** argv) {
 
     // Start episode
     if (!mgr.start_episode()) {
-      std::cerr << "✗ Failed to start episode " << mgr.stats().current_episode_index << "\n";
       break;
     }
 
@@ -360,7 +360,7 @@ int main(int argc, char** argv) {
     std::thread teleop_thread;
     if (!cfg.use_mock) {
       teleop_thread = std::thread([&]() {
-        while (mgr.is_episode_active() && !trossen::demo::g_stop_requested) {
+        while (mgr.is_episode_active() && !trossen::utils::g_stop_requested) {
           auto leader_positions = leader_driver->get_joint_positions();
           follower_driver->set_joint_positions(leader_positions);
           std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -387,16 +387,16 @@ int main(int argc, char** argv) {
       std::chrono::duration<double>(episode_end_time - episode_start_time).count();
 
     // Build the file path and print summary
-    std::string file_path = trossen::demo::generate_episode_path(
+    std::string file_path = trossen::utils::generate_episode_path(
       cfg.root,
       recording_episode_index);
-    trossen::demo::print_episode_summary(file_path, last_stats);
+    trossen::utils::print_episode_summary(file_path, last_stats);
 
     // ──────────────────────────────────────────────────────────
     // Sanity check: verify expected record counts
     // ──────────────────────────────────────────────────────────
 
-    trossen::demo::SanityCheckConfig sanity_cfg{
+    trossen::utils::SanityCheckConfig sanity_cfg{
       last_stats.elapsed.count(),
       1,  // 1 joint producer (follower)
       cfg.joint_rate_hz,
@@ -404,13 +404,13 @@ int main(int argc, char** argv) {
       cfg.camera_fps,
       5.0  // 5% tolerance
     };
-    trossen::demo::perform_sanity_check(
+    trossen::utils::perform_sanity_check(
       recording_episode_index,
       last_stats.records_written_current,
       sanity_cfg);
 
     // Check if user requested stop
-    if (trossen::demo::g_stop_requested) {
+    if (trossen::utils::g_stop_requested) {
       std::cout << "\nStopping at user request (Ctrl+C).\n";
       break;
     }
@@ -418,7 +418,7 @@ int main(int argc, char** argv) {
     // Pause between episodes (unless this was the last one)
     if (ep < cfg.episodes - 1) {
       std::cout << "\nPausing for 1 second before next episode...\n";
-      if (!trossen::demo::interruptible_sleep(std::chrono::seconds(1))) {
+      if (!trossen::utils::interruptible_sleep(std::chrono::seconds(1))) {
         break;  // Stop requested during pause
       }
     }
@@ -435,11 +435,11 @@ int main(int argc, char** argv) {
     std::cout << "\nDisconnecting SO101 arms...\n";
     leader_driver->disconnect();
     follower_driver->disconnect();
-    std::cout << "  ✓ Arms disconnected\n";
+    std::cout << "  [ok] Arms disconnected\n";
   }
 
   auto final_stats = mgr.stats();
-  trossen::demo::print_final_summary(final_stats.total_episodes_completed, cfg.root);
+  trossen::utils::print_final_summary(final_stats.total_episodes_completed, cfg.root);
 
   return 0;
 }

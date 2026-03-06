@@ -324,7 +324,7 @@ nlohmann::ordered_json compute_fixed_size_list_stats(
 }
 
 // ============================================================================
-// LeRobotBackend Class Implementation
+// LeRobotV2Backend Class Implementation
 // ============================================================================
 
 LeRobotV2Backend::LeRobotV2Backend(
@@ -541,7 +541,7 @@ void LeRobotV2Backend::convert_to_videos() const {
 
   auto start_time = std::chrono::steady_clock::now();
 
-  // Collect all (camera, episode) directories first — reduces directory I/O inside threads
+  // Collect all (camera, episode) directories first - reduces directory I/O inside threads
   struct EpisodeTask {
     fs::path episode_dir;
     fs::path output_path;
@@ -778,7 +778,7 @@ void LeRobotV2Backend::print_stats_table(const nlohmann::ordered_json& stats) co
 
       std::cout << std::left << std::setw(12) << metric_name << " | ";
 
-      // If metric value is a list of numbers → print inline
+      // If metric value is a list of numbers -> print inline
       if (arr.is_array()) {
         for (size_t i = 0; i < arr.size(); i++) {
           std::cout << std::fixed << std::setprecision(4) << arr[i].get<double>();

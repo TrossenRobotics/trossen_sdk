@@ -5,18 +5,9 @@ build:
 	cd build && cmake .. && make -j$(NPROC)
 .PHONY: build
 
-build/all:
-	mkdir -p build
-	cd build && cmake .. -DBUILD_APPS=ON && make -j$(NPROC) all
-.PHONY: build/all
-
 install: build
 	cd build && make install
 .PHONY: install
-
-run: build/all
-	./build/apps/soma/soma
-.PHONY: run
 
 test:
 	mkdir -p build
@@ -38,5 +29,5 @@ clean:
 
 realsense:
 	mkdir -p build
-	cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON .. && make -j4
+	cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON .. && make -j$(NPROC)
 .PHONY: realsense

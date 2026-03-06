@@ -32,10 +32,10 @@ namespace trossen::configuration {
  * @endcode
  *
  * Known types:
- *  - "trossen_arm"      — arm joint-state producer
- *  - "realsense_camera" — Intel RealSense image producer
- *  - "opencv_camera"    — OpenCV/V4L2 image producer
- *  - "slate_base"       — SLATE mobile base velocity producer
+ *  - "trossen_arm"      - arm joint-state producer
+ *  - "realsense_camera" - Intel RealSense image producer
+ *  - "opencv_camera"    - OpenCV/V4L2 image producer
+ *  - "slate_base"       - SLATE mobile base velocity producer
  */
 struct ProducerConfig {
   /// @brief Producer/hardware registry key (e.g. "trossen_arm", "realsense_camera")
@@ -53,7 +53,7 @@ struct ProducerConfig {
   /// @brief Use hardware device timestamp when available
   bool use_device_time{false};
 
-  /// @brief Pixel encoding — camera producers only (e.g. "bgr8", "rgb8", "mono8")
+  /// @brief Pixel encoding - camera producers only (e.g. "bgr8", "rgb8", "mono8")
   std::string encoding{"bgr8"};
 
   static ProducerConfig from_json(const nlohmann::json& j) {
@@ -67,7 +67,7 @@ struct ProducerConfig {
     return c;
   }
 
-  /// @brief Build JSON for ProducerRegistry::create() — arm and mobile-base producers
+  /// @brief Build JSON for ProducerRegistry::create() - arm and mobile-base producers
   nlohmann::json to_registry_json() const {
     return nlohmann::json{
       {"stream_id",       stream_id},
@@ -75,7 +75,7 @@ struct ProducerConfig {
     };
   }
 
-  /// @brief Build JSON for ProducerRegistry::create() — camera producers
+  /// @brief Build JSON for ProducerRegistry::create() - camera producers
   nlohmann::json to_registry_json(int width, int height, int fps) const {
     return nlohmann::json{
       {"stream_id",       stream_id},

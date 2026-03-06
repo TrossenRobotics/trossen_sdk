@@ -23,7 +23,7 @@ public:
 
   void configure(const nlohmann::json& config) override {
     num_joints_ = config.value("num_joints", 6);
-    std::cout << "  ✓ Configured '" << get_identifier()
+    std::cout << "  [ok] Configured '" << get_identifier()
               << "' (" << num_joints_ << " joints)\n";
   }
 
@@ -116,14 +116,14 @@ int main(int argc, char** argv) {
     trossen::hw::ActiveHardwareRegistry::register_active("realsense_camera0", realsense_camera);
     trossen::hw::ActiveHardwareRegistry::register_active("opencv_camera0", opencv_camera);
   }
-  std::cout << "  ✓ " << trossen::hw::ActiveHardwareRegistry::count()
+  std::cout << "  [ok] " << trossen::hw::ActiveHardwareRegistry::count()
             << " hardware components active\n";
 
   // 3. Retrieve and use hardware
   std::cout << "\nRetrieving hardware:\n";
   auto arm = trossen::hw::ActiveHardwareRegistry::get_as<demo::MockArmComponent>("left_arm");
   if (arm) {
-    std::cout << "  ✓ Retrieved '" << arm->get_identifier()
+    std::cout << "  [ok] Retrieved '" << arm->get_identifier()
               << "' with " << arm->get_num_joints() << " joints\n";
   }
 
@@ -131,12 +131,12 @@ int main(int argc, char** argv) {
   std::cout << "\nActive hardware:\n";
   for (const auto& id : trossen::hw::ActiveHardwareRegistry::get_ids()) {
     auto hw = trossen::hw::ActiveHardwareRegistry::get(id);
-    std::cout << "  • " << id << " (" << hw->get_type() << ")\n";
+    std::cout << "  - " << id << " (" << hw->get_type() << ")\n";
   }
 
   // 5. Cleanup
   trossen::hw::ActiveHardwareRegistry::clear();
-  std::cout << "\n✓ Demo complete!\n\n";
+  std::cout << "\n[ok] Demo complete!\n\n";
 
   return 0;
 }

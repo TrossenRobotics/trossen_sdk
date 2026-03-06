@@ -153,8 +153,8 @@ nlohmann::json merge_overrides(
       (*current)[final_key] = (value == "true");
     } else if (!value.empty() && (std::isdigit(value[0]) ||
                value[0] == '-' || value[0] == '.')) {
-      // Try to parse as number — only when the entire string is consumed.
-      // This prevents partial parses like "10.0.0.1" → 10.0 (IP addresses, etc.).
+      // Try to parse as number - only when the entire string is consumed.
+      // This prevents partial parses like "10.0.0.1" -> 10.0 (IP addresses, etc.).
       bool parsed = false;
       try {
         if (value.find('.') != std::string::npos) {

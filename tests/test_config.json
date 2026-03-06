@@ -16,13 +16,6 @@
     "fps": 30.0,
     "encode_videos": false
   },
-  "trossen_backend": {
-    "type": "trossen_backend",
-    "encoder_threads": 1,
-    "max_image_queue": 4,
-    "png_compression_level": 1,
-    "drop_policy": "DropNewest"
-  },
   "null_backend": {
     "type": "null_backend"
   }

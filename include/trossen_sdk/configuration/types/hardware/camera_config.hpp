@@ -47,7 +47,7 @@ namespace trossen::configuration {
  * @endcode
  */
 struct CameraConfig {
-  /// @brief Hardware registry key — "realsense_camera" or "opencv_camera"
+  /// @brief Hardware registry key - "realsense_camera" or "opencv_camera"
   std::string type{"realsense_camera"};
 
   /// @brief Logical camera identifier used as stream_id (e.g. "camera_0", "wrist_cam")
@@ -59,7 +59,7 @@ struct CameraConfig {
   /// @brief OpenCV device index (OpenCV only)
   int device_index{0};
 
-  /// @brief OpenCV capture backend — "v4l2" or "any" (OpenCV only)
+  /// @brief OpenCV capture backend - "v4l2" or "any" (OpenCV only)
   std::string backend{""};
 
   /// @brief Capture width in pixels

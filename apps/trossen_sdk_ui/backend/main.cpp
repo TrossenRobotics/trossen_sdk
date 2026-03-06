@@ -1225,7 +1225,7 @@ int main() {
             active_session->episode_manager_active = true;
             active_session->waiting_for_next = false;  // Start first episode immediately
             active_session->episode_manager_thread = std::thread([active_session]() {
-                std::cout << "  ✓ Episode manager thread started (manual progression mode)"
+                std::cout << "  [ok] Episode manager thread started (manual progression mode)"
                           << std::endl;
 
                 while (active_session->episode_manager_active) {
@@ -1235,7 +1235,7 @@ int main() {
 
                         if (stats.total_episodes_completed < active_session->max_episodes) {
                             // Episode finished - wait for user to click "Next" button
-                            std::cout << "  → Episode " << stats.total_episodes_completed
+                            std::cout << "  -> Episode " << stats.total_episodes_completed
                                       << " complete. Waiting for user to start episode "
                                       << (stats.total_episodes_completed + 1) << " of "
                                       << active_session->max_episodes << std::endl;
@@ -1251,19 +1251,19 @@ int main() {
                             // User clicked "Next" - start next episode
                             if (active_session->episode_manager_active) {
                                 if (!active_session->manager->start_episode()) {
-                                    std::cerr << "  ✗ Failed to start episode "
+                                    std::cerr << "  [FAILED] Failed to start episode "
                                               << (stats.total_episodes_completed + 1)
                                               << std::endl;
                                     active_session->episode_manager_active = false;
                                     break;
                                 }
-                                std::cout << "  ✓ Starting episode "
+                                std::cout << "  [ok] Starting episode "
                                           << (stats.total_episodes_completed + 1)
                                           << std::endl;
                             }
                         } else {
                             // All episodes complete
-                            std::cout << "  ✓ All " << active_session->max_episodes
+                            std::cout << "  [ok] All " << active_session->max_episodes
                                       << " episodes complete!" << std::endl;
 
                             config_manager.log_activity(
@@ -1275,7 +1275,7 @@ int main() {
 
                             if (active_session->teleop_active) {
                                 active_session->teleop_active = false;
-                                std::cout << "  → Stopping teleoperation thread..." << std::endl;
+                                std::cout << "  -> Stopping teleoperation thread..." << std::endl;
                             }
 
                             active_session->all_episodes_complete = true;
@@ -1286,7 +1286,7 @@ int main() {
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
 
-                std::cout << "  ✓ Episode manager thread stopped" << std::endl;
+                std::cout << "  [ok] Episode manager thread stopped" << std::endl;
             });
 
             // Store active session

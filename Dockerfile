@@ -59,7 +59,7 @@ RUN make
 RUN mkdir -p /data
 
 # Set the entrypoint to run demos from the build directory
-WORKDIR /app/build/examples
+WORKDIR /app/build/examples/trossen_solo_ai
 
 # Default command
-CMD ["./widowxai", "--help"]
+CMD ["./trossen_solo_ai", "--help"]

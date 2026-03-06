@@ -7,11 +7,13 @@ project(trossen_sdk
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-option(TROSSEN_ENABLE_REALSENSE "Enable Intel RealSense support" OFF)
+# TODO: Discuss build options - do we want RealSense ON by default? What about other
+# optional hardware (e.g., Zed cameras)? Where do we draw the line between mandatory
+# and opt-in dependencies?
+option(TROSSEN_ENABLE_REALSENSE "Enable Intel RealSense support" ON)
 
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
-  src/backends/trossen/trossen_backend.cpp
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
   src/backends/trossen_mcap/trossen_mcap_backend.cpp
   src/backends/null/null_backend.cpp
@@ -23,7 +25,7 @@ add_library(trossen_sdk SHARED
   src/hw/active_hardware_registry.cpp
   src/hw/arm/trossen_arm_component.cpp
   src/hw/arm/so101_arm_component.cpp
-  src/hw/arm/arm_producer.cpp
+  src/hw/arm/trossen_arm_producer.cpp
   src/hw/arm/teleop_arm_producer.cpp
   src/hw/arm/mock_joint_producer.cpp
   src/hw/arm/teleop_mock_joint_producer.cpp
@@ -38,6 +40,7 @@ add_library(trossen_sdk SHARED
   src/hw/camera/mock_synced_producer.cpp
   src/runtime/session_manager.cpp
   src/runtime/producer_registry.cpp
+  src/utils/app_utils.cpp
 )
 
 if(TROSSEN_ENABLE_REALSENSE)
@@ -215,7 +218,6 @@ set(PROTOBUF_IMPORT_DIRS ${TROSSEN_PROTO_PATH})
 set(TROSSEN_PROTO_FILES
   ${TROSSEN_PROTO_PATH}/JointState.proto
   ${TROSSEN_PROTO_PATH}/Odometry2D.proto
-  ${TROSSEN_PROTO_PATH}/RawImage.proto
   ${TROSSEN_PROTO_PATH}/RobotDescription.proto
   ${TROSSEN_PROTO_PATH}/Timestamp.proto
 )
@@ -237,6 +239,24 @@ foreach(PROTO_FILE ${TROSSEN_PROTO_FILES})
   list(APPEND TROSSEN_PROTO_SRCS ${PROTO_SRC})
   list(APPEND TROSSEN_PROTO_HDRS ${PROTO_HDR})
 endforeach()
+
+# Generate RawImage.pb.h from the Foxglove schemas shipped with the MCAP dependency.
+# The backend uses foxglove::schemas::RawImage (SDK built-in) for writing; the generated
+# protobuf class is used by the conversion script to decode messages when reading MCAP files.
+set(FOXGLOVE_PROTO_PATH ${mcap_SOURCE_DIR}/cpp/examples/protobuf/proto/foxglove)
+set(RAWIMAGE_PROTO_SRC ${CMAKE_CURRENT_BINARY_DIR}/RawImage.pb.cc)
+set(RAWIMAGE_PROTO_HDR ${CMAKE_CURRENT_BINARY_DIR}/RawImage.pb.h)
+add_custom_command(
+  OUTPUT ${RAWIMAGE_PROTO_SRC} ${RAWIMAGE_PROTO_HDR}
+  COMMAND ${Protobuf_PROTOC_EXECUTABLE}
+  ARGS --cpp_out=${CMAKE_CURRENT_BINARY_DIR}
+       --proto_path=${FOXGLOVE_PROTO_PATH}
+       ${FOXGLOVE_PROTO_PATH}/RawImage.proto
+  DEPENDS ${FOXGLOVE_PROTO_PATH}/RawImage.proto
+  COMMENT "Running cpp protocol buffer compiler on foxglove/RawImage.proto"
+)
+list(APPEND TROSSEN_PROTO_SRCS ${RAWIMAGE_PROTO_SRC})
+list(APPEND TROSSEN_PROTO_HDRS ${RAWIMAGE_PROTO_HDR})
 
 target_sources(trossen_sdk PRIVATE ${TROSSEN_PROTO_SRCS} ${TROSSEN_PROTO_HDRS})
 target_link_libraries(trossen_sdk PUBLIC ${Protobuf_LIBRARIES})
@@ -262,16 +282,4 @@ option(BUILD_TESTING "Build the testing tree" ON)
 if(BUILD_TESTING)
   enable_testing()
   add_subdirectory(tests)
-endif()
-
-# Benchmarks
-option(BUILD_BENCHMARKS "Build the benchmarking tree" OFF)
-if(BUILD_BENCHMARKS)
-  add_subdirectory(benchmarks)
-endif()
-
-# Applications
-option(BUILD_APPS "Build applications" OFF)
-if(BUILD_APPS)
-  add_subdirectory(apps/soma)
 endif()

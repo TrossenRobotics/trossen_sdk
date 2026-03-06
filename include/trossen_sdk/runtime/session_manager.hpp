@@ -37,7 +37,7 @@ namespace trossen::runtime {
 /**
  * @brief Session Manager orchestrates discrete recording sessions
  *
- * Episodes are NOT continuous streams being sliced—they are distinct recording
+ * Episodes are NOT continuous streams being sliced-they are distinct recording
  * sessions separated by breaks. The Session Manager handles:
  * - Creating and managing individual episode files
  * - Controlling Scheduler lifecycle (start/stop producers)
