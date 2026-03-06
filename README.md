@@ -29,7 +29,7 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Intel Rea
 - Joint states recordable up to 200 Hz; cameras at configurable frame rates
 - Converts recorded TrossenMCAP files to LeRobot V2 format (Parquet + MP4 video) with per-episode statistics computed during conversion
 
-> **Coming soon:** Additional storage backends (beyond TrossenMCAP) are planned for future releases.
+
 
 ---
 
@@ -87,7 +87,7 @@ sudo apt-get install -y \
     ffmpeg
 ```
 
-### Trossen arm library
+### Trossen Arm library
 
 Install `libtrossen_arm` by following the C++ setup guide in the Trossen Robotics documentation:
 
@@ -116,13 +116,6 @@ cmake ..
 make -j$(nproc)
 ```
 
-### Build outputs
-
-| Path | Contents |
-|---|---|
-| `build/lib/` | Compiled `libtrossen_sdk` shared library |
-| `build/examples/` | Example executables (`trossen_solo_ai`, etc.) |
-| `build/scripts/` | Conversion tool (`trossen_mcap_to_lerobot_v2`) |
 
 ---
 
@@ -305,8 +298,7 @@ for every episode.
 
 ### Key abstractions
 
-**HardwareComponent** wraps a single physical device. Accepts a JSON config block and
-provides typed access to the driver (joint API, camera frame API, etc.).
+**HardwareComponent** wraps a single physical device. Accepts a JSON config block and provides typed access to the driver (joint API, camera frame API, etc.).
 
 **PolledProducer** reads from a HardwareComponent and emits `Record` objects. The Scheduler
 calls `poll(emit)` at a fixed period. Each record carries a stream `id`, a monotonic `seq`

@@ -21,7 +21,7 @@ target_link_libraries(trossen_mobile_ai demo_utils trossen_sdk libtrossen_arm)
 add_executable(so101_teleop so101/so101_lerobot_v2.cpp)
 target_link_libraries(so101_teleop demo_utils trossen_sdk)
 
-# Registry demo executables (development / debugging)
+# Registry demo executable
 add_executable(backend_registry_demo backend_registry_demo.cpp)
 target_link_libraries(backend_registry_demo trossen_sdk)
 

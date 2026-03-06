@@ -60,7 +60,7 @@ Update `config.json` or override on the command line:
 
 ## SLATE Mobile Base Setup
 
-The SLATE base connects over USB serial. No IP configuration is required. Two options are exposed in `config.json`:
+The SLATE base connects over USB serial. Two options are exposed in `config.json`:
 
 | Option | Default | Description |
 |---|---|---|
