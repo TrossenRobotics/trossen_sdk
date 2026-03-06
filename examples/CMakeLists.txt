@@ -56,13 +56,7 @@ target_compile_definitions(replay_mcap_jointstate PRIVATE MCAP_IMPLEMENTATION)
 target_link_libraries(replay_mcap_jointstate demo_utils trossen_sdk libtrossen_arm zstd lz4)
 
 # MCAP to LeRobot converter with statistics
-set(RAWIMAGE_PB_CC ${CMAKE_BINARY_DIR}/include/trossen_sdk/io/backends/mcap/proto/foxglove/RawImage.pb.cc)
-set_source_files_properties(${RAWIMAGE_PB_CC} PROPERTIES GENERATED TRUE)
-
-add_executable(mcap_to_lerobot
-  mcap_to_lerobot.cpp
-  ${RAWIMAGE_PB_CC}
-)
+add_executable(mcap_to_lerobot mcap_to_lerobot.cpp)
 target_include_directories(mcap_to_lerobot PRIVATE
   ${mcap_SOURCE_DIR}/cpp/mcap/include
   ${CMAKE_BINARY_DIR}  # For generated protobuf headers
