@@ -595,23 +595,44 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return 1;
   }
 
-  // Read trossen_sdk_recording metadata (contains dataset_info with joint names, camera specs)
+  // ────────────────────────────────────────────────────────────────────────────
+  // PHASE 1: Extract embedded metadata from MCAP file
+  // ────────────────────────────────────────────────────────────────────────────
+  // The MCAP file may contain a "trossen_sdk_recording" metadata record with a
+  // "dataset_info" JSON blob. This includes:
+  //   - robot_name: e.g., "trossen_solo_ai", "trossen_mobile_ai"
+  //   - streams: per-stream joint names (e.g., streams.leader_left.joint_names)
+  //   - cameras: per-camera specs (height, width, fps, codec)
+  //   - base_velocity_names: names for mobile base velocity dimensions
+  // If present, this metadata is used to populate info.json with accurate names
+  // instead of generic placeholders like "joint_0", "joint_1", etc.
+  // ────────────────────────────────────────────────────────────────────────────
   nlohmann::json mcap_dataset_info;
   auto* data_source = reader.dataSource();
   const auto& meta_indexes = reader.metadataIndexes();
+
+  // Find all metadata records named "trossen_sdk_recording"
   auto range = meta_indexes.equal_range("trossen_sdk_recording");
   for (auto it = range.first; it != range.second; ++it) {
+    // Read the raw record from the MCAP file at the indexed offset
     mcap::Record raw_record;
     auto rs = mcap::McapReader::ReadRecord(*data_source, it->second.offset, &raw_record);
     if (!rs.ok()) continue;
+
+    // Parse the raw record into a structured Metadata object
     mcap::Metadata meta_record;
     rs = mcap::McapReader::ParseMetadata(raw_record, &meta_record);
     if (!rs.ok()) continue;
+
+    // Look for the "dataset_info" key within the metadata key-value pairs
     auto info_it = meta_record.metadata.find("dataset_info");
     if (info_it != meta_record.metadata.end()) {
       try {
+        // Parse the JSON string into our mcap_dataset_info object
         mcap_dataset_info = nlohmann::json::parse(info_it->second);
         std::cout << "  ✓ Found MCAP dataset_info metadata\n";
+
+        // Update robot name from metadata if available
         if (mcap_dataset_info.contains("robot_name")) {
           cfg.robot_name = mcap_dataset_info["robot_name"].get<std::string>();
           std::cout << "    Robot name from MCAP: " << cfg.robot_name << "\n";
@@ -622,12 +643,22 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
   }
 
-  std::map<mcap::ChannelId, std::string> channel_id_to_stream;
-  std::map<mcap::ChannelId, std::string> camera_channels;
-  mcap::ChannelId slate_base_channel_id = 0;
-  bool has_slate_base = false;
-  std::vector<std::string> detected_leader_streams;
-  std::vector<std::string> detected_follower_streams;
+  // ────────────────────────────────────────────────────────────────────────────
+  // PHASE 2: Initialize channel tracking maps for message routing
+  // ────────────────────────────────────────────────────────────────────────────
+  // These maps associate MCAP channel IDs with semantic stream identifiers:
+  //   - channel_id_to_stream: Joint state channels → stream names (e.g., "leader_left")
+  //   - camera_channels: Image channels → camera names (e.g., "cam_high")
+  //   - slate_base_channel_id: Mobile base odometry channel (if present)
+  // The leader/follower vectors accumulate detected arm streams for later use
+  // in determining which streams provide actions vs. observations.
+  // ────────────────────────────────────────────────────────────────────────────
+  std::map<mcap::ChannelId, std::string> channel_id_to_stream;  // Joint channels
+  std::map<mcap::ChannelId, std::string> camera_channels;       // Camera channels
+  mcap::ChannelId slate_base_channel_id = 0;                    // Mobile base channel
+  bool has_slate_base = false;                                  // Is this a mobile robot?
+  std::vector<std::string> detected_leader_streams;             // Teleoperation input arms
+  std::vector<std::string> detected_follower_streams;           // Robot output arms
 
   std::cout << "  Available channels:\n";
   for (const auto& [channel_id, channel_ptr] : reader.channels()) {

@@ -52,8 +52,6 @@ public:
     /**
      * @brief Get producer info as JSON (LeRobot feature format)
      *
-     * For a single-arm (solo) setup, the arm acts as both action and observation source.
-     *
      * @return JSON object with "action" and "observation.state" feature entries
      */
     nlohmann::ordered_json get_info() const override {
