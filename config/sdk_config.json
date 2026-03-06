@@ -1,9 +1,9 @@
 {
   "session_manager": {
     "type": "session_manager",
-    "max_duration": 3,
+    "max_duration": 15,
     "max_episodes": 2,
-    "backend_type": "lerobot"
+    "backend_type": "mcap"
   },
   "lerobot_backend": {
     "type": "lerobot_backend",
@@ -21,10 +21,10 @@
   },
   "mcap_backend": {
     "type": "mcap_backend",
-    "robot_name": "/robot/joint_states",
+    "robot_name": "widowxai_bimanaual",
     "chunk_size_bytes": 4194304,
     "compression": "zstd",
-    "dataset_id": "mcap_dataset_v2",
+    "dataset_id": "mcap_test_dataset_conversion",
     "episode_index": 0
   },
   "trossen_backend": {
