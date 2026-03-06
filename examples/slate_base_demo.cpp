@@ -54,8 +54,7 @@ int main() {
     // Configure the base
     nlohmann::json config = {
       {"reset_odometry", false},
-      {"enable_torque", true},
-      {"enable_charging", false}
+      {"enable_torque", true}
     };
 
     std::cout << "\nConfiguring SLATE base..." << std::endl;
