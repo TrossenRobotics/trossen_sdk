@@ -148,6 +148,8 @@ void McapBackend::close() {
       std::cerr << "Failed to close MCAP writer: " << foxglove::strerror(st) << "\n";
     }
   }
+  joint_channels_.clear();
+  image_channels_.clear();
   opened_ = false;
 }
 
@@ -190,11 +192,10 @@ void McapBackend::write_batch(std::span<const data::RecordBase* const> records) 
   }
 }
 
-void McapBackend::ensure_jointstate_channel(const std::string& stream_id) {
-  // Check if the channel already exists for this stream
+foxglove::RawChannel* McapBackend::ensure_jointstate_channel(const std::string& stream_id) {
   auto it = joint_channels_.find(stream_id);
   if (it != joint_channels_.end()) {
-    return;
+    return &it->second;
   }
 
   // Create schema
@@ -215,23 +216,23 @@ void McapBackend::ensure_jointstate_channel(const std::string& stream_id) {
   if (!channel_result.has_value()) {
     std::cerr << "Failed to create joint state channel for " << stream_id << ": "
               << foxglove::strerror(channel_result.error()) << "\n";
-    return;
+    return nullptr;
   }
 
-  joint_channels_.emplace(stream_id, std::move(channel_result.value()));
+  auto [inserted_it, _] = joint_channels_.emplace(stream_id, std::move(channel_result.value()));
+  return &inserted_it->second;
 }
 
-void McapBackend::ensure_image_channel(const std::string& camera_name) {
-  // Color path: delegate to generalized ensure with minimal metadata
-  ensure_image_channel_with_metadata(camera_name, { {"stream_type", "color"} });
+foxglove::RawChannel* McapBackend::ensure_image_channel(const std::string& camera_name) {
+  return ensure_image_channel_with_metadata(camera_name, { {"stream_type", "color"} });
 }
 
-void McapBackend::ensure_image_channel_with_metadata(
+foxglove::RawChannel* McapBackend::ensure_image_channel_with_metadata(
   const std::string& camera_name,
   const std::unordered_map<std::string, std::string>& metadata) {
   auto it = image_channels_.find(camera_name);
   if (it != image_channels_.end()) {
-    return;  // already exists
+    return &it->second;
   }
 
   // Use Foxglove SDK's built-in RawImage schema
@@ -251,20 +252,16 @@ void McapBackend::ensure_image_channel_with_metadata(
   if (!channel_result.has_value()) {
     std::cerr << "Failed to create image channel: "
               << foxglove::strerror(channel_result.error()) << "\n";
-    return;
+    return nullptr;
   }
 
-  image_channels_.emplace(camera_name, std::move(channel_result.value()));
+  auto [inserted_it, _] = image_channels_.emplace(camera_name, std::move(channel_result.value()));
+  return &inserted_it->second;
 }
 
 void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
-  // Ensure channel exists for this stream
-  ensure_jointstate_channel(js.id);
-
-  // Look up the channel for this stream
-  auto it = joint_channels_.find(js.id);
-  if (it == joint_channels_.end()) {
-    std::cerr << "Failed to find joint state channel for stream: " << js.id << "\n";
+  auto* channel = ensure_jointstate_channel(js.id);
+  if (!channel) {
     return;
   }
 
@@ -291,7 +288,7 @@ void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
   std::string payload;
   out.SerializeToString(&payload);
 
-  auto st = it->second.log(
+  auto st = channel->log(
     reinterpret_cast<const std::byte*>(payload.data()),
     payload.size(),
     js.ts.realtime.to_ns());
@@ -308,6 +305,7 @@ void McapBackend::write_image_record(const data::ImageRecord& img) {
   // Determine if this is a depth frame based on encoding or topic
   const bool depth =
     is_depth_encoding(img.encoding) || is_depth_topic(mcapdefs::image_topic(img.id));
+  foxglove::RawChannel* channel = nullptr;
   if (depth) {
     // Depth metadata; attempt to parse scale if provided in encoding (future) - for now leave
     // blank
@@ -324,9 +322,12 @@ void McapBackend::write_image_record(const data::ImageRecord& img) {
     } else if (img.encoding == "32FC1") {
       md["depth_encoding_semantics"] = "float_m";
     }
-    ensure_image_channel_with_metadata(img.id, md);
+    channel = ensure_image_channel_with_metadata(img.id, md);
   } else {
-    ensure_image_channel(img.id);
+    channel = ensure_image_channel(img.id);
+  }
+  if (!channel) {
+    return;
   }
   foxglove::schemas::RawImage imsg;
   imsg.timestamp = foxglove::schemas::Timestamp{
@@ -359,7 +360,7 @@ void McapBackend::write_image_record(const data::ImageRecord& img) {
     return;
   }
 
-  auto st = image_channels_.at(img.id).log(
+  auto st = channel->log(
     reinterpret_cast<const std::byte*>(payload.data()),
     encoded_len,
     img.ts.realtime.to_ns());

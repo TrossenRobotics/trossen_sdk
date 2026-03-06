@@ -123,16 +123,18 @@ private:
    * @brief Ensure an image channel exists for the given camera name
    *
    * @param camera_name Name of the camera (used as stream ID)
+   * @return Pointer to the channel, or nullptr on failure
    */
-  void ensure_image_channel(const std::string& camera_name);
+  foxglove::RawChannel* ensure_image_channel(const std::string& camera_name);
 
   /**
    * @brief Ensure an image channel exists for the given camera name, with additional metadata
    *
    * @param camera_name Name of the camera (used as stream ID)
    * @param metadata Key/value pairs to add to the MCAP Channel metadata map
+   * @return Pointer to the channel, or nullptr on failure
    */
-  void ensure_image_channel_with_metadata(
+  foxglove::RawChannel* ensure_image_channel_with_metadata(
     const std::string& camera_name,
     const std::unordered_map<std::string, std::string>& metadata);
 
@@ -140,8 +142,9 @@ private:
    * @brief Ensure the joint state channel exists for a given stream ID
    *
    * @param stream_id Stream identifier (e.g., "leader_left", "follower_right")
+   * @return Pointer to the channel, or nullptr on failure
    */
-  void ensure_jointstate_channel(const std::string& stream_id);
+  foxglove::RawChannel* ensure_jointstate_channel(const std::string& stream_id);
 
   /**
    * @brief Write an image record
