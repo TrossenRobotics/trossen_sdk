@@ -33,6 +33,300 @@ REGISTER_BACKEND(LeRobotBackend, "lerobot")
 
 namespace fs = std::filesystem;
 
+// ============================================================================
+// LeRobot Statistics and Image Utility Functions Implementation
+// ============================================================================
+
+std::vector<int> sample_indices(
+  int dataset_len,
+  int min_samples,
+  int max_samples,
+  float power)
+{
+  // Calculate the number of samples based on the power law
+  // Clamp the number of samples between min_samples and max_samples
+  int num_samples = std::clamp(
+    static_cast<int>(std::pow(dataset_len, power)),
+    min_samples,
+    max_samples);
+
+  std::vector<int> indices(num_samples);
+  float step = static_cast<float>(dataset_len - 1) / (num_samples - 1);
+  for (int i = 0; i < num_samples; ++i) indices[i] = std::round(i * step);
+  return indices;
+}
+
+cv::Mat auto_downsample(
+  const cv::Mat &img,
+  int target_size,
+  int max_threshold)
+{
+  int h = img.rows;
+  int w = img.cols;
+  // If the larger dimension is already below the max threshold, return the original image
+  if (std::max(w, h) < max_threshold) return img;
+  // Calculate the downsampling factor to make the larger dimension equal to target_size
+  float factor = (w > h) ? (w / static_cast<float>(target_size))
+                        : (h / static_cast<float>(target_size));
+  // Downsample the image using area interpolation for better quality
+  cv::Mat downsampled;
+  cv::resize(img, downsampled, {}, 1.0 / factor, 1.0 / factor, cv::INTER_AREA);
+  return downsampled;
+}
+
+std::vector<cv::Mat> sample_images(
+  const std::vector<std::filesystem::path> &image_paths)
+{
+  if (image_paths.empty()) {
+    return {};
+  }
+
+  // Sample indices using power law distribution
+  auto indices = sample_indices(image_paths.size());
+
+  std::vector<cv::Mat> images;
+  // Load and process images at the sampled indices
+  for (int idx : indices) {
+    cv::Mat img = cv::imread(image_paths[idx].string(), cv::IMREAD_COLOR);
+    if (img.empty()) continue;
+    // Downsample the image if necessary and convert to float32
+    cv::Mat img_downsampled = auto_downsample(img);
+    cv::Mat img_float;
+    // Normalize pixel values to [0, 1]
+    img_downsampled.convertTo(img_float, CV_32F, 1.0 / 255.0);
+    // Ensure the image has 3 channels (BGR)
+    if (img_float.channels() == 3) {
+      images.push_back(img_float);
+    } else {
+      std::cerr << "Unexpected channel count: " << img_float.channels() << std::endl;
+    }
+  }
+
+  return images;
+}
+
+nlohmann::ordered_json compute_image_stats(
+  const std::vector<cv::Mat> &images)
+{
+  nlohmann::ordered_json stats_json;
+  if (images.empty()) {
+    std::cerr << "No images provided." << std::endl;
+    stats_json["min"] = {};
+    stats_json["max"] = {};
+    stats_json["mean"] = {};
+    stats_json["std"] = {};
+    stats_json["count"] = {0};
+    return stats_json;
+  }
+
+  int num_channels = images[0].channels();
+  int count = static_cast<int>(images.size());
+
+  // Create a vector for each channel
+  std::vector<std::vector<float>> channel_values(num_channels);
+
+  for (const auto &img : images) {
+    std::vector<cv::Mat> channels;
+    cv::split(img, channels);
+
+    for (int c = 0; c < num_channels; ++c) {
+      // Flatten and push pixels into channel_values[c]
+      channel_values[c].insert(
+        channel_values[c].end(),
+        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].datastart)),
+        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].dataend)));
+    }
+  }
+
+  // Helper lambda to convert a vector to a nested JSON array
+  auto to_nested = [](const std::vector<float> &vec) {
+    nlohmann::ordered_json result = nlohmann::ordered_json::array();
+    for (float v : vec) {
+      result.push_back({{v}});
+    }
+    return result;
+  };
+
+  std::vector<float> min_vals, max_vals, mean_vals, std_vals;
+  for (int c = 0; c < num_channels; ++c) {
+    cv::Mat channel_mat(channel_values[c]);
+    cv::Scalar mean, stddev;
+    cv::meanStdDev(channel_mat, mean, stddev);
+
+    double min_val, max_val;
+    cv::minMaxLoc(channel_mat, &min_val, &max_val);
+
+    min_vals.push_back(static_cast<float>(min_val));
+    max_vals.push_back(static_cast<float>(max_val));
+    mean_vals.push_back(static_cast<float>(mean[0]));
+    std_vals.push_back(static_cast<float>(stddev[0]));
+  }
+
+  stats_json["min"] = to_nested(min_vals);
+  stats_json["max"] = to_nested(max_vals);
+  stats_json["mean"] = to_nested(mean_vals);
+  stats_json["std"] = to_nested(std_vals);
+  stats_json["count"] = {count};
+
+  return stats_json;
+}
+
+nlohmann::ordered_json compute_flat_stats(
+  const std::shared_ptr<arrow::Array> &array)
+{
+  double sum = 0.0, sum_sq = 0.0;
+  double min_val = std::numeric_limits<double>::max();
+  double max_val = std::numeric_limits<double>::lowest();
+  int64_t count = 0;
+
+  // Iterate over the array and compute statistics
+  for (int64_t i = 0; i < array->length(); ++i) {
+    if (array->IsNull(i)) continue;
+
+    double val = 0;
+    // Handle different data types
+    if (array->type_id() == arrow::Type::DOUBLE) {
+      val = std::static_pointer_cast<arrow::DoubleArray>(array)->Value(i);
+    } else if (array->type_id() == arrow::Type::FLOAT) {
+      val = std::static_pointer_cast<arrow::FloatArray>(array)->Value(i);
+    } else if (array->type_id() == arrow::Type::INT64) {
+      val = static_cast<double>(
+          std::static_pointer_cast<arrow::Int64Array>(array)->Value(i));
+    } else {
+      continue;
+    }
+
+    // Update statistics
+    min_val = std::min(min_val, val);
+    max_val = std::max(max_val, val);
+    sum += val;
+    sum_sq += val * val;
+    ++count;
+  }
+  // Compute mean and standard deviation
+  double mean = count > 0 ? sum / count : 0;
+  double stddev = 0;
+
+  // Handle edge case where all values are zero and standard deviation can be NaN
+  if (count > 0) {
+    if (min_val == 0.0 && max_val == 0.0) {
+      stddev = 0.0;
+    } else {
+      stddev = std::sqrt((sum_sq / count) - (mean * mean));
+    }
+  }
+
+  return {{"min", {min_val}},
+          {"max", {max_val}},
+          {"mean", {mean}},
+          {"std", {stddev}},
+          {"count", {count}}};
+}
+
+nlohmann::ordered_json compute_list_stats(
+  const std::shared_ptr<arrow::ListArray> &list_array)
+{
+  // Get the values array from the ListArray
+  // Handle both Float and Double arrays
+  auto values_array = list_array->values();
+
+  // Calculate the number of lists and the dimension of each list
+  int64_t list_count = list_array->length();
+  int64_t value_count = values_array->length();
+  int64_t dim = list_count > 0 ? value_count / list_count : 0;
+
+  // Initialize statistics vectors
+  std::vector<double> sum(dim, 0.0), sum_sq(dim, 0.0),
+      min_val(dim, std::numeric_limits<double>::max()),
+      max_val(dim, std::numeric_limits<double>::lowest());
+
+  // Iterate over the values and compute statistics for each dimension
+  for (int64_t i = 0; i < value_count; ++i) {
+    double val = 0.0;
+
+    // Handle both Float32 and Float64 types
+    if (values_array->type_id() == arrow::Type::FLOAT) {
+      val = static_cast<double>(
+          std::static_pointer_cast<arrow::FloatArray>(values_array)->Value(i));
+    } else if (values_array->type_id() == arrow::Type::DOUBLE) {
+      val = std::static_pointer_cast<arrow::DoubleArray>(values_array)->Value(i);
+    } else {
+      // Unsupported type, skip
+      continue;
+    }
+
+    int d = i % dim;
+    min_val[d] = std::min(min_val[d], val);
+    max_val[d] = std::max(max_val[d], val);
+    sum[d] += val;
+    sum_sq[d] += val * val;
+  }
+
+  std::vector<double> mean(dim), stddev(dim);
+  // Compute mean and standard deviation for each dimension
+  for (int d = 0; d < dim; ++d) {
+    mean[d] = sum[d] / list_count;
+    // Handle edge case where all values are zero and standard deviation can be NaN
+    double variance = (sum_sq[d] / list_count) - (mean[d] * mean[d]);
+    stddev[d] = (list_count > 0 && variance >= 0.0) ? std::sqrt(variance) : 0.0;
+  }
+
+  return {{"min", min_val},
+          {"max", max_val},
+          {"mean", mean},
+          {"std", stddev},
+          {"count", {list_count}}};
+}
+
+nlohmann::ordered_json compute_fixed_size_list_stats(
+  const std::shared_ptr<arrow::FixedSizeListArray> &fixed_list_array)
+{
+  auto values_array = fixed_list_array->values();
+
+  int64_t list_count = fixed_list_array->length();
+  int64_t value_count = values_array->length();
+  int64_t dim = list_count > 0 ? value_count / list_count : 0;
+
+  std::vector<double> sum(dim, 0.0), sum_sq(dim, 0.0),
+      min_val(dim, std::numeric_limits<double>::max()),
+      max_val(dim, std::numeric_limits<double>::lowest());
+
+  // Iterate and compute stats
+  for (int64_t i = 0; i < value_count; ++i) {
+    double val = 0.0;
+    // Handle different numeric types (float and double)
+    if (values_array->type_id() == arrow::Type::FLOAT) {
+      val = static_cast<double>(
+          std::static_pointer_cast<arrow::FloatArray>(values_array)->Value(i));
+    } else if (values_array->type_id() == arrow::Type::DOUBLE) {
+      val = std::static_pointer_cast<arrow::DoubleArray>(values_array)->Value(i);
+    }
+
+    int d = i % dim;
+    min_val[d] = std::min(min_val[d], val);
+    max_val[d] = std::max(max_val[d], val);
+    sum[d] += val;
+    sum_sq[d] += val * val;
+  }
+  // Compute mean and standard deviation for each dimension
+  std::vector<double> mean(dim), stddev(dim);
+  for (int d = 0; d < dim; ++d) {
+    mean[d] = sum[d] / list_count;
+    double variance = (sum_sq[d] / list_count) - (mean[d] * mean[d]);
+    stddev[d] = (list_count > 0 && variance >= 0.0) ? std::sqrt(variance) : 0.0;
+  }
+  // Store stats in JSON
+  return {{"min", min_val},
+          {"max", max_val},
+          {"mean", mean},
+          {"std", stddev},
+          {"count", {list_count}}};
+}
+
+// ============================================================================
+// LeRobotBackend Class Implementation
+// ============================================================================
+
 LeRobotBackend::LeRobotBackend(
   ProducerMetadataList metadata = {})
   : io::Backend(), metadata_(std::move(metadata))
@@ -110,11 +404,10 @@ bool LeRobotBackend::open() {
     return true;
   }
 
-  std::ostringstream oss;
-  oss << "episode_" << std::setfill('0') << std::setw(6) << episode_index_;
+  std::string episode_name = format_episode_folder(episode_index_);
 
   // Create images root directory from camera names
-  images_root_ = root_ / "images" / "chunk-000";
+  images_root_ = root_ / "images" / format_chunk_dir(0);
   try {
     fs::create_directories(images_root_);
   } catch (const std::exception& e) {
@@ -124,7 +417,7 @@ bool LeRobotBackend::open() {
 
   // Create Video Directories
   // TODO(shantanuparab-tr): Use chunk size to create chunk folders
-  videos_root_ = root_ / "videos" / "chunk-000";
+  videos_root_ = root_ / "videos" / format_chunk_dir(0);
   try {
     fs::create_directories(videos_root_);
   } catch (const std::exception& e) {
@@ -141,7 +434,7 @@ bool LeRobotBackend::open() {
     return false;
   }
   // Create data directory
-  data_root_ = root_ / "data" / "chunk-000";
+  data_root_ = root_ / "data" / format_chunk_dir(0);
   try {
     fs::create_directories(data_root_);
   } catch (const std::exception& e) {
@@ -174,8 +467,7 @@ bool LeRobotBackend::open() {
   });
 
 
-  oss << ".parquet";
-  fs::path episode_path = data_root_ / oss.str();
+  fs::path episode_path = data_root_ / format_episode_parquet(episode_index_);
   auto outfile_result = arrow::io::FileOutputStream::Open(episode_path.string());
   if (!outfile_result.ok()) {
     throw std::runtime_error(std::string("Failed to open parquet file: ") + episode_path.string());
@@ -360,250 +652,8 @@ void LeRobotBackend::convert_to_videos() const {
   auto secs = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
 }
 
-std::vector<int> LeRobotBackend::sample_indices(
-  int dataset_len,
-  int min_samples,
-  int max_samples,
-  float power) const
-{
-  // Calculate the number of samples based on the power law
-  // Clamp the number of samples between min_samples and max_samples
-  int num_samples = std::clamp(
-    static_cast<int>(std::pow(dataset_len, power)),
-    min_samples,
-    max_samples);
-
-  std::vector<int> indices(num_samples);
-  float step = static_cast<float>(dataset_len - 1) / (num_samples - 1);
-  for (int i = 0; i < num_samples; ++i) indices[i] = std::round(i * step);
-  return indices;
-}
-
-cv::Mat LeRobotBackend::auto_downsample(
-  const cv::Mat &img,
-  int target_size,
-  int max_threshold) const
-{
-  int h = img.rows;
-  int w = img.cols;
-  // If the larger dimension is already below the max threshold, return the original image
-  if (std::max(w, h) < max_threshold) return img;
-  // Calculate the downsampling factor to make the larger dimension equal to target_size
-  float factor = (w > h) ? (w / static_cast<float>(target_size))
-                        : (h / static_cast<float>(target_size));
-  // Downsample the image using area interpolation for better quality
-  cv::Mat downsampled;
-  cv::resize(img, downsampled, {}, 1.0 / factor, 1.0 / factor, cv::INTER_AREA);
-  return downsampled;
-}
-
-std::vector<cv::Mat> LeRobotBackend::sample_images(
-  const std::vector<std::filesystem::path> &image_paths) const
-{
-  if (image_paths.empty()) {
-    return {};
-  }
-
-  // Sample indices using power law distribution
-  auto indices = sample_indices(image_paths.size());
-
-  std::vector<cv::Mat> images;
-  // Load and process images at the sampled indices
-  for (int idx : indices) {
-    cv::Mat img = cv::imread(image_paths[idx].string(), cv::IMREAD_COLOR);
-    if (img.empty()) continue;
-    // Downsample the image if necessary and convert to float32
-    cv::Mat img_downsampled = auto_downsample(img);
-    cv::Mat img_float;
-    // Normalize pixel values to [0, 1]
-    img_downsampled.convertTo(img_float, CV_32F, 1.0 / 255.0);
-    // Ensure the image has 3 channels (BGR)
-    if (img_float.channels() == 3) {
-      images.push_back(img_float);
-    } else {
-      std::cerr << "Unexpected channel count: " << img_float.channels() << std::endl;
-    }
-  }
-
-  return images;
-}
-
-nlohmann::ordered_json LeRobotBackend::compute_image_stats(
-  const std::vector<cv::Mat> &images) const{
-  nlohmann::ordered_json stats_json;
-  if (images.empty()) {
-    std::cerr << "No images provided." << std::endl;
-    stats_json["min"] = {};
-    stats_json["max"] = {};
-    stats_json["mean"] = {};
-    stats_json["std"] = {};
-    stats_json["count"] = {0};
-    return stats_json;
-  }
-
-  int num_channels = images[0].channels();
-  int count = static_cast<int>(images.size());
-
-  // Create a vector for each channel
-  std::vector<std::vector<float>> channel_values(num_channels);
-
-  for (const auto &img : images) {
-    std::vector<cv::Mat> channels;
-    cv::split(img, channels);
-
-    for (int c = 0; c < num_channels; ++c) {
-      // Flatten and push pixels into channel_values[c]
-      channel_values[c].insert(
-        channel_values[c].end(),
-        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].datastart)),
-        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].dataend)));
-    }
-  }
-
-  // Helper lambda to convert a vector to a nested JSON array
-  auto to_nested = [](const std::vector<float> &vec) {
-    nlohmann::ordered_json result = nlohmann::ordered_json::array();
-    for (float v : vec) {
-      result.push_back({{v}});
-    }
-    return result;
-  };
-
-  std::vector<float> min_vals, max_vals, mean_vals, std_vals;
-  for (int c = 0; c < num_channels; ++c) {
-    cv::Mat channel_mat(channel_values[c]);
-    cv::Scalar mean, stddev;
-    cv::meanStdDev(channel_mat, mean, stddev);
-
-    double min_val, max_val;
-    cv::minMaxLoc(channel_mat, &min_val, &max_val);
-
-    min_vals.push_back(static_cast<float>(min_val));
-    max_vals.push_back(static_cast<float>(max_val));
-    mean_vals.push_back(static_cast<float>(mean[0]));
-    std_vals.push_back(static_cast<float>(stddev[0]));
-  }
-
-  stats_json["min"] = to_nested(min_vals);
-  stats_json["max"] = to_nested(max_vals);
-  stats_json["mean"] = to_nested(mean_vals);
-  stats_json["std"] = to_nested(std_vals);
-  stats_json["count"] = {count};
-
-  return stats_json;
-}
-
-nlohmann::ordered_json LeRobotBackend::compute_flat_stats(
-    const std::shared_ptr<arrow::Array> &array) const {
-    double sum = 0.0, sum_sq = 0.0;
-    double min_val = std::numeric_limits<double>::max();
-    double max_val = std::numeric_limits<double>::lowest();
-    int64_t count = 0;
-
-    // Iterate over the array and compute statistics
-    for (int64_t i = 0; i < array->length(); ++i) {
-      if (array->IsNull(i)) continue;
-
-      double val = 0;
-      // Handle different data types
-      if (array->type_id() == arrow::Type::DOUBLE) {
-        val = std::static_pointer_cast<arrow::DoubleArray>(array)->Value(i);
-      } else if (array->type_id() == arrow::Type::FLOAT) {
-        val = std::static_pointer_cast<arrow::FloatArray>(array)->Value(i);
-      } else if (array->type_id() == arrow::Type::INT64) {
-        val = static_cast<double>(
-            std::static_pointer_cast<arrow::Int64Array>(array)->Value(i));
-      } else {
-        continue;
-      }
-
-      // Update statistics
-      min_val = std::min(min_val, val);
-      max_val = std::max(max_val, val);
-      sum += val;
-      sum_sq += val * val;
-      ++count;
-    }
-    // Compute mean and standard deviation
-    double mean = count > 0 ? sum / count : 0;
-    double stddev = 0;
-
-    // Handle edge case where all values are zero and standard deviation can be NaN
-    if (count > 0) {
-      if (min_val == 0.0 && max_val == 0.0) {
-        stddev = 0.0;
-      } else {
-        stddev = std::sqrt((sum_sq / count) - (mean * mean));
-      }
-    }
-
-    return {{"min", {min_val}},
-            {"max", {max_val}},
-            {"mean", {mean}},
-            {"std", {stddev}},
-            {"count", {count}}};
-}
-
-nlohmann::ordered_json LeRobotBackend::compute_list_stats(
-  const std::shared_ptr<arrow::ListArray> &list_array) const
-{
-  // Get the values array from the ListArray
-  // Handle both Float and Double arrays
-  auto values_array = list_array->values();
-
-  // Calculate the number of lists and the dimension of each list
-  int64_t list_count = list_array->length();
-  int64_t value_count = values_array->length();
-  int64_t dim = list_count > 0 ? value_count / list_count : 0;
-
-  // Initialize statistics vectors
-  std::vector<double> sum(dim, 0.0), sum_sq(dim, 0.0),
-      min_val(dim, std::numeric_limits<double>::max()),
-      max_val(dim, std::numeric_limits<double>::lowest());
-
-  // Iterate over the values and compute statistics for each dimension
-  for (int64_t i = 0; i < value_count; ++i) {
-    double val = 0.0;
-
-    // Handle both Float32 and Float64 types
-    if (values_array->type_id() == arrow::Type::FLOAT) {
-      val = static_cast<double>(
-          std::static_pointer_cast<arrow::FloatArray>(values_array)->Value(i));
-    } else if (values_array->type_id() == arrow::Type::DOUBLE) {
-      val = std::static_pointer_cast<arrow::DoubleArray>(values_array)->Value(i);
-    } else {
-      // Unsupported type, skip
-      continue;
-    }
-
-    int d = i % dim;
-    min_val[d] = std::min(min_val[d], val);
-    max_val[d] = std::max(max_val[d], val);
-    sum[d] += val;
-    sum_sq[d] += val * val;
-  }
-
-  std::vector<double> mean(dim), stddev(dim);
-  // Compute mean and standard deviation for each dimension
-  for (int d = 0; d < dim; ++d) {
-    mean[d] = sum[d] / list_count;
-    // Handle edge case where all values are zero and standard deviation can be NaN
-    double variance = (sum_sq[d] / list_count) - (mean[d] * mean[d]);
-    stddev[d] = (list_count > 0 && variance >= 0.0) ? std::sqrt(variance) : 0.0;
-  }
-
-  return {{"min", min_val},
-          {"max", max_val},
-          {"mean", mean},
-          {"std", stddev},
-          {"count", {list_count}}};
-}
-
-
 void LeRobotBackend::compute_statistics() const {
-  std::ostringstream oss;
-  oss << "episode_" << std::setfill('0') << std::setw(6) << episode_index_ << ".parquet";
-  fs::path episode_path = data_root_ / oss.str();
+  fs::path episode_path = data_root_ / format_episode_parquet(episode_index_);
 
   std::unique_ptr<parquet::ParquetFileReader> parquet_reader =
       parquet::ParquetFileReader::OpenFile(episode_path, false);
@@ -647,10 +697,7 @@ void LeRobotBackend::compute_statistics() const {
     // Get image paths for the current episode and camera
     std::string image_folder_path = images_root_.string();
 
-    std::ostringstream episode_folder_ss;
-    episode_folder_ss << "episode_" << std::setfill('0') << std::setw(6)
-                      << episode_index_;
-    std::string episode_folder_name = episode_folder_ss.str();
+    std::string episode_folder_name = format_episode_folder(episode_index_);
 
     // Construct the full path to the episode's image directory for the current
     // camera
@@ -692,37 +739,28 @@ void LeRobotBackend::compute_statistics() const {
   episode_stats_file << episode_stats.dump() << "\n";
   episode_stats_file.close();
 
-  nlohmann::ordered_json episode_metadata;
-  episode_metadata["episode_index"] = episode_index_;
-  episode_metadata["tasks"] = {cfg_->task_name};
-  episode_metadata["length"] = table->num_rows();
-
-  std::ofstream episodes_file(meta_root_ / JSONL_EPISODES, std::ios::app);
-
-  if (!episodes_file.is_open()) {
-    std::cerr << "Failed to open episode stats file for writing." << std::endl;
-    return;
-  }
-  episodes_file << episode_metadata.dump() << "\n";
-  episodes_file.close();
-
-  // TODO(shantanuparab-tr): Implement logic to check for existing task entries
-  nlohmann::ordered_json task_metadata;
-  task_metadata["task_index"] = episode_index_;
-  task_metadata["task"] = cfg_->task_name;
-
-  std::ofstream tasks_file(meta_root_ / JSONL_TASKS, std::ios::app);
-
-  if (!tasks_file.is_open()) {
-    std::cerr << "Failed to open tasks file for writing." << std::endl;
-    return;
-  }
-  tasks_file << task_metadata.dump() << "\n";
-
   // Get total number of rows in the table (frames recorded)
   int64_t episode_frame_length = table->num_rows();
 
-  update_episode_info(episode_frame_length);
+  // Use utility functions to write metadata
+  if (!write_episode_entry(meta_root_, episode_index_, cfg_->task_name,
+                           episode_frame_length)) {
+    std::cerr << "Failed to write episode entry." << std::endl;
+    return;
+  }
+
+  // Write task entry (will only create if doesn't exist)
+  // TODO(shantanuparab-tr): Use proper task_index instead of episode_index
+  if (!write_task_entry(meta_root_, episode_index_, cfg_->task_name)) {
+    std::cerr << "Failed to write task entry." << std::endl;
+    return;
+  }
+
+  // Update info.json with episode counts
+  if (!update_info_json(meta_root_, episode_frame_length, camera_names_.size())) {
+    std::cerr << "Failed to update info.json." << std::endl;
+    return;
+  }
 }
 
 void LeRobotBackend::print_stats_table(const nlohmann::ordered_json& stats) const {
@@ -936,19 +974,14 @@ void LeRobotBackend::write_image(const data::RecordBase& base) {
   // TODO(shantanuparab-tr): this could be moved to a pre-processing step?
   auto it = image_dir_cache_.find(img.id);
   if (it == image_dir_cache_.end()) {
-    std::ostringstream oss;
-    oss << "episode_" << std::setfill('0') << std::setw(6) << episode_index_;
-    fs::path camera_dir = images_root_ / img.id / oss.str();
+    fs::path camera_dir = images_root_ / img.id / format_episode_folder(episode_index_);
     std::error_code ec;
     fs::create_directories(camera_dir, ec);
     it = image_dir_cache_.emplace(img.id, std::move(camera_dir)).first;
   }
   const fs::path& camera_dir = it->second;
 
-  fs::path file_path = camera_dir / (std::string("image_") +
-                     (std::ostringstream() << std::setw(6)
-                     << std::setfill('0') << frame_index).str() +
-                     ".jpg");
+  fs::path file_path = camera_dir / format_image_filename(frame_index);
 
   // Enqueue job (clone image to ensure safety if producer overwrites buffer later)
   //
@@ -1060,42 +1093,6 @@ void LeRobotBackend::image_worker_loop() {
   }
 }
 
-void LeRobotBackend::update_episode_info(int episode_frame_length) const {
-  // Load the existing info.json
-  fs::path info_path = meta_root_ / JSON_INFO;
-  nlohmann::ordered_json info_json;
-  if (fs::exists(info_path)) {
-    std::ifstream info_file(info_path);
-    if (info_file.is_open()) {
-      info_file >> info_json;
-      info_file.close();
-    }
-  }
-  // Update episode count
-  info_json["total_episodes"] = info_json.value("total_episodes", 0) + 1;
-
-  // update total videos
-  info_json["total_videos"] = info_json.value("total_videos", 0) + camera_names_.size();
-
-  // Update splits (simple logic: all episodes go to train)
-  std::string train_split = info_json["splits"].value("train", "0:0");
-  size_t colon_pos = train_split.find(':');
-  int train_start = std::stoi(train_split.substr(0, colon_pos));;
-  int train_end = std::stoi(train_split.substr(colon_pos + 1));;
-  train_end += 1;  // add one episode to train
-  info_json["splits"]["train"] = std::to_string(train_start) + ":" + std::to_string(train_end);
-
-  // Update total frames
-  info_json["total_frames"] = info_json.value("total_frames", 0) + episode_frame_length;
-
-  // Write back to info.json
-  std::ofstream info_file(info_path);
-  if (info_file.is_open()) {
-    info_file << info_json.dump(4);
-    info_file.close();
-  }
-}
-
 void LeRobotBackend::write_metadata() {
   // TODO(shantanuparab-tr): [TDS-15]: Extract features from the robot's
   // observation space and action space
@@ -1107,38 +1104,18 @@ void LeRobotBackend::write_metadata() {
   if (fs::exists(info_path)) {
     return;
   }
-  nlohmann::ordered_json info_;
 
-  // Miscellaneous Feature (Initialization with placeholder values)
-
-  // TODO(shantanuparab-tr): [TDS-24]: Update codebase version dynamically
-  info_["codebase_version"] = "v2.1";
-  info_["robot_type"] = cfg_->robot_name;
-
-  info_["total_episodes"] = 0;
-  info_["total_frames"] = 0;
-  info_["total_videos"] = 0;
-  // TODO(shantanuparab-tr): [TDS-25]: Update total tasks based on total number
-  // of unique tasks
-  info_["total_tasks"] = 1;
-  // TODO(shantanuparab-tr): [TDS-26] Update chunks based on total number of
-  // episodes
-  info_["total_chunks"] = 1;
-  // TODO(shantanuparab-tr): [TDS-27] Add appropriate logic to decide chunk size
-  info_["chunks_size"] = 1000;
-  // TODO(shantanuparab-tr): [TDS-28] Update fps based on robot/control
-  // configuration
-  info_["fps"] = 30;
-  info_["splits"]["train"] = "0:0";
-
+  // Gather features from all metadata producers
   nlohmann::ordered_json features;
 
   for (const auto &metadata : metadata_) {
     nlohmann::ordered_json producer_feature = metadata->get_info();
-    // Merge producer_feature into features
+
+    // Merge producer features into main features object
     for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
       features[it.key()] = it.value();
     }
+
     // Extract camera names for video features
     for (auto it = producer_feature.begin(); it != producer_feature.end(); ++it) {
       if (it.value().contains("dtype") && it.value()["dtype"] == "video") {
@@ -1149,54 +1126,14 @@ void LeRobotBackend::write_metadata() {
     }
   }
 
-  // TODO(shantanuparab-tr): Common Feature these can be moved to a constants file later
+  // Add standard metadata features (timestamp, frame_index, etc.)
+  // TODO(shantanuparab-tr): Common features - can be moved to a constants file later
+  add_standard_metadata_features(features);
 
-  nlohmann::ordered_json timestamp_feature;
-  timestamp_feature["dtype"] = "float32";
-  timestamp_feature["shape"] = {1};
-  timestamp_feature["names"] = {};
-
-  nlohmann::ordered_json frame_index_feature;
-  frame_index_feature["dtype"] = "int64";
-  frame_index_feature["shape"] = {1};
-  frame_index_feature["names"] = {};
-
-  nlohmann::ordered_json episode_index_feature;
-  episode_index_feature["dtype"] = "int64";
-  episode_index_feature["shape"] = {1};
-  episode_index_feature["names"] = {};
-
-  nlohmann::ordered_json index_feature;
-  index_feature["dtype"] = "int64";
-  index_feature["shape"] = {1};
-  index_feature["names"] = {};
-
-  nlohmann::ordered_json task_index_feature;
-  task_index_feature["dtype"] = "int64";
-  task_index_feature["shape"] = {1};
-  task_index_feature["names"] = {};
-
-  features["timestamp"] = timestamp_feature;
-  features["frame_index"] = frame_index_feature;
-  features["episode_index"] = episode_index_feature;
-  features["index"] = index_feature;
-  features["task_index"] = task_index_feature;
-
-  info_["features"] = features;
-
-  info_["data_path"] = "data/chunk-{episode_chunk:03d}/episode_{episode_index:06d}.parquet";
-  info_["video_path"] =
-    "videos/chunk-{episode_chunk:03d}/{video_key}/episode_{episode_index:06d}.mp4";
-
-  // // Write to info.json
-  std::ofstream info_file(meta_root_ / JSON_INFO);
-
-  if (!info_file.is_open()) {
-    std::cerr << "Failed to open info.json for writing metadata." << std::endl;
-    return;
-  }
-  info_file << info_.dump(4);
-  info_file.close();
+  // Create initial info.json with gathered features
+  // TODO(shantanuparab-tr): [TDS-24]: Update codebase version dynamically
+  // TODO(shantanuparab-tr): [TDS-28] Update fps based on robot/control configuration
+  create_initial_info_json(meta_root_, cfg_->robot_name, features, 30, "v2.1");
 }
 
 uint32_t LeRobotBackend::scan_existing_episodes() {
