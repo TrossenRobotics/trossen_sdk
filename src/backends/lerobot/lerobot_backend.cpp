@@ -548,11 +548,12 @@ nlohmann::ordered_json LeRobotBackend::compute_list_stats(
   const std::shared_ptr<arrow::ListArray> &list_array) const
 {
   // Get the values array from the ListArray
-  auto values = std::static_pointer_cast<arrow::DoubleArray>(list_array->values());
+  // Handle both Float and Double arrays
+  auto values_array = list_array->values();
 
   // Calculate the number of lists and the dimension of each list
   int64_t list_count = list_array->length();
-  int64_t value_count = values->length();
+  int64_t value_count = values_array->length();
   int64_t dim = list_count > 0 ? value_count / list_count : 0;
 
   // Initialize statistics vectors
@@ -562,7 +563,19 @@ nlohmann::ordered_json LeRobotBackend::compute_list_stats(
 
   // Iterate over the values and compute statistics for each dimension
   for (int64_t i = 0; i < value_count; ++i) {
-    double val = values->Value(i);
+    double val = 0.0;
+
+    // Handle both Float32 and Float64 types
+    if (values_array->type_id() == arrow::Type::FLOAT) {
+      val = static_cast<double>(
+          std::static_pointer_cast<arrow::FloatArray>(values_array)->Value(i));
+    } else if (values_array->type_id() == arrow::Type::DOUBLE) {
+      val = std::static_pointer_cast<arrow::DoubleArray>(values_array)->Value(i);
+    } else {
+      // Unsupported type, skip
+      continue;
+    }
+
     int d = i % dim;
     min_val[d] = std::min(min_val[d], val);
     max_val[d] = std::max(max_val[d], val);
