@@ -580,11 +580,15 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     std::string topic = channel_ptr->topic;
     std::cout << "    - Topic: '" << topic << "'\n";
 
-    size_t odom_pos = topic.find("/odometry_2d/state");
+    size_t odom_pos = topic.find("/odom/state");
     if (odom_pos != std::string::npos) {
+      std::string stream_id = topic.substr(0, odom_pos);
+      if (!stream_id.empty() && stream_id[0] == '/') {
+        stream_id = stream_id.substr(1);
+      }
       slate_base_channel_id = channel_id;
       has_slate_base = true;
-      std::cout << "    ✓ Found odometry 2D stream for mobile robot\n";
+      std::cout << "    ✓ Found odometry stream for mobile robot: " << stream_id << "\n";
       continue;
     }
 
