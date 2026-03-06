@@ -1,0 +1,42 @@
+{
+  "_comment": [
+    "TODO: This config file is a placeholder for the future SO101 migration.",
+    "The so101_lerobot_v2.cpp example should be migrated to use DataCollectionConfig::from_json()",
+    "following the pattern used in examples/solo/, examples/stationary/, and examples/mobile/.",
+    "See those directories for reference config structure with hardware.arms, producers, etc."
+  ],
+  "session": {
+    "max_episodes": 1,
+    "episode_duration_s": 10,
+    "auto_start": false
+  },
+  "hardware": {
+    "arms": {
+      "leader": {
+        "type": "so101",
+        "port": "/dev/ttyACM1",
+        "stream_id": "leader"
+      },
+      "follower": {
+        "type": "so101",
+        "port": "/dev/ttyACM0",
+        "stream_id": "follower"
+      }
+    }
+  },
+  "lerobot_v2_backend": {
+    "type": "lerobot_v2_backend",
+    "root": "~/lerobot_v2_datasets",
+    "repository_id": "TrossenRoboticsCommunity",
+    "dataset_id": "so101_dataset",
+    "robot_name": "so101",
+    "fps": 30.0,
+    "encode_videos": false
+  },
+  "trossen_mcap_backend": {
+    "type": "trossen_mcap_backend",
+    "robot_name": "so101",
+    "dataset_id": "so101_dataset",
+    "episode_index": 0
+  }
+}

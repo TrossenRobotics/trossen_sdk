@@ -5,7 +5,7 @@
     "  ./build/examples/trossen_mcap_to_lerobot_v2 --help"
   ],
 
-  "robot_name": "solo_ai",
+  "robot_name": "trossen_solo_ai",
 
   "hardware": {
     "arms": {

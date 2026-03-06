@@ -28,7 +28,7 @@ class BackendRegistryTest : public ::testing::Test {
   static void SetUpTestSuite() {
     // Load configuration once for all tests
     // Tests run from build/tests directory, so we need to go up two levels
-    const std::string config_path = "../../config/sdk_config.json";
+    const std::string config_path = "../../tests/test_config.json";
 
     if (!std::filesystem::exists(config_path)) {
       std::cerr << "Warning: " << config_path << " not found" << std::endl;

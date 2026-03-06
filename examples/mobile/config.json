@@ -5,7 +5,7 @@
     "  ./build/examples/trossen_mcap_to_lerobot_v2 --help"
   ],
 
-  "robot_name": "mobile_ai",
+  "robot_name": "trossen_mobile_ai",
 
   "hardware": {
     "arms": {

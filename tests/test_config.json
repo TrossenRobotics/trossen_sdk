@@ -1,0 +1,29 @@
+{
+  "trossen_mcap_backend": {
+    "type": "trossen_mcap_backend",
+    "robot_name": "trossen_solo_ai",
+    "chunk_size_bytes": 4194304,
+    "compression": "zstd",
+    "dataset_id": "test_dataset",
+    "episode_index": 0
+  },
+  "lerobot_v2_backend": {
+    "type": "lerobot_v2_backend",
+    "root": "/tmp/trossen_test_datasets",
+    "repository_id": "TrossenRoboticsCommunity",
+    "dataset_id": "test_dataset",
+    "robot_name": "trossen_solo_ai",
+    "fps": 30.0,
+    "encode_videos": false
+  },
+  "trossen_backend": {
+    "type": "trossen_backend",
+    "encoder_threads": 1,
+    "max_image_queue": 4,
+    "png_compression_level": 1,
+    "drop_policy": "DropNewest"
+  },
+  "null_backend": {
+    "type": "null_backend"
+  }
+}

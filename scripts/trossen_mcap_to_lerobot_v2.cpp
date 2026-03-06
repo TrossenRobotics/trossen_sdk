@@ -45,6 +45,7 @@
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_constants.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/configuration/cli_parser.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/configuration/types/backends/lerobot_v2_backend_config.hpp"
@@ -66,7 +67,7 @@ struct Odometry2DMessage {
  * @brief Configuration for LeRobotV2 dataset conversion
  *
  * The folder structure is: dataset_root / repository_id / dataset_id / [data, images, videos, meta]
- * Example: ~/lerobot_v2_datasets/trossen_robotics/widowxai_bimanual/data/chunk-000/episode_000000.parquet
+ * Example: ~/lerobot_v2_datasets/TrossenRoboticsCommunity/pick_and_place_001/data/chunk-000/episode_000000.parquet
  */
 struct ParquetConfig {
   std::string mcap_file;
@@ -75,7 +76,7 @@ struct ParquetConfig {
   std::string dataset_root;
   std::string repository_id = "TrossenRoboticsCommunity";  // repo_id in the folder structure
   std::string dataset_id = "mcap_converted_dataset";    // dataset_name in the folder structure
-  std::string robot_name = "widowxai_bimanual";
+  std::string robot_name = "trossen_solo_ai";
   std::string task_name = "Pick and Place";
   std::vector<std::string> leader_streams;
   std::vector<std::string> follower_streams;
@@ -83,6 +84,7 @@ struct ParquetConfig {
   float camera_fps = 30.0f;
   int episode_index = 0;
   int episode_chunk = 0;
+  int chunk_size = 1000;
   bool extract_images = true;
   bool create_videos = true;
 };
@@ -223,58 +225,82 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
 
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
-                      const std::string& dataset_id);
+                      const std::string& dataset_id, int chunk_size);
 
 // ──────────────────────────────────────────────────────────
 // Main entry point
 // ──────────────────────────────────────────────────────────
 
+static void print_usage(const char* program) {
+  std::cerr << "Usage: " << program << " <mcap_file_or_folder> [options]\n";
+  std::cerr << "\nArguments:\n";
+  std::cerr << "  mcap_file_or_folder          Path to MCAP file or folder "
+            << "containing MCAP files\n";
+  std::cerr << "\nOptions:\n";
+  std::cerr << "  --config <path>              Config JSON file\n";
+  std::cerr << "                               (default: scripts/mcap_to_lerobot_config.json)\n";
+  std::cerr << "  --set KEY=VALUE              Override a config value (repeatable)\n";
+  std::cerr << "                               e.g. --set lerobot_v2_backend.dataset_id=my_ds\n";
+  std::cerr << "  --dump-config                Print resolved config and exit\n";
+  std::cerr << "  --help                       Show this help message\n";
+  std::cerr << "\nExamples:\n";
+  std::cerr << "  " << program << " ~/datasets/episode_000000.mcap\n";
+  std::cerr << "  " << program << " ~/datasets/\n";
+  std::cerr << "  " << program << " --config my_config.json ~/datasets/\n";
+  std::cerr << "  " << program << " ~/datasets/"
+            << " --set lerobot_v2_backend.root=~/out"
+            << " --set lerobot_v2_backend.dataset_id=my_ds\n";
+  std::cerr << "\nThe script will:\n";
+  std::cerr << "  1. Load settings from scripts/mcap_to_lerobot_config.json "
+            << "(lerobot_v2_backend section)\n";
+  std::cerr << "  2. Convert TrossenMCAP recordings to LeRobotV2 Parquet format\n";
+  std::cerr << "  3. Extract camera images and encode MP4 videos\n";
+  std::cerr << "  4. Generate metadata files (info.json, tasks.jsonl, episodes.jsonl)\n";
+  std::cerr << "  5. Compute and update dataset statistics\n";
+  std::cerr << "\nFolder structure: "
+            << "root/repository_id/dataset_id/[data,images,videos,meta]\n";
+  std::cerr << "\nNote: Video encoding requires FFmpeg with libsvtav1 codec.\n";
+}
+
 int main(int argc, char** argv) {
-  if (argc < 2) {
-    std::cerr << "Usage: " << argv[0]
-              << " <path_to_mcap_file_or_folder> [dataset_root_dir] "
-              << "[repo_id] [dataset_name]\n";
-    std::cerr << "\nArguments:\n";
-    std::cerr << "  path_to_mcap_file_or_folder  Path to MCAP file or folder "
-              << "containing MCAP files\n";
-    std::cerr << "  dataset_root_dir             Root directory for datasets "
-              << "(optional, from config)\n";
-    std::cerr << "  repo_id                      Repository ID "
-              << "(optional, from config/sdk_config.json)\n";
-    std::cerr << "  dataset_name                 Dataset name "
-              << "(optional, from config/sdk_config.json)\n";
-    std::cerr << "\nExamples:\n";
-    std::cerr << "  Single file:  " << argv[0]
-              << " ~/datasets/episode_000000.mcap\n";
-    std::cerr << "  Full folder:  " << argv[0] << " ~/datasets/\n";
-    std::cerr << "  Custom path:  " << argv[0] << " ~/datasets/ ~/lerobot_v2_datasets\n";
-    std::cerr << "  Custom IDs:   " << argv[0]
-              << " ~/datasets/ ~/lerobot_v2_datasets my_org my_dataset\n";
-    std::cerr << "\nThe script will:\n";
-    std::cerr << "  1. Load repository_id and dataset_id from "
-              << "config/sdk_config.json (lerobot_v2_backend section)\n";
-    std::cerr << "  2. Convert TrossenMCAP recordings to LeRobotV2 Parquet format\n";
-    std::cerr << "  3. Extract camera images and encode MP4 videos\n";
-    std::cerr << "  4. Generate metadata files (info.json, tasks.jsonl, episodes.jsonl)\n";
-    std::cerr << "  5. Compute and update dataset statistics\n";
-    std::cerr << "\nFolder structure: "
-              << "dataset_root_dir/repo_id/dataset_name/[data,images,videos,meta]\n";
-    std::cerr << "\nNote: Video encoding requires FFmpeg with libsvtav1 codec.\n";
+  namespace fs = std::filesystem;
+
+  trossen::configuration::CliParser cli(argc, argv);
+
+  if (cli.has_flag("help")) {
+    print_usage(argv[0]);
+    return 0;
+  }
+
+  const auto& pos_args = cli.get_positional();
+  if (pos_args.empty()) {
+    print_usage(argv[0]);
     return 1;
   }
 
-  namespace fs = std::filesystem;
-  fs::path input_path(argv[1]);
+  fs::path input_path(pos_args[0]);
 
-  // Load SDK configuration
-  std::string config_path = "config/sdk_config.json";
+  // Load conversion configuration
+  const std::string config_path =
+      cli.get_string("config", "scripts/mcap_to_lerobot_config.json");
+
   if (!fs::exists(config_path)) {
-    std::cerr << "Error: " << config_path << " not found!\n";
-    std::cerr << "Please run from the repository root or ensure config file exists.\n";
+    std::cerr << "Error: config file not found: " << config_path << "\n";
+    std::cerr << "Run from the repository root or use --config <path>.\n";
     return 1;
   }
 
   auto j = trossen::configuration::JsonLoader::load(config_path);
+  const auto overrides = cli.get_set_overrides();
+  if (!overrides.empty()) {
+    j = trossen::configuration::merge_overrides(j, overrides);
+  }
+
+  if (cli.has_flag("dump-config")) {
+    trossen::configuration::dump_config(j, "TrossenMCAP to LeRobotV2 Config");
+    return 0;
+  }
+
   trossen::configuration::GlobalConfig::instance().load_from_json(j);
 
   // Get LeRobotV2 backend config
@@ -283,40 +309,21 @@ int main(int argc, char** argv) {
           .get_as<trossen::configuration::LeRobotV2BackendConfig>(
               "lerobot_v2_backend");
 
-  // Use values from config, but allow command-line override
-  std::string dataset_root_dir;
-  if (argc >= 3) {
-    dataset_root_dir = argv[2];
-  } else {
-    dataset_root_dir = lerobot_config->root;
-  }
-
-  std::string repository_id;
-  if (argc >= 4) {
-    repository_id = argv[3];
-  } else {
-    repository_id = lerobot_config->repository_id;
-  }
-
-  std::string dataset_id;
-  if (argc >= 5) {
-    dataset_id = argv[4];
-  } else {
-    dataset_id = lerobot_config->dataset_id;
-  }
+  const std::string dataset_root_dir = lerobot_config->root;
+  const std::string repository_id = lerobot_config->repository_id;
+  const std::string dataset_id = lerobot_config->dataset_id;
+  const int chunk_size = lerobot_config->chunk_size;
 
   // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
   std::cout << "Configuration (loaded from " << config_path << ")\n";
   std::cout << std::string(70, '=') << "\n";
-  std::cout << "  Repository ID:    " << repository_id
-            << (argc >= 4 ? " (command-line)" : " (from config)") << "\n";
-  std::cout << "  Dataset ID:       " << dataset_id
-            << (argc >= 5 ? " (command-line)" : " (from config)") << "\n";
-  std::cout << "  Dataset Root:     " << dataset_root_dir
-            << (argc >= 3 ? " (command-line)" : " (from config)") << "\n";
+  std::cout << "  Repository ID:    " << repository_id << "\n";
+  std::cout << "  Dataset ID:       " << dataset_id << "\n";
+  std::cout << "  Dataset Root:     " << dataset_root_dir << "\n";
   std::cout << "  Full Path:        "
             << fs::path(dataset_root_dir) / repository_id / dataset_id << "\n";
+  std::cout << "  Chunk size:       " << chunk_size << " episodes/chunk\n";
   std::cout << std::string(70, '=') << "\n\n";
 
   std::vector<fs::path> mcap_files;
@@ -348,7 +355,10 @@ int main(int argc, char** argv) {
 
   // Process all MCAP files
   int successful = 0;
+  int skipped = 0;
   int failed = 0;
+
+  fs::path full_dataset_path_check = fs::path(dataset_root_dir) / repository_id / dataset_id;
 
   for (size_t i = 0; i < mcap_files.size(); ++i) {
     const auto& mcap_path = mcap_files[i];
@@ -362,13 +372,27 @@ int main(int argc, char** argv) {
       episode_index = std::stoi(match[1].str());
     }
 
+    // Idempotent: skip episodes whose parquet already exists
+    int ep_chunk = episode_index / chunk_size;
+    fs::path expected_parquet = full_dataset_path_check / "data" /
+                                trossen::io::backends::format_chunk_dir(ep_chunk) /
+                                trossen::io::backends::format_episode_parquet(episode_index);
+
+    if (fs::exists(expected_parquet)) {
+      std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
+                << episode_index << " (already converted): "
+                << mcap_path.filename().string() << "\n";
+      ++skipped;
+      continue;
+    }
+
     std::cout << "\n" << std::string(70, '=') << "\n";
     std::cout << "Processing file " << (i + 1) << "/" << mcap_files.size() << ": "
               << mcap_path.filename().string() << "\n";
     std::cout << std::string(70, '=') << "\n";
 
     int result = process_mcap_file(mcap_path.string(), dataset_root_dir, episode_index,
-                                    repository_id, dataset_id);
+                                    repository_id, dataset_id, chunk_size);
 
     if (result == 0) {
       successful++;
@@ -474,6 +498,7 @@ int main(int argc, char** argv) {
   std::cout << std::string(70, '=') << "\n";
   std::cout << "  Total files:      " << mcap_files.size() << "\n";
   std::cout << "  Successful:       " << successful << "\n";
+  std::cout << "  Skipped:          " << skipped << " (already converted)\n";
   std::cout << "  Failed:           " << failed << "\n";
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
   std::cout << std::string(70, '=') << "\n";
@@ -483,17 +508,19 @@ int main(int argc, char** argv) {
 
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
-                      const std::string& dataset_id) {
+                      const std::string& dataset_id, int chunk_size) {
   ParquetConfig cfg;
   cfg.mcap_file = mcap_file;
   cfg.dataset_root = dataset_root_dir;
   cfg.repository_id = repository_id;
   cfg.dataset_id = dataset_id;
+  cfg.chunk_size = chunk_size;
 
   namespace fs = std::filesystem;
   fs::path mcap_path(cfg.mcap_file);
 
   cfg.episode_index = episode_index;
+  cfg.episode_chunk = episode_index / chunk_size;
 
   // Create LeRobotV2 folder structure: dataset_root / repo_id / dataset_name
   fs::path full_dataset_path = fs::path(cfg.dataset_root) / cfg.repository_id / cfg.dataset_id;
@@ -610,13 +637,13 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
     }
 
-    if (topic.find("/image") != std::string::npos || topic.find("/camera") != std::string::npos) {
-      std::string camera_name = topic;
-      if (!camera_name.empty() && camera_name[0] == '/') {
-        camera_name = camera_name.substr(1);
+    // Topic format: /cameras/<camera_name>/image
+    {
+      static const std::regex camera_topic_re("^/cameras/(.+)/image$");
+      std::smatch m;
+      if (std::regex_match(topic, m, camera_topic_re)) {
+        camera_channels[channel_id] = m[1].str();
       }
-      std::replace(camera_name.begin(), camera_name.end(), '/', '_');
-      camera_channels[channel_id] = camera_name;
     }
   }
 
@@ -1396,7 +1423,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     // Use helper function to create initial info.json with custom features
     if (!trossen::io::backends::create_initial_info_json(
             meta_dir, cfg.robot_name, features, static_cast<int>(cfg.fps),
-            trossen::io::backends::CODEBASE_VERSION)) {
+            trossen::io::backends::CODEBASE_VERSION, cfg.chunk_size)) {
       std::cerr << "  Error: Failed to create " << info_path.string() << "\n";
       return 1;
     }

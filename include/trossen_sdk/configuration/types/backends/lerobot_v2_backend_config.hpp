@@ -20,6 +20,8 @@ inline constexpr char LEROBOT_V2_DEFAULT_TASK_NAME[] = "perform a generic task";
 inline constexpr char LEROBOT_V2_DEFAULT_REPOSITORY_ID[] = "TrossenRoboticsCommunity";
 inline constexpr float LEROBOT_V2_DEFAULT_FPS = 30.0f;
 inline constexpr int LEROBOT_V2_DEFAULT_EPISODE_INDEX = 0;
+// Number of episodes stored per chunk folder (chunk-000, chunk-001, ...)
+inline constexpr int LEROBOT_V2_DEFAULT_CHUNK_SIZE = 1000;
 
 struct LeRobotV2BackendConfig : public BaseConfig {
   int encoder_threads{trossen::io::backends::DEFAULT_ENCODER_THREADS};
@@ -33,6 +35,7 @@ struct LeRobotV2BackendConfig : public BaseConfig {
   std::string root{trossen::io::backends::get_default_root_path().string()};
   // TODO(shantanuparab-tr): DRemove episode index if not being used
   int episode_index{LEROBOT_V2_DEFAULT_EPISODE_INDEX};
+  int chunk_size{LEROBOT_V2_DEFAULT_CHUNK_SIZE};
   std::string robot_name{trossen::io::backends::DEFAULT_ROBOT_NAME};
   float fps{LEROBOT_V2_DEFAULT_FPS};
 
@@ -57,6 +60,7 @@ struct LeRobotV2BackendConfig : public BaseConfig {
     if (j.contains("repository_id")) j.at("repository_id").get_to(c.repository_id);
     if (j.contains("dataset_id")) j.at("dataset_id").get_to(c.dataset_id);
     if (j.contains("episode_index")) j.at("episode_index").get_to(c.episode_index);
+    if (j.contains("chunk_size")) j.at("chunk_size").get_to(c.chunk_size);
     if (j.contains("robot_name")) j.at("robot_name").get_to(c.robot_name);
     if (j.contains("fps")) j.at("fps").get_to(c.fps);
 
