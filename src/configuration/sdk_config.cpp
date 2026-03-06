@@ -1,9 +1,9 @@
 /**
- * @file data_collection_config.cpp
- * @brief Implementation of DataCollectionConfig and sub-config from_json methods
+ * @file sdk_config.cpp
+ * @brief Implementation of SdkConfig and sub-config from_json methods
  */
 
-#include "trossen_sdk/configuration/data_collection_config.hpp"
+#include "trossen_sdk/configuration/sdk_config.hpp"
 
 #include "trossen_sdk/configuration/global_config.hpp"
 
@@ -33,10 +33,10 @@ HardwareConfig HardwareConfig::from_json(const nlohmann::json& j) {
   return c;
 }
 
-// ─── DataCollectionConfig ────────────────────────────────────────────────────
+// ─── SdkConfig ───────────────────────────────────────────────────────────────
 
-DataCollectionConfig DataCollectionConfig::from_json(const nlohmann::json& j) {
-  DataCollectionConfig c;
+SdkConfig SdkConfig::from_json(const nlohmann::json& j) {
+  SdkConfig c;
 
   if (j.contains("robot_name")) j.at("robot_name").get_to(c.robot_name);
 
@@ -71,9 +71,7 @@ DataCollectionConfig DataCollectionConfig::from_json(const nlohmann::json& j) {
   return c;
 }
 
-void DataCollectionConfig::populate_global_config() const {
-  // Build a JSON object in the format GlobalConfig::load_from_json() expects:
-  // each top-level key maps to an object that has a "type" field.
+void SdkConfig::populate_global_config() const {
   nlohmann::json gc_json = nlohmann::json::object();
 
   // Session manager

@@ -1,8 +1,8 @@
 /**
- * @file data_collection_config.hpp
- * @brief Top-level data collection configuration aggregator
+ * @file sdk_config.hpp
+ * @brief Top-level SDK configuration aggregator
  *
- * DataCollectionConfig is the single entry point for all SDK configuration.
+ * SdkConfig is the single entry point for all SDK configuration.
  * Load it from a unified JSON file, optionally apply CLI overrides, and
  * it will populate the GlobalConfig singleton so all SDK components
  * (SessionManager, backends) pick up the correct settings automatically.
@@ -14,7 +14,7 @@
  *   if (!overrides.empty()) {
  *     j = trossen::configuration::merge_overrides(j, overrides);
  *   }
- *   auto cfg = trossen::configuration::DataCollectionConfig::from_json(j);
+ *   auto cfg = trossen::configuration::SdkConfig::from_json(j);
  *   cfg.populate_global_config();
  *
  *   // Now use cfg.hardware, cfg.producers, cfg.teleop directly
@@ -59,8 +59,8 @@
  *       Use the mcap_to_lerobot tool to convert recorded data to LeRobot format.
  */
 
-#ifndef TROSSEN_SDK__CONFIGURATION__DATA_COLLECTION_CONFIG_HPP_
-#define TROSSEN_SDK__CONFIGURATION__DATA_COLLECTION_CONFIG_HPP_
+#ifndef TROSSEN_SDK__CONFIGURATION__SDK_CONFIG_HPP_
+#define TROSSEN_SDK__CONFIGURATION__SDK_CONFIG_HPP_
 
 #include <optional>
 #include <string>
@@ -97,15 +97,13 @@ struct HardwareConfig {
 
 
 /**
- * @brief Top-level data collection configuration
+ * @brief Top-level SDK configuration
  *
  * Aggregates hardware, producer, teleop, session, and backend configurations
  * into a single object loaded from a unified JSON file.
  *
- * @note Recording is currently supported in MCAP format only.
- *       Use the mcap_to_lerobot tool to convert to LeRobot format.
  */
-struct DataCollectionConfig {
+struct SdkConfig {
   /// @brief Human-readable robot name (used in backend metadata)
   std::string robot_name{"trossen_robot"};
 
@@ -118,31 +116,28 @@ struct DataCollectionConfig {
   /// @brief Teleoperation setup
   TeleoperationConfig teleop;
 
-  /// @brief MCAP backend configuration (the only supported recording format)
+  /// @brief Backend configuration
   McapBackendConfig mcap_backend;
 
   /// @brief Session manager settings (episode duration, max episodes, backend selection)
   SessionManagerConfig session;
 
   /**
-   * @brief Parse a DataCollectionConfig from a unified JSON object
+   * @brief Parse a SdkConfig from a unified JSON object
    *
-   * @param j Unified data collection configuration JSON
-   * @return Populated DataCollectionConfig with defaults for any omitted fields
+   * @param j Unified SDK configuration JSON
+   * @return Populated SdkConfig with defaults for any omitted fields
    */
-  static DataCollectionConfig from_json(const nlohmann::json& j);
+  static SdkConfig from_json(const nlohmann::json& j);
 
   /**
    * @brief Load session and backend configs into the GlobalConfig singleton
    *
    * Must be called before constructing a SessionManager.
-   * Converts the typed config structs back to the JSON format expected by
-   * GlobalConfig::load_from_json(), preserving full backward compatibility
-   * with SessionManager and BackendRegistry.
    */
   void populate_global_config() const;
 };
 
 }  // namespace trossen::configuration
 
-#endif  // TROSSEN_SDK__CONFIGURATION__DATA_COLLECTION_CONFIG_HPP_
+#endif  // TROSSEN_SDK__CONFIGURATION__SDK_CONFIG_HPP_
