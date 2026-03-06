@@ -54,11 +54,11 @@ SdkConfig SdkConfig::from_json(const nlohmann::json& j) {
     c.teleop = TeleoperationConfig::from_json(j.at("teleop"));
   }
 
-  // Parse the MCAP backend config; seed robot_name from the top-level field
+  // Parse the TrossenMCAP backend config; seed robot_name from the top-level field
   // so it does not need to be repeated inside the "backend" section.
   c.mcap_backend.robot_name = c.robot_name;
   if (j.contains("backend") && j.at("backend").is_object()) {
-    c.mcap_backend = McapBackendConfig::from_json(j.at("backend"));
+    c.mcap_backend = TrossenMCAPBackendConfig::from_json(j.at("backend"));
     if (!j.at("backend").contains("robot_name")) {
       c.mcap_backend.robot_name = c.robot_name;
     }
@@ -88,18 +88,18 @@ void SdkConfig::populate_global_config() const {
     gc_json["session_manager"] = sm;
   }
 
-  // MCAP backend
+  // TrossenMCAP backend
   {
     const auto& b = mcap_backend;
     nlohmann::json bj;
-    bj["type"] = "mcap_backend";
+    bj["type"] = "trossen_mcap_backend";
     bj["root"] = b.root;
     bj["robot_name"] = b.robot_name;
     bj["chunk_size_bytes"] = b.chunk_size_bytes;
     bj["compression"] = b.compression;
     bj["dataset_id"] = b.dataset_id;
     bj["episode_index"] = b.episode_index;
-    gc_json["mcap_backend"] = bj;
+    gc_json["trossen_mcap_backend"] = bj;
   }
 
   GlobalConfig::instance().load_from_json(gc_json);
