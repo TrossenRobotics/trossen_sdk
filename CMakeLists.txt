@@ -17,6 +17,8 @@ add_library(trossen_sdk SHARED
   src/backends/null/null_backend.cpp
   src/configuration/global_config.cpp
   src/configuration/loaders/json_loader.cpp
+  src/configuration/cli_parser.cpp
+  src/configuration/sdk_config.cpp
   src/hw/hardware_registry.cpp
   src/hw/active_hardware_registry.cpp
   src/hw/arm/trossen_arm_component.cpp
