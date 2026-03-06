@@ -51,6 +51,7 @@
 struct JointStateMessage {
   uint64_t timestamp_ns;
   std::vector<double> positions;
+  std::vector<double> velocities;
   std::string stream_id;
 };
 
@@ -501,8 +502,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return 1;
   }
 
-  cfg.leader_streams = {"leader_left", "leader_right"};
-  cfg.follower_streams = {"follower_left", "follower_right"};
+  // Leader/follower streams will be auto-detected from MCAP file
+  cfg.leader_streams = {};
+  cfg.follower_streams = {};
 
   std::vector<std::string> config_lines = {
       "Input MCAP:       " + cfg.mcap_file,
@@ -512,8 +514,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       "Episode Index:    " + std::to_string(cfg.episode_index),
       "Episode Chunk:    " + std::to_string(cfg.episode_chunk),
       "Output Parquet:   " + cfg.output_file,
-      "Leader streams:   " + std::to_string(cfg.leader_streams.size()),
-      "Follower streams: " + std::to_string(cfg.follower_streams.size())};
+      "Arms/Cameras:     Auto-detect from MCAP"};
 
   trossen::demo::print_config_banner("MCAP to LeRobot Converter", config_lines);
 
@@ -562,6 +563,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
   std::map<mcap::ChannelId, std::string> channel_id_to_stream;
   std::map<mcap::ChannelId, std::string> camera_channels;
+  mcap::ChannelId slate_base_channel_id = 0;
+  bool has_slate_base = false;
+  std::vector<std::string> detected_leader_streams;
+  std::vector<std::string> detected_follower_streams;
 
   std::cout << "  Available channels:\n";
   for (const auto& [channel_id, channel_ptr] : reader.channels()) {
@@ -571,7 +576,24 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     size_t pos = topic.find("/joints/state");
     if (pos != std::string::npos) {
       std::string stream_id = topic.substr(0, pos);
+      // Remove leading slash if present
+      if (!stream_id.empty() && stream_id[0] == '/') {
+        stream_id = stream_id.substr(1);
+      }
       channel_id_to_stream[channel_id] = stream_id;
+
+      // Check if this is the slate_base stream
+      if (stream_id == "slate_base") {
+        slate_base_channel_id = channel_id;
+        has_slate_base = true;
+        std::cout << "    ✓ Found slate_base stream for mobile robot\n";
+      } else if (stream_id.find("leader") != std::string::npos) {
+        detected_leader_streams.push_back(stream_id);
+        std::cout << "    ✓ Detected leader stream: " << stream_id << "\n";
+      } else if (stream_id.find("follower") != std::string::npos) {
+        detected_follower_streams.push_back(stream_id);
+        std::cout << "    ✓ Detected follower stream: " << stream_id << "\n";
+      }
     }
 
     if (topic.find("/image") != std::string::npos || topic.find("/camera") != std::string::npos) {
@@ -589,12 +611,49 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return 1;
   }
 
+  // Configure leader/follower streams based on detection
+  if (!detected_leader_streams.empty() && !detected_follower_streams.empty()) {
+    // Sort for consistent ordering
+    std::sort(detected_leader_streams.begin(), detected_leader_streams.end());
+    std::sort(detected_follower_streams.begin(), detected_follower_streams.end());
+    cfg.leader_streams = detected_leader_streams;
+    cfg.follower_streams = detected_follower_streams;
+    std::cout << "\n  ✓ Auto-detected configuration:\n";
+    std::cout << "    Leader streams (" << cfg.leader_streams.size() << "): ";
+    for (const auto& s : cfg.leader_streams) std::cout << s << " ";
+    std::cout << "\n    Follower streams (" << cfg.follower_streams.size() << "): ";
+    for (const auto& s : cfg.follower_streams) std::cout << s << " ";
+    std::cout << "\n";
+  } else {
+    // Fallback: treat all non-slate_base streams as both leader and follower (single robot mode)
+    std::vector<std::string> all_streams;
+    for (const auto& [channel_id, stream_id] : channel_id_to_stream) {
+      if (stream_id != "slate_base") {
+        all_streams.push_back(stream_id);
+      }
+    }
+    std::sort(all_streams.begin(), all_streams.end());
+    all_streams.erase(std::unique(all_streams.begin(), all_streams.end()), all_streams.end());
+
+    if (!all_streams.empty()) {
+      cfg.leader_streams = all_streams;
+      cfg.follower_streams = all_streams;
+      std::cout << "\n  ✓ Single robot mode detected " << all_streams.size() << " stream(s):\n    ";
+      for (const auto& s : all_streams) std::cout << s << " ";
+      std::cout << "\n";
+    } else {
+      std::cerr << "Error: No usable joint state streams found\n";
+      return 1;
+    }
+  }
+
   if (!camera_channels.empty()) {
     std::cout << "  Found " << camera_channels.size() << " camera channel(s)\n";
   }
 
   std::cout << "\nParsing joint state messages...\n";
   std::map<std::string, std::vector<JointStateMessage>> messages_by_stream;
+  std::vector<JointStateMessage> slate_base_messages;
   std::map<std::string, size_t> camera_image_counts;
   std::map<std::string, std::vector<uint64_t>> camera_timestamps;
 
@@ -623,8 +682,16 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       for (auto v : js_msg.positions()) {
         msg.positions.push_back(static_cast<double>(v));
       }
+      for (auto v : js_msg.velocities()) {
+        msg.velocities.push_back(static_cast<double>(v));
+      }
 
-      messages_by_stream[stream_id].push_back(msg);
+      // Store slate_base messages separately
+      if (has_slate_base && messageView.channel->id == slate_base_channel_id) {
+        slate_base_messages.push_back(msg);
+      } else {
+        messages_by_stream[stream_id].push_back(msg);
+      }
       ++total_messages;
       continue;
     }
@@ -640,6 +707,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   std::cout << "  ✓ Parsed " << total_messages << " joint state messages\n";
   for (const auto& [stream_id, messages] : messages_by_stream) {
     std::cout << "    - " << stream_id << ": " << messages.size() << " messages\n";
+  }
+  if (has_slate_base) {
+    std::cout << "    - slate_base: " << slate_base_messages.size() << " messages (velocities)\n";
   }
 
   if (total_images > 0) {
@@ -679,9 +749,37 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
   std::cout << "\nCreating Parquet file...\n";
 
+  // Calculate dimensions based on detected streams
+  int joints_per_stream = 0;
+  for (const auto& [stream_id, messages] : messages_by_stream) {
+    if (!messages.empty()) {
+      joints_per_stream = messages[0].positions.size();
+      break;
+    }
+  }
+
+  int action_dim = cfg.leader_streams.size() * joints_per_stream;
+  int obs_dim = cfg.follower_streams.size() * joints_per_stream;
+
+  // Add 2 dimensions for mobile base velocities (linear, angular) if present
+  if (has_slate_base) {
+    action_dim += 2;
+    obs_dim += 2;
+  }
+
+  std::cout << "  Joint dimensions per stream: " << joints_per_stream << "\n";
+  std::cout << "  Action dimension: " << action_dim << " (" << cfg.leader_streams.size()
+            << " stream(s) × " << joints_per_stream;
+  if (has_slate_base) std::cout << " + 2 base velocities";
+  std::cout << ")\n";
+  std::cout << "  Observation dimension: " << obs_dim << " (" << cfg.follower_streams.size()
+            << " stream(s) × " << joints_per_stream;
+  if (has_slate_base) std::cout << " + 2 base velocities";
+  std::cout << ")\n";
+
   auto schema = arrow::schema({
-      arrow::field("action", arrow::fixed_size_list(arrow::float32(), 14)),
-      arrow::field("observation.state", arrow::fixed_size_list(arrow::float32(), 14)),
+      arrow::field("action", arrow::fixed_size_list(arrow::float32(), action_dim)),
+      arrow::field("observation.state", arrow::fixed_size_list(arrow::float32(), obs_dim)),
       arrow::field("timestamp", arrow::float32()),
       arrow::field("frame_index", arrow::int64()),
       arrow::field("episode_index", arrow::int64()),
@@ -769,6 +867,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   // Use double precision for consistent timestamp calculation, then cast to float32
   const double frame_duration_s = 1.0 / 30.0;
 
+  // Index for slate_base messages
+  size_t slate_base_idx = 0;
+
   auto find_closest_message = [&](const std::string& stream_id, uint64_t target_ts,
                                   size_t& idx) -> std::vector<double>* {
     auto it = messages_by_stream.find(stream_id);
@@ -825,16 +926,51 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
     }
 
+    // Find and append slate base velocities (linear, angular) if mobile
+    std::vector<double> base_velocities;
+    if (has_slate_base) {
+      // Find closest slate_base message
+      while (slate_base_idx < slate_base_messages.size() - 1 &&
+             slate_base_messages[slate_base_idx + 1].timestamp_ns <= timestamp_ns) {
+        ++slate_base_idx;
+      }
+
+      const uint64_t tolerance_ns = 50000000;
+      if (slate_base_idx < slate_base_messages.size() &&
+          std::abs(static_cast<int64_t>(
+              slate_base_messages[slate_base_idx].timestamp_ns - timestamp_ns)) <=
+              static_cast<int64_t>(tolerance_ns)) {
+        const auto& velocities = slate_base_messages[slate_base_idx].velocities;
+        if (velocities.size() >= 2) {
+          base_velocities.push_back(velocities[0]);  // linear velocity
+          base_velocities.push_back(velocities[2]);  // angular velocity
+        }
+      }
+
+      // If we didn't get base velocities, use zeros
+      if (base_velocities.empty()) {
+        base_velocities = {0.0, 0.0};
+      }
+    }
+
     if (!have_all_leaders || !have_all_followers) {
       ++rows_skipped;
       continue;
     }
 
+    // Append base velocities at the end for mobile robots
+    if (has_slate_base) {
+      actions.insert(actions.end(), base_velocities.begin(), base_velocities.end());
+      observations.insert(observations.end(), base_velocities.begin(), base_velocities.end());
+    }
+
     arrow::FloatBuilder ts_builder;
     auto obs_value_builder = std::make_shared<arrow::FloatBuilder>();
-    arrow::FixedSizeListBuilder obs_builder(arrow::default_memory_pool(), obs_value_builder, 14);
+    arrow::FixedSizeListBuilder obs_builder(
+        arrow::default_memory_pool(), obs_value_builder, obs_dim);
     auto act_value_builder = std::make_shared<arrow::FloatBuilder>();
-    arrow::FixedSizeListBuilder act_builder(arrow::default_memory_pool(), act_value_builder, 14);
+    arrow::FixedSizeListBuilder act_builder(
+        arrow::default_memory_pool(), act_value_builder, action_dim);
     arrow::Int64Builder epi_idx_builder, frame_idx_builder, index_builder, task_idx_builder;
 
     auto* obs_val = static_cast<arrow::FloatBuilder*>(obs_builder.value_builder());
@@ -947,8 +1083,16 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
         obs_per_row += it->second[0].positions.size();
       }
     }
-    std::cout << "  Actions per row:   " << actions_per_row << "\n";
-    std::cout << "  Observations/row:  " << obs_per_row << "\n";
+    if (has_slate_base) {
+      actions_per_row += 2;  // Add base velocities
+      obs_per_row += 2;      // Add base velocities
+    }
+    std::cout << "  Actions per row:   " << actions_per_row;
+    if (has_slate_base) std::cout << " (incl. 2 base velocities)";
+    std::cout << "\n";
+    std::cout << "  Observations/row:  " << obs_per_row;
+    if (has_slate_base) std::cout << " (incl. 2 base velocities)";
+    std::cout << "\n";
   }
 
   // ──────────────────────────────────────────────────────────
@@ -1170,6 +1314,14 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
 
     int obs_state_dim = cfg.follower_streams.size() * joints_per_stream;
+
+    // Add base velocities at the end if mobile robot
+    if (has_slate_base) {
+      obs_names.push_back("linear_vel");
+      obs_names.push_back("angular_vel");
+      obs_state_dim += 2;
+    }
+
     features["observation.state"]["dtype"] = "float32";
     features["observation.state"]["shape"] = nlohmann::json::array({obs_state_dim});
     features["observation.state"]["names"] = obs_names;
@@ -1188,6 +1340,13 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
 
     int action_dim = cfg.leader_streams.size() * joints_per_stream;
+
+    // Add base velocities at the end if mobile robot
+    if (has_slate_base) {
+      action_names.push_back("linear_vel");
+      action_names.push_back("angular_vel");
+      action_dim += 2;
+    }
     features["action"]["dtype"] = "float32";
     features["action"]["shape"] = nlohmann::json::array({action_dim});
     features["action"]["names"] = action_names;
