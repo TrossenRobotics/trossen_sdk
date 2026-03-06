@@ -52,7 +52,7 @@ inline std::string joint_state_topic(const std::string& robot_name) {
  * @return Topic name for the 2D odometry stream
  */
 inline std::string odometry_2d_topic(const std::string& stream_id) {
-  return stream_id + "/odometry_2d/state";
+  return stream_id + "/odom/state";
 }
 
 }  // namespace trossen::mcapdefs

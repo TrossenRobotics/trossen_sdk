@@ -189,10 +189,10 @@ private:
   std::optional<foxglove::McapWriter> writer_;
 
   /// @brief Serialised FileDescriptorSet for the JointState protobuf schema
-  std::string schema_data_;
+  std::string schema_data_js_;
 
   /// @brief Serialised FileDescriptorSet for the Odometry2D protobuf schema
-  std::string odometry_2d_schema_data_;
+  std::string schema_data_odom2d_;
 
   /// @brief Output file path
   std::filesystem::path path_;

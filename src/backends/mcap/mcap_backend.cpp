@@ -215,8 +215,8 @@ foxglove::RawChannel* McapBackend::ensure_jointstate_channel(const std::string& 
   foxglove::Schema schema;
   schema.name = "trossen_sdk.msg.JointState";
   schema.encoding = "protobuf";
-  schema.data = reinterpret_cast<const std::byte*>(schema_data_.data());
-  schema.data_len = schema_data_.size();
+  schema.data = reinterpret_cast<const std::byte*>(schema_data_js_.data());
+  schema.data_len = schema_data_js_.size();
 
   // Create channel with stream-specific topic
   auto channel_result = foxglove::RawChannel::create(
@@ -323,8 +323,8 @@ void McapBackend::ensure_odometry_2d_channel(const std::string& stream_id) {
   foxglove::Schema schema;
   schema.name = "trossen_sdk.msg.Odometry2D";
   schema.encoding = "protobuf";
-  schema.data = reinterpret_cast<const std::byte*>(odometry_2d_schema_data_.data());
-  schema.data_len = odometry_2d_schema_data_.size();
+  schema.data = reinterpret_cast<const std::byte*>(schema_data_odom2d_.data());
+  schema.data_len = schema_data_odom2d_.size();
 
   auto channel_result = foxglove::RawChannel::create(
     mcapdefs::odometry_2d_topic(stream_id),
@@ -500,9 +500,9 @@ void McapBackend::register_schemas_once() {
     return blob;
   };
 
-  schema_data_ = build_schema_blob(
+  schema_data_js_ = build_schema_blob(
     "trossen_sdk/io/backends/mcap/proto/JointState.proto");
-  odometry_2d_schema_data_ = build_schema_blob(
+  schema_data_odom2d_ = build_schema_blob(
     "trossen_sdk/io/backends/mcap/proto/Odometry2D.proto");
 }
 

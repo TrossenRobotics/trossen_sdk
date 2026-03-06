@@ -77,10 +77,10 @@ public:
   ~SlateBaseProducer() override = default;
 
   /**
-   * @brief Poll the driver for the latest state and emit a MobileBaseRecord.
+   * @brief Poll the driver for the latest state and emit an Odometry2DRecord.
    *
    * Reads odom_x/y/z (pose) and vel_x/y/z (body-frame velocity) from the
-   * SLATE driver and populates a MobileBaseRecord.
+   * SLATE driver and populates a Odometry2DRecord.
    *
    * @param emit Callback to invoke for each produced record
    */
