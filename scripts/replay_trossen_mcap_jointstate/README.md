@@ -47,7 +47,9 @@ Example:
         "stream_id": "follower",  // must match the stream_id in the MCAP file
         "ip_address": "192.168.1.4",
         "model": "wxai_v0",
-        "end_effector": "wxai_v0_follower"
+        "end_effector": "wxai_v0_follower",
+        "goal_time": 0.066        // seconds to reach each commanded position (optional, default 0.0)
+                                  // recommended: 2.0/fps for smooth motion (e.g. 0.066 at 30 Hz)
       }
     ],
     "slates": [                   // optional: include only if replaying a mobile base episode

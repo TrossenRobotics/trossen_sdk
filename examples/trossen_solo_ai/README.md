@@ -26,8 +26,8 @@ Override at the command line without editing the file:
 
 ```bash
 ./build/examples/trossen_solo_ai \
-  --set hardware.arms.leader.ip_address=10.0.0.1 \
-  --set hardware.arms.follower.ip_address=10.0.0.2
+  --set hardware.arms.leader.ip_address=192.168.1.2 \
+  --set hardware.arms.follower.ip_address=192.168.1.4
 ```
 
 ---
@@ -129,10 +129,10 @@ All settings are in [config.json](config.json) and can be overridden with `--set
 After recording, convert the episodes:
 
 ```bash
-./build/bin/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/solo_dataset/ ~/lerobot_datasets
+./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/solo_dataset/ ~/lerobot_datasets
 ```
 
-See [scripts/TROSSEN_MCAP_TO_LEROBOT_V2.md](../../scripts/TROSSEN_MCAP_TO_LEROBOT_V2.md) for full options.
+See [scripts/trossen_mcap_to_lerobot_v2/README.md](../../scripts/trossen_mcap_to_lerobot_v2/README.md) for full options.
 
 ---
 
@@ -140,8 +140,8 @@ See [scripts/TROSSEN_MCAP_TO_LEROBOT_V2.md](../../scripts/TROSSEN_MCAP_TO_LEROBO
 
 | Stream ID | Type | Content |
 |---|---|---|
-| `leader` | JointState | 6-DOF positions, velocities, efforts |
-| `follower` | JointState | 6-DOF positions, velocities, efforts |
+| `leader` | JointState | position, velocity, effort × 7 (6 joints + 1 gripper) |
+| `follower` | JointState | position, velocity, effort × 7 (6 joints + 1 gripper) |
 | `camera_main` | Image | BGR8 640×480 @ 30 fps |
 | `camera_wrist` | Image | BGR8 640×480 @ 30 fps |
 
@@ -159,4 +159,3 @@ See [scripts/TROSSEN_MCAP_TO_LEROBOT_V2.md](../../scripts/TROSSEN_MCAP_TO_LEROBO
 
 **Low frame rate on camera**
 - Use a USB 3.0 port
-- Reduce resolution: `--set hardware.cameras.0.width=320 --set hardware.cameras.0.height=240`

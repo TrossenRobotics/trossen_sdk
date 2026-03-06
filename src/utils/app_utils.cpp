@@ -1,6 +1,6 @@
 /**
- * @file demo_utils.cpp
- * @brief Implementation of shared utilities for Trossen SDK demo applications
+ * @file app_utils.cpp
+ * @brief Implementation of shared utilities for Trossen SDK applications
  */
 
 #include <csignal>
@@ -11,9 +11,9 @@
 #include <thread>
 #include <vector>
 
-#include "./demo_utils.hpp"
+#include "trossen_sdk/utils/app_utils.hpp"
 
-namespace trossen::demo {
+namespace trossen::utils {
 
 std::atomic<bool> g_stop_requested{false};
 
@@ -257,4 +257,4 @@ std::string generate_episode_path(
   return path.str();
 }
 
-}  // namespace trossen::demo
+}  // namespace trossen::utils

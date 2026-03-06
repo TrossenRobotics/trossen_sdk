@@ -230,7 +230,7 @@ Any JSON key can be overridden at runtime using dot-notation:
 
 ```bash
 ./build/examples/trossen_solo_ai \
-  --set hardware.arms.leader.ip_address=10.0.0.1 \
+  --set hardware.arms.leader.ip_address=192.168.1.2 \
   --set session.max_duration=30 \
   --set backend.dataset_id=trial_01
 ```

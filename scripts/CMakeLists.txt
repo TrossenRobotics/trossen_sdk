@@ -14,17 +14,15 @@ find_package(libtrossen_arm)
 add_executable(replay_trossen_mcap_jointstate replay_trossen_mcap_jointstate/replay_trossen_mcap_jointstate.cpp)
 target_include_directories(replay_trossen_mcap_jointstate PRIVATE
   ${mcap_SOURCE_DIR}/cpp/mcap/include
-  ${CMAKE_SOURCE_DIR}/examples
 )
 target_compile_definitions(replay_trossen_mcap_jointstate PRIVATE MCAP_IMPLEMENTATION)
-target_link_libraries(replay_trossen_mcap_jointstate demo_utils trossen_sdk libtrossen_arm zstd lz4)
+target_link_libraries(replay_trossen_mcap_jointstate trossen_sdk libtrossen_arm zstd lz4)
 
 # TrossenMCAP → LeRobotV2 conversion tool
 add_executable(trossen_mcap_to_lerobot_v2 trossen_mcap_to_lerobot_v2/trossen_mcap_to_lerobot_v2.cpp)
 target_include_directories(trossen_mcap_to_lerobot_v2 PRIVATE
   ${mcap_SOURCE_DIR}/cpp/mcap/include
   ${CMAKE_BINARY_DIR}
-  ${CMAKE_SOURCE_DIR}/examples
 )
 target_compile_definitions(trossen_mcap_to_lerobot_v2 PRIVATE MCAP_IMPLEMENTATION)
-target_link_libraries(trossen_mcap_to_lerobot_v2 demo_utils trossen_sdk arrow parquet zstd lz4 protobuf ${OpenCV_LIBS})
+target_link_libraries(trossen_mcap_to_lerobot_v2 trossen_sdk arrow parquet zstd lz4 protobuf ${OpenCV_LIBS})

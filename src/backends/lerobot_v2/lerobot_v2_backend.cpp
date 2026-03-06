@@ -324,7 +324,7 @@ nlohmann::ordered_json compute_fixed_size_list_stats(
 }
 
 // ============================================================================
-// LeRobotBackend Class Implementation
+// LeRobotV2Backend Class Implementation
 // ============================================================================
 
 LeRobotV2Backend::LeRobotV2Backend(

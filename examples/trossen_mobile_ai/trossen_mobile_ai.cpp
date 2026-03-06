@@ -18,7 +18,7 @@
  * Examples:
  *   ./trossen_mobile_ai
  *   ./trossen_mobile_ai --config examples/trossen_mobile_ai/config.json
- *   ./trossen_mobile_ai --set hardware.arms.leader_left.ip_address=10.0.0.1
+ *   ./trossen_mobile_ai --set hardware.arms.leader_left.ip_address=192.168.1.3
  *   ./trossen_mobile_ai --set session.max_duration=30 --set producers.mobile_base.poll_rate_hz=60
  *   ./trossen_mobile_ai --dump-config
  */
@@ -48,7 +48,11 @@
 #include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
-#include "../demo_utils.hpp"
+#include "trossen_sdk/utils/app_utils.hpp"
+
+static const std::vector<double> STAGED_POSITIONS = {
+  0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0
+};
 
 static void print_usage(const char* program) {
   std::cout <<
@@ -64,7 +68,7 @@ static void print_usage(const char* program) {
     "Examples:\n"
     "  " << program << "\n"
     "  " << program << " --config examples/trossen_mobile_ai/config.json\n"
-    "  " << program << " --set hardware.arms.leader_left.ip_address=10.0.0.1\n"
+    "  " << program << " --set hardware.arms.leader_left.ip_address=192.168.1.3\n"
     "  " << program << " --set session.max_duration=30\n"
     "  " << program << " --dump-config\n";
 }
@@ -154,9 +158,9 @@ int main(int argc, char** argv) {
     std::string(cfg.teleop.enabled ? "enabled" : "disabled") +
     " (" + std::to_string(cfg.teleop.pairs.size()) + " pairs)");
 
-  trossen::demo::print_config_banner("Trossen Mobile AI Kit Demo Usage", config_lines);
+  trossen::utils::print_config_banner("Trossen Mobile AI Kit Demo Usage", config_lines);
 
-  trossen::demo::install_signal_handler();
+  trossen::utils::install_signal_handler();
   std::filesystem::create_directories(root);
 
   // ──────────────────────────────────────────────────────────
@@ -191,7 +195,7 @@ int main(int argc, char** argv) {
   for (const auto& [id, comp] : arm_components) {
     auto driver = comp->get_hardware();
     driver->set_all_modes(trossen_arm::Mode::position);
-    driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+    driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
   }
   std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
   std::cout << "  [ok] All arms staged to starting positions\n";
@@ -279,7 +283,7 @@ int main(int argc, char** argv) {
   // ──────────────────────────────────────────────────────────
 
   while (true) {
-    if (trossen::demo::g_stop_requested) {
+    if (trossen::utils::g_stop_requested) {
       std::cout << "\n\nStopping at user request (Ctrl+C).\n";
       break;
     }
@@ -334,7 +338,7 @@ int main(int argc, char** argv) {
         return;
       }
       const auto sleep_ns = static_cast<int64_t>(1e9 / cfg.teleop.rate_hz);
-      while (mgr.is_episode_active() && !trossen::demo::g_stop_requested) {
+      while (mgr.is_episode_active() && !trossen::utils::g_stop_requested) {
         for (const auto& pair : cfg.teleop.pairs) {
           auto leader_it = arm_components.find(pair.leader);
           auto follower_it = arm_components.find(pair.follower);
@@ -353,7 +357,7 @@ int main(int argc, char** argv) {
       if (!base_prod) {
         return;
       }
-      while (mgr.is_episode_active() && !trossen::demo::g_stop_requested) {
+      while (mgr.is_episode_active() && !trossen::utils::g_stop_requested) {
         base_prod->poll([](std::shared_ptr<trossen::data::RecordBase>) {});
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }
@@ -377,10 +381,10 @@ int main(int argc, char** argv) {
     (void)actual_duration;
 
     const std::string file_path =
-      trossen::demo::generate_episode_path(root, recording_episode_index);
-    trossen::demo::print_episode_summary(file_path, last_stats);
+      trossen::utils::generate_episode_path(root, recording_episode_index);
+    trossen::utils::print_episode_summary(file_path, last_stats);
 
-    trossen::demo::SanityCheckConfig sanity_cfg{
+    trossen::utils::SanityCheckConfig sanity_cfg{
       last_stats.elapsed.count(),
       static_cast<int>(cfg.hardware.arms.size()),
       joint_rate_hz,
@@ -390,7 +394,7 @@ int main(int argc, char** argv) {
     };
     perform_sanity_check(recording_episode_index, last_stats.records_written_current, sanity_cfg);
 
-    if (trossen::demo::g_stop_requested) {
+    if (trossen::utils::g_stop_requested) {
       std::cout << "\nStopping at user request (Ctrl+C).\n";
       break;
     }
@@ -403,7 +407,7 @@ int main(int argc, char** argv) {
   for (const auto& [id, comp] : arm_components) {
     auto driver = comp->get_hardware();
     driver->set_all_modes(trossen_arm::Mode::position);
-    driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+    driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
   }
   std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
 
@@ -415,6 +419,12 @@ int main(int argc, char** argv) {
   }
   std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
 
+  std::cout << "Cleaning up arm drivers...\n";
+  for (const auto& [id, comp] : arm_components) {
+    comp->get_hardware()->cleanup();
+  }
+  std::cout << "  [ok] All arm drivers cleaned up\n";
+
   const auto final_stats = mgr.stats();
   std::vector<std::string> extra_info = {
     "Data streams:         " +
@@ -422,7 +432,7 @@ int main(int argc, char** argv) {
       (slate_base_component ? " + mobile base velocity" : "") +
       " + " + std::to_string(cfg.hardware.cameras.size()) + " cameras"
   };
-  trossen::demo::print_final_summary(
+  trossen::utils::print_final_summary(
     final_stats.total_episodes_completed, root, extra_info);
 
   return 0;

@@ -28,10 +28,10 @@ Override at the command line:
 
 ```bash
 ./build/examples/trossen_stationary_ai \
-  --set hardware.arms.leader_left.ip_address=10.0.0.1 \
-  --set hardware.arms.leader_right.ip_address=10.0.0.2 \
-  --set hardware.arms.follower_left.ip_address=10.0.0.3 \
-  --set hardware.arms.follower_right.ip_address=10.0.0.4
+  --set hardware.arms.leader_left.ip_address=192.168.1.3 \
+  --set hardware.arms.leader_right.ip_address=192.168.1.2 \
+  --set hardware.arms.follower_left.ip_address=192.168.1.5 \
+  --set hardware.arms.follower_right.ip_address=192.168.1.4
 ```
 
 ---
@@ -131,7 +131,7 @@ Episodes are saved to `~/.trossen_sdk/<dataset_id>/episode_NNNNNN.mcap`.
 After recording, convert the episodes:
 
 ```bash
-./build/bin/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/stationary_dataset/ ~/lerobot_datasets
+./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/stationary_dataset/ ~/lerobot_datasets
 ```
 
 See [scripts/trossen_mcap_to_lerobot_v2/README.md](../../scripts/trossen_mcap_to_lerobot_v2/README.md) for full options.
@@ -142,10 +142,10 @@ See [scripts/trossen_mcap_to_lerobot_v2/README.md](../../scripts/trossen_mcap_to
 
 | Stream ID | Type | Content |
 |---|---|---|
-| `leader_left` | JointState | 6-DOF positions, velocities, efforts |
-| `leader_right` | JointState | 6-DOF positions, velocities, efforts |
-| `follower_left` | JointState | 6-DOF positions, velocities, efforts |
-| `follower_right` | JointState | 6-DOF positions, velocities, efforts |
+| `leader_left` | JointState | position, velocity, effort × 7 (6 joints + 1 gripper) |
+| `leader_right` | JointState | position, velocity, effort × 7 (6 joints + 1 gripper) |
+| `follower_left` | JointState | position, velocity, effort × 7 (6 joints + 1 gripper) |
+| `follower_right` | JointState | position, velocity, effort × 7 (6 joints + 1 gripper) |
 | `camera_high` | Image | BGR8 640×480 @ 30 fps |
 | `camera_low` | Image | BGR8 640×480 @ 30 fps |
 | `camera_left_wrist` | Image | BGR8 640×480 @ 30 fps |
@@ -162,7 +162,3 @@ See [scripts/trossen_mcap_to_lerobot_v2/README.md](../../scripts/trossen_mcap_to
 **Camera not found**
 - Check the serial number in `realsense-viewer` (left panel, below the device name)
 - Use separate USB 3.0 ports for each camera to avoid bandwidth contention
-
-**High CPU usage with 4 cameras**
-- Lower the resolution: `--set hardware.cameras.0.width=320 --set hardware.cameras.0.height=240`
-- Or reduce frame rate: change `fps` in `config.json` and `poll_rate_hz` in the corresponding producer entry

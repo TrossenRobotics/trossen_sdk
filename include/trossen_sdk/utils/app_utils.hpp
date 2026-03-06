@@ -1,12 +1,12 @@
 /**
- * @file demo_utils.hpp
- * @brief Shared utilities for Trossen SDK demo applications
+ * @file app_utils.hpp
+ * @brief Shared utilities for Trossen SDK applications
  *
- * This header provides common functionality used across multiple demo applications:
+ * Common functionality used across SDK applications and scripts:
  * - Signal handling for graceful shutdown
  * - UI/display helpers for episode monitoring
  * - Recording statistics and sanity checks
- * - Common constants and configurations
+ * - Interruptible sleep and episode path generation
  */
 
 #pragma once
@@ -20,25 +20,9 @@
 
 #include "trossen_sdk/runtime/session_manager.hpp"
 
-namespace trossen::demo {
+namespace trossen::utils {
 
-const std::vector<double> STAGED_POSITIONS = {
-  0.0,
-  1.04719755,
-  0.523598776,
-  0.628318531,
-  0.0,
-  0.0,
-  0.0
-};
-
-/// Standard moving time for arm movements (seconds)
-constexpr float MOVING_TIME_S = 2.0f;
-
-/// Gripper joint position tolerance
-constexpr double GRIPPER_POSITION_TOLERANCE = 0.01;
-
-/// Global flag indicating if Ctrl+C has been pressed
+/// @brief Global flag indicating if Ctrl+C has been pressed
 extern std::atomic<bool> g_stop_requested;
 
 /**
@@ -50,25 +34,17 @@ extern std::atomic<bool> g_stop_requested;
 void install_signal_handler();
 
 /**
- * @brief Print a formatted header for an episode
- *
- * @param index Episode index
- * @param duration_s Target duration in seconds
- */
-void print_episode_header(uint32_t index, int duration_s);
-
-/**
  * @brief Print episode completion summary
  *
  * @param file_path Path to the recorded episode
- * @param records Number of records written
+ * @param stats Session manager stats for the completed episode
  */
 void print_episode_summary(const std::string& file_path, runtime::SessionManager::Stats stats);
 
 /**
  * @brief Print application configuration banner
  *
- * @param app_name Application name (e.g., "Trossen AI Stationary Demo")
+ * @param app_name Application name
  * @param config_lines Vector of "key: value" configuration strings
  */
 void print_config_banner(
@@ -139,4 +115,4 @@ std::string generate_episode_path(
   uint32_t episode_index,
   const std::string& extension = "trossen_mcap");
 
-}  // namespace trossen::demo
+}  // namespace trossen::utils

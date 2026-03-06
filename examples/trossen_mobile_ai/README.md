@@ -29,10 +29,10 @@ Override at the command line:
 
 ```bash
 ./build/examples/trossen_mobile_ai \
-  --set hardware.arms.leader_left.ip_address=10.0.0.1 \
-  --set hardware.arms.leader_right.ip_address=10.0.0.2 \
-  --set hardware.arms.follower_left.ip_address=10.0.0.3 \
-  --set hardware.arms.follower_right.ip_address=10.0.0.4
+  --set hardware.arms.leader_left.ip_address=192.168.1.3 \
+  --set hardware.arms.leader_right.ip_address=192.168.1.2 \
+  --set hardware.arms.follower_left.ip_address=192.168.1.5 \
+  --set hardware.arms.follower_right.ip_address=192.168.1.4
 ```
 
 ---
@@ -151,7 +151,7 @@ Episodes are saved to `~/.trossen_sdk/<dataset_id>/episode_NNNNNN.mcap`.
 After recording, convert the episodes:
 
 ```bash
-./build/bin/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/mobile_dataset/ ~/lerobot_datasets
+./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/mobile_dataset/ ~/lerobot_datasets
 ```
 
 See [scripts/trossen_mcap_to_lerobot_v2/README.md](../../scripts/trossen_mcap_to_lerobot_v2/README.md) for full options.
@@ -162,10 +162,10 @@ See [scripts/trossen_mcap_to_lerobot_v2/README.md](../../scripts/trossen_mcap_to
 
 | Stream ID | Type | Content |
 |---|---|---|
-| `leader_left` | JointState | 6-DOF positions, velocities, efforts |
-| `leader_right` | JointState | 6-DOF positions, velocities, efforts |
-| `follower_left` | JointState | 6-DOF positions, velocities, efforts |
-| `follower_right` | JointState | 6-DOF positions, velocities, efforts |
+| `leader_left` | JointState | position, velocity, effort × 7 (6 joints + 1 gripper) |
+| `leader_right` | JointState | position, velocity, effort × 7 (6 joints + 1 gripper) |
+| `follower_left` | JointState | position, velocity, effort × 7 (6 joints + 1 gripper) |
+| `follower_right` | JointState | position, velocity, effort × 7 (6 joints + 1 gripper) |
 | `slate_base` | Odometry2D | Linear velocity vx, vy and angular velocity wz |
 | `camera_high` | Image | BGR8 640×480 @ 30 fps |
 | `camera_left_wrist` | Image | BGR8 640×480 @ 30 fps |
@@ -181,12 +181,10 @@ See [scripts/trossen_mcap_to_lerobot_v2/README.md](../../scripts/trossen_mcap_to
 
 **SLATE base not detected**
 - Check USB connection and verify the device appears: `ls /dev/ttyUSB*`
+- Ensure your user is in the `dialout` group: `sudo usermod -aG dialout $USER` (log out and back in after)
+- If the device still doesn't appear, `brltty` may be claiming the USB-serial converter — remove it: `sudo apt-get remove brltty`
 - Ensure you have read/write permission: `sudo chmod 666 /dev/ttyUSB0`
 
 **Camera not found**
 - Check the serial number in `realsense-viewer` (left panel, below the device name)
 - Use separate USB 3.0 ports for each camera
-
-**High CPU usage with 3 cameras + base**
-- Lower resolution: `--set hardware.cameras.0.width=320 --set hardware.cameras.0.height=240`
-- Or reduce frame rate in the camera producer entries

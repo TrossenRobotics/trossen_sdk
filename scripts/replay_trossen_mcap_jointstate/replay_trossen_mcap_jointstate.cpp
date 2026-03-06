@@ -43,13 +43,22 @@
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 
 #include "JointState.pb.h"
-#include "demo_utils.hpp"
+#include "Odometry2D.pb.h"
+#include "trossen_sdk/utils/app_utils.hpp"
+
+static const std::vector<double> STAGED_POSITIONS = {
+  0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0
+};
 
 struct ArmConfig {
   std::string stream_id;
   std::string ip_address;
   std::string model;
   std::string end_effector;
+  // Duration passed to set_all_positions(). Set to 2.0/fps (e.g. 0.066 for 30 Hz) for smooth
+  // chained motion — two frame periods gives the controller enough headroom to interpolate
+  // cleanly between commands. 0.0 commands an immediate step which produces jerky replay.
+  double goal_time = 0.0;
 };
 
 struct SlateConfig {
@@ -80,6 +89,7 @@ static ReplayConfig load_replay_config(const nlohmann::json& j) {
       arm.at("ip_address").get_to(a.ip_address);
       arm.at("model").get_to(a.model);
       arm.at("end_effector").get_to(a.end_effector);
+      if (arm.contains("goal_time")) arm.at("goal_time").get_to(a.goal_time);
       cfg.arms.push_back(a);
     }
   }
@@ -164,14 +174,15 @@ int main(int argc, char** argv) {
     config_lines.push_back("  - " + arm.stream_id + " (" + arm.ip_address + ")");
   }
 
-  trossen::demo::print_config_banner("MCAP Joint State Replay", config_lines);
-  trossen::demo::install_signal_handler();
+  trossen::utils::print_config_banner("MCAP Joint State Replay", config_lines);
+  trossen::utils::install_signal_handler();
 
   // ──────────────────────────────────────────────────────────
   // Initialize hardware
   // ──────────────────────────────────────────────────────────
 
   std::map<std::string, std::shared_ptr<trossen_arm::TrossenArmDriver>> drivers;
+  std::map<std::string, double> driver_goal_times;
   std::map<std::string, std::shared_ptr<trossen::hw::HardwareComponent>> components;
   std::map<std::string, std::shared_ptr<trossen_slate::TrossenSlate>> slate_drivers;
 
@@ -202,6 +213,7 @@ int main(int argc, char** argv) {
     }
 
     drivers[arm_cfg.stream_id] = driver;
+    driver_goal_times[arm_cfg.stream_id] = arm_cfg.goal_time;
     components[arm_cfg.stream_id] = component;
     std::cout << "  [ok] " << arm_cfg.stream_id << " initialized (" << arm_cfg.ip_address << ")\n";
   }
@@ -221,7 +233,7 @@ int main(int argc, char** argv) {
   const float moving_time_s = 2.0f;
   std::cout << "\nStaging arms to starting positions...\n";
   for (auto& [stream_id, driver] : drivers) {
-    driver->set_all_positions(trossen::demo::STAGED_POSITIONS, moving_time_s, false);
+    driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
   }
   std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
   std::cout << "  [ok] Arms staged to ready position\n";
@@ -266,25 +278,40 @@ int main(int argc, char** argv) {
               << channel_ptr->schemaId << ", ID: " << channel_id << ")\n";
   }
 
+  // Detect arm joint state channels ({stream_id}/joints/state)
+  // and base odometry channels ({stream_id}/odom/state) separately.
+  std::map<mcap::ChannelId, std::string> odom_channel_id_to_stream;
   std::set<std::string> slate_stream_ids;
+
   for (const auto& [channel_id, channel_ptr] : reader.channels()) {
-    std::string topic = channel_ptr->topic;
+    const std::string& topic = channel_ptr->topic;
+
     size_t pos = topic.find("/joints/state");
     if (pos != std::string::npos) {
       std::string stream_id = topic.substr(0, pos);
       channel_id_to_stream[channel_id] = stream_id;
       std::cout << "  Found joint state channel: " << topic
                 << " (stream_id: " << stream_id << ")\n";
+      continue;
+    }
+
+    pos = topic.find("/odom/state");
+    if (pos != std::string::npos) {
+      std::string stream_id = topic.substr(0, pos);
+      odom_channel_id_to_stream[channel_id] = stream_id;
+      slate_stream_ids.insert(stream_id);
+      std::cout << "  Found odometry channel:   " << topic
+                << " (stream_id: " << stream_id << ")\n";
     }
   }
 
-  if (channel_id_to_stream.empty()) {
-    std::cerr << "Error: No joint state channels found in MCAP file\n";
-    std::cerr << "Looking for topics matching pattern: '{stream_id}/joints/state'\n";
+  if (channel_id_to_stream.empty() && odom_channel_id_to_stream.empty()) {
+    std::cerr << "Error: No replayable channels found in MCAP file\n";
+    std::cerr << "Expected topics: '{stream_id}/joints/state' or '{stream_id}/odom/state'\n";
     return 1;
   }
 
-  std::cout << "\nParsing joint state messages...\n";
+  std::cout << "\nParsing messages...\n";
   size_t total_messages = 0;
 
   auto onProblem = [](const mcap::Status& problem) {
@@ -292,42 +319,56 @@ int main(int argc, char** argv) {
   };
 
   for (const auto& messageView : reader.readMessages(onProblem)) {
-    auto it = channel_id_to_stream.find(messageView.channel->id);
-    if (it == channel_id_to_stream.end()) {
+    const mcap::ChannelId ch_id = messageView.channel->id;
+
+    // Arm joint state
+    auto arm_it = channel_id_to_stream.find(ch_id);
+    if (arm_it != channel_id_to_stream.end()) {
+      const std::string& stream_id = arm_it->second;
+      trossen_sdk::msg::JointState js_msg;
+      if (!js_msg.ParseFromArray(
+            reinterpret_cast<const char*>(messageView.message.data),
+            messageView.message.dataSize)) {
+        std::cerr << "Warning: Failed to parse JointState for " << stream_id << "\n";
+        continue;
+      }
+      JointStateMessage js;
+      js.timestamp_ns = messageView.message.logTime;
+      for (auto v : js_msg.positions()) js.positions.push_back(static_cast<double>(v));
+      for (auto v : js_msg.velocities()) js.velocities.push_back(static_cast<double>(v));
+      messages_by_stream[stream_id].push_back(js);
+      ++total_messages;
       continue;
     }
 
-    const std::string& stream_id = it->second;
-
-    trossen_sdk::msg::JointState js_msg;
-    if (!js_msg.ParseFromArray(
-          reinterpret_cast<const char*>(messageView.message.data),
-          messageView.message.dataSize)) {
-      std::cerr << "Warning: Failed to parse message for " << stream_id << "\n";
-      continue;
+    // Base odometry — store body-frame twist as velocities: [linear_x, linear_y, angular_z]
+    auto odom_it = odom_channel_id_to_stream.find(ch_id);
+    if (odom_it != odom_channel_id_to_stream.end()) {
+      const std::string& stream_id = odom_it->second;
+      trossen_sdk::msg::Odometry2D odom_msg;
+      if (!odom_msg.ParseFromArray(
+            reinterpret_cast<const char*>(messageView.message.data),
+            messageView.message.dataSize)) {
+        std::cerr << "Warning: Failed to parse Odometry2D for " << stream_id << "\n";
+        continue;
+      }
+      JointStateMessage js;
+      js.timestamp_ns = messageView.message.logTime;
+      js.velocities = {
+        static_cast<double>(odom_msg.twist().linear_x()),
+        static_cast<double>(odom_msg.twist().linear_y()),
+        static_cast<double>(odom_msg.twist().angular_z())
+      };
+      messages_by_stream[stream_id].push_back(js);
+      ++total_messages;
     }
-
-    JointStateMessage js;
-    js.timestamp_ns = messageView.message.logTime;
-    for (auto v : js_msg.positions()) {
-      js.positions.push_back(static_cast<double>(v));
-    }
-    for (auto v : js_msg.velocities()) {
-      js.velocities.push_back(static_cast<double>(v));
-    }
-
-    if (js.positions.empty() && !js.velocities.empty() &&
-        (js.velocities.size() == 2 || js.velocities.size() == 3)) {
-      slate_stream_ids.insert(stream_id);
-    }
-
-    messages_by_stream[stream_id].push_back(js);
-    ++total_messages;
   }
 
-  std::cout << "  [ok] Parsed " << total_messages << " joint state messages\n";
+  std::cout << "  [ok] Parsed " << total_messages << " messages\n";
   for (const auto& [stream_id, messages] : messages_by_stream) {
-    std::cout << "    - " << stream_id << ": " << messages.size() << " messages\n";
+    std::cout << "    - " << stream_id << ": " << messages.size() << " messages";
+    if (slate_stream_ids.count(stream_id)) std::cout << "  [base]";
+    std::cout << "\n";
   }
 
   // Initialize SLATE bases if detected
@@ -384,14 +425,39 @@ int main(int argc, char** argv) {
   // Replay joint states
   // ──────────────────────────────────────────────────────────
 
+  // Warn if no configured stream IDs appear in the MCAP
+  {
+    bool any_match = false;
+    for (const auto& arm_cfg : cfg.arms) {
+      if (messages_by_stream.count(arm_cfg.stream_id)) {
+        any_match = true;
+        break;
+      }
+    }
+    if (!any_match && !cfg.arms.empty()) {
+      std::cerr << "\nWarning: none of the configured arm stream IDs appear in this MCAP.\n";
+      std::cerr << "  Configured: ";
+      for (const auto& a : cfg.arms) std::cerr << "'" << a.stream_id << "' ";
+      std::cerr << "\n  MCAP streams: ";
+      for (const auto& [sid, _] : messages_by_stream) std::cerr << "'" << sid << "' ";
+      std::cerr << "\nCheck that your config stream_ids match those recorded in the episode.\n\n";
+    }
+  }
+
   std::cout << "\nMoving arms to first recorded positions...\n";
+  bool any_arm_moved = false;
   for (const auto& [stream_id, messages] : messages_by_stream) {
     if (!messages.empty() && drivers.find(stream_id) != drivers.end()) {
       drivers[stream_id]->set_all_positions(messages[0].positions, moving_time_s, false);
+      any_arm_moved = true;
     }
   }
-  std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-  std::cout << "  [ok] Arms moved to starting positions\n";
+  if (any_arm_moved) {
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+    std::cout << "  [ok] Arms moved to starting positions\n";
+  } else {
+    std::cout << "  [skip] No matching arm streams found — skipping pre-positioning\n";
+  }
 
   if (!slate_drivers.empty()) {
     std::cout << "  [ok] SLATE bases ready (starting from zero velocity)\n";
@@ -432,42 +498,49 @@ int main(int argc, char** argv) {
   size_t messages_replayed = 0;
   auto next_frame_time = std::chrono::steady_clock::now();
 
-  while (!trossen::demo::g_stop_requested) {
+  while (!trossen::utils::g_stop_requested) {
     bool all_streams_done = true;
     for (auto& [stream_id, idx] : stream_indices) {
       const auto& messages = messages_by_stream[stream_id];
 
-      if (idx < messages.size()) {
-        const auto& msg = messages[idx];
+      if (idx >= messages.size()) {
+        continue;  // this stream is exhausted
+      }
 
-        if (drivers.find(stream_id) != drivers.end()) {
-          drivers[stream_id]->set_all_positions(msg.positions, 0.0f, false);
-          ++idx;
-          ++messages_replayed;
-          all_streams_done = false;
-        } else if (slate_drivers.find(stream_id) != slate_drivers.end()) {
-          if (msg.velocities.size() >= 2) {
-            base_driver::ChassisData cmd_data = {};
-            cmd_data.cmd_vel_x = static_cast<float>(msg.velocities[0]);
+      const bool has_arm_driver = drivers.count(stream_id) > 0;
+      const bool has_slate_driver = slate_drivers.count(stream_id) > 0;
 
-            if (msg.velocities.size() == 2) {
-              cmd_data.cmd_vel_y = 0.0f;
-              cmd_data.cmd_vel_z = static_cast<float>(msg.velocities[1]);
-            } else {
-              cmd_data.cmd_vel_y = static_cast<float>(msg.velocities[1]);
-              cmd_data.cmd_vel_z = static_cast<float>(msg.velocities[2]);
-            }
+      if (!has_arm_driver && !has_slate_driver) {
+        ++idx;  // advance but don't affect termination — unmatched stream
+        continue;
+      }
 
-            cmd_data.light_state = static_cast<uint32_t>(LightState::WHITE);
-            slate_drivers[stream_id]->write(cmd_data);
+      // This stream has a driver and still has messages
+      all_streams_done = false;
+      const auto& msg = messages[idx];
+
+      if (has_arm_driver) {
+        drivers[stream_id]->set_all_positions(msg.positions, driver_goal_times[stream_id], false);
+      } else {
+        if (msg.velocities.size() >= 2) {
+          base_driver::ChassisData cmd_data = {};
+          cmd_data.cmd_vel_x = static_cast<float>(msg.velocities[0]);
+
+          if (msg.velocities.size() == 2) {
+            cmd_data.cmd_vel_y = 0.0f;
+            cmd_data.cmd_vel_z = static_cast<float>(msg.velocities[1]);
+          } else {
+            cmd_data.cmd_vel_y = static_cast<float>(msg.velocities[1]);
+            cmd_data.cmd_vel_z = static_cast<float>(msg.velocities[2]);
           }
-          ++idx;
-          ++messages_replayed;
-          all_streams_done = false;
-        } else {
-          ++idx;
+
+          cmd_data.light_state = static_cast<uint32_t>(LightState::WHITE);
+          slate_drivers[stream_id]->write(cmd_data);
         }
       }
+
+      ++idx;
+      ++messages_replayed;
     }
 
     if (all_streams_done) {

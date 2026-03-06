@@ -36,7 +36,7 @@
 #include <string>
 #include <vector>
 
-#include "./demo_utils.hpp"
+#include "trossen_sdk/utils/app_utils.hpp"
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
 #include "RawImage.pb.h"
@@ -551,7 +551,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       "Output Parquet:   " + cfg.output_file,
       "Arms/Cameras:     Auto-detect from MCAP"};
 
-  trossen::demo::print_config_banner("TrossenMCAP to LeRobotV2 Converter", config_lines);
+  trossen::utils::print_config_banner("TrossenMCAP to LeRobotV2 Converter", config_lines);
 
   std::cout << "\nCreating LeRobotV2 dataset structure...\n";
 
