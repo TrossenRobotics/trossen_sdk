@@ -53,12 +53,12 @@ TrossenArmProducer::TrossenArmProducer(
   metadata_.id = cfg_.stream_id;
   metadata_.name = "Trossen Arm Producer";
   metadata_.description = "Produces joint states from a Trossen Arm via TrossenArmDriver";
-  // TODO(shantanuparab-tr): Extract from driver / User Config
   metadata_.arm_model = "WIDOWX_AI";
-  // TODO(shantanuparab-tr): Extract from driver / User Config
-  metadata_.joint_names = {
-    "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"};
-  // TODO(shantanuparab-tr): Extract from driver / User Config
+  size_t n = driver_->get_num_joints();
+  metadata_.joint_names.clear();
+  for (size_t i = 0; i < n; ++i) {
+    metadata_.joint_names.push_back("joint_" + std::to_string(i));
+  }
   metadata_.gripper_type = "STANDARD";
 }
 

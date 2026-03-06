@@ -54,9 +54,19 @@ public:
      * @return JSON object containing producer information
      */
     nlohmann::ordered_json get_info() const override {
-      std::cout << "SlateBaseProducerMetadata: " << name << " (" << id << ") - " << description
-                << ", Model: " << base_model << "\n";
       return nlohmann::ordered_json{};
+    }
+
+    /**
+     * @brief Get per-stream dataset metadata for MCAP recording
+     *
+     * @return JSON indicating a mobile base is present with its velocity feature names
+     */
+    nlohmann::ordered_json get_stream_info() const override {
+      nlohmann::ordered_json info;
+      info["has_mobile_base"] = true;
+      info["base_velocity_names"] = nlohmann::json::array({"linear_vel", "angular_vel"});
+      return info;
     }
   };
 

@@ -80,9 +80,26 @@ public:
     /**
      * @brief Get producer info as JSON
      *
+     * Features JSON for use in LeRobot info.json (e.g. action, observation.state, camera features).
+     *
      * @return JSON object containing producer information
      */
     virtual nlohmann::ordered_json get_info() const {
+      return nlohmann::ordered_json{};
+    }
+
+    /**
+     * @brief Get per-stream dataset metadata for MCAP recording
+     *
+     * Returns a JSON object with stream and sensor info for use as MCAP file-level metadata.
+     * The object may contain:
+     *   - "streams": { "<stream_id>": { "joint_names": [...] } }
+     *   - "cameras": { "<camera_id>": { "width", "height", "fps", "channels", ... } }
+     *   - "has_mobile_base": true
+     *
+     * @return JSON object with dataset stream/sensor metadata, or empty if not applicable
+     */
+    virtual nlohmann::ordered_json get_stream_info() const {
       return nlohmann::ordered_json{};
     }
   };

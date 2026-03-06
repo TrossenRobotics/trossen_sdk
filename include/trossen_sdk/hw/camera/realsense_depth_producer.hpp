@@ -109,6 +109,25 @@ public:
       features["observation.images." + id] = camera_feature;
       return features;
     }
+
+    /**
+     * @brief Get per-stream dataset metadata for MCAP recording
+     *
+     * @return JSON with "cameras.<camera_id>" containing width, height, fps, etc.
+     */
+    nlohmann::ordered_json get_stream_info() const override {
+      nlohmann::ordered_json info;
+      info["cameras"][id] = {
+          {"width", width},
+          {"height", height},
+          {"fps", fps},
+          {"channels", channels},
+          {"codec", codec},
+          {"pix_fmt", pix_fmt},
+          {"is_depth_map", is_depth_map},
+          {"has_audio", has_audio}};
+      return info;
+    }
   };
 
   /**

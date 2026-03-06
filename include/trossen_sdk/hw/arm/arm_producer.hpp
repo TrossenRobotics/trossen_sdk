@@ -50,15 +50,31 @@ public:
     std::string gripper_type;
 
     /**
-     * @brief Get producer info as JSON
+     * @brief Get producer info as JSON (LeRobot feature format)
      *
-     * @return JSON object containing producer information
+     * @return JSON object with "action" and "observation.state" feature entries
      */
     nlohmann::ordered_json get_info() const override {
-      // TODO(shantanuparab-tr): Implement JSON output when needed
-      std::cout << "TrossenArmProducerMetadata: " << name << " (" << id << ") - " << description
-                << ", Model: " << arm_model << ", Gripper: " << gripper_type << "\n";
-      return nlohmann::ordered_json{};
+      int n = static_cast<int>(joint_names.size());
+      nlohmann::ordered_json features;
+      features["action"]["dtype"] = "float32";
+      features["action"]["shape"] = nlohmann::json::array({n});
+      features["action"]["names"] = joint_names;
+      features["observation.state"]["dtype"] = "float32";
+      features["observation.state"]["shape"] = nlohmann::json::array({n});
+      features["observation.state"]["names"] = joint_names;
+      return features;
+    }
+
+    /**
+     * @brief Get per-stream dataset metadata for MCAP recording
+     *
+     * @return JSON with "streams.<stream_id>.joint_names"
+     */
+    nlohmann::ordered_json get_stream_info() const override {
+      nlohmann::ordered_json info;
+      info["streams"][id]["joint_names"] = joint_names;
+      return info;
     }
   };
 

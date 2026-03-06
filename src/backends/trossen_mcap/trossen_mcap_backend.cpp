@@ -13,6 +13,7 @@
 
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
+#include "nlohmann/json.hpp"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
@@ -23,8 +24,8 @@ namespace trossen::io::backends {
 REGISTER_BACKEND(TrossenMCAPBackend, "trossen_mcap")
 
 TrossenMCAPBackend::TrossenMCAPBackend(
-  const ProducerMetadataList&)
-  : io::Backend() {
+  const ProducerMetadataList& producer_metadata)
+  : io::Backend(), producer_metadata_(producer_metadata) {
   // This allows us to access the global configuration for the TrossenMCAP backend
   // without passing it explicitly.
   cfg_ = trossen::configuration::GlobalConfig::instance()
@@ -119,9 +120,42 @@ bool TrossenMCAPBackend::open() {
   std::map<std::string, std::string> metadata;
   metadata["tool_version"] = trossen::core::version();
   metadata["dataset_id"] = cfg_->dataset_id;
+  metadata["robot_name"] = cfg_->robot_name;
   metadata["episode_index"] = std::to_string(episode_index_);
   auto now = trossen::data::now_real();
   metadata["recording_start_time"] = std::to_string(now.to_ns());
+
+  // Build dataset_info JSON from producer metadata (joint names, camera specs, etc.)
+  nlohmann::ordered_json dataset_info;
+  dataset_info["robot_name"] = cfg_->robot_name;
+
+  for (const auto& producer_meta : producer_metadata_) {
+    if (!producer_meta) continue;
+    nlohmann::ordered_json stream_info = producer_meta->get_stream_info();
+    if (stream_info.empty()) continue;
+
+    // Merge "streams" entries
+    if (stream_info.contains("streams")) {
+      for (auto& [key, val] : stream_info["streams"].items()) {
+        dataset_info["streams"][key] = val;
+      }
+    }
+    // Merge "cameras" entries
+    if (stream_info.contains("cameras")) {
+      for (auto& [key, val] : stream_info["cameras"].items()) {
+        dataset_info["cameras"][key] = val;
+      }
+    }
+    // Mobile base flag
+    if (stream_info.value("has_mobile_base", false)) {
+      dataset_info["has_mobile_base"] = true;
+      if (stream_info.contains("base_velocity_names")) {
+        dataset_info["base_velocity_names"] = stream_info["base_velocity_names"];
+      }
+    }
+  }
+
+  metadata["dataset_info"] = dataset_info.dump();
 
   auto st = writer_->writeMetadata("trossen_sdk_recording", metadata.begin(), metadata.end());
   if (st != foxglove::FoxgloveError::Ok) {
