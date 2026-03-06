@@ -268,7 +268,7 @@ export const startWidowXTutorial = () => {
         element: '#session-modal-form',
         popover: {
           title: 'Configure Recording Session',
-          description: 'Fill out the form:<ol><li>Name: "my_first_recording"</li><li>System: Select "widowx_teleop"</li><li>Action: "Teleop WidowX"</li><li>Episodes: 5</li><li>Duration: 30 seconds</li><li>Backend: "mcap" or "lerobot"</li></ol>Click "Create Session" when ready.',
+          description: 'Fill out the form:<ol><li>Name: "my_first_recording"</li><li>System: Select "widowx_teleop"</li><li>Action: "Teleop WidowX"</li><li>Episodes: 5</li><li>Duration: 30 seconds</li><li>Backend: "trossen_mcap" or "lerobot_v2"</li></ol>Click "Create Session" when ready.',
           side: 'right',
         },
         onHighlighted: () => {

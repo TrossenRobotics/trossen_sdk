@@ -77,7 +77,7 @@ public:
     const ProducerMetadataList& metadata = {});
 
   /**
-   * @brief Open a LeRobot V2 logging destination
+   * @brief Open the Trossen backend logging destination
    *
    * @return true on success
    */

@@ -182,7 +182,7 @@ All endpoints return JSON. CORS is enabled for all origins.
 - **Description:** Create recording session template
 - **Implementation:** `main.cpp` line 888
 - **Valid Actions:** `TELEOP_SO101`, `TELEOP_WIDOWX`, `TELEOP_WIDOWX_BIMANUAL`
-- **Valid Backends:** `mcap`, `lerobot`
+- **Valid Backends:** `trossen_mcap`, `lerobot_v2`
 
 **PUT /configure/session/:id**
 - **Implementation:** `main.cpp` line 930

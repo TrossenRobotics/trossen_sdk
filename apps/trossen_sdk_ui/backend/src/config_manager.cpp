@@ -169,7 +169,7 @@ RecordingSession RecordingSession::from_json(const nlohmann::json& j) {
     session.action = j.value("action", "teleop_so101");
     session.num_episodes = j.value("num_episodes", 1);
     session.episode_duration = j.value("episode_duration", 60.0);
-    session.backend_type = j.value("backend_type", "mcap");
+    session.backend_type = j.value("backend_type", "trossen_mcap");
     return session;
 }
 
@@ -705,7 +705,7 @@ bool ConfigManager::add_session(
     }
 
     // Validate backend type
-    if (session.backend_type != "mcap" && session.backend_type != "lerobot") {
+    if (session.backend_type != "trossen_mcap" && session.backend_type != "lerobot_v2") {
         error = "Backend type must be 'mcap' or 'lerobot'";
         return false;
     }
@@ -811,7 +811,7 @@ bool ConfigManager::update_session(const std::string& id,
     }
 
     // Validate backend type
-    if (session.backend_type != "mcap" && session.backend_type != "lerobot") {
+    if (session.backend_type != "trossen_mcap" && session.backend_type != "lerobot_v2") {
         error = "Backend type must be 'mcap' or 'lerobot'";
         return false;
     }

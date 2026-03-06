@@ -1,11 +1,11 @@
 /**
- * @file lerobot_backend.hpp
- * @brief LeRobot backend: writes joint states to Parquet and images to directory tree. Converts
+ * @file lerobot_v2_backend.hpp
+ * @brief LeRobotV2 backend: writes joint states to Parquet and images to directory tree. Converts
  * images to videos per source using FFmpeg after recording.
  */
 
-#ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_BACKEND_HPP
-#define TROSSEN_SDK__IO__BACKENDS__LEROBOT_BACKEND_HPP
+#ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2_BACKEND_HPP
+#define TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2_BACKEND_HPP
 
 #include <atomic>
 #include <condition_variable>
@@ -29,13 +29,13 @@
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/io/backend.hpp"
-#include "trossen_sdk/io/backends/lerobot/lerobot_constants.hpp"
-#include "trossen_sdk/configuration/types/backends/lerobot_backend_config.hpp"
+#include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_constants.hpp"
+#include "trossen_sdk/configuration/types/backends/lerobot_v2_backend_config.hpp"
 
 namespace trossen::io::backends {
 
 // ============================================================================
-// LeRobot Naming and Formatting Utilities
+// LeRobotV2 Naming and Formatting Utilities
 // ============================================================================
 
 /**
@@ -99,7 +99,7 @@ inline std::string format_video_filename(int episode_index) {
 }
 
 // ============================================================================
-// LeRobot Statistics and Image Utility Functions
+// LeRobotV2 Statistics and Image Utility Functions
 // ============================================================================
 
 /**
@@ -174,7 +174,7 @@ std::vector<int> sample_indices(
   float power = 0.75f);
 
 // ============================================================================
-// LeRobot Metadata Utility Functions
+// LeRobotV2 Metadata Utility Functions
 // ============================================================================
 
 /**
@@ -192,7 +192,7 @@ inline nlohmann::ordered_json create_scalar_feature(const std::string& dtype) {
 }
 
 /**
- * @brief Add standard LeRobot metadata features (timestamp, indices, etc.)
+ * @brief Add standard LeRobotV2 metadata features (timestamp, indices, etc.)
  *
  * @param features JSON object to add features to (modified in place)
  */
@@ -516,7 +516,7 @@ inline bool write_episode_metadata(
 }
 
 // ============================================================================
-// LeRobotBackend Class
+// LeRobotV2Backend Class
 // ============================================================================
 
 /**
@@ -541,7 +541,7 @@ inline bool write_episode_metadata(
  *                     <source-id>/
  *                         <video-id>.<video-format>
  */
-class LeRobotBackend : public io::Backend {
+class LeRobotV2Backend : public io::Backend {
 public:
   /**
    * @enum Image queue drop policy when full
@@ -558,11 +558,11 @@ public:
   };
 
   /**
-   * @brief Construct a LeRobotBackend
+   * @brief Construct a LeRobotV2Backend
    *
    * @param metadata Vector of producer metadata to include in info.json
    */
-  explicit LeRobotBackend(
+  explicit LeRobotV2Backend(
     ProducerMetadataList metadata);
 
   /**
@@ -576,7 +576,7 @@ public:
   void preprocess_episode() override;
 
   /**
-   * @brief Open a LeRobot V2 logging destination
+   * @brief Open a LeRobotV2 logging destination
    *
    * @return true on success
    */
@@ -789,7 +789,7 @@ private:
   std::vector<std::thread> image_workers_;
 
   /// @brief Config for this backend
-  std::shared_ptr<trossen::configuration::LeRobotBackendConfig> cfg_;
+  std::shared_ptr<trossen::configuration::LeRobotV2BackendConfig> cfg_;
 
   /// @brief Metadata for this backend
   ProducerMetadataList metadata_;
@@ -836,4 +836,4 @@ private:
 
 }  // namespace trossen::io::backends
 
-#endif  // TROSSEN_SDK__IO__BACKENDS__TROSSEN_HPP
+#endif  // TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2_BACKEND_HPP

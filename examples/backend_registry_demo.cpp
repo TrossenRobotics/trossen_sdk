@@ -13,7 +13,7 @@
 int main() {
   // List registered backends
   std::cout << "Registered backends:\n";
-  for (const auto& type : {"null", "mcap", "lerobot", "trossen"}) {
+  for (const auto& type : {"null", "trossen_mcap", "lerobot_v2", "trossen"}) {
     if (trossen::io::BackendRegistry::is_registered(type)) {
       std::cout << "  Is Registered: " << type << "\n";
     }

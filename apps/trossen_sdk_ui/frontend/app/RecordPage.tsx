@@ -630,8 +630,8 @@ export function RecordPage() {
                   onChange={(e) => setSessionForm({ ...sessionForm, backendType: e.target.value as 'mcap' | 'lerobot' })}
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 >
-                  <option value="mcap">MCAP</option>
-                  <option value="lerobot">LeRobot</option>
+                  <option value="trossen_mcap">TrossenMCAP</option>
+                  <option value="lerobot_v2">LeRobotV2</option>
                 </select>
                 <p className="text-sm text-gray-500 mt-1">
                   Choose the data storage format for recorded episodes

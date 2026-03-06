@@ -1,11 +1,11 @@
 /**
  * @file widowxai_bimanual.cpp
- * @brief Complete Stationary AI Kit demo with Session Manager, MCAP backend, and multi-camera
+ * @brief Complete Stationary AI Kit demo with Session Manager, TrossenMCAP backend, and multi-camera
  *
  * This demo is designed for the full stationary AI kit configuration:
  * - 4 Trossen AI arms (2 leaders for teleop, 2 followers recorded)
  * - Session Manager for multi-episode recording
- * - MCAP backend for data storage
+ * - TrossenMCAP backend for data storage
  * - 4 OpenCV camera producers for image capture
  * - Configurable episode count and duration
  *
@@ -70,7 +70,7 @@ struct Config {
   std::string follower_right_ip = "192.168.1.4";
 
   // Dataset backend type
-  std::string backend_type = "mcap";
+  std::string backend_type = "trossen_mcap";
 };
 
 void print_usage(const char* prog_name) {

@@ -93,7 +93,7 @@ This document tracks bugs, features, and improvements needed for the Beta releas
 
 #### 11. Data Export Validation
 - **Status:** Complete
-- **Description:** Verify exported MCAP/LeRobot datasets are valid and complete
+- **Description:** Verify exported TrossenMCAP/LeRobotV2 datasets are valid and complete
 - **Requirements:**
   - Post-recording validation step
   - Check frame counts match expected

@@ -4,7 +4,7 @@
 
 This SDK logs synchronized robotics data such as joint trajectories and camera frames.
 It uses a central event loop scheduler to trigger periodic callbacks and sink threads to handle I/O.
-Each sink delegates persistence to a pluggable backend (e.g., MCAP, LeRobot, Trossen, or user-defined).
+Each sink delegates persistence to a pluggable backend (e.g., TrossenMCAP, LeRobotV2, Trossen, or user-defined).
 This design allows users to create extremely-high throughput and data intensive datasets with minimal CPU and memory overhead.
 It focuses on precise timing, low latency, and flexibility.
 
@@ -56,8 +56,8 @@ Together, these allow deterministic replay and global correlation.
   - Example backends:
 
     - `TrossenBackend` - Log data to Trossen format
-    - `McapBackend` - Log data to MCAP files
-    - `LeRobotBackend` - Log data to LeRobot datasets format
+    - `TrossenMCAPBackend` - Log data to TrossenMCAP files
+    - `LeRobotV2Backend` - Log data to LeRobotV2 datasets format
     - `UserBackend` - Log data to user-defined format
 
 ## Data Flow
@@ -79,15 +79,15 @@ flowchart TD
 
     subgraph JointTrajectorySink
         Qj["Joint Queue"] --> JB["Backend API"]
-        JB --> J1["LeRobotBackend"]
-        JB -. optional .-> J2["McapBackend"]
+        JB --> J1["LeRobotV2Backend"]
+        JB -. optional .-> J2["TrossenMCAPBackend"]
         JB -. optional .-> J3["UserBackend"]
     end
 
     subgraph ImageSink
         Qi["Image Queue"] --> IB["Backend API"]
         IB --> I1["TrossenBackend"]
-        IB -. optional .-> I2["LeRobotBackend"]
+        IB -. optional .-> I2["LeRobotV2Backend"]
         IB -. optional .-> I3["UserBackend"]
     end
 ```

@@ -131,12 +131,12 @@ bool interruptible_sleep(std::chrono::duration<double> duration);
  *
  * @param output_dir Base output directory
  * @param episode_index Episode index
- * @param extension File extension (default: "mcap")
+ * @param extension File extension (default: "trossen_mcap")
  * @return Full path to episode file
  */
 std::string generate_episode_path(
   const std::string& output_dir,
   uint32_t episode_index,
-  const std::string& extension = "mcap");
+  const std::string& extension = "trossen_mcap");
 
 }  // namespace trossen::demo

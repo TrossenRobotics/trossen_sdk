@@ -1,10 +1,10 @@
-# MCAP to LeRobot Conversion Tool
+# TrossenMCAP to LeRobotV2 Conversion Tool
 
-A utility to convert MCAP joint state recordings to LeRobot-compatible Parquet format with video encoding and dataset statistics.
+A utility to convert TrossenMCAP joint state recordings to LeRobotV2-compatible Parquet format with video encoding and dataset statistics.
 
 ## Overview
 
-This tool processes MCAP files containing robot joint states and camera images, converting them into the LeRobot V2 format for use with the LeRobot framework. It handles:
+This tool processes TrossenMCAP files containing robot joint states and camera images, converting them into the LeRobotV2 format for use with the LeRobotV2 framework. It handles:
 
 - Joint state data conversion to Parquet format
 - Camera image extraction and video encoding
@@ -16,39 +16,39 @@ This tool processes MCAP files containing robot joint states and camera images, 
 ```bash
 cd build
 cmake ..
-make mcap_to_lerobot
+make trossen_mcap_to_lerobot_v2
 ```
 
 ## Usage
 
 ### Basic Usage
 
-Convert a single MCAP file:
+Convert a single TrossenMCAP file:
 ```bash
-./mcap_to_lerobot <path_to_mcap_file> [dataset_root_dir]
+./trossen_mcap_to_lerobot_v2 <path_to_mcap_file> [dataset_root_dir]
 ```
 
 ### Examples
 
 **Single episode:**
 ```bash
-./mcap_to_lerobot ~/datasets/episode_000000.mcap ~/lerobot_datasets
+./trossen_mcap_to_lerobot_v2 ~/datasets/episode_000000.mcap ~/lerobot_v2_datasets
 ```
 
 **Batch processing (entire folder):**
 ```bash
-./mcap_to_lerobot ~/datasets/ ~/lerobot_datasets
+./trossen_mcap_to_lerobot_v2 ~/datasets/ ~/lerobot_v2_datasets
 ```
 
 **Using default output location:**
 ```bash
-./mcap_to_lerobot episode_000000.mcap
+./trossen_mcap_to_lerobot_v2 episode_000000.mcap
 # Output: ~/.cache/trossen_sdk/trossen_robotics/widowxai_bimanual/
 ```
 
 ## Output Structure
 
-The tool generates a LeRobot-compatible dataset with the following structure:
+The tool generates a LeRobotV2-compatible dataset with the following structure:
 
 ```
 dataset_root/
@@ -104,7 +104,7 @@ To customize, modify the `ParquetConfig` structure in the source code.
 ## Data Validation
 
 The tool performs validation to ensure:
-- All required streams are present in MCAP files
+- All required streams are present in TrossenMCAP files
 - Image dimensions are consistent
 - Timestamps are properly ordered
 - Video encoding succeeds
@@ -122,17 +122,17 @@ sudo apt-get install libarrow-dev libparquet-dev libopencv-dev
 - Check camera image format compatibility
 
 **Episode numbering:**
-- Verify MCAP filenames follow the pattern: `episode_NNNNNN.mcap`
+- Verify TrossenMCAP filenames follow the pattern: `episode_NNNNNN.mcap`
 - For custom naming, the tool will attempt regex extraction
 
 ## Related Examples
 
-- [replay_mcap_jointstate.cpp](replay_mcap_jointstate.cpp) - Replay joint states from MCAP
-- [widowxai_lerobot.cpp](widowxai_lerobot.cpp) - Record to LeRobot format
-- [so101_lerobot.cpp](so101_lerobot.cpp) - SO-101 arm recording
+- [replay_trossen_mcap_jointstate.cpp](replay_trossen_mcap_jointstate.cpp) - Replay joint states from MCAP
+- [widowxai_lerobot_v2.cpp](widowxai_lerobot_v2.cpp) - Record to LeRobotV2 format
+- [so101_lerobot_v2.cpp](so101_lerobot_v2.cpp) - SO-101 arm recording
 
 ## Additional Resources
 
-- [LeRobot Documentation](https://github.com/huggingface/lerobot)
+- [LeRobotV2 Documentation](https://github.com/huggingface/lerobot)
 - [MCAP Format Specification](https://mcap.dev/)
 - [Arrow/Parquet Documentation](https://arrow.apache.org/docs/cpp/parquet.html)

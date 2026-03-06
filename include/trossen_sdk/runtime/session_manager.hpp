@@ -23,8 +23,8 @@
 #include <vector>
 
 #include "trossen_sdk/hw/producer_base.hpp"
-#include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
-#include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
+#include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/io/sink.hpp"
 #include "trossen_sdk/runtime/scheduler.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"

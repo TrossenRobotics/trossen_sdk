@@ -50,13 +50,13 @@
  *   "session": {
  *     "max_duration": 20.0,
  *     "max_episodes": 5,
- *     "backend_type": "mcap"
+ *     "backend_type": "trossen_mcap"
  *   }
  * }
  * @endcode
  *
- * @note Recording is currently supported in MCAP format only.
- *       Use the mcap_to_lerobot tool to convert recorded data to LeRobot format.
+ * @note Recording is currently supported in TrossenMCAP format only.
+ *       Use the trossen_mcap_to_lerobot_v2 tool to convert recorded data to LeRobotV2 format.
  */
 
 #ifndef TROSSEN_SDK__CONFIGURATION__SDK_CONFIG_HPP_
@@ -74,7 +74,7 @@
 #include "trossen_sdk/configuration/types/hardware/mobile_base_config.hpp"
 #include "trossen_sdk/configuration/types/producers/producer_config.hpp"
 #include "trossen_sdk/configuration/types/teleop_config.hpp"
-#include "trossen_sdk/configuration/types/backends/mcap_backend_config.hpp"
+#include "trossen_sdk/configuration/types/backends/trossen_mcap_backend_config.hpp"
 #include "trossen_sdk/configuration/types/runtime/session_manager_config.hpp"
 
 namespace trossen::configuration {
@@ -116,8 +116,8 @@ struct SdkConfig {
   /// @brief Teleoperation setup
   TeleoperationConfig teleop;
 
-  /// @brief Backend configuration
-  McapBackendConfig mcap_backend;
+  /// @brief TrossenMCAP backend configuration (the only supported recording format)
+  TrossenMCAPBackendConfig mcap_backend;
 
   /// @brief Session manager settings (episode duration, max episodes, backend selection)
   SessionManagerConfig session;

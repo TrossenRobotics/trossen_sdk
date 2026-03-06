@@ -1,10 +1,10 @@
 /**
- * @file mcap_backend.hpp
- * @brief MCAP backend: writes records to an MCAP file.
+ * @file trossen_mcap_backend.hpp
+ * @brief TrossenMCAP backend: writes records to a TrossenMCAP file.
  */
 
-#ifndef TROSSEN_SDK__IO__BACKENDS__MCAP_BACKEND_HPP
-#define TROSSEN_SDK__IO__BACKENDS__MCAP_BACKEND_HPP
+#ifndef TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP_BACKEND_HPP
+#define TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP_BACKEND_HPP
 
 #include <filesystem>
 #include <memory>
@@ -23,18 +23,18 @@
 
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
-#include "trossen_sdk/io/backends/mcap/mcap_schemas.hpp"
-#include "trossen_sdk/configuration/types/backends/mcap_backend_config.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
+#include "trossen_sdk/configuration/types/backends/trossen_mcap_backend_config.hpp"
 
 namespace trossen::io::backends {
 
 /// @brief Initial buffer size for encoded messages
-const size_t MCAP_INITIAL_ENCODED_BUFFER_SIZE = 1024 * 1024;  // 1 MB
+const size_t TROSSEN_MCAP_INITIAL_ENCODED_BUFFER_SIZE = 1024 * 1024;  // 1 MB
 
 /**
- * @brief McapBackend writes records into an MCAP file.
+ * @brief TrossenMCAPBackend writes records into a TrossenMCAP file.
  */
-class McapBackend : public io::Backend {
+class TrossenMCAPBackend : public io::Backend {
 public:
   /**
    * @brief Statistics about written records
@@ -54,17 +54,17 @@ public:
   };
 
   /**
-   * @brief Construct an McapBackend with the given configuration
+   * @brief Construct a TrossenMCAPBackend with the given configuration
    *
    * @param metadata Optional producer metadata
    */
-  explicit McapBackend(
+  explicit TrossenMCAPBackend(
     const ProducerMetadataList& metadata = {});
 
   /**
    * @brief Destructor
    */
-  ~McapBackend() override;
+  ~TrossenMCAPBackend() override;
 
   /**
    * @brief Prepare backend for a new episode
@@ -153,8 +153,9 @@ private:
    * @brief Ensure the 2D odometry channel exists for a given stream ID
    *
    * @param stream_id Stream identifier (e.g., "base")
+   * @return Pointer to the channel, or nullptr on failure
    */
-  void ensure_odometry_2d_channel(const std::string& stream_id);
+  foxglove::RawChannel* ensure_odometry_2d_channel(const std::string& stream_id);
 
   /**
    * @brief Write an image record
@@ -198,7 +199,7 @@ private:
   std::filesystem::path path_;
 
   /// @brief Configuration options
-  std::shared_ptr<trossen::configuration::McapBackendConfig> cfg_;
+  std::shared_ptr<trossen::configuration::TrossenMCAPBackendConfig> cfg_;
 
   /// @brief Mutex to protect writer access
   std::mutex writer_mutex_;
@@ -224,4 +225,4 @@ private:
 
 }  // namespace trossen::io::backends
 
-#endif  // TROSSEN_SDK__IO__BACKENDS__MCAP_BACKEND_HPP
+#endif  // TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP_BACKEND_HPP

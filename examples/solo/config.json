@@ -1,8 +1,8 @@
 {
   "_notes": [
-    "Data is recorded exclusively in MCAP format.",
-    "To convert recorded MCAP data to LeRobot format, run:",
-    "  ./build/examples/mcap_to_lerobot --help"
+    "Data is recorded exclusively in TrossenMCAP format.",
+    "To convert recorded TrossenMCAP data to LeRobotV2 format, run:",
+    "  ./build/examples/trossen_mcap_to_lerobot_v2 --help"
   ],
 
   "robot_name": "solo_ai",
@@ -89,6 +89,6 @@
   "session": {
     "max_duration": 10.0,
     "max_episodes": 5,
-    "backend_type": "mcap"
+    "backend_type": "trossen_mcap"
   }
 }

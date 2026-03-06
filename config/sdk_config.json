@@ -3,10 +3,10 @@
     "type": "session_manager",
     "max_duration": 15,
     "max_episodes": 2,
-    "backend_type": "mcap"
+    "backend_type": "trossen_mcap"
   },
-  "lerobot_backend": {
-    "type": "lerobot_backend",
+  "lerobot_v2_backend": {
+    "type": "lerobot_v2_backend",
     "encoder_threads": 2,
     "max_image_queue": 10,
     "png_compression_level": 5,
@@ -19,8 +19,8 @@
     "robot_name": "widowxai",
     "fps": 30.0
   },
-  "mcap_backend": {
-    "type": "mcap_backend",
+  "trossen_mcap_backend": {
+    "type": "trossen_mcap_backend",
     "robot_name": "widowxai_bimanaual",
     "chunk_size_bytes": 4194304,
     "compression": "zstd",

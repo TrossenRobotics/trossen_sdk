@@ -1,6 +1,6 @@
 /**
- * @file lerobot_backend.cpp
- * @brief Implementation of LeRobotBackend for Trossen SDK.
+ * @file lerobot_v2_backend.cpp
+ * @brief Implementation of LeRobotV2Backend for Trossen SDK.
  */
 
 #include <algorithm>
@@ -25,16 +25,16 @@
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
-#include "trossen_sdk/io/backends/lerobot/lerobot_backend.hpp"
+#include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 
 namespace trossen::io::backends {
 
-REGISTER_BACKEND(LeRobotBackend, "lerobot")
+REGISTER_BACKEND(LeRobotV2Backend, "lerobot_v2")
 
 namespace fs = std::filesystem;
 
 // ============================================================================
-// LeRobot Statistics and Image Utility Functions Implementation
+// LeRobotV2 Statistics and Image Utility Functions Implementation
 // ============================================================================
 
 std::vector<int> sample_indices(
@@ -327,16 +327,16 @@ nlohmann::ordered_json compute_fixed_size_list_stats(
 // LeRobotBackend Class Implementation
 // ============================================================================
 
-LeRobotBackend::LeRobotBackend(
+LeRobotV2Backend::LeRobotV2Backend(
   ProducerMetadataList metadata = {})
   : io::Backend(), metadata_(std::move(metadata))
 {
-  // This allows us to access the global configuration for the LeRobot backend
+  // This allows us to access the global configuration for the LeRobotV2 backend
   // without passing it explicitly.
 
   cfg_ = trossen::configuration::GlobalConfig::instance()
-           .get_as<trossen::configuration::LeRobotBackendConfig>(
-             "lerobot_backend");
+           .get_as<trossen::configuration::LeRobotV2BackendConfig>(
+             "lerobot_v2_backend");
 
   if (!cfg_) {
         std::cerr << "Backend config not found!" << std::endl;
@@ -348,7 +348,7 @@ LeRobotBackend::LeRobotBackend(
   }
 
   // Print the stored values
-  std::cout << "================= LeRobot Backend Config =================" << std::endl;
+  std::cout << "================= LeRobotV2 Backend Config =================" << std::endl;
   std::cout << "Backend Config Loaded:" << std::endl;
   std::cout << "  root = " << cfg_->root << std::endl;
   std::cout << "  encoder_threads = " << cfg_->encoder_threads << std::endl;
@@ -366,10 +366,10 @@ LeRobotBackend::LeRobotBackend(
   std::cout << "==========================================================" << std::endl;
 }
 
-void LeRobotBackend::preprocess_episode()
+void LeRobotV2Backend::preprocess_episode()
 {
   // Root is the base output directory for this episode
-  // Constructed as: output_dir/repository_id/dataset_id/ for LeRobot V2
+  // Constructed as: output_dir/repository_id/dataset_id/ for LeRobotV2
   // This is used to form the full paths for images, videos, metadata, and data
   try {
     root_ = fs::path(cfg_->root) / cfg_->repository_id / cfg_->dataset_id;
@@ -398,7 +398,7 @@ void LeRobotBackend::preprocess_episode()
   fs::remove(test_path);
 }
 
-bool LeRobotBackend::open() {
+bool LeRobotV2Backend::open() {
   std::lock_guard<std::mutex> lock(open_mutex_);
   if (opened_) {
     return true;
@@ -450,7 +450,7 @@ bool LeRobotBackend::open() {
   size_t nthreads = cfg_->encoder_threads == 0 ? 1 : cfg_->encoder_threads;
   image_workers_.reserve(nthreads);
   for (size_t i = 0; i < nthreads; ++i) {
-    image_workers_.emplace_back(&LeRobotBackend::image_worker_loop, this);
+    image_workers_.emplace_back(&LeRobotV2Backend::image_worker_loop, this);
   }
 
   // Open a Parquet file for joint states and frame data
@@ -499,7 +499,7 @@ bool LeRobotBackend::open() {
   return true;
 }
 
-void LeRobotBackend::write(const data::RecordBase& record) {
+void LeRobotV2Backend::write(const data::RecordBase& record) {
   std::lock_guard<std::mutex> lock(write_mutex_);
 
   // Decide type by RTTI (simple approach for now)
@@ -512,7 +512,7 @@ void LeRobotBackend::write(const data::RecordBase& record) {
   }
 }
 
-void LeRobotBackend::write_batch(std::span<const data::RecordBase* const> records) {
+void LeRobotV2Backend::write_batch(std::span<const data::RecordBase* const> records) {
   std::lock_guard<std::mutex> lock(write_mutex_);
   for (auto* r : records) {
     if (!r) {
@@ -526,7 +526,7 @@ void LeRobotBackend::write_batch(std::span<const data::RecordBase* const> record
   }
 }
 
-void LeRobotBackend::convert_to_videos() const {
+void LeRobotV2Backend::convert_to_videos() const {
   // TODO(shantanuparab-tr): Use recorded fps from metadata if available
   const int fps = static_cast<int>(std::round(30.0));  // Use recorded fps if available
   const int episode_chunk = 0;
@@ -652,7 +652,7 @@ void LeRobotBackend::convert_to_videos() const {
   auto secs = std::chrono::duration_cast<std::chrono::seconds>(end_time - start_time).count();
 }
 
-void LeRobotBackend::compute_statistics() const {
+void LeRobotV2Backend::compute_statistics() const {
   fs::path episode_path = data_root_ / format_episode_parquet(episode_index_);
 
   std::unique_ptr<parquet::ParquetFileReader> parquet_reader =
@@ -763,7 +763,7 @@ void LeRobotBackend::compute_statistics() const {
   }
 }
 
-void LeRobotBackend::print_stats_table(const nlohmann::ordered_json& stats) const {
+void LeRobotV2Backend::print_stats_table(const nlohmann::ordered_json& stats) const {
   std::cout << "\n================ Episode: " << episode_index_ << " ================\n";
   for (auto it = stats.begin(); it != stats.end(); ++it) {
     const std::string& column_name = it.key();
@@ -798,11 +798,11 @@ void LeRobotBackend::print_stats_table(const nlohmann::ordered_json& stats) cons
   std::cout << "=================================================================\n";
 }
 
-void LeRobotBackend::flush() {
+void LeRobotV2Backend::flush() {
   // TODO(shantanuparab-tr): flush parquet writer if needed
 }
 
-void LeRobotBackend::close() {
+void LeRobotV2Backend::close() {
   std::lock_guard<std::mutex> lock(open_mutex_);
   if (!opened_) {
     return;
@@ -852,7 +852,7 @@ void LeRobotBackend::close() {
   opened_ = false;
 }
 
-void LeRobotBackend::write_joint_state(const data::RecordBase& base) {
+void LeRobotV2Backend::write_joint_state(const data::RecordBase& base) {
   const auto& js = static_cast<const data::TeleopJointStateRecord&>(base);
 
   // Frame indexing strategy for multi-source data streams:
@@ -946,7 +946,7 @@ void LeRobotBackend::write_joint_state(const data::RecordBase& base) {
   }
 }
 
-void LeRobotBackend::write_image(const data::RecordBase& base) {
+void LeRobotV2Backend::write_image(const data::RecordBase& base) {
   const auto& img = static_cast<const data::ImageRecord&>(base);
 
   // exit early if nothing to write
@@ -1031,7 +1031,7 @@ void LeRobotBackend::write_image(const data::RecordBase& base) {
   image_queue_cv_.notify_one();
 }
 
-void LeRobotBackend::image_worker_loop() {
+void LeRobotV2Backend::image_worker_loop() {
   const std::vector<int> params = { cv::IMWRITE_PNG_COMPRESSION, cfg_->png_compression_level };
   while (image_worker_running_) {
     ImageJob job;
@@ -1093,7 +1093,7 @@ void LeRobotBackend::image_worker_loop() {
   }
 }
 
-void LeRobotBackend::write_metadata() {
+void LeRobotV2Backend::write_metadata() {
   // TODO(shantanuparab-tr): [TDS-15]: Extract features from the robot's
   // observation space and action space
   // TODO(shantanuparab-tr): [TDS-16]: Get feature specifications from a
@@ -1136,7 +1136,7 @@ void LeRobotBackend::write_metadata() {
   create_initial_info_json(meta_root_, cfg_->robot_name, features, 30, "v2.1");
 }
 
-uint32_t LeRobotBackend::scan_existing_episodes() {
+uint32_t LeRobotV2Backend::scan_existing_episodes() {
   std::filesystem::path base_path = std::filesystem::path(cfg_->root)
                                   / std::filesystem::path(cfg_->repository_id)
                                   / std::filesystem::path(cfg_->dataset_id)
