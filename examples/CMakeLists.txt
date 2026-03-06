@@ -46,9 +46,10 @@ target_link_libraries(hardware_registry_demo trossen_sdk)
 add_executable(producer_registry_demo producer_registry_demo.cpp)
 target_link_libraries(producer_registry_demo trossen_sdk)
 
-# SLATE base hardware component demo
-add_executable(slate_base_demo slate_base_demo.cpp)
-target_link_libraries(slate_base_demo trossen_sdk)
+# Bimanual AI Kit with Mobile Base demo
+find_package(libtrossen_arm)
+add_executable(widowxai_bimanual_mobile widowxai_bimanual_mobile.cpp)
+target_link_libraries(widowxai_bimanual_mobile demo_utils trossen_sdk libtrossen_arm)
 
 # MCAP replay demo
 find_package(libtrossen_arm)

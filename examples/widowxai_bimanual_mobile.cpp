@@ -51,6 +51,16 @@
 struct Config {
   std::string root = trossen::io::backends::get_default_root_path().string();
 
+  // Camera settings
+  std::vector<std::string> camera_serials = {
+    "128422271347",  // Camera 0 - TODO: Add your serial number
+    "218622270304",  // Camera 1 - TODO: Add your serial number
+    "218622274938"   // Camera 2 - TODO: Add your serial number
+  };
+  int camera_width = 640;
+  int camera_height = 480;
+  int camera_fps = 30;
+
   // Arm settings
   float joint_rate_hz = 30.0f;
   std::string leader_left_ip = "192.168.1.3";
@@ -83,7 +93,12 @@ int main(int argc, char** argv) {
     "Follower Left IP:     " + cfg.follower_left_ip + " (recorded)",
     "Follower Right IP:    " + cfg.follower_right_ip + " (recorded)",
     "Joint rate:           " + std::to_string(cfg.joint_rate_hz) + " Hz (all 4 arms)",
-    "Mobile Base rate:     " + std::to_string(cfg.base_rate_hz) + " Hz"
+    "Mobile Base rate:     " + std::to_string(cfg.base_rate_hz) + " Hz",
+    "Camera 0 Serial:      " + cfg.camera_serials[0],
+    "Camera 1 Serial:      " + cfg.camera_serials[1],
+    "Camera 2 Serial:      " + cfg.camera_serials[2],
+    "Camera Resolution:    " + std::to_string(cfg.camera_width) + "x" +
+    std::to_string(cfg.camera_height) + " @ " + std::to_string(cfg.camera_fps) + " fps (RGB)"
   };
 
   trossen::demo::print_config_banner("Bimanual AI Kit with Mobile Base Demo", config_lines);
@@ -269,7 +284,7 @@ int main(int argc, char** argv) {
   auto base_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.base_rate_hz));
 
   nlohmann::json base_prod_cfg = {
-    {"stream_id", "slate_base_velocity"},
+    {"stream_id", "slate_base"},
     {"use_device_time", false}
   };
   auto base_prod = trossen::runtime::ProducerRegistry::create(
@@ -277,8 +292,52 @@ int main(int argc, char** argv) {
   mgr.add_producer(base_prod, base_period);
   std::cout << "  ✓ SLATE mobile base producer (" << cfg.base_rate_hz << " Hz)\n";
 
+  // ──────────────────────────────────────────────────────────
+  // RealSense Camera producers (RGB only) - 3 cameras
+  // ──────────────────────────────────────────────────────────
+  auto camera_period = std::chrono::milliseconds(static_cast<int>(1000.0f / cfg.camera_fps));
+
+  std::vector<std::shared_ptr<trossen::hw::HardwareComponent>> camera_components;
+  std::vector<std::shared_ptr<trossen::hw::PolledProducer>> camera_producers;
+
+  for (size_t i = 0; i < cfg.camera_serials.size(); ++i) {
+    // Create hardware component for RealSense camera
+    nlohmann::json camera_hw_cfg = {
+      {"serial_number", cfg.camera_serials[i]},
+      {"width", cfg.camera_width},
+      {"height", cfg.camera_height},
+      {"fps", cfg.camera_fps},
+      {"use_depth", false},
+      {"force_hardware_reset", false}
+    };
+
+    auto camera_component = trossen::hw::HardwareRegistry::create(
+      "realsense_camera", "camera_" + std::to_string(i), camera_hw_cfg);
+    camera_components.push_back(camera_component);
+    std::cout << "  ✓ RealSense camera " << i << " hardware initialized ("
+              << cfg.camera_serials[i] << ")\n";
+
+    // Create RGB producer
+    nlohmann::json rgb_prod_cfg = {
+      {"stream_id", "camera_" + std::to_string(i)},
+      {"encoding", "bgr8"},
+      {"use_device_time", true},
+      {"width", cfg.camera_width},
+      {"height", cfg.camera_height},
+      {"fps", cfg.camera_fps}
+    };
+
+    auto rgb_prod = trossen::runtime::ProducerRegistry::create(
+      "realsense_camera", camera_component, rgb_prod_cfg);
+    camera_producers.push_back(rgb_prod);
+    mgr.add_producer(rgb_prod, camera_period);
+    std::cout << "  ✓ RealSense camera " << i << " producer (" << cfg.camera_fps << " Hz, "
+              << cfg.camera_width << "x" << cfg.camera_height << " RGB)\n";
+  }
+
   std::cout << "\nProducers registered. Ready to record.\n";
-  std::cout << "  Recording: 4 arms (all leaders + followers) + mobile base velocity\n";
+  std::cout << "  Recording: 4 arms (all leaders + followers) + mobile base velocity + "
+            << "3 RealSense cameras\n";
 
   while (true) {
     if (trossen::demo::g_stop_requested) {
@@ -312,7 +371,7 @@ int main(int argc, char** argv) {
       std::cout << "   Leader Left & Right: gravity compensation (external_effort mode)\n";
       std::cout << "   Follower Left: will mirror Leader Left\n";
       std::cout << "   Follower Right: will mirror Leader Right\n";
-      std::cout << "   All 4 arms + mobile base will be recorded\n\n";
+      std::cout << "   All 4 arms + mobile base + 3 cameras will be recorded\n\n";
       leader_left_driver->set_all_modes(trossen_arm::Mode::external_effort);
       leader_left_driver->set_all_external_efforts(
         std::vector<double>(leader_left_driver->get_num_joints(), 0.0),
@@ -357,25 +416,11 @@ int main(int argc, char** argv) {
       }
     });
 
-    // Velocity logging thread - display SLATE base velocity data
-    std::atomic<int> velocity_sample_count{0};
+    // Velocity polling thread - base_prod will handle logging in its poll method
     std::thread velocity_logging_thread([&]() {
       while (mgr.is_episode_active() && !trossen::demo::g_stop_requested) {
-        base_prod->poll([&velocity_sample_count](std::shared_ptr<trossen::data::RecordBase> rec) {
-          auto joint_rec = std::dynamic_pointer_cast<trossen::data::JointStateRecord>(rec);
-          if (joint_rec && joint_rec->velocities.size() >= 3) {
-            velocity_sample_count++;
-
-            // Display velocity data every 30 samples (~1 second at 30 Hz)
-            if (velocity_sample_count % 30 == 0) {
-              std::cout << "SLATE Base Velocity [vx, vy, vz]: ["
-                        << std::fixed << std::setprecision(3)
-                        << joint_rec->velocities[0] << ", "
-                        << joint_rec->velocities[1] << ", "
-                        << joint_rec->velocities[2] << "] m/s | rad/s"
-                        << std::endl;
-            }
-          }
+        base_prod->poll([](std::shared_ptr<trossen::data::RecordBase> rec) {
+          // Velocity logging happens in the poll method
         });
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
       }
