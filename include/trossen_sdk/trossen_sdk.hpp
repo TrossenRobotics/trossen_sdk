@@ -77,7 +77,7 @@
 #include "trossen_sdk/configuration/base_config.hpp"
 #include "trossen_sdk/configuration/config_registry.hpp"
 #include "trossen_sdk/configuration/cli_parser.hpp"
-#include "trossen_sdk/configuration/data_collection_config.hpp"
+#include "trossen_sdk/configuration/sdk_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 
 // Runtime config

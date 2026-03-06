@@ -36,7 +36,7 @@
 #include "nlohmann/json.hpp"
 #include "trossen_sdk/configuration/cli_parser.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
-#include "trossen_sdk/configuration/data_collection_config.hpp"
+#include "trossen_sdk/configuration/sdk_config.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
@@ -93,7 +93,7 @@ int main(int argc, char** argv) {
   }
 
   // Parse unified robot config
-  auto cfg = trossen::configuration::DataCollectionConfig::from_json(j);
+  auto cfg = trossen::configuration::SdkConfig::from_json(j);
 
   // Populate GlobalConfig so SessionManager picks up session + backend settings
   cfg.populate_global_config();
