@@ -38,6 +38,7 @@
 
 #include "./demo_utils.hpp"
 #include "JointState.pb.h"
+#include "Odometry2D.pb.h"
 #include "RawImage.pb.h"
 #include "mcap/reader.hpp"
 #include "nlohmann/json.hpp"
@@ -53,6 +54,12 @@ struct JointStateMessage {
   std::vector<double> positions;
   std::vector<double> velocities;
   std::string stream_id;
+};
+
+struct Odometry2DMessage {
+  uint64_t timestamp_ns{0};
+  double vel_x{0.0};
+  double vel_theta{0.0};
 };
 
 /**
@@ -573,6 +580,18 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     std::string topic = channel_ptr->topic;
     std::cout << "    - Topic: '" << topic << "'\n";
 
+    size_t odom_pos = topic.find("/odom/state");
+    if (odom_pos != std::string::npos) {
+      std::string stream_id = topic.substr(0, odom_pos);
+      if (!stream_id.empty() && stream_id[0] == '/') {
+        stream_id = stream_id.substr(1);
+      }
+      slate_base_channel_id = channel_id;
+      has_slate_base = true;
+      std::cout << "    ✓ Found odometry stream for mobile robot: " << stream_id << "\n";
+      continue;
+    }
+
     size_t pos = topic.find("/joints/state");
     if (pos != std::string::npos) {
       std::string stream_id = topic.substr(0, pos);
@@ -582,12 +601,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
       channel_id_to_stream[channel_id] = stream_id;
 
-      // Check if this is the slate_base stream
-      if (stream_id == "slate_base") {
-        slate_base_channel_id = channel_id;
-        has_slate_base = true;
-        std::cout << "    ✓ Found slate_base stream for mobile robot\n";
-      } else if (stream_id.find("leader") != std::string::npos) {
+      if (stream_id.find("leader") != std::string::npos) {
         detected_leader_streams.push_back(stream_id);
         std::cout << "    ✓ Detected leader stream: " << stream_id << "\n";
       } else if (stream_id.find("follower") != std::string::npos) {
@@ -653,7 +667,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
   std::cout << "\nParsing joint state messages...\n";
   std::map<std::string, std::vector<JointStateMessage>> messages_by_stream;
-  std::vector<JointStateMessage> slate_base_messages;
+  std::vector<Odometry2DMessage> slate_base_messages;
   std::map<std::string, size_t> camera_image_counts;
   std::map<std::string, std::vector<uint64_t>> camera_timestamps;
 
@@ -665,6 +679,22 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   size_t total_images = 0;
 
   for (const auto& messageView : reader.readMessages(onProblem)) {
+    if (has_slate_base && messageView.channel->id == slate_base_channel_id) {
+      trossen_sdk::msg::Odometry2D odom_msg;
+      if (!odom_msg.ParseFromArray(reinterpret_cast<const char*>(messageView.message.data),
+                                   messageView.message.dataSize)) {
+        std::cerr << "Warning: Failed to parse Odometry2D message\n";
+        continue;
+      }
+      Odometry2DMessage msg;
+      msg.timestamp_ns = messageView.message.logTime;
+      msg.vel_x = static_cast<double>(odom_msg.twist().linear_x());
+      msg.vel_theta = static_cast<double>(odom_msg.twist().angular_z());
+      slate_base_messages.push_back(msg);
+      ++total_messages;
+      continue;
+    }
+
     auto joint_it = channel_id_to_stream.find(messageView.channel->id);
     if (joint_it != channel_id_to_stream.end()) {
       const std::string& stream_id = joint_it->second;
@@ -686,12 +716,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
         msg.velocities.push_back(static_cast<double>(v));
       }
 
-      // Store slate_base messages separately
-      if (has_slate_base && messageView.channel->id == slate_base_channel_id) {
-        slate_base_messages.push_back(msg);
-      } else {
-        messages_by_stream[stream_id].push_back(msg);
-      }
+      messages_by_stream[stream_id].push_back(msg);
       ++total_messages;
       continue;
     }
@@ -940,11 +965,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
           std::abs(static_cast<int64_t>(
               slate_base_messages[slate_base_idx].timestamp_ns - timestamp_ns)) <=
               static_cast<int64_t>(tolerance_ns)) {
-        const auto& velocities = slate_base_messages[slate_base_idx].velocities;
-        if (velocities.size() >= 2) {
-          base_velocities.push_back(velocities[0]);  // linear velocity
-          base_velocities.push_back(velocities[2]);  // angular velocity
-        }
+        const auto& odom = slate_base_messages[slate_base_idx];
+        base_velocities.push_back(odom.vel_x);      // linear velocity
+        base_velocities.push_back(odom.vel_theta);  // angular velocity
       }
 
       // If we didn't get base velocities, use zeros

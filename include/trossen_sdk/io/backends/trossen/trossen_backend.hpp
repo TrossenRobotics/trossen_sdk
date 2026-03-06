@@ -221,6 +221,13 @@ private:
   void write_joint_state(const data::RecordBase& base);
 
   /**
+   * @brief Write a 2D odometry record to disk
+   *
+   * @param odom 2D odometry record to write
+   */
+  void write_odometry_2d(const data::Odometry2DRecord& odom);
+
+  /**
    * @brief Write an image record to disk
    *
    * @param base Record to write (will be dynamic_cast to ImageRecord)
@@ -283,6 +290,8 @@ private:
   std::filesystem::path images_root_;
   std::ofstream joint_csv_;
   bool header_written_{false};
+  std::ofstream odometry_2d_csv_;
+  bool odometry_2d_header_written_{false};
   std::mutex write_mutex_;
   std::mutex open_mutex_;
   bool opened_{false};

@@ -12,6 +12,7 @@
 #include "opencv2/imgcodecs.hpp"
 
 #include "JointState.pb.h"
+#include "Odometry2D.pb.h"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/mcap/mcap_backend.hpp"
@@ -139,6 +140,9 @@ void McapBackend::close() {
   for (auto& [stream_id, channel] : joint_channels_) {
     channel.close();
   }
+  for (auto& [stream_id, channel] : odometry_2d_channels_) {
+    channel.close();
+  }
   for (auto& [name, channel] : image_channels_) {
     channel.close();
   }
@@ -174,6 +178,11 @@ void McapBackend::write(const data::RecordBase& record) {
     write_jointstate_record(*js);
     return;
   }
+
+  if (auto mb = dynamic_cast<const data::Odometry2DRecord*>(&record)) {
+    write_odometry_2d_record(*mb);
+    return;
+  }
 }
 
 void McapBackend::write_batch(std::span<const data::RecordBase* const> records) {
@@ -189,6 +198,10 @@ void McapBackend::write_batch(std::span<const data::RecordBase* const> records) 
       write_jointstate_record(*js);
       continue;
     }
+    if (auto mb = dynamic_cast<const data::Odometry2DRecord*>(r)) {
+      write_odometry_2d_record(*mb);
+      continue;
+    }
   }
 }
 
@@ -202,8 +215,8 @@ foxglove::RawChannel* McapBackend::ensure_jointstate_channel(const std::string& 
   foxglove::Schema schema;
   schema.name = "trossen_sdk.msg.JointState";
   schema.encoding = "protobuf";
-  schema.data = reinterpret_cast<const std::byte*>(schema_data_.data());
-  schema.data_len = schema_data_.size();
+  schema.data = reinterpret_cast<const std::byte*>(schema_data_js_.data());
+  schema.data_len = schema_data_js_.size();
 
   // Create channel with stream-specific topic
   auto channel_result = foxglove::RawChannel::create(
@@ -301,6 +314,82 @@ void McapBackend::write_jointstate_record(const data::JointStateRecord& js) {
   }
 }
 
+void McapBackend::ensure_odometry_2d_channel(const std::string& stream_id) {
+  auto it = odometry_2d_channels_.find(stream_id);
+  if (it != odometry_2d_channels_.end()) {
+    return;
+  }
+
+  foxglove::Schema schema;
+  schema.name = "trossen_sdk.msg.Odometry2D";
+  schema.encoding = "protobuf";
+  schema.data = reinterpret_cast<const std::byte*>(schema_data_odom2d_.data());
+  schema.data_len = schema_data_odom2d_.size();
+
+  auto channel_result = foxglove::RawChannel::create(
+    mcapdefs::odometry_2d_topic(stream_id),
+    "protobuf",
+    schema,
+    context_,
+    std::nullopt);
+
+  if (!channel_result.has_value()) {
+    std::cerr << "Failed to create odometry 2D channel for " << stream_id << ": "
+              << foxglove::strerror(channel_result.error()) << "\n";
+    return;
+  }
+
+  odometry_2d_channels_.emplace(stream_id, std::move(channel_result.value()));
+}
+
+void McapBackend::write_odometry_2d_record(const data::Odometry2DRecord& odom) {
+  ensure_odometry_2d_channel(odom.id);
+
+  auto it = odometry_2d_channels_.find(odom.id);
+  if (it == odometry_2d_channels_.end()) {
+    std::cerr << "Failed to find odometry 2D channel for stream: " << odom.id << "\n";
+    return;
+  }
+
+  trossen_sdk::msg::Odometry2D out;
+  auto* ts = out.mutable_ts();
+
+  auto* mono = ts->mutable_monotonic();
+  mono->set_seconds(odom.ts.monotonic.sec);
+  mono->set_nanos(odom.ts.monotonic.nsec);
+
+  auto* real = ts->mutable_realtime();
+  real->set_seconds(odom.ts.realtime.sec);
+  real->set_nanos(odom.ts.realtime.nsec);
+
+  out.set_seq(odom.seq);
+
+  auto* pose = out.mutable_pose();
+  pose->set_x(odom.pose.x);
+  pose->set_y(odom.pose.y);
+  pose->set_theta(odom.pose.theta);
+
+  auto* twist = out.mutable_twist();
+  twist->set_linear_x(odom.twist.linear_x);
+  twist->set_linear_y(odom.twist.linear_y);
+  twist->set_angular_z(odom.twist.angular_z);
+
+  std::string payload;
+  out.SerializeToString(&payload);
+
+  auto st = it->second.log(
+    reinterpret_cast<const std::byte*>(payload.data()),
+    payload.size(),
+    odom.ts.realtime.to_ns());
+
+  if (st != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to write odometry 2D record for " << odom.id << ": "
+              << foxglove::strerror(st) << "\n";
+  } else {
+    ++stats_.odometry_2d_written;
+  }
+}
+
 void McapBackend::write_image_record(const data::ImageRecord& img) {
   // Determine if this is a depth frame based on encoding or topic
   const bool depth =
@@ -377,47 +466,44 @@ void McapBackend::write_image_record(const data::ImageRecord& img) {
 }
 
 void McapBackend::register_schemas_once() {
-  // Build descriptor set from generated pool, including transitive dependencies
   const auto* pool = google::protobuf::DescriptorPool::generated_pool();
-  google::protobuf::FileDescriptorSet set;
 
-  const char* roots[] = {
-    "trossen_sdk/io/backends/mcap/proto/JointState.proto",
-  };
+  // Helper: build a self-contained FileDescriptorSet for one root .proto file
+  auto build_schema_blob = [&](const char* proto_path) -> std::string {
+    google::protobuf::FileDescriptorSet set;
+    std::unordered_set<std::string> visited;
 
-  std::unordered_set<std::string> visited;
-  std::function<void(const google::protobuf::FileDescriptor*)> add_with_deps;
-  add_with_deps = [&](const google::protobuf::FileDescriptor* fd) {
+    std::function<void(const google::protobuf::FileDescriptor*)> add_with_deps;
+    add_with_deps = [&](const google::protobuf::FileDescriptor* fd) {
+      if (!fd || !visited.insert(fd->name()).second) {
+        return;
+      }
+      for (int i = 0; i < fd->dependency_count(); ++i) {
+        add_with_deps(fd->dependency(i));
+      }
+      fd->CopyTo(set.add_file());
+    };
+
+    const google::protobuf::FileDescriptor* fd = pool->FindFileByName(proto_path);
     if (!fd) {
-      return;
-    }
-    if (!visited.insert(fd->name()).second){
-      // already added
-       return;
-    }
-    // Recurse first so dependencies appear earlier (order not strictly required)
-    for (int i = 0; i < fd->dependency_count(); ++i) {
-      add_with_deps(fd->dependency(i));
-    }
-    fd->CopyTo(set.add_file());
-  };
-
-  for (auto* fname : roots) {
-    const google::protobuf::FileDescriptor* fd = pool->FindFileByName(fname);
-    if (!fd) {
-      // Try basename fallback if the compiler emitted only the base name
-      std::string base(fname);
+      // Basename fallback: compiler may have stripped the directory prefix
+      std::string base(proto_path);
       if (auto pos = base.find_last_of('/'); pos != std::string::npos) {
         base = base.substr(pos + 1);
       }
       fd = pool->FindFileByName(base);
     }
     add_with_deps(fd);
-  }
 
-  std::string blob;
-  set.SerializeToString(&blob);
-  schema_data_ = blob;
+    std::string blob;
+    set.SerializeToString(&blob);
+    return blob;
+  };
+
+  schema_data_js_ = build_schema_blob(
+    "trossen_sdk/io/backends/mcap/proto/JointState.proto");
+  schema_data_odom2d_ = build_schema_blob(
+    "trossen_sdk/io/backends/mcap/proto/Odometry2D.proto");
 }
 
 bool McapBackend::is_depth_topic(const std::string& topic) {

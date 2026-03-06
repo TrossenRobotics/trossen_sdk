@@ -172,6 +172,31 @@ struct TeleopJointStateRecord : public RecordBase {
 };
 
 /**
+ * @brief 2D odometry state (pose + velocity), mirroring nav_msgs/Odometry.
+ */
+struct Odometry2DRecord : public RecordBase {
+  /// @brief 2D pose in the odom frame.
+  struct Pose {
+    /// @brief Position along x-axis (m)
+    float x{0.f};
+    /// @brief Position along y-axis (m)
+    float y{0.f};
+    /// @brief Heading angle (rad)
+    float theta{0.f};
+  } pose;
+
+  /// @brief Body-frame twist.
+  struct Twist {
+    /// @brief Linear velocity along x (m/s)
+    float linear_x{0.f};
+    /// @brief Linear velocity along y (m/s)
+    float linear_y{0.f};
+    /// @brief Angular velocity around z (rad/s)
+    float angular_z{0.f};
+  } twist;
+};
+
+/**
  * @brief Image frame payload.
  */
 struct ImageRecord : public RecordBase {

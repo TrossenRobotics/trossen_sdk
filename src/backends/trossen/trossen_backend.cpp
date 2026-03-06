@@ -102,6 +102,13 @@ bool TrossenBackend::open() {
     return false;
   }
   header_written_ = false;
+
+  odometry_2d_csv_.open((root_ / "odometry_2d.csv").string(), std::ios::out | std::ios::trunc);
+  if (!odometry_2d_csv_) {
+    std::cerr << "Failed to open mobile_base.csv\n";
+    return false;
+  }
+  odometry_2d_header_written_ = false;
   // Cache queue policy derived members
   max_image_queue_cached_ = cfg_->max_image_queue;
 
@@ -121,10 +128,10 @@ void TrossenBackend::write(const data::RecordBase& record) {
   // Decide type by RTTI (simple approach for now)
   if (auto js = dynamic_cast<const data::JointStateRecord*>(&record)) {
     write_joint_state(*js);
+  } else if (auto mb = dynamic_cast<const data::Odometry2DRecord*>(&record)) {
+    write_odometry_2d(*mb);
   } else if (auto img = dynamic_cast<const data::ImageRecord*>(&record)) {
     write_image(*img);
-  } else {
-    // Unknown type ignored for now
   }
 }
 
@@ -136,6 +143,8 @@ void TrossenBackend::write_batch(std::span<const data::RecordBase* const> record
     }
     if (auto js = dynamic_cast<const data::JointStateRecord*>(r)) {
       write_joint_state(*js);
+    } else if (auto mb = dynamic_cast<const data::Odometry2DRecord*>(r)) {
+      write_odometry_2d(*mb);
     } else if (auto img = dynamic_cast<const data::ImageRecord*>(r)) {
       write_image(*img);
     }
@@ -144,12 +153,14 @@ void TrossenBackend::write_batch(std::span<const data::RecordBase* const> record
 
 void TrossenBackend::flush() {
   if (joint_csv_) joint_csv_.flush();
+  if (odometry_2d_csv_) odometry_2d_csv_.flush();
 }
 
 void TrossenBackend::close() {
   std::lock_guard<std::mutex> lock(open_mutex_);
   if (!opened_) return;
   if (joint_csv_.is_open()) joint_csv_.close();
+  if (odometry_2d_csv_.is_open()) odometry_2d_csv_.close();
   // Stop image worker
   image_worker_running_ = false;
   image_queue_cv_.notify_all();
@@ -180,6 +191,26 @@ void TrossenBackend::write_joint_state(const data::RecordBase& base) {
              << vecToStr(js.positions) << ','
              << vecToStr(js.velocities) << ','
              << vecToStr(js.efforts) << '\n';
+}
+
+void TrossenBackend::write_odometry_2d(const data::Odometry2DRecord& mb) {
+  if (!odometry_2d_header_written_) {
+    odometry_2d_csv_
+      << "monotonic_ns,realtime_ns,id,"
+      << "pose_x,pose_y,pose_theta,"
+      << "twist_linear_x,twist_linear_y,twist_angular_z\n";
+    odometry_2d_header_written_ = true;
+  }
+  odometry_2d_csv_
+    << mb.ts.monotonic.to_ns() << ','
+    << mb.ts.realtime.to_ns()  << ','
+    << mb.id                   << ','
+    << std::setprecision(6) << mb.pose.x     << ','
+    << std::setprecision(6) << mb.pose.y     << ','
+    << std::setprecision(6) << mb.pose.theta << ','
+    << std::setprecision(6) << mb.twist.linear_x  << ','
+    << std::setprecision(6) << mb.twist.linear_y  << ','
+    << std::setprecision(6) << mb.twist.angular_z << '\n';
 }
 
 void TrossenBackend::write_image(const data::RecordBase& base) {

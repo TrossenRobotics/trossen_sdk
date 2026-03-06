@@ -45,6 +45,16 @@ inline std::string joint_state_topic(const std::string& robot_name) {
   return robot_name + "/joints/state";
 }
 
+/**
+ * @brief Get topic name for 2D odometry stream
+ *
+ * @param stream_id Stream identifier (e.g., "base")
+ * @return Topic name for the 2D odometry stream
+ */
+inline std::string odometry_2d_topic(const std::string& stream_id) {
+  return stream_id + "/odom/state";
+}
+
 }  // namespace trossen::mcapdefs
 
 #endif  // TROSSEN_SDK__IO__BACKENDS__MCAP__MCAP_SCHEMAS_HPP_

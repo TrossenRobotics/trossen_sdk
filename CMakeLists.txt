@@ -214,6 +214,7 @@ set(TROSSEN_PROTO_PATH ${CMAKE_CURRENT_SOURCE_DIR}/include/trossen_sdk/io/backen
 set(PROTOBUF_IMPORT_DIRS ${TROSSEN_PROTO_PATH})
 set(TROSSEN_PROTO_FILES
   ${TROSSEN_PROTO_PATH}/JointState.proto
+  ${TROSSEN_PROTO_PATH}/Odometry2D.proto
   ${TROSSEN_PROTO_PATH}/RawImage.proto
   ${TROSSEN_PROTO_PATH}/RobotDescription.proto
   ${TROSSEN_PROTO_PATH}/Timestamp.proto
