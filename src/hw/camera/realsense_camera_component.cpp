@@ -38,6 +38,9 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
   if (config.contains("use_depth")) {
     use_depth_ = config.at("use_depth").get<bool>();
   }
+  if (config.contains("align_depth_to_color")) {
+    align_depth_to_color_ = config.at("align_depth_to_color").get<bool>();
+  }
   if (config.contains("force_hardware_reset")) {
     force_hardware_reset_ = config.at("force_hardware_reset").get<bool>();
   }
@@ -64,6 +67,7 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
   // Create Realsense pipeline
   rs2::pipeline realsense_pipeline;
   auto camera_ = std::make_shared<rs2::pipeline>(realsense_pipeline);
+  pipeline_ = camera_;
 
   // Create Realsense config
   rs2::config cam_cfg;
@@ -87,13 +91,17 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
       "RealsenseCameraComponent: Failed to start camera with serial number " +
       serial_number + ": " + std::string(e.what()));
   }
-  // TODO(shantanuparab-tr): Determine RealsenseFrameCache consumer
-  // count from use_depth_ (2 for color+depth streams, 1 for color-only).
-  // Pass use_depth flag to RealsenseFrameCache constructor.
+
+  // Store depth scale if depth stream is enabled
   if (use_depth_) {
-    frame_cache_ = std::make_shared<RealsenseFrameCache>(camera_, 2);
-  } else {
-    frame_cache_ = std::make_shared<RealsenseFrameCache>(camera_, 1);
+    try {
+      auto depth_sensor = profile.get_device().first<rs2::depth_sensor>();
+      depth_scale_ = depth_sensor.get_depth_scale();
+    } catch (const rs2::error& e) {
+      std::cerr << "RealsenseCameraComponent: Could not read depth scale: "
+                << e.what() << std::endl;
+      depth_scale_ = 0.001f;  // fallback: 1mm per Z16 unit
+    }
   }
 
   // Read back actual values
@@ -136,8 +144,7 @@ nlohmann::json RealsenseCameraComponent::get_info() const {
 }
 
 bool RealsenseCameraComponent::is_opened() const {
-  // TODO(shantanuparab-tr): Implement proper check for Realsense pipeline and frame cache
-  return frame_cache_ != nullptr;
+  return pipeline_ != nullptr;
 }
 
 REGISTER_HARDWARE(RealsenseCameraComponent, "realsense_camera")
