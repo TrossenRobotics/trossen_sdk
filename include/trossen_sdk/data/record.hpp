@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -214,6 +215,21 @@ struct ImageRecord : public RecordBase {
 
   /// @brief Image data stored as OpenCV matrix (reference-counted internally)
   cv::Mat image;
+
+  // ── Optional depth fields (populated only by depth-capable producers) ──
+
+  /// @brief Depth image aligned to color frame (CV_16UC1, Z16 raw units)
+  ///        std::nullopt when producer does not provide depth.
+  std::optional<cv::Mat> depth_image;
+
+  /// @brief Scale factor: multiply raw Z16 value by this to get meters.
+  ///        Only meaningful when depth_image.has_value().
+  std::optional<float> depth_scale;
+
+  // ── Convenience accessors ──
+
+  /// @brief Check if this record contains depth data
+  bool has_depth() const { return depth_image.has_value(); }
 };
 }  // namespace trossen::data
 
