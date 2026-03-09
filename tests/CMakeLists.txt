@@ -24,9 +24,19 @@ add_executable(test_backend_registry test_backend_registry.cpp)
 target_link_libraries(test_backend_registry PRIVATE trossen_sdk GTest::gtest_main)
 add_test(NAME test_backend_registry COMMAND test_backend_registry)
 
+add_executable(test_push_producer_registry test_push_producer_registry.cpp)
+target_link_libraries(test_push_producer_registry PRIVATE trossen_sdk GTest::gtest_main)
+add_test(NAME test_push_producer_registry COMMAND test_push_producer_registry)
+
+add_executable(test_push_producer_base test_push_producer_base.cpp)
+target_link_libraries(test_push_producer_base PRIVATE trossen_sdk GTest::gtest_main)
+add_test(NAME test_push_producer_base COMMAND test_push_producer_base)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
 gtest_discover_tests(test_record)
 gtest_discover_tests(test_null_backend)
 gtest_discover_tests(test_backend_registry)
+gtest_discover_tests(test_push_producer_registry)
+gtest_discover_tests(test_push_producer_base)
