@@ -164,6 +164,13 @@ public:
   virtual void stop() = 0;
 
   /**
+   * @brief Get producer metadata
+   *
+   * @return Shared pointer to ProducerMetadata, or nullptr if not applicable
+   */
+  virtual std::shared_ptr<PolledProducer::ProducerMetadata> metadata() const { return nullptr; }
+
+  /**
    * @brief Get producer statistics
    *
    * @return const reference to ProducerStats

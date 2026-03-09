@@ -40,6 +40,7 @@ add_library(trossen_sdk SHARED
   src/hw/camera/mock_synced_producer.cpp
   src/runtime/session_manager.cpp
   src/runtime/producer_registry.cpp
+  src/runtime/push_producer_registry.cpp
   src/utils/app_utils.cpp
 )
 
