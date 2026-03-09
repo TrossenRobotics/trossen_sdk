@@ -89,6 +89,19 @@ void SessionManager::add_producer(
     });
 }
 
+void SessionManager::add_push_producer(std::shared_ptr<hw::PushProducer> producer) {
+  if (!producer) {
+    throw std::invalid_argument("Cannot add null push producer");
+  }
+
+  if (episode_active_) {
+    throw std::runtime_error(
+      "Cannot add push producers while episode is active. Add before start_episode().");
+  }
+
+  push_producer_entries_.push_back(PushProducerEntry{.producer = std::move(producer)});
+}
+
 bool SessionManager::start_episode() {
   // Guard: already active
   if (episode_active_) {
@@ -110,6 +123,15 @@ bool SessionManager::start_episode() {
       producer_metadata.push_back(polled_producer->metadata());
     }
   }
+
+  // Collect metadata from push producers
+  for (const auto& ppe : push_producer_entries_) {
+    auto meta = ppe.producer->metadata();
+    if (meta) {
+      producer_metadata.push_back(meta);
+    }
+  }
+
   // Create backend
   try {
     current_backend_ = create_backend(producer_metadata);
@@ -150,6 +172,16 @@ bool SessionManager::start_episode() {
 
   // Capture initial record count for this episode (for stats delta calculation)
   episode_start_record_count_ = current_sink_->processed_count();
+
+  // Start push producers (own threads, emit into current sink)
+  auto* sink_ptr = current_sink_.get();
+  for (const auto& ppe : push_producer_entries_) {
+    ppe.producer->start([sink_ptr](std::shared_ptr<data::RecordBase> rec) {
+      if (rec) {
+        sink_ptr->enqueue(std::move(rec));
+      }
+    });
+  }
 
   // Create and configure scheduler
   scheduler_ = std::make_unique<Scheduler>();
@@ -226,7 +258,12 @@ void SessionManager::stop_episode() {
 
   std::cout << "Stopping episode " << next_episode_index_ << "..." << std::endl;
 
-  // Stop scheduler first - prevent new records from being generated
+  // Stop push producers first (they push to the sink; must stop before draining)
+  for (const auto& ppe : push_producer_entries_) {
+    ppe.producer->stop();
+  }
+
+  // Stop scheduler - prevent new records from being generated
   if (scheduler_) {
     scheduler_->stop();
     scheduler_.reset();

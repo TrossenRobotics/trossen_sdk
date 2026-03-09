@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "trossen_sdk/hw/producer_base.hpp"
+#include "trossen_sdk/runtime/push_producer_registry.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/io/sink.hpp"
@@ -76,6 +77,18 @@ public:
     std::shared_ptr<hw::PolledProducer> producer,
     std::chrono::milliseconds poll_period,
     const Scheduler::TaskOptions& opts = {});
+
+  /**
+   * @brief Register a push producer to be started during episodes
+   *
+   * Push producers manage their own threads. They are started after the sink is
+   * created and before the scheduler, stopped before the scheduler during episode end.
+   *
+   * @param producer Shared pointer to push producer
+   *
+   * Must be called before start_episode().
+   */
+  void add_push_producer(std::shared_ptr<hw::PushProducer> producer);
 
   /**
    * @brief Start a new episode
@@ -345,6 +358,14 @@ private:
 
   /// @brief Registered producers (persists across episodes)
   std::vector<ProducerTask> producer_tasks_;
+
+  /// @brief Push producer registration info
+  struct PushProducerEntry {
+    std::shared_ptr<hw::PushProducer> producer;
+  };
+
+  /// @brief Registered push producers (persists across episodes)
+  std::vector<PushProducerEntry> push_producer_entries_;
 
   /**
    * @brief Create backend instance for the given episode
