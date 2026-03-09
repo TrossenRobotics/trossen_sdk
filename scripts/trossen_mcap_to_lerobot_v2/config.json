@@ -9,7 +9,7 @@
     "encode_videos": true,
     "task_name": "perform a generic task",
     "repository_id": "TrossenRoboticsCommunity",
-    "dataset_id": "mcap_converted_dataset",
+    "dataset_id": "mcap_converted_dataset_depth_one_camera",
     "episode_index": 0,
     "chunk_size": 2,
     "robot_name": "trossen_solo_ai",

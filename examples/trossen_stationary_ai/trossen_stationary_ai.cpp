@@ -42,6 +42,7 @@
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
+#include "trossen_sdk/runtime/push_producer_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
 #include "trossen_sdk/utils/app_utils.hpp"
@@ -229,16 +230,26 @@ int main(int argc, char** argv) {
       mgr.add_producer(prod, period);
       std::cout << "  [ok] Arm producer [" << prod_cfg.stream_id << "] ("
                 << prod_cfg.poll_rate_hz << " Hz)\n";
-    } else if (prod_cfg.type == "realsense_camera" || prod_cfg.type == "opencv_camera") {
+    } else if (camera_components.count(prod_cfg.hardware_id)) {
       const auto* cam = camera_cfg_map.at(prod_cfg.hardware_id);
-      auto prod = trossen::runtime::ProducerRegistry::create(
-        prod_cfg.type,
-        camera_components.at(prod_cfg.hardware_id),
-        prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
-      mgr.add_producer(prod, period);
-      std::cout << "  [ok] Camera producer [" << prod_cfg.stream_id << "] ("
-                << prod_cfg.poll_rate_hz << " Hz, "
-                << cam->width << "x" << cam->height << ")\n";
+      if (trossen::runtime::PushProducerRegistry::is_registered(prod_cfg.type)) {
+        auto prod = trossen::runtime::PushProducerRegistry::create(
+          prod_cfg.type,
+          camera_components.at(prod_cfg.hardware_id),
+          prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
+        mgr.add_push_producer(prod);
+        std::cout << "  [ok] Camera producer (push) [" << prod_cfg.stream_id << "] ("
+                  << cam->width << "x" << cam->height << ")\n";
+      } else {
+        auto prod = trossen::runtime::ProducerRegistry::create(
+          prod_cfg.type,
+          camera_components.at(prod_cfg.hardware_id),
+          prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
+        mgr.add_producer(prod, period);
+        std::cout << "  [ok] Camera producer [" << prod_cfg.stream_id << "] ("
+                  << prod_cfg.poll_rate_hz << " Hz, "
+                  << cam->width << "x" << cam->height << ")\n";
+      }
     }
   }
 

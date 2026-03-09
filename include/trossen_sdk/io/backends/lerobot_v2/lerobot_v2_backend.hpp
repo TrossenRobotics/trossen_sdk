@@ -98,6 +98,18 @@ inline std::string format_video_filename(int episode_index) {
   return oss.str();
 }
 
+/**
+ * @brief Format a depth image filename (16-bit PNG)
+ *
+ * @param frame_index Frame index (0-based)
+ * @return Formatted depth image filename (e.g., "image_000000.png")
+ */
+inline std::string format_depth_filename(int frame_index) {
+  std::ostringstream oss;
+  oss << "image_" << std::setfill('0') << std::setw(6) << frame_index << ".png";
+  return oss.str();
+}
+
 // ============================================================================
 // LeRobotV2 Statistics and Image Utility Functions
 // ============================================================================
