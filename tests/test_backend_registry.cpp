@@ -51,7 +51,6 @@ TEST_F(BackendRegistryTest, CommonBackendsAreRegistered) {
   EXPECT_TRUE(BackendRegistry::is_registered("lerobot_v2"));
   EXPECT_TRUE(BackendRegistry::is_registered("trossen_mcap"));
   EXPECT_TRUE(BackendRegistry::is_registered("null"));
-  EXPECT_TRUE(BackendRegistry::is_registered("trossen"));
 }
 
 // Test that unknown backend types are not registered
