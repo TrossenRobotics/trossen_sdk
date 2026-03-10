@@ -59,6 +59,10 @@ target_link_libraries(test_sink PRIVATE trossen_sdk GTest::gtest_main)
 add_executable(test_scheduler test_scheduler.cpp)
 target_link_libraries(test_scheduler PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_session_manager test_session_manager.cpp)
+target_link_libraries(test_session_manager PRIVATE trossen_sdk GTest::gtest_main)
+add_test(NAME test_session_manager COMMAND test_session_manager)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -79,3 +83,4 @@ gtest_discover_tests(test_queue_adapter)
 gtest_discover_tests(test_producer_registry)
 gtest_discover_tests(test_sink)
 gtest_discover_tests(test_scheduler)
+gtest_discover_tests(test_session_manager)
