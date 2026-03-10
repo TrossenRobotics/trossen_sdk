@@ -47,6 +47,14 @@ add_executable(test_lerobot_depth_utils test_lerobot_depth_utils.cpp)
 target_link_libraries(test_lerobot_depth_utils PRIVATE trossen_sdk GTest::gtest_main)
 add_test(NAME test_lerobot_depth_utils COMMAND test_lerobot_depth_utils)
 
+add_executable(test_record_types test_record_types.cpp)
+target_link_libraries(test_record_types PRIVATE trossen_sdk GTest::gtest_main)
+add_test(NAME test_record_types COMMAND test_record_types)
+
+add_executable(test_config test_config.cpp)
+target_link_libraries(test_config PRIVATE trossen_sdk GTest::gtest_main)
+add_test(NAME test_config COMMAND test_config)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -60,3 +68,5 @@ if(TROSSEN_ENABLE_REALSENSE)
   gtest_discover_tests(test_realsense_push_producer_metadata)
 endif()
 gtest_discover_tests(test_lerobot_depth_utils)
+gtest_discover_tests(test_record_types)
+gtest_discover_tests(test_config)
