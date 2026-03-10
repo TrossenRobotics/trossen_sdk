@@ -55,6 +55,10 @@ add_executable(test_config test_config.cpp)
 target_link_libraries(test_config PRIVATE trossen_sdk GTest::gtest_main)
 add_test(NAME test_config COMMAND test_config)
 
+add_executable(test_lerobot_utils test_lerobot_utils.cpp)
+target_link_libraries(test_lerobot_utils PRIVATE trossen_sdk GTest::gtest_main)
+add_test(NAME test_lerobot_utils COMMAND test_lerobot_utils)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -70,3 +74,4 @@ endif()
 gtest_discover_tests(test_lerobot_depth_utils)
 gtest_discover_tests(test_record_types)
 gtest_discover_tests(test_config)
+gtest_discover_tests(test_lerobot_utils)
