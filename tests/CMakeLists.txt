@@ -59,6 +59,14 @@ add_executable(test_lerobot_utils test_lerobot_utils.cpp)
 target_link_libraries(test_lerobot_utils PRIVATE trossen_sdk GTest::gtest_main)
 add_test(NAME test_lerobot_utils COMMAND test_lerobot_utils)
 
+add_executable(test_queue_adapter test_queue_adapter.cpp)
+target_link_libraries(test_queue_adapter PRIVATE trossen_sdk GTest::gtest_main)
+add_test(NAME test_queue_adapter COMMAND test_queue_adapter)
+
+add_executable(test_producer_registry test_producer_registry.cpp)
+target_link_libraries(test_producer_registry PRIVATE trossen_sdk GTest::gtest_main)
+add_test(NAME test_producer_registry COMMAND test_producer_registry)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -75,3 +83,5 @@ gtest_discover_tests(test_lerobot_depth_utils)
 gtest_discover_tests(test_record_types)
 gtest_discover_tests(test_config)
 gtest_discover_tests(test_lerobot_utils)
+gtest_discover_tests(test_queue_adapter)
+gtest_discover_tests(test_producer_registry)
