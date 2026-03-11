@@ -70,10 +70,28 @@ public:
   std::string get_serial_number() const { return serial_number; }
 
   /**
-   * @brief Check if camera is opened and ready
-   * @return true if camera pipeline and frame cache can be accessed
+   * @brief Check if the camera pipeline has been initialized and is ready for use
+   * @return true if the internal rs2::pipeline handle is valid and the camera is opened
    */
   bool is_opened() const;
+
+  /**
+   * @brief Get the configured frame width
+   * @return Width in pixels
+   */
+  int get_width() const { return width_; }
+
+  /**
+   * @brief Get the configured frame height
+   * @return Height in pixels
+   */
+  int get_height() const { return height_; }
+
+  /**
+   * @brief Get the configured frame rate
+   * @return FPS
+   */
+  int get_fps() const { return fps_; }
 
   /**
    * @brief Get the active RealSense pipeline
