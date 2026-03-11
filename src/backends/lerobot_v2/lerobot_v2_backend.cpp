@@ -328,7 +328,7 @@ nlohmann::ordered_json compute_fixed_size_list_stats(
 // ============================================================================
 
 LeRobotV2Backend::LeRobotV2Backend(
-  ProducerMetadataList metadata = {})
+  ProducerMetadataList metadata)
   : io::Backend(), metadata_(std::move(metadata))
 {
   // This allows us to access the global configuration for the LeRobotV2 backend

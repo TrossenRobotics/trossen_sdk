@@ -23,7 +23,6 @@
 #include <vector>
 
 #include "trossen_sdk/hw/producer_base.hpp"
-#include "trossen_sdk/runtime/push_producer_registry.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/io/sink.hpp"
@@ -341,7 +340,7 @@ private:
   mutable std::mutex episode_mutex_;
 
   /// @brief Current sink instance (per episode)
-  std::unique_ptr<io::Sink> current_sink_;
+  std::shared_ptr<io::Sink> current_sink_;
 
   /// @brief Current backend instance (per episode)
   std::shared_ptr<io::Backend> current_backend_;
