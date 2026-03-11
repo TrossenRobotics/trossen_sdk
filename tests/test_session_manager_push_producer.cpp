@@ -8,7 +8,9 @@
 
 #include <atomic>
 #include <functional>
+#include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -183,4 +185,5 @@ TEST_F(SessionManagerPushProducerTest, PushProducerRecordsReachBackend) {
   sm.stop_episode();
 
   EXPECT_EQ(producer->stats().produced, 5);
+  EXPECT_EQ(sm.stats().records_written_current, 5);
 }
