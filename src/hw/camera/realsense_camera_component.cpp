@@ -67,7 +67,6 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
   // Create Realsense pipeline
   rs2::pipeline realsense_pipeline;
   auto camera_ = std::make_shared<rs2::pipeline>(realsense_pipeline);
-  pipeline_ = camera_;
 
   // Create Realsense config
   rs2::config cam_cfg;
@@ -91,6 +90,9 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
       "RealsenseCameraComponent: Failed to start camera with serial number " +
       serial_number + ": " + std::string(e.what()));
   }
+
+  // Set pipeline_ only after successful start
+  pipeline_ = camera_;
 
   // Store depth scale if depth stream is enabled
   if (use_depth_) {

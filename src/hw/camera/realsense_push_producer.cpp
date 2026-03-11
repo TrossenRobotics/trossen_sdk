@@ -48,6 +48,9 @@ RealsensePushProducer::RealsensePushProducer(
   cfg_.color_encoding = config.value("encoding", "bgr8");
   cfg_.use_device_time = config.value("use_device_time", true);
   cfg_.timeout_ms = config.value("timeout_ms", 3000);
+  if (cfg_.timeout_ms <= 0) {
+    cfg_.timeout_ms = 3000;
+  }
   cfg_.fps = config.value("fps", 30);
 
   // Populate metadata
@@ -56,9 +59,9 @@ RealsensePushProducer::RealsensePushProducer(
   metadata_.name = cfg_.stream_id;
   metadata_.description =
     "Unified push producer for RealSense camera (color + optional depth)";
-  metadata_.width = 0;   // updated from first frame if needed; use hardware value
-  metadata_.height = 0;
-  metadata_.fps = cfg_.fps;
+  metadata_.width = cam->get_width();
+  metadata_.height = cam->get_height();
+  metadata_.fps = cam->get_fps();
   metadata_.codec = "av1";
   metadata_.pix_fmt = "yuv420p";
   metadata_.channels = 3;
@@ -143,9 +146,11 @@ void RealsensePushProducer::push_loop(
     cv::Mat color_out;
     if (cfg_.color_encoding == "bgr8") {
       cv::cvtColor(color_raw, color_out, cv::COLOR_RGB2BGR);
-    } else {
-      // rgb8 or other: shallow clone to own the data
+    } else if (cfg_.color_encoding == "rgb8") {
       color_out = color_raw.clone();
+    } else {
+      throw std::runtime_error(
+        "[RealsensePushProducer] Unsupported color encoding: " + cfg_.color_encoding);
     }
 
     auto rec = std::make_shared<data::ImageRecord>();
@@ -159,7 +164,9 @@ void RealsensePushProducer::push_loop(
     if (use_depth_) {
       auto depth_frame = frames.get_depth_frame();
       if (depth_frame) {
-        cv::Mat depth_raw(h, w, CV_16UC1,
+        const int depth_w = depth_frame.get_width();
+        const int depth_h = depth_frame.get_height();
+        cv::Mat depth_raw(depth_h, depth_w, CV_16UC1,
                           const_cast<void*>(depth_frame.get_data()),
                           cv::Mat::AUTO_STEP);
         rec->depth_image = depth_raw.clone();
@@ -172,8 +179,9 @@ void RealsensePushProducer::push_loop(
     uint64_t mono_now = data::now_mono().to_ns();
     data::Timestamp ts;
     if (cfg_.use_device_time) {
-      uint64_t device_ts = color_frame.get_timestamp();
-      ts.monotonic = data::Timespec::from_ns(device_ts);
+      double device_ts_ms = color_frame.get_timestamp();
+      uint64_t device_ts_ns = static_cast<uint64_t>(device_ts_ms * 1'000'000.0);
+      ts.monotonic = data::Timespec::from_ns(device_ts_ns);
     } else {
       ts.monotonic = data::now_mono();
     }
@@ -192,8 +200,16 @@ void RealsensePushProducer::push_loop(
     rec->seq = seq_++;
     rec->id = cfg_.stream_id;
 
-    emit(rec);
-    ++stats_.produced;
+    try {
+      emit(rec);
+      ++stats_.produced;
+    } catch (const std::exception& e) {
+      ++stats_.dropped;
+      std::cerr << "[RealsensePushProducer] emit failed: " << e.what() << std::endl;
+    } catch (...) {
+      ++stats_.dropped;
+      std::cerr << "[RealsensePushProducer] emit failed with unknown exception" << std::endl;
+    }
 
     // Periodic FPS health report
     if (cfg_.fps > 0 && stats_.produced >= next_health_report_frame_) {
