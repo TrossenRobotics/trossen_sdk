@@ -59,6 +59,7 @@ RealsensePushProducer::RealsensePushProducer(
   metadata_.name = cfg_.stream_id;
   metadata_.description =
     "Unified push producer for RealSense camera (color + optional depth)";
+  // Width/height/fps from camera component's actual negotiated pipeline profile values
   metadata_.width = cam->get_width();
   metadata_.height = cam->get_height();
   metadata_.fps = cam->get_fps();
@@ -147,6 +148,8 @@ void RealsensePushProducer::push_loop(
     if (cfg_.color_encoding == "bgr8") {
       cv::cvtColor(color_raw, color_out, cv::COLOR_RGB2BGR);
     } else if (cfg_.color_encoding == "rgb8") {
+      // Clone required: color_raw wraps the rs2::frame buffer which is recycled
+      // on the next wait_for_frames() call
       color_out = color_raw.clone();
     } else {
       throw std::runtime_error(

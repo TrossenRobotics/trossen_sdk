@@ -146,7 +146,15 @@ nlohmann::json RealsenseCameraComponent::get_info() const {
 }
 
 bool RealsenseCameraComponent::is_opened() const {
-  return pipeline_ != nullptr;
+  if (!pipeline_) {
+    return false;
+  }
+  try {
+    pipeline_->get_active_profile();
+    return true;
+  } catch (const rs2::error&) {
+    return false;
+  }
 }
 
 REGISTER_HARDWARE(RealsenseCameraComponent, "realsense_camera")

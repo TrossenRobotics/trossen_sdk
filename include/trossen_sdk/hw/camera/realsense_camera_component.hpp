@@ -138,7 +138,7 @@ private:
   bool use_depth_ = false;
 
   /// @brief Whether to align depth to color frame
-  bool align_depth_to_color_ = true;
+  bool align_depth_to_color_ = false;
 
   /// @brief Shared pointer to the active pipeline (used by RealsensePushProducer)
   std::shared_ptr<rs2::pipeline> pipeline_;
