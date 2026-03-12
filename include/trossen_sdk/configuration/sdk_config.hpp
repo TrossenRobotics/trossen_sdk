@@ -50,6 +50,7 @@
  *   "session": {
  *     "max_duration": 20.0,
  *     "max_episodes": 5,
+ *     "reset_duration_s": 5.0,
  *     "backend_type": "trossen_mcap"
  *   }
  * }

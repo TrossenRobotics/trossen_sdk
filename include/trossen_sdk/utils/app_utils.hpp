@@ -14,10 +14,14 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <memory>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
+#include "trossen_sdk/configuration/types/teleop_config.hpp"
+#include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
 namespace trossen::utils {
@@ -114,5 +118,22 @@ std::string generate_episode_path(
   const std::string& output_dir,
   uint32_t episode_index,
   const std::string& extension = "trossen_mcap");
+
+/**
+ * @brief Run a reset period between episodes with teleop active
+ *
+ * Displays a countdown timer while keeping leader-follower teleoperation
+ * running so the operator can physically reset the scene.
+ *
+ * @param duration_s Reset period duration in seconds
+ * @param teleop_cfg Teleoperation configuration
+ * @param arm_components Map of arm components for teleop mirroring
+ * @return true if completed normally, false if interrupted by Ctrl+C
+ */
+bool run_reset_period(
+  double duration_s,
+  const configuration::TeleoperationConfig& teleop_cfg,
+  const std::unordered_map<std::string,
+    std::shared_ptr<hw::arm::TrossenArmComponent>>& arm_components);
 
 }  // namespace trossen::utils

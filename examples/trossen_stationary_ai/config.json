@@ -134,14 +134,15 @@
 
   "backend": {
     "root":             "~/.trossen_sdk",
-    "dataset_id":       "stationary_dataset",
+    "dataset_id":       "stationary_dataset_001",
     "compression":      "",
     "chunk_size_bytes": 4194304
   },
 
   "session": {
-    "max_duration":  20.0,
-    "max_episodes":  5,
-    "backend_type":  "trossen_mcap"
+    "max_duration":     10.0,
+    "max_episodes":     5,
+    "reset_duration_s": 5.0,
+    "backend_type":     "trossen_mcap"
   }
 }

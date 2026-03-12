@@ -3,12 +3,14 @@
  * @brief Implementation of shared utilities for Trossen SDK applications
  */
 
+#include <atomic>
 #include <csignal>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <unordered_map>
 #include <vector>
 
 #include "trossen_sdk/utils/app_utils.hpp"
@@ -255,6 +257,85 @@ std::string generate_episode_path(
        << std::setfill('0') << std::setw(6) << episode_index
        << "." << extension;
   return path.str();
+}
+
+bool run_reset_period(
+  double duration_s,
+  const configuration::TeleoperationConfig& teleop_cfg,
+  const std::unordered_map<std::string,
+    std::shared_ptr<hw::arm::TrossenArmComponent>>& arm_components)
+{
+  // Brief arm lock: hold all arms in their current position for 1 second
+  // so the user gets tactile feedback that recording stopped
+  if (teleop_cfg.enabled && !g_stop_requested) {
+    std::cout << "\n  Locking arms (1s)...\n";
+    for (const auto& [id, comp] : arm_components) {
+      auto driver = comp->get_hardware();
+      driver->set_all_modes(trossen_arm::Mode::position);
+      driver->set_all_positions(driver->get_all_positions(), 0.0f, false);
+    }
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+  }
+
+  std::cout << "\n═══════════════════════════════════════════════════════════\n";
+  std::cout << "  Scene Reset Period (" << std::fixed << std::setprecision(1)
+            << duration_s << "s)\n";
+  std::cout << "  Teleop active — reposition the scene for the next episode\n";
+  std::cout << "═══════════════════════════════════════════════════════════\n";
+
+  std::atomic<bool> reset_done{false};
+
+  // Teleop thread mirrors leader positions to followers during reset
+  std::thread teleop_thread([&]() {
+    if (!teleop_cfg.enabled) {
+      return;
+    }
+    const auto sleep_ns = static_cast<int64_t>(1e9 / teleop_cfg.rate_hz);
+    while (!reset_done && !g_stop_requested) {
+      for (const auto& pair : teleop_cfg.pairs) {
+        auto leader_it = arm_components.find(pair.leader);
+        auto follower_it = arm_components.find(pair.follower);
+        if (leader_it == arm_components.end() || follower_it == arm_components.end()) {
+          continue;
+        }
+        follower_it->second->get_hardware()->set_all_positions(
+          leader_it->second->get_hardware()->get_all_positions(), 0.0f, false);
+      }
+      std::this_thread::sleep_for(std::chrono::nanoseconds(sleep_ns));
+    }
+  });
+
+  // Countdown loop on the main thread
+  auto start = std::chrono::steady_clock::now();
+  auto target = start + std::chrono::duration<double>(duration_s);
+  bool interrupted = false;
+
+  while (std::chrono::steady_clock::now() < target) {
+    if (g_stop_requested) {
+      interrupted = true;
+      break;
+    }
+    double remaining =
+      std::chrono::duration<double>(target - std::chrono::steady_clock::now()).count();
+    if (remaining < 0.0) remaining = 0.0;
+    std::cout << "\r  Time remaining: " << std::fixed << std::setprecision(1)
+              << remaining << "s   " << std::flush;
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+  }
+
+  std::cout << "\r  Time remaining: 0.0s   \n";
+
+  reset_done = true;
+  if (teleop_thread.joinable()) {
+    teleop_thread.join();
+  }
+
+  if (interrupted) {
+    return false;
+  }
+
+  std::cout << "  Reset period complete. Starting next episode...\n\n";
+  return true;
 }
 
 }  // namespace trossen::utils

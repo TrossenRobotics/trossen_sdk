@@ -144,6 +144,10 @@ int main(int argc, char** argv) {
     "Teleop:               " +
     std::string(cfg.teleop.enabled ? "enabled" : "disabled") +
     " (" + std::to_string(cfg.teleop.pairs.size()) + " pairs)");
+  if (cfg.session.reset_duration_s > 0.0) {
+    config_lines.push_back(
+      "Reset period:         " + std::to_string(cfg.session.reset_duration_s) + " s");
+  }
 
   trossen::utils::print_config_banner("Trossen Stationary AI Kit Demo Usage", config_lines);
 
@@ -265,6 +269,16 @@ int main(int argc, char** argv) {
       break;
     }
 
+    // Stage all arms to starting position before each episode
+    std::cout << "\nStaging arms to starting position...\n";
+    for (const auto& [id, comp] : arm_components) {
+      auto driver = comp->get_hardware();
+      driver->set_all_modes(trossen_arm::Mode::position);
+      driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    }
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+    std::cout << "  [ok] Arms staged to starting position\n";
+
     if (cfg.teleop.enabled) {
       std::cout << "\nLocking leader arms and moving followers to match...\n";
       for (const auto& pair : cfg.teleop.pairs) {
@@ -360,6 +374,14 @@ int main(int argc, char** argv) {
     if (trossen::utils::g_stop_requested) {
       std::cout << "\nStopping at user request (Ctrl+C).\n";
       break;
+    }
+
+    if (cfg.session.reset_duration_s > 0.0) {
+      if (!trossen::utils::run_reset_period(
+            cfg.session.reset_duration_s, cfg.teleop, arm_components)) {
+        std::cout << "\nStopping at user request (Ctrl+C).\n";
+        break;
+      }
     }
   }
 

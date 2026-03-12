@@ -36,6 +36,9 @@ TEST(SessionManagerConfigTest, Defaults) {
   // Default max_episodes is nullopt (unlimited)
   EXPECT_FALSE(cfg.max_episodes.has_value());
 
+  // Default reset_duration_s is 0.0 (disabled)
+  EXPECT_DOUBLE_EQ(cfg.reset_duration_s, 0.0);
+
   // Default backend_type
   EXPECT_EQ(cfg.backend_type, "trossen_mcap");
 
@@ -52,6 +55,7 @@ TEST(SessionManagerConfigTest, FromJson_Override) {
     {"type", "session_manager"},
     {"max_duration", 30.0},
     {"max_episodes", 50},
+    {"reset_duration_s", 7.5},
     {"backend_type", "null"}
   };
 
@@ -62,6 +66,8 @@ TEST(SessionManagerConfigTest, FromJson_Override) {
 
   ASSERT_TRUE(cfg.max_episodes.has_value());
   EXPECT_EQ(cfg.max_episodes.value(), 50);
+
+  EXPECT_DOUBLE_EQ(cfg.reset_duration_s, 7.5);
 
   EXPECT_EQ(cfg.backend_type, "null");
 }
@@ -87,6 +93,41 @@ TEST(SessionManagerConfigTest, FromJson_Partial) {
 
   // backend_type should be default
   EXPECT_EQ(cfg.backend_type, "trossen_mcap");
+
+  // reset_duration_s should be default 0.0 when absent from JSON
+  EXPECT_DOUBLE_EQ(cfg.reset_duration_s, 0.0);
+}
+
+// ============================================================================
+// CFG-03b: SessionManagerConfig from_json clamps negative reset_duration_s
+// ============================================================================
+
+TEST(SessionManagerConfigTest, FromJson_NegativeResetDuration_ClampedToZero) {
+  nlohmann::json j = {
+    {"type", "session_manager"},
+    {"reset_duration_s", -3.0}
+  };
+
+  SessionManagerConfig cfg = SessionManagerConfig::from_json(j);
+
+  // Negative values must be clamped to 0.0 (disabled)
+  EXPECT_DOUBLE_EQ(cfg.reset_duration_s, 0.0);
+}
+
+// ============================================================================
+// CFG-03c: SessionManagerConfig from_json accepts zero reset_duration_s
+// ============================================================================
+
+TEST(SessionManagerConfigTest, FromJson_ZeroResetDuration_RemainsZero) {
+  nlohmann::json j = {
+    {"type", "session_manager"},
+    {"reset_duration_s", 0.0}
+  };
+
+  SessionManagerConfig cfg = SessionManagerConfig::from_json(j);
+
+  // Explicit zero should remain zero (disabled)
+  EXPECT_DOUBLE_EQ(cfg.reset_duration_s, 0.0);
 }
 
 // ============================================================================
