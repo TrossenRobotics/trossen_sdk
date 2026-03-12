@@ -517,8 +517,8 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
         .nsec = static_cast<uint32_t>(img.ts.realtime.nsec)
       };
       dmsg.frame_id = depth_topic_id;
-      dmsg.width = img.width;
-      dmsg.height = img.height;
+      dmsg.width = static_cast<uint32_t>(img.depth_image->cols);
+      dmsg.height = static_cast<uint32_t>(img.depth_image->rows);
       dmsg.encoding = "16UC1";
       dmsg.step = static_cast<uint32_t>(img.depth_image->step);
       const std::byte* dptr =

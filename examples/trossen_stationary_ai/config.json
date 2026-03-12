@@ -31,7 +31,7 @@
         "width":         640,
         "height":        480,
         "fps":           30,
-        "use_depth":     true
+        "use_depth":     false
       },
       {
         "id":            "camera_low",
@@ -39,7 +39,7 @@
         "width":         640,
         "height":        480,
         "fps":           30,
-        "use_depth":     true
+        "use_depth":     false
       },
       {
         "id":            "camera_left_wrist",
@@ -47,7 +47,7 @@
         "width":         640,
         "height":        480,
         "fps":           30,
-        "use_depth":     true
+        "use_depth":     false
       },
       {
         "id":            "camera_right_wrist",
@@ -55,7 +55,7 @@
         "width":         640,
         "height":        480,
         "fps":           30,
-        "use_depth":     true
+        "use_depth":     false
       }
     ]
   },
