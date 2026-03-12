@@ -55,7 +55,7 @@ TEST(LeRobotUtilsTest, FormatChunkDir_NonZero) {
 
 TEST(LeRobotUtilsTest, FormatEpisodeParquet_Extension) {
   std::string name = format_episode_parquet(0);
-  EXPECT_EQ(name, "episode_000000.parquet");
+  ASSERT_EQ(name, "episode_000000.parquet");
 
   std::string ext = name.substr(name.rfind('.'));
   EXPECT_EQ(ext, ".parquet");
@@ -71,7 +71,7 @@ TEST(LeRobotUtilsTest, FormatEpisodeParquet_Index) {
 
 TEST(LeRobotUtilsTest, FormatVideoFilename_Extension) {
   std::string name = format_video_filename(0);
-  EXPECT_EQ(name, "episode_000000.mp4");
+  ASSERT_EQ(name, "episode_000000.mp4");
 
   std::string ext = name.substr(name.rfind('.'));
   EXPECT_EQ(ext, ".mp4");
@@ -87,7 +87,7 @@ TEST(LeRobotUtilsTest, FormatVideoFilename_Index) {
 
 TEST(LeRobotUtilsTest, FormatImageFilename_Extension) {
   std::string name = format_image_filename(0);
-  EXPECT_EQ(name, "image_000000.jpg");
+  ASSERT_EQ(name, "image_000000.jpg");
 
   std::string ext = name.substr(name.rfind('.'));
   EXPECT_EQ(ext, ".jpg");
@@ -98,7 +98,7 @@ TEST(LeRobotUtilsTest, FormatImageFilename_Extension) {
 // ============================================================================
 
 TEST(LeRobotUtilsTest, CreateScalarFeature_Shape) {
-  auto feature = create_scalar_feature("float32");
+  const auto feature = create_scalar_feature("float32");
 
   EXPECT_EQ(feature["dtype"], "float32");
   ASSERT_TRUE(feature["shape"].is_array());
@@ -109,7 +109,7 @@ TEST(LeRobotUtilsTest, CreateScalarFeature_Shape) {
 }
 
 TEST(LeRobotUtilsTest, CreateScalarFeature_Int64) {
-  auto feature = create_scalar_feature("int64");
+  const auto feature = create_scalar_feature("int64");
   EXPECT_EQ(feature["dtype"], "int64");
 }
 
@@ -135,8 +135,8 @@ TEST(LeRobotUtilsTest, AddStandardMetadataFeatures_AllPresent) {
   EXPECT_EQ(features["task_index"]["dtype"], "int64");
 }
 
-// Verify standard features don't overwrite existing features
-TEST(LeRobotUtilsTest, AddStandardMetadataFeatures_DoesNotOverwriteExisting) {
+// Verify custom fields are preserved when standard metadata is added
+TEST(LeRobotUtilsTest, AddStandardMetadataFeatures_PreservesCustomFields) {
   nlohmann::ordered_json features;
   features["custom_field"] = {{"dtype", "bool"}};
 
