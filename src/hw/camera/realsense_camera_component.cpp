@@ -113,14 +113,12 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
   height_ = color_profile.height();
   fps_ = static_cast<int>(color_profile.fps());
 
-  // If depth stream is enabled, confirm its parameters
+  // Confirm depth stream is valid (uses same width/height as color)
   if (use_depth_) {
     auto depth_stream = profile.get_stream(RS2_STREAM_DEPTH);
     auto depth_profile = depth_stream.as<rs2::video_stream_profile>();
-    // Just to confirm depth stream is valid
     (void)depth_profile.width();
     (void)depth_profile.height();
-    (void)depth_profile.fps();
   }
 
   std::cout << "Camera " << get_identifier() << " configured: "

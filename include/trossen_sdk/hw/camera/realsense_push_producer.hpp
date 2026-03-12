@@ -76,6 +76,8 @@ public:
       color_feature["dtype"] = "video";
       color_feature["shape"] = {height, width, channels};
       color_feature["names"] = {"height", "width", "channels"};
+      // TODO(shantanuparab-tr): codec and pix_fmt for color are placeholders;
+      // update after validating with LeRobot v2 depth support and alpha user feedback
       color_feature["info"] = {
         {"video.fps", fps},
         {"video.height", height},
@@ -95,8 +97,10 @@ public:
         depth_feature["dtype"] = "video";
         depth_feature["shape"] = {height, width, 1};
         depth_feature["names"] = {"height", "width", "channels"};
-        // ffv1: lossless codec required for metric depth data
-        // gray16le: matches RealSense Z16 depth format (16-bit unsigned, little-endian)
+        // TODO(shantanuparab-tr): depth codec ("ffv1") and pix_fmt ("gray16le") are
+        // provisional; update after validating with LeRobot v2 depth support and alpha
+        // user feedback. ffv1 chosen as lossless codec for metric depth data;
+        // gray16le matches RealSense Z16 depth format (16-bit unsigned, little-endian).
         depth_feature["info"] = {
           {"video.fps", fps},
           {"video.height", height},
@@ -126,6 +130,7 @@ public:
 
       if (has_depth) {
         std::string depth_id = id + "_depth";
+        // TODO(shantanuparab-tr): depth codec/pix_fmt — see TODO in get_info()
         info["cameras"][depth_id] = {
           {"width", width},
           {"height", height},
