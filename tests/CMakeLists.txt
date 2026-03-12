@@ -61,7 +61,6 @@ target_link_libraries(test_scheduler PRIVATE trossen_sdk GTest::gtest_main)
 
 add_executable(test_session_manager test_session_manager.cpp)
 target_link_libraries(test_session_manager PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_session_manager COMMAND test_session_manager)
 
 # Enable CTest integration
 include(GoogleTest)

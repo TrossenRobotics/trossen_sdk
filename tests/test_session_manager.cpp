@@ -3,7 +3,7 @@
  * @brief Unit tests for SessionManager core lifecycle, polled producers, and state management
  *
  * Tests episode start/stop, producer registration guards, episode index tracking,
- * stats computation, max_episodes enforcement, and callback invocation.
+ * and stats computation.
  * Uses NullBackend via GlobalConfig to avoid real I/O.
  */
 
@@ -74,11 +74,7 @@ protected:
       }}
     };
 
-    try {
-      trossen::configuration::GlobalConfig::instance().load_from_json(config);
-    } catch (const std::exception&) {
-      // May already be loaded -- acceptable
-    }
+    trossen::configuration::GlobalConfig::instance().load_from_json(config);
   }
 };
 
@@ -209,14 +205,14 @@ TEST_F(SessionManagerTest, PolledProducer_RecordsReachBackend) {
 }
 
 // ============================================================================
-// SM-11: Episode complete callback
+// SM-10: Episode complete callback
 // ============================================================================
 
 // BUG: episode_complete_callback deadlocks in stop_episode().
 //
-// stop_episode() holds episode_mutex_ (line 253) and then calls stats() (line 319)
-// which also tries to lock episode_mutex_. Since std::mutex is not recursive, this
-// deadlocks on the same thread. This affects ANY use of set_episode_complete_callback().
+// stop_episode() holds episode_mutex_ and then calls stats(), which also tries to
+// lock episode_mutex_. Since std::mutex is not recursive, this deadlocks on the
+// same thread. This affects ANY use of set_episode_complete_callback().
 //
 // Recommended fix: either (a) release episode_mutex_ before calling the callback,
 // or (b) use a separate internal stats computation that does not acquire the lock,
@@ -227,22 +223,22 @@ TEST_F(SessionManagerTest, DISABLED_EpisodeCompleteCallback_Invoked) {
   SessionManager sm;
 
   std::atomic<bool> callback_fired{false};
-  uint64_t callback_episodes_completed = 0;
+  std::atomic<uint64_t> callback_episodes_completed{0};
   sm.set_episode_complete_callback(
     [&callback_fired, &callback_episodes_completed](const SessionManager::Stats& s) {
-      callback_fired = true;
-      callback_episodes_completed = s.total_episodes_completed;
+      callback_fired.store(true);
+      callback_episodes_completed.store(s.total_episodes_completed);
     });
 
   sm.start_episode();
   sm.stop_episode();
 
   EXPECT_TRUE(callback_fired.load());
-  EXPECT_EQ(callback_episodes_completed, 1);
+  EXPECT_EQ(callback_episodes_completed.load(), 1);
 }
 
 // ============================================================================
-// SM-10: Stats records_written_current tracks produced count
+// SM-11: Stats records_written_current tracks produced count
 // ============================================================================
 
 TEST_F(SessionManagerTest, Stats_RecordsWrittenTracked) {
