@@ -63,6 +63,8 @@ RealsensePushProducer::RealsensePushProducer(
   metadata_.width = cam->get_width();
   metadata_.height = cam->get_height();
   metadata_.fps = cam->get_fps();
+  // TODO(shantanuparab-tr): codec and pix_fmt are placeholders; update after
+  // validating with LeRobot v2 depth support and alpha user feedback
   metadata_.codec = "av1";
   metadata_.pix_fmt = "yuv420p";
   metadata_.channels = 3;

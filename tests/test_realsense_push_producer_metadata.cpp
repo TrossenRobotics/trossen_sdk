@@ -207,7 +207,7 @@ TEST(RealsenseMetadataTest, GetStreamInfoDimensionsMatch) {
   EXPECT_EQ(stream["cameras"]["cam_wrist"]["height"].get<int>(), 720);
   EXPECT_EQ(stream["cameras"]["cam_wrist"]["fps"].get<int>(), 60);
 
-  // Depth shares the same dimensions
+  // Depth shares the same dimensions as color
   EXPECT_EQ(stream["cameras"]["cam_wrist_depth"]["width"].get<int>(), 1280);
   EXPECT_EQ(stream["cameras"]["cam_wrist_depth"]["height"].get<int>(), 720);
   EXPECT_EQ(stream["cameras"]["cam_wrist_depth"]["fps"].get<int>(), 60);

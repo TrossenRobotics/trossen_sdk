@@ -40,7 +40,8 @@ public:
    *   "width": 640,
    *   "height": 480,
    *   "fps": 30,
-   *   "use_depth": true,
+   *   "use_depth": false,
+   *   "align_depth_to_color": false,
    *   "force_hardware_reset": false
    * }
    *
