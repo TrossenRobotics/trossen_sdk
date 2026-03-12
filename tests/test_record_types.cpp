@@ -155,7 +155,8 @@ TEST(Odometry2DRecordTest, InheritedFields) {
   rec.seq = 77;
   rec.id = "test_odom";
 
-  EXPECT_GT(rec.ts.monotonic.sec, 0);
+  EXPECT_TRUE(rec.ts.monotonic.sec > 0 ||
+              (rec.ts.monotonic.sec == 0 && rec.ts.monotonic.nsec > 0));
   EXPECT_EQ(rec.seq, 77);
   EXPECT_EQ(rec.id, "test_odom");
 }

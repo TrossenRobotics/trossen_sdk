@@ -103,7 +103,8 @@ TEST(GlobalConfigTest, LoadAndRetrieve) {
   };
 
   // NOTE: This modifies the global singleton. Since other test suites
-  // also load configs, we accept that the last load wins.
+  // also load configs, subsequent loads merge into the existing config:
+  // keys in this JSON overwrite existing ones, but unspecified keys may persist.
   GlobalConfig::instance().load_from_json(config);
 
   auto sm_cfg = GlobalConfig::instance().get_as<SessionManagerConfig>("session_manager");
