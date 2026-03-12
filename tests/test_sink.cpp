@@ -10,6 +10,7 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 #include <vector>
 
@@ -52,8 +53,8 @@ TEST(SinkTest, StartStop_EmptyQueue) {
   EXPECT_EQ(backend->count(), 0);
 }
 
-// SINK-06: Double start is idempotent (no second thread spawned)
-TEST(SinkTest, DoubleStart_IsIdempotent) {
+// SINK-06: Double start does not crash and records are still processed
+TEST(SinkTest, DoubleStart_DoesNotCrash) {
   auto backend = make_null_backend();
   Sink sink(backend);
 
@@ -68,7 +69,7 @@ TEST(SinkTest, DoubleStart_IsIdempotent) {
   std::this_thread::sleep_for(std::chrono::milliseconds(50));
   sink.stop();
 
-  // Should still have processed exactly 1 record (not 2 from double drain)
+  // Record should still be processed normally after double start
   EXPECT_EQ(backend->count(), 1);
 }
 
@@ -125,8 +126,6 @@ TEST(SinkTest, EnqueueAndDrain_MultipleRecords) {
     sink.enqueue(rec);
   }
 
-  // Wait for drain
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
   sink.stop();
 
   EXPECT_EQ(backend->count(), N);
@@ -257,8 +256,6 @@ TEST(SinkTest, LargeBatch_DrainedCompletely) {
     sink.enqueue(rec);
   }
 
-  // Allow time for drain, then stop to flush remainder
-  std::this_thread::sleep_for(std::chrono::milliseconds(500));
   sink.stop();
 
   EXPECT_EQ(backend->count(), N);
