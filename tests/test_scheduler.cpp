@@ -26,7 +26,10 @@ using trossen::runtime::Scheduler;
 // These are public members of Scheduler (header-level visibility).
 TEST(SchedulerTest, AddTask_NormalLane) {
   Scheduler sched;
-  // Default cutover is 5ms; period of 100ms should go to normal
+  Scheduler::Config cfg;
+  cfg.high_res_cutover_ms = 5;
+  sched.configure(cfg);
+  // Period of 100ms exceeds cutover, should go to normal lane
   sched.add_task(
     std::chrono::milliseconds(100),
     []() {},
@@ -41,7 +44,10 @@ TEST(SchedulerTest, AddTask_NormalLane) {
 // SCHED-02: Task with period <= high_res_cutover goes to high-res lane
 TEST(SchedulerTest, AddTask_HighResLane) {
   Scheduler sched;
-  // Default cutover is 5ms; period of 5ms should go to high-res
+  Scheduler::Config cfg;
+  cfg.high_res_cutover_ms = 5;
+  sched.configure(cfg);
+  // Period of 5ms <= cutover, should go to high-res lane
   sched.add_task(
     std::chrono::milliseconds(5),
     []() {},
@@ -140,8 +146,13 @@ TEST(SchedulerTest, TaskExecutes_AtLeastOnce) {
     Scheduler::TaskOptions{.name = "counter_task"});
 
   sched.start();
-  // Wait up to 200ms for at least one execution
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  // Poll up to 200ms for at least one execution
+  const auto deadline =
+    std::chrono::steady_clock::now() + std::chrono::milliseconds(200);
+  while (counter.load() == 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
   sched.stop();
 
   EXPECT_GT(counter.load(), 0);

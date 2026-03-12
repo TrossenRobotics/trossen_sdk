@@ -55,11 +55,9 @@ target_link_libraries(test_producer_registry PRIVATE trossen_sdk GTest::gtest_ma
 
 add_executable(test_sink test_sink.cpp)
 target_link_libraries(test_sink PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_sink COMMAND test_sink)
 
 add_executable(test_scheduler test_scheduler.cpp)
 target_link_libraries(test_scheduler PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_scheduler COMMAND test_scheduler)
 
 # Enable CTest integration
 include(GoogleTest)
