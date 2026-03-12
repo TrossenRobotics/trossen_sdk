@@ -26,10 +26,9 @@ namespace trossen::hw::camera {
 /**
  * @brief Unified PushProducer for RealSense cameras.
  *
- * Owns a dedicated thread that calls wait_for_frames() independently of the
- * Scheduler, eliminating the 3-second blocking bottleneck. Supports both
- * color-only and color+depth capture modes. Depth frames are aligned to the
- * color frame using rs2::align (stored as member, reused per frame).
+ * Owns a dedicated thread that calls wait_for_frames() on the rs2::pipeline.
+ * Supports both color-only and color+depth capture modes. When depth alignment
+ * is enabled, an rs2::align instance is created once and reused per frame.
  *
  * Registered as "realsense_camera" in PushProducerRegistry.
  */
@@ -96,6 +95,8 @@ public:
         depth_feature["dtype"] = "video";
         depth_feature["shape"] = {height, width, 1};
         depth_feature["names"] = {"height", "width", "channels"};
+        // ffv1: lossless codec required for metric depth data
+        // gray16le: matches RealSense Z16 depth format (16-bit unsigned, little-endian)
         depth_feature["info"] = {
           {"video.fps", fps},
           {"video.height", height},
