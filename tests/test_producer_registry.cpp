@@ -55,12 +55,11 @@ TEST(ProducerRegistryTest, Create_ThrowsForUnknownType) {
 // PR-03: Register and create mock producer
 // ============================================================================
 
-// Fixture that registers a mock factory once. The try/catch guards against
-// duplicate registration when GTest re-runs the suite (static registry persists).
+// Fixture that registers a mock factory once per process.
 class ProducerRegistryRegistrationTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
-    try {
+    if (!ProducerRegistry::is_registered("mock_polled_for_test")) {
       ProducerRegistry::register_producer(
         "mock_polled_for_test",
         [](std::shared_ptr<trossen::hw::HardwareComponent>,
@@ -69,8 +68,6 @@ protected:
         {
           return std::make_shared<MockPolledProducerForRegistry>();
         });
-    } catch (const std::runtime_error&) {
-      // Already registered from previous test run
     }
   }
 };
@@ -141,7 +138,7 @@ TEST(ProducerRegistryTest, GetRegisteredTypes_Callable) {
 class ProducerRegistryNullFactoryTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
-    try {
+    if (!ProducerRegistry::is_registered("null_factory_polled_for_test")) {
       ProducerRegistry::register_producer(
         "null_factory_polled_for_test",
         [](std::shared_ptr<trossen::hw::HardwareComponent>,
@@ -150,8 +147,6 @@ protected:
         {
           return nullptr;
         });
-    } catch (const std::runtime_error&) {
-      // Already registered
     }
   }
 };
