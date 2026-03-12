@@ -1047,8 +1047,18 @@ void LeRobotV2Backend::write_image(const data::RecordBase& base) {
     auto depth_job = ImageJob{depth_file_path, img.depth_image.value()};
     {
       std::lock_guard<std::mutex> lk(image_queue_mutex_);
-      image_queue_.push_back(std::move(depth_job));
-      image_queue_enqueue_times_.push_back(enqueue_time);
+      if (max_image_queue_cached_ > 0 && image_queue_.size() >= max_image_queue_cached_) {
+        // Drop depth frame under same policy as color frames
+      } else {
+        image_queue_.push_back(std::move(depth_job));
+        image_queue_enqueue_times_.push_back(enqueue_time);
+        auto qsize = image_queue_.size();
+        img_enqueued_.fetch_add(1, std::memory_order_relaxed);
+        size_t prev = img_queue_high_water_.load(std::memory_order_relaxed);
+        while (qsize > prev && !img_queue_high_water_.compare_exchange_weak(prev, qsize)) {}
+        img_queue_backlog_sum_.fetch_add(qsize, std::memory_order_relaxed);
+        img_queue_backlog_samples_.fetch_add(1, std::memory_order_relaxed);
+      }
     }
     image_queue_cv_.notify_one();
   }
