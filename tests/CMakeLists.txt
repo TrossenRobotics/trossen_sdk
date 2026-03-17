@@ -32,6 +32,10 @@ add_executable(test_push_producer_base test_push_producer_base.cpp)
 target_link_libraries(test_push_producer_base PRIVATE trossen_sdk GTest::gtest_main)
 add_test(NAME test_push_producer_base COMMAND test_push_producer_base)
 
+add_executable(test_session_manager_push_producer test_session_manager_push_producer.cpp)
+target_link_libraries(test_session_manager_push_producer PRIVATE trossen_sdk GTest::gtest_main)
+add_test(NAME test_session_manager_push_producer COMMAND test_session_manager_push_producer)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -40,3 +44,4 @@ gtest_discover_tests(test_null_backend)
 gtest_discover_tests(test_backend_registry)
 gtest_discover_tests(test_push_producer_registry)
 gtest_discover_tests(test_push_producer_base)
+gtest_discover_tests(test_session_manager_push_producer)

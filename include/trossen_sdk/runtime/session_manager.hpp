@@ -78,6 +78,18 @@ public:
     const Scheduler::TaskOptions& opts = {});
 
   /**
+   * @brief Register a push producer to be started during episodes
+   *
+   * Push producers manage their own threads. They are started after the sink is
+   * created and before the scheduler, stopped before the scheduler during episode end.
+   *
+   * @param producer Shared pointer to push producer
+   *
+   * Must be called before start_episode().
+   */
+  void add_push_producer(std::shared_ptr<hw::PushProducer> producer);
+
+  /**
    * @brief Start a new episode
    *
    * @return true on success, false if max_episodes reached or setup fails
@@ -328,7 +340,7 @@ private:
   mutable std::mutex episode_mutex_;
 
   /// @brief Current sink instance (per episode)
-  std::unique_ptr<io::Sink> current_sink_;
+  std::shared_ptr<io::Sink> current_sink_;
 
   /// @brief Current backend instance (per episode)
   std::shared_ptr<io::Backend> current_backend_;
@@ -345,6 +357,14 @@ private:
 
   /// @brief Registered producers (persists across episodes)
   std::vector<ProducerTask> producer_tasks_;
+
+  /// @brief Push producer registration info
+  struct PushProducerEntry {
+    std::shared_ptr<hw::PushProducer> producer;
+  };
+
+  /// @brief Registered push producers (persists across episodes)
+  std::vector<PushProducerEntry> push_producer_entries_;
 
   /**
    * @brief Create backend instance for the given episode
