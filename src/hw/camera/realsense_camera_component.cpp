@@ -38,6 +38,9 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
   if (config.contains("use_depth")) {
     use_depth_ = config.at("use_depth").get<bool>();
   }
+  if (config.contains("align_depth_to_color")) {
+    align_depth_to_color_ = config.at("align_depth_to_color").get<bool>();
+  }
   if (config.contains("force_hardware_reset")) {
     force_hardware_reset_ = config.at("force_hardware_reset").get<bool>();
   }
@@ -87,13 +90,20 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
       "RealsenseCameraComponent: Failed to start camera with serial number " +
       serial_number + ": " + std::string(e.what()));
   }
-  // TODO(shantanuparab-tr): Determine RealsenseFrameCache consumer
-  // count from use_depth_ (2 for color+depth streams, 1 for color-only).
-  // Pass use_depth flag to RealsenseFrameCache constructor.
+
+  // Set pipeline_ only after successful start
+  pipeline_ = camera_;
+
+  // Store depth scale if depth stream is enabled
   if (use_depth_) {
-    frame_cache_ = std::make_shared<RealsenseFrameCache>(camera_, 2);
-  } else {
-    frame_cache_ = std::make_shared<RealsenseFrameCache>(camera_, 1);
+    try {
+      auto depth_sensor = profile.get_device().first<rs2::depth_sensor>();
+      depth_scale_ = depth_sensor.get_depth_scale();
+    } catch (const rs2::error& e) {
+      std::cerr << "RealsenseCameraComponent: Could not read depth scale: "
+                << e.what() << std::endl;
+      depth_scale_ = 0.001f;  // fallback: 1mm per Z16 unit
+    }
   }
 
   // Read back actual values
@@ -103,14 +113,12 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
   height_ = color_profile.height();
   fps_ = static_cast<int>(color_profile.fps());
 
-  // If depth stream is enabled, confirm its parameters
+  // Confirm depth stream is valid (uses same width/height as color)
   if (use_depth_) {
     auto depth_stream = profile.get_stream(RS2_STREAM_DEPTH);
     auto depth_profile = depth_stream.as<rs2::video_stream_profile>();
-    // Just to confirm depth stream is valid
     (void)depth_profile.width();
     (void)depth_profile.height();
-    (void)depth_profile.fps();
   }
 
   std::cout << "Camera " << get_identifier() << " configured: "
@@ -136,8 +144,15 @@ nlohmann::json RealsenseCameraComponent::get_info() const {
 }
 
 bool RealsenseCameraComponent::is_opened() const {
-  // TODO(shantanuparab-tr): Implement proper check for Realsense pipeline and frame cache
-  return frame_cache_ != nullptr;
+  if (!pipeline_) {
+    return false;
+  }
+  try {
+    pipeline_->get_active_profile();
+    return true;
+  } catch (const rs2::error&) {
+    return false;
+  }
 }
 
 REGISTER_HARDWARE(RealsenseCameraComponent, "realsense_camera")

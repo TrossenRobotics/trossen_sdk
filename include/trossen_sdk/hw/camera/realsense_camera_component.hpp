@@ -9,15 +9,16 @@
 #include <memory>
 #include <string>
 
-#include "trossen_sdk/hw/camera/realsense_frame_cache.hpp"
+#include "librealsense2/rs.hpp"
+
 #include "trossen_sdk/hw/hardware_component.hpp"
 
 namespace trossen::hw::camera {
 
 /**
- * @brief Hardware component for Realsense-compatible cameras
+ * @brief Hardware component for RealSense-compatible cameras
  *
- * Owns RealsenseFrameCache instance and provides JSON configuration.
+ * Owns the rs2::pipeline and exposes it to push producers via get_hardware().
  */
 class RealsenseCameraComponent : public HardwareComponent {
 public:
@@ -39,7 +40,8 @@ public:
    *   "width": 640,
    *   "height": 480,
    *   "fps": 30,
-   *   "use_depth": true,
+   *   "use_depth": false,
+   *   "align_depth_to_color": false,
    *   "force_hardware_reset": false
    * }
    *
@@ -69,22 +71,54 @@ public:
   std::string get_serial_number() const { return serial_number; }
 
   /**
-   * @brief Get the underlying hardware (RealsenseFrameCache) instance
-   *
-   * @return Shared pointer to RealsenseFrameCache (for producer access)
-   */
-  std::shared_ptr<RealsenseFrameCache> get_hardware() { return frame_cache_; }
-
-  /**
-   * @brief Check if camera is opened and ready
-   * @return true if camera pipeline and frame cache can be accessed
+   * @brief Check if the camera pipeline has been initialized and is ready for use
+   * @return true if the internal rs2::pipeline handle is valid and the camera is opened
    */
   bool is_opened() const;
 
-private:
-  /// @brief Underlying RealsenseFrameCache for Realsense camera
-  std::shared_ptr<RealsenseFrameCache> frame_cache_;
+  /**
+   * @brief Get the configured frame width
+   * @return Width in pixels
+   */
+  int get_width() const { return width_; }
 
+  /**
+   * @brief Get the configured frame height
+   * @return Height in pixels
+   */
+  int get_height() const { return height_; }
+
+  /**
+   * @brief Get the configured frame rate
+   * @return FPS
+   */
+  int get_fps() const { return fps_; }
+
+  /**
+   * @brief Get the active RealSense pipeline
+   * @return Shared pointer to rs2::pipeline (valid after configure())
+   */
+  std::shared_ptr<rs2::pipeline> get_hardware() const { return pipeline_; }
+
+  /**
+   * @brief Get depth scale factor (multiply Z16 raw value by this to get meters)
+   * @return Depth scale in m/Z16 unit, 0 if depth not enabled
+   */
+  float get_depth_scale() const { return depth_scale_; }
+
+  /**
+   * @brief Get the use_depth config flag
+   * @return true if depth stream was configured
+   */
+  bool get_use_depth() const { return use_depth_; }
+
+  /**
+   * @brief Get the align_depth_to_color config flag
+   * @return true if depth should be aligned to color
+   */
+  bool get_align_depth_to_color() const { return align_depth_to_color_; }
+
+private:
   /// @brief Realsense pipeline profile
   // Used for getting actual stream parameters after starting the pipeline
   rs2::pipeline_profile profile;
@@ -103,6 +137,15 @@ private:
 
   /// @brief Configure use_depth flag
   bool use_depth_ = false;
+
+  /// @brief Whether to align depth to color frame
+  bool align_depth_to_color_ = false;
+
+  /// @brief Shared pointer to the active pipeline (used by RealsensePushProducer)
+  std::shared_ptr<rs2::pipeline> pipeline_;
+
+  /// @brief Depth scale factor (meters per Z16 unit), 0 if depth not enabled
+  float depth_scale_ = 0.0f;
 
   /// @brief Configure force_hardware_reset flag
   bool force_hardware_reset_ = false;

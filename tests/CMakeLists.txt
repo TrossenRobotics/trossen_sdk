@@ -36,6 +36,13 @@ add_executable(test_session_manager_push_producer test_session_manager_push_prod
 target_link_libraries(test_session_manager_push_producer PRIVATE trossen_sdk GTest::gtest_main)
 add_test(NAME test_session_manager_push_producer COMMAND test_session_manager_push_producer)
 
+if(TROSSEN_ENABLE_REALSENSE)
+  add_executable(test_realsense_push_producer_metadata test_realsense_push_producer_metadata.cpp)
+  target_link_libraries(test_realsense_push_producer_metadata PRIVATE trossen_sdk GTest::gtest_main)
+  target_compile_definitions(test_realsense_push_producer_metadata PRIVATE TROSSEN_ENABLE_REALSENSE)
+  add_test(NAME test_realsense_push_producer_metadata COMMAND test_realsense_push_producer_metadata)
+endif()
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -45,3 +52,6 @@ gtest_discover_tests(test_backend_registry)
 gtest_discover_tests(test_push_producer_registry)
 gtest_discover_tests(test_push_producer_base)
 gtest_discover_tests(test_session_manager_push_producer)
+if(TROSSEN_ENABLE_REALSENSE)
+  gtest_discover_tests(test_realsense_push_producer_metadata)
+endif()

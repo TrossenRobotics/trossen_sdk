@@ -46,8 +46,7 @@
 
 #ifdef TROSSEN_ENABLE_REALSENSE
 #include "trossen_sdk/hw/camera/realsense_camera_component.hpp"
-#include "trossen_sdk/hw/camera/realsense_producer.hpp"
-#include "trossen_sdk/hw/camera/realsense_depth_producer.hpp"
+#include "trossen_sdk/hw/camera/realsense_push_producer.hpp"
 #endif
 
 // Mobile base
