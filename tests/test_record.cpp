@@ -3,6 +3,8 @@
  * @brief Unit tests for record data structures
  */
 
+#include <cstdint>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -219,4 +221,168 @@ TEST(JointStateRecordTest, RealisticRobotData) {
   ASSERT_EQ(record.positions.size(), 6);
   EXPECT_FLOAT_EQ(record.positions[1], -1.57f);
   EXPECT_GT(record.ts.monotonic.sec, 0);
+}
+
+// ============================================================================
+// ImageRecord depth field tests
+// ============================================================================
+
+// Test that depth fields are absent by default
+TEST(ImageRecordTest, DefaultDepthFields) {
+  ImageRecord record;
+
+  EXPECT_FALSE(record.has_depth());
+  EXPECT_FALSE(record.depth_image.has_value());
+  EXPECT_FALSE(record.depth_scale.has_value());
+}
+
+// Test has_depth() after assigning a depth image
+TEST(ImageRecordTest, WithDepthImage) {
+  ImageRecord record;
+  record.width = 640;
+  record.height = 480;
+  record.channels = 3;
+  record.encoding = "bgr8";
+  record.image = cv::Mat(480, 640, CV_8UC3, cv::Scalar(0, 128, 255));
+
+  // Assign 16-bit depth image
+  record.depth_image = cv::Mat(480, 640, CV_16UC1, cv::Scalar(1000));
+
+  EXPECT_TRUE(record.has_depth());
+  ASSERT_TRUE(record.depth_image.has_value());
+  EXPECT_EQ(record.depth_image->rows, 480);
+  EXPECT_EQ(record.depth_image->cols, 640);
+  EXPECT_EQ(record.depth_image->type(), CV_16UC1);
+  // depth_scale not set
+  EXPECT_FALSE(record.depth_scale.has_value());
+}
+
+// Test both depth_image and depth_scale fields
+TEST(ImageRecordTest, WithDepthImageAndScale) {
+  ImageRecord record;
+  record.depth_image = cv::Mat(240, 320, CV_16UC1, cv::Scalar(500));
+  record.depth_scale = 0.001f;
+
+  EXPECT_TRUE(record.has_depth());
+  ASSERT_TRUE(record.depth_scale.has_value());
+  EXPECT_FLOAT_EQ(record.depth_scale.value(), 0.001f);
+}
+
+// Test color image and depth image can coexist in same record
+TEST(ImageRecordTest, ColorAndDepthCoexist) {
+  ImageRecord record;
+  record.width = 640;
+  record.height = 480;
+
+  record.image = cv::Mat(480, 640, CV_8UC3, cv::Scalar(100, 150, 200));
+  record.depth_image = cv::Mat(480, 640, CV_16UC1, cv::Scalar(2000));
+  record.depth_scale = 0.001f;
+
+  EXPECT_FALSE(record.image.empty());
+  EXPECT_TRUE(record.has_depth());
+  EXPECT_EQ(record.image.rows, 480);
+  EXPECT_EQ(record.depth_image->rows, 480);
+  EXPECT_FLOAT_EQ(record.depth_scale.value(), 0.001f);
+}
+
+// Test depth_image matches expected pixel value
+TEST(ImageRecordTest, DepthImagePixelValue) {
+  ImageRecord record;
+  const uint16_t depth_val = 1234;
+  record.depth_image = cv::Mat(10, 10, CV_16UC1, cv::Scalar(depth_val));
+
+  ASSERT_TRUE(record.depth_image.has_value());
+  EXPECT_EQ(record.depth_image->at<uint16_t>(0, 0), depth_val);
+  EXPECT_EQ(record.depth_image->at<uint16_t>(9, 9), depth_val);
+}
+
+// Test depth_scale boundary: zero scale
+TEST(ImageRecordTest, DepthScaleZero) {
+  ImageRecord record;
+  record.depth_image = cv::Mat(10, 10, CV_16UC1, cv::Scalar(500));
+  record.depth_scale = 0.0f;
+
+  EXPECT_TRUE(record.has_depth());
+  ASSERT_TRUE(record.depth_scale.has_value());
+  EXPECT_FLOAT_EQ(record.depth_scale.value(), 0.0f);
+}
+
+// Test depth pixel at uint16 max (65535)
+TEST(ImageRecordTest, DepthImageMaxUint16) {
+  ImageRecord record;
+  const uint16_t max_val = std::numeric_limits<uint16_t>::max();
+  record.depth_image = cv::Mat(4, 4, CV_16UC1, cv::Scalar(max_val));
+
+  ASSERT_TRUE(record.depth_image.has_value());
+  EXPECT_EQ(record.depth_image->at<uint16_t>(0, 0), max_val);
+  EXPECT_EQ(record.depth_image->at<uint16_t>(3, 3), max_val);
+}
+
+// Test depth_image with different dimensions than color image
+TEST(ImageRecordTest, DepthAndColorDifferentDimensions) {
+  ImageRecord record;
+  record.width = 640;
+  record.height = 480;
+  record.image = cv::Mat(480, 640, CV_8UC3, cv::Scalar(0));
+
+  // Depth at a different resolution (e.g., native depth sensor resolution)
+  record.depth_image = cv::Mat(240, 320, CV_16UC1, cv::Scalar(1000));
+
+  EXPECT_TRUE(record.has_depth());
+  EXPECT_EQ(record.image.rows, 480);
+  EXPECT_EQ(record.image.cols, 640);
+  EXPECT_EQ(record.depth_image->rows, 240);
+  EXPECT_EQ(record.depth_image->cols, 320);
+}
+
+// Test that has_depth() is false when only depth_scale is set (no image)
+TEST(ImageRecordTest, DepthScaleWithoutImage) {
+  ImageRecord record;
+  record.depth_scale = 0.001f;
+
+  EXPECT_FALSE(record.has_depth());
+  EXPECT_FALSE(record.depth_image.has_value());
+  ASSERT_TRUE(record.depth_scale.has_value());
+}
+
+// Test copy semantics preserve depth fields
+TEST(ImageRecordTest, CopySemanticsWithDepth) {
+  ImageRecord original;
+  original.width = 640;
+  original.height = 480;
+  original.image = cv::Mat(480, 640, CV_8UC3, cv::Scalar(100));
+  original.depth_image = cv::Mat(480, 640, CV_16UC1, cv::Scalar(2000));
+  original.depth_scale = 0.001f;
+  original.id = "cam_wrist";
+  original.seq = 42;
+
+  ImageRecord copy = original;
+
+  EXPECT_TRUE(copy.has_depth());
+  EXPECT_FLOAT_EQ(copy.depth_scale.value(), 0.001f);
+  EXPECT_EQ(copy.depth_image->rows, 480);
+  EXPECT_EQ(copy.depth_image->cols, 640);
+  EXPECT_EQ(copy.id, "cam_wrist");
+  EXPECT_EQ(copy.seq, 42);
+  // cv::Mat uses reference counting; data pointer should be the same after shallow copy
+  EXPECT_EQ(copy.depth_image->data, original.depth_image->data);
+}
+
+// Test polymorphic downcast with depth-carrying ImageRecord
+TEST(ImageRecordTest, PolymorphicDowncastWithDepth) {
+  auto img = std::make_shared<ImageRecord>();
+  img->width = 640;
+  img->height = 480;
+  img->image = cv::Mat(480, 640, CV_8UC3, cv::Scalar(0));
+  img->depth_image = cv::Mat(480, 640, CV_16UC1, cv::Scalar(1500));
+  img->depth_scale = 0.001f;
+  img->id = "cam_overhead";
+
+  std::shared_ptr<RecordBase> base = img;
+
+  auto* derived = dynamic_cast<ImageRecord*>(base.get());
+  ASSERT_NE(derived, nullptr);
+  EXPECT_TRUE(derived->has_depth());
+  EXPECT_FLOAT_EQ(derived->depth_scale.value(), 0.001f);
+  EXPECT_EQ(derived->id, "cam_overhead");
 }
