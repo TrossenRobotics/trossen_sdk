@@ -53,6 +53,12 @@ target_link_libraries(test_queue_adapter PRIVATE trossen_sdk GTest::gtest_main)
 add_executable(test_producer_registry test_producer_registry.cpp)
 target_link_libraries(test_producer_registry PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_sink test_sink.cpp)
+target_link_libraries(test_sink PRIVATE trossen_sdk GTest::gtest_main)
+
+add_executable(test_scheduler test_scheduler.cpp)
+target_link_libraries(test_scheduler PRIVATE trossen_sdk GTest::gtest_main)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -71,3 +77,5 @@ gtest_discover_tests(test_config)
 gtest_discover_tests(test_lerobot_utils)
 gtest_discover_tests(test_queue_adapter)
 gtest_discover_tests(test_producer_registry)
+gtest_discover_tests(test_sink)
+gtest_discover_tests(test_scheduler)
