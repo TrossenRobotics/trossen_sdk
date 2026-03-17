@@ -1029,6 +1029,39 @@ void LeRobotV2Backend::write_image(const data::RecordBase& base) {
     img_queue_backlog_samples_.fetch_add(1, std::memory_order_relaxed);
   }
   image_queue_cv_.notify_one();
+
+  // Enqueue depth image if available (written as 16-bit PNG to a parallel depth directory)
+  if (img.has_depth()) {
+    const std::string depth_key = img.id + "_depth";
+    auto depth_it = image_dir_cache_.find(depth_key);
+    if (depth_it == image_dir_cache_.end()) {
+      fs::path depth_dir =
+        images_root_ / (img.id + "_depth") / format_episode_folder(episode_index_);
+      std::error_code ec;
+      fs::create_directories(depth_dir, ec);
+      depth_it = image_dir_cache_.emplace(depth_key, std::move(depth_dir)).first;
+    }
+    const fs::path& depth_dir = depth_it->second;
+    fs::path depth_file_path = depth_dir / format_depth_filename(frame_index);
+
+    auto depth_job = ImageJob{depth_file_path, img.depth_image.value()};
+    {
+      std::lock_guard<std::mutex> lk(image_queue_mutex_);
+      if (max_image_queue_cached_ > 0 && image_queue_.size() >= max_image_queue_cached_) {
+        // Drop depth frame under same policy as color frames
+      } else {
+        image_queue_.push_back(std::move(depth_job));
+        image_queue_enqueue_times_.push_back(enqueue_time);
+        auto qsize = image_queue_.size();
+        img_enqueued_.fetch_add(1, std::memory_order_relaxed);
+        size_t prev = img_queue_high_water_.load(std::memory_order_relaxed);
+        while (qsize > prev && !img_queue_high_water_.compare_exchange_weak(prev, qsize)) {}
+        img_queue_backlog_sum_.fetch_add(qsize, std::memory_order_relaxed);
+        img_queue_backlog_samples_.fetch_add(1, std::memory_order_relaxed);
+      }
+    }
+    image_queue_cv_.notify_one();
+  }
 }
 
 void LeRobotV2Backend::image_worker_loop() {

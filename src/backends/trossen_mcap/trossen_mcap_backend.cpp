@@ -374,7 +374,8 @@ foxglove::RawChannel* TrossenMCAPBackend::ensure_odometry_2d_channel(const std::
     return nullptr;
   }
 
-  auto [inserted_it, _] = odometry_2d_channels_.emplace(stream_id, std::move(channel_result.value()));
+  auto [inserted_it, _] = odometry_2d_channels_.emplace(
+    stream_id, std::move(channel_result.value()));
   return &inserted_it->second;
 }
 
@@ -494,6 +495,60 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
       ++stats_.depth_images_written;
     } else {
       ++stats_.images_written;
+    }
+  }
+
+  // Write optional depth image to a separate channel when ImageRecord carries depth
+  if (img.has_depth()) {
+    const std::string depth_topic_id = img.id + "_depth";
+    std::unordered_map<std::string, std::string> md;
+    md["stream_type"] = "depth";
+    md["depth_encoding"] = "16UC1";
+    if (img.depth_scale.has_value()) {
+      md["depth_scale_m"] = std::to_string(img.depth_scale.value());
+    }
+
+    foxglove::RawChannel* depth_channel =
+      ensure_image_channel_with_metadata(depth_topic_id, md);
+    if (depth_channel) {
+      foxglove::schemas::RawImage dmsg;
+      dmsg.timestamp = foxglove::schemas::Timestamp{
+        .sec = static_cast<uint32_t>(img.ts.realtime.sec),
+        .nsec = static_cast<uint32_t>(img.ts.realtime.nsec)
+      };
+      dmsg.frame_id = depth_topic_id;
+      dmsg.width = static_cast<uint32_t>(img.depth_image->cols);
+      dmsg.height = static_cast<uint32_t>(img.depth_image->rows);
+      dmsg.encoding = "16UC1";
+      dmsg.step = static_cast<uint32_t>(img.depth_image->step);
+      const std::byte* dptr =
+        reinterpret_cast<const std::byte*>(img.depth_image->data);
+      const size_t dsize = img.depth_image->total() * img.depth_image->elemSize();
+      dmsg.data.assign(dptr, dptr + dsize);
+
+      std::vector<uint8_t> dpayload(TROSSEN_MCAP_INITIAL_ENCODED_BUFFER_SIZE);
+      size_t dencoded_len = 0;
+      auto dencode_result = dmsg.encode(dpayload.data(), dpayload.size(), &dencoded_len);
+
+      if (dencode_result == foxglove::FoxgloveError::BufferTooShort) {
+        dpayload.resize(dencoded_len);
+        dencode_result = dmsg.encode(dpayload.data(), dpayload.size(), &dencoded_len);
+      }
+
+      if (dencode_result != foxglove::FoxgloveError::Ok) {
+        std::cerr << "Failed to encode depth image: "
+                  << foxglove::strerror(dencode_result) << "\n";
+      } else {
+        auto dst = depth_channel->log(
+          reinterpret_cast<const std::byte*>(dpayload.data()),
+          dencoded_len,
+          img.ts.realtime.to_ns());
+        if (dst != foxglove::FoxgloveError::Ok) {
+          std::cerr << "Failed to write depth image: " << foxglove::strerror(dst) << "\n";
+        } else {
+          ++stats_.depth_images_written;
+        }
+      }
     }
   }
 }

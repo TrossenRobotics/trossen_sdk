@@ -1,0 +1,33 @@
+{
+  "robot_name": "realsense_rgb",
+  "hardware": {
+    "cameras": [
+      {
+        "id": "cam_high",
+        "type": "realsense_camera",
+        "serial_number": "000000000000",
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "use_depth": false
+      }
+    ]
+  },
+  "producers": [
+    {
+      "type": "realsense_camera",
+      "hardware_id": "cam_high",
+      "stream_id": "cam_high",
+      "encoding": "bgr8",
+      "use_device_time": true,
+      "timeout_ms": 3000
+    }
+  ],
+  "session": {
+    "backend_type": "TrossenMCAP",
+    "max_duration": 30
+  },
+  "mcap_backend": {
+    "root": "data/realsense_rgb"
+  }
+}
