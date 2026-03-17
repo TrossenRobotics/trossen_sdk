@@ -82,9 +82,33 @@ sudo apt-get install -y \
     libopencv-dev \
     libprotobuf-dev \
     protobuf-compiler \
-    libarrow-dev \
-    libparquet-dev \
     ffmpeg
+```
+
+### Apache Parquet
+
+In order to read and write Parquet files, you need to install the Apache Parquet C++ library. You can do this by adding the Apache Arrow APT repository and installing the necessary packages. This was tested on Ubuntu 24.04.
+
+```bash
+sudo apt update
+sudo apt install -y -V ca-certificates lsb-release wget
+wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
+sudo apt install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
+sudo apt update
+sudo apt install -y -V \
+    libarrow-dev \
+    libarrow-glib-dev \
+    libarrow-dataset-dev \
+    libarrow-dataset-glib-dev \
+    libarrow-acero-dev \
+    libarrow-flight-dev \
+    libarrow-flight-glib-dev \
+    libarrow-flight-sql-dev \
+    libarrow-flight-sql-glib-dev \
+    libgandiva-dev \
+    libgandiva-glib-dev \
+    libparquet-dev \
+    libparquet-glib-dev
 ```
 
 ### Trossen Arm library
