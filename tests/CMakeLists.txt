@@ -10,54 +10,48 @@ FetchContent_MakeAvailable(googletest)
 # Unit test executables
 add_executable(test_timestamp test_timestamp.cpp)
 target_link_libraries(test_timestamp PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_timestamp COMMAND test_timestamp)
 
 add_executable(test_record test_record.cpp)
 target_link_libraries(test_record PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_record COMMAND test_record)
 
 add_executable(test_null_backend test_null_backend.cpp)
 target_link_libraries(test_null_backend PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_null_backend COMMAND test_null_backend)
 
 add_executable(test_backend_registry test_backend_registry.cpp)
 target_link_libraries(test_backend_registry PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_backend_registry COMMAND test_backend_registry)
 
 add_executable(test_push_producer_registry test_push_producer_registry.cpp)
 target_link_libraries(test_push_producer_registry PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_push_producer_registry COMMAND test_push_producer_registry)
 
 add_executable(test_push_producer_base test_push_producer_base.cpp)
 target_link_libraries(test_push_producer_base PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_push_producer_base COMMAND test_push_producer_base)
 
 add_executable(test_session_manager_push_producer test_session_manager_push_producer.cpp)
 target_link_libraries(test_session_manager_push_producer PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_session_manager_push_producer COMMAND test_session_manager_push_producer)
 
 if(TROSSEN_ENABLE_REALSENSE)
   add_executable(test_realsense_push_producer_metadata test_realsense_push_producer_metadata.cpp)
   target_link_libraries(test_realsense_push_producer_metadata PRIVATE trossen_sdk GTest::gtest_main)
   target_compile_definitions(test_realsense_push_producer_metadata PRIVATE TROSSEN_ENABLE_REALSENSE)
-  add_test(NAME test_realsense_push_producer_metadata COMMAND test_realsense_push_producer_metadata)
 endif()
 
 add_executable(test_lerobot_depth_utils test_lerobot_depth_utils.cpp)
 target_link_libraries(test_lerobot_depth_utils PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_lerobot_depth_utils COMMAND test_lerobot_depth_utils)
 
 add_executable(test_record_types test_record_types.cpp)
 target_link_libraries(test_record_types PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_record_types COMMAND test_record_types)
 
 add_executable(test_config test_config.cpp)
 target_link_libraries(test_config PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_config COMMAND test_config)
 
 add_executable(test_lerobot_utils test_lerobot_utils.cpp)
 target_link_libraries(test_lerobot_utils PRIVATE trossen_sdk GTest::gtest_main)
-add_test(NAME test_lerobot_utils COMMAND test_lerobot_utils)
+
+add_executable(test_queue_adapter test_queue_adapter.cpp)
+target_link_libraries(test_queue_adapter PRIVATE trossen_sdk GTest::gtest_main)
+
+add_executable(test_producer_registry test_producer_registry.cpp)
+target_link_libraries(test_producer_registry PRIVATE trossen_sdk GTest::gtest_main)
 
 # Enable CTest integration
 include(GoogleTest)
@@ -75,3 +69,5 @@ gtest_discover_tests(test_lerobot_depth_utils)
 gtest_discover_tests(test_record_types)
 gtest_discover_tests(test_config)
 gtest_discover_tests(test_lerobot_utils)
+gtest_discover_tests(test_queue_adapter)
+gtest_discover_tests(test_producer_registry)
