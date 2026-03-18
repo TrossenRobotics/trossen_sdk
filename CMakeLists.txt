@@ -11,6 +11,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # optional hardware (e.g., Zed cameras)? Where do we draw the line between mandatory
 # and opt-in dependencies?
 option(TROSSEN_ENABLE_REALSENSE "Enable Intel RealSense support" ON)
+option(TROSSEN_ENABLE_ZED "Enable StereoLabs ZED camera support" OFF)
 
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
@@ -56,6 +57,24 @@ if(TROSSEN_ENABLE_REALSENSE)
   find_package(fastcdr REQUIRED)
   find_package(fastrtps REQUIRED)
   find_package(realsense2 REQUIRED)
+endif()
+
+if(TROSSEN_ENABLE_ZED)
+  message(STATUS "StereoLabs ZED support enabled")
+  target_sources(trossen_sdk PRIVATE
+    src/hw/camera/zed_camera_component.cpp
+    src/hw/camera/zed_push_producer.cpp
+  )
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_ZED)
+
+  # ZED SDK ships its own CMake config; ZED_DIR must point to the install root
+  # (e.g. /usr/local/zed).
+  find_package(ZED REQUIRED HINTS ${ZED_DIR})
+  find_package(CUDA ${ZED_CUDA_VERSION} REQUIRED)
+
+  target_include_directories(trossen_sdk PUBLIC ${ZED_INCLUDE_DIRS} ${CUDA_INCLUDE_DIRS})
+  target_link_directories(trossen_sdk PUBLIC ${ZED_LIBRARY_DIR})
+  target_link_libraries(trossen_sdk PUBLIC ${ZED_LIBRARIES} ${CUDA_LIBRARIES})
 endif()
 
 # Add architecture-specific CMAKE_PREFIX_PATH
