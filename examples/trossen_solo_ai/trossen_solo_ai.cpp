@@ -1,8 +1,8 @@
 /**
  * @file trossen_solo_ai.cpp
- * @brief Single arm pair AI Kit demo - 1 leader + 1 follower + 2 RealSense cameras
+ * @brief Single arm pair AI Kit demo - 1 leader + 1 follower + 2 cameras
  *
- * Records one leader/follower arm pair along with 2 RealSense cameras.
+ * Records one leader/follower arm pair along with cameras (RealSense, OpenCV, or ZED).
  * All hardware parameters, session settings, and teleop setup are driven by a
  * single JSON config file with optional CLI overrides.
  *
@@ -115,7 +115,8 @@ int main(int argc, char** argv) {
     }
   }
   for (const auto& p : cfg.producers) {
-    if (p.type == "realsense_camera" || p.type == "opencv_camera") {
+    if (p.type == "realsense_camera" || p.type == "opencv_camera" ||
+        p.type == "zed_camera") {
       camera_fps = p.poll_rate_hz;
       break;
     }
@@ -345,13 +346,20 @@ int main(int argc, char** argv) {
       trossen::utils::generate_episode_path(root, recording_episode_index);
     trossen::utils::print_episode_summary(file_path, last_stats);
 
+    // Count depth-capable cameras for accurate sanity check
+    int depth_cameras = 0;
+    for (const auto& cam : cfg.hardware.cameras) {
+      if (cam.use_depth) ++depth_cameras;
+    }
+
     trossen::utils::SanityCheckConfig sanity_cfg{
       last_stats.elapsed.count(),
       static_cast<int>(cfg.hardware.arms.size()),
       joint_rate_hz,
       static_cast<int>(cfg.hardware.cameras.size()),
       static_cast<int>(camera_fps),
-      5.0
+      5.0,
+      depth_cameras
     };
     perform_sanity_check(recording_episode_index, last_stats.records_written_current, sanity_cfg);
 

@@ -191,11 +191,26 @@ bool perform_sanity_check(
   uint64_t actual_records,
   const SanityCheckConfig& config)
 {
-  // Calculate expected records based on actual duration
+  // Calculate expected records based on actual duration.
+  //
+  // Depth-capable cameras produce 2 records per frame (color + depth), so we
+  // count them separately:
+  //   color-only cameras = camera_producers - depth_camera_producers
+  //   depth cameras      = depth_camera_producers  (each emits 2 records/frame)
+  //
+  // Mathematically this simplifies to:
+  //   expected_image = fps * duration * (camera_producers + depth_camera_producers)
+  // because (N - D)*1 + D*2 = N + D.  We keep the explicit breakdown for
+  // clarity in the diagnostic output.
+  int color_only_cameras = config.camera_producers - config.depth_camera_producers;
+
   int expected_joint_records = static_cast<int>(
     config.joint_rate_hz * config.actual_duration_s * config.joint_producers);
-  int expected_image_records = static_cast<int>(
-    config.camera_fps * config.actual_duration_s * config.camera_producers);
+  int expected_color_records = static_cast<int>(
+    config.camera_fps * config.actual_duration_s * color_only_cameras);
+  int expected_depth_records = static_cast<int>(
+    config.camera_fps * config.actual_duration_s * config.depth_camera_producers * 2);
+  int expected_image_records = expected_color_records + expected_depth_records;
   int expected_total = expected_joint_records + expected_image_records;
 
   // Calculate tolerance range
@@ -210,7 +225,12 @@ bool perform_sanity_check(
             << config.actual_duration_s << "s\n";
   std::cout << "  Expected records:     ~" << expected_total
             << " (" << expected_joint_records << " joints + "
-            << expected_image_records << " images)\n";
+            << expected_image_records << " images";
+  if (config.depth_camera_producers > 0) {
+    std::cout << " [" << color_only_cameras << " color-only + "
+              << config.depth_camera_producers << " depth x2]";
+  }
+  std::cout << ")\n";
   std::cout << "  Actual records:       " << actual_records << "\n";
   std::cout << "  Tolerance range:      " << min_expected << " - " << max_expected << "\n";
 
