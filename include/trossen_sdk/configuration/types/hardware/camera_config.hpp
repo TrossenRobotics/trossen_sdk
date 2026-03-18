@@ -7,17 +7,19 @@
 #define TROSSEN_SDK__CONFIGURATION__TYPES__HARDWARE__CAMERA_CONFIG_HPP_
 
 #include <string>
+#include <vector>
 
 #include "nlohmann/json.hpp"
 
 namespace trossen::configuration {
 
 /**
- * @brief Configuration for a single camera (RealsenseCameraComponent or OpenCvCameraComponent)
+ * @brief Configuration for a single camera (RealSense, OpenCV, or ZED)
  *
  * The @p type field selects which hardware component is created via HardwareRegistry.
- * Use @c "realsense_camera" for Intel RealSense cameras and @c "opencv_camera" for
- * any V4L2 / USB webcam accessible through OpenCV.
+ * Use @c "realsense_camera" for Intel RealSense cameras, @c "opencv_camera" for
+ * any V4L2 / USB webcam accessible through OpenCV, or @c "zed_camera" for
+ * StereoLabs ZED stereo cameras.
  *
  * JSON format (RealSense):
  * @code
@@ -45,15 +47,28 @@ namespace trossen::configuration {
  *   "backend": "v4l2"
  * }
  * @endcode
+ *
+ * JSON format (ZED):
+ * @code
+ * {
+ *   "id": "zed_0",
+ *   "type": "zed_camera",
+ *   "serial_number": "12345678",
+ *   "fps": 30,
+ *   "resolution": "HD720",
+ *   "use_depth": true,
+ *   "depth_mode": "NEURAL"
+ * }
+ * @endcode
  */
 struct CameraConfig {
-  /// @brief Hardware registry key - "realsense_camera" or "opencv_camera"
+  /// @brief Hardware registry key - "realsense_camera", "opencv_camera", or "zed_camera"
   std::string type{"realsense_camera"};
 
   /// @brief Logical camera identifier used as stream_id (e.g. "camera_0", "wrist_cam")
   std::string id{"camera_0"};
 
-  /// @brief Camera serial number (RealSense only)
+  /// @brief Camera serial number (RealSense: string, ZED: numeric — both accepted)
   std::string serial_number{""};
 
   /// @brief OpenCV device index (OpenCV only)
@@ -71,17 +86,29 @@ struct CameraConfig {
   /// @brief Capture frame rate
   int fps{30};
 
-  /// @brief Enable depth stream alongside color (RealSense only)
+  /// @brief Enable depth stream alongside color (RealSense / ZED)
   bool use_depth{false};
 
   /// @brief Force hardware reset on open (RealSense only)
   bool force_hardware_reset{false};
 
+  /// @brief Passthrough JSON for hardware-specific settings not modelled above
+  /// (e.g. ZED "resolution", "depth_mode").  Merged into to_json() output so
+  /// that HardwareComponent::configure() receives them transparently.
+  nlohmann::json extra{};
+
   static CameraConfig from_json(const nlohmann::json& j) {
     CameraConfig c;
     if (j.contains("type")) j.at("type").get_to(c.type);
     if (j.contains("id")) j.at("id").get_to(c.id);
-    if (j.contains("serial_number")) j.at("serial_number").get_to(c.serial_number);
+    // Accept both string and numeric serial_number (ZED uses numeric SNs)
+    if (j.contains("serial_number")) {
+      if (j["serial_number"].is_number_integer()) {
+        c.serial_number = std::to_string(j["serial_number"].get<uint64_t>());
+      } else {
+        j.at("serial_number").get_to(c.serial_number);
+      }
+    }
     if (j.contains("device_index")) j.at("device_index").get_to(c.device_index);
     if (j.contains("backend")) j.at("backend").get_to(c.backend);
     if (j.contains("width")) j.at("width").get_to(c.width);
@@ -90,6 +117,27 @@ struct CameraConfig {
     if (j.contains("use_depth")) j.at("use_depth").get_to(c.use_depth);
     if (j.contains("force_hardware_reset"))
       j.at("force_hardware_reset").get_to(c.force_hardware_reset);
+
+    // Collect any keys not explicitly parsed above into `extra`.
+    // WARNING: if you add a new known key above, you must also add it to the
+    // known_keys list below — otherwise it will be silently duplicated into
+    // the `extra` passthrough and may confuse downstream components.
+    static const std::vector<std::string> known_keys = {
+      "type", "id", "serial_number", "device_index", "backend",
+      "width", "height", "fps", "use_depth", "force_hardware_reset"
+    };
+    for (auto it = j.begin(); it != j.end(); ++it) {
+      bool is_known = false;
+      for (const auto& k : known_keys) {
+        if (it.key() == k) {
+          is_known = true;
+          break;
+        }
+      }
+      if (!is_known) {
+        c.extra[it.key()] = it.value();
+      }
+    }
     return c;
   }
 
@@ -106,6 +154,10 @@ struct CameraConfig {
     };
     if (!backend.empty()) {
       j["backend"] = backend;
+    }
+    // Merge passthrough keys (e.g. "resolution", "depth_mode" for ZED)
+    if (!extra.is_null() && extra.is_object()) {
+      j.merge_patch(extra);
     }
     return j;
   }
