@@ -204,10 +204,75 @@ public:
    *
    * @param callback Function to call with final stats when episode ends
    *
+   * @deprecated Use on_episode_ended() instead. This delegates to on_episode_ended().
+   *
    * The callback is invoked from the monitoring thread or from stop_episode().
    * It should be thread-safe and should not block for extended periods.
    */
+  [[deprecated("Use on_episode_ended() instead")]]
   void set_episode_complete_callback(EpisodeCompleteCallback callback);
+
+  // =========================================================================
+  // Lifecycle callbacks
+  // =========================================================================
+
+  /// @brief Callback invoked before an episode starts. Return false to abort.
+  using PreEpisodeCallback = std::function<bool()>;
+
+  /// @brief Callback invoked after an episode has fully started.
+  using EpisodeStartedCallback = std::function<void()>;
+
+  /// @brief Callback invoked after an episode has fully stopped.
+  using EpisodeEndedCallback = std::function<void(const Stats&)>;
+
+  /// @brief Callback invoked at the top of shutdown(), before stop_episode().
+  using PreShutdownCallback = std::function<void()>;
+
+  /**
+   * @brief Register a callback invoked before each episode starts
+   *
+   * Called in start_episode() after backend/sink are ready but before the
+   * scheduler begins polling. If the callback returns false or throws, the
+   * episode is aborted and start_episode() returns false.
+   *
+   * Multiple callbacks are invoked in registration order.
+   *
+   * @param cb Callback to register
+   * @throws std::runtime_error if called while an episode is active
+   */
+  void on_pre_episode(PreEpisodeCallback cb);
+
+  /**
+   * @brief Register a callback invoked after each episode has started
+   *
+   * Called at the end of start_episode(), after the scheduler is running
+   * and episode_active_ is true.
+   *
+   * @param cb Callback to register
+   * @throws std::runtime_error if called while an episode is active
+   */
+  void on_episode_started(EpisodeStartedCallback cb);
+
+  /**
+   * @brief Register a callback invoked after each episode has ended
+   *
+   * Called in stop_episode() after full teardown. Receives final stats.
+   *
+   * @param cb Callback to register
+   * @throws std::runtime_error if called while an episode is active
+   */
+  void on_episode_ended(EpisodeEndedCallback cb);
+
+  /**
+   * @brief Register a callback invoked at the top of shutdown()
+   *
+   * Called before stop_episode() during shutdown. Useful for returning
+   * hardware to safe positions.
+   *
+   * @param cb Callback to register
+   * @throws std::runtime_error if called while an episode is active
+   */
+  void on_pre_shutdown(PreShutdownCallback cb);
 
   /**
    * @brief Print episode header to console
@@ -327,8 +392,14 @@ private:
   /// @brief Flag indicating that episode final statistics were emitted
   mutable std::atomic<bool> stats_emitted_{false};
 
-  /// @brief Callback invoked when episode completes
-  EpisodeCompleteCallback episode_complete_callback_;
+  /// @brief Registered lifecycle callbacks
+  std::vector<PreEpisodeCallback> pre_episode_cbs_;
+  std::vector<EpisodeStartedCallback> episode_started_cbs_;
+  std::vector<EpisodeEndedCallback> episode_ended_cbs_;
+  std::vector<PreShutdownCallback> pre_shutdown_cbs_;
+
+  /// @brief Whether shutdown callbacks have already fired
+  bool shutdown_callbacks_fired_{false};
 
   /// @brief Condition variable for auto-stop signaling
   std::condition_variable auto_stop_cv_;
@@ -376,6 +447,11 @@ private:
    */
   std::shared_ptr<io::Backend> create_backend(
     const ProducerMetadataList& producer_metadatas);
+
+  /**
+   * @brief Compute stats without acquiring episode_mutex_ (caller must hold it)
+   */
+  Stats stats_unlocked() const;
 
   /**
    * @brief Background monitoring loop for auto-stop

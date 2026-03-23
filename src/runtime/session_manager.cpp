@@ -64,6 +64,17 @@ SessionManager::~SessionManager() {
 }
 
 void SessionManager::shutdown() {
+  // Fire pre-shutdown callbacks once
+  if (!shutdown_callbacks_fired_) {
+    shutdown_callbacks_fired_ = true;
+    for (const auto& cb : pre_shutdown_cbs_) {
+      try {
+        cb();
+      } catch (const std::exception& e) {
+        std::cerr << "Pre-shutdown callback error: " << e.what() << std::endl;
+      }
+    }
+  }
   stop_episode();
 }
 
@@ -195,6 +206,33 @@ bool SessionManager::start_episode() {
     }
   }
 
+  // Invoke pre-episode callbacks (after sink ready, before scheduler)
+  for (const auto& cb : pre_episode_cbs_) {
+    try {
+      if (!cb()) {
+        std::cerr << "Pre-episode callback returned false; aborting episode." << std::endl;
+        // Cleanup: stop push producers, sink, backend
+        for (const auto& cleanup_ppe : push_producer_entries_) {
+          cleanup_ppe.producer->stop();
+        }
+        current_sink_->stop();
+        current_sink_.reset();
+        current_backend_.reset();
+        return false;
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "Pre-episode callback threw: " << e.what()
+                << "; aborting episode." << std::endl;
+      for (const auto& cleanup_ppe : push_producer_entries_) {
+        cleanup_ppe.producer->stop();
+      }
+      current_sink_->stop();
+      current_sink_.reset();
+      current_backend_.reset();
+      return false;
+    }
+  }
+
   // Create and configure scheduler
   scheduler_ = std::make_unique<Scheduler>();
   // TODO(lukeschmitt-tr): Expose Scheduler::Config in SessionConfig if needed
@@ -243,6 +281,15 @@ bool SessionManager::start_episode() {
   preprocessing_duration_s_ =
     std::chrono::duration<double>(prep_end_time - prep_start_time).count();
   std::cout << "Episode " << next_episode_index_ << " started." << std::endl;
+
+  // Invoke episode-started callbacks
+  for (const auto& cb : episode_started_cbs_) {
+    try {
+      cb();
+    } catch (const std::exception& e) {
+      std::cerr << "Episode-started callback error: " << e.what() << std::endl;
+    }
+  }
 
   return true;
 }
@@ -320,13 +367,16 @@ void SessionManager::stop_episode() {
   }
   auto_stop_cv_.notify_all();
 
-  // Invoke callback if set (after episode is fully stopped and stats are available)
-  // Note: We do this outside the main lock to avoid blocking episode operations
-  // The callback will call stats() which has its own locking
-  if (episode_complete_callback_) {
-    // Get final stats to pass to callback
-    Stats final_stats = stats();
-    episode_complete_callback_(final_stats);
+  // Compute final stats while we still hold the lock
+  Stats final_stats = stats_unlocked();
+
+  // Invoke episode-ended callbacks (includes legacy set_episode_complete_callback)
+  for (const auto& cb : episode_ended_cbs_) {
+    try {
+      cb(final_stats);
+    } catch (const std::exception& e) {
+      std::cerr << "Episode-ended callback error: " << e.what() << std::endl;
+    }
   }
 }
 
@@ -364,9 +414,7 @@ bool SessionManager::wait_for_auto_stop(std::chrono::milliseconds timeout) {
   return was_auto_stopped;
 }
 
-SessionManager::Stats SessionManager::stats() const {
-  std::lock_guard<std::mutex> lock(episode_mutex_);
-
+SessionManager::Stats SessionManager::stats_unlocked() const {
   Stats s;
   s.current_episode_index = next_episode_index_;
   s.episode_active = episode_active_;
@@ -383,10 +431,9 @@ SessionManager::Stats SessionManager::stats() const {
         s.remaining = std::chrono::duration<double>(0);
       }
     } else {
-      s.remaining = std::nullopt;  // unlimited
+      s.remaining = std::nullopt;
     }
 
-    // Compute records written to current episode as delta from start
     if (current_sink_) {
       uint64_t current_count = current_sink_->processed_count();
       s.records_written_current = current_count - episode_start_record_count_;
@@ -411,14 +458,48 @@ SessionManager::Stats SessionManager::stats() const {
   }
 
   s.total_episodes_completed = total_episodes_completed_;
-
-
   return s;
 }
 
-void SessionManager::set_episode_complete_callback(EpisodeCompleteCallback callback) {
+SessionManager::Stats SessionManager::stats() const {
   std::lock_guard<std::mutex> lock(episode_mutex_);
-  episode_complete_callback_ = std::move(callback);
+  return stats_unlocked();
+}
+
+void SessionManager::set_episode_complete_callback(EpisodeCompleteCallback callback) {
+  on_episode_ended(std::move(callback));
+}
+
+void SessionManager::on_pre_episode(PreEpisodeCallback cb) {
+  if (episode_active_) {
+    throw std::runtime_error(
+      "Cannot register callbacks while episode is active.");
+  }
+  pre_episode_cbs_.push_back(std::move(cb));
+}
+
+void SessionManager::on_episode_started(EpisodeStartedCallback cb) {
+  if (episode_active_) {
+    throw std::runtime_error(
+      "Cannot register callbacks while episode is active.");
+  }
+  episode_started_cbs_.push_back(std::move(cb));
+}
+
+void SessionManager::on_episode_ended(EpisodeEndedCallback cb) {
+  if (episode_active_) {
+    throw std::runtime_error(
+      "Cannot register callbacks while episode is active.");
+  }
+  episode_ended_cbs_.push_back(std::move(cb));
+}
+
+void SessionManager::on_pre_shutdown(PreShutdownCallback cb) {
+  if (episode_active_) {
+    throw std::runtime_error(
+      "Cannot register callbacks while episode is active.");
+  }
+  pre_shutdown_cbs_.push_back(std::move(cb));
 }
 
 std::shared_ptr<io::Backend> SessionManager::create_backend(

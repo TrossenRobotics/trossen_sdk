@@ -205,26 +205,15 @@ TEST_F(SessionManagerTest, PolledProducer_RecordsReachBackend) {
 }
 
 // ============================================================================
-// SM-10: Episode complete callback
+// SM-10: Episode complete callback (deadlock fixed via stats_unlocked)
 // ============================================================================
 
-// BUG: episode_complete_callback deadlocks in stop_episode().
-//
-// stop_episode() holds episode_mutex_ and then calls stats(), which also tries to
-// lock episode_mutex_. Since std::mutex is not recursive, this deadlocks on the
-// same thread. This affects ANY use of set_episode_complete_callback().
-//
-// Recommended fix: either (a) release episode_mutex_ before calling the callback,
-// or (b) use a separate internal stats computation that does not acquire the lock,
-// or (c) switch episode_mutex_ to std::recursive_mutex.
-//
-// This test is DISABLED until the deadlock is fixed.
-TEST_F(SessionManagerTest, DISABLED_EpisodeCompleteCallback_Invoked) {
+TEST_F(SessionManagerTest, EpisodeCompleteCallback_Invoked) {
   SessionManager sm;
 
   std::atomic<bool> callback_fired{false};
   std::atomic<uint64_t> callback_episodes_completed{0};
-  sm.set_episode_complete_callback(
+  sm.on_episode_ended(
     [&callback_fired, &callback_episodes_completed](const SessionManager::Stats& s) {
       callback_fired.store(true);
       callback_episodes_completed.store(s.total_episodes_completed);
@@ -235,6 +224,188 @@ TEST_F(SessionManagerTest, DISABLED_EpisodeCompleteCallback_Invoked) {
 
   EXPECT_TRUE(callback_fired.load());
   EXPECT_EQ(callback_episodes_completed.load(), 1);
+}
+
+// ============================================================================
+// SM-12: on_pre_episode fires and can abort
+// ============================================================================
+
+TEST_F(SessionManagerTest, OnPreEpisode_FiresBeforeScheduler) {
+  SessionManager sm;
+
+  std::atomic<bool> pre_fired{false};
+  sm.on_pre_episode([&pre_fired]() {
+    pre_fired.store(true);
+    return true;
+  });
+
+  ASSERT_TRUE(sm.start_episode());
+  EXPECT_TRUE(pre_fired.load());
+  sm.stop_episode();
+}
+
+TEST_F(SessionManagerTest, OnPreEpisode_ReturnsFalse_AbortsEpisode) {
+  SessionManager sm;
+
+  sm.on_pre_episode([]() { return false; });
+
+  EXPECT_FALSE(sm.start_episode());
+  EXPECT_FALSE(sm.is_episode_active());
+}
+
+TEST_F(SessionManagerTest, OnPreEpisode_Throws_AbortsEpisode) {
+  SessionManager sm;
+
+  sm.on_pre_episode([]() -> bool {
+    throw std::runtime_error("setup failed");
+  });
+
+  EXPECT_FALSE(sm.start_episode());
+  EXPECT_FALSE(sm.is_episode_active());
+}
+
+// ============================================================================
+// SM-13: on_episode_started fires after episode is active
+// ============================================================================
+
+TEST_F(SessionManagerTest, OnEpisodeStarted_Fires) {
+  SessionManager sm;
+
+  std::atomic<bool> started_fired{false};
+  sm.on_episode_started([&started_fired]() {
+    started_fired.store(true);
+  });
+
+  ASSERT_TRUE(sm.start_episode());
+  EXPECT_TRUE(started_fired.load());
+  sm.stop_episode();
+}
+
+TEST_F(SessionManagerTest, OnEpisodeStarted_ExceptionDoesNotCrash) {
+  SessionManager sm;
+
+  sm.on_episode_started([]() {
+    throw std::runtime_error("oops");
+  });
+
+  // Should still start successfully despite callback error
+  ASSERT_TRUE(sm.start_episode());
+  sm.stop_episode();
+}
+
+// ============================================================================
+// SM-14: on_episode_ended fires with stats
+// ============================================================================
+
+TEST_F(SessionManagerTest, OnEpisodeEnded_ReceivesStats) {
+  SessionManager sm;
+
+  std::atomic<uint64_t> ended_episodes{0};
+  sm.on_episode_ended([&ended_episodes](const SessionManager::Stats& s) {
+    ended_episodes.store(s.total_episodes_completed);
+  });
+
+  sm.start_episode();
+  sm.stop_episode();
+  EXPECT_EQ(ended_episodes.load(), 1);
+
+  sm.start_episode();
+  sm.stop_episode();
+  EXPECT_EQ(ended_episodes.load(), 2);
+}
+
+TEST_F(SessionManagerTest, OnEpisodeEnded_ExceptionDoesNotPreventOthers) {
+  SessionManager sm;
+
+  std::atomic<bool> second_fired{false};
+  sm.on_episode_ended([](const SessionManager::Stats&) {
+    throw std::runtime_error("first fails");
+  });
+  sm.on_episode_ended([&second_fired](const SessionManager::Stats&) {
+    second_fired.store(true);
+  });
+
+  sm.start_episode();
+  sm.stop_episode();
+  EXPECT_TRUE(second_fired.load());
+}
+
+// ============================================================================
+// SM-15: on_pre_shutdown fires before stop
+// ============================================================================
+
+TEST_F(SessionManagerTest, OnPreShutdown_FiresBeforeStop) {
+  SessionManager sm;
+
+  std::atomic<bool> shutdown_fired{false};
+  sm.on_pre_shutdown([&shutdown_fired]() {
+    shutdown_fired.store(true);
+  });
+
+  sm.start_episode();
+  sm.shutdown();
+  EXPECT_TRUE(shutdown_fired.load());
+  EXPECT_FALSE(sm.is_episode_active());
+}
+
+TEST_F(SessionManagerTest, OnPreShutdown_FiresOnlyOnce) {
+  SessionManager sm;
+
+  std::atomic<int> call_count{0};
+  sm.on_pre_shutdown([&call_count]() {
+    call_count.fetch_add(1);
+  });
+
+  sm.start_episode();
+  sm.shutdown();
+  sm.shutdown();  // second call should not fire callback again
+  EXPECT_EQ(call_count.load(), 1);
+}
+
+TEST_F(SessionManagerTest, OnPreShutdown_ExceptionDoesNotPreventShutdown) {
+  SessionManager sm;
+
+  sm.on_pre_shutdown([]() {
+    throw std::runtime_error("cleanup failed");
+  });
+
+  sm.start_episode();
+  EXPECT_NO_THROW(sm.shutdown());
+  EXPECT_FALSE(sm.is_episode_active());
+}
+
+// ============================================================================
+// SM-16: Registration during active episode throws
+// ============================================================================
+
+TEST_F(SessionManagerTest, CallbackRegistration_DuringEpisode_Throws) {
+  SessionManager sm;
+  sm.start_episode();
+
+  EXPECT_THROW(sm.on_pre_episode([]() { return true; }), std::runtime_error);
+  EXPECT_THROW(sm.on_episode_started([]() {}), std::runtime_error);
+  EXPECT_THROW(
+    sm.on_episode_ended([](const SessionManager::Stats&) {}),
+    std::runtime_error);
+  EXPECT_THROW(sm.on_pre_shutdown([]() {}), std::runtime_error);
+
+  sm.stop_episode();
+}
+
+// ============================================================================
+// SM-17: Multiple callbacks per hook
+// ============================================================================
+
+TEST_F(SessionManagerTest, MultipleCallbacksPerHook) {
+  SessionManager sm;
+
+  std::atomic<int> count{0};
+  sm.on_episode_started([&count]() { count.fetch_add(1); });
+  sm.on_episode_started([&count]() { count.fetch_add(10); });
+
+  sm.start_episode();
+  EXPECT_EQ(count.load(), 11);
+  sm.stop_episode();
 }
 
 // ============================================================================
