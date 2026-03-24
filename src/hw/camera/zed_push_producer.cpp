@@ -15,7 +15,6 @@
  * once start() is called.  ZedCameraComponent must not call grab() concurrently.
  */
 
-#include <cmath>
 #include <iostream>
 #include <limits>
 #include <memory>
@@ -32,6 +31,13 @@
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 
 namespace trossen::hw::camera {
+
+/// Maximum valid depth value (millimetres) when quantizing F32 → U16.
+/// Matches std::numeric_limits<uint16_t>::max() (65 535 mm ≈ 65.5 m), which
+/// exceeds every ZED model's maximum range (~20 m for ZED 2).  Values above
+/// this are clamped so the subsequent convertTo(CV_16UC1) cannot overflow.
+static constexpr float kDepthU16MaxMm =
+  static_cast<float>(std::numeric_limits<uint16_t>::max());
 
 // ─────────────────────────────────────────────────────────────
 // Metadata helpers
@@ -291,21 +297,14 @@ void ZedPushProducer::push_loop(
                           sl_depth_.getPtr<float>(sl::MEM::CPU),
                           sl_depth_.getStepBytes(sl::MEM::CPU));
 
-        // Sanitize: replace NaN/Inf with 0, then clamp to [0, 65000] before
-        // converting to 16-bit unsigned.  patchNaNs replaces NaN with the
-        // given value (0.0); we must also handle +/-Inf explicitly.
+        // Sanitize invalid pixels.  The ZED SDK marks invalid depth using:
+        //   sl::OCCLUSION_VALUE / sl::INVALID_VALUE  →  NaN
+        //   sl::TOO_FAR                               →  +Inf
+        //   sl::TOO_CLOSE                             →  -Inf
         cv::Mat depth_clean = depth_f32.clone();
         cv::patchNaNs(depth_clean, 0.0);
-
-        // Clamp: negative values (invalid) → 0, values > 65000 → 65000
-        // to fit in uint16 and match RealSense DEPTH_U16_MM convention
-        cv::Mat mask_neg = depth_clean < 0.0f;
-        depth_clean.setTo(0.0f, mask_neg);
-
-        cv::Mat mask_inf;
-        // Inf check: values above a large finite threshold are Inf or huge
-        cv::compare(depth_clean, 65000.0f, mask_inf, cv::CMP_GT);
-        depth_clean.setTo(65000.0f, mask_inf);
+        cv::max(depth_clean, 0.0f, depth_clean);
+        cv::min(depth_clean, kDepthU16MaxMm, depth_clean);
 
         cv::Mat depth_u16;
         depth_clean.convertTo(depth_u16, CV_16UC1);
@@ -322,7 +321,12 @@ void ZedPushProducer::push_loop(
     uint64_t mono_now = data::now_mono().to_ns();
     data::Timestamp ts;
     if (cfg_.use_device_time) {
-      // sl::Camera timestamp is nanoseconds since camera boot
+      // NOTE: despite the name, TIME_REFERENCE::IMAGE is a host-side
+      // timestamp (Unix epoch ns) captured when the frame arrived in PC
+      // memory — the ZED SDK does not expose a true sensor-exposure
+      // timestamp.  It is still more consistent than now_mono() because
+      // it is stamped inside the SDK's receive path, before our grab()
+      // returns, so it excludes any scheduling jitter in our thread.
       uint64_t device_ts_ns =
         camera_->getTimestamp(sl::TIME_REFERENCE::IMAGE).getNanoseconds();
       ts.monotonic = data::Timespec::from_ns(device_ts_ns);
