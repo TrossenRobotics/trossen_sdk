@@ -29,7 +29,3 @@ target_link_libraries(producer_registry_demo trossen_sdk)
 # Lifecycle callback demo (no hardware required)
 add_executable(callback_demo callback_demo/callback_demo.cpp)
 target_link_libraries(callback_demo trossen_sdk)
-
-# Mock producer demo (no hardware required)
-add_executable(mock_producer_demo mock_producer_demo/mock_producer_demo.cpp)
-target_link_libraries(mock_producer_demo trossen_sdk)

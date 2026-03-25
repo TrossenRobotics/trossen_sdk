@@ -245,8 +245,10 @@ public:
   /**
    * @brief Register a callback invoked after each episode has started
    *
-   * Called at the end of start_episode(), after the scheduler is running
-   * and episode_active_ is true.
+   * The callback fires at the end of start_episode(), after the scheduler
+   * is running and the episode is fully active.
+   *
+   * Registration must be done before an episode is started.
    *
    * @param cb Callback to register
    * @throws std::runtime_error if called while an episode is active
@@ -264,10 +266,11 @@ public:
   void on_episode_ended(EpisodeEndedCallback cb);
 
   /**
-   * @brief Register a callback invoked at the top of shutdown()
+   * @brief Register a callback invoked during shutdown(), after recording stops
    *
-   * Called before stop_episode() during shutdown. Useful for returning
-   * hardware to safe positions.
+   * Called after stop_episode() during shutdown. Recording has ended but
+   * post-processing may still be running. Useful for returning hardware
+   * to safe positions (e.g. sending arms to sleep) while encoding completes.
    *
    * @param cb Callback to register
    * @throws std::runtime_error if called while an episode is active

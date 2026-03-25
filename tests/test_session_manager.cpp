@@ -29,10 +29,8 @@ using trossen::data::Timestamp;
 using trossen::hw::PolledProducer;
 using trossen::runtime::SessionManager;
 
-// ============================================================================
 // Mock polled producer
-// ============================================================================
-
+//
 // Concrete PolledProducer that emits a JointStateRecord per poll() call.
 // Increments stats_.produced so tests can verify the scheduler polled it.
 class MockPolledProducer : public PolledProducer {
@@ -58,10 +56,7 @@ public:
   }
 };
 
-// ============================================================================
 // Test fixture: loads minimal GlobalConfig with null backend
-// ============================================================================
-
 class SessionManagerTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
@@ -78,10 +73,7 @@ protected:
   }
 };
 
-// ============================================================================
 // SM-01: Basic start/stop lifecycle
-// ============================================================================
-
 TEST_F(SessionManagerTest, StartStop_MinimalEpisode) {
   SessionManager sm;
   ASSERT_TRUE(sm.start_episode());
@@ -91,10 +83,7 @@ TEST_F(SessionManagerTest, StartStop_MinimalEpisode) {
   EXPECT_FALSE(sm.is_episode_active());
 }
 
-// ============================================================================
 // SM-02: stop_episode is no-op when not active
-// ============================================================================
-
 TEST_F(SessionManagerTest, StopEpisode_NoOp_WhenNotActive) {
   SessionManager sm;
   EXPECT_FALSE(sm.is_episode_active());
@@ -102,10 +91,7 @@ TEST_F(SessionManagerTest, StopEpisode_NoOp_WhenNotActive) {
   EXPECT_FALSE(sm.is_episode_active());
 }
 
-// ============================================================================
 // SM-03: add_producer with null throws
-// ============================================================================
-
 TEST_F(SessionManagerTest, AddProducer_NullThrows) {
   SessionManager sm;
   EXPECT_THROW(
@@ -113,10 +99,7 @@ TEST_F(SessionManagerTest, AddProducer_NullThrows) {
     std::invalid_argument);
 }
 
-// ============================================================================
 // SM-04: add_producer during active episode throws
-// ============================================================================
-
 TEST_F(SessionManagerTest, AddProducer_DuringEpisode_Throws) {
   SessionManager sm;
   sm.start_episode();
@@ -129,10 +112,7 @@ TEST_F(SessionManagerTest, AddProducer_DuringEpisode_Throws) {
   sm.stop_episode();
 }
 
-// ============================================================================
 // SM-05: Double start returns false
-// ============================================================================
-
 TEST_F(SessionManagerTest, DoubleStart_ReturnsFalse) {
   SessionManager sm;
   ASSERT_TRUE(sm.start_episode());
@@ -140,10 +120,7 @@ TEST_F(SessionManagerTest, DoubleStart_ReturnsFalse) {
   sm.stop_episode();
 }
 
-// ============================================================================
 // SM-06: Episode index increments per episode
-// ============================================================================
-
 TEST_F(SessionManagerTest, EpisodeIndex_IncrementsPerEpisode) {
   SessionManager sm;
 
@@ -159,10 +136,7 @@ TEST_F(SessionManagerTest, EpisodeIndex_IncrementsPerEpisode) {
   EXPECT_EQ(s.total_episodes_completed, 2);
 }
 
-// ============================================================================
 // SM-07: is_episode_active reflects state
-// ============================================================================
-
 TEST_F(SessionManagerTest, IsEpisodeActive_ReflectsState) {
   SessionManager sm;
 
@@ -173,10 +147,7 @@ TEST_F(SessionManagerTest, IsEpisodeActive_ReflectsState) {
   EXPECT_FALSE(sm.is_episode_active());
 }
 
-// ============================================================================
 // SM-08: shutdown stops active episode
-// ============================================================================
-
 TEST_F(SessionManagerTest, Shutdown_StopsActiveEpisode) {
   SessionManager sm;
   sm.start_episode();
@@ -186,10 +157,7 @@ TEST_F(SessionManagerTest, Shutdown_StopsActiveEpisode) {
   EXPECT_FALSE(sm.is_episode_active());
 }
 
-// ============================================================================
 // SM-09: Polled producer records reach backend
-// ============================================================================
-
 TEST_F(SessionManagerTest, PolledProducer_RecordsReachBackend) {
   SessionManager sm;
   auto producer = std::make_shared<MockPolledProducer>();
@@ -204,10 +172,7 @@ TEST_F(SessionManagerTest, PolledProducer_RecordsReachBackend) {
   EXPECT_GT(producer->stats().produced, 0);
 }
 
-// ============================================================================
 // SM-10: Episode complete callback (deadlock fixed via stats_unlocked)
-// ============================================================================
-
 TEST_F(SessionManagerTest, EpisodeCompleteCallback_Invoked) {
   SessionManager sm;
 
@@ -226,10 +191,7 @@ TEST_F(SessionManagerTest, EpisodeCompleteCallback_Invoked) {
   EXPECT_EQ(callback_episodes_completed.load(), 1);
 }
 
-// ============================================================================
 // SM-12: on_pre_episode fires and can abort
-// ============================================================================
-
 TEST_F(SessionManagerTest, OnPreEpisode_FiresBeforeScheduler) {
   SessionManager sm;
 
@@ -264,10 +226,7 @@ TEST_F(SessionManagerTest, OnPreEpisode_Throws_AbortsEpisode) {
   EXPECT_FALSE(sm.is_episode_active());
 }
 
-// ============================================================================
 // SM-13: on_episode_started fires after episode is active
-// ============================================================================
-
 TEST_F(SessionManagerTest, OnEpisodeStarted_Fires) {
   SessionManager sm;
 
@@ -293,10 +252,7 @@ TEST_F(SessionManagerTest, OnEpisodeStarted_ExceptionDoesNotCrash) {
   sm.stop_episode();
 }
 
-// ============================================================================
 // SM-14: on_episode_ended fires with stats
-// ============================================================================
-
 TEST_F(SessionManagerTest, OnEpisodeEnded_ReceivesStats) {
   SessionManager sm;
 
@@ -330,10 +286,7 @@ TEST_F(SessionManagerTest, OnEpisodeEnded_ExceptionDoesNotPreventOthers) {
   EXPECT_TRUE(second_fired.load());
 }
 
-// ============================================================================
-// SM-15: on_pre_shutdown fires before stop
-// ============================================================================
-
+// SM-15: on_pre_shutdown fires after episode stops
 TEST_F(SessionManagerTest, OnPreShutdown_FiresBeforeStop) {
   SessionManager sm;
 
@@ -374,10 +327,7 @@ TEST_F(SessionManagerTest, OnPreShutdown_ExceptionDoesNotPreventShutdown) {
   EXPECT_FALSE(sm.is_episode_active());
 }
 
-// ============================================================================
 // SM-16: Registration during active episode throws
-// ============================================================================
-
 TEST_F(SessionManagerTest, CallbackRegistration_DuringEpisode_Throws) {
   SessionManager sm;
   sm.start_episode();
@@ -392,10 +342,7 @@ TEST_F(SessionManagerTest, CallbackRegistration_DuringEpisode_Throws) {
   sm.stop_episode();
 }
 
-// ============================================================================
 // SM-17: Multiple callbacks per hook
-// ============================================================================
-
 TEST_F(SessionManagerTest, MultipleCallbacksPerHook) {
   SessionManager sm;
 
@@ -408,10 +355,7 @@ TEST_F(SessionManagerTest, MultipleCallbacksPerHook) {
   sm.stop_episode();
 }
 
-// ============================================================================
 // SM-11: Stats records_written_current tracks produced count
-// ============================================================================
-
 TEST_F(SessionManagerTest, Stats_RecordsWrittenTracked) {
   SessionManager sm;
   auto producer = std::make_shared<MockPolledProducer>();
@@ -428,10 +372,7 @@ TEST_F(SessionManagerTest, Stats_RecordsWrittenTracked) {
   sm.stop_episode();
 }
 
-// ============================================================================
 // Shutdown idempotency: multiple shutdown calls are safe
-// ============================================================================
-
 TEST_F(SessionManagerTest, Shutdown_IsIdempotent) {
   SessionManager sm;
   sm.start_episode();
@@ -440,10 +381,7 @@ TEST_F(SessionManagerTest, Shutdown_IsIdempotent) {
   EXPECT_NO_THROW(sm.shutdown());
 }
 
-// ============================================================================
 // add_push_producer during active episode throws
-// ============================================================================
-
 TEST_F(SessionManagerTest, AddPushProducer_DuringEpisode_Throws) {
   SessionManager sm;
   sm.start_episode();

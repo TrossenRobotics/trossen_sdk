@@ -64,7 +64,10 @@ SessionManager::~SessionManager() {
 }
 
 void SessionManager::shutdown() {
-  // Fire pre-shutdown callbacks once
+  stop_episode();
+
+  // Fire pre-shutdown callbacks once, after recording has stopped.
+  // Useful for returning hardware to safe positions while post-processing runs.
   if (!shutdown_callbacks_fired_) {
     shutdown_callbacks_fired_ = true;
     for (const auto& cb : pre_shutdown_cbs_) {
@@ -75,7 +78,6 @@ void SessionManager::shutdown() {
       }
     }
   }
-  stop_episode();
 }
 
 void SessionManager::add_producer(
@@ -184,6 +186,17 @@ bool SessionManager::start_episode() {
   // Capture initial record count for this episode (for stats delta calculation)
   episode_start_record_count_ = current_sink_->processed_count();
 
+  // Helper to tear down push producers, sink, and backend on early abort
+  auto cleanup_and_abort = [&]() -> bool {
+    for (const auto& ppe : push_producer_entries_) {
+      ppe.producer->stop();
+    }
+    current_sink_->stop();
+    current_sink_.reset();
+    current_backend_.reset();
+    return false;
+  };
+
   // Start push producers (own threads, emit into current sink)
   // Capture shared_ptr to ensure Sink lifetime outlives any in-flight emit callbacks
   std::shared_ptr<io::Sink> sink_shared = current_sink_;
@@ -195,14 +208,7 @@ bool SessionManager::start_episode() {
     });
     if (!started) {
       std::cerr << "Failed to start push producer; aborting episode startup." << std::endl;
-      // Stop any push producers that were already started
-      for (const auto& cleanup_ppe : push_producer_entries_) {
-        cleanup_ppe.producer->stop();
-      }
-      current_sink_->stop();
-      current_sink_.reset();
-      current_backend_.reset();
-      return false;
+      return cleanup_and_abort();
     }
   }
 
@@ -211,25 +217,12 @@ bool SessionManager::start_episode() {
     try {
       if (!cb()) {
         std::cerr << "Pre-episode callback returned false; aborting episode." << std::endl;
-        // Cleanup: stop push producers, sink, backend
-        for (const auto& cleanup_ppe : push_producer_entries_) {
-          cleanup_ppe.producer->stop();
-        }
-        current_sink_->stop();
-        current_sink_.reset();
-        current_backend_.reset();
-        return false;
+        return cleanup_and_abort();
       }
     } catch (const std::exception& e) {
       std::cerr << "Pre-episode callback threw: " << e.what()
                 << "; aborting episode." << std::endl;
-      for (const auto& cleanup_ppe : push_producer_entries_) {
-        cleanup_ppe.producer->stop();
-      }
-      current_sink_->stop();
-      current_sink_.reset();
-      current_backend_.reset();
-      return false;
+      return cleanup_and_abort();
     }
   }
 
@@ -431,9 +424,10 @@ SessionManager::Stats SessionManager::stats_unlocked() const {
         s.remaining = std::chrono::duration<double>(0);
       }
     } else {
-      s.remaining = std::nullopt;
+      s.remaining = std::nullopt;  // unlimited
     }
 
+    // Compute records written to current episode as delta from start
     if (current_sink_) {
       uint64_t current_count = current_sink_->processed_count();
       s.records_written_current = current_count - episode_start_record_count_;
