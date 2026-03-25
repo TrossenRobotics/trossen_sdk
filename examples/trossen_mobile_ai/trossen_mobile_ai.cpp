@@ -291,6 +291,57 @@ int main(int argc, char** argv) {
   std::cout << "\nProducers registered. Ready to record.\n";
 
   // ──────────────────────────────────────────────────────────
+  // Register lifecycle callbacks
+  // ──────────────────────────────────────────────────────────
+
+  // Count depth-capable cameras once for sanity checks
+  int depth_cameras = 0;
+  for (const auto& cam : cfg.hardware.cameras) {
+    if (cam.use_depth) ++depth_cameras;
+  }
+
+  mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
+    const std::string file_path =
+      trossen::utils::generate_episode_path(root, stats.current_episode_index);
+    trossen::utils::print_episode_summary(file_path, stats);
+
+    trossen::utils::SanityCheckConfig sanity_cfg{
+      stats.elapsed.count(),
+      static_cast<int>(cfg.hardware.arms.size()),
+      joint_rate_hz,
+      static_cast<int>(cfg.hardware.cameras.size()),
+      static_cast<int>(camera_fps),
+      5.0,
+      depth_cameras
+    };
+    perform_sanity_check(stats.current_episode_index, stats.records_written_current, sanity_cfg);
+  });
+
+  mgr.on_pre_shutdown([&]() {
+    std::cout << "\nReturning arms to starting positions...\n";
+    for (const auto& [id, comp] : arm_components) {
+      auto driver = comp->get_hardware();
+      driver->set_all_modes(trossen_arm::Mode::position);
+      driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
+    }
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+
+    std::cout << "Moving arms to sleep positions...\n";
+    for (const auto& [id, comp] : arm_components) {
+      auto driver = comp->get_hardware();
+      driver->set_all_positions(
+        std::vector<double>(driver->get_num_joints(), 0.0), moving_time_s, false);
+    }
+    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
+
+    std::cout << "Cleaning up arm drivers...\n";
+    for (const auto& [id, comp] : arm_components) {
+      comp->get_hardware()->cleanup();
+    }
+    std::cout << "  [ok] All arm drivers cleaned up\n";
+  });
+
+  // ──────────────────────────────────────────────────────────
   // Episode loop
   // ──────────────────────────────────────────────────────────
 
@@ -340,8 +391,6 @@ int main(int argc, char** argv) {
       break;
     }
 
-    const uint32_t recording_episode_index = mgr.stats().current_episode_index;
-    const auto episode_start_time = std::chrono::steady_clock::now();
     std::cout << "Recording...\n";
 
     // Teleop thread mirrors leader positions to followers at configured rate
@@ -375,7 +424,7 @@ int main(int argc, char** argv) {
       }
     });
 
-    trossen::runtime::SessionManager::Stats last_stats = mgr.monitor_episode();
+    mgr.monitor_episode();
 
     if (mgr.is_episode_active()) {
       mgr.stop_episode();
@@ -387,62 +436,14 @@ int main(int argc, char** argv) {
       velocity_thread.join();
     }
 
-    const double actual_duration =
-      std::chrono::duration<double>(
-        std::chrono::steady_clock::now() - episode_start_time).count();
-    (void)actual_duration;
-
-    const std::string file_path =
-      trossen::utils::generate_episode_path(root, recording_episode_index);
-    trossen::utils::print_episode_summary(file_path, last_stats);
-
-    // Count depth-capable cameras for accurate sanity check
-    int depth_cameras = 0;
-    for (const auto& cam : cfg.hardware.cameras) {
-      if (cam.use_depth) ++depth_cameras;
-    }
-
-    trossen::utils::SanityCheckConfig sanity_cfg{
-      last_stats.elapsed.count(),
-      static_cast<int>(cfg.hardware.arms.size()),
-      joint_rate_hz,
-      static_cast<int>(cfg.hardware.cameras.size()),
-      static_cast<int>(camera_fps),
-      5.0,
-      depth_cameras
-    };
-    perform_sanity_check(recording_episode_index, last_stats.records_written_current, sanity_cfg);
-
     if (trossen::utils::g_stop_requested) {
       std::cout << "\nStopping at user request (Ctrl+C).\n";
       break;
     }
   }
 
+  // shutdown() calls stop_episode() (fires on_episode_ended) then on_pre_shutdown
   mgr.shutdown();
-
-  // Return arms to starting then sleep positions
-  std::cout << "\nReturning arms to starting positions...\n";
-  for (const auto& [id, comp] : arm_components) {
-    auto driver = comp->get_hardware();
-    driver->set_all_modes(trossen_arm::Mode::position);
-    driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
-  }
-  std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-
-  std::cout << "Moving arms to sleep positions...\n";
-  for (const auto& [id, comp] : arm_components) {
-    auto driver = comp->get_hardware();
-    driver->set_all_positions(
-      std::vector<double>(driver->get_num_joints(), 0.0), moving_time_s, false);
-  }
-  std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-
-  std::cout << "Cleaning up arm drivers...\n";
-  for (const auto& [id, comp] : arm_components) {
-    comp->get_hardware()->cleanup();
-  }
-  std::cout << "  [ok] All arm drivers cleaned up\n";
 
   const auto final_stats = mgr.stats();
   std::vector<std::string> extra_info = {
