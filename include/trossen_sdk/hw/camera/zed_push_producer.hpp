@@ -35,8 +35,8 @@ namespace trossen::hw::camera {
  * The producer uses VIEW::LEFT_BGR (SDK 5.x) to retrieve a 3-channel BGR
  * image directly from the GPU pipeline, avoiding a redundant BGRA->BGR
  * strip.  When depth is enabled, MEASURE::DEPTH (F32_C1) is retrieved and
- * sanitized (NaN/Inf replaced, then quantized to CV_16UC1 millimetres)
- * for downstream compatibility with the RealSense depth path.
+ * sanitized (NaN/Inf replaced) and quantized to CV_16UC1 millimetres
+ * for backend consumption.
  *
  * Registered as "zed_camera" in PushProducerRegistry.
  */
@@ -48,14 +48,14 @@ public:
   struct Config {
     std::string stream_id{"zed_camera"};
     std::string color_encoding{"bgr8"};
-    bool use_device_time{true};
+    bool use_device_time{false};
     int timeout_ms{3000};
     int fps{30};
     bool remove_saturated_areas{false};  ///< SDK 5.x default is false
   };
 
   /**
-   * @brief Metadata for ZedPushProducer (mirrors RealsensePushProducerMetadata)
+   * @brief Metadata for ZedPushProducer
    */
   struct ZedPushProducerMetadata : public ::trossen::hw::PolledProducer::ProducerMetadata {
     int width{0};

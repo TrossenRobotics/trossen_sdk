@@ -8,8 +8,7 @@
  *      3-channel BGR image directly, avoiding a BGRA→BGR strip on the CPU.
  *   3. When depth is enabled, MEASURE::DEPTH (F32_C1, metres) is retrieved,
  *      sanitized (NaN/Inf → 0 via cv::patchNaNs + clamping), then quantized
- *      to CV_16UC1 (millimetres) for downstream compatibility with the
- *      RealSense depth pipeline.
+ *      to CV_16UC1 (millimetres) for backend consumption.
  *
  * Thread safety: the sl::Camera handle is used exclusively by this thread
  * once start() is called.  ZedCameraComponent must not call grab() concurrently.
@@ -152,7 +151,9 @@ ZedPushProducer::ZedPushProducer(
       "[ZedPushProducer] Unsupported color encoding: " + cfg_.color_encoding +
       ". Valid: bgr8, rgb8");
   }
-  cfg_.use_device_time = config.value("use_device_time", true);
+  // ZED cameras do not expose a true sensor-exposure timestamp;
+  // TIME_REFERENCE::IMAGE is host-side.  Default to false.
+  cfg_.use_device_time = config.value("use_device_time", false);
   cfg_.timeout_ms = config.value("timeout_ms", 3000);
   if (cfg_.timeout_ms <= 0) {
     cfg_.timeout_ms = 3000;

@@ -92,7 +92,7 @@ public:
   const std::string& get_depth_mode_str() const { return depth_mode_str_; }
 
 private:
-  /// @brief Parse a depth mode string to sl::DEPTH_MODE, with deprecation warnings
+  /// @brief Parse a depth mode string to sl::DEPTH_MODE
   static sl::DEPTH_MODE parse_depth_mode(const std::string& mode_str);
 
   /// @brief Parse a resolution string to sl::RESOLUTION
@@ -104,7 +104,7 @@ private:
   int height_{0};
   int fps_{0};
   bool use_depth_{false};
-  std::string depth_mode_str_{"NEURAL"};
+  std::string depth_mode_str_{"NONE"};
 };
 
 }  // namespace trossen::hw::camera

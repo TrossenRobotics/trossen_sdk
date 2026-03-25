@@ -87,10 +87,10 @@ void ZedCameraComponent::configure(const nlohmann::json& config) {
   }
 
   // Optional resolution / fps / depth settings
-  std::string resolution_str = config.value("resolution", "AUTO");
+  std::string resolution_str = config.value("resolution", "HD720");
   int requested_fps = config.value("fps", 0);
   use_depth_ = config.value("use_depth", false);
-  depth_mode_str_ = config.value("depth_mode", std::string("NEURAL"));
+  depth_mode_str_ = config.value("depth_mode", std::string("NONE"));
 
   // Build InitParameters
   sl::InitParameters init;
