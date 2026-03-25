@@ -17,7 +17,7 @@ namespace trossen::configuration {
  * @brief Configuration for a single camera (RealSense, OpenCV, or ZED)
  *
  * The @p type field selects which hardware component is created via HardwareRegistry.
- * Use @c "realsense_camera" for Intel RealSense cameras, @c "opencv_camera" for
+ * Use @c "realsense_camera" for RealSense cameras, @c "opencv_camera" for
  * any V4L2 / USB webcam accessible through OpenCV, or @c "zed_camera" for
  * StereoLabs ZED stereo cameras.
  *
@@ -68,6 +68,9 @@ struct CameraConfig {
   /// @brief Logical camera identifier used as stream_id (e.g. "camera_0", "wrist_cam")
   std::string id{"camera_0"};
 
+  // TODO(shantanuparab-tr): Unify serial_number and device_index into a
+  // single device identifier field (serial string or numeric index).
+
   /// @brief Camera serial number (RealSense: string, ZED: numeric — both accepted)
   std::string serial_number{""};
 
@@ -77,10 +80,14 @@ struct CameraConfig {
   /// @brief OpenCV capture backend - "v4l2" or "any" (OpenCV only)
   std::string backend{""};
 
-  /// @brief Capture width in pixels
+  // TODO(shantanuparab-tr): Unify resolution configuration across camera types. Consider accepting
+  //       a resolution string (e.g. "720x480", "HD720", "SVGA") that maps to
+  //       width/height for RealSense/OpenCV and to the native enum for ZED.
+
+  /// @brief Capture width in pixels (RealSense / OpenCV only; ZED uses "resolution" in extra)
   int width{640};
 
-  /// @brief Capture height in pixels
+  /// @brief Capture height in pixels (RealSense / OpenCV only; ZED uses "resolution" in extra)
   int height{480};
 
   /// @brief Capture frame rate
@@ -122,6 +129,9 @@ struct CameraConfig {
     // WARNING: if you add a new known key above, you must also add it to the
     // known_keys list below — otherwise it will be silently duplicated into
     // the `extra` passthrough and may confuse downstream components.
+    // TODO(shantanuparab-tr): Replace known_keys list with a parse-and-erase pattern — copy j,
+    //       erase each key as it is parsed, then assign the remainder to extra.
+    //       This eliminates the need to maintain a separate known_keys list.
     static const std::vector<std::string> known_keys = {
       "type", "id", "serial_number", "device_index", "backend",
       "width", "height", "fps", "use_depth", "force_hardware_reset"
