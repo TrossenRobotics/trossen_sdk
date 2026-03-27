@@ -96,18 +96,24 @@ public:
    *
    * - Creates episode_NNNNNN.mcap file (6-digit zero-padded index)
    * - Instantiates Backend + Sink
+   * - Starts push producers
+   * - Fires pre-episode callbacks (can abort episode)
    * - Starts Scheduler with registered producer tasks
    * - Begins duration monitoring (if max_duration set)
+   * - Fires episode-started callbacks
    */
   bool start_episode();
 
   /**
    * @brief Stop the current episode
    *
+   * - Joins monitor thread
+   * - Stops push producers
    * - Stops Scheduler (producers stop polling)
    * - Drains Sink queue (writes all pending records)
    * - Flushes and closes Backend
    * - Updates episode index for next start
+   * - Fires episode-ended callbacks
    *
    * @note Safe to call if no episode running (no-op).
    */
@@ -191,23 +197,70 @@ public:
    */
   Stats stats() const;
 
-  /**
-   * @brief Callback type for episode completion notification
-   *
-   * Invoked when an episode completes (either by auto-stop or manual stop).
-   * Receives final statistics for the completed episode.
-   */
-  using EpisodeCompleteCallback = std::function<void(const Stats&)>;
+  // =========================================================================
+  // Lifecycle callbacks
+  // =========================================================================
+
+  /// @brief Callback invoked before an episode starts. Return false to abort.
+  using PreEpisodeCallback = std::function<bool()>;
+
+  /// @brief Callback invoked after an episode has fully started.
+  using EpisodeStartedCallback = std::function<void()>;
+
+  /// @brief Callback invoked after an episode has fully stopped.
+  using EpisodeEndedCallback = std::function<void(const Stats&)>;
+
+  /// @brief Callback invoked during shutdown(), after recording stops.
+  using PreShutdownCallback = std::function<void()>;
 
   /**
-   * @brief Set callback to be invoked when episode completes
+   * @brief Register a callback invoked before each episode starts
    *
-   * @param callback Function to call with final stats when episode ends
+   * Called in start_episode() after backend/sink are ready but before the
+   * scheduler begins polling. If the callback returns false or throws, the
+   * episode is aborted and start_episode() returns false.
    *
-   * The callback is invoked from the monitoring thread or from stop_episode().
-   * It should be thread-safe and should not block for extended periods.
+   * Multiple callbacks are invoked in registration order.
+   *
+   * @param cb Callback to register
+   * @throws std::runtime_error if called while an episode is active
    */
-  void set_episode_complete_callback(EpisodeCompleteCallback callback);
+  void on_pre_episode(PreEpisodeCallback cb);
+
+  /**
+   * @brief Register a callback invoked after each episode has started
+   *
+   * The callback fires at the end of start_episode(), after the scheduler
+   * is running and the episode is fully active.
+   *
+   * Registration must be done before an episode is started.
+   *
+   * @param cb Callback to register
+   * @throws std::runtime_error if called while an episode is active
+   */
+  void on_episode_started(EpisodeStartedCallback cb);
+
+  /**
+   * @brief Register a callback invoked after each episode has ended
+   *
+   * Called in stop_episode() after full teardown. Receives final stats.
+   *
+   * @param cb Callback to register
+   * @throws std::runtime_error if called while an episode is active
+   */
+  void on_episode_ended(EpisodeEndedCallback cb);
+
+  /**
+   * @brief Register a callback invoked during shutdown(), after recording stops
+   *
+   * Called after stop_episode() during shutdown. Recording has ended but
+   * post-processing may still be running. Useful for returning hardware
+   * to safe positions (e.g. sending arms to sleep) while encoding completes.
+   *
+   * @param cb Callback to register
+   * @throws std::runtime_error if called while an episode is active
+   */
+  void on_pre_shutdown(PreShutdownCallback cb);
 
   /**
    * @brief Print episode header to console
@@ -327,8 +380,14 @@ private:
   /// @brief Flag indicating that episode final statistics were emitted
   mutable std::atomic<bool> stats_emitted_{false};
 
-  /// @brief Callback invoked when episode completes
-  EpisodeCompleteCallback episode_complete_callback_;
+  /// @brief Registered lifecycle callbacks
+  std::vector<PreEpisodeCallback> pre_episode_cbs_;
+  std::vector<EpisodeStartedCallback> episode_started_cbs_;
+  std::vector<EpisodeEndedCallback> episode_ended_cbs_;
+  std::vector<PreShutdownCallback> pre_shutdown_cbs_;
+
+  /// @brief Whether shutdown callbacks have already fired
+  bool shutdown_callbacks_fired_{false};
 
   /// @brief Condition variable for auto-stop signaling
   std::condition_variable auto_stop_cv_;
@@ -376,6 +435,11 @@ private:
    */
   std::shared_ptr<io::Backend> create_backend(
     const ProducerMetadataList& producer_metadatas);
+
+  /**
+   * @brief Compute stats without acquiring episode_mutex_ (caller must hold it)
+   */
+  Stats stats_unlocked() const;
 
   /**
    * @brief Background monitoring loop for auto-stop

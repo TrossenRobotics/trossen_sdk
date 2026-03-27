@@ -25,3 +25,7 @@ target_link_libraries(hardware_registry_demo trossen_sdk)
 
 add_executable(producer_registry_demo producer_registry_demo.cpp)
 target_link_libraries(producer_registry_demo trossen_sdk)
+
+# Lifecycle callback demo (no hardware required)
+add_executable(callback_demo callback_demo/callback_demo.cpp)
+target_link_libraries(callback_demo trossen_sdk)

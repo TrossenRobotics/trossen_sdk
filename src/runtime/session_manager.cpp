@@ -65,6 +65,19 @@ SessionManager::~SessionManager() {
 
 void SessionManager::shutdown() {
   stop_episode();
+
+  // Fire pre-shutdown callbacks once, after recording has stopped.
+  // Useful for returning hardware to safe positions while post-processing runs.
+  if (!shutdown_callbacks_fired_) {
+    shutdown_callbacks_fired_ = true;
+    for (const auto& cb : pre_shutdown_cbs_) {
+      try {
+        cb();
+      } catch (const std::exception& e) {
+        std::cerr << "Pre-shutdown callback error: " << e.what() << std::endl;
+      }
+    }
+  }
 }
 
 void SessionManager::add_producer(
@@ -173,6 +186,17 @@ bool SessionManager::start_episode() {
   // Capture initial record count for this episode (for stats delta calculation)
   episode_start_record_count_ = current_sink_->processed_count();
 
+  // Helper to tear down push producers, sink, and backend on early abort
+  auto cleanup_and_abort = [&]() -> bool {
+    for (const auto& ppe : push_producer_entries_) {
+      ppe.producer->stop();
+    }
+    current_sink_->stop();
+    current_sink_.reset();
+    current_backend_.reset();
+    return false;
+  };
+
   // Start push producers (own threads, emit into current sink)
   // Capture shared_ptr to ensure Sink lifetime outlives any in-flight emit callbacks
   std::shared_ptr<io::Sink> sink_shared = current_sink_;
@@ -184,14 +208,21 @@ bool SessionManager::start_episode() {
     });
     if (!started) {
       std::cerr << "Failed to start push producer; aborting episode startup." << std::endl;
-      // Stop any push producers that were already started
-      for (const auto& cleanup_ppe : push_producer_entries_) {
-        cleanup_ppe.producer->stop();
+      return cleanup_and_abort();
+    }
+  }
+
+  // Invoke pre-episode callbacks (after sink ready, before scheduler)
+  for (const auto& cb : pre_episode_cbs_) {
+    try {
+      if (!cb()) {
+        std::cerr << "Pre-episode callback returned false; aborting episode." << std::endl;
+        return cleanup_and_abort();
       }
-      current_sink_->stop();
-      current_sink_.reset();
-      current_backend_.reset();
-      return false;
+    } catch (const std::exception& e) {
+      std::cerr << "Pre-episode callback threw: " << e.what()
+                << "; aborting episode." << std::endl;
+      return cleanup_and_abort();
     }
   }
 
@@ -243,6 +274,15 @@ bool SessionManager::start_episode() {
   preprocessing_duration_s_ =
     std::chrono::duration<double>(prep_end_time - prep_start_time).count();
   std::cout << "Episode " << next_episode_index_ << " started." << std::endl;
+
+  // Invoke episode-started callbacks
+  for (const auto& cb : episode_started_cbs_) {
+    try {
+      cb();
+    } catch (const std::exception& e) {
+      std::cerr << "Episode-started callback error: " << e.what() << std::endl;
+    }
+  }
 
   return true;
 }
@@ -320,13 +360,16 @@ void SessionManager::stop_episode() {
   }
   auto_stop_cv_.notify_all();
 
-  // Invoke callback if set (after episode is fully stopped and stats are available)
-  // Note: We do this outside the main lock to avoid blocking episode operations
-  // The callback will call stats() which has its own locking
-  if (episode_complete_callback_) {
-    // Get final stats to pass to callback
-    Stats final_stats = stats();
-    episode_complete_callback_(final_stats);
+  // Compute final stats while we still hold the lock
+  Stats final_stats = stats_unlocked();
+
+  // Invoke episode-ended callbacks
+  for (const auto& cb : episode_ended_cbs_) {
+    try {
+      cb(final_stats);
+    } catch (const std::exception& e) {
+      std::cerr << "Episode-ended callback error: " << e.what() << std::endl;
+    }
   }
 }
 
@@ -364,9 +407,7 @@ bool SessionManager::wait_for_auto_stop(std::chrono::milliseconds timeout) {
   return was_auto_stopped;
 }
 
-SessionManager::Stats SessionManager::stats() const {
-  std::lock_guard<std::mutex> lock(episode_mutex_);
-
+SessionManager::Stats SessionManager::stats_unlocked() const {
   Stats s;
   s.current_episode_index = next_episode_index_;
   s.episode_active = episode_active_;
@@ -411,14 +452,44 @@ SessionManager::Stats SessionManager::stats() const {
   }
 
   s.total_episodes_completed = total_episodes_completed_;
-
-
   return s;
 }
 
-void SessionManager::set_episode_complete_callback(EpisodeCompleteCallback callback) {
+SessionManager::Stats SessionManager::stats() const {
   std::lock_guard<std::mutex> lock(episode_mutex_);
-  episode_complete_callback_ = std::move(callback);
+  return stats_unlocked();
+}
+
+void SessionManager::on_pre_episode(PreEpisodeCallback cb) {
+  if (episode_active_) {
+    throw std::runtime_error(
+      "Cannot register callbacks while episode is active.");
+  }
+  pre_episode_cbs_.push_back(std::move(cb));
+}
+
+void SessionManager::on_episode_started(EpisodeStartedCallback cb) {
+  if (episode_active_) {
+    throw std::runtime_error(
+      "Cannot register callbacks while episode is active.");
+  }
+  episode_started_cbs_.push_back(std::move(cb));
+}
+
+void SessionManager::on_episode_ended(EpisodeEndedCallback cb) {
+  if (episode_active_) {
+    throw std::runtime_error(
+      "Cannot register callbacks while episode is active.");
+  }
+  episode_ended_cbs_.push_back(std::move(cb));
+}
+
+void SessionManager::on_pre_shutdown(PreShutdownCallback cb) {
+  if (episode_active_) {
+    throw std::runtime_error(
+      "Cannot register callbacks while episode is active.");
+  }
+  pre_shutdown_cbs_.push_back(std::move(cb));
 }
 
 std::shared_ptr<io::Backend> SessionManager::create_backend(
