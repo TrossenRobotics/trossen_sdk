@@ -355,15 +355,21 @@ records non-blocking; the drain thread batches up to 64 records per iteration an
 start_episode()
   1. Instantiate Backend (BackendRegistry)
   2. Create Sink (starts drain thread, opens backend file)
-  3. Create Scheduler; register one polling task per producer
-  4. Start duration monitor thread (if max_duration set)
+  3. Start push producers
+  4. Fire pre-episode callbacks (can abort episode)
+  5. Create Scheduler; register one polling task per producer
+  6. Start duration monitor thread (if max_duration set)
+  7. Fire episode-started callbacks
 
   --- recording in progress ---
 
 stop_episode()
-  1. Stop Scheduler (producers stop polling)
-  2. Stop Sink (drain remaining queue, flush and close backend)
-  3. Stop monitor; fire EpisodeCompleteCallback; increment episode index
+  1. Signal and join monitor thread
+  2. Stop push producers
+  3. Stop Scheduler (producers stop polling)
+  4. Stop Sink (drain remaining queue, flush and close backend)
+  5. Update state and increment episode index
+  6. Fire episode-ended callbacks
 ```
 
 Each episode gets its own Backend file handle, Sink queue, and Scheduler — no state is

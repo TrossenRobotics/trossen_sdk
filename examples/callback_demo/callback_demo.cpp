@@ -7,7 +7,7 @@
  *   on_pre_episode    — before scheduler starts (can abort)
  *   on_episode_started — after episode is fully active
  *   on_episode_ended   — after episode teardown, with stats
- *   on_pre_shutdown    — top of shutdown(), before stop_episode()
+ *   on_pre_shutdown    — during shutdown(), after episode stops
  */
 
 #include <chrono>

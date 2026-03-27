@@ -363,7 +363,7 @@ void SessionManager::stop_episode() {
   // Compute final stats while we still hold the lock
   Stats final_stats = stats_unlocked();
 
-  // Invoke episode-ended callbacks (includes legacy set_episode_complete_callback)
+  // Invoke episode-ended callbacks
   for (const auto& cb : episode_ended_cbs_) {
     try {
       cb(final_stats);
@@ -458,10 +458,6 @@ SessionManager::Stats SessionManager::stats_unlocked() const {
 SessionManager::Stats SessionManager::stats() const {
   std::lock_guard<std::mutex> lock(episode_mutex_);
   return stats_unlocked();
-}
-
-void SessionManager::set_episode_complete_callback(EpisodeCompleteCallback callback) {
-  on_episode_ended(std::move(callback));
 }
 
 void SessionManager::on_pre_episode(PreEpisodeCallback cb) {

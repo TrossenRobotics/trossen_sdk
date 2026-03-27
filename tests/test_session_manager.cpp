@@ -172,8 +172,8 @@ TEST_F(SessionManagerTest, PolledProducer_RecordsReachBackend) {
   EXPECT_GT(producer->stats().produced, 0);
 }
 
-// SM-10: Episode complete callback (deadlock fixed via stats_unlocked)
-TEST_F(SessionManagerTest, EpisodeCompleteCallback_Invoked) {
+// SM-10: on_episode_ended callback
+TEST_F(SessionManagerTest, OnEpisodeEnded_Invoked) {
   SessionManager sm;
 
   std::atomic<bool> callback_fired{false};
@@ -287,7 +287,7 @@ TEST_F(SessionManagerTest, OnEpisodeEnded_ExceptionDoesNotPreventOthers) {
 }
 
 // SM-15: on_pre_shutdown fires after episode stops
-TEST_F(SessionManagerTest, OnPreShutdown_FiresBeforeStop) {
+TEST_F(SessionManagerTest, OnPreShutdown_FiresAfterStop) {
   SessionManager sm;
 
   std::atomic<bool> shutdown_fired{false};

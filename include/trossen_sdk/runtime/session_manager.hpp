@@ -96,18 +96,24 @@ public:
    *
    * - Creates episode_NNNNNN.mcap file (6-digit zero-padded index)
    * - Instantiates Backend + Sink
+   * - Starts push producers
+   * - Fires pre-episode callbacks (can abort episode)
    * - Starts Scheduler with registered producer tasks
    * - Begins duration monitoring (if max_duration set)
+   * - Fires episode-started callbacks
    */
   bool start_episode();
 
   /**
    * @brief Stop the current episode
    *
+   * - Joins monitor thread
+   * - Stops push producers
    * - Stops Scheduler (producers stop polling)
    * - Drains Sink queue (writes all pending records)
    * - Flushes and closes Backend
    * - Updates episode index for next start
+   * - Fires episode-ended callbacks
    *
    * @note Safe to call if no episode running (no-op).
    */
@@ -191,27 +197,6 @@ public:
    */
   Stats stats() const;
 
-  /**
-   * @brief Callback type for episode completion notification
-   *
-   * Invoked when an episode completes (either by auto-stop or manual stop).
-   * Receives final statistics for the completed episode.
-   */
-  using EpisodeCompleteCallback = std::function<void(const Stats&)>;
-
-  /**
-   * @brief Set callback to be invoked when episode completes
-   *
-   * @param callback Function to call with final stats when episode ends
-   *
-   * @deprecated Use on_episode_ended() instead. This delegates to on_episode_ended().
-   *
-   * The callback is invoked from the monitoring thread or from stop_episode().
-   * It should be thread-safe and should not block for extended periods.
-   */
-  [[deprecated("Use on_episode_ended() instead")]]
-  void set_episode_complete_callback(EpisodeCompleteCallback callback);
-
   // =========================================================================
   // Lifecycle callbacks
   // =========================================================================
@@ -225,7 +210,7 @@ public:
   /// @brief Callback invoked after an episode has fully stopped.
   using EpisodeEndedCallback = std::function<void(const Stats&)>;
 
-  /// @brief Callback invoked at the top of shutdown(), before stop_episode().
+  /// @brief Callback invoked during shutdown(), after recording stops.
   using PreShutdownCallback = std::function<void()>;
 
   /**
