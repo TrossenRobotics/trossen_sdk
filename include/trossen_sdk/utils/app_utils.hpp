@@ -73,6 +73,7 @@ struct SanityCheckConfig {
   int camera_producers;         ///< Number of camera producers
   int camera_fps;               ///< Camera frame rate
   double tolerance_percent;     ///< Tolerance as percentage (default: 5.0%)
+  int depth_camera_producers;   ///< Number of depth-capable cameras (each emits 2x records)
 };
 
 /**

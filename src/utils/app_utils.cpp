@@ -191,41 +191,58 @@ bool perform_sanity_check(
   uint64_t actual_records,
   const SanityCheckConfig& config)
 {
-  // Calculate expected records based on actual duration
-  int expected_joint_records = static_cast<int>(
+  // Expected sink records: each producer enqueues 1 record per poll/frame.
+  // Depth cameras embed color + depth in a single ImageRecord, so they count
+  // as 1 sink record per frame (same as color-only cameras). The backend then
+  // writes the depth as a separate channel in the output file.
+  int expected_joint = static_cast<int>(
     config.joint_rate_hz * config.actual_duration_s * config.joint_producers);
-  int expected_image_records = static_cast<int>(
+  int expected_camera = static_cast<int>(
     config.camera_fps * config.actual_duration_s * config.camera_producers);
-  int expected_total = expected_joint_records + expected_image_records;
+  int expected_total = expected_joint + expected_camera;
 
-  // Calculate tolerance range
-  double tolerance_factor = 1.0 - (config.tolerance_percent / 100.0);
-  int min_expected = static_cast<int>(expected_total * tolerance_factor);
-  tolerance_factor = 1.0 + (config.tolerance_percent / 100.0);
-  int max_expected = static_cast<int>(expected_total * tolerance_factor);
+  // Backend output writes: depth cameras produce 2 channel writes per frame
+  int color_only = config.camera_producers - config.depth_camera_producers;
+  int expected_output_writes = expected_joint
+    + static_cast<int>(config.camera_fps * config.actual_duration_s * color_only)
+    + static_cast<int>(config.camera_fps * config.actual_duration_s *
+                       config.depth_camera_producers * 2);
 
-  // Print detailed check
-  std::cout << "\n[Sanity Check] Episode " << episode_index << ":\n";
-  std::cout << "  Actual duration:      " << std::fixed << std::setprecision(2)
-            << config.actual_duration_s << "s\n";
-  std::cout << "  Expected records:     ~" << expected_total
-            << " (" << expected_joint_records << " joints + "
-            << expected_image_records << " images)\n";
-  std::cout << "  Actual records:       " << actual_records << "\n";
-  std::cout << "  Tolerance range:      " << min_expected << " - " << max_expected << "\n";
+  // Tolerance range
+  double tol_lo = 1.0 - (config.tolerance_percent / 100.0);
+  double tol_hi = 1.0 + (config.tolerance_percent / 100.0);
+  int min_expected = static_cast<int>(expected_total * tol_lo);
+  int max_expected = static_cast<int>(expected_total * tol_hi);
 
   bool passed = (actual_records >= static_cast<uint64_t>(min_expected) &&
                  actual_records <= static_cast<uint64_t>(max_expected));
 
+  // Print report
+  std::cout << "\n[Sanity Check] Episode " << episode_index << ":\n";
+  std::cout << "  Duration:        " << std::fixed << std::setprecision(2)
+            << config.actual_duration_s << "s\n";
+  std::cout << "  Expected:        ~" << expected_total << " sink records ("
+            << expected_joint << " joints + "
+            << expected_camera << " camera frames)\n";
+  std::cout << "  Actual:          " << actual_records << " sink records\n";
+  std::cout << "  Tolerance:       " << min_expected << " - " << max_expected
+            << " (" << config.tolerance_percent << "%)\n";
+
   if (passed) {
-    std::cout << "  Status:               PASS (within "
-              << config.tolerance_percent << "% tolerance)\n";
+    std::cout << "  Status:          PASS\n";
   } else {
-    std::cout << "  Status:               WARNING (outside expected range)\n";
     double deviation =
       100.0 * (static_cast<double>(actual_records) - expected_total) / expected_total;
-    std::cout << "  Deviation:            " << std::fixed << std::setprecision(1)
-              << std::showpos << deviation << std::noshowpos << "%\n";
+    std::cout << "  Status:          WARNING (" << std::fixed << std::setprecision(1)
+              << std::showpos << deviation << std::noshowpos << "% deviation)\n";
+  }
+
+  // Depth info: show the distinction between sink records and output writes
+  if (config.depth_camera_producers > 0) {
+    std::cout << "\n  Depth cameras:   " << config.depth_camera_producers
+              << " of " << config.camera_producers << " cameras have depth enabled\n";
+    std::cout << "  Output writes:   ~" << expected_output_writes
+              << " (each depth frame writes color + depth as 2 channels)\n";
   }
 
   return passed;

@@ -402,7 +402,8 @@ int main(int argc, char** argv) {
       cfg.joint_rate_hz,
       1,  // 1 camera
       cfg.camera_fps,
-      5.0  // 5% tolerance
+      5.0,  // 5% tolerance
+      0     // no depth cameras
     };
     trossen::utils::perform_sanity_check(
       recording_episode_index,
