@@ -125,7 +125,7 @@ int main(int argc, char** argv) {
   std::vector<std::string> config_lines = {
     "Config file:          " + config_path,
     "Root directory:       " + root,
-    "Backend:              mcap",
+    "Backend:              " + cfg.session.backend_type,
     "Robot name:           " + cfg.robot_name
   };
   for (const auto& [id, arm] : cfg.hardware.arms) {
@@ -392,7 +392,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  // shutdown() calls stop_episode() (fires on_episode_ended) then on_pre_shutdown
+  // shutdown() calls stop_episode() (no-op if already stopped) then on_pre_shutdown
   mgr.shutdown();
 
   const auto final_stats = mgr.stats();

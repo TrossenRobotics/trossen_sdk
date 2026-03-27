@@ -19,11 +19,10 @@
  *   ./trossen_mobile_ai
  *   ./trossen_mobile_ai --config examples/trossen_mobile_ai/config.json
  *   ./trossen_mobile_ai --set hardware.arms.leader_left.ip_address=192.168.1.3
- *   ./trossen_mobile_ai --set session.max_duration=30 --set producers.mobile_base.poll_rate_hz=60
+ *   ./trossen_mobile_ai --set session.max_duration=30 --set session.max_episodes=10
  *   ./trossen_mobile_ai --dump-config
  */
 
-#include <atomic>
 #include <chrono>
 #include <filesystem>
 #include <iostream>
@@ -44,7 +43,6 @@
 #include "trossen_sdk/hw/base/slate_base_component.hpp"
 #include "trossen_sdk/hw/base/slate_base_producer.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
-#include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
@@ -442,7 +440,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  // shutdown() calls stop_episode() (fires on_episode_ended) then on_pre_shutdown
+  // shutdown() calls stop_episode() (no-op if already stopped) then on_pre_shutdown
   mgr.shutdown();
 
   const auto final_stats = mgr.stats();

@@ -19,7 +19,7 @@
  *   ./trossen_stationary_ai
  *   ./trossen_stationary_ai --config examples/trossen_stationary_ai/config.json
  *   ./trossen_stationary_ai --set hardware.arms.leader_left.ip_address=192.168.1.3
- *   ./trossen_stationary_ai --set session.max_duration=30 --set session.backend_type=lerobot
+ *   ./trossen_stationary_ai --set session.max_duration=30 --set session.backend_type=lerobot_v2
  *   ./trossen_stationary_ai --dump-config
  */
 
@@ -40,7 +40,6 @@
 #include "trossen_sdk/hw/arm/trossen_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
-#include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
@@ -394,7 +393,7 @@ int main(int argc, char** argv) {
     }
   }
 
-  // shutdown() calls stop_episode() (fires on_episode_ended) then on_pre_shutdown
+  // shutdown() calls stop_episode() (no-op if already stopped) then on_pre_shutdown
   mgr.shutdown();
 
   const auto final_stats = mgr.stats();
