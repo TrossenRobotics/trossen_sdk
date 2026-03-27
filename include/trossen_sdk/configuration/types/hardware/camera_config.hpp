@@ -14,73 +14,50 @@
 namespace trossen::configuration {
 
 /**
- * @brief Configuration for a single camera hardware component
+ * @brief Configuration for a single camera (RealSense, OpenCV, or ZED)
  *
  * The @p type field selects which hardware component is created via HardwareRegistry.
- * Supported types: @c "realsense_camera", @c "opencv_camera", @c "zed_camera".
+ * Use @c "realsense_camera" for RealSense cameras, @c "opencv_camera" for
+ * any V4L2 / USB webcam accessible through OpenCV, or @c "zed_camera" for
+ * StereoLabs ZED stereo cameras.
  *
- * Common fields across all camera types:
- *   - @c id   — logical identifier used as stream_id (e.g. "camera_0")
- *   - @c type — hardware registry key
- *   - @c fps  — capture frame rate
- *
- * Resolution configuration varies by camera type:
- *
- * **RealSense / OpenCV** — set resolution via @c width and @c height in pixels.
- * Any resolution the hardware supports can be requested; the driver will
- * negotiate the closest match. Common examples: 640x480, 1280x720, 1920x1080.
- *
- * **ZED** — set resolution via the @c "resolution" string in the @c extra
- * passthrough field. Supported values (default: "HD720"):
- *   - "HD2K"   — 2208x1242
- *   - "HD1200" — 1920x1200
- *   - "HD1080" — 1920x1080
- *   - "HD720"  — 1280x720
- *   - "SVGA"   — 960x600
- *   - "VGA"    — 672x376
- *   - "AUTO"   — selected by the SDK based on the camera model
- *
- * Depth support:
- *   - **RealSense** — enable with @c use_depth. Uses the same width/height as color.
- *   - **ZED** — enable with @c use_depth and set @c "depth_mode" in extra.
- *     Supported depth modes: "NEURAL_LIGHT", "NEURAL", "NEURAL_PLUS", "NONE".
- *     Legacy modes "PERFORMANCE", "QUALITY", "ULTRA" are accepted but deprecated
- *     in ZED SDK 5.x — prefer "NEURAL_LIGHT", "NEURAL", "NEURAL_PLUS" respectively.
- *   - **OpenCV** — depth not supported.
- *
- * Camera-type-specific fields:
- *   - @c serial_number — device serial (RealSense: string, ZED: numeric, both accepted)
- *   - @c device_index  — V4L2 device index (OpenCV only)
- *   - @c backend       — capture backend, "v4l2" or "any" (OpenCV only)
- *   - @c force_hardware_reset — reset device on open (RealSense only)
- *   - @c extra         — passthrough JSON for fields not modelled above (e.g. ZED
- *                         "resolution", "depth_mode"); merged into the config sent
- *                         to HardwareComponent::configure()
- *
- * JSON examples:
+ * JSON format (RealSense):
  * @code
- * // RealSense
  * {
- *   "id": "camera_0", "type": "realsense_camera",
+ *   "id": "camera_0",
+ *   "type": "realsense_camera",
  *   "serial_number": "128422271347",
- *   "width": 640, "height": 480, "fps": 30,
- *   "use_depth": false, "force_hardware_reset": false
+ *   "width": 640,
+ *   "height": 480,
+ *   "fps": 30,
+ *   "use_depth": false,
+ *   "force_hardware_reset": false
  * }
+ * @endcode
  *
- * // OpenCV
+ * JSON format (OpenCV):
+ * @code
  * {
- *   "id": "camera_0", "type": "opencv_camera",
+ *   "id": "camera_0",
+ *   "type": "opencv_camera",
  *   "device_index": 0,
- *   "width": 640, "height": 480, "fps": 30,
+ *   "width": 640,
+ *   "height": 480,
+ *   "fps": 30,
  *   "backend": "v4l2"
  * }
+ * @endcode
  *
- * // ZED
+ * JSON format (ZED):
+ * @code
  * {
- *   "id": "zed_0", "type": "zed_camera",
- *   "serial_number": "12345678", "fps": 30,
+ *   "id": "zed_0",
+ *   "type": "zed_camera",
+ *   "serial_number": "12345678",
+ *   "fps": 30,
  *   "resolution": "HD720",
- *   "use_depth": true, "depth_mode": "NEURAL"
+ *   "use_depth": true,
+ *   "depth_mode": "NEURAL"
  * }
  * @endcode
  */
@@ -94,7 +71,7 @@ struct CameraConfig {
   // TODO(shantanuparab-tr): Unify serial_number and device_index into a
   // single device identifier field (serial string or numeric index).
 
-  /// @brief Device serial number (RealSense: string, ZED: numeric — both accepted)
+  /// @brief Camera serial number (RealSense: string, ZED: numeric — both accepted)
   std::string serial_number{""};
 
   /// @brief OpenCV device index (OpenCV only)
@@ -107,10 +84,10 @@ struct CameraConfig {
   //       a resolution string (e.g. "720x480", "HD720", "SVGA") that maps to
   //       width/height for RealSense/OpenCV and to the native enum for ZED.
 
-  /// @brief Capture width in pixels (RealSense / OpenCV; ZED uses "resolution" in extra)
+  /// @brief Capture width in pixels (RealSense / OpenCV only; ZED uses "resolution" in extra)
   int width{640};
 
-  /// @brief Capture height in pixels (RealSense / OpenCV; ZED uses "resolution" in extra)
+  /// @brief Capture height in pixels (RealSense / OpenCV only; ZED uses "resolution" in extra)
   int height{480};
 
   /// @brief Capture frame rate
