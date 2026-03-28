@@ -1,0 +1,195 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 790" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#475569"/>
+    </marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#16a34a"/>
+    </marker>
+    <marker id="arrow-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#d97706"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="790" fill="#f8fafc" rx="8"/>
+
+  <!-- Title (centered) -->
+  <text x="480" y="28" text-anchor="middle" font-size="20" font-weight="700" fill="#0f172a">Trossen SDK Architecture</text>
+
+  <!-- Legend (top, perfectly centered at x=480) -->
+  <rect x="320" y="40" width="320" height="22" rx="4" fill="#ffffff" stroke="#e2e8f0" stroke-width="1"/>
+  <line x1="326" y1="52" x2="342" y2="52" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="348" y="55" font-size="8" fill="#64748b">Control</text>
+  <line x1="396" y1="52" x2="412" y2="52" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="418" y="55" font-size="8" fill="#64748b">Data flow</text>
+  <line x1="474" y1="52" x2="490" y2="52" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <text x="496" y="55" font-size="8" fill="#64748b">Output to disk</text>
+  <line x1="562" y1="52" x2="578" y2="52" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+  <text x="584" y="55" font-size="8" fill="#64748b">Conversion</text>
+
+  <!-- ==================== ROW 1: JSON Config ==================== -->
+  <rect x="340" y="78" width="280" height="44" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="480" y="105" text-anchor="middle" font-size="13" font-weight="600" fill="#92400e">JSON Config  +  CLI Overrides</text>
+
+  <!-- Arrow: Config -> SessionManager -->
+  <line x1="480" y1="122" x2="480" y2="152" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ==================== ROW 2: Session Manager ==================== -->
+  <rect x="280" y="155" width="400" height="50" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <text x="480" y="178" text-anchor="middle" font-size="14" font-weight="700" fill="#f1f5f9">SessionManager</text>
+  <text x="480" y="195" text-anchor="middle" font-size="10" fill="#94a3b8">Episode lifecycle  |  Duration limits  |  Auto-stop  |  Callbacks</text>
+
+  <!-- Arrow: SessionManager -> Scheduler (left) -->
+  <line x1="380" y1="205" x2="220" y2="255" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <!-- Arrow: SessionManager -> Sink (center) -->
+  <line x1="480" y1="205" x2="480" y2="255" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <!-- Arrow: SessionManager -> Backend (right) -->
+  <line x1="580" y1="205" x2="740" y2="255" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+  <!-- ==================== ROW 3: Scheduler / Sink / Backend ==================== -->
+
+  <!-- Scheduler -->
+  <rect x="100" y="258" width="240" height="50" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="220" y="280" text-anchor="middle" font-size="13" font-weight="600" fill="#5b21b6">Scheduler</text>
+  <text x="220" y="296" text-anchor="middle" font-size="10" fill="#7c3aed">Dual-lane timing  |  Spin-wait</text>
+
+  <!-- Sink -->
+  <rect x="370" y="258" width="220" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="480" y="280" text-anchor="middle" font-size="13" font-weight="600" fill="#1e40af">Sink</text>
+  <text x="480" y="296" text-anchor="middle" font-size="10" fill="#2563eb">Lock-free MPSC queue  |  Batching</text>
+
+  <!-- Backend -->
+  <rect x="620" y="258" width="240" height="50" rx="6" fill="#dcfce7" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="740" y="280" text-anchor="middle" font-size="13" font-weight="600" fill="#166534">Backend</text>
+  <text x="740" y="296" text-anchor="middle" font-size="10" fill="#16a34a">Serialization  |  One per episode</text>
+
+  <!-- Arrow: Sink -> Backend -->
+  <line x1="590" y1="283" x2="618" y2="283" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="604" y="276" text-anchor="middle" font-size="9" fill="#64748b">drain</text>
+
+  <!-- ==================== ROW 4: Producers ==================== -->
+
+  <!-- Producer group background (taller, title has room above arrows) -->
+  <rect x="60" y="340" width="520" height="125" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="1" stroke-dasharray="4,3"/>
+
+  <!-- Polled Producer (includes Teleop) -->
+  <rect x="80" y="395" width="240" height="56" rx="5" fill="#ffffff" stroke="#fb923c" stroke-width="1.2"/>
+  <text x="200" y="417" text-anchor="middle" font-size="11" font-weight="600" fill="#c2410c">PolledProducer</text>
+  <text x="200" y="433" text-anchor="middle" font-size="9" fill="#9a3412">Arms  |  USB Cameras  |  Teleop</text>
+  <text x="200" y="445" text-anchor="middle" font-size="9" fill="#9a3412">up to 200 Hz</text>
+
+  <!-- Push Producer -->
+  <rect x="340" y="395" width="220" height="56" rx="5" fill="#ffffff" stroke="#fb923c" stroke-width="1.2"/>
+  <text x="450" y="417" text-anchor="middle" font-size="11" font-weight="600" fill="#c2410c">PushProducer</text>
+  <text x="450" y="433" text-anchor="middle" font-size="9" fill="#9a3412">ZED  | RealSense</text>
+  <text x="450" y="445" text-anchor="middle" font-size="9" fill="#9a3412">Event-driven sensors</text>
+
+  <!-- Arrows drawn IN FRONT of producer boxes -->
+
+  <!-- Arrow: Scheduler -> PolledProducer (polls - vertical) -->
+  <line x1="200" y1="308" x2="200" y2="392" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+
+  <!-- Arrow: PolledProducer -> Sink (emit records - vertical segments) -->
+  <path d="M 300 395 L 300 335 L 420 335 L 420 310" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="360" y="330" text-anchor="middle" font-size="9" fill="#2563eb">emit records</text>
+
+  <!-- Arrow: PushProducer -> Sink (direct push - vertical) -->
+  <line x1="470" y1="395" x2="470" y2="310" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <text x="484" y="355" font-size="9" fill="#2563eb">push</text>
+
+  <!-- Producer group title (drawn LAST, in front of everything) -->
+  <rect x="76" y="348" width="220" height="15" rx="3" fill="#fff7ed"/>
+  <text x="80" y="360" font-size="11" font-weight="600" fill="#c2410c">Producers (via ProducerRegistry)</text>
+
+  <!-- polls label (near Scheduler box) -->
+  <text x="208" y="322" font-size="9" fill="#2563eb">polls</text>
+
+  <!-- ==================== ROW 4 RIGHT: Backend types ==================== -->
+
+  <!-- Backend types group (TrossenMCAP only + custom) -->
+  <rect x="620" y="328" width="280" height="130" rx="8" fill="#f0fdf4" stroke="#16a34a" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="640" y="348" font-size="11" font-weight="600" fill="#166534">Backends (via BackendRegistry)</text>
+
+  <!-- TrossenMCAP -->
+  <rect x="640" y="358" width="240" height="44" rx="5" fill="#ffffff" stroke="#22c55e" stroke-width="1.2"/>
+  <text x="760" y="378" text-anchor="middle" font-size="11" font-weight="600" fill="#166534">TrossenMCAP</text>
+  <text x="760" y="392" text-anchor="middle" font-size="9" fill="#16a34a">High-performance binary recording</text>
+
+  <!-- Custom Backend -->
+  <rect x="690" y="410" width="150" height="38" rx="5" fill="#ffffff" stroke="#86efac" stroke-width="1.2" stroke-dasharray="3,2"/>
+  <text x="765" y="428" text-anchor="middle" font-size="10" fill="#4ade80">Your Custom Backend</text>
+  <text x="765" y="440" text-anchor="middle" font-size="9" fill="#86efac">via REGISTER_BACKEND</text>
+
+  <!-- ==================== ROW 5: Hardware ==================== -->
+
+  <!-- Hardware group background -->
+  <rect x="60" y="485" width="840" height="110" rx="8" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1" stroke-dasharray="4,3"/>
+  <text x="80" y="505" font-size="11" font-weight="600" fill="#475569">Hardware Layer (via HardwareRegistry)</text>
+
+  <!-- Arms -->
+  <rect x="80" y="515" width="128" height="66" rx="6" fill="#ffffff" stroke="#64748b" stroke-width="1.2"/>
+  <text x="144" y="537" text-anchor="middle" font-size="12" font-weight="600" fill="#334155">Robot Arms</text>
+  <text x="144" y="553" text-anchor="middle" font-size="9" fill="#64748b">wxai_v0 Leader/Follower</text>
+  <text x="144" y="567" text-anchor="middle" font-size="9" fill="#64748b">SO-101</text>
+
+  <!-- ZED  Cameras -->
+  <rect x="220" y="515" width="128" height="66" rx="6" fill="#ffffff" stroke="#64748b" stroke-width="1.2"/>
+  <text x="284" y="537" text-anchor="middle" font-size="12" font-weight="600" fill="#334155">ZED Cameras</text>
+  <text x="284" y="553" text-anchor="middle" font-size="9" fill="#64748b">Stereolabs ZED</text>
+  <text x="284" y="567" text-anchor="middle" font-size="9" fill="#64748b">Color + Depth</text>
+  <!-- Realsense Cameras -->
+  <rect x="640" y="515" width="128" height="66" rx="6" fill="#ffffff" stroke="#64748b" stroke-width="1.2"/>
+  <text x="704" y="537" text-anchor="middle" font-size="12" font-weight="600" fill="#334155">RealSense</text>
+  <text x="704" y="553" text-anchor="middle" font-size="9" fill="#64748b">D400 Series</text>
+  <text x="704" y="567" text-anchor="middle" font-size="9" fill="#64748b">Color + Depth</text>
+
+  <!-- USB Cameras -->
+  <rect x="360" y="515" width="128" height="66" rx="6" fill="#ffffff" stroke="#64748b" stroke-width="1.2"/>
+  <text x="424" y="537" text-anchor="middle" font-size="12" font-weight="600" fill="#334155">USB Cameras</text>
+  <text x="424" y="553" text-anchor="middle" font-size="9" fill="#64748b">OpenCV / V4L2</text>
+  <text x="424" y="567" text-anchor="middle" font-size="9" fill="#64748b">Any compatible</text>
+
+  <!-- SLATE Base -->
+  <rect x="500" y="515" width="128" height="66" rx="6" fill="#ffffff" stroke="#64748b" stroke-width="1.2"/>
+  <text x="564" y="537" text-anchor="middle" font-size="12" font-weight="600" fill="#334155">SLATE Base</text>
+  <text x="564" y="553" text-anchor="middle" font-size="9" fill="#64748b">Differential drive</text>
+  <text x="564" y="567" text-anchor="middle" font-size="9" fill="#64748b">2D odometry</text>
+
+  <!-- Custom Hardware -->
+  <rect x="780" y="515" width="110" height="66" rx="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="3,2"/>
+  <text x="835" y="537" text-anchor="middle" font-size="11" font-weight="600" fill="#94a3b8">Your Sensor</text>
+  <text x="835" y="555" text-anchor="middle" font-size="9" fill="#94a3b8">REGISTER_HARDWARE</text>
+  <text x="835" y="569" text-anchor="middle" font-size="9" fill="#94a3b8">macro</text>
+
+  <!-- Arrow: Hardware Layer -> Producers (single arrow from group) -->
+  <line x1="300" y1="485" x2="300" y2="468" stroke="#475569" stroke-width="1.3" marker-end="url(#arrow)"/>
+
+  <!-- ==================== ROW 6: Output Pipeline (full width, spacious) ==================== -->
+
+  <!-- Arrow: Backends -> MCAP Episodes (green, routed via right margin) -->
+  <path d="M 900 393 L 930 393 L 930 633 L 840 633" fill="none" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <text x="942" y="520" text-anchor="middle" font-size="9" fill="#16a34a" transform="rotate(90,942,520)">write to disk</text>
+
+  <!-- MCAP Episodes box -->
+  <rect x="100" y="615" width="740" height="36" rx="6" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+  <text x="470" y="638" text-anchor="middle" font-size="12" font-weight="600" fill="#065f46">TrossenMCAP Episodes</text>
+
+  <!-- Arrow: MCAP -> Conversion -->
+  <line x1="470" y1="651" x2="470" y2="680" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+
+  <!-- Conversion Script box -->
+  <rect x="140" y="683" width="660" height="38" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="470" y="699" text-anchor="middle" font-size="9" fill="#b45309">Conversion Script</text>
+  <text x="470" y="713" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">trossen_mcap_to_lerobot_v2</text>
+
+  <!-- Arrow: Conversion -> Training Dataset -->
+  <line x1="470" y1="721" x2="470" y2="750" stroke="#d97706" stroke-width="1.5" marker-end="url(#arrow-amber)"/>
+
+  <!-- Training-Ready Dataset -->
+  <rect x="100" y="753" width="740" height="28" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+  <text x="470" y="771" text-anchor="middle" font-size="11" font-weight="600" fill="#065f46">Training-Ready Dataset  —  Parquet  +  MP4  +  info.json  |  LeRobot V2</text>
+</svg>

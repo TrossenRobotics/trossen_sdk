@@ -1,0 +1,176 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 900" font-family="Inter, system-ui, sans-serif">
+  <defs>
+    <!-- Arrow markers colored to match source blocks -->
+    <marker id="arr-gray" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#64748b"/>
+    </marker>
+    <marker id="arr-orange" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#f97316"/>
+    </marker>
+    <marker id="arr-blue" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#2563eb"/>
+    </marker>
+    <marker id="arr-dark" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#334155"/>
+    </marker>
+    <marker id="arr-purple" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#a855f7"/>
+    </marker>
+    <marker id="arr-green" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#059669"/>
+    </marker>
+    <marker id="arr-amber" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#d97706"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="960" height="900" fill="#f8fafc" rx="8"/>
+
+  <!-- Title -->
+  <text x="480" y="36" text-anchor="middle" font-size="20" font-weight="700" fill="#0f172a">TrossenMCAP Data Flow</text>
+  <text x="480" y="56" text-anchor="middle" font-size="12" fill="#64748b">From hardware sensors to training-ready datasets</text>
+
+  <!-- ==================== ROW 1: Hardware Sources (gray) ==================== -->
+  <rect x="40" y="75" width="880" height="75" rx="8" fill="#f1f5f9" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="60" y="95" font-size="11" font-weight="600" fill="#475569">Hardware Sources</text>
+
+  <rect x="60" y="105" width="200" height="36" rx="5" fill="#fff" stroke="#64748b" stroke-width="1.2"/>
+  <text x="160" y="120" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">Robot Arms</text>
+  <text x="160" y="134" text-anchor="middle" font-size="9" fill="#64748b">Trossen WidowX AI</text>
+
+  <rect x="280" y="105" width="310" height="36" rx="5" fill="#fff" stroke="#64748b" stroke-width="1.2"/>
+  <text x="435" y="120" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">Cameras</text>
+  <text x="435" y="134" text-anchor="middle" font-size="9" fill="#64748b">Stereolabs ZED | RealSense |  OpenCV</text>
+
+  <rect x="610" y="105" width="130" height="36" rx="5" fill="#fff" stroke="#64748b" stroke-width="1.2"/>
+  <text x="675" y="120" text-anchor="middle" font-size="11" font-weight="600" fill="#334155">Mobile Bases</text>
+  <text x="675" y="134" text-anchor="middle" font-size="9" fill="#64748b">SLATE</text>
+
+  <rect x="760" y="105" width="140" height="36" rx="5" fill="#fff" stroke="#94a3b8" stroke-width="1.2" stroke-dasharray="3,2"/>
+  <text x="830" y="128" text-anchor="middle" font-size="11" fill="#94a3b8">Your Sensor</text>
+
+  <!-- ==================== ROW 2: Producers emit typed Records (orange) ==================== -->
+  <!-- Group background drawn first (taller to give title room above arrows) -->
+  <rect x="40" y="165" width="880" height="118" rx="8" fill="#fff7ed" stroke="#f97316" stroke-width="1"/>
+
+  <!-- Record boxes (taller, with space above text for arrowheads) -->
+  <rect x="60" y="205" width="260" height="48" rx="5" fill="#fff" stroke="#fb923c" stroke-width="1.2"/>
+  <rect x="330" y="205" width="270" height="48" rx="5" fill="#fff" stroke="#fb923c" stroke-width="1.2"/>
+  <rect x="610" y="205" width="260" height="48" rx="5" fill="#fff" stroke="#fb923c" stroke-width="1.2"/>
+
+  <!-- Arrows: Hardware -> Record boxes (gray, land at box top) -->
+  <line x1="160" y1="141" x2="190" y2="202" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr-gray)"/>
+  <line x1="435" y1="141" x2="465" y2="202" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr-gray)"/>
+  <line x1="675" y1="141" x2="740" y2="202" stroke="#64748b" stroke-width="1.3" marker-end="url(#arr-gray)"/>
+
+  <!-- Group title (drawn last, in front of arrows, with matching group background) -->
+  <rect x="56" y="171" width="220" height="15" rx="3" fill="#fff7ed"/>
+  <text x="60" y="183" font-size="11" font-weight="600" fill="#c2410c">Producers emit typed Records</text>
+
+  <!-- Record box text (on the arrow line, above the arrowhead) -->
+  <rect x="120" y="213" width="140" height="27" rx="3" fill="#fff"/>
+  <text x="190" y="224" text-anchor="middle" font-size="10" font-weight="600" fill="#c2410c">JointStateRecord</text>
+  <text x="190" y="237" text-anchor="middle" font-size="9" fill="#9a3412">pos, vel, effort</text>
+
+  <rect x="380" y="213" width="170" height="27" rx="3" fill="#fff"/>
+  <text x="465" y="224" text-anchor="middle" font-size="10" font-weight="600" fill="#c2410c">ImageRecord</text>
+  <text x="465" y="237" text-anchor="middle" font-size="9" fill="#9a3412">w, h, encoding, Mat  |  optional depth + scale</text>
+
+  <rect x="668" y="213" width="144" height="27" rx="3" fill="#fff"/>
+  <text x="740" y="224" text-anchor="middle" font-size="10" font-weight="600" fill="#c2410c">Odometry2DRecord</text>
+  <text x="740" y="237" text-anchor="middle" font-size="9" fill="#9a3412">pose + twist</text>
+
+  <!-- Arrows: Records -> Sink (orange bus with breathing room) -->
+  <line x1="190" y1="253" x2="190" y2="268" stroke="#f97316" stroke-width="1.3"/>
+  <line x1="465" y1="253" x2="465" y2="268" stroke="#f97316" stroke-width="1.3"/>
+  <line x1="740" y1="253" x2="740" y2="268" stroke="#f97316" stroke-width="1.3"/>
+  <line x1="190" y1="268" x2="740" y2="268" stroke="#f97316" stroke-width="1.3"/>
+  <line x1="480" y1="268" x2="480" y2="295" stroke="#f97316" stroke-width="1.3" marker-end="url(#arr-orange)"/>
+
+  <!-- ==================== ROW 3: Sink (blue) ==================== -->
+  <rect x="260" y="298" width="440" height="44" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="480" y="319" text-anchor="middle" font-size="13" font-weight="600" fill="#1e40af">Sink — Lock-Free MPSC Queue</text>
+  <text x="480" y="334" text-anchor="middle" font-size="10" fill="#3b82f6">Batch drain (up to 64 records)  |  Background thread  |  Zero blocking</text>
+
+  <!-- Arrow: Sink -> Backend (blue, from blue sink block) -->
+  <line x1="480" y1="342" x2="480" y2="373" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arr-blue)"/>
+
+  <!-- ==================== ROW 4: TrossenMCAP Backend (dark) ==================== -->
+  <rect x="140" y="376" width="680" height="52" rx="8" fill="#1e293b" stroke="#334155" stroke-width="1.5"/>
+  <text x="480" y="400" text-anchor="middle" font-size="14" font-weight="700" fill="#f1f5f9">TrossenMCAP Backend</text>
+  <text x="480" y="418" text-anchor="middle" font-size="10" fill="#94a3b8">Type dispatch  |  Protobuf serialization  |  Lazy channel creation  |  Schema embedding</text>
+
+  <!-- Arrows: Backend -> Serialization (dark, from dark backend block) -->
+  <line x1="300" y1="428" x2="300" y2="458" stroke="#334155" stroke-width="1.3" marker-end="url(#arr-dark)"/>
+  <line x1="480" y1="428" x2="480" y2="458" stroke="#334155" stroke-width="1.3" marker-end="url(#arr-dark)"/>
+  <line x1="660" y1="428" x2="660" y2="458" stroke="#334155" stroke-width="1.3" marker-end="url(#arr-dark)"/>
+
+  <!-- ==================== ROW 5: Protobuf Serialization (purple) ==================== -->
+  <rect x="40" y="461" width="880" height="80" rx="8" fill="#faf5ff" stroke="#a855f7" stroke-width="1"/>
+  <text x="60" y="481" font-size="11" font-weight="600" fill="#7e22ce">Protobuf3 Serialization (schemas compiled at build time, embedded in MCAP)</text>
+
+  <rect x="60" y="491" width="240" height="40" rx="5" fill="#fff" stroke="#c084fc" stroke-width="1.2"/>
+  <text x="180" y="509" text-anchor="middle" font-size="10" font-weight="600" fill="#7e22ce">JointState.proto</text>
+  <text x="180" y="523" text-anchor="middle" font-size="9" fill="#a855f7">ts, seq, positions[], velocities[], efforts[]</text>
+
+  <rect x="320" y="491" width="240" height="40" rx="5" fill="#fff" stroke="#c084fc" stroke-width="1.2"/>
+  <text x="440" y="509" text-anchor="middle" font-size="10" font-weight="600" fill="#7e22ce">Foxglove RawImage</text>
+  <text x="440" y="523" text-anchor="middle" font-size="9" fill="#a855f7">ts, w, h, encoding, step, data(bytes)</text>
+
+  <rect x="580" y="491" width="240" height="40" rx="5" fill="#fff" stroke="#c084fc" stroke-width="1.2"/>
+  <text x="700" y="509" text-anchor="middle" font-size="10" font-weight="600" fill="#7e22ce">Odometry2D.proto</text>
+  <text x="700" y="523" text-anchor="middle" font-size="9" fill="#a855f7">ts, seq, Pose2D, Twist2D</text>
+
+  <!-- Arrow: Serialization -> MCAP File (purple, from purple protobuf block) -->
+  <line x1="480" y1="541" x2="480" y2="571" stroke="#a855f7" stroke-width="1.5" marker-end="url(#arr-purple)"/>
+
+  <!-- ==================== ROW 6: MCAP Episode File (green) ==================== -->
+  <rect x="100" y="574" width="760" height="120" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+  <text x="480" y="598" text-anchor="middle" font-size="14" font-weight="700" fill="#065f46">episode_NNNNNN.mcap</text>
+
+  <!-- Metadata block -->
+  <rect x="120" y="611" width="340" height="70" rx="5" fill="#fff" stroke="#34d399" stroke-width="1.2"/>
+  <text x="290" y="629" text-anchor="middle" font-size="10" font-weight="600" fill="#065f46">Metadata Record</text>
+  <text x="290" y="643" text-anchor="middle" font-size="9" fill="#059669">dataset_id, robot_name</text>
+  <text x="290" y="655" text-anchor="middle" font-size="9" fill="#059669">SDK version, joint names</text>
+  <text x="290" y="667" text-anchor="middle" font-size="9" fill="#059669">camera specs, base flag</text>
+
+  <!-- Channels block -->
+  <rect x="480" y="611" width="360" height="70" rx="5" fill="#fff" stroke="#34d399" stroke-width="1.2"/>
+  <text x="660" y="629" text-anchor="middle" font-size="10" font-weight="600" fill="#065f46">Channels (one per stream)</text>
+  <text x="660" y="643" text-anchor="middle" font-size="9" fill="#059669">/leader/joints/state  (JointState @ 200Hz)</text>
+  <text x="660" y="655" text-anchor="middle" font-size="9" fill="#059669">/cameras/main/image  (RawImage @ 30fps)</text>
+  <text x="660" y="667" text-anchor="middle" font-size="9" fill="#059669">/base/odom/state  (Odometry2D @ 50Hz)</text>
+
+  <!-- Arrow: MCAP -> Converter (green, from green MCAP block) -->
+  <line x1="480" y1="694" x2="480" y2="724" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-green)"/>
+
+  <!-- Converter box -->
+  <rect x="280" y="727" width="400" height="38" rx="6" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="480" y="743" text-anchor="middle" font-size="9" fill="#b45309">Conversion Script</text>
+  <text x="480" y="757" text-anchor="middle" font-size="11" font-weight="600" fill="#92400e">trossen_mcap_to_lerobot_v2</text>
+
+  <!-- Arrow: Converter -> LeRobot (amber, from amber converter block) -->
+  <line x1="480" y1="765" x2="480" y2="795" stroke="#d97706" stroke-width="1.5" marker-end="url(#arr-amber)"/>
+
+  <!-- ==================== ROW 7: LeRobot V2 Output ==================== -->
+  <rect x="100" y="798" width="760" height="88" rx="8" fill="#fef3c7" stroke="#d97706" stroke-width="1.5"/>
+  <text x="480" y="820" text-anchor="middle" font-size="14" font-weight="700" fill="#92400e">LeRobot V2 Dataset (HuggingFace-ready)</text>
+
+  <rect x="120" y="832" width="165" height="40" rx="5" fill="#fff" stroke="#fbbf24" stroke-width="1.2"/>
+  <text x="202" y="849" text-anchor="middle" font-size="10" font-weight="600" fill="#92400e">Parquet Files</text>
+  <text x="202" y="862" text-anchor="middle" font-size="9" fill="#b45309">action, observation.state</text>
+
+  <rect x="305" y="832" width="145" height="40" rx="5" fill="#fff" stroke="#fbbf24" stroke-width="1.2"/>
+  <text x="377" y="849" text-anchor="middle" font-size="10" font-weight="600" fill="#92400e">MP4 Videos</text>
+  <text x="377" y="862" text-anchor="middle" font-size="9" fill="#b45309">per camera, per episode</text>
+
+  <rect x="470" y="832" width="145" height="40" rx="5" fill="#fff" stroke="#fbbf24" stroke-width="1.2"/>
+  <text x="542" y="849" text-anchor="middle" font-size="10" font-weight="600" fill="#92400e">info.json</text>
+  <text x="542" y="862" text-anchor="middle" font-size="9" fill="#b45309">features, schema</text>
+
+  <rect x="635" y="832" width="205" height="40" rx="5" fill="#fff" stroke="#fbbf24" stroke-width="1.2"/>
+  <text x="737" y="849" text-anchor="middle" font-size="10" font-weight="600" fill="#92400e">episode_stats.jsonl</text>
+  <text x="737" y="862" text-anchor="middle" font-size="9" fill="#b45309">min/max/mean/std per channel</text>
+</svg>

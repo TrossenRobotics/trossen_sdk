@@ -7,6 +7,7 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Intel Rea
 ## Table of Contents
 
 - [Features](#features)
+- [Data Flow Overview](#data-flow-overview)
 - [Recommended Workflow](#recommended-workflow)
 - [Supported Hardware](#supported-hardware)
 - [Installation](#installation)
@@ -30,6 +31,16 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Intel Rea
 - Converts recorded TrossenMCAP files to LeRobot V2 format (Parquet + MP4 video) with per-episode statistics computed during conversion
 
 
+
+---
+
+## Data Flow Overview
+
+The diagram below shows how sensor data flows through the SDK — from hardware devices through producers and the lock-free sink into TrossenMCAP episode files, and finally through the conversion tool into training-ready LeRobot V2 datasets.
+
+<p align="center">
+  <img src="docs/diagrams/trossen-mcap-dataflow.svg" alt="TrossenMCAP Data Flow" width="800"/>
+</p>
 
 ---
 
@@ -299,27 +310,11 @@ For full conversion options and format details see the [Conversion Tool Guide](s
 
 ## Architecture Overview
 
-The SDK is built around five cooperating components:
+<p align="center">
+  <img src="docs/diagrams/trossen-sdk-architecture.svg" alt="Trossen SDK Architecture" width="800"/>
+</p>
 
-```
-Physical hardware
-      |
-      v
-HardwareComponent     wraps one physical device (arm, camera, base)
-      |
-      v
-Producer              polls the hardware at a fixed rate; emits Records
-      |
-      v  (lock-free MPSC queue)
-Sink                  background drain thread; batches records to the backend
-      |
-      v
-Backend               serialises records to disk (one file per episode)
-```
-
-**Scheduler** drives the producers — calls `poll()` on each at its configured rate on a
-dedicated thread. **SessionManager** creates and tears down a fresh Scheduler + Sink + Backend
-for every episode.
+The SDK is built around five cooperating components: **HardwareComponent** wraps a physical device, **Producer** polls hardware and emits records, **Sink** queues records via a lock-free MPSC queue, **Backend** serializes to disk, and **Scheduler** drives polling at configured rates. **SessionManager** creates and tears down a fresh Scheduler + Sink + Backend for every episode.
 
 ### Key abstractions
 
