@@ -340,6 +340,9 @@ void SessionManager::stop_episode() {
   // Update state
   episode_active_ = false;
   ++total_episodes_completed_;
+
+  // Snapshot the finished episode index before incrementing for use in callbacks
+  uint32_t finished_episode_index = next_episode_index_;
   ++next_episode_index_;
 
   // Measure and report shutdown duration
@@ -360,8 +363,10 @@ void SessionManager::stop_episode() {
   }
   auto_stop_cv_.notify_all();
 
-  // Compute final stats while we still hold the lock
+  // Compute final stats while we still hold the lock, then correct the episode index
+  // so callbacks receive the index of the episode that just finished (not the next one)
   Stats final_stats = stats_unlocked();
+  final_stats.current_episode_index = finished_episode_index;
 
   // Invoke episode-ended callbacks
   for (const auto& cb : episode_ended_cbs_) {
