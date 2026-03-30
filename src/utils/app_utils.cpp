@@ -3,7 +3,9 @@
  * @brief Implementation of shared utilities for Trossen SDK applications
  */
 
+#include <cctype>
 #include <csignal>
+#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -272,6 +274,23 @@ std::string generate_episode_path(
        << std::setfill('0') << std::setw(6) << episode_index
        << "." << extension;
   return path.str();
+}
+
+void announce(const std::string& message) {
+  if (message.empty()) return;
+  // Allowlist: keep only characters safe for shell single-quote context.
+  // SECURITY: single-quote (') MUST NOT be added — it terminates the shell
+  // string in the spd-say command below and would enable command injection.
+  std::string safe_msg;
+  safe_msg.reserve(message.size());
+  for (char c : message) {
+    if (std::isalnum(static_cast<unsigned char>(c)) || c == ' ' ||
+        c == '.' || c == ',' || c == '!' || c == '?' || c == '-') {
+      safe_msg += c;
+    }
+  }
+  if (safe_msg.empty()) return;
+  (void)std::system(("spd-say -w '" + safe_msg + "' 2>/dev/null").c_str());
 }
 
 }  // namespace trossen::utils

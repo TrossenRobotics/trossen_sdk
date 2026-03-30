@@ -116,4 +116,16 @@ std::string generate_episode_path(
   uint32_t episode_index,
   const std::string& extension = "trossen_mcap");
 
+/**
+ * @brief Announce a message via text-to-speech (spd-say)
+ *
+ * Blocks until speech finishes (-w flag). Safe to call even if spd-say
+ * is not installed — fails silently (stderr suppressed).
+ * Only alphanumeric characters and basic punctuation are passed through;
+ * all other characters are stripped for shell safety.
+ *
+ * @param message Text to speak; empty messages are ignored
+ */
+void announce(const std::string& message);
+
 }  // namespace trossen::utils
