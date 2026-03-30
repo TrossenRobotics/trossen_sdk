@@ -43,6 +43,7 @@ add_library(trossen_sdk SHARED
   src/runtime/producer_registry.cpp
   src/runtime/push_producer_registry.cpp
   src/utils/app_utils.cpp
+  src/utils/input_utils.cpp
 )
 
 if(TROSSEN_ENABLE_REALSENSE)
