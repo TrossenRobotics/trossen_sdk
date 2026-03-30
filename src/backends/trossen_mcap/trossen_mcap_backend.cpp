@@ -165,12 +165,10 @@ bool TrossenMCAPBackend::open() {
   return true;
 }
 
-void TrossenMCAPBackend::close() {
-  std::scoped_lock lk(writer_mutex_);
-  if (!opened_) {
-    return;
-  }
-  // Close channels
+void TrossenMCAPBackend::close_resources() {
+  // Caller must hold writer_mutex_. Closes channels and writer.
+  if (!opened_) return;
+
   for (auto& [stream_id, channel] : joint_channels_) {
     channel.close();
   }
@@ -190,6 +188,28 @@ void TrossenMCAPBackend::close() {
   image_channels_.clear();
   odometry_2d_channels_.clear();
   opened_ = false;
+}
+
+void TrossenMCAPBackend::close() {
+  std::scoped_lock lk(writer_mutex_);
+  close_resources();
+}
+
+void TrossenMCAPBackend::discard_episode() {
+  std::scoped_lock lk(writer_mutex_);
+  close_resources();
+
+  // Construct and delete the episode file (works even if already closed by sink)
+  std::ostringstream oss;
+  oss << cfg_->root << "/"
+      << cfg_->dataset_id << "/"
+      << "episode_" << std::setw(6) << std::setfill('0') << episode_index_ << ".mcap";
+  try {
+    std::filesystem::remove(std::filesystem::path(oss.str()));
+  } catch (const std::filesystem::filesystem_error& e) {
+    std::cerr << "Warning: Failed to remove MCAP file during discard: "
+              << e.what() << "\n";
+  }
 }
 
 void TrossenMCAPBackend::flush() {
