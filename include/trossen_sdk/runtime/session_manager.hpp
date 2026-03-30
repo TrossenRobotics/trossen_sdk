@@ -277,6 +277,28 @@ public:
   void print_stats_line(const Stats& stats);
 
   /**
+   * @brief Wait between episodes for the configured reset period
+   *
+   * If reset_duration is positive, prints a countdown for that many seconds.
+   * If reset_duration is zero, returns immediately (no reset phase).
+   * If reset_duration is unset (nullopt), blocks until signal_reset_complete()
+   * is called or right arrow is pressed.
+   * Both timed and infinite modes can be interrupted by Ctrl+C or skipped with
+   * right arrow key.
+   *
+   * @return true if reset completed normally, false if interrupted by stop request
+   */
+  bool wait_for_reset();
+
+  /**
+   * @brief Signal that the reset hold should end
+   *
+   * Thread-safe. Wakes wait_for_reset() from infinite hold or skips remaining
+   * countdown. Can be called from any thread (input thread, UI callback, etc.).
+   */
+  void signal_reset_complete();
+
+  /**
   * @brief Pausable sleep that respects stop requests
   *
   * Sleeps for the specified duration but checks g_stop_requested
@@ -376,6 +398,15 @@ private:
 
   /// @brief Flag indicating that auto-stop was triggered by monitor thread
   std::atomic<bool> auto_stop_triggered_{false};
+
+  /// @brief Condition variable for reset wait signaling
+  std::condition_variable reset_cv_;
+
+  /// @brief Mutex for reset condition variable
+  std::mutex reset_mutex_;
+
+  /// @brief Flag indicating that reset wait should end
+  std::atomic<bool> reset_signaled_{false};
 
   /// @brief Flag indicating that episode final statistics were emitted
   mutable std::atomic<bool> stats_emitted_{false};
