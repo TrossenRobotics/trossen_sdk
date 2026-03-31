@@ -16,7 +16,7 @@
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 #include "trossen_sdk/utils/app_utils.hpp"
-#include "trossen_sdk/utils/input_utils.hpp"
+#include "trossen_sdk/utils/keyboard_input_utils.hpp"
 
 namespace trossen::runtime {
 
