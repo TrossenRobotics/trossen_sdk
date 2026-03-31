@@ -121,8 +121,8 @@ std::string generate_episode_path(
  *
  * Blocks until speech finishes (-w flag). Safe to call even if spd-say
  * is not installed — fails silently (stderr suppressed).
- * Only alphanumeric characters and basic punctuation are passed through;
- * all other characters are stripped for shell safety.
+ * Message is passed directly to spd-say via posix_spawn (no shell involved),
+ * so all characters are safe and no sanitization is needed.
  *
  * @param message Text to speak; empty messages are ignored
  */

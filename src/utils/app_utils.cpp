@@ -3,15 +3,18 @@
  * @brief Implementation of shared utilities for Trossen SDK applications
  */
 
-#include <cctype>
 #include <csignal>
-#include <cstdlib>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
+
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
 
 #include "trossen_sdk/utils/app_utils.hpp"
 
@@ -278,19 +281,27 @@ std::string generate_episode_path(
 
 void announce(const std::string& message) {
   if (message.empty()) return;
-  // Allowlist: keep only characters safe for shell single-quote context.
-  // SECURITY: single-quote (') MUST NOT be added — it terminates the shell
-  // string in the spd-say command below and would enable command injection.
-  std::string safe_msg;
-  safe_msg.reserve(message.size());
-  for (char c : message) {
-    if (std::isalnum(static_cast<unsigned char>(c)) || c == ' ' ||
-        c == '.' || c == ',' || c == '!' || c == '?' || c == '-') {
-      safe_msg += c;
-    }
+
+  // Spawn spd-say directly via posix_spawnp (no shell involved).
+  const char* argv[] = {"spd-say", "-w", message.c_str(), nullptr};
+
+  // Suppress stderr so missing spd-say doesn't print errors
+  posix_spawn_file_actions_t actions;
+  bool have_actions = (posix_spawn_file_actions_init(&actions) == 0);
+  if (have_actions) {
+    posix_spawn_file_actions_addopen(
+      &actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
   }
-  if (safe_msg.empty()) return;
-  (void)std::system(("spd-say -w '" + safe_msg + "' 2>/dev/null").c_str());
+
+  pid_t pid;
+  int err = posix_spawnp(
+    &pid, "spd-say", have_actions ? &actions : nullptr, nullptr,
+    const_cast<char**>(argv), environ);
+  if (have_actions) posix_spawn_file_actions_destroy(&actions);
+
+  if (err == 0) {
+    waitpid(pid, nullptr, 0);  // block until speech finishes
+  }
 }
 
 }  // namespace trossen::utils
