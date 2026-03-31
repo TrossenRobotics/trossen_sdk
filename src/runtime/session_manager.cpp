@@ -367,11 +367,8 @@ void SessionManager::teardown_episode(bool discard) {
     // Signal stats emitted so monitor_episode() can exit
     stats_emitted_.store(true);
 
-    // Notify auto-stop waiters
-    {
-      std::lock_guard<std::mutex> cv_lock(auto_stop_mutex_);
-      auto_stop_triggered_ = true;
-    }
+    // Notify auto-stop waiters so they can observe the discard,
+    // but don't set auto_stop_triggered_ -- this was a manual discard, not an auto-stop.
     auto_stop_cv_.notify_all();
 
     std::cout << "Episode " << next_episode_index_
@@ -798,6 +795,12 @@ void SessionManager::start_async_monitoring(
   async_monitor_thread_ = std::thread([this, update_interval, sleep_interval, print_stats]() {
     // Run monitor_episode in background thread
     monitor_episode(update_interval, sleep_interval, print_stats);
+
+    // monitor_episode may return early on keypress/rerecord.
+    // Wait for the episode to actually end before capturing final stats.
+    while (!are_final_stats_emitted() && !trossen::utils::g_stop_requested) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 
     // Store final stats
     {

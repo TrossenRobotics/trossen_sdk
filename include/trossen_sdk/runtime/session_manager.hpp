@@ -345,7 +345,9 @@ public:
   * @param update_interval How often to update stats (and print if enabled)
   * @param sleep_interval How long to sleep between checks
   * @param print_stats Whether to print stats to console (default: false)
-  * @return true if completed normally, false if interrupted by stop request
+  * @return UserAction::kContinue if completed normally,
+  *         UserAction::kReRecord if re-record requested,
+  *         or UserAction::kStop if interrupted by Ctrl+C
   */
   UserAction monitor_episode(
     std::chrono::duration<double> update_interval = std::chrono::milliseconds(500),
