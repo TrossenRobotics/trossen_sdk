@@ -279,7 +279,7 @@ bool SessionManager::start_episode() {
   std::cout << "Episode " << next_episode_index_ << " started." << std::endl;
 
   trossen::utils::announce(
-    "Episode " + std::to_string(next_episode_index_) + " started");
+    "Episode " + std::to_string(next_episode_index_) + " started", false);
 
   // Invoke episode-started callbacks
   for (const auto& cb : episode_started_cbs_) {
