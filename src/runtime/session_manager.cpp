@@ -4,6 +4,7 @@
  */
 
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -597,11 +598,11 @@ bool SessionManager::wait_for_reset() {
   if (cfg_->reset_duration.has_value()) {
     // Zero duration = skip reset phase entirely
     if (cfg_->reset_duration->count() <= 0.0) {
-      return true;
+      return !trossen::utils::g_stop_requested;
     }
 
     // Countdown mode: wait for the configured duration
-    int total_seconds = static_cast<int>(cfg_->reset_duration->count());
+    int total_seconds = static_cast<int>(std::ceil(cfg_->reset_duration->count()));
     if (total_seconds < 1) total_seconds = 1;
 
     std::cout << "\nResetting environment — next episode in "

@@ -38,13 +38,18 @@ struct SessionManagerConfig : public BaseConfig {
       j.at("backend_type").get_to(c.backend_type);
     }
     if (j.contains("reset_duration")) {
-      double val = j.at("reset_duration").get<double>();
-      if (val > 0.0) {
-        c.reset_duration = std::chrono::duration<double>{val};
+      const auto& rd = j.at("reset_duration");
+      if (rd.is_null()) {
+        // Explicit null = infinite wait (same as omitting the field)
+        c.reset_duration = std::nullopt;
       } else {
-        // Zero or negative = no wait (skip reset phase entirely).
-        // To get infinite wait, omit the field or set to null.
-        c.reset_duration = std::chrono::duration<double>{0.0};
+        double val = rd.get<double>();
+        if (val > 0.0) {
+          c.reset_duration = std::chrono::duration<double>{val};
+        } else {
+          // Zero or negative = no wait (skip reset phase entirely).
+          c.reset_duration = std::chrono::duration<double>{0.0};
+        }
       }
     }
 
