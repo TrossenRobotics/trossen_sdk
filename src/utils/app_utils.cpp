@@ -279,11 +279,14 @@ std::string generate_episode_path(
   return path.str();
 }
 
-void announce(const std::string& message) {
+void announce(const std::string& message, bool block) {
   if (message.empty()) return;
 
   // Spawn spd-say directly via posix_spawnp (no shell involved).
-  const char* argv[] = {"spd-say", "-w", message.c_str(), nullptr};
+  // When blocking, pass -w so spd-say itself waits for speech to finish.
+  const char* argv_block[] = {"spd-say", "-w", message.c_str(), nullptr};
+  const char* argv_async[] = {"spd-say", message.c_str(), nullptr};
+  const char** argv = block ? argv_block : argv_async;
 
   // Suppress stderr so missing spd-say doesn't print errors
   posix_spawn_file_actions_t actions;
@@ -299,8 +302,8 @@ void announce(const std::string& message) {
     const_cast<char**>(argv), environ);
   if (have_actions) posix_spawn_file_actions_destroy(&actions);
 
-  if (err == 0) {
-    waitpid(pid, nullptr, 0);  // block until speech finishes
+  if (err == 0 && block) {
+    waitpid(pid, nullptr, 0);
   }
 }
 

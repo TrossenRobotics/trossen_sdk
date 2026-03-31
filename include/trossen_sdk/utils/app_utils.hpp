@@ -119,13 +119,14 @@ std::string generate_episode_path(
 /**
  * @brief Announce a message via text-to-speech (spd-say)
  *
- * Blocks until speech finishes (-w flag). Safe to call even if spd-say
- * is not installed — fails silently (stderr suppressed).
+ * Safe to call even if spd-say is not installed -- fails silently.
  * Message is passed directly to spd-say via posix_spawn (no shell involved),
  * so all characters are safe and no sanitization is needed.
  *
  * @param message Text to speak; empty messages are ignored
+ * @param block If true (default), blocks until speech finishes.
+ *              If false, returns immediately while speech plays in background.
  */
-void announce(const std::string& message);
+void announce(const std::string& message, bool block = true);
 
 }  // namespace trossen::utils
