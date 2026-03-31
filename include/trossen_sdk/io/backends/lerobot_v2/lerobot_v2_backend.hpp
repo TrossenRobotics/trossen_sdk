@@ -418,14 +418,19 @@ inline bool write_task_entry(
 }
 
 /**
- * @brief Remove the last non-empty line from a JSONL file
+ * @brief Remove the last JSONL entry matching a given episode_index
  *
- * Used during episode discard to undo appended entries.
+ * Only removes the last line if its "episode_index" field matches the
+ * expected index. Returns true (no-op) if the last entry doesn't match,
+ * preventing accidental deletion of a previous episode's metadata.
  *
  * @param file_path Path to the JSONL file
- * @return true on success, false on failure
+ * @param expected_episode_index Episode index that must match for removal
+ * @return true on success or no-op, false on I/O failure
  */
-inline bool remove_last_jsonl_line(const std::filesystem::path& file_path) {
+inline bool remove_last_jsonl_line(
+    const std::filesystem::path& file_path,
+    int expected_episode_index) {
   namespace fs = std::filesystem;
   if (!fs::exists(file_path)) return true;
 
@@ -440,6 +445,17 @@ inline bool remove_last_jsonl_line(const std::filesystem::path& file_path) {
   in.close();
 
   if (lines.empty()) return true;
+
+  // Only remove if the last entry's episode_index matches
+  try {
+    auto entry = nlohmann::json::parse(lines.back());
+    if (entry.value("episode_index", -1) != expected_episode_index) {
+      return true;  // no-op: last entry belongs to a different episode
+    }
+  } catch (const std::exception&) {
+    return false;  // malformed JSON
+  }
+
   lines.pop_back();
 
   std::ofstream out(file_path, std::ios::trunc);
@@ -487,13 +503,21 @@ inline bool revert_info_json(
   int chunks_size = info_json.value("chunks_size", 1000);
   info_json["total_chunks"] = std::max(1, (total_episodes + chunks_size - 1) / chunks_size);
 
-  // Adjust train split end
-  std::string train_split = info_json["splits"].value("train", "0:0");
-  size_t colon_pos = train_split.find(':');
-  if (colon_pos != std::string::npos) {
-    int train_start = std::stoi(train_split.substr(0, colon_pos));
-    int train_end = std::max(train_start, std::stoi(train_split.substr(colon_pos + 1)) - 1);
-    info_json["splits"]["train"] = std::to_string(train_start) + ":" + std::to_string(train_end);
+  // Adjust train split end (guard against missing/malformed "splits")
+  if (info_json.contains("splits") && info_json["splits"].is_object() &&
+      info_json["splits"].contains("train")) {
+    try {
+      std::string train_split = info_json["splits"].value("train", "0:0");
+      size_t colon_pos = train_split.find(':');
+      if (colon_pos != std::string::npos) {
+        int train_start = std::stoi(train_split.substr(0, colon_pos));
+        int train_end = std::max(train_start, std::stoi(train_split.substr(colon_pos + 1)) - 1);
+        info_json["splits"]["train"] =
+            std::to_string(train_start) + ":" + std::to_string(train_end);
+      }
+    } catch (const std::exception&) {
+      // Malformed split value — leave unchanged
+    }
   }
 
   std::ofstream out(info_path);

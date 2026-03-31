@@ -804,7 +804,9 @@ void LeRobotV2Backend::flush() {
 
 void LeRobotV2Backend::close_resources() {
   // Caller must hold open_mutex_. Closes writer, stream, and image workers.
-  if (!opened_) return;
+  // Check actual resource state, not just opened_, because open() may have
+  // started threads before a later step threw (leaving opened_ == false).
+  if (!opened_ && !writer_ && !outfile_ && image_workers_.empty()) return;
 
   try {
     if (writer_) {
@@ -840,6 +842,8 @@ void LeRobotV2Backend::close_resources() {
 
 void LeRobotV2Backend::close() {
   std::lock_guard<std::mutex> lock(open_mutex_);
+
+  if (!opened_) return;
 
   close_resources();
 
@@ -938,11 +942,12 @@ void LeRobotV2Backend::discard_episode() {
     }
   } catch (...) {}
 
-  // Remove last entries from JSONL metadata files
-  if (!remove_last_jsonl_line(discard_meta / JSONL_EPISODES)) {
+  // Remove JSONL entries only if they match this episode's index
+  int ep_idx = static_cast<int>(episode_index_);
+  if (!remove_last_jsonl_line(discard_meta / JSONL_EPISODES, ep_idx)) {
     std::cerr << "[LeRobotV2] Warning: Failed to revert episodes.jsonl" << std::endl;
   }
-  if (!remove_last_jsonl_line(discard_meta / JSONL_EPISODE_STATS)) {
+  if (!remove_last_jsonl_line(discard_meta / JSONL_EPISODE_STATS, ep_idx)) {
     std::cerr << "[LeRobotV2] Warning: Failed to revert episodes_stats.jsonl" << std::endl;
   }
 
