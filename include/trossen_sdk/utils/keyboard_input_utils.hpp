@@ -1,10 +1,10 @@
 /**
- * @file input_utils.hpp
+ * @file keyboard_input_utils.hpp
  * @brief Terminal keyboard input utilities for interactive session control
  */
 
-#ifndef TROSSEN_SDK__UTILS__INPUT_UTILS_HPP
-#define TROSSEN_SDK__UTILS__INPUT_UTILS_HPP
+#ifndef TROSSEN_SDK__UTILS__KEYBOARD_INPUT_UTILS_HPP
+#define TROSSEN_SDK__UTILS__KEYBOARD_INPUT_UTILS_HPP
 
 #include <memory>
 
@@ -64,4 +64,4 @@ KeyPress poll_keypress();
 
 }  // namespace trossen::utils
 
-#endif  // TROSSEN_SDK__UTILS__INPUT_UTILS_HPP
+#endif  // TROSSEN_SDK__UTILS__KEYBOARD_INPUT_UTILS_HPP

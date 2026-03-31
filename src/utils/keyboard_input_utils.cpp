@@ -1,17 +1,18 @@
 /**
- * @file input_utils.cpp
+ * @file keyboard_input_utils.cpp
  * @brief Implementation of terminal keyboard input utilities
  */
 
 #include <atomic>
 #include <cerrno>
 #include <cstdlib>
+#include <mutex>
 
 #include <poll.h>
 #include <termios.h>
 #include <unistd.h>
 
-#include "trossen_sdk/utils/input_utils.hpp"
+#include "trossen_sdk/utils/keyboard_input_utils.hpp"
 
 namespace trossen::utils {
 
@@ -32,8 +33,9 @@ static constexpr int kDrainTimeoutMs = 10;
 /// Track active instances to prevent nested guards from corrupting terminal state.
 static std::atomic<int> g_raw_mode_refcount{0};
 
-/// Saved terminal settings for atexit restoration (SIGINT safety net).
-/// tcsetattr is async-signal-safe per POSIX, so this is safe from atexit.
+/// Saved terminal settings for atexit restoration.
+/// Best-effort: runs on normal exit (exit()/return from main), not on
+/// fatal signals (SIGKILL, SIGABRT) that skip atexit handlers.
 static termios g_saved_termios{};
 static std::atomic<bool> g_termios_saved{false};
 
@@ -44,13 +46,10 @@ static void restore_terminal_atexit() {
   }
 }
 
-/// Register the atexit handler exactly once
+/// Register the atexit handler exactly once (thread-safe)
 static void ensure_atexit_registered() {
-  static bool registered = false;
-  if (!registered) {
-    std::atexit(restore_terminal_atexit);
-    registered = true;
-  }
+  static std::once_flag flag;
+  std::call_once(flag, []() { std::atexit(restore_terminal_atexit); });
 }
 
 struct RawModeGuard::Impl {
@@ -95,10 +94,12 @@ RawModeGuard::RawModeGuard() {
 RawModeGuard::~RawModeGuard() {
   if (!active_) return;
 
-  // Only the last guard restores terminal settings
-  if (g_raw_mode_refcount.fetch_sub(1) == 1 && impl_) {
-    tcsetattr(STDIN_FILENO, TCSANOW, &impl_->original);
-    g_termios_saved.store(false, std::memory_order_release);
+  // Only the last guard restores terminal settings, using the shared snapshot
+  if (g_raw_mode_refcount.fetch_sub(1) == 1) {
+    if (g_termios_saved.load(std::memory_order_acquire)) {
+      tcsetattr(STDIN_FILENO, TCSANOW, &g_saved_termios);
+      g_termios_saved.store(false, std::memory_order_release);
+    }
   }
 }
 
@@ -112,13 +113,17 @@ static bool has_input(int timeout_ms = 0) {
   do {
     ret = poll(&pfd, 1, timeout_ms);
   } while (ret == -1 && errno == EINTR);
-  return ret > 0;
+  if (ret <= 0) return false;
+  return (pfd.revents & POLLIN) != 0;
 }
 
 /// Read a single byte from stdin, or -1 if unavailable/EOF.
 static int read_byte() {
   char c;
-  ssize_t n = read(STDIN_FILENO, &c, 1);
+  ssize_t n;
+  do {
+    n = read(STDIN_FILENO, &c, 1);
+  } while (n == -1 && errno == EINTR);
   if (n == 1) return static_cast<unsigned char>(c);
   return -1;
 }
