@@ -387,6 +387,9 @@ void SessionManager::teardown_episode(bool discard) {
     std::cout << "\nEpisode stopped. Total completed: " << total_episodes_completed_
               << ", Next index: " << next_episode_index_ << std::endl;
 
+    trossen::utils::announce(
+      "Episode " + std::to_string(finished_episode_index) + " complete");
+
     // Notify any threads waiting for auto-stop
     {
       std::lock_guard<std::mutex> cv_lock(auto_stop_mutex_);
@@ -658,8 +661,6 @@ UserAction SessionManager::wait_for_reset() {
   // Reset signal flags for this wait cycle
   reset_signaled_.store(false);
   rerecord_requested_.store(false);
-
-  trossen::utils::announce("Episode complete");
 
   // Enable raw terminal input to detect keypresses without Enter
   trossen::utils::RawModeGuard raw_mode;
