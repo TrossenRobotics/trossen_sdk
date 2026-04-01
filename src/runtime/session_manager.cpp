@@ -333,13 +333,13 @@ void SessionManager::teardown_episode(bool discard) {
     ppe.producer->stop();
   }
 
-  // Stop scheduler — prevent new records from being generated
+  // Stop scheduler - prevent new records from being generated
   if (scheduler_) {
     scheduler_->stop();
     scheduler_.reset();
   }
 
-  // Stop sink — drain queue and write all pending records
+  // Stop sink - drain queue and write all pending records
   if (current_sink_) {
     current_sink_->stop();
     if (!discard) {
