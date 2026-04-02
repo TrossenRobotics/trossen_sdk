@@ -264,6 +264,10 @@ int main(int argc, char** argv) {
     if (cam.use_depth) ++depth_cameras;
   }
 
+  mgr.on_episode_started([]() {
+    std::cout << "Episode started - recording is now active.\n";
+  });
+
   mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
     const std::string file_path =
       trossen::utils::generate_episode_path(root, stats.current_episode_index);
@@ -377,7 +381,15 @@ int main(int argc, char** argv) {
       }
     });
 
-    mgr.monitor_episode();
+    auto action = mgr.monitor_episode();
+
+    if (action == trossen::runtime::UserAction::kReRecord) {
+      mgr.discard_current_episode();
+      if (teleop_thread.joinable()) {
+        teleop_thread.join();
+      }
+      continue;
+    }
 
     if (mgr.is_episode_active()) {
       mgr.stop_episode();
@@ -389,6 +401,13 @@ int main(int argc, char** argv) {
     if (trossen::utils::g_stop_requested) {
       std::cout << "\nStopping at user request (Ctrl+C).\n";
       break;
+    }
+
+    action = mgr.wait_for_reset();
+    if (action == trossen::runtime::UserAction::kStop) break;
+    if (action == trossen::runtime::UserAction::kReRecord) {
+      mgr.discard_last_episode();
+      continue;
     }
   }
 
