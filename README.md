@@ -13,6 +13,7 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Intel Rea
 - [Installation](#installation)
 - [Building](#building)
 - [Quick Start](#quick-start)
+- [Interactive Episode Controls](#interactive-episode-controls)
 - [Configuration Reference](#configuration-reference)
 - [Converting to LeRobot V2](#converting-to-lerobot-v2)
 - [Architecture Overview](#architecture-overview)
@@ -29,6 +30,9 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Intel Rea
 - Automatic episode numbering with resumption from existing episodes in the output directory
 - Joint states recordable up to 200 Hz; cameras at configurable frame rates
 - Converts recorded TrossenMCAP files to LeRobot V2 format (Parquet + MP4 video) with per-episode statistics computed during conversion
+- Interactive episode controls: re-record, skip, and discard episodes with keyboard shortcuts during recording
+- Audio announcements via text-to-speech for hands-free session feedback
+- Configurable reset duration between episodes (countdown, skip, or wait for input)
 
 
 
@@ -184,6 +188,72 @@ Episodes are saved to the directory set in `backend.root` (default: `~/.trossen_
 
 ---
 
+## Interactive Episode Controls
+
+During a recording session the operator can control episode flow using keyboard shortcuts. No mouse or GUI is needed — this is designed for hands-free data collection with audio feedback.
+
+### Keyboard shortcuts
+
+| Phase | Key | Action |
+|---|---|---|
+| **Recording** | Left arrow | Discard current episode and re-record at the same index |
+| **Recording** | Right arrow | Stop recording early and proceed to reset |
+| **Recording** | Ctrl+C | End the session |
+| **Reset** | Left arrow | Discard the last completed episode and re-record |
+| **Reset** | Right arrow | Skip the remaining countdown |
+| **Reset** | Ctrl+C | End the session |
+
+### Reset duration
+
+The pause between episodes is controlled by `session.reset_duration` in the config JSON:
+
+| Value | Behavior |
+|---|---|
+| Positive number (e.g. `5.0`) | Countdown for that many seconds, then start next episode |
+| `0` | No pause — start the next episode immediately |
+| Omitted / `null` | Wait indefinitely until the operator presses right arrow |
+
+### Audio announcements
+
+The SDK announces session events via text-to-speech using `spd-say`. Install it for audio cues:
+
+```bash
+sudo apt-get install -y speech-dispatcher
+```
+
+Events announced: "Episode N started", "Episode N complete", "Reset time". If `spd-say` is not installed, announcements are silently skipped.
+
+### Example episode loop
+
+The examples use this pattern to handle all user actions:
+
+```cpp
+while (!trossen::utils::g_stop_requested) {
+  mgr.start_episode();
+
+  // Recording phase
+  auto action = mgr.monitor_episode();
+  if (action == UserAction::kReRecord) {
+    mgr.discard_current_episode();
+    continue;
+  }
+  if (mgr.is_episode_active()) mgr.stop_episode();
+
+  if (trossen::utils::g_stop_requested) break;
+
+  // Reset phase
+  action = mgr.wait_for_reset();
+  if (action == UserAction::kStop) break;
+  if (action == UserAction::kReRecord) {
+    mgr.discard_last_episode();
+    continue;
+  }
+}
+mgr.shutdown();
+```
+
+---
+
 ## Configuration Reference
 
 All examples share the same JSON config schema. Key sections:
@@ -253,7 +323,8 @@ All examples share the same JSON config schema. Key sections:
   "session": {
     "max_duration": 20.0,            // Episode length in seconds — always set a limit
     "max_episodes": 50,              // Total episodes to record — always set a limit
-    "backend_type": "trossen_mcap"   // The recommended backend
+    "backend_type": "trossen_mcap",  // The recommended backend
+    "reset_duration": 5.0            // Seconds between episodes (0 = skip, omit = wait for input)
   }
 }
 ```
@@ -365,6 +436,18 @@ stop_episode()
   4. Stop Sink (drain remaining queue, flush and close backend)
   5. Update state and increment episode index
   6. Fire episode-ended callbacks
+
+discard_current_episode()
+  Same teardown as stop_episode(), but deletes all episode files
+  and does NOT increment the episode index or fire callbacks.
+
+discard_last_episode()
+  Deletes files for the most recently completed episode and
+  decrements the episode index so the next episode reuses it.
+
+wait_for_reset()
+  Pauses between episodes for the configured reset_duration.
+  Returns a UserAction indicating what the operator chose.
 ```
 
 Each episode gets its own Backend file handle, Sink queue, and Scheduler — no state is
