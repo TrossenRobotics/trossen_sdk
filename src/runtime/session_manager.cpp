@@ -294,10 +294,18 @@ bool SessionManager::start_episode() {
 }
 
 void SessionManager::stop_episode() {
+  teardown_episode(false);
+}
+
+void SessionManager::discard_current_episode() {
+  teardown_episode(true);
+}
+
+void SessionManager::teardown_episode(bool discard) {
   // Start timer to measure shutdown duration
   auto shutdown_start_time = std::chrono::steady_clock::now();
 
-  // First, signal monitoring thread to stop (if any)
+  // Signal monitoring thread to stop (if any)
   monitoring_active_ = false;
 
   // Join monitoring thread before acquiring lock (avoid deadlock)
@@ -314,7 +322,11 @@ void SessionManager::stop_episode() {
     return;  // no-op if not active
   }
 
-  std::cout << "Stopping episode " << next_episode_index_ << "..." << std::endl;
+  if (discard) {
+    std::cout << "Discarding episode " << next_episode_index_ << "..." << std::endl;
+  } else {
+    std::cout << "Stopping episode " << next_episode_index_ << "..." << std::endl;
+  }
 
   // Stop push producers first (they push to the sink; must stop before draining)
   for (const auto& ppe : push_producer_entries_) {
@@ -327,61 +339,125 @@ void SessionManager::stop_episode() {
     scheduler_.reset();
   }
 
-  // Stop sink - drain queue and write all pending records; count after drain for accuracy
+  // Stop sink - drain queue and write all pending records
   if (current_sink_) {
     current_sink_->stop();
-    final_records_written_ = current_sink_->processed_count() - episode_start_record_count_;
+    if (!discard) {
+      final_records_written_ = current_sink_->processed_count() - episode_start_record_count_;
+    }
     current_sink_.reset();
-  } else {
+  } else if (!discard) {
     final_records_written_ = 0;
   }
 
-  // Close backend - flush and finalize the file episode
+  // Backend: finalize or discard
   if (current_backend_) {
-    current_backend_->flush();
-    current_backend_->close();
+    if (discard) {
+      current_backend_->discard_episode();
+    } else {
+      current_backend_->flush();
+      current_backend_->close();
+    }
     current_backend_.reset();
   }
 
-  // Update state
   episode_active_ = false;
-  ++total_episodes_completed_;
 
-  // Snapshot the finished episode index before incrementing for use in callbacks
-  uint32_t finished_episode_index = next_episode_index_;
-  ++next_episode_index_;
+  if (discard) {
+    // Signal stats emitted so monitor_episode() can exit
+    stats_emitted_.store(true);
 
-  // Measure and report shutdown duration
-  auto shutdown_end_time = std::chrono::steady_clock::now();
-  auto shutdown_duration = shutdown_end_time - shutdown_start_time;
-  postprocess_duration_s_ = std::chrono::duration<double>(shutdown_duration).count();
-  std::cout << "\nEpisode stopped. Total completed: " << total_episodes_completed_
-            << ", Next index: " << next_episode_index_ << std::endl;
+    // Notify auto-stop waiters so they can observe the discard,
+    // but don't set auto_stop_triggered_ -- this was a manual discard, not an auto-stop.
+    auto_stop_cv_.notify_all();
 
-  // Notify any threads waiting for auto-stop
-  {
-    std::lock_guard<std::mutex> cv_lock(auto_stop_mutex_);
-    // Set flag if this was called from monitor thread (for wait_for_auto_stop users)
-    if (monitor_thread_.joinable() &&
-        std::this_thread::get_id() == monitor_thread_.get_id()) {
-      auto_stop_triggered_ = true;
+    std::cout << "Episode " << next_episode_index_
+              << " discarded. Will re-record at same index." << std::endl;
+  } else {
+    ++total_episodes_completed_;
+
+    // Snapshot the finished episode index before incrementing for use in callbacks
+    uint32_t finished_episode_index = next_episode_index_;
+    ++next_episode_index_;
+
+    // Measure and report shutdown duration
+    auto shutdown_end_time = std::chrono::steady_clock::now();
+    postprocess_duration_s_ =
+      std::chrono::duration<double>(shutdown_end_time - shutdown_start_time).count();
+    std::cout << "\nEpisode stopped. Total completed: " << total_episodes_completed_
+              << ", Next index: " << next_episode_index_ << std::endl;
+
+    // Notify any threads waiting for auto-stop
+    {
+      std::lock_guard<std::mutex> cv_lock(auto_stop_mutex_);
+      if (monitor_thread_.joinable() &&
+          std::this_thread::get_id() == monitor_thread_.get_id()) {
+        auto_stop_triggered_ = true;
+      }
+    }
+    auto_stop_cv_.notify_all();
+
+    // Compute final stats, correct episode index for callbacks
+    Stats final_stats = stats_unlocked();
+    final_stats.current_episode_index = finished_episode_index;
+
+    // Invoke episode-ended callbacks
+    for (const auto& cb : episode_ended_cbs_) {
+      try {
+        cb(final_stats);
+      } catch (const std::exception& e) {
+        std::cerr << "Episode-ended callback error: " << e.what() << std::endl;
+      }
     }
   }
-  auto_stop_cv_.notify_all();
+}
 
-  // Compute final stats while we still hold the lock, then correct the episode index
-  // so callbacks receive the index of the episode that just finished (not the next one)
-  Stats final_stats = stats_unlocked();
-  final_stats.current_episode_index = finished_episode_index;
+void SessionManager::discard_last_episode() {
+  std::lock_guard<std::mutex> lock(episode_mutex_);
 
-  // Invoke episode-ended callbacks
-  for (const auto& cb : episode_ended_cbs_) {
-    try {
-      cb(final_stats);
-    } catch (const std::exception& e) {
-      std::cerr << "Episode-ended callback error: " << e.what() << std::endl;
+  if (next_episode_index_ == 0) {
+    std::cerr << "No episodes to discard." << std::endl;
+    return;
+  }
+
+  uint32_t discard_index = next_episode_index_ - 1;
+  std::cout << "Discarding last episode " << discard_index << "..." << std::endl;
+
+  // Create a temporary backend to perform the discard
+  ProducerMetadataList producer_metadata;
+  for (const auto& pt : producer_tasks_) {
+    if (auto polled = std::dynamic_pointer_cast<hw::PolledProducer>(pt.producer)) {
+      producer_metadata.push_back(polled->metadata());
     }
   }
+  for (const auto& ppe : push_producer_entries_) {
+    auto meta = ppe.producer->metadata();
+    if (meta) {
+      producer_metadata.push_back(meta);
+    }
+  }
+
+  try {
+    auto backend = create_backend(producer_metadata);
+    backend->set_episode_index(discard_index);
+    backend->discard_episode();
+  } catch (const std::exception& e) {
+    std::cerr << "Failed to discard episode " << discard_index
+              << ": " << e.what() << std::endl;
+    return;
+  }
+
+  --next_episode_index_;
+  if (total_episodes_completed_ > 0) {
+    --total_episodes_completed_;
+  }
+
+  std::cout << "Episode " << discard_index
+            << " discarded. Will re-record at same index." << std::endl;
+}
+
+void SessionManager::request_rerecord() {
+  rerecord_requested_.store(true);
 }
 
 bool SessionManager::is_episode_active() const {
@@ -578,9 +654,10 @@ void SessionManager::print_stats_line(const SessionManager::Stats& stats) {
   std::cout << std::flush;
 }
 
-bool SessionManager::wait_for_reset() {
-  // Reset signal flag for this wait cycle
+UserAction SessionManager::wait_for_reset() {
+  // Reset signal flags for this wait cycle
   reset_signaled_.store(false);
+  rerecord_requested_.store(false);
 
   trossen::utils::announce("Episode complete");
 
@@ -591,14 +668,28 @@ bool SessionManager::wait_for_reset() {
   auto wait_or_signal = [this]() {
     std::unique_lock<std::mutex> lk(reset_mutex_);
     reset_cv_.wait_for(lk, std::chrono::milliseconds(100), [this]() {
-      return reset_signaled_.load() || trossen::utils::g_stop_requested;
+      return reset_signaled_.load() || rerecord_requested_.load() ||
+             trossen::utils::g_stop_requested;
     });
+  };
+
+  auto poll_keys = [this]() -> UserAction {
+    auto key = trossen::utils::poll_keypress();
+    if (key == trossen::utils::KeyPress::kRightArrow) {
+      reset_signaled_.store(true);
+      return UserAction::kContinue;
+    }
+    if (key == trossen::utils::KeyPress::kLeftArrow) {
+      rerecord_requested_.store(true);
+      return UserAction::kReRecord;
+    }
+    return UserAction::kContinue;
   };
 
   if (cfg_->reset_duration.has_value()) {
     // Zero duration = skip reset phase entirely
     if (cfg_->reset_duration->count() <= 0.0) {
-      return !trossen::utils::g_stop_requested;
+      return trossen::utils::g_stop_requested ? UserAction::kStop : UserAction::kContinue;
     }
 
     // Countdown mode: wait for the configured duration
@@ -607,39 +698,39 @@ bool SessionManager::wait_for_reset() {
 
     std::cout << "\nResetting environment — next episode in "
               << total_seconds << " seconds...\n"
-              << "  (Press -> to skip)\n";
+              << "  (-> skip | <- re-record)\n";
     trossen::utils::announce("Reset time");
 
     for (int i = total_seconds; i > 0; --i) {
       if (trossen::utils::g_stop_requested || reset_signaled_.load()) break;
+      if (rerecord_requested_.load()) return UserAction::kReRecord;
       std::cout << "  " << i << "...\n";
-      // Poll for keypress during each second (10 x 100ms)
       for (int ms = 0; ms < 10; ++ms) {
         if (trossen::utils::g_stop_requested || reset_signaled_.load()) break;
-        auto key = trossen::utils::poll_keypress();
-        if (key == trossen::utils::KeyPress::kRightArrow) {
-          reset_signaled_.store(true);
-          break;
-        }
+        if (rerecord_requested_.load()) return UserAction::kReRecord;
+        auto action = poll_keys();
+        if (action == UserAction::kReRecord) return UserAction::kReRecord;
         wait_or_signal();
       }
     }
   } else {
-    // Infinite wait: block until right arrow, signal_reset_complete(), or Ctrl+C
-    std::cout << "\nWaiting for input — press -> to continue...\n";
+    // Infinite wait: block until keypress, signal, or Ctrl+C
+    std::cout << "\nWaiting for input...\n"
+              << "  (-> continue | <- re-record)\n";
     trossen::utils::announce("Reset time. Waiting for input.");
 
-    while (!trossen::utils::g_stop_requested && !reset_signaled_.load()) {
-      auto key = trossen::utils::poll_keypress();
-      if (key == trossen::utils::KeyPress::kRightArrow) {
-        reset_signaled_.store(true);
-        break;
-      }
+    while (!trossen::utils::g_stop_requested &&
+           !reset_signaled_.load() &&
+           !rerecord_requested_.load()) {
+      auto action = poll_keys();
+      if (action == UserAction::kReRecord) return UserAction::kReRecord;
       wait_or_signal();
     }
   }
 
-  return !trossen::utils::g_stop_requested;
+  if (trossen::utils::g_stop_requested) return UserAction::kStop;
+  if (rerecord_requested_.load()) return UserAction::kReRecord;
+  return UserAction::kContinue;
 }
 
 void SessionManager::signal_reset_complete() {
@@ -647,27 +738,47 @@ void SessionManager::signal_reset_complete() {
   reset_cv_.notify_all();
 }
 
-SessionManager::Stats SessionManager::monitor_episode(
+UserAction SessionManager::monitor_episode(
   std::chrono::duration<double> update_interval,
   std::chrono::duration<double> sleep_interval,
   bool print_stats)
 {
+  rerecord_requested_.store(false);
+
+  // Enable raw terminal input to detect keypresses during recording
+  trossen::utils::RawModeGuard raw_mode;
+
   auto last_update = std::chrono::steady_clock::now();
-  SessionManager::Stats last_stats;
 
   while (!are_final_stats_emitted()) {
+    // Check for re-record request
+    if (rerecord_requested_.load()) {
+      return UserAction::kReRecord;
+    }
+
+    // Poll for arrow keys: left = re-record, right = early exit to next episode
+    auto key = trossen::utils::poll_keypress();
+    if (key == trossen::utils::KeyPress::kLeftArrow) {
+      rerecord_requested_.store(true);
+      return UserAction::kReRecord;
+    }
+    if (key == trossen::utils::KeyPress::kRightArrow) {
+      return UserAction::kContinue;
+    }
+
     auto now = std::chrono::steady_clock::now();
     if (now - last_update >= update_interval) {
       SessionManager::Stats stats_ = stats();
       if (print_stats) {
         print_stats_line(stats_);
       }
-      last_stats = stats_;
       last_update = now;
     }
     std::this_thread::sleep_for(sleep_interval);
   }
-  return last_stats;
+
+  if (trossen::utils::g_stop_requested) return UserAction::kStop;
+  return UserAction::kContinue;
 }
 
 void SessionManager::start_async_monitoring(
@@ -683,12 +794,18 @@ void SessionManager::start_async_monitoring(
   async_monitoring_active_ = true;
   async_monitor_thread_ = std::thread([this, update_interval, sleep_interval, print_stats]() {
     // Run monitor_episode in background thread
-    Stats final_stats = monitor_episode(update_interval, sleep_interval, print_stats);
+    monitor_episode(update_interval, sleep_interval, print_stats);
+
+    // monitor_episode may return early on keypress/rerecord.
+    // Wait for the episode to actually end before capturing final stats.
+    while (!are_final_stats_emitted() && !trossen::utils::g_stop_requested) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
 
     // Store final stats
     {
       std::lock_guard<std::mutex> lock(async_monitor_mutex_);
-      async_monitor_final_stats_ = final_stats;
+      async_monitor_final_stats_ = stats();
     }
 
     async_monitoring_active_ = false;

@@ -33,6 +33,12 @@
 
 namespace trossen::runtime {
 
+/// @brief User action returned by monitor_episode() and wait_for_reset()
+enum class UserAction {
+  kContinue,   ///< Proceed normally (episode ended or reset completed)
+  kReRecord,   ///< Discard current/last episode, retry same index
+  kStop        ///< End session (Ctrl+C)
+};
 
 /**
  * @brief Session Manager orchestrates discrete recording sessions
@@ -118,6 +124,37 @@ public:
    * @note Safe to call if no episode running (no-op).
    */
   void stop_episode();
+
+  /**
+   * @brief Discard the current episode (while recording)
+   *
+   * Same teardown as stop_episode() but calls backend->discard_episode()
+   * to delete all files. Does NOT increment episode index or fire
+   * episode-ended callbacks.
+   *
+   * @note Safe to call if no episode running (no-op).
+   */
+  void discard_current_episode();
+
+  /**
+   * @brief Discard the last completed episode (during reset)
+   *
+   * Creates a temporary backend, points it at the last completed episode
+   * index, and calls discard_episode() to delete its files.
+   * Decrements next_episode_index_ so the next start_episode() reuses
+   * the same index.
+   *
+   * @note No-op if no episodes have been completed.
+   */
+  void discard_last_episode();
+
+  /**
+   * @brief Request re-recording of the current episode
+   *
+   * Thread-safe. Sets a flag checked by monitor_episode() and
+   * wait_for_reset() to trigger early exit with UserAction::kReRecord.
+   */
+  void request_rerecord();
 
   /**
    * @brief Check if an episode is currently running
@@ -286,9 +323,9 @@ public:
    * Both timed and infinite modes can be interrupted by Ctrl+C or skipped with
    * right arrow key.
    *
-   * @return true if reset completed normally, false if interrupted by stop request
+   * @return UserAction::kContinue, kReRecord (left arrow), or kStop (Ctrl+C)
    */
-  bool wait_for_reset();
+  UserAction wait_for_reset();
 
   /**
    * @brief Signal that the reset hold should end
@@ -308,9 +345,11 @@ public:
   * @param update_interval How often to update stats (and print if enabled)
   * @param sleep_interval How long to sleep between checks
   * @param print_stats Whether to print stats to console (default: false)
-  * @return true if completed normally, false if interrupted by stop request
+  * @return UserAction::kContinue if completed normally,
+  *         UserAction::kReRecord if re-record requested,
+  *         or UserAction::kStop if interrupted by Ctrl+C
   */
-  Stats monitor_episode(
+  UserAction monitor_episode(
     std::chrono::duration<double> update_interval = std::chrono::milliseconds(500),
     std::chrono::duration<double> sleep_interval = std::chrono::milliseconds(100),
     bool print_stats = false);
@@ -408,6 +447,9 @@ private:
   /// @brief Flag indicating that reset wait should end
   std::atomic<bool> reset_signaled_{false};
 
+  /// @brief Flag indicating that re-record was requested
+  std::atomic<bool> rerecord_requested_{false};
+
   /// @brief Flag indicating that episode final statistics were emitted
   mutable std::atomic<bool> stats_emitted_{false};
 
@@ -471,6 +513,14 @@ private:
    * @brief Compute stats without acquiring episode_mutex_ (caller must hold it)
    */
   Stats stats_unlocked() const;
+
+  /**
+   * @brief Shared teardown logic for stop_episode() and discard_current_episode()
+   *
+   * @param discard If true, discard episode files; if false, finalize normally
+   * @note Caller must NOT hold episode_mutex_ (this method acquires it)
+   */
+  void teardown_episode(bool discard);
 
   /**
    * @brief Background monitoring loop for auto-stop
