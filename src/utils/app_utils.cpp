@@ -11,6 +11,11 @@
 #include <thread>
 #include <vector>
 
+#include <fcntl.h>
+#include <spawn.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
 #include "trossen_sdk/utils/app_utils.hpp"
 
 namespace trossen::utils {
@@ -272,6 +277,34 @@ std::string generate_episode_path(
        << std::setfill('0') << std::setw(6) << episode_index
        << "." << extension;
   return path.str();
+}
+
+void announce(const std::string& message, bool block) {
+  if (message.empty()) return;
+
+  // Spawn spd-say directly via posix_spawnp (no shell involved).
+  // When blocking, pass -w so spd-say itself waits for speech to finish.
+  const char* argv_block[] = {"spd-say", "-w", message.c_str(), nullptr};
+  const char* argv_async[] = {"spd-say", message.c_str(), nullptr};
+  const char** argv = block ? argv_block : argv_async;
+
+  // Suppress stderr so missing spd-say doesn't print errors
+  posix_spawn_file_actions_t actions;
+  bool have_actions = (posix_spawn_file_actions_init(&actions) == 0);
+  if (have_actions) {
+    posix_spawn_file_actions_addopen(
+      &actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+  }
+
+  pid_t pid;
+  int err = posix_spawnp(
+    &pid, "spd-say", have_actions ? &actions : nullptr, nullptr,
+    const_cast<char**>(argv), environ);
+  if (have_actions) posix_spawn_file_actions_destroy(&actions);
+
+  if (err == 0 && block) {
+    waitpid(pid, nullptr, 0);
+  }
 }
 
 }  // namespace trossen::utils
