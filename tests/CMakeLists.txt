@@ -62,6 +62,15 @@ target_link_libraries(test_scheduler PRIVATE trossen_sdk GTest::gtest_main)
 add_executable(test_session_manager test_session_manager.cpp)
 target_link_libraries(test_session_manager PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_session_manager_discard test_session_manager_discard.cpp)
+target_link_libraries(test_session_manager_discard PRIVATE trossen_sdk GTest::gtest_main)
+
+add_executable(test_keyboard_input_utils test_keyboard_input_utils.cpp)
+target_link_libraries(test_keyboard_input_utils PRIVATE trossen_sdk GTest::gtest_main)
+
+add_executable(test_announce test_announce.cpp)
+target_link_libraries(test_announce PRIVATE trossen_sdk GTest::gtest_main)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -83,3 +92,6 @@ gtest_discover_tests(test_producer_registry)
 gtest_discover_tests(test_sink)
 gtest_discover_tests(test_scheduler)
 gtest_discover_tests(test_session_manager)
+gtest_discover_tests(test_session_manager_discard)
+gtest_discover_tests(test_keyboard_input_utils)
+gtest_discover_tests(test_announce)
