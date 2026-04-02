@@ -2,9 +2,11 @@
  * @file test_keyboard_input_utils.cpp
  * @brief Unit tests for KeyPress enum, RawModeGuard, and poll_keypress
  *
- * In CI environments stdin is not a terminal, so RawModeGuard will be inactive.
- * Tests verify graceful behavior in that scenario.
+ * Tests work both in CI (stdin is not a terminal) and interactively
+ * (stdin is a TTY) by branching on isatty() where behavior differs.
  */
+
+#include <unistd.h>
 
 #include "gtest/gtest.h"
 
@@ -50,16 +52,22 @@ TEST(KeyboardInputUtilsTest, RawModeGuard_ConstructDestruct_NoCrash) {
   });
 }
 
-// KI-04: RawModeGuard::is_active() returns false when stdin is not a terminal
-TEST(KeyboardInputUtilsTest, RawModeGuard_IsActive_FalseInCI) {
+// KI-04: RawModeGuard::is_active() matches whether stdin is a terminal
+TEST(KeyboardInputUtilsTest, RawModeGuard_IsActive_MatchesIsatty) {
   RawModeGuard guard;
-  // In CI, stdin is not a terminal, so raw mode cannot be activated
-  EXPECT_FALSE(guard.is_active());
+  if (isatty(STDIN_FILENO)) {
+    EXPECT_TRUE(guard.is_active());
+  } else {
+    EXPECT_FALSE(guard.is_active());
+  }
 }
 
 // KI-05: poll_keypress returns kNone when no input available
 TEST(KeyboardInputUtilsTest, PollKeypress_ReturnsNone_WhenNoInput) {
-  // Without raw mode active, poll_keypress should return kNone immediately
+  // Skip when running interactively — buffered terminal input could interfere
+  if (isatty(STDIN_FILENO)) {
+    GTEST_SKIP() << "Skipping: stdin is a terminal";
+  }
   KeyPress key = poll_keypress();
   EXPECT_EQ(key, KeyPress::kNone);
 }
