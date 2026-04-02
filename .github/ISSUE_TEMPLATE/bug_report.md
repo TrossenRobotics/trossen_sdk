@@ -29,9 +29,20 @@ What actually happened. Include error messages or logs if available.
 - **OS**: (e.g., Ubuntu 24.04, Jetson JetPack 6.1)
 - **Architecture**: (x86_64 / aarch64)
 - **SDK Version / Commit**: (e.g., v1.0.0 or commit hash)
-- **Hardware**: (e.g., WidowX-250, RealSense D435i, SLATE base)
+- **Robot kit**: (e.g., Trossen Solo AI, Trossen Stationary AI, Trossen Mobile AI)
+- **Arms**: (e.g., WidowX AI)
+- **Cameras**: (e.g., RealSense D405, ZED X Mini, USB webcam)
+- **Mobile base**: (e.g., SLATE base, or N/A)
 - **Build flags**: (e.g., `-DTROSSEN_ENABLE_REALSENSE=ON`)
+
+## Configuration
+
+Paste your `config.json` (or the relevant sections) below:
+
+```json
+
+```
 
 ## Additional Context
 
-Any other context, screenshots, or config snippets.
+Any other context, screenshots, or logs.
