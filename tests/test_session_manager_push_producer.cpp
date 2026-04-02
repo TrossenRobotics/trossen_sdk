@@ -7,11 +7,13 @@
  */
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -182,8 +184,13 @@ TEST_F(SessionManagerPushProducerTest, PushProducerRecordsReachBackend) {
   sm.add_push_producer(producer);
 
   sm.start_episode();
+
+  // Check records while episode is still active (sink is valid)
+  // Sleep briefly to let the sink drain thread process the records
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_EQ(sm.stats().records_written_current, 5);
+
   sm.stop_episode();
 
   EXPECT_EQ(producer->stats().produced, 5);
-  EXPECT_EQ(sm.stats().records_written_current, 5);
 }
