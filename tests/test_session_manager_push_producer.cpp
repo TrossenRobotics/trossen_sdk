@@ -7,11 +7,13 @@
  */
 
 #include <atomic>
+#include <chrono>
 #include <functional>
 #include <iostream>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -181,9 +183,17 @@ TEST_F(SessionManagerPushProducerTest, PushProducerRecordsReachBackend) {
   producer->records_per_episode_ = 5;
   sm.add_push_producer(producer);
 
-  sm.start_episode();
+  ASSERT_TRUE(sm.start_episode());
+
+  // Poll until the sink drain thread processes all records (or timeout)
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (sm.stats().records_written_current < 5 &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  EXPECT_EQ(sm.stats().records_written_current, 5);
+
   sm.stop_episode();
 
   EXPECT_EQ(producer->stats().produced, 5);
-  EXPECT_EQ(sm.stats().records_written_current, 5);
 }
