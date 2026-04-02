@@ -252,6 +252,31 @@ while (!trossen::utils::g_stop_requested) {
 mgr.shutdown();
 ```
 
+### Custom input methods
+
+The keyboard controls in the examples are just one way to drive the session. The SessionManager exposes callbacks and thread-safe methods that let you plug in any input source — a GUI, a foot pedal, a web dashboard, ROS topics, etc.
+
+**Lifecycle callbacks** let you react to episode events:
+
+| Callback | When it fires | Typical use |
+|---|---|---|
+| `on_pre_episode(cb)` | Before recording starts (can abort) | Validate hardware state, move arm to start pose |
+| `on_episode_started(cb)` | After recording begins | Update UI, enable teleop |
+| `on_episode_ended(cb)` | After episode is saved | Log stats, trigger post-processing |
+| `on_pre_shutdown(cb)` | During `shutdown()`, after recording stops | Return arms to sleep position |
+
+**Thread-safe control methods** can be called from any thread:
+
+| Method | Effect |
+|---|---|
+| `request_rerecord()` | Signals `monitor_episode()` to exit with `UserAction::kReRecord` |
+| `signal_reset_complete()` | Wakes `wait_for_reset()` to proceed to the next episode |
+| `stop_episode()` | Stops recording immediately |
+| `discard_current_episode()` | Stops and deletes the current episode |
+| `discard_last_episode()` | Deletes the most recently completed episode |
+
+For example, a web UI could call `request_rerecord()` when the user clicks a "discard" button, or `signal_reset_complete()` when they click "next episode" — no keyboard required.
+
 ---
 
 ## Configuration Reference
