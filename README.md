@@ -200,7 +200,7 @@ During a recording session the operator can control episode flow using keyboard 
 | **Recording** | Right arrow | Stop recording early and proceed to reset |
 | **Recording** | Ctrl+C | End the session |
 | **Reset** | Left arrow | Discard the last completed episode and re-record |
-| **Reset** | Right arrow | Skip the remaining countdown |
+| **Reset** | Right arrow | Continue to next episode (skip countdown / end wait) |
 | **Reset** | Ctrl+C | End the session |
 
 ### Reset duration
@@ -228,8 +228,10 @@ Events announced: "Episode N started", "Episode N complete", "Reset time". If `s
 The examples use this pattern to handle all user actions:
 
 ```cpp
+using trossen::runtime::UserAction;
+
 while (!trossen::utils::g_stop_requested) {
-  mgr.start_episode();
+  if (!mgr.start_episode()) break;
 
   // Recording phase
   auto action = mgr.monitor_episode();
@@ -265,15 +267,15 @@ The keyboard controls in the examples are just one way to drive the session. The
 | `on_episode_ended(cb)` | After episode is saved | Log stats, trigger post-processing |
 | `on_pre_shutdown(cb)` | During `shutdown()`, after recording stops | Return arms to sleep position |
 
-**Thread-safe control methods** can be called from any thread:
+**Control methods** for driving the session programmatically:
 
-| Method | Effect |
-|---|---|
-| `request_rerecord()` | Signals `monitor_episode()` to exit with `UserAction::kReRecord` |
-| `signal_reset_complete()` | Wakes `wait_for_reset()` to proceed to the next episode |
-| `stop_episode()` | Stops recording immediately |
-| `discard_current_episode()` | Stops and deletes the current episode |
-| `discard_last_episode()` | Deletes the most recently completed episode |
+| Method | Thread-safe | Effect |
+|---|---|---|
+| `request_rerecord()` | Yes | Signals `monitor_episode()` to exit with `UserAction::kReRecord` |
+| `signal_reset_complete()` | Yes | Wakes `wait_for_reset()` to proceed to the next episode |
+| `stop_episode()` | No | Stops recording immediately |
+| `discard_current_episode()` | No | Stops and deletes the current episode |
+| `discard_last_episode()` | No | Deletes the most recently completed episode |
 
 For example, a web UI could call `request_rerecord()` when the user clicks a "discard" button, or `signal_reset_complete()` when they click "next episode" — no keyboard required.
 
