@@ -64,6 +64,11 @@ public:
   void close() override;
 
   /**
+   * @brief Discard episode data (no-op for null backend)
+   */
+  void discard_episode() override {}
+
+  /**
    * @brief Get the number of records "written"
    *
    * @return Count of records

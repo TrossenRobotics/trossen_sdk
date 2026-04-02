@@ -105,6 +105,15 @@ public:
   virtual void close() = 0;
 
   /**
+   * @brief Discard all data for the current episode
+   *
+   * Closes the backend without finalizing, then deletes all files/directories
+   * associated with the current episode_index_. Used for re-recording.
+   * Safe to call even if the backend was already closed (e.g., by Sink::stop()).
+   */
+  virtual void discard_episode() = 0;
+
+  /**
    * @brief Scan directory for existing episode files and return next index
    * @return Next episode index to use
    */

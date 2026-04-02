@@ -418,6 +418,116 @@ inline bool write_task_entry(
 }
 
 /**
+ * @brief Remove the last JSONL entry matching a given episode_index
+ *
+ * Only removes the last line if its "episode_index" field matches the
+ * expected index. Returns true (no-op) if the last entry doesn't match,
+ * preventing accidental deletion of a previous episode's metadata.
+ *
+ * @param file_path Path to the JSONL file
+ * @param expected_episode_index Episode index that must match for removal
+ * @return true on success or no-op, false on I/O failure
+ */
+inline bool remove_last_jsonl_line(
+    const std::filesystem::path& file_path,
+    int expected_episode_index) {
+  namespace fs = std::filesystem;
+  if (!fs::exists(file_path)) return true;
+
+  std::ifstream in(file_path);
+  if (!in.is_open()) return false;
+
+  std::vector<std::string> lines;
+  std::string line;
+  while (std::getline(in, line)) {
+    if (!line.empty()) lines.push_back(line);
+  }
+  in.close();
+
+  if (lines.empty()) return true;
+
+  // Only remove if the last entry's episode_index matches
+  try {
+    auto entry = nlohmann::json::parse(lines.back());
+    if (entry.value("episode_index", -1) != expected_episode_index) {
+      return true;  // no-op: last entry belongs to a different episode
+    }
+  } catch (const std::exception&) {
+    return false;  // malformed JSON
+  }
+
+  lines.pop_back();
+
+  std::ofstream out(file_path, std::ios::trunc);
+  if (!out.is_open()) return false;
+  for (const auto& l : lines) {
+    out << l << "\n";
+  }
+  out.close();
+  return true;
+}
+
+/**
+ * @brief Revert info.json counters after discarding an episode
+ *
+ * Decrements total_episodes, total_frames, total_videos, and adjusts
+ * the train split range. Requires the frame count that was recorded for
+ * the discarded episode.
+ *
+ * @param meta_dir Path to the meta directory
+ * @param episode_frame_count Number of frames in the discarded episode
+ * @param num_videos Number of video streams in the discarded episode
+ * @return true on success, false on failure
+ */
+inline bool revert_info_json(
+    const std::filesystem::path& meta_dir,
+    int episode_frame_count,
+    int num_videos) {
+  namespace fs = std::filesystem;
+
+  fs::path info_path = meta_dir / JSON_INFO;
+  if (!fs::exists(info_path)) return true;
+
+  nlohmann::ordered_json info_json;
+  {
+    std::ifstream info_file(info_path);
+    if (!info_file.is_open()) return false;
+    info_file >> info_json;
+  }
+
+  int total_episodes = std::max(0, info_json.value("total_episodes", 0) - 1);
+  info_json["total_episodes"] = total_episodes;
+  info_json["total_videos"] = std::max(0, info_json.value("total_videos", 0) - num_videos);
+  info_json["total_frames"] = std::max(0, info_json.value("total_frames", 0) - episode_frame_count);
+
+  int chunks_size = info_json.value("chunks_size", 1000);
+  info_json["total_chunks"] = std::max(1, (total_episodes + chunks_size - 1) / chunks_size);
+
+  // Adjust train split end (guard against missing/malformed "splits")
+  if (info_json.contains("splits") && info_json["splits"].is_object() &&
+      info_json["splits"].contains("train")) {
+    try {
+      std::string train_split = info_json["splits"].value("train", "0:0");
+      size_t colon_pos = train_split.find(':');
+      if (colon_pos != std::string::npos) {
+        int train_start = std::stoi(train_split.substr(0, colon_pos));
+        int train_end = std::max(train_start, std::stoi(train_split.substr(colon_pos + 1)) - 1);
+        info_json["splits"]["train"] =
+            std::to_string(train_start) + ":" + std::to_string(train_end);
+      }
+    } catch (const std::exception&) {
+      // Malformed split value — leave unchanged
+    }
+  }
+
+  std::ofstream out(info_path);
+  if (!out.is_open()) return false;
+  out << info_json.dump(4);
+  out.close();
+  return true;
+}
+
+/**
  * @brief Append episode statistics to episodes_stats.jsonl
  *
  * @param meta_dir Path to the meta directory
@@ -625,6 +735,11 @@ public:
   void close() override;
 
   /**
+   * @brief Discard episode data and delete parquet file + image directories
+   */
+  void discard_episode() override;
+
+  /**
    * @brief Add metadata to be written to info.json
    *
    * @param md Metadata to add
@@ -761,6 +876,14 @@ public:
   }
 
 private:
+  /**
+   * @brief Close writer, output stream, and image workers without finalization.
+   *
+   * Shared teardown used by both close() and discard_episode(). Does NOT call
+   * convert_to_videos() or compute_statistics(). Caller must hold open_mutex_.
+   */
+  void close_resources();
+
   /**
    * @brief Write a joint state record to disk
    *

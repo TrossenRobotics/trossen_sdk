@@ -802,14 +802,13 @@ void LeRobotV2Backend::flush() {
   // TODO(shantanuparab-tr): flush parquet writer if needed
 }
 
-void LeRobotV2Backend::close() {
-  std::lock_guard<std::mutex> lock(open_mutex_);
-  if (!opened_) {
-    return;
-  }
+void LeRobotV2Backend::close_resources() {
+  // Caller must hold open_mutex_. Closes writer, stream, and image workers.
+  // Check actual resource state, not just opened_, because open() may have
+  // started threads before a later step threw (leaving opened_ == false).
+  if (!opened_ && !writer_ && !outfile_ && image_workers_.empty()) return;
 
   try {
-    // 1. Flush and close writer if initialized
     if (writer_) {
       auto st = writer_->Close();
       if (!st.ok()) {
@@ -819,7 +818,6 @@ void LeRobotV2Backend::close() {
       writer_.reset();
     }
 
-    // 2. Close output stream (very important!)
     if (outfile_) {
       auto st = outfile_->Close();
       if (!st.ok()) {
@@ -828,28 +826,137 @@ void LeRobotV2Backend::close() {
       }
       outfile_.reset();
     }
-  } catch (const std::exception &e) {
+  } catch (const std::exception& e) {
     std::cerr << "[Parquet] Exception while closing: " << e.what() << std::endl;
   }
 
-  // Stop image worker
   image_worker_running_ = false;
   image_queue_cv_.notify_all();
-  for (auto &t : image_workers_) {
+  for (auto& t : image_workers_) {
     if (t.joinable()) t.join();
   }
   image_workers_.clear();
+  source_frame_indices_.clear();
+  opened_ = false;
+}
+
+void LeRobotV2Backend::close() {
+  std::lock_guard<std::mutex> lock(open_mutex_);
+
+  if (!opened_) return;
+
+  close_resources();
 
   // Encode any remaining images to videos
   convert_to_videos();
 
   // Compute dataset statistics
   compute_statistics();
+}
 
-  // Clear source frame indices map
-  source_frame_indices_.clear();
+void LeRobotV2Backend::discard_episode() {
+  std::lock_guard<std::mutex> lock(open_mutex_);
 
-  opened_ = false;
+  close_resources();
+
+  // Construct paths from config (works even if open() was never called)
+  // NOTE: currently only chunk 0 is supported
+  fs::path discard_root = fs::path(cfg_->root) / cfg_->repository_id / cfg_->dataset_id;
+  fs::path discard_data = discard_root / "data" / format_chunk_dir(0);
+  fs::path discard_images = discard_root / "images" / format_chunk_dir(0);
+  fs::path discard_videos = discard_root / "videos" / format_chunk_dir(0);
+  fs::path discard_meta = discard_root / "meta";
+
+  // Delete episode parquet file
+  try {
+    fs::remove(discard_data / format_episode_parquet(episode_index_));
+  } catch (const fs::filesystem_error& e) {
+    std::cerr << "[LeRobotV2] Warning: Failed to remove parquet file during discard: "
+              << e.what() << std::endl;
+  }
+
+  // Delete episode image directories for all camera streams
+  try {
+    std::string episode_folder = format_episode_folder(episode_index_);
+    if (fs::exists(discard_images)) {
+      for (const auto& cam_dir : fs::directory_iterator(discard_images)) {
+        if (!cam_dir.is_directory()) continue;
+        auto ep_dir = cam_dir.path() / episode_folder;
+        if (fs::exists(ep_dir)) {
+          fs::remove_all(ep_dir);
+        }
+      }
+    }
+  } catch (const fs::filesystem_error& e) {
+    std::cerr << "[LeRobotV2] Warning: Failed to remove image directories during discard: "
+              << e.what() << std::endl;
+  }
+
+  // Delete episode video files (created by convert_to_videos() if close() already ran)
+  try {
+    std::string video_filename = format_video_filename(episode_index_);
+    if (fs::exists(discard_videos)) {
+      for (const auto& video_dir : fs::directory_iterator(discard_videos)) {
+        if (!video_dir.is_directory()) continue;
+        auto video_file = video_dir.path() / video_filename;
+        if (fs::exists(video_file)) {
+          fs::remove(video_file);
+        }
+      }
+    }
+  } catch (const fs::filesystem_error& e) {
+    std::cerr << "[LeRobotV2] Warning: Failed to remove video files during discard: "
+              << e.what() << std::endl;
+  }
+
+  // Revert metadata written by compute_statistics() if close() already ran.
+  // Read the frame count from the episodes.jsonl entry before removing it,
+  // so we can decrement info.json counters accurately.
+  int discarded_frame_count = 0;
+  try {
+    fs::path episodes_path = discard_meta / JSONL_EPISODES;
+    if (fs::exists(episodes_path)) {
+      std::ifstream in(episodes_path);
+      std::string last_line, line;
+      while (std::getline(in, line)) {
+        if (!line.empty()) last_line = line;
+      }
+      if (!last_line.empty()) {
+        auto entry = nlohmann::json::parse(last_line);
+        if (entry.value("episode_index", -1) == static_cast<int>(episode_index_)) {
+          discarded_frame_count = entry.value("length", 0);
+        }
+      }
+    }
+  } catch (...) {
+    // Best-effort: if we can't read the frame count, counters will be approximate
+  }
+
+  // Count video streams for info.json revert
+  int num_video_streams = 0;
+  try {
+    if (fs::exists(discard_videos)) {
+      for (const auto& entry : fs::directory_iterator(discard_videos)) {
+        if (entry.is_directory()) ++num_video_streams;
+      }
+    }
+  } catch (...) {}
+
+  // Remove JSONL entries only if they match this episode's index
+  int ep_idx = static_cast<int>(episode_index_);
+  if (!remove_last_jsonl_line(discard_meta / JSONL_EPISODES, ep_idx)) {
+    std::cerr << "[LeRobotV2] Warning: Failed to revert episodes.jsonl" << std::endl;
+  }
+  if (!remove_last_jsonl_line(discard_meta / JSONL_EPISODE_STATS, ep_idx)) {
+    std::cerr << "[LeRobotV2] Warning: Failed to revert episodes_stats.jsonl" << std::endl;
+  }
+
+  // Revert info.json counters
+  if (discarded_frame_count > 0 || num_video_streams > 0) {
+    if (!revert_info_json(discard_meta, discarded_frame_count, num_video_streams)) {
+      std::cerr << "[LeRobotV2] Warning: Failed to revert info.json" << std::endl;
+    }
+  }
 }
 
 void LeRobotV2Backend::write_joint_state(const data::RecordBase& base) {

@@ -108,6 +108,11 @@ public:
   void close() override;
 
   /**
+   * @brief Discard episode data and delete the MCAP file
+   */
+  void discard_episode() override;
+
+  /**
    * @brief Get statistics about written records
    *
    * @return Stats structure with counts
@@ -122,6 +127,14 @@ public:
   uint32_t scan_existing_episodes() override;
 
 private:
+  /**
+   * @brief Close all channels and writer without deleting files.
+   *
+   * Shared teardown used by both close() and discard_episode().
+   * Caller must hold writer_mutex_.
+   */
+  void close_resources();
+
   /**
    * @brief Ensure an image channel exists for the given camera name
    *
