@@ -183,11 +183,14 @@ TEST_F(SessionManagerPushProducerTest, PushProducerRecordsReachBackend) {
   producer->records_per_episode_ = 5;
   sm.add_push_producer(producer);
 
-  sm.start_episode();
+  ASSERT_TRUE(sm.start_episode());
 
-  // Check records while episode is still active (sink is valid)
-  // Sleep briefly to let the sink drain thread process the records
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  // Poll until the sink drain thread processes all records (or timeout)
+  auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+  while (sm.stats().records_written_current < 5 &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
   EXPECT_EQ(sm.stats().records_written_current, 5);
 
   sm.stop_episode();
