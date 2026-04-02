@@ -60,6 +60,7 @@ jobs:
         # Register the RealSense signing key (official method)
         curl -sSf https://librealsense.realsenseai.com/Debian/librealsenseai.asc | \
           gpg --dearmor | sudo tee /etc/apt/keyrings/librealsenseai.gpg > /dev/null
+        sudo chmod 0644 /etc/apt/keyrings/librealsenseai.gpg
 
         # Make sure apt HTTPS support is installed
         sudo apt-get install -y apt-transport-https
