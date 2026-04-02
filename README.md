@@ -223,37 +223,6 @@ sudo apt-get install -y speech-dispatcher
 
 Events announced: "Episode N started", "Episode N complete", "Reset time". If `spd-say` is not installed, announcements are silently skipped.
 
-### Example episode loop
-
-The examples use this pattern to handle all user actions:
-
-```cpp
-using trossen::runtime::UserAction;
-
-while (!trossen::utils::g_stop_requested) {
-  if (!mgr.start_episode()) break;
-
-  // Recording phase
-  auto action = mgr.monitor_episode();
-  if (action == UserAction::kReRecord) {
-    mgr.discard_current_episode();
-    continue;
-  }
-  if (mgr.is_episode_active()) mgr.stop_episode();
-
-  if (trossen::utils::g_stop_requested) break;
-
-  // Reset phase
-  action = mgr.wait_for_reset();
-  if (action == UserAction::kStop) break;
-  if (action == UserAction::kReRecord) {
-    mgr.discard_last_episode();
-    continue;
-  }
-}
-mgr.shutdown();
-```
-
 ### Custom input methods
 
 The keyboard controls in the examples are just one way to drive the session. The SessionManager exposes callbacks and thread-safe methods that let you plug in any input source — a GUI, a foot pedal, a web dashboard, ROS topics, etc.
