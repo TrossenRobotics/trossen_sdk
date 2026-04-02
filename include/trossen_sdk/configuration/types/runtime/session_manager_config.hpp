@@ -18,6 +18,10 @@ struct SessionManagerConfig : public BaseConfig {
   std::optional<std::chrono::duration<double>> max_duration{std::chrono::seconds(20)};
   std::optional<uint32_t> max_episodes{std::nullopt};
   std::string backend_type{"trossen_mcap"};
+  /// Reset duration between episodes.
+  /// Positive = countdown timer (seconds). Zero = no wait (skip reset).
+  /// nullopt (field absent) = infinite wait for user input.
+  std::optional<std::chrono::duration<double>> reset_duration{std::nullopt};
 
   std::string type() const override { return "session_manager"; }
 
@@ -32,6 +36,21 @@ struct SessionManagerConfig : public BaseConfig {
     }
     if (j.contains("backend_type")) {
       j.at("backend_type").get_to(c.backend_type);
+    }
+    if (j.contains("reset_duration")) {
+      const auto& rd = j.at("reset_duration");
+      if (rd.is_null()) {
+        // Explicit null = infinite wait (same as omitting the field)
+        c.reset_duration = std::nullopt;
+      } else {
+        double val = rd.get<double>();
+        if (val > 0.0) {
+          c.reset_duration = std::chrono::duration<double>{val};
+        } else {
+          // Zero or negative = no wait (skip reset phase entirely).
+          c.reset_duration = std::chrono::duration<double>{0.0};
+        }
+      }
     }
 
     return c;

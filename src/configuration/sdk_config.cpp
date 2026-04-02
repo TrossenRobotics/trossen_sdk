@@ -85,6 +85,9 @@ void SdkConfig::populate_global_config() const {
       sm["max_episodes"] = session.max_episodes.value();
     }
     sm["backend_type"] = session.backend_type;
+    if (session.reset_duration.has_value()) {
+      sm["reset_duration"] = session.reset_duration->count();
+    }
     gc_json["session_manager"] = sm;
   }
 

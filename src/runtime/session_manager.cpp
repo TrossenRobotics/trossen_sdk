@@ -4,6 +4,7 @@
  */
 
 #include <algorithm>
+#include <cmath>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -14,6 +15,8 @@
 
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
+#include "trossen_sdk/utils/app_utils.hpp"
+#include "trossen_sdk/utils/keyboard_input_utils.hpp"
 
 namespace trossen::runtime {
 
@@ -274,6 +277,9 @@ bool SessionManager::start_episode() {
   preprocessing_duration_s_ =
     std::chrono::duration<double>(prep_end_time - prep_start_time).count();
   std::cout << "Episode " << next_episode_index_ << " started." << std::endl;
+
+  trossen::utils::announce(
+    "Episode " + std::to_string(next_episode_index_) + " started", false);
 
   // Invoke episode-started callbacks
   for (const auto& cb : episode_started_cbs_) {
@@ -570,6 +576,75 @@ void SessionManager::print_stats_line(const SessionManager::Stats& stats) {
   }
 
   std::cout << std::flush;
+}
+
+bool SessionManager::wait_for_reset() {
+  // Reset signal flag for this wait cycle
+  reset_signaled_.store(false);
+
+  trossen::utils::announce("Episode complete");
+
+  // Enable raw terminal input to detect keypresses without Enter
+  trossen::utils::RawModeGuard raw_mode;
+
+  // Helper: wait up to 100ms, waking early on signal_reset_complete()
+  auto wait_or_signal = [this]() {
+    std::unique_lock<std::mutex> lk(reset_mutex_);
+    reset_cv_.wait_for(lk, std::chrono::milliseconds(100), [this]() {
+      return reset_signaled_.load() || trossen::utils::g_stop_requested;
+    });
+  };
+
+  if (cfg_->reset_duration.has_value()) {
+    // Zero duration = skip reset phase entirely
+    if (cfg_->reset_duration->count() <= 0.0) {
+      return !trossen::utils::g_stop_requested;
+    }
+
+    // Countdown mode: wait for the configured duration
+    int total_seconds = static_cast<int>(std::ceil(cfg_->reset_duration->count()));
+    if (total_seconds < 1) total_seconds = 1;
+
+    std::cout << "\nResetting environment — next episode in "
+              << total_seconds << " seconds...\n"
+              << "  (Press -> to skip)\n";
+    trossen::utils::announce("Reset time");
+
+    for (int i = total_seconds; i > 0; --i) {
+      if (trossen::utils::g_stop_requested || reset_signaled_.load()) break;
+      std::cout << "  " << i << "...\n";
+      // Poll for keypress during each second (10 x 100ms)
+      for (int ms = 0; ms < 10; ++ms) {
+        if (trossen::utils::g_stop_requested || reset_signaled_.load()) break;
+        auto key = trossen::utils::poll_keypress();
+        if (key == trossen::utils::KeyPress::kRightArrow) {
+          reset_signaled_.store(true);
+          break;
+        }
+        wait_or_signal();
+      }
+    }
+  } else {
+    // Infinite wait: block until right arrow, signal_reset_complete(), or Ctrl+C
+    std::cout << "\nWaiting for input — press -> to continue...\n";
+    trossen::utils::announce("Reset time. Waiting for input.");
+
+    while (!trossen::utils::g_stop_requested && !reset_signaled_.load()) {
+      auto key = trossen::utils::poll_keypress();
+      if (key == trossen::utils::KeyPress::kRightArrow) {
+        reset_signaled_.store(true);
+        break;
+      }
+      wait_or_signal();
+    }
+  }
+
+  return !trossen::utils::g_stop_requested;
+}
+
+void SessionManager::signal_reset_complete() {
+  reset_signaled_.store(true);
+  reset_cv_.notify_all();
 }
 
 SessionManager::Stats SessionManager::monitor_episode(
