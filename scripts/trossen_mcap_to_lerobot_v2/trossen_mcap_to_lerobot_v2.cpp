@@ -225,7 +225,8 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
 
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
-                      const std::string& dataset_id, int chunk_size);
+                      const std::string& dataset_id, int chunk_size,
+                      int64_t& global_index_offset);
 
 // ──────────────────────────────────────────────────────────
 // Main entry point
@@ -358,6 +359,7 @@ int main(int argc, char** argv) {
   int successful = 0;
   int skipped = 0;
   int failed = 0;
+  int64_t global_index_offset = 0;
 
   fs::path full_dataset_path_check = fs::path(dataset_root_dir) / repository_id / dataset_id;
 
@@ -393,7 +395,8 @@ int main(int argc, char** argv) {
     std::cout << std::string(70, '=') << "\n";
 
     int result = process_mcap_file(mcap_path.string(), dataset_root_dir, episode_index,
-                                    repository_id, dataset_id, chunk_size);
+                                    repository_id, dataset_id, chunk_size,
+                                    global_index_offset);
 
     if (result == 0) {
       successful++;
@@ -509,7 +512,8 @@ int main(int argc, char** argv) {
 
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
-                      const std::string& dataset_id, int chunk_size) {
+                      const std::string& dataset_id, int chunk_size,
+                      int64_t& global_index_offset) {
   ParquetConfig cfg;
   cfg.mcap_file = mcap_file;
   cfg.dataset_root = dataset_root_dir;
@@ -970,7 +974,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   int64_t frame_index = 0;
-  int64_t global_index = 0;
+  int64_t global_index = global_index_offset;
   size_t rows_written = 0;
   size_t rows_skipped = 0;
 
@@ -1545,5 +1549,6 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   std::cout << "\n[ok] Successfully created LeRobotV2 dataset episode!\n";
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
 
+  global_index_offset = global_index;
   return 0;
 }
