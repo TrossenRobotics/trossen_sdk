@@ -9,7 +9,7 @@ Records a bimanual setup on a SLATE mobile base — two leader + two follower ar
 | Device | Quantity | Notes |
 |---|---|---|
 | Trossen AI Kit arm (wxai_v0) | 4 | Left leader, right leader, left follower, right follower |
-| Intel RealSense camera | 3 | High view, left wrist, right wrist |
+| RealSense camera | 3 | High view, left wrist, right wrist |
 | SLATE mobile base | 1 | Differential drive with odometry |
 
 ---

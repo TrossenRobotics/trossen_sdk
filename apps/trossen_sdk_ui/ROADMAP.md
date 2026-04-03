@@ -75,9 +75,9 @@ This document tracks bugs, features, and improvements needed for the Beta releas
 
 ## Critical Features (Must Complete for Beta)
 
-#### 9. RealSense Camera Support
+#### 9. Stereolabs ZED and RealSense Camera Support
 - **Status:** In Progress (40% complete)
-- **Description:** Add support for Intel RealSense depth cameras (D435, D455)
+- **Description:** Add support for Stereolabs ZED cameras (Jetson only, GMSL) and RealSense depth cameras (D435, D455)
 
 #### 10. Session Recovery After Backend Restart
 - **Status:** Not Started

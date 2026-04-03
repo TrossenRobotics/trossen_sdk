@@ -96,7 +96,7 @@ React Re-render
   - Hardware connection controls
   - Real-time connection status
 - **Tabs:**
-  1. **Cameras Tab:** OpenCV/RealSense camera configuration
+  1. **Cameras Tab:** Stereolabs ZED/RealSense/OpenCV camera configuration
   2. **Robots Tab:** SO101/WidowX arm configuration
   3. **Producers Tab:** Data producer configuration
   4. **Systems Tab:** Hardware system grouping

@@ -14,12 +14,12 @@
 namespace trossen::configuration {
 
 /**
- * @brief Configuration for a single camera (RealSense, OpenCV, or ZED)
+ * @brief Configuration for a single camera (ZED, RealSense, or OpenCV)
  *
  * The @p type field selects which hardware component is created via HardwareRegistry.
- * Use @c "realsense_camera" for RealSense cameras, @c "opencv_camera" for
- * any V4L2 / USB webcam accessible through OpenCV, or @c "zed_camera" for
- * StereoLabs ZED stereo cameras.
+ * Use @c "zed_camera" for StereoLabs ZED stereo cameras, @c "realsense_camera"
+ * for RealSense cameras, or @c "opencv_camera" for any V4L2 / USB webcam
+ * accessible through OpenCV.
  *
  * JSON format (RealSense):
  * @code
@@ -62,7 +62,7 @@ namespace trossen::configuration {
  * @endcode
  */
 struct CameraConfig {
-  /// @brief Hardware registry key - "realsense_camera", "opencv_camera", or "zed_camera"
+  /// @brief Hardware registry key - "zed_camera", "realsense_camera", or "opencv_camera"
   std::string type{"realsense_camera"};
 
   /// @brief Logical camera identifier used as stream_id (e.g. "camera_0", "wrist_cam")
@@ -71,7 +71,7 @@ struct CameraConfig {
   // TODO(shantanuparab-tr): Unify serial_number and device_index into a
   // single device identifier field (serial string or numeric index).
 
-  /// @brief Camera serial number (RealSense: string, ZED: numeric — both accepted)
+  /// @brief Camera serial number (ZED: numeric, RealSense: string — both accepted)
   std::string serial_number{""};
 
   /// @brief OpenCV device index (OpenCV only)
@@ -84,10 +84,10 @@ struct CameraConfig {
   //       a resolution string (e.g. "720x480", "HD720", "SVGA") that maps to
   //       width/height for RealSense/OpenCV and to the native enum for ZED.
 
-  /// @brief Capture width in pixels (RealSense / OpenCV only; ZED uses "resolution" in extra)
+  /// @brief Capture width in pixels (ZED uses "resolution" in extra; RealSense / OpenCV only)
   int width{640};
 
-  /// @brief Capture height in pixels (RealSense / OpenCV only; ZED uses "resolution" in extra)
+  /// @brief Capture height in pixels (ZED uses "resolution" in extra; RealSense / OpenCV only)
   int height{480};
 
   /// @brief Capture frame rate

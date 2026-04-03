@@ -9,7 +9,7 @@ Records a bimanual setup — two leader + two follower arms and four RealSense c
 | Device | Quantity | Notes |
 |---|---|---|
 | Trossen AI Kit arm (wxai_v0) | 4 | Left leader, right leader, left follower, right follower |
-| Intel RealSense camera | 4 | High view, low view, left wrist, right wrist |
+| RealSense camera | 4 | High view, low view, left wrist, right wrist |
 
 ---
 

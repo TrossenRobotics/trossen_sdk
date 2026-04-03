@@ -33,9 +33,9 @@ namespace trossen::configuration {
  *
  * Known types:
  *  - "trossen_arm"      - arm joint-state producer
- *  - "realsense_camera" - Intel RealSense image producer
- *  - "opencv_camera"    - OpenCV/V4L2 image producer
  *  - "zed_camera"       - StereoLabs ZED stereo camera producer
+ *  - "realsense_camera" - RealSense image producer
+ *  - "opencv_camera"    - OpenCV/V4L2 image producer
  *  - "slate_base"       - SLATE mobile base velocity producer
  */
 struct ProducerConfig {
