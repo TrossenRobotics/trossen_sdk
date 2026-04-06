@@ -223,9 +223,21 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
 // MCAP to Parquet conversion
 // ──────────────────────────────────────────────────────────
 
+/// @brief Convert a single MCAP file to a LeRobotV2 dataset episode
+/// @param mcap_file Path to the input MCAP file
+/// @param dataset_root_dir Root directory for all datasets
+/// @param episode_index Zero-based episode index
+/// @param repository_id HuggingFace-style repository ID for the folder structure
+/// @param dataset_id Dataset name within the repository
+/// @param chunk_size Number of episodes per chunk directory
+/// @param global_index_offset In/out parameter tracking the next available
+///   global row index across episodes. Pass 0 for a fresh conversion; on
+///   successful return the value is advanced by the number of rows written.
+/// @return 0 on success, non-zero on failure
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
-                      const std::string& dataset_id, int chunk_size);
+                      const std::string& dataset_id, int chunk_size,
+                      int64_t& global_index_offset);
 
 // ──────────────────────────────────────────────────────────
 // Main entry point
@@ -358,6 +370,7 @@ int main(int argc, char** argv) {
   int successful = 0;
   int skipped = 0;
   int failed = 0;
+  int64_t global_index_offset = 0;
 
   fs::path full_dataset_path_check = fs::path(dataset_root_dir) / repository_id / dataset_id;
 
@@ -380,11 +393,23 @@ int main(int argc, char** argv) {
                                 trossen::io::backends::format_episode_parquet(episode_index);
 
     if (fs::exists(expected_parquet)) {
-      std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
-                << episode_index << " (already converted): "
-                << mcap_path.filename().string() << "\n";
-      ++skipped;
-      continue;
+      // Advance global index past the skipped episode's rows.
+      // If the parquet is corrupt / unreadable, delete it and fall through
+      // to re-convert so we don't end up with overlapping indices.
+      try {
+        auto reader = parquet::ParquetFileReader::OpenFile(expected_parquet.string(), false);
+        global_index_offset += reader->metadata()->num_rows();
+        std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
+                  << episode_index << " (already converted): "
+                  << mcap_path.filename().string() << "\n";
+        ++skipped;
+        continue;
+      } catch (const std::exception& e) {
+        std::cerr << "\n[" << (i + 1) << "/" << mcap_files.size()
+                  << "] Corrupt parquet for episode " << episode_index
+                  << ", deleting and re-converting: " << e.what() << "\n";
+        fs::remove(expected_parquet);
+      }
     }
 
     std::cout << "\n" << std::string(70, '=') << "\n";
@@ -393,7 +418,8 @@ int main(int argc, char** argv) {
     std::cout << std::string(70, '=') << "\n";
 
     int result = process_mcap_file(mcap_path.string(), dataset_root_dir, episode_index,
-                                    repository_id, dataset_id, chunk_size);
+                                    repository_id, dataset_id, chunk_size,
+                                    global_index_offset);
 
     if (result == 0) {
       successful++;
@@ -509,7 +535,8 @@ int main(int argc, char** argv) {
 
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
-                      const std::string& dataset_id, int chunk_size) {
+                      const std::string& dataset_id, int chunk_size,
+                      int64_t& global_index_offset) {
   ParquetConfig cfg;
   cfg.mcap_file = mcap_file;
   cfg.dataset_root = dataset_root_dir;
@@ -970,7 +997,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   int64_t frame_index = 0;
-  int64_t global_index = 0;
+  int64_t global_index = global_index_offset;
   size_t rows_written = 0;
   size_t rows_skipped = 0;
 
@@ -1171,6 +1198,11 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     std::cerr << "This usually means joint state streams were misaligned or missing.\n";
     return 1;
   }
+
+  // Advance the global index offset now that parquet is committed to disk.
+  // This ensures post-parquet failures (image extraction, metadata) don't
+  // cause overlapping indices in subsequent episodes.
+  global_index_offset += rows_written;
 
   std::cout << "\n[ok] Successfully created Parquet file: " << cfg.output_file << "\n";
   std::cout << "\nSummary:\n";
