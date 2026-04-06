@@ -605,23 +605,30 @@ inline bool write_episode_stats_with_data(
  * and a markdown body embedding the full info.json content.
  *
  * @param dataset_root Path to the dataset root directory (containing meta/, data/, etc.)
+ * @param license SPDX license identifier for the dataset (default: "apache-2.0")
  * @return true on success, false on failure
  */
-inline bool generate_dataset_readme(const std::filesystem::path& dataset_root) {
+inline bool generate_dataset_readme(
+    const std::filesystem::path& dataset_root,
+    const std::string& license = "apache-2.0") {
   namespace fs = std::filesystem;
 
   fs::path readme_path = dataset_root / "README.md";
   fs::path info_path = dataset_root / METADATA_DIR / JSON_INFO;
 
   // Read info.json content for embedding in the README
-  std::string info_json_str = "[More Information Needed]";
+  std::string info_json_str = "{}";
   if (fs::exists(info_path)) {
     std::ifstream info_file(info_path);
     if (info_file.is_open()) {
-      nlohmann::ordered_json info_json;
-      info_file >> info_json;
+      try {
+        nlohmann::ordered_json info_json;
+        info_file >> info_json;
+        info_json_str = info_json.dump(4);
+      } catch (const std::exception& e) {
+        std::cerr << "Warning: Failed to parse " << info_path << ": " << e.what() << "\n";
+      }
       info_file.close();
-      info_json_str = info_json.dump(4);
     }
   }
 
@@ -633,7 +640,7 @@ inline bool generate_dataset_readme(const std::filesystem::path& dataset_root) {
 
   readme_file
     << "---\n"
-    << "license: apache-2.0\n"
+    << "license: " << license << "\n"
     << "task_categories:\n"
     << "- robotics\n"
     << "tags:\n"
@@ -650,12 +657,25 @@ inline bool generate_dataset_readme(const std::filesystem::path& dataset_root) {
     << "Converted from TrossenMCAP format using the Trossen SDK "
     << "`trossen_mcap_to_lerobot_v2` tool.\n"
     << "\n"
+    << "- **Homepage:** [More Information Needed]\n"
+    << "- **Paper:** [More Information Needed]\n"
+    << "- **License:** " << license << "\n"
+    << "\n"
     << "## Dataset Structure\n"
     << "\n"
     << "[meta/info.json](meta/info.json):\n"
     << "\n"
     << "```json\n"
     << info_json_str << "\n"
+    << "```\n"
+    << "\n"
+    << "\n"
+    << "## Citation\n"
+    << "\n"
+    << "**BibTeX:**\n"
+    << "\n"
+    << "```bibtex\n"
+    << "[More Information Needed]\n"
     << "```\n";
 
   readme_file.close();
