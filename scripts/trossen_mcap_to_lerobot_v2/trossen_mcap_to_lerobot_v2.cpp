@@ -519,6 +519,13 @@ int main(int argc, char** argv) {
     }
   }
 
+  // Generate HuggingFace Hub compatibility files
+  if (trossen::io::backends::generate_dataset_readme(full_dataset_path)) {
+    std::cout << "  [ok] Generated README.md\n";
+  } else {
+    std::cerr << "  Warning: Failed to generate README.md\n";
+  }
+
   // Print summary
   std::cout << "\n" << std::string(70, '=') << "\n";
   std::cout << "Processing Complete\n";
@@ -1572,6 +1579,13 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   } else {
     std::cerr << "  Error: Failed to write metadata files\n";
     return 1;
+  }
+
+  // Generate HuggingFace Hub compatibility files
+  if (trossen::io::backends::generate_dataset_readme(full_dataset_path)) {
+    std::cout << "  [ok] Generated README.md\n";
+  } else {
+    std::cerr << "  Warning: Failed to generate README.md\n";
   }
 
   std::cout << "\n[ok] Successfully created LeRobotV2 dataset episode!\n";

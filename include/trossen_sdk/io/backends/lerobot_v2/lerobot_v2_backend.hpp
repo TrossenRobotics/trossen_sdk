@@ -599,6 +599,70 @@ inline bool write_episode_stats_with_data(
 }
 
 /**
+ * @brief Generate a README.md dataset card for HuggingFace Hub compatibility
+ *
+ * Creates a README.md with YAML frontmatter (license, task_categories, tags, configs)
+ * and a markdown body embedding the full info.json content.
+ *
+ * @param dataset_root Path to the dataset root directory (containing meta/, data/, etc.)
+ * @return true on success, false on failure
+ */
+inline bool generate_dataset_readme(const std::filesystem::path& dataset_root) {
+  namespace fs = std::filesystem;
+
+  fs::path readme_path = dataset_root / "README.md";
+  fs::path info_path = dataset_root / METADATA_DIR / JSON_INFO;
+
+  // Read info.json content for embedding in the README
+  std::string info_json_str = "[More Information Needed]";
+  if (fs::exists(info_path)) {
+    std::ifstream info_file(info_path);
+    if (info_file.is_open()) {
+      nlohmann::ordered_json info_json;
+      info_file >> info_json;
+      info_file.close();
+      info_json_str = info_json.dump(4);
+    }
+  }
+
+  std::ofstream readme_file(readme_path);
+  if (!readme_file.is_open()) {
+    std::cerr << "Error: Failed to create " << readme_path << " for writing\n";
+    return false;
+  }
+
+  readme_file
+    << "---\n"
+    << "license: apache-2.0\n"
+    << "task_categories:\n"
+    << "- robotics\n"
+    << "tags:\n"
+    << "- LeRobot\n"
+    << "configs:\n"
+    << "- config_name: default\n"
+    << "  data_files: data/*/*.parquet\n"
+    << "---\n"
+    << "\n"
+    << "This dataset was created using [LeRobot](https://github.com/huggingface/lerobot).\n"
+    << "\n"
+    << "## Dataset Description\n"
+    << "\n"
+    << "Converted from TrossenMCAP format using the Trossen SDK "
+    << "`trossen_mcap_to_lerobot_v2` tool.\n"
+    << "\n"
+    << "## Dataset Structure\n"
+    << "\n"
+    << "[meta/info.json](meta/info.json):\n"
+    << "\n"
+    << "```json\n"
+    << info_json_str << "\n"
+    << "```\n";
+
+  readme_file.close();
+  return true;
+}
+
+/**
  * @brief Write all metadata files for an episode
  *
  * This is a convenience function that calls the individual metadata writing functions.
