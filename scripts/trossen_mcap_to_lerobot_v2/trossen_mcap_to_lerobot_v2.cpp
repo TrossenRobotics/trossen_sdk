@@ -223,9 +223,17 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
 // MCAP to Parquet conversion
 // ──────────────────────────────────────────────────────────
 
-/// @param global_index_offset  In/out parameter tracking the next available
-///   global row index across episodes.  Pass 0 for a fresh conversion; on
+/// @brief Convert a single MCAP file to a LeRobotV2 dataset episode
+/// @param mcap_file Path to the input MCAP file
+/// @param dataset_root_dir Root directory for all datasets
+/// @param episode_index Zero-based episode index
+/// @param repository_id HuggingFace-style repository ID for the folder structure
+/// @param dataset_id Dataset name within the repository
+/// @param chunk_size Number of episodes per chunk directory
+/// @param global_index_offset In/out parameter tracking the next available
+///   global row index across episodes. Pass 0 for a fresh conversion; on
 ///   successful return the value is advanced by the number of rows written.
+/// @return 0 on success, non-zero on failure
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
