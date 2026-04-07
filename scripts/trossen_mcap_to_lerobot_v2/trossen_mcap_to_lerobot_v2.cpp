@@ -326,6 +326,7 @@ int main(int argc, char** argv) {
   const std::string repository_id = lerobot_config->repository_id;
   const std::string dataset_id = lerobot_config->dataset_id;
   const int chunk_size = lerobot_config->chunk_size;
+  const std::string license = lerobot_config->license;
 
   // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -517,6 +518,13 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
       std::cerr << "Warning: Failed to compute statistics: " << e.what() << "\n";
     }
+  }
+
+  // Generate HuggingFace Hub compatibility files
+  if (trossen::io::backends::generate_dataset_readme(full_dataset_path, license)) {
+    std::cout << "  [ok] Generated README.md\n";
+  } else {
+    std::cerr << "  Warning: Failed to generate README.md\n";
   }
 
   // Print summary

@@ -22,6 +22,7 @@ inline constexpr float LEROBOT_V2_DEFAULT_FPS = 30.0f;
 inline constexpr int LEROBOT_V2_DEFAULT_EPISODE_INDEX = 0;
 // Number of episodes stored per chunk folder (chunk-000, chunk-001, ...)
 inline constexpr int LEROBOT_V2_DEFAULT_CHUNK_SIZE = 1000;
+inline constexpr char LEROBOT_V2_DEFAULT_LICENSE[] = "apache-2.0";
 
 struct LeRobotV2BackendConfig : public BaseConfig {
   int encoder_threads{trossen::io::backends::DEFAULT_ENCODER_THREADS};
@@ -38,6 +39,7 @@ struct LeRobotV2BackendConfig : public BaseConfig {
   int chunk_size{LEROBOT_V2_DEFAULT_CHUNK_SIZE};
   std::string robot_name{trossen::io::backends::DEFAULT_ROBOT_NAME};
   float fps{LEROBOT_V2_DEFAULT_FPS};
+  std::string license{LEROBOT_V2_DEFAULT_LICENSE};
 
   std::string type() const override { return "lerobot_v2_backend"; }
 
@@ -63,6 +65,7 @@ struct LeRobotV2BackendConfig : public BaseConfig {
     if (j.contains("chunk_size")) j.at("chunk_size").get_to(c.chunk_size);
     if (j.contains("robot_name")) j.at("robot_name").get_to(c.robot_name);
     if (j.contains("fps")) j.at("fps").get_to(c.fps);
+    if (j.contains("license")) j.at("license").get_to(c.license);
 
     return c;
   }
