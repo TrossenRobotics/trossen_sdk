@@ -76,7 +76,15 @@ Run example script          →   trossen_mcap_to_lerobot_v2 <input> <output>
 | OpenCV / USB camera | `opencv_camera` | Any V4L2-compatible USB camera |
 | SLATE mobile base | `slate_base` | Differential drive base with odometry |
 
-> **RealSense depth stream:** Depth recording is not fully supported at this time. Enabling depth capture alongside RGB can saturate USB bandwidth and introduce frame drop artifacts. Only the RGB stream is recommended.
+> **Note:** RealSense depth capture is supported alongside RGB, but requires careful hardware setup to get the best results. Enabling depth significantly increases USB bandwidth usage, which can introduce frame drops if the bus is saturated.
+>
+> **Multi-camera USB bandwidth:** When running multiple RealSense cameras, USB 3.0 bus bandwidth is the primary bottleneck. Each camera's bandwidth scales with resolution, frame rate, and number of active streams. To avoid frame drops and instability:
+> - Use short (under 1 m), high-quality shielded USB 3.0 cables — for longer runs, use active USB 3.0 repeaters instead of passive extensions
+> - Distribute cameras across independent USB host controllers — multiple ports on the same bus share bandwidth
+> - Reduce resolution and frame rate per camera as the camera count increases (e.g. 4 cameras at 640x360 @ 30 fps fits within a single bus; 4 cameras at 1280x720 @ 30 fps does not)
+> - Use externally powered USB hubs — each RealSense camera draws around 2 W, which exceeds per-port bus power when running multiple cameras
+>
+> See the [RealSense multi-camera configuration guide](https://dev.realsenseai.com/docs/multiple-depth-cameras-configuration) for detailed bandwidth calculations and tested configurations.
 
 ### Data modalities recorded
 
@@ -432,7 +440,7 @@ records non-blocking; the drain thread batches up to 64 records per iteration an
   <img src="docs/diagrams/session_manager.png" alt="Episode Lifecycle State Machine" width="800"/>
 </p>
 
-The SessionManager drives each episode through four states: **INACTIVE → STARTING → RECORDING → STOPPING**, then back to INACTIVE for the next episode. At each transition it fires lifecycle callbacks that let application code prepare hardware, log stats, or clean up safely.
+The SessionManager moves each episode through startup, recording, and stopping phases before returning to an inactive state for the next episode. Applications can hook into the documented lifecycle callback points: pre-episode, episode-started, episode-ended, and pre-shutdown.
 
 ```
 start_episode()
