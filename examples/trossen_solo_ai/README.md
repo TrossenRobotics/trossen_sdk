@@ -9,7 +9,7 @@ Records a single leader + follower arm pair and two RealSense cameras to Trossen
 | Device | Quantity | Notes |
 |---|---|---|
 | Trossen AI Kit arm (wxai_v0) | 2 | One leader, one follower |
-| Intel RealSense camera | 2 | Main view + wrist view |
+| RealSense camera | 2 | Main view + wrist view |
 
 ---
 

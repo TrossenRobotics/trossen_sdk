@@ -31,7 +31,7 @@ What actually happened. Include error messages or logs if available.
 - **SDK Version / Commit**: (e.g., v1.0.0 or commit hash)
 - **Robot kit**: (e.g., Trossen Solo AI, Trossen Stationary AI, Trossen Mobile AI)
 - **Arms**: (e.g., WidowX AI)
-- **Cameras**: (e.g., RealSense D405, ZED X Mini, USB webcam)
+- **Cameras**: (e.g., ZED X Mini, RealSense D405, USB webcam)
 - **Mobile base**: (e.g., SLATE base, or N/A)
 - **Build flags**: (e.g., `-DTROSSEN_ENABLE_REALSENSE=ON`)
 

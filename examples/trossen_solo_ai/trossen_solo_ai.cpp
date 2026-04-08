@@ -2,7 +2,7 @@
  * @file trossen_solo_ai.cpp
  * @brief Single arm pair AI Kit demo - 1 leader + 1 follower + 2 cameras
  *
- * Records one leader/follower arm pair along with cameras (RealSense, OpenCV, or ZED).
+ * Records one leader/follower arm pair along with cameras (ZED, RealSense, or OpenCV).
  * All hardware parameters, session settings, and teleop setup are driven by a
  * single JSON config file with optional CLI overrides.
  *
@@ -115,8 +115,8 @@ int main(int argc, char** argv) {
     }
   }
   for (const auto& p : cfg.producers) {
-    if (p.type == "realsense_camera" || p.type == "opencv_camera" ||
-        p.type == "zed_camera") {
+    if (p.type == "zed_camera" || p.type == "realsense_camera" ||
+        p.type == "opencv_camera") {
       camera_fps = p.poll_rate_hz;
       break;
     }

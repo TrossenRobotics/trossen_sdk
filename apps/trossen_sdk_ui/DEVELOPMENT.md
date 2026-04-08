@@ -23,7 +23,7 @@ This guide covers running the Trossen SDK UI in development mode and using Docke
 ### Hardware Setup
 - USB access to SO101 arms (serial ports)
 - Network access to WidowX arms (via IP)
-- USB cameras or RealSense cameras
+- Stereolabs ZED cameras (Jetson only), RealSense cameras, or USB cameras
 - Proper udev rules configured for hardware access
 
 ### Add User to dialout Group

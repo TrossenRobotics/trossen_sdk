@@ -1,8 +1,8 @@
 /**
  * @file trossen_stationary_ai.cpp
- * @brief Bimanual AI Kit demo - 4 arms + RealSense cameras with config-driven setup
+ * @brief Bimanual AI Kit demo - 2 leader + 2 follower arms + 4 cameras
  *
- * Records all 4 arms (both leaders and followers) along with RealSense cameras.
+ * Records two leader/follower arm pairs along with cameras (ZED, RealSense, or OpenCV).
  * All hardware parameters, session settings, and teleop setup are driven by a
  * single JSON config file with optional CLI overrides.
  *
@@ -116,8 +116,8 @@ int main(int argc, char** argv) {
     }
   }
   for (const auto& p : cfg.producers) {
-    if (p.type == "realsense_camera" || p.type == "opencv_camera" ||
-        p.type == "zed_camera") {
+    if (p.type == "zed_camera" || p.type == "realsense_camera" ||
+        p.type == "opencv_camera") {
       camera_fps = p.poll_rate_hz;
       break;
     }

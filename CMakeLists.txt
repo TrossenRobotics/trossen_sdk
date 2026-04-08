@@ -10,7 +10,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # TODO: Discuss build options - do we want RealSense ON by default? What about other
 # optional hardware (e.g., Zed cameras)? Where do we draw the line between mandatory
 # and opt-in dependencies?
-option(TROSSEN_ENABLE_REALSENSE "Enable Intel RealSense support" ON)
+option(TROSSEN_ENABLE_REALSENSE "Enable RealSense camera support" ON)
 option(TROSSEN_ENABLE_ZED "Enable StereoLabs ZED camera support" OFF)
 
 add_library(trossen_sdk SHARED
@@ -47,7 +47,7 @@ add_library(trossen_sdk SHARED
 )
 
 if(TROSSEN_ENABLE_REALSENSE)
-  message(STATUS "Intel RealSense support enabled")
+  message(STATUS "RealSense camera support enabled")
   target_sources(trossen_sdk PRIVATE
     src/hw/camera/realsense_push_producer.cpp
     src/hw/camera/realsense_camera_component.cpp

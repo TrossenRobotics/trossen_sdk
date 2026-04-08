@@ -1,6 +1,6 @@
 # Trossen SDK
 
-A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Intel RealSense cameras, and the SLATE mobile base. Episodes are recorded to the **TrossenMCAP** format and can be converted to **LeRobot V2** format for training.
+A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Stereolabs ZED cameras, RealSense cameras, and the SLATE mobile base. Episodes are recorded to the **TrossenMCAP** format and can be converted to **LeRobot V2** format for training.
 
 ---
 
@@ -71,11 +71,20 @@ Run example script          →   trossen_mcap_to_lerobot_v2 <input> <output>
 | Hardware | Type string | Description |
 |---|---|---|
 | Trossen AI Kit arm | `trossen_arm` | wxai_v0 arms (leader and follower) |
-| Intel RealSense camera | `realsense_camera` | Depth camera — RGB stream only (see note below) |
+| Stereolabs ZED camera | `zed_camera` | Stereo camera — Color + Depth (Jetson only, requires GMSL) |
+| RealSense camera | `realsense_camera` | Depth camera — RGB stream only (see note below) |
 | OpenCV / USB camera | `opencv_camera` | Any V4L2-compatible USB camera |
 | SLATE mobile base | `slate_base` | Differential drive base with odometry |
 
-> **RealSense depth stream:** Depth recording is not fully supported at this time. Enabling depth capture alongside RGB can saturate USB bandwidth and introduce frame drop artifacts. Only the RGB stream is recommended.
+> **Note:** RealSense depth capture is supported alongside RGB, but requires careful hardware setup to get the best results. Enabling depth significantly increases USB bandwidth usage, which can introduce frame drops if the bus is saturated.
+>
+> **Multi-camera USB bandwidth:** When running multiple RealSense cameras, USB 3.0 bus bandwidth is the primary bottleneck. Each camera's bandwidth scales with resolution, frame rate, and number of active streams. To avoid frame drops and instability:
+> - Use short (under 1 m), high-quality shielded USB 3.0 cables — for longer runs, use active USB 3.0 repeaters instead of passive extensions
+> - Distribute cameras across independent USB host controllers — multiple ports on the same bus share bandwidth
+> - Reduce resolution and frame rate per camera as the camera count increases (e.g. 4 cameras at 640x360 @ 30 fps fits within a single bus; 4 cameras at 1280x720 @ 30 fps does not)
+> - Use externally powered USB hubs — each RealSense camera draws around 2 W, which exceeds per-port bus power when running multiple cameras
+>
+> See the [RealSense multi-camera configuration guide](https://dev.realsenseai.com/docs/multiple-depth-cameras-configuration) for detailed bandwidth calculations and tested configurations.
 
 ### Data modalities recorded
 
@@ -135,9 +144,13 @@ Install `libtrossen_arm` by following the C++ setup guide in the Trossen Robotic
 
 The library must be installed before building this SDK.
 
+### Stereolabs ZED (Jetson only)
+
+Required for Stereolabs ZED cameras. ZED cameras use GMSL connectors and are supported on NVIDIA Jetson platforms only. Install the ZED SDK by following the [official installation guide](https://www.stereolabs.com/docs/development/zed-sdk/linux).
+
 ### RealSense
 
-Required for Intel RealSense cameras. Install the Intel RealSense SDK 2.0 by following the [official installation guide](https://github.com/IntelRealSense/librealsense/blob/master/doc/distribution_linux.md).
+Required for RealSense cameras. Install the RealSense SDK 2.0 by following the [official installation guide](https://github.com/IntelRealSense/librealsense/blob/master/doc/distribution_linux.md).
 
 ---
 
@@ -147,6 +160,17 @@ Examples and the conversion script are always included in the build.
 
 ### Standard build
 
+### Building with Stereolabs ZED support (Jetson only)
+
+ZED camera support is disabled by default. To enable it on a Jetson platform:
+
+```bash
+cmake .. -DTROSSEN_ENABLE_ZED=ON
+make -j$(nproc)
+```
+
+### Standard build (RealSense)
+
 RealSense support is **enabled by default**. The standard build includes it automatically:
 
 ```bash
@@ -155,7 +179,6 @@ cd build
 cmake ..
 make -j$(nproc)
 ```
-
 
 ---
 
@@ -413,6 +436,12 @@ records non-blocking; the drain thread batches up to 64 records per iteration an
 
 ### Episode lifecycle
 
+<p align="center">
+  <img src="docs/diagrams/session_manager.png" alt="Episode Lifecycle State Machine" width="800"/>
+</p>
+
+The SessionManager moves each episode through startup, recording, and stopping phases before returning to an inactive state for the next episode. Applications can hook into the documented lifecycle callback points: pre-episode, episode-started, episode-ended, and pre-shutdown.
+
 ```
 start_episode()
   1. Instantiate Backend (BackendRegistry)
@@ -445,6 +474,8 @@ wait_for_reset()
   Pauses between episodes for the configured reset_duration.
   Returns a UserAction indicating what the operator chose.
 ```
+
+`monitor_episode()` blocks while recording and returns a `UserAction` — **kContinue** (episode completed normally), **kReRecord** (operator wants to discard and retry), or **kStop** (Ctrl+C). The re-record path calls `discard_current_episode()` which tears down the episode and deletes its files without advancing the episode index. Between episodes, `wait_for_reset()` provides a configurable pause with the same three-way `UserAction` return, allowing the operator to discard the *last completed* episode via `discard_last_episode()`.
 
 Each episode gets its own Backend file handle, Sink queue, and Scheduler — no state is
 shared between episodes.
