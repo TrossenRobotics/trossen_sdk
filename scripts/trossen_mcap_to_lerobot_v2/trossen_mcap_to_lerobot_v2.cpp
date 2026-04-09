@@ -22,8 +22,10 @@
 #include <parquet/arrow/writer.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -31,9 +33,11 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <opencv2/opencv.hpp>
 #include <regex>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "trossen_sdk/utils/app_utils.hpp"
@@ -223,21 +227,9 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
 // MCAP to Parquet conversion
 // ──────────────────────────────────────────────────────────
 
-/// @brief Convert a single MCAP file to a LeRobotV2 dataset episode
-/// @param mcap_file Path to the input MCAP file
-/// @param dataset_root_dir Root directory for all datasets
-/// @param episode_index Zero-based episode index
-/// @param repository_id HuggingFace-style repository ID for the folder structure
-/// @param dataset_id Dataset name within the repository
-/// @param chunk_size Number of episodes per chunk directory
-/// @param global_index_offset In/out parameter tracking the next available
-///   global row index across episodes. Pass 0 for a fresh conversion; on
-///   successful return the value is advanced by the number of rows written.
-/// @return 0 on success, non-zero on failure
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
-                      const std::string& dataset_id, int chunk_size,
-                      int64_t& global_index_offset);
+                      const std::string& dataset_id, int chunk_size);
 
 // ──────────────────────────────────────────────────────────
 // Main entry point
@@ -254,6 +246,8 @@ static void print_usage(const char* program) {
             << "(default: scripts/trossen_mcap_to_lerobot_v2/config.json)\n";
   std::cerr << "  --set KEY=VALUE              Override a config value (repeatable)\n";
   std::cerr << "                               e.g. --set lerobot_v2_backend.dataset_id=my_ds\n";
+  std::cerr << "  --threads <N>                Number of parallel episode cores\n";
+  std::cerr << "                               (default: 70% of hardware_concurrency)\n";
   std::cerr << "  --dump-config                Print resolved config and exit\n";
   std::cerr << "  --help                       Show this help message\n";
   std::cerr << "\nExamples:\n";
@@ -326,7 +320,6 @@ int main(int argc, char** argv) {
   const std::string repository_id = lerobot_config->repository_id;
   const std::string dataset_id = lerobot_config->dataset_id;
   const int chunk_size = lerobot_config->chunk_size;
-  const std::string license = lerobot_config->license;
 
   // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -367,68 +360,124 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // Determine thread count: default = 70% of hardware_concurrency
+  unsigned int hw_threads = std::thread::hardware_concurrency();
+  if (hw_threads == 0) hw_threads = 4;
+  unsigned int default_threads = std::max(1u, static_cast<unsigned int>(hw_threads * 0.7));
+  unsigned int num_threads = static_cast<unsigned int>(cli.get_int("threads", default_threads));
+  num_threads = std::max(1u, num_threads);
+  std::cout << "Using " << num_threads << " core(s) of " << hw_threads << " available\n\n";
+
   // Process all MCAP files
-  int successful = 0;
-  int skipped = 0;
-  int failed = 0;
-  int64_t global_index_offset = 0;
+  std::atomic<int> successful{0};
+  std::atomic<int> skipped{0};
+  std::atomic<int> failed{0};
 
   fs::path full_dataset_path_check = fs::path(dataset_root_dir) / repository_id / dataset_id;
 
+  // Build list of episodes to actually process (skip already-converted)
+  struct EpisodeTask {
+    fs::path mcap_path;
+    int episode_index;
+    size_t display_idx;  // 1-based index for progress display
+  };
+  std::vector<EpisodeTask> tasks;
+
   for (size_t i = 0; i < mcap_files.size(); ++i) {
     const auto& mcap_path = mcap_files[i];
-
     std::string filename = mcap_path.stem().string();
     std::regex episode_pattern(R"(episode_(\d{6}))");
     std::smatch match;
-    int episode_index = i;
-
+    int episode_index = static_cast<int>(i);
     if (std::regex_search(filename, match, episode_pattern)) {
       episode_index = std::stoi(match[1].str());
     }
 
-    // Idempotent: skip episodes whose parquet already exists
     int ep_chunk = episode_index / chunk_size;
     fs::path expected_parquet = full_dataset_path_check / "data" /
                                 trossen::io::backends::format_chunk_dir(ep_chunk) /
                                 trossen::io::backends::format_episode_parquet(episode_index);
 
     if (fs::exists(expected_parquet)) {
-      // Advance global index past the skipped episode's rows.
-      // If the parquet is corrupt / unreadable, delete it and fall through
-      // to re-convert so we don't end up with overlapping indices.
-      try {
-        auto reader = parquet::ParquetFileReader::OpenFile(expected_parquet.string(), false);
-        global_index_offset += reader->metadata()->num_rows();
-        std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
-                  << episode_index << " (already converted): "
-                  << mcap_path.filename().string() << "\n";
-        ++skipped;
-        continue;
-      } catch (const std::exception& e) {
-        std::cerr << "\n[" << (i + 1) << "/" << mcap_files.size()
-                  << "] Corrupt parquet for episode " << episode_index
-                  << ", deleting and re-converting: " << e.what() << "\n";
-        fs::remove(expected_parquet);
-      }
+      std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
+                << episode_index << " (already converted): "
+                << mcap_path.filename().string() << "\n";
+      ++skipped;
+      continue;
     }
 
-    std::cout << "\n" << std::string(70, '=') << "\n";
-    std::cout << "Processing file " << (i + 1) << "/" << mcap_files.size() << ": "
-              << mcap_path.filename().string() << "\n";
-    std::cout << std::string(70, '=') << "\n";
+    tasks.push_back({mcap_path, episode_index, i + 1});
+  }
 
-    int result = process_mcap_file(mcap_path.string(), dataset_root_dir, episode_index,
-                                    repository_id, dataset_id, chunk_size,
-                                    global_index_offset);
+  auto total_start = std::chrono::steady_clock::now();
 
-    if (result == 0) {
-      successful++;
-    } else {
-      failed++;
-      std::cerr << "\n[FAILED] Failed to process: " << mcap_path.string() << "\n";
+  if (!tasks.empty()) {
+    // Dispatch episodes in parallel, capped at num_threads concurrent cores
+    std::mutex pool_mutex;
+    std::condition_variable pool_cv;
+    unsigned int active = 0;
+    std::mutex cout_mutex;
+
+    std::vector<std::thread> threads;
+    threads.reserve(tasks.size());
+
+    for (const auto& task : tasks) {
+      // Block until a core is free
+      {
+        std::unique_lock<std::mutex> lock(pool_mutex);
+        pool_cv.wait(lock, [&] { return active < num_threads; });
+        ++active;
+      }
+
+      threads.emplace_back([&, task]() {
+        {
+          std::lock_guard<std::mutex> lk(cout_mutex);
+          std::cout << "\n" << std::string(70, '=') << "\n";
+          std::cout << "Processing file " << task.display_idx << "/" << mcap_files.size() << ": "
+                    << task.mcap_path.filename().string() << "\n";
+          std::cout << std::string(70, '=') << "\n";
+        }
+
+        auto ep_start = std::chrono::steady_clock::now();
+        int result = process_mcap_file(task.mcap_path.string(), dataset_root_dir,
+                                       task.episode_index, repository_id, dataset_id, chunk_size);
+        auto ep_end = std::chrono::steady_clock::now();
+        double ep_secs = std::chrono::duration<double>(ep_end - ep_start).count();
+
+        {
+          std::lock_guard<std::mutex> lk(cout_mutex);
+          std::cout << "[TIMING] Episode " << task.episode_index << " took " << std::fixed
+                    << std::setprecision(2) << ep_secs << "s\n";
+        }
+
+        if (result == 0) {
+          ++successful;
+        } else {
+          ++failed;
+          std::lock_guard<std::mutex> lk(cout_mutex);
+          std::cerr << "\n[FAILED] Failed to process: " << task.mcap_path.string() << "\n";
+        }
+
+        {
+          std::lock_guard<std::mutex> lock(pool_mutex);
+          --active;
+        }
+        pool_cv.notify_one();
+      });
+    }
+
+    for (auto& t : threads) {
+      t.join();
     }
   }
+
+  auto total_end = std::chrono::steady_clock::now();
+  double total_secs = std::chrono::duration<double>(total_end - total_start).count();
+  int processed = successful.load() + failed.load();
+  std::cout << "\n[TIMING] Total episode processing: " << std::fixed << std::setprecision(2)
+            << total_secs << "s for " << processed << " episode(s) processed\n"
+            << "[TIMING] Average per episode: "
+            << (processed > 0 ? total_secs / processed : 0.0) << "s\n";
 
   // Update dataset statistics
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -520,31 +569,24 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Generate HuggingFace Hub compatibility files
-  if (trossen::io::backends::generate_dataset_readme(full_dataset_path, license)) {
-    std::cout << "  [ok] Generated README.md\n";
-  } else {
-    std::cerr << "  Warning: Failed to generate README.md\n";
-  }
-
   // Print summary
   std::cout << "\n" << std::string(70, '=') << "\n";
   std::cout << "Processing Complete\n";
   std::cout << std::string(70, '=') << "\n";
   std::cout << "  Total files:      " << mcap_files.size() << "\n";
-  std::cout << "  Successful:       " << successful << "\n";
-  std::cout << "  Skipped:          " << skipped << " (already converted)\n";
-  std::cout << "  Failed:           " << failed << "\n";
+  std::cout << "  Successful:       " << successful.load() << "\n";
+  std::cout << "  Skipped:          " << skipped.load() << " (already converted)\n";
+  std::cout << "  Failed:           " << failed.load() << "\n";
+  std::cout << "  Cores used:       " << num_threads << "\n";
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
   std::cout << std::string(70, '=') << "\n";
 
-  return (failed > 0) ? 1 : 0;
+  return (failed.load() > 0) ? 1 : 0;
 }
 
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
-                      const std::string& dataset_id, int chunk_size,
-                      int64_t& global_index_offset) {
+                      const std::string& dataset_id, int chunk_size) {
   ParquetConfig cfg;
   cfg.mcap_file = mcap_file;
   cfg.dataset_root = dataset_root_dir;
@@ -1005,7 +1047,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   int64_t frame_index = 0;
-  int64_t global_index = global_index_offset;
+  int64_t global_index = 0;
   size_t rows_written = 0;
   size_t rows_skipped = 0;
 
@@ -1206,11 +1248,6 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     std::cerr << "This usually means joint state streams were misaligned or missing.\n";
     return 1;
   }
-
-  // Advance the global index offset now that parquet is committed to disk.
-  // This ensures post-parquet failures (image extraction, metadata) don't
-  // cause overlapping indices in subsequent episodes.
-  global_index_offset += rows_written;
 
   std::cout << "\n[ok] Successfully created Parquet file: " << cfg.output_file << "\n";
   std::cout << "\nSummary:\n";
