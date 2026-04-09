@@ -320,6 +320,7 @@ int main(int argc, char** argv) {
   const std::string repository_id = lerobot_config->repository_id;
   const std::string dataset_id = lerobot_config->dataset_id;
   const int chunk_size = lerobot_config->chunk_size;
+  const std::string license = lerobot_config->license;
 
   // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -364,8 +365,9 @@ int main(int argc, char** argv) {
   unsigned int hw_threads = std::thread::hardware_concurrency();
   if (hw_threads == 0) hw_threads = 4;
   unsigned int default_threads = std::max(1u, static_cast<unsigned int>(hw_threads * 0.7));
-  unsigned int num_threads = static_cast<unsigned int>(cli.get_int("threads", default_threads));
-  num_threads = std::max(1u, num_threads);
+  int requested_threads = cli.get_int("threads", static_cast<int>(default_threads));
+requested_threads = std::max(1, requested_threads);
+unsigned int num_threads = static_cast<unsigned int>(requested_threads);
   std::cout << "Using " << num_threads << " core(s) of " << hw_threads << " available\n\n";
 
   // Process all MCAP files
@@ -399,11 +401,20 @@ int main(int argc, char** argv) {
                                 trossen::io::backends::format_episode_parquet(episode_index);
 
     if (fs::exists(expected_parquet)) {
-      std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
-                << episode_index << " (already converted): "
-                << mcap_path.filename().string() << "\n";
-      ++skipped;
-      continue;
+      try {
+        auto reader = parquet::ParquetFileReader::OpenFile(expected_parquet.string(), false);
+        reader->metadata()->num_rows();
+        std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
+                  << episode_index << " (already converted): "
+                  << mcap_path.filename().string() << "\n";
+        ++skipped;
+        continue;
+      } catch (const std::exception& e) {
+        std::cerr << "\n[" << (i + 1) << "/" << mcap_files.size()
+                  << "] Corrupt parquet for episode " << episode_index
+                  << ", deleting and re-converting: " << e.what() << "\n";
+        fs::remove(expected_parquet);
+      }
     }
 
     tasks.push_back({mcap_path, episode_index, i + 1});
@@ -567,6 +578,13 @@ int main(int argc, char** argv) {
     } catch (const std::exception& e) {
       std::cerr << "Warning: Failed to compute statistics: " << e.what() << "\n";
     }
+  }
+
+  // Generate HuggingFace Hub compatibility files
+  if (trossen::io::backends::generate_dataset_readme(full_dataset_path, license)) {
+    std::cout << "  [ok] Generated README.md\n";
+  } else {
+    std::cerr << "  Warning: Failed to generate README.md\n";
   }
 
   // Print summary
