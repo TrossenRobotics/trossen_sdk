@@ -44,6 +44,8 @@ add_library(trossen_sdk SHARED
   src/runtime/push_producer_registry.cpp
   src/utils/app_utils.cpp
   src/utils/keyboard_input_utils.cpp
+  src/hw/teleop/teleop_controller.cpp
+  src/hw/teleop/teleop_factory.cpp
 )
 
 if(TROSSEN_ENABLE_REALSENSE)

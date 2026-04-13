@@ -11,6 +11,9 @@
 
 #include "nlohmann/json.hpp"
 
+#include "trossen_sdk/configuration/base_config.hpp"
+#include "trossen_sdk/configuration/config_registry.hpp"
+
 namespace trossen::configuration {
 
 /**
@@ -47,7 +50,7 @@ struct TeleoperationPair {
  * The teleop loop mirrors each leader arm's joint positions to its paired follower
  * at the specified rate. Set "enabled" to false to skip teleop (e.g. replay mode).
  */
-struct TeleoperationConfig {
+struct TeleoperationConfig : public BaseConfig {
   /// @brief Whether teleoperation is active
   bool enabled{true};
 
@@ -56,6 +59,8 @@ struct TeleoperationConfig {
 
   /// @brief Leader->follower pairings
   std::vector<TeleoperationPair> pairs;
+
+  std::string type() const override { return "teleop"; }
 
   static TeleoperationConfig from_json(const nlohmann::json& j) {
     TeleoperationConfig c;
@@ -69,6 +74,8 @@ struct TeleoperationConfig {
     return c;
   }
 };
+
+REGISTER_CONFIG(TeleoperationConfig, "teleop");
 
 }  // namespace trossen::configuration
 

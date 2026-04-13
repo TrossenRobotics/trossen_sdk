@@ -69,6 +69,45 @@ nlohmann::json TrossenArmComponent::get_info() const {
   return info;
 }
 
+size_t TrossenArmComponent::num_joints() const {
+  return driver_ ? static_cast<size_t>(driver_->get_num_joints()) : 0;
+}
+
+std::vector<float> TrossenArmComponent::get_joint_positions() {
+  if (!driver_) return {};
+  auto output = driver_->get_robot_output();
+  const auto& positions = output.joint.all.positions;
+  return std::vector<float>(positions.begin(), positions.end());
+}
+
+void TrossenArmComponent::set_joint_positions(const std::vector<float>& positions) {
+  if (!driver_) return;
+  std::vector<double> pos_d(positions.begin(), positions.end());
+  driver_->set_all_positions(pos_d, 0.0, false);
+}
+
+void TrossenArmComponent::prepare_for_leader() {
+  if (!driver_) return;
+  driver_->set_all_modes(trossen_arm::Mode::external_effort);
+  std::vector<double> zeros(driver_->get_num_joints(), 0.0);
+  driver_->set_all_external_efforts(zeros, 0.0, false);
+}
+
+void TrossenArmComponent::prepare_for_follower(
+    const std::vector<float>& initial_positions) {
+  if (!driver_) return;
+  driver_->set_all_modes(trossen_arm::Mode::position);
+  if (!initial_positions.empty()) {
+    std::vector<double> pos_d(initial_positions.begin(), initial_positions.end());
+    driver_->set_all_positions(pos_d, 2.0, true);
+  }
+}
+
+void TrossenArmComponent::cleanup_teleop() {
+  if (!driver_) return;
+  driver_->set_all_modes(trossen_arm::Mode::idle);
+}
+
 REGISTER_HARDWARE(TrossenArmComponent, "trossen_arm")
 
 }  // namespace trossen::hw::arm

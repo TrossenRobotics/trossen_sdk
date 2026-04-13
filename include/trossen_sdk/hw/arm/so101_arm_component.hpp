@@ -5,17 +5,21 @@
  */
 #ifndef TROSSEN_SDK__HW__ARM__SO101_ARM_COMPONENT_HPP_
 #define TROSSEN_SDK__HW__ARM__SO101_ARM_COMPONENT_HPP_
+#include <cstddef>
 #include <memory>
 #include <string>
+#include <vector>
 #include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
+#include "trossen_sdk/hw/teleop/teleop_capable.hpp"
 namespace trossen::hw::arm {
 /**
  * @brief Hardware component for SO101 arms
  *
  * Wraps SO101ArmDriver and provides JSON configuration.
+ * Implements TeleopCapable so it can act as a teleop leader or follower.
  */
-class SO101ArmComponent : public HardwareComponent {
+class SO101ArmComponent : public HardwareComponent, public teleop::TeleopCapable {
 public:
   /**
    * @brief Constructor
@@ -55,6 +59,14 @@ public:
    * @return Shared pointer to driver
    */
   std::shared_ptr<SO101ArmDriver> get_driver() const { return driver_; }
+
+  // ── TeleopCapable overrides ──────────────────────────────────────────
+  std::size_t num_joints() const override;
+  std::vector<float> get_joint_positions() override;
+  void set_joint_positions(const std::vector<float>& positions) override;
+  void prepare_for_leader() override;
+  void prepare_for_follower(const std::vector<float>& initial_positions) override;
+  void cleanup_teleop() override;
 
 private:
   std::shared_ptr<SO101ArmDriver> driver_;

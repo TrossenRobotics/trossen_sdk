@@ -42,4 +42,35 @@ nlohmann::json SO101ArmComponent::get_info() const {
   info["num_joints"] = driver_ ? driver_->get_num_joints() : 0;
   return info;
 }
+size_t SO101ArmComponent::num_joints() const {
+  return driver_ ? driver_->get_num_joints() : 0;
+}
+
+std::vector<float> SO101ArmComponent::get_joint_positions() {
+  if (!driver_) return {};
+  auto positions = driver_->get_joint_positions(true);
+  return std::vector<float>(positions.begin(), positions.end());
+}
+
+void SO101ArmComponent::set_joint_positions(const std::vector<float>& positions) {
+  if (!driver_) return;
+  std::vector<double> pos_d(positions.begin(), positions.end());
+  driver_->set_joint_positions(pos_d, true);
+}
+
+void SO101ArmComponent::prepare_for_leader() {
+  // SO101 leader: read-only, no special mode needed
+}
+
+void SO101ArmComponent::prepare_for_follower(
+    const std::vector<float>& initial_positions) {
+  if (!driver_ || initial_positions.empty()) return;
+  std::vector<double> pos_d(initial_positions.begin(), initial_positions.end());
+  driver_->set_joint_positions(pos_d, true);
+}
+
+void SO101ArmComponent::cleanup_teleop() {
+  // SO101: no special cleanup needed
+}
+
 }  // namespace trossen::hw::arm

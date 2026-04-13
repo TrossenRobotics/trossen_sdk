@@ -40,6 +40,8 @@
 #include "trossen_sdk/hw/arm/trossen_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/hw/teleop/teleop_controller.hpp"
+#include "trossen_sdk/hw/teleop/teleop_factory.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
@@ -319,38 +321,14 @@ int main(int argc, char** argv) {
       break;
     }
 
-    if (cfg.teleop.enabled) {
-      std::cout << "\nLocking leader arms and moving followers to match...\n";
-      for (const auto& pair : cfg.teleop.pairs) {
-        auto leader_it = arm_components.find(pair.leader);
-        auto follower_it = arm_components.find(pair.follower);
-        if (leader_it == arm_components.end() || follower_it == arm_components.end()) {
-          continue;
-        }
-        auto leader_driver = leader_it->second->get_hardware();
-        auto follower_driver = follower_it->second->get_hardware();
-        leader_driver->set_all_modes(trossen_arm::Mode::position);
-        follower_driver->set_all_modes(trossen_arm::Mode::position);
-        follower_driver->set_all_positions(
-          leader_driver->get_all_positions(), moving_time_s, false);
-      }
-      std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-      std::cout << "  [ok] Followers moved to match leaders\n";
-
-      std::cout << "\n!! Enabling teleop mode !!\n";
-      for (const auto& pair : cfg.teleop.pairs) {
-        auto it = arm_components.find(pair.leader);
-        if (it == arm_components.end()) {
-          continue;
-        }
-        auto driver = it->second->get_hardware();
-        driver->set_all_modes(trossen_arm::Mode::external_effort);
-        driver->set_all_external_efforts(
-          std::vector<double>(driver->get_num_joints(), 0.0), 0.0, false);
-        std::cout << "   " << pair.leader << ": gravity compensation -> "
-                  << pair.follower << " will mirror\n";
-      }
-      std::cout << "\n";
+    // Construct one TeleopController per configured pair (resolved from the
+    // global teleop config + ActiveHardwareRegistry), then start each. Each
+    // controller's start() prepares the hardware (matches follower to leader,
+    // enables gravity compensation on leader) and spawns its own mirror thread;
+    // stop() joins the thread and returns the hardware to idle.
+    auto controllers = trossen::hw::teleop::create_controllers_from_global_config();
+    for (auto& ctrl : controllers) {
+      ctrl->start();
     }
 
     mgr.print_episode_header();
@@ -361,42 +339,18 @@ int main(int argc, char** argv) {
 
     std::cout << "Recording...\n";
 
-    // Teleop thread mirrors leader positions to followers at configured rate
-    std::thread teleop_thread([&]() {
-      if (!cfg.teleop.enabled) {
-        return;
-      }
-      const auto sleep_ns = static_cast<int64_t>(1e9 / cfg.teleop.rate_hz);
-      while (mgr.is_episode_active() && !trossen::utils::g_stop_requested) {
-        for (const auto& pair : cfg.teleop.pairs) {
-          auto leader_it = arm_components.find(pair.leader);
-          auto follower_it = arm_components.find(pair.follower);
-          if (leader_it == arm_components.end() || follower_it == arm_components.end()) {
-            continue;
-          }
-          follower_it->second->get_hardware()->set_all_positions(
-            leader_it->second->get_hardware()->get_all_positions(), 0.0f, false);
-        }
-        std::this_thread::sleep_for(std::chrono::nanoseconds(sleep_ns));
-      }
-    });
-
     auto action = mgr.monitor_episode();
 
     if (action == trossen::runtime::UserAction::kReRecord) {
       mgr.discard_current_episode();
-      if (teleop_thread.joinable()) {
-        teleop_thread.join();
-      }
+      for (auto& ctrl : controllers) ctrl->stop();
       continue;
     }
 
     if (mgr.is_episode_active()) {
       mgr.stop_episode();
     }
-    if (teleop_thread.joinable()) {
-      teleop_thread.join();
-    }
+    for (auto& ctrl : controllers) ctrl->stop();
 
     if (trossen::utils::g_stop_requested) {
       std::cout << "\nStopping at user request (Ctrl+C).\n";
