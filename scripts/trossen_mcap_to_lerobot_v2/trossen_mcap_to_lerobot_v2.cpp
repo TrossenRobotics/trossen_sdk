@@ -229,7 +229,8 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
 
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
-                      const std::string& dataset_id, int chunk_size);
+                      const std::string& dataset_id, int chunk_size,
+                      const std::string& video_encoder, const std::string& encoder_flags);
 
 // ──────────────────────────────────────────────────────────
 // Main entry point
@@ -270,6 +271,7 @@ static void print_usage(const char* program) {
 }
 
 int main(int argc, char** argv) {
+  std::atexit([]() { std::system("stty sane 2>/dev/null"); });
   namespace fs = std::filesystem;
 
   trossen::configuration::CliParser cli(argc, argv);
@@ -370,6 +372,37 @@ requested_threads = std::max(1, requested_threads);
 unsigned int num_threads = static_cast<unsigned int>(requested_threads);
   std::cout << "Using " << num_threads << " core(s) of " << hw_threads << " available\n\n";
 
+  // Detect best available video encoder
+  std::string video_encoder;
+  std::string encoder_flags;
+
+  bool has_ffmpeg = (std::system("which ffmpeg > /dev/null 2>&1") == 0);
+  if (!has_ffmpeg) {
+    std::cerr << "Error: ffmpeg is not installed. Video encoding requires ffmpeg.\n";
+    return 1;
+  }
+
+  if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_nvenc") == 0) {
+    video_encoder = "av1_nvenc";
+    encoder_flags = "-cq 30 -preset p6";
+    std::cout << "Video encoder: NVIDIA GPU (av1_nvenc)\n";
+  } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_amf") == 0) {
+    video_encoder = "av1_amf";
+    encoder_flags = "-rc cqp -qp 30";
+    std::cout << "Video encoder: AMD GPU (av1_amf)\n";
+  } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_qsv") == 0) {
+    video_encoder = "av1_qsv";
+    encoder_flags = "-global_quality 30";
+    std::cout << "Video encoder: Intel GPU (av1_qsv)\n";
+  } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q libsvtav1") == 0) {
+    video_encoder = "libsvtav1";
+    encoder_flags = "-crf 30 -g 30 -preset 6";
+    std::cout << "Video encoder: CPU (libsvtav1)\n";
+  } else {
+    std::cerr << "Error: No AV1 encoder found. Install ffmpeg with libsvtav1 or a GPU encoder.\n";
+    return 1;
+  }
+
   // Process all MCAP files
   std::atomic<int> successful{0};
   std::atomic<int> skipped{0};
@@ -441,34 +474,30 @@ unsigned int num_threads = static_cast<unsigned int>(requested_threads);
       }
 
       threads.emplace_back([&, task]() {
+        auto ep_start = std::chrono::steady_clock::now();
+        int result;
         {
           std::lock_guard<std::mutex> lk(cout_mutex);
           std::cout << "\n" << std::string(70, '=') << "\n";
           std::cout << "Processing file " << task.display_idx << "/" << mcap_files.size() << ": "
                     << task.mcap_path.filename().string() << "\n";
           std::cout << std::string(70, '=') << "\n";
-        }
-
-        auto ep_start = std::chrono::steady_clock::now();
-        int result = process_mcap_file(task.mcap_path.string(), dataset_root_dir,
-                                       task.episode_index, repository_id, dataset_id, chunk_size);
-        auto ep_end = std::chrono::steady_clock::now();
-        double ep_secs = std::chrono::duration<double>(ep_end - ep_start).count();
-
-        {
-          std::lock_guard<std::mutex> lk(cout_mutex);
+          result = process_mcap_file(task.mcap_path.string(), dataset_root_dir,
+                                     task.episode_index, repository_id, dataset_id, chunk_size,
+                                     video_encoder, encoder_flags);
+          auto ep_end = std::chrono::steady_clock::now();
+          double ep_secs = std::chrono::duration<double>(ep_end - ep_start).count();
           std::cout << "[TIMING] Episode " << task.episode_index << " took " << std::fixed
                     << std::setprecision(2) << ep_secs << "s\n";
+          if (result != 0) {
+            std::cerr << "\n[FAILED] Failed to process: " << task.mcap_path.string() << "\n";
+          }
         }
-
         if (result == 0) {
           ++successful;
         } else {
           ++failed;
-          std::lock_guard<std::mutex> lk(cout_mutex);
-          std::cerr << "\n[FAILED] Failed to process: " << task.mcap_path.string() << "\n";
         }
-
         {
           std::lock_guard<std::mutex> lock(pool_mutex);
           --active;
@@ -604,7 +633,8 @@ unsigned int num_threads = static_cast<unsigned int>(requested_threads);
 
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
-                      const std::string& dataset_id, int chunk_size) {
+                      const std::string& dataset_id, int chunk_size,
+                      const std::string& video_encoder, const std::string& encoder_flags) {
   ParquetConfig cfg;
   cfg.mcap_file = mcap_file;
   cfg.dataset_root = dataset_root_dir;
@@ -670,6 +700,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return 1;
   }
 
+  auto stage_start = std::chrono::steady_clock::now();
   std::cout << "\nReading MCAP file...\n";
 
   std::ifstream input(cfg.mcap_file, std::ios::binary);
@@ -952,6 +983,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
   }
 
+  auto mcap_read_end = std::chrono::steady_clock::now();
+  double mcap_read_s = std::chrono::duration<double>(mcap_read_end - stage_start).count();
+  stage_start = std::chrono::steady_clock::now();
   std::cout << "\nCreating Parquet file...\n";
 
   // Calculate dimensions based on detected streams
@@ -1305,9 +1339,12 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   std::map<std::string, size_t> camera_frame_indices;
   std::map<std::string, fs::path> camera_dirs;
 
+  auto parquet_end = std::chrono::steady_clock::now();
+  double parquet_write_s = std::chrono::duration<double>(parquet_end - stage_start).count();
+  stage_start = std::chrono::steady_clock::now();
+
   if (cfg.extract_images && !camera_channels.empty()) {
     std::cout << "\nExtracting camera images...\n";
-
     fs::path images_root = images_dir;
 
     std::string episode_name = trossen::io::backends::format_episode_folder(cfg.episode_index);
@@ -1427,10 +1464,19 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   // Encode images to videos
   // ──────────────────────────────────────────────────────────
 
-  if (cfg.create_videos && !camera_dirs.empty()) {
-    std::cout << "\nEncoding videos from images...\n";
+ auto images_end = std::chrono::steady_clock::now();
+  double image_extract_s = std::chrono::duration<double>(images_end - stage_start).count();
+  stage_start = std::chrono::steady_clock::now();
 
-    int videos_created = 0;
+ if (cfg.create_videos && !camera_dirs.empty()) {
+    std::cout << "\nEncoding videos from images...\n";
+    std::atomic<int> videos_created{0};
+    std::vector<std::thread> cam_threads;
+    std::mutex cam_pool_mutex;
+    std::condition_variable cam_pool_cv;
+    unsigned int cam_active = 0;
+    unsigned int max_cam_threads = 3;
+
     for (const auto& [camera_name, camera_dir] : camera_dirs) {
       if (camera_frame_indices[camera_name] == 0) {
         std::cout << "  Skipping " << camera_name << " (no images)\n";
@@ -1448,34 +1494,44 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       fs::path input_pattern = camera_dir / "image_%06d.jpg";
 
       std::ostringstream ffmpeg_cmd;
-      // Force output to exactly 30fps for perfect timestamp alignment
       ffmpeg_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps << " -start_number 0"
                  << " -i " << input_pattern.string() << " -frames:v "
                  << camera_frame_indices[camera_name]
-                 << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p -r 30 "
-                 << video_output.string();
+                 << " -c:v " << video_encoder << " " << encoder_flags << " -pix_fmt yuv420p -r 30 "
+                 << video_output.string() << " 2>/dev/null";
 
-      std::cout << "  Encoding " << camera_name << "...";
-      std::cout.flush();
+      std::string cmd = ffmpeg_cmd.str();
+      std::string cam = camera_name;
 
-      auto encode_start = std::chrono::steady_clock::now();
-      int ret = std::system(ffmpeg_cmd.str().c_str());
-      auto encode_end = std::chrono::steady_clock::now();
-
-      if (ret == 0) {
-        auto duration =
-            std::chrono::duration_cast<std::chrono::milliseconds>(encode_end - encode_start)
-                .count();
-        std::cout << " [ok] (" << (duration / 1000.0) << "s)\n";
-        videos_created++;
-      } else {
-        std::cout << " [FAILED] Failed (exit code " << ret << ")\n";
-        std::cerr << "    Command: " << ffmpeg_cmd.str() << "\n";
+      // Block until a camera slot is free
+      {
+        std::unique_lock<std::mutex> lock(cam_pool_mutex);
+        cam_pool_cv.wait(lock, [&] { return cam_active < max_cam_threads; });
+        ++cam_active;
       }
+
+      cam_threads.emplace_back(
+          [cmd, cam, &videos_created, &cam_pool_mutex, &cam_pool_cv, &cam_active]() {
+        int ret = std::system(cmd.c_str());
+        if (ret == 0) {
+          ++videos_created;
+        } else {
+          std::cerr << "  [FAILED] " << cam << " (exit code " << ret << ")\n";
+        }
+        {
+          std::lock_guard<std::mutex> lock(cam_pool_mutex);
+          --cam_active;
+        }
+        cam_pool_cv.notify_one();
+      });
     }
 
-    if (videos_created > 0) {
-      std::cout << "  [ok] Created " << videos_created << " video(s)\n";
+    for (auto& t : cam_threads) {
+      t.join();
+    }
+
+    if (videos_created.load() > 0) {
+      std::cout << "  [ok] Created " << videos_created.load() << " video(s)\n";
     } else {
       std::cout << "  Warning: No videos were created\n";
     }
@@ -1485,6 +1541,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   // Generate LeRobotV2 metadata files
   // ──────────────────────────────────────────────────────────
 
+  auto video_end = std::chrono::steady_clock::now();
+  double video_encode_s = std::chrono::duration<double>(video_end - stage_start).count();
+  stage_start = std::chrono::steady_clock::now();
   std::cout << "\nGenerating metadata files...\n";
 
   // Check if info.json exists, create if needed
@@ -1640,5 +1699,16 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   std::cout << "\n[ok] Successfully created LeRobotV2 dataset episode!\n";
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
 
+  auto metadata_end = std::chrono::steady_clock::now();
+  double metadata_s = std::chrono::duration<double>(metadata_end - stage_start).count();
+  double total_ep_s = mcap_read_s + parquet_write_s + image_extract_s + video_encode_s + metadata_s;
+
+  std::cout << "\n[TIMING] Episode " << cfg.episode_index << " breakdown:\n";
+  std::cout << "  MCAP read:        " << std::fixed << std::setprecision(3) << mcap_read_s << "s\n";
+  std::cout << "  Parquet write:    " << parquet_write_s << "s\n";
+  std::cout << "  Image extraction: " << image_extract_s << "s\n";
+  std::cout << "  Video encoding:   " << video_encode_s << "s\n";
+  std::cout << "  Metadata:         " << metadata_s << "s\n";
+  std::cout << "  Total:            " << total_ep_s << "s\n";
   return 0;
 }
