@@ -93,9 +93,9 @@ struct ParquetConfig {
   bool create_videos = true;
 };
 
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 // Statistics computation functions
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 
 /**
  * @brief Compute statistics for a single episode
@@ -223,9 +223,9 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
   return stats;
 }
 
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 // MCAP to Parquet conversion
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
@@ -234,9 +234,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
                       std::atomic<int64_t>& global_index_counter,
                       std::ostringstream& log);
 
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 // Main entry point
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 
 static void print_usage(const char* program) {
   std::cerr << "Usage: " << program << " <mcap_file_or_folder> [options]\n";
@@ -272,7 +272,22 @@ static void print_usage(const char* program) {
   std::cerr << "\nNote: Video encoding requires FFmpeg with libsvtav1 codec.\n";
 }
 
+
+// ════════════════════════════════════════════════════
+// PROGRAM ENTRY POINT
+// ════════════════════════════════════════════════════
+// main() orchestrates the entire conversion pipeline:
+//   1. Parse CLI flags and load config
+//   2. Scan input folder for .mcap files
+//   3. Detect the best available GPU/CPU video encoder
+//   4. Build task list (skip already-converted episodes)
+//   5. Pre-create output directories
+//   6. Spawn a thread pool and convert all episodes in parallel
+//   7. Compute dataset statistics across all parquet files
+//   8. Generate README.md and print final summary
+// process_mcap_file() is called once per episode inside the thread pool (step 6).
 int main(int argc, char** argv) {
+  // Reset terminal settings on exit in case FFmpeg corrupts them mid-encode
   std::atexit([]() { std::system("stty sane 2>/dev/null"); });
   namespace fs = std::filesystem;
 
@@ -283,7 +298,6 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  // Load config before positional check so --dump-config works without an input path
   const std::string config_path =
       cli.get_string("config", "scripts/trossen_mcap_to_lerobot_v2/config.json");
 
@@ -293,7 +307,15 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  auto j = trossen::configuration::JsonLoader::load(config_path);
+  nlohmann::json j;
+  try {
+    j = trossen::configuration::JsonLoader::load(config_path);
+  } catch (const std::exception& e) {
+    std::cerr << "Error: failed to parse config file: " << config_path << "\n";
+    std::cerr << "  " << e.what() << "\n";
+    return 1;
+  }
+
   const auto overrides = cli.get_set_overrides();
   if (!overrides.empty()) {
     j = trossen::configuration::merge_overrides(j, overrides);
@@ -314,7 +336,6 @@ int main(int argc, char** argv) {
 
   trossen::configuration::GlobalConfig::instance().load_from_json(j);
 
-  // Get LeRobotV2 backend config
   auto lerobot_config =
       trossen::configuration::GlobalConfig::instance()
           .get_as<trossen::configuration::LeRobotV2BackendConfig>(
@@ -325,8 +346,12 @@ int main(int argc, char** argv) {
   const std::string dataset_id = lerobot_config->dataset_id;
   const int chunk_size = lerobot_config->chunk_size;
   const std::string license = lerobot_config->license;
+  const std::string config_task_name = lerobot_config->task_name;
+  const std::string config_robot_name = lerobot_config->robot_name;
+  const float config_fps = lerobot_config->fps;
+  const bool overwrite_existing = lerobot_config->overwrite_existing;
+  const bool encode_videos = lerobot_config->encode_videos;
 
-  // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
   std::cout << "Configuration (loaded from " << config_path << ")\n";
   std::cout << std::string(70, '=') << "\n";
@@ -349,6 +374,7 @@ int main(int argc, char** argv) {
       }
     }
 
+    // sort alphabetically so episode_000000 is processed before episode_000001
     std::sort(mcap_files.begin(), mcap_files.end());
 
     if (mcap_files.empty()) {
@@ -365,16 +391,19 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // Determine thread count: default = 70% of hardware_concurrency
   unsigned int hw_threads = std::thread::hardware_concurrency();
-  if (hw_threads == 0) hw_threads = 4;
+  if (hw_threads == 0) {
+    std::cerr << "Error: Could not detect CPU core count.\n";
+    return 1;
+  }
+
+  // Use 70% of cores to leave room for GPU driver and OS scheduler
   unsigned int default_threads = std::max(1u, static_cast<unsigned int>(hw_threads * 0.7));
   int requested_threads = cli.get_int("threads", static_cast<int>(default_threads));
   requested_threads = std::max(1, std::min(requested_threads, static_cast<int>(hw_threads)));
   unsigned int num_threads = static_cast<unsigned int>(requested_threads);
   std::cout << "Using " << num_threads << " core(s) of " << hw_threads << " available\n\n";
 
-  // Detect best available video encoder
   std::string video_encoder;
   std::string encoder_flags;
 
@@ -384,6 +413,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // Probe AV1 encoders in priority order: NVIDIA GPU > AMD GPU > Intel GPU > CPU
   if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_nvenc") == 0) {
     video_encoder = "av1_nvenc";
     encoder_flags = "-cq 30 -preset p6";
@@ -406,13 +436,12 @@ int main(int argc, char** argv) {
   }
 
   // Process all MCAP files
-  std::atomic<int> successful{0};
-  std::atomic<int> skipped{0};
-  std::atomic<int> failed{0};
+  std::atomic<int> successful{0};  // episodes converted successfully
+  std::atomic<int> skipped{0};    // episodes already converted, skipped
+  std::atomic<int> failed{0};     // episodes that threw or returned non-zero
 
   fs::path full_dataset_path_check = fs::path(dataset_root_dir) / repository_id / dataset_id;
 
-  // Build list of episodes to actually process (skip already-converted)
   struct EpisodeTask {
     fs::path mcap_path;
     int episode_index;
@@ -435,10 +464,14 @@ int main(int argc, char** argv) {
                                 trossen::io::backends::format_chunk_dir(ep_chunk) /
                                 trossen::io::backends::format_episode_parquet(episode_index);
 
+    // Check if this episode was already converted. If the output parquet exists
+    // and is valid (can be opened and has rows), skip it. If it exists but is corrupt
+    // (throws on open), delete it and re-add to the task list for re-conversion.
+    // This makes re-runs safe — kill the script and restart without losing progress.
     if (fs::exists(expected_parquet)) {
       try {
         auto reader = parquet::ParquetFileReader::OpenFile(expected_parquet.string(), false);
-        reader->metadata()->num_rows();
+        reader->metadata()->num_rows();  // throws if file is corrupt  // throws if file is corrupt
         std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
                   << episode_index << " (already converted): "
                   << mcap_path.filename().string() << "\n";
@@ -457,6 +490,10 @@ int main(int argc, char** argv) {
 
   // Pre-create all chunk directories before spawning workers to avoid
   // concurrent fs::create_directories calls on overlapping paths.
+  // Pre-create all chunk directories in the main thread BEFORE spawning workers.
+  // If workers created directories themselves, two episodes in the same chunk
+  // (e.g. episodes 0 and 1 both in chunk-000) would race on the same path.
+  // Using std::error_code overload means already-existing dirs are silently ignored.
   for (const auto& task : tasks) {
     int ep_chunk = task.episode_index / chunk_size;
     fs::path chunk_data = fs::path(dataset_root_dir) / repository_id / dataset_id / "data" /
@@ -472,23 +509,34 @@ int main(int argc, char** argv) {
     fs::create_directories(chunk_videos, ec);
     fs::create_directories(meta_dir, ec);
   }
+  // Globally unique row index shared across all worker threads.
+  // Each parquet row calls fetch_add(1) atomically — guarantees unique indices
+  // across all episodes even when they complete out of order.
   std::atomic<int64_t> global_index_counter{0};
   auto total_start = std::chrono::steady_clock::now();
 
   if (!tasks.empty()) {
+    // serializes terminal output — without this, lines from different episodes interleave
     std::mutex cout_mutex;
+    // protects task_index — without this two workers could grab the same episode
     std::mutex queue_mutex;
+    // workers sleep here when queue is empty, woken when work is available
     std::condition_variable queue_cv;
-    size_t task_index = 0;
-    bool done = false;
+    size_t task_index = 0;  // next task to claim — incremented under queue_mutex
+    bool done = false;  // signals workers to exit once all tasks are claimed
 
+    // Worker lambda — each of the num_threads threads runs this loop.
+    // The worker sleeps on queue_cv until a task is available, claims the next
+    // task under queue_mutex, then runs process_mcap_file() for that episode.
+    // When all tasks are claimed and done==true, the worker returns and the thread exits.
     auto worker = [&]() {
       while (true) {
         EpisodeTask task;
         {
           std::unique_lock<std::mutex> lock(queue_mutex);
+          // sleep until a task is available or done is set
           queue_cv.wait(lock, [&] { return task_index < tasks.size() || done; });
-          if (task_index >= tasks.size()) return;
+          if (task_index >= tasks.size()) return;  // queue empty and done — exit thread
           task = tasks[task_index++];
         }
         auto ep_start = std::chrono::steady_clock::now();
@@ -501,13 +549,17 @@ int main(int argc, char** argv) {
                       << ": " << task.mcap_path.filename().string() << "\n";
             std::cout << std::string(70, '=') << "\n";
           }
+          // per-episode output buffer — flushed atomically under cout_mutex when done
           std::ostringstream ep_log;
+          // episode pipeline: read MCAP -> write parquet -> extract images -> encode videos ->
+          // write metadata
           result = process_mcap_file(task.mcap_path.string(), dataset_root_dir,
                                      task.episode_index, repository_id, dataset_id, chunk_size,
                                      video_encoder, encoder_flags,
                                      global_index_counter, ep_log);
           {
             std::lock_guard<std::mutex> lk(cout_mutex);
+            // flush entire episode log atomically — no interleaving with other episodes
             std::cout << ep_log.str();
             auto ep_end = std::chrono::steady_clock::now();
             double ep_secs = std::chrono::duration<double>(ep_end - ep_start).count();
@@ -517,6 +569,10 @@ int main(int argc, char** argv) {
               std::cerr << "\n[FAILED] Failed to process: " << task.mcap_path.string() << "\n";
             }
           }
+        // Catch all exceptions from process_mcap_file. Without this, an uncaught
+        // exception kills the worker thread silently, leaving other workers waiting
+        // on queue_cv forever (deadlock). Catching here marks the episode failed
+        // and lets the worker continue to the next task.
         } catch (const std::exception& e) {
           std::lock_guard<std::mutex> lk(cout_mutex);
           std::cerr << "\n[EXCEPTION] Episode " << task.episode_index
@@ -536,17 +592,18 @@ int main(int argc, char** argv) {
       }
     };
 
+    // spawn exactly num_threads persistent workers — not one per episode
     std::vector<std::thread> workers;
     workers.reserve(num_threads);
     for (unsigned int i = 0; i < num_threads; ++i) {
       workers.emplace_back(worker);
     }
-    queue_cv.notify_all();
+    queue_cv.notify_all();  // wake all workers so they start pulling tasks immediately
     {
       std::lock_guard<std::mutex> lock(queue_mutex);
-      done = true;
+      done = true;  // signal that no more tasks will be added
     }
-    queue_cv.notify_all();
+    queue_cv.notify_all();  // wake any workers blocked on empty queue so they exit cleanly
     for (auto& w : workers) {
       w.join();
     }
@@ -560,7 +617,11 @@ int main(int argc, char** argv) {
             << "[TIMING] Average per episode: "
             << (processed > 0 ? total_secs / processed : 0.0) << "s\n";
 
-  // Update dataset statistics
+  // ── PHASE 2: DATASET STATISTICS ──
+  // After all episodes are converted, compute min/max/mean statistics for every
+  // column in every parquet file. This runs sequentially in the main thread —
+  // it is fast enough (~1s per episode) that parallelizing it is not worthwhile.
+  // Results are written to meta/episodes_stats.jsonl.
   std::cout << "\n" << std::string(70, '=') << "\n";
   std::cout << "Computing Dataset Statistics\n";
   std::cout << std::string(70, '=') << "\n";
@@ -650,6 +711,8 @@ int main(int argc, char** argv) {
     }
   }
 
+  // Generate README.md required for HuggingFace Hub upload.
+  // This file describes the dataset schema, robot, and task for the Hub UI.
   // Generate HuggingFace Hub compatibility files
   if (trossen::io::backends::generate_dataset_readme(full_dataset_path, license)) {
     std::cout << "  [ok] Generated README.md\n";
@@ -669,9 +732,25 @@ int main(int argc, char** argv) {
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
   std::cout << std::string(70, '=') << "\n";
 
+  // Exit 1 if any episodes failed — lets CI/scripts detect partial failures.
+  // Exit 0 only if all episodes succeeded (or were skipped as already-converted).
+
   return (failed.load() > 0) ? 1 : 0;
 }
 
+
+// ════════════════════════════════════════════════════
+// EPISODE CONVERSION PIPELINE
+// ════════════════════════════════════════════════════
+// This function is called once per episode by each worker thread.
+// It runs the full conversion pipeline for a single .mcap file:
+//   Phase 1 — Read MCAP: open file, extract metadata, parse joint states + camera frames
+//   Phase 2 — Write Parquet: align data to 30Hz grid, write columnar dataset file
+//   Phase 3 — Extract Images: decompress camera frames, save as JPGs on disk
+//   Phase 4 — Encode Videos: run FFmpeg to compress JPG sequences into AV1 MP4
+//   Phase 5 — Write Metadata: update info.json, episodes.jsonl, episodes_stats.jsonl
+// All output goes to `log` (ostringstream) instead of cout — the caller (worker thread)
+// flushes it atomically to the terminal when this function returns.
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
@@ -765,9 +844,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return 1;
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
   // PHASE 1: Extract embedded metadata from MCAP file
-  // ────────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
   // The MCAP file may contain a "trossen_sdk_recording" metadata record with a
   // "dataset_info" JSON blob. This includes:
   //   - robot_name: e.g., "trossen_solo_ai", "trossen_mobile_ai"
@@ -776,7 +855,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   //   - base_velocity_names: names for mobile base velocity dimensions
   // If present, this metadata is used to populate info.json with accurate names
   // instead of generic placeholders like "joint_0", "joint_1", etc.
-  // ────────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
   nlohmann::json mcap_dataset_info;
   auto* data_source = reader.dataSource();
   const auto& meta_indexes = reader.metadataIndexes();
@@ -811,16 +890,16 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
   // PHASE 2: Initialize channel tracking maps for message routing
-  // ────────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
   // These maps associate MCAP channel IDs with semantic stream identifiers:
   //   - channel_id_to_stream: Joint state channels → stream names (e.g., "leader_left")
   //   - camera_channels: Image channels → camera names (e.g., "cam_high")
   //   - slate_base_channel_id: Mobile base odometry channel (if present)
   // The leader/follower vectors accumulate detected arm streams for later use
   // in determining which streams provide actions vs. observations.
-  // ────────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
   std::map<mcap::ChannelId, std::string> channel_id_to_stream;  // Joint channels
   std::map<mcap::ChannelId, std::string> camera_channels;       // Camera channels
   mcap::ChannelId slate_base_channel_id = 0;                    // Mobile base channel
@@ -1375,9 +1454,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     log << "\n";
   }
 
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
   // Extract camera images
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
 
   std::map<std::string, size_t> camera_frame_indices;
   std::map<std::string, fs::path> camera_dirs;
@@ -1503,9 +1582,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
   }
 
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
   // Encode images to videos
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
 
  auto images_end = std::chrono::steady_clock::now();
   double image_extract_s = std::chrono::duration<double>(images_end - stage_start).count();
@@ -1542,22 +1621,38 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
                  << camera_frame_indices[camera_name]
                  << " -c:v " << video_encoder << " " << encoder_flags << " -pix_fmt yuv420p -r 30 "
                  << video_output.string() << " 2>/dev/null";
-
+      std::ostringstream cpu_cmd;
+      cpu_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps << " -start_number 0"
+              << " -i " << input_pattern.string() << " -frames:v "
+              << camera_frame_indices[camera_name]
+              << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p -r 30 "
+              << video_output.string() << " 2>/dev/null";
       std::string cmd = ffmpeg_cmd.str();
+      std::string cpu_fallback = cpu_cmd.str();
       std::string cam = camera_name;
-
-      // Block until a camera slot is free
+      bool is_gpu = (video_encoder != "libsvtav1");
       {
         std::unique_lock<std::mutex> lock(cam_pool_mutex);
         cam_pool_cv.wait(lock, [&] { return cam_active < max_cam_threads; });
         ++cam_active;
       }
-
       cam_threads.emplace_back(
-          [cmd, cam, &log, &videos_created, &cam_pool_mutex, &cam_pool_cv, &cam_active]() {
+          [cmd, cpu_fallback, cam, is_gpu, &log, &videos_created,
+           &cam_pool_mutex, &cam_pool_cv, &cam_active]() {
         int ret = std::system(cmd.c_str());
         if (ret == 0) {
           ++videos_created;
+        } else if (is_gpu) {
+          // GPU encode failed — retry with CPU encoder
+          log << "  [WARNING] " << cam << " GPU encode failed (exit "
+              << ret << "), retrying with CPU\n";
+          ret = std::system(cpu_fallback.c_str());
+          if (ret == 0) {
+            ++videos_created;
+            log << "  [ok] " << cam << " CPU fallback succeeded\n";
+          } else {
+            log << "  [FAILED] " << cam << " GPU and CPU both failed\n";
+          }
         } else {
           log << "  [FAILED] " << cam << " (exit code " << ret << ")\n";
         }
@@ -1580,9 +1675,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
   }
 
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
   // Generate LeRobotV2 metadata files
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
 
   auto video_end = std::chrono::steady_clock::now();
   double video_encode_s = std::chrono::duration<double>(video_end - stage_start).count();
