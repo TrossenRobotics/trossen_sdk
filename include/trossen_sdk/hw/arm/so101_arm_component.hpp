@@ -1,21 +1,26 @@
 /**
  * @file so101_arm_component.hpp
- * @brief Hardware component wrapper for SO101 arms
-
+ * @brief Hardware component wrapper for SO101 arms.
  */
 #ifndef TROSSEN_SDK__HW__ARM__SO101_ARM_COMPONENT_HPP_
 #define TROSSEN_SDK__HW__ARM__SO101_ARM_COMPONENT_HPP_
+#include <cstddef>
 #include <memory>
 #include <string>
+#include <vector>
 #include "trossen_sdk/hw/arm/so101_arm_driver.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
+#include "trossen_sdk/hw/teleop/teleop_capable.hpp"
 namespace trossen::hw::arm {
 /**
- * @brief Hardware component for SO101 arms
+ * @brief Hardware component for SO101 arms.
  *
- * Wraps SO101ArmDriver and provides JSON configuration.
+ * Wraps SO101ArmDriver and provides JSON configuration. Inherits
+ * JointSpaceTeleop directly, providing joint-space teleop IO without
+ * the adapter pattern needed by multi-space components.
  */
-class SO101ArmComponent : public HardwareComponent {
+class SO101ArmComponent : public HardwareComponent,
+                          public teleop::JointSpaceTeleop {
 public:
   /**
    * @brief Constructor
@@ -56,10 +61,23 @@ public:
    */
   std::shared_ptr<SO101ArmDriver> get_driver() const { return driver_; }
 
+  // ── JointSpaceTeleop IO (hot loop) ────────────────────────────────────
+  std::vector<float> read() override;
+  void write(const std::vector<float>& cmd) override;
+
+  // ── TeleopCapable lifecycle ──────────────────────────────────────────
+  void prepare_for_teleop() override;
+  void end_teleop() override;
+  void stage() override;
+
 private:
   std::shared_ptr<SO101ArmDriver> driver_;
   std::string port_;
   SO101EndEffector end_effector_;
+
+  /// Joint-space pose this arm moves to at session start (via stage()).
+  /// Empty = no staging.
+  std::vector<float> staged_position_;
 };
 }  // namespace trossen::hw::arm
 #endif  // TROSSEN_SDK__HW__ARM__SO101_ARM_COMPONENT_HPP_
