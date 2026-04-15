@@ -968,11 +968,9 @@ private:
    */
   void close_resources();
 
-  // TODO(shantanuparab-tr): a joint-state writer lived here and consumed
-  // TeleopJointStateRecord (combined leader action + follower observation
-  // from the removed teleop producers). Replace it with a writer that
-  // pairs independent leader/follower JointStateRecord streams — driven
-  // by the teleop pair config — into the parquet action/observation
+  // TODO(shantanuparab-tr): add a joint-state writer that pairs
+  // leader/follower JointStateRecord streams — using the stream_id
+  // pairing in the teleop config — into the parquet action/observation
   // columns this backend expects.
 
   /**
