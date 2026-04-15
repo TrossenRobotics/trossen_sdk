@@ -5,7 +5,6 @@
     "arms": {
       "kbd_leader": {
         "type":              "keyboard_teleop",
-        "initial_pose":      [0.275, 0.0, 0.21, 0.0, 1.5708, 0.0],
         "step_translation_m": 0.005
       },
       "follower": {
@@ -24,7 +23,7 @@
 
   "teleop": {
     "enabled": true,
-    "rate_hz": 200.0,
+    "rate_hz": 1000.0,
     "pairs": [
       { "leader": "kbd_leader", "follower": "follower", "space": "cartesian" }
     ]

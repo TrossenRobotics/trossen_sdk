@@ -12,6 +12,10 @@ target_link_libraries(trossen_stationary_ai trossen_sdk libtrossen_arm)
 add_executable(trossen_mobile_ai trossen_mobile_ai/trossen_mobile_ai.cpp)
 target_link_libraries(trossen_mobile_ai trossen_sdk libtrossen_arm)
 
+# Keyboard teleop demo — virtual leader + Trossen follower in cartesian space
+add_executable(trossen_keyboard_teleop trossen_keyboard_teleop/trossen_keyboard_teleop.cpp)
+target_link_libraries(trossen_keyboard_teleop trossen_sdk libtrossen_arm)
+
 # Registry demo executable
 add_executable(backend_registry_demo backend_registry_demo.cpp)
 target_link_libraries(backend_registry_demo trossen_sdk)
