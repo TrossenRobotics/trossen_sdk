@@ -111,68 +111,6 @@ struct JointStateRecord : public RecordBase {
 
 
 /**
- * @brief Joint state sample (positions, velocities, efforts).
- */
-struct TeleopJointStateRecord : public RecordBase {
-  /// @brief Joint actions (homogeneous float features)
-  std::vector<float> actions;
-
-  /// @brief Joint observations (homogeneous float features)
-  std::vector<float> observations;
-
-  /**
-   * @brief Default constructor
-   */
-  TeleopJointStateRecord() = default;
-
-  /**
-   * @brief Convenience constructor used when source vectors are double
-   *
-   * @param ts_ Timestamp
-   * @param seq_ Sequence number
-   * @param id_ Stream identifier
-   * @param act_d Joint actions in double
-   * @param obs_d Joint observations in double
-   */
-  TeleopJointStateRecord(
-    const Timestamp& ts_,
-    uint64_t seq_,
-    std::string id_,
-    const std::vector<double>& act_d,
-    const std::vector<double>& obs_d)
-  {
-    ts = ts_;
-    seq = seq_;
-    id = std::move(id_);
-    actions.assign(act_d.begin(), act_d.end());
-    observations.assign(obs_d.begin(), obs_d.end());
-  }
-
-  /**
-   * @brief Convenience constructor used when source vectors are float
-   *
-   * @param ts_ Timestamp
-   * @param seq_ Sequence number
-   * @param id_ Stream identifier
-   * @param act_f Joint actions in float
-   * @param obs_f Joint observations in float
-   */
-  TeleopJointStateRecord(
-    const Timestamp& ts_,
-    uint64_t seq_,
-    std::string id_,
-    const std::vector<float>& act_f,
-    const std::vector<float>& obs_f)
-  {
-    ts = ts_;
-    seq = seq_;
-    id = std::move(id_);
-    actions = act_f;
-    observations = obs_f;
-  }
-};
-
-/**
  * @brief 2D odometry state (pose + velocity), mirroring nav_msgs/Odometry.
  */
 struct Odometry2DRecord : public RecordBase {
