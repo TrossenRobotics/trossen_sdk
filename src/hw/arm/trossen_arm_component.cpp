@@ -55,17 +55,6 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
       "TrossenArmComponent: Failed to configure driver: " + std::string(e.what()));
   }
 
-  // Optional gripper position tolerance. Primarily useful on follower arms
-  // to relax position tracking on the gripper joint.
-  if (config.contains("gripper_tolerance")) {
-    const float tol = config.at("gripper_tolerance").get<float>();
-    if (tol >= 0.0f) {
-      auto limits = driver_->get_joint_limits();
-      limits[driver_->get_num_joints() - 1].position_tolerance = tol;
-      driver_->set_joint_limits(limits);
-    }
-  }
-
   // Optional teleop tuning — used by stage() / end_teleop() / prepare_for_teleop().
   if (config.contains("staged_position")) {
     staged_position_ = config.at("staged_position").get<std::vector<float>>();
@@ -128,8 +117,7 @@ void TrossenArmComponent::prepare_for_teleop() {
     return;
   }
   // Follower: enter position mode. The mirror loop drives the follower's
-  // joints from here; staging aligns both arms to the same pose so no
-  // explicit runtime alignment is required.
+  // joints from here.
   driver_->set_all_modes(trossen_arm::Mode::position);
 }
 
