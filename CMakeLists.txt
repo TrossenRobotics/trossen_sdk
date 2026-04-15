@@ -36,6 +36,7 @@ add_library(trossen_sdk SHARED
   src/hw/base/slate_base_component.cpp
   src/hw/base/slate_base_producer.cpp
   src/hw/teleop/teleop_controller.cpp
+  src/hw/teleop/teleop_factory.cpp
   src/hw/camera/opencv_camera_component.cpp
   src/hw/camera/opencv_producer.cpp
   src/hw/camera/mock_producer.cpp

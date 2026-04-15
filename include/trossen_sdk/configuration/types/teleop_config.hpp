@@ -11,6 +11,9 @@
 
 #include "nlohmann/json.hpp"
 
+#include "trossen_sdk/configuration/base_config.hpp"
+#include "trossen_sdk/configuration/config_registry.hpp"
+
 namespace trossen::configuration {
 
 /**
@@ -23,10 +26,19 @@ struct TeleoperationPair {
   /// @brief Key in hardware.arms map for the follower arm
   std::string follower;
 
+  /// @brief Teleop space: "joint" or "cartesian". Defaults to "joint".
+  ///
+  /// The factory converts this to teleop::TeleopCapable::Space. The chosen
+  /// space must be implemented (via JointSpaceTeleop / CartesianSpaceTeleop)
+  /// by both the leader and the follower — otherwise the controller throws
+  /// at construction.
+  std::string space{"joint"};
+
   static TeleoperationPair from_json(const nlohmann::json& j) {
     TeleoperationPair p;
     if (j.contains("leader")) j.at("leader").get_to(p.leader);
     if (j.contains("follower")) j.at("follower").get_to(p.follower);
+    if (j.contains("space")) j.at("space").get_to(p.space);
     return p;
   }
 };
@@ -44,10 +56,15 @@ struct TeleoperationPair {
  *   ]
  * }
  *
- * The teleop loop mirrors each leader arm's joint positions to its paired follower
- * at the specified rate. Set "enabled" to false to skip teleop (e.g. replay mode).
+ * The teleop loop mirrors each leader arm's state to its paired follower at
+ * the specified rate. Set "enabled" to false to skip teleop (e.g. replay
+ * mode).
+ *
+ * Per-arm tuning (staging pose, trajectory time, gripper tolerance, etc.)
+ * lives in each arm's own hardware configuration block — see the relevant
+ * component headers for supported fields.
  */
-struct TeleoperationConfig {
+struct TeleoperationConfig : public BaseConfig {
   /// @brief Whether teleoperation is active
   bool enabled{true};
 
@@ -56,6 +73,8 @@ struct TeleoperationConfig {
 
   /// @brief Leader->follower pairings
   std::vector<TeleoperationPair> pairs;
+
+  std::string type() const override { return "teleop"; }
 
   static TeleoperationConfig from_json(const nlohmann::json& j) {
     TeleoperationConfig c;
@@ -69,6 +88,8 @@ struct TeleoperationConfig {
     return c;
   }
 };
+
+REGISTER_CONFIG(TeleoperationConfig, "teleop");
 
 }  // namespace trossen::configuration
 
