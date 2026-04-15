@@ -9,27 +9,8 @@
  * that space. If either side does not implement the requested space,
  * construction throws with a clear message.
  *
- * The follower may be nullptr for leader-only setups (e.g. handheld
- * capture). Recording is handled separately by producers.
- *
- * Usage:
- * @code
- *   auto leader_hw   = HardwareRegistry::create("trossen_arm", "leader",   cfg);
- *   auto follower_hw = HardwareRegistry::create("trossen_arm", "follower", cfg);
- *
- *   auto leader   = teleop::as_capable<teleop::TeleopCapable>(leader_hw);
- *   auto follower = teleop::as_capable<teleop::TeleopCapable>(follower_hw);
- *
- *   TeleopController::Config tc{
- *     .space           = teleop::TeleopCapable::Space::Joint,
- *     .control_rate_hz = 1000.0f,
- *   };
- *   TeleopController ctrl(leader, follower, tc);
- *
- *   ctrl.teleop();        // spawns mirroring thread
- *   // ... recording happens via SessionManager ...
- *   ctrl.stop_teleop();   // joins thread, cleans up hardware
- * @endcode
+ * The follower may be nullptr for leader-only setups. Recording is
+ * performed separately and is not the controller's concern.
  */
 
 #ifndef TROSSEN_SDK__HW__TELEOP__TELEOP_CONTROLLER_HPP
@@ -81,14 +62,12 @@ public:
   /**
    * @brief Prepare hardware for a teleop episode.
    *
-   * Calls pre_episode() on both components, aligns the follower to the
-   * leader's current joint state, and puts the leader into its teleop mode
-   * (e.g. gravity compensation for Trossen arms). Does not start the mirror
-   * thread -- that is done by teleop().
-   *
-   * Once the mirror loop is running, subsequent calls are no-ops: the
-   * follower is already tracking the leader through reset periods and does
-   * not need re-alignment.
+   * Calls pre_episode() on both components, puts the leader into its
+   * teleop role, and calls sync_to_state on the leader with the follower's
+   * current state (so virtual leaders can align with the follower before
+   * mirroring starts). Does not start the mirror thread -- that is done
+   * by teleop(). Subsequent calls while the mirror is already running are
+   * no-ops.
    */
   void prepare_teleop();
 

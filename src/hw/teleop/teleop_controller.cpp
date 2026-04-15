@@ -80,24 +80,23 @@ void TeleopController::prepare_teleop() {
     follower_->pre_episode();
   }
 
-  // The mirror loop runs continuously across episodes, keeping the follower
-  // at the leader's current state through reset periods. Once it is
-  // running, per-episode preparation is unnecessary.
+  // The mirror loop runs continuously across episodes; return early if it
+  // is already running.
   if (running_) {
     return;
   }
 
-  // First-episode setup. Each arm reads its configured role (leader vs
-  // follower) and trajectory parameters from its own members; the
-  // controller only signals the lifecycle transition.
+  // First-episode setup. Each arm reads its configured role and trajectory
+  // parameters from its own members; the controller only signals the
+  // lifecycle transition.
   if (follower_) {
     follower_->prepare_for_teleop();
   }
   leader_->prepare_for_teleop();
 
-  // Give virtual leaders (e.g. keyboard input) a chance to align their
-  // internal state to the follower's actual pose, so the first mirror
-  // tick doesn't snap. Real-hardware leaders inherit the no-op default.
+  // Let virtual leaders align their internal state to the follower's
+  // current pose before the mirror loop starts. Real-hardware leaders
+  // inherit the no-op default.
   if (follower_io_) {
     leader_io_->sync_to_state(follower_io_->read());
   }
