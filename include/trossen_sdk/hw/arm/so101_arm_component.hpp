@@ -16,8 +16,7 @@ namespace trossen::hw::arm {
  * @brief Hardware component for SO101 arms.
  *
  * Wraps SO101ArmDriver and provides JSON configuration. Inherits
- * JointSpaceTeleop directly, providing joint-space teleop IO without
- * the adapter pattern needed by multi-space components.
+ * JointSpaceTeleop to expose joint-space teleop read/write.
  */
 class SO101ArmComponent : public HardwareComponent,
                           public teleop::JointSpaceTeleop {
