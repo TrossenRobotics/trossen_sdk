@@ -2,25 +2,13 @@
  * @file teleop_factory.hpp
  * @brief Factory for constructing TeleopControllers from the global config.
  *
- * Mirrors the SessionManager pattern: read teleop wiring from
- * `GlobalConfig::instance()`, resolve hardware references via
- * `ActiveHardwareRegistry`, and return ready-to-start `TeleopController`
- * instances.
+ * Reads the teleop block from `GlobalConfig::instance()`, resolves the
+ * leader and follower referenced in each pair via `ActiveHardwareRegistry`,
+ * and returns one ready-to-run `TeleopController` per pair.
  *
- * Prerequisite: `SdkConfig::populate_global_config()` must have been called,
- * and the hardware components referenced in the teleop pairs must already be
- * registered in `ActiveHardwareRegistry` (typically by `HardwareRegistry::create`
- * with `mark_active=true`).
- *
- * Usage:
- * @code
- *   auto cfg = trossen::configuration::SdkConfig::from_json(j);
- *   cfg.populate_global_config();
- *   // ... create hardware via HardwareRegistry::create(..., mark_active=true) ...
- *
- *   auto controllers = trossen::hw::teleop::create_controllers_from_global_config();
- *   for (auto& c : controllers) c->start();
- * @endcode
+ * Prerequisite: the global config must already carry the teleop section,
+ * and the hardware components referenced in each pair must be present in
+ * `ActiveHardwareRegistry`.
  */
 
 #ifndef TROSSEN_SDK__HW__TELEOP__TELEOP_FACTORY_HPP_
@@ -39,16 +27,16 @@ namespace trossen::hw::teleop {
  * Behavior:
  * - If teleop is disabled (`enabled = false`), returns an empty vector.
  * - For each pair: looks up `leader` and `follower` IDs in
- *   `ActiveHardwareRegistry`. If the leader is missing, prints a warning and
- *   skips that pair. If the follower is missing or absent, the controller is
- *   constructed in leader-only mode (UMI-style).
- * - If a referenced component does not implement `TeleopCapable` (e.g. a
- *   camera was named by mistake), prints a warning and skips that pair.
- * - Each returned controller is constructed but **not yet started**; the
- *   caller is responsible for invoking `start()` and `stop()`.
+ *   `ActiveHardwareRegistry`. If the leader is missing, prints a warning
+ *   and skips that pair. If the follower is missing or absent, the
+ *   controller is constructed in leader-only mode.
+ * - If a referenced component does not implement `TeleopCapable`, prints
+ *   a warning and skips that pair.
+ * - Each returned controller is constructed but not yet running; the
+ *   caller drives its lifecycle via `prepare_teleop()`, `teleop()`,
+ *   `reset_teleop()`, and `stop_teleop()`.
  *
- * Throws `std::runtime_error` if the global "teleop" key is missing
- * (i.e. `populate_global_config()` was never called).
+ * Throws `std::runtime_error` if the global "teleop" key is missing.
  */
 std::vector<std::unique_ptr<TeleopController>>
 create_controllers_from_global_config();
