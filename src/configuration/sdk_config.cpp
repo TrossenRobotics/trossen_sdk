@@ -105,6 +105,24 @@ void SdkConfig::populate_global_config() const {
     gc_json["trossen_mcap_backend"] = bj;
   }
 
+  // Teleop (consumed by trossen::hw::teleop::create_controllers_from_global_config)
+  {
+    nlohmann::json tj;
+    tj["type"] = "teleop";
+    tj["enabled"] = teleop.enabled;
+    tj["rate_hz"] = teleop.rate_hz;
+    nlohmann::json pairs_j = nlohmann::json::array();
+    for (const auto& p : teleop.pairs) {
+      pairs_j.push_back({
+        {"leader",   p.leader},
+        {"follower", p.follower},
+        {"space",    p.space},
+      });
+    }
+    tj["pairs"] = pairs_j;
+    gc_json["teleop"] = tj;
+  }
+
   GlobalConfig::instance().load_from_json(gc_json);
 }
 
