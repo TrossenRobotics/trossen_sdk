@@ -230,7 +230,7 @@ int main(int argc, char** argv) {
   std::cout << "\nProducers registered. Ready to record.\n";
 
   // ──────────────────────────────────────────────────────────
-  // Teleop controllers (constructor stages arms + applies tuning)
+  // Teleop controllers (constructor stages arms)
   // ──────────────────────────────────────────────────────────
 
   auto controllers = trossen::hw::teleop::create_controllers_from_global_config();
@@ -239,7 +239,7 @@ int main(int argc, char** argv) {
   // Register lifecycle callbacks
   // ──────────────────────────────────────────────────────────
 
-  // Before each episode: summon follower to leader position
+  // Before each episode: let controllers run their pre-episode lifecycle
   mgr.on_pre_episode([&]() -> bool {
     for (auto& ctrl : controllers) ctrl->prepare_teleop();
     return true;
