@@ -14,8 +14,8 @@
  *   - CartesianSpaceTeleop   : TeleopCapable + TeleopSpaceIO for cartesian space.
  *
  * A hardware component must implement at least one space child to be usable
- * by TeleopController. The controller calls `as_space_io(cfg.space)` at
- * construction and throws if the return is null.
+ * by the teleop controller. The controller calls `as_space_io(cfg.space)`
+ * at construction and throws if the return is null.
  *
  * Single-space hardware (e.g. SO101 arm, joint-only) inherits the relevant
  * space child directly. The child auto-wires `as_space_io` to return `this`
@@ -29,15 +29,14 @@
  *   };
  * @endcode
  *
- * Multi-space hardware (e.g. TrossenArmComponent, which supports both joint
- * and cartesian) inherits TeleopCapable directly and exposes each space
- * through a nested adapter sub-object that implements TeleopSpaceIO. The
- * component overrides `as_space_io` with a switch that dispatches to the
- * correct adapter. See TrossenArmComponent for a worked example.
+ * Multi-space hardware (a component that supports more than one space)
+ * inherits TeleopCapable directly and exposes each space through a nested
+ * adapter sub-object that implements TeleopSpaceIO. The component overrides
+ * `as_space_io` with a switch that dispatches to the correct adapter.
  *
  * ── Adding a new teleop space ─────────────────────────────────────────────
  *
- *  1. Add an entry to the `Space` enum below.
+ *  1. Add a new value to the `Space` enum below, before the `Count` sentinel.
  *  2. Add a row to `kSpaceDescriptors` (name + interface name for errors).
  *  3. Add a child class (e.g. `VelocitySpaceTeleop`) that inherits
  *     `TeleopCapable` virtually and `TeleopSpaceIO`, mirroring the existing
@@ -77,6 +76,12 @@ public:
   virtual ~TeleopSpaceIO() = default;
 
   /// Return the component's current state in this space (leader role).
+  ///
+  /// TODO(shantanuparab-tr): revisit with a span / caller-owned output
+  /// buffer if profiling shows allocator pressure at high control rates.
+  /// Returning a vector by value encourages a fresh allocation per tick,
+  /// which is cheap at 1 kHz with small state vectors but becomes
+  /// meaningful at higher rates or larger payloads.
   virtual std::vector<float> read() = 0;
 
   /// Apply a teleop command in this space (follower role).
@@ -106,8 +111,11 @@ public:
 class TeleopCapable {
 public:
   /// Teleop spaces a component may operate in.
-  /// When adding a new space, also update `kSpaceDescriptors` below.
-  enum class Space { Joint, Cartesian };
+  ///
+  /// `Count` is a sentinel (not a real space) used to make the descriptor
+  /// table's compile-time check meaningful. When adding a new space,
+  /// insert it before `Count` and add a matching row to `kSpaceDescriptors`.
+  enum class Space { Joint, Cartesian, Count };
 
   virtual ~TeleopCapable() = default;
 
@@ -166,13 +174,14 @@ inline constexpr std::array<SpaceDescriptor, 2> kSpaceDescriptors{{
   {TeleopCapable::Space::Cartesian, "cartesian", "CartesianSpaceTeleop"},
 }};
 
-// Guard against adding a Space enum value without a corresponding row.
-// `std::array<_, 2>` catches a shorter initializer at compile time; this
-// static_assert catches a longer enum that outgrows the table.
-static_assert(kSpaceDescriptors.size() == 2,
-  "kSpaceDescriptors must have exactly one row per TeleopCapable::Space "
-  "value. When adding a new Space, add its row above and update this "
-  "expected count.");
+// Compile-time check: every Space enum value has a descriptor row. The
+// `Space::Count` sentinel gives this assertion teeth — adding a new enum
+// value without adding its row fails to compile here.
+static_assert(
+  kSpaceDescriptors.size() ==
+    static_cast<std::size_t>(TeleopCapable::Space::Count),
+  "kSpaceDescriptors must have one row per TeleopCapable::Space value. "
+  "Add the new row above; the compiler will then be satisfied.");
 
 /// Lower-case name used in JSON and log output. Returns "unknown" if `s` is
 /// absent from `kSpaceDescriptors` (should never happen for a well-formed
