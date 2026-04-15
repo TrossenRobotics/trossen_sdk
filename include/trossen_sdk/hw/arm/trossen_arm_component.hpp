@@ -22,14 +22,10 @@ namespace trossen::hw::arm {
  * @brief Hardware component for Trossen Robotics robot arms.
  *
  * Wraps trossen_arm::TrossenArmDriver and provides JSON configuration.
- *
  * Implements teleop::TeleopCapable and supports both joint and cartesian
- * teleop spaces. Because C++ cannot disambiguate two same-signature virtual
- * `read()`/`write()` methods inherited from sibling bases (JointSpaceTeleop
- * and CartesianSpaceTeleop both provide TeleopSpaceIO), each space is
- * exposed through a small nested adapter sub-object (JointView, CartView)
- * whose `read()` / `write()` forward to private space-specific helpers on
- * this class. The controller selects the active space via `as_space_io()`.
+ * teleop spaces; each space is exposed through a nested adapter sub-object
+ * (JointView, CartView) that forwards to space-specific helpers on this
+ * class. The controller selects the active space via `as_space_io()`.
  */
 class TrossenArmComponent : public HardwareComponent,
                             public teleop::TeleopCapable {
@@ -50,7 +46,6 @@ public:
    *   "ip_address": "192.168.1.100",
    *   "model": "wxai_v0",
    *   "end_effector": "wxai_v0_follower",
-   *   "gripper_tolerance": 0.01,          // optional, follower arms
    *   "staged_position": [0, 1.0, 0.5, 0.6, 0, 0, 0],  // optional, joint-space
    *   "teleop_moving_time_s": 2.0         // optional, default 2.0
    * }
