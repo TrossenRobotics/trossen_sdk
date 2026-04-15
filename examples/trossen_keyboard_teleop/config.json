@@ -1,0 +1,46 @@
+{
+  "robot_name": "trossen_keyboard_teleop",
+
+  "hardware": {
+    "arms": {
+      "kbd_leader": {
+        "type":              "keyboard_teleop",
+        "initial_pose":      [0.275, 0.0, 0.21, 0.0, 1.5708, 0.0],
+        "step_translation_m": 0.005
+      },
+      "follower": {
+        "ip_address":          "192.168.1.4",
+        "model":               "wxai_v0",
+        "end_effector":        "wxai_v0_follower",
+        "staged_position":     [0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0],
+        "teleop_moving_time_s": 2.0,
+        "gripper_tolerance":   0.01
+      }
+    },
+    "cameras": []
+  },
+
+  "producers": [],
+
+  "teleop": {
+    "enabled": true,
+    "rate_hz": 200.0,
+    "pairs": [
+      { "leader": "kbd_leader", "follower": "follower", "space": "cartesian" }
+    ]
+  },
+
+  "backend": {
+    "root":             "~/.trossen_sdk/keyboard_teleop_test",
+    "dataset_id":       "kbd_test",
+    "compression":      "",
+    "chunk_size_bytes": 4194304
+  },
+
+  "session": {
+    "max_duration":   0.0,
+    "max_episodes":   0,
+    "backend_type":   "trossen_mcap",
+    "reset_duration": 0.0
+  }
+}
