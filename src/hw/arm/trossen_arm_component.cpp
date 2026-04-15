@@ -1,6 +1,6 @@
 /**
  * @file trossen_arm_component.cpp
- * @brief Implementation of TrossenArmComponent
+ * @brief Implementation of TrossenArmComponent.
  */
 
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
@@ -11,8 +11,6 @@
 namespace trossen::hw::arm {
 
 void TrossenArmComponent::configure(const nlohmann::json& config) {
-  // Extract required configuration
-
   // Parse IP address
   if (!config.contains("ip_address")) {
     throw std::runtime_error("TrossenArmComponent: 'ip_address' is required in config");
@@ -39,8 +37,10 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
   end_effector_str_ = config.at("end_effector").get<std::string>();
   if (end_effector_str_ == "wxai_v0_leader") {
     end_effector = trossen_arm::StandardEndEffector::wxai_v0_leader;
+    is_leader_ = true;
   } else if (end_effector_str_ == "wxai_v0_follower") {
     end_effector = trossen_arm::StandardEndEffector::wxai_v0_follower;
+    is_leader_ = false;
   } else {
     throw std::runtime_error("TrossenArmComponent: Unknown end_effector: " + end_effector_str_);
   }
@@ -55,6 +55,25 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
       "TrossenArmComponent: Failed to configure driver: " + std::string(e.what()));
   }
 
+  // Optional gripper position tolerance. Primarily useful on follower arms
+  // to relax position tracking on the gripper joint.
+  if (config.contains("gripper_tolerance")) {
+    const float tol = config.at("gripper_tolerance").get<float>();
+    if (tol >= 0.0f) {
+      auto limits = driver_->get_joint_limits();
+      limits[driver_->get_num_joints() - 1].position_tolerance = tol;
+      driver_->set_joint_limits(limits);
+    }
+  }
+
+  // Optional teleop tuning — used by stage() / end_teleop() / prepare_for_teleop().
+  if (config.contains("staged_position")) {
+    staged_position_ = config.at("staged_position").get<std::vector<float>>();
+  }
+  if (config.contains("teleop_moving_time_s")) {
+    teleop_moving_time_s_ = config.at("teleop_moving_time_s").get<float>();
+  }
+
   // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
 }
 
@@ -67,6 +86,73 @@ nlohmann::json TrossenArmComponent::get_info() const {
   };
 
   return info;
+}
+
+// ── Space-specific IO ────────────────────────────────────────────────────
+
+std::vector<float> TrossenArmComponent::read_joint() {
+  if (!driver_) return {};
+  const auto& positions = driver_->get_robot_output().joint.all.positions;
+  return std::vector<float>(positions.begin(), positions.end());
+}
+
+void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
+  if (!driver_) return;
+  std::vector<double> pos_d(cmd.begin(), cmd.end());
+  driver_->set_all_positions(pos_d, 0.0, false);
+}
+
+std::vector<float> TrossenArmComponent::read_cartesian() {
+  if (!driver_) return {};
+  const auto& p = driver_->get_robot_output().cartesian.positions;
+  return std::vector<float>(p.begin(), p.end());
+}
+
+void TrossenArmComponent::write_cartesian(const std::vector<float>& cmd) {
+  if (!driver_ || cmd.size() < 6) return;
+  std::array<double, 6> goal;
+  std::copy_n(cmd.begin(), 6, goal.begin());
+  driver_->set_cartesian_positions(
+    goal, trossen_arm::InterpolationSpace::cartesian, 0.0, false);
+}
+
+// ── Shared lifecycle ─────────────────────────────────────────────────────
+
+void TrossenArmComponent::prepare_for_teleop() {
+  if (!driver_) return;
+  if (is_leader_) {
+    // Leader: enable gravity compensation.
+    driver_->set_all_modes(trossen_arm::Mode::external_effort);
+    std::vector<double> zeros(driver_->get_num_joints(), 0.0);
+    driver_->set_all_external_efforts(zeros, 0.0, false);
+    return;
+  }
+  // Follower: enter position mode. The mirror loop drives the follower's
+  // joints from here; staging aligns both arms to the same pose so no
+  // explicit runtime alignment is required.
+  driver_->set_all_modes(trossen_arm::Mode::position);
+}
+
+void TrossenArmComponent::end_teleop() {
+  if (!driver_) return;
+  // Neutralize first (safe regardless of current mode), then gracefully
+  // return to rest over the configured trajectory time, then release the
+  // driver.
+  driver_->set_all_modes(trossen_arm::Mode::idle);
+  driver_->set_all_modes(trossen_arm::Mode::position);
+  driver_->set_all_positions(
+    std::vector<double>(driver_->get_num_joints(), 0.0),
+    teleop_moving_time_s_, true);
+  driver_->cleanup();
+  driver_.reset();
+}
+
+void TrossenArmComponent::stage() {
+  if (!driver_ || staged_position_.empty()) return;
+  driver_->set_all_modes(trossen_arm::Mode::position);
+  std::vector<double> pos_d(staged_position_.begin(), staged_position_.end());
+  // Non-blocking so multiple arms can stage in parallel.
+  driver_->set_all_positions(pos_d, teleop_moving_time_s_, false);
 }
 
 REGISTER_HARDWARE(TrossenArmComponent, "trossen_arm")
