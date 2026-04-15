@@ -501,14 +501,10 @@ void LeRobotV2Backend::write(const data::RecordBase& record) {
   std::lock_guard<std::mutex> lock(write_mutex_);
 
   // Decide type by RTTI (simple approach for now).
-  // TODO(shantanuparab-tr): joint-state writing used to dispatch on
-  // TeleopJointStateRecord (combined leader action + follower observation
-  // emitted by the removed teleop producers). The new pipeline has each
-  // arm's trossen_arm_producer emit an independent JointStateRecord, so
-  // the LeRobot conversion needs retargeting: read the `pairs` entries
-  // from the teleop config to pair leader/follower streams by stream_id,
-  // then combine them into the action/observation columns this backend's
-  // parquet schema expects. Until that is wired, joint data is dropped.
+  // TODO(shantanuparab-tr): add joint-state writing. Each arm emits its
+  // own JointStateRecord; pairing leader/follower streams by stream_id
+  // (driven by the teleop pair config) and combining them into the
+  // parquet action/observation columns is the work to do.
   if (auto img = dynamic_cast<const data::ImageRecord*>(&record)) {
     write_image(*img);
   } else {
@@ -518,9 +514,8 @@ void LeRobotV2Backend::write(const data::RecordBase& record) {
 
 void LeRobotV2Backend::write_batch(std::span<const data::RecordBase* const> records) {
   std::lock_guard<std::mutex> lock(write_mutex_);
-  // TODO(shantanuparab-tr): mirror the dispatch change above once
-  // JointStateRecord pairing is implemented. Today this path only writes
-  // images; per-arm JointStateRecords are silently dropped.
+  // TODO(shantanuparab-tr): add joint-state dispatch here alongside images
+  // once the pairing described in write() above is implemented.
   for (auto* r : records) {
     if (!r) {
       continue;
@@ -964,13 +959,10 @@ void LeRobotV2Backend::discard_episode() {
   }
 }
 
-// TODO(shantanuparab-tr): a `write_joint_state` method previously lived here
-// and consumed TeleopJointStateRecord (combined leader action + follower
-// observation emitted by the now-removed teleop producers). A replacement
-// is needed that pairs independent leader/follower JointStateRecord
-// streams — driven by the teleop pair config — into the action/observation
-// columns this backend's parquet schema expects. Until then, joint data is
-// dropped at the dispatch site above.
+// TODO(shantanuparab-tr): add a `write_joint_state` method that pairs
+// leader/follower JointStateRecord streams (using the stream_id pairing
+// in the teleop config) into the action/observation columns this
+// backend's parquet schema expects.
 
 void LeRobotV2Backend::write_image(const data::RecordBase& base) {
   const auto& img = static_cast<const data::ImageRecord&>(base);
