@@ -4,27 +4,32 @@
   "hardware": {
     "arms": {
       "leader": {
-        "ip_address":   "192.168.1.2",
-        "model":        "wxai_v0",
-        "end_effector": "wxai_v0_leader"
+        "ip_address":          "192.168.1.2",
+        "model":               "wxai_v0",
+        "end_effector":        "wxai_v0_leader",
+        "staged_position":     [0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0],
+        "teleop_moving_time_s": 2.0
       },
       "follower": {
-        "ip_address":   "192.168.1.4",
-        "model":        "wxai_v0",
-        "end_effector": "wxai_v0_follower"
+        "ip_address":          "192.168.1.4",
+        "model":               "wxai_v0",
+        "end_effector":        "wxai_v0_follower",
+        "gripper_tolerance":   0.01,
+        "staged_position":     [0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0],
+        "teleop_moving_time_s": 2.0
       }
     },
     "cameras": [
       {
         "id":            "camera_main",
-        "serial_number": "128422271347",
+        "serial_number": "218622270304",
         "width":         640,
         "height":        480,
         "fps":           30
       },
       {
         "id":            "camera_wrist",
-        "serial_number": "218622270304",
+        "serial_number": "128422271347",
         "width":         640,
         "height":        480,
         "fps":           30
@@ -75,15 +80,15 @@
 
   "backend": {
     "root":             "~/.trossen_sdk",
-    "dataset_id":       "solo_dataset",
+    "dataset_id":       "solo_dataset_python",
     "compression":      "",
     "chunk_size_bytes": 4194304
   },
 
   "session": {
-    "max_duration":  10.0,
-    "max_episodes":  5,
+    "max_duration":  7.0,
+    "max_episodes":  60,
     "backend_type":  "trossen_mcap",
-    "reset_duration": 5.0
+    "reset_duration": 2.0
   }
 }
