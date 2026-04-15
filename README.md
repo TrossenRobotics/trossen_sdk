@@ -418,8 +418,7 @@ counter, and a dual `Timestamp`.
 
 | Type | Fields | Hardware |
 |---|---|---|
-| `JointStateRecord` | positions (rad), velocities (rad/s), efforts (Nm) | Trossen arm |
-| `TeleopJointStateRecord` | actions, observations (float vectors) | Teleop producers |
+| `JointStateRecord` | positions (rad), velocities (rad/s), efforts (Nm) | Trossen arm, SO101 arm |
 | `ImageRecord` | width, height, encoding, pixel data | Cameras |
 | `Odometry2DRecord` | pose (m, rad), velocity (m/s, rad/s) | SLATE base |
 

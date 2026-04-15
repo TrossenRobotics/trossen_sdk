@@ -30,11 +30,8 @@
 // Arms
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_producer.hpp"
-#include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/so101_arm_component.hpp"
-#include "trossen_sdk/hw/arm/so101_teleop_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
-#include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 
 // Cameras
 #include "trossen_sdk/hw/camera/camera_types.hpp"
