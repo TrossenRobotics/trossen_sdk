@@ -968,12 +968,12 @@ private:
    */
   void close_resources();
 
-  /**
-   * @brief Write a joint state record to disk
-   *
-   * @param base Record to write (will be dynamic_cast to JointStateRecord)
-   */
-  void write_joint_state(const data::RecordBase& base);
+  // TODO(shantanuparab-tr): a joint-state writer lived here and consumed
+  // TeleopJointStateRecord (combined leader action + follower observation
+  // from the removed teleop producers). Replace it with a writer that
+  // pairs independent leader/follower JointStateRecord streams — driven
+  // by the teleop pair config — into the parquet action/observation
+  // columns this backend expects.
 
   /**
    * @brief Write an image record to disk
