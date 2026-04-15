@@ -17,9 +17,8 @@
  * by the teleop controller. The controller calls `as_space_io(cfg.space)`
  * at construction and throws if the return is null.
  *
- * Single-space hardware (e.g. SO101 arm, joint-only) inherits the relevant
- * space child directly. The child auto-wires `as_space_io` to return `this`
- * for its space:
+ * Single-space hardware inherits the relevant space child directly. The
+ * child auto-wires `as_space_io` to return `this` for its space:
  *
  * @code
  *   class MyArm : public HardwareComponent, public JointSpaceTeleop {
@@ -44,9 +43,8 @@
  *  4. Any hardware that should support the new space either inherits the new
  *     child (single-space) or extends its `as_space_io` switch (multi-space).
  *
- * Nothing in teleop_controller.{hpp,cpp} or teleop_factory.cpp needs to
- * change — the resolver, error messages, and JSON parse all go through
- * `kSpaceDescriptors` and `as_space_io`.
+ * The resolver, error messages, and JSON parse all go through
+ * `kSpaceDescriptors` and `as_space_io` — no other layer needs to change.
  */
 
 #ifndef TROSSEN_SDK__HW__TELEOP__TELEOP_CAPABLE_HPP_
@@ -90,8 +88,8 @@ public:
   /// Optional. Called once by the controller before the mirror loop starts,
   /// with the follower's current state in this space. Real-hardware leaders
   /// have no internal state to sync, so the default is a no-op. Virtual
-  /// leaders (e.g. keyboard input) override this to align their starting
-  /// state with the follower, avoiding a snap when the mirror begins.
+  /// leaders override this to align their starting state with the follower
+  /// before mirroring begins.
   virtual void sync_to_state(const std::vector<float>& state) {
     (void)state;
   }
