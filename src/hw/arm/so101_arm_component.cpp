@@ -60,9 +60,7 @@ void SO101ArmComponent::write(const std::vector<float>& cmd) {
 }
 
 void SO101ArmComponent::prepare_for_teleop() {
-  // SO101 has no teleop mode to enter — the mirror loop drives it
-  // directly. Staging puts both arms at the same pose, so no explicit
-  // runtime alignment is required.
+  // SO101 has no teleop mode to enter — the mirror loop drives it directly.
 }
 
 void SO101ArmComponent::end_teleop() {
