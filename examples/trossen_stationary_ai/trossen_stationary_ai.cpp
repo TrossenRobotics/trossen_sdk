@@ -40,15 +40,12 @@
 #include "trossen_sdk/hw/arm/trossen_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/hw/teleop/teleop_factory.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
 #include "trossen_sdk/utils/app_utils.hpp"
-
-static const std::vector<double> STAGED_POSITIONS = {
-  0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0
-};
 
 static void print_usage(const char* program) {
   std::cout <<
@@ -167,28 +164,6 @@ int main(int argc, char** argv) {
     std::cout << "  [ok] Arm [" << id << "] configured (" << arm_cfg.ip_address << ")\n";
   }
 
-  // Stage all arms to starting positions
-  const float moving_time_s = 2.0f;
-  for (const auto& [id, comp] : arm_components) {
-    auto driver = comp->get_hardware();
-    driver->set_all_modes(trossen_arm::Mode::position);
-    driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
-  }
-  std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-  std::cout << "  [ok] All arms staged to starting positions\n";
-
-  // Adjust gripper tolerance for follower arms
-  for (const auto& pair : cfg.teleop.pairs) {
-    auto it = arm_components.find(pair.follower);
-    if (it == arm_components.end()) {
-      continue;
-    }
-    auto driver = it->second->get_hardware();
-    auto limits = driver->get_joint_limits();
-    limits[driver->get_num_joints() - 1].position_tolerance = 0.01;
-    driver->set_joint_limits(limits);
-  }
-
   // ──────────────────────────────────────────────────────────
   // Session Manager + producers
   // ──────────────────────────────────────────────────────────
@@ -256,8 +231,26 @@ int main(int argc, char** argv) {
   std::cout << "\nProducers registered. Ready to record.\n";
 
   // ──────────────────────────────────────────────────────────
+  // Teleop controllers (constructor stages arms + applies tuning)
+  // ──────────────────────────────────────────────────────────
+
+  auto controllers = trossen::hw::teleop::create_controllers_from_global_config();
+
+  // ──────────────────────────────────────────────────────────
   // Register lifecycle callbacks
   // ──────────────────────────────────────────────────────────
+
+  // Before each episode: summon follower to leader position
+  mgr.on_pre_episode([&]() -> bool {
+    for (auto& ctrl : controllers) ctrl->prepare_teleop();
+    return true;
+  });
+
+  // Episode started: begin mirroring (alongside recording)
+  mgr.on_episode_started([&]() {
+    for (auto& ctrl : controllers) ctrl->teleop();
+    std::cout << "Episode started - recording and mirroring active.\n";
+  });
 
   // Count depth-capable cameras once for sanity checks
   int depth_cameras = 0;
@@ -265,11 +258,10 @@ int main(int argc, char** argv) {
     if (cam.use_depth) ++depth_cameras;
   }
 
-  mgr.on_episode_started([]() {
-    std::cout << "Episode started - recording is now active.\n";
-  });
-
+  // After each episode: reset mode (mirroring continues, no recording)
   mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
+    for (auto& ctrl : controllers) ctrl->reset_teleop();
+
     const std::string file_path =
       trossen::utils::generate_episode_path(root, stats.current_episode_index);
     trossen::utils::print_episode_summary(file_path, stats);
@@ -286,28 +278,9 @@ int main(int argc, char** argv) {
     perform_sanity_check(stats.current_episode_index, stats.records_written_current, sanity_cfg);
   });
 
+  // Shutdown: stop mirror + return arms to rest
   mgr.on_pre_shutdown([&]() {
-    std::cout << "\nReturning arms to starting positions...\n";
-    for (const auto& [id, comp] : arm_components) {
-      auto driver = comp->get_hardware();
-      driver->set_all_modes(trossen_arm::Mode::position);
-      driver->set_all_positions(STAGED_POSITIONS, moving_time_s, false);
-    }
-    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-
-    std::cout << "Moving arms to sleep positions...\n";
-    for (const auto& [id, comp] : arm_components) {
-      auto driver = comp->get_hardware();
-      driver->set_all_positions(
-        std::vector<double>(driver->get_num_joints(), 0.0), moving_time_s, false);
-    }
-    std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-
-    std::cout << "Cleaning up arm drivers...\n";
-    for (const auto& [id, comp] : arm_components) {
-      comp->get_hardware()->cleanup();
-    }
-    std::cout << "  [ok] All arm drivers cleaned up\n";
+    for (auto& ctrl : controllers) ctrl->stop_teleop();
   });
 
   // ──────────────────────────────────────────────────────────
@@ -320,40 +293,6 @@ int main(int argc, char** argv) {
       break;
     }
 
-    if (cfg.teleop.enabled) {
-      std::cout << "\nLocking leader arms and moving followers to match...\n";
-      for (const auto& pair : cfg.teleop.pairs) {
-        auto leader_it = arm_components.find(pair.leader);
-        auto follower_it = arm_components.find(pair.follower);
-        if (leader_it == arm_components.end() || follower_it == arm_components.end()) {
-          continue;
-        }
-        auto leader_driver = leader_it->second->get_hardware();
-        auto follower_driver = follower_it->second->get_hardware();
-        leader_driver->set_all_modes(trossen_arm::Mode::position);
-        follower_driver->set_all_modes(trossen_arm::Mode::position);
-        follower_driver->set_all_positions(
-          leader_driver->get_all_positions(), moving_time_s, false);
-      }
-      std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
-      std::cout << "  [ok] Followers moved to match leaders\n";
-
-      std::cout << "\n!! Enabling teleop mode !!\n";
-      for (const auto& pair : cfg.teleop.pairs) {
-        auto it = arm_components.find(pair.leader);
-        if (it == arm_components.end()) {
-          continue;
-        }
-        auto driver = it->second->get_hardware();
-        driver->set_all_modes(trossen_arm::Mode::external_effort);
-        driver->set_all_external_efforts(
-          std::vector<double>(driver->get_num_joints(), 0.0), 0.0, false);
-        std::cout << "   " << pair.leader << ": gravity compensation -> "
-                  << pair.follower << " will mirror\n";
-      }
-      std::cout << "\n";
-    }
-
     mgr.print_episode_header();
 
     if (!mgr.start_episode()) {
@@ -362,41 +301,15 @@ int main(int argc, char** argv) {
 
     std::cout << "Recording...\n";
 
-    // Teleop thread mirrors leader positions to followers at configured rate
-    std::thread teleop_thread([&]() {
-      if (!cfg.teleop.enabled) {
-        return;
-      }
-      const auto sleep_ns = static_cast<int64_t>(1e9 / cfg.teleop.rate_hz);
-      while (mgr.is_episode_active() && !trossen::utils::g_stop_requested) {
-        for (const auto& pair : cfg.teleop.pairs) {
-          auto leader_it = arm_components.find(pair.leader);
-          auto follower_it = arm_components.find(pair.follower);
-          if (leader_it == arm_components.end() || follower_it == arm_components.end()) {
-            continue;
-          }
-          follower_it->second->get_hardware()->set_all_positions(
-            leader_it->second->get_hardware()->get_all_positions(), 0.0f, false);
-        }
-        std::this_thread::sleep_for(std::chrono::nanoseconds(sleep_ns));
-      }
-    });
-
     auto action = mgr.monitor_episode();
 
     if (action == trossen::runtime::UserAction::kReRecord) {
       mgr.discard_current_episode();
-      if (teleop_thread.joinable()) {
-        teleop_thread.join();
-      }
       continue;
     }
 
     if (mgr.is_episode_active()) {
       mgr.stop_episode();
-    }
-    if (teleop_thread.joinable()) {
-      teleop_thread.join();
     }
 
     if (trossen::utils::g_stop_requested) {
