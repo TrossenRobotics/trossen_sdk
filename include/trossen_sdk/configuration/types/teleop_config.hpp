@@ -51,18 +51,18 @@ struct TeleoperationPair {
  *   "enabled": true,
  *   "rate_hz": 1000.0,
  *   "pairs": [
- *     { "leader": "leader_left",  "follower": "follower_left"  },
- *     { "leader": "leader_right", "follower": "follower_right" }
+ *     { "leader": "leader_left",  "follower": "follower_left",  "space": "joint" },
+ *     { "leader": "leader_right", "follower": "follower_right", "space": "joint" }
  *   ]
  * }
  *
- * The teleop loop mirrors each leader arm's state to its paired follower at
- * the specified rate. Set "enabled" to false to skip teleop (e.g. replay
- * mode).
+ * The teleop loop mirrors each leader's state to its paired follower at the
+ * specified rate. Set "enabled" to false to skip teleop (e.g. replay mode).
+ * The "space" field on each pair selects the teleop space ("joint" or
+ * "cartesian"); it defaults to "joint" if omitted.
  *
- * Per-arm tuning (staging pose, trajectory time, gripper tolerance, etc.)
- * lives in each arm's own hardware configuration block — see the relevant
- * component headers for supported fields.
+ * Per-arm tuning (staging pose, trajectory time, etc.) lives in each arm's
+ * own hardware configuration block.
  */
 struct TeleoperationConfig : public BaseConfig {
   /// @brief Whether teleoperation is active
