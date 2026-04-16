@@ -32,9 +32,16 @@ void SO101ArmComponent::configure(const nlohmann::json& config) {
     throw std::runtime_error("Failed to connect to SO101 arm on port: " + port_);
   }
 
-  // Optional teleop staging pose.
+  // Optional teleop staging pose — length must match joint count.
   if (config.contains("staged_position")) {
-    staged_position_ = config.at("staged_position").get<std::vector<float>>();
+    auto pos = config.at("staged_position").get<std::vector<float>>();
+    if (pos.size() != static_cast<size_t>(driver_->get_num_joints())) {
+      throw std::runtime_error(
+        "SO101ArmComponent: 'staged_position' length (" +
+        std::to_string(pos.size()) + ") must match joint count (" +
+        std::to_string(driver_->get_num_joints()) + ")");
+    }
+    staged_position_ = std::move(pos);
   }
 }
 nlohmann::json SO101ArmComponent::get_info() const {
@@ -55,6 +62,12 @@ std::vector<float> SO101ArmComponent::read() {
 
 void SO101ArmComponent::write(const std::vector<float>& cmd) {
   if (!driver_) return;
+  if (cmd.size() != static_cast<size_t>(driver_->get_num_joints())) {
+    throw std::runtime_error(
+      "SO101ArmComponent::write: expected " +
+      std::to_string(driver_->get_num_joints()) + " joints, got " +
+      std::to_string(cmd.size()));
+  }
   std::vector<double> pos_d(cmd.begin(), cmd.end());
   driver_->set_joint_positions(pos_d, true);
 }
@@ -64,11 +77,16 @@ void SO101ArmComponent::prepare_for_teleop() {
 }
 
 void SO101ArmComponent::end_teleop() {
-  // Graceful shutdown: return to the zero pose. SO101 driver does not
-  // support trajectory timing; the move is blocking.
+  // Graceful shutdown: command the zero pose, then release the driver.
+  // SO101 does not support trajectory timing; the command is dispatched
+  // but does not wait for motion completion.
   if (!driver_) return;
   std::vector<double> zeros(driver_->get_num_joints(), 0.0);
   driver_->set_joint_positions(zeros, true);
+  if (driver_->is_connected()) {
+    driver_->disconnect();
+  }
+  driver_.reset();
 }
 
 void SO101ArmComponent::stage() {
