@@ -606,7 +606,7 @@ int main(int argc, char** argv) {
     if (fs::exists(expected_parquet)) {
       try {
         auto reader = parquet::ParquetFileReader::OpenFile(expected_parquet.string(), false);
-        reader->metadata()->num_rows();  // throws if file is corrupt  // throws if file is corrupt
+        reader->metadata()->num_rows();  // liveness probe: throws if corrupt
         std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
                   << episode_index << " (already converted): "
                   << mcap_path.filename().string() << "\n";
@@ -924,7 +924,15 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       "Output Parquet:   " + cfg.output_file,
       "Arms/Cameras:     Auto-detect from MCAP"};
 
-  trossen::utils::print_config_banner("TrossenMCAP to LeRobotV2 Converter", config_lines);
+  const std::size_t banner_width = 59;
+  log << "\n" << std::string(banner_width, '=') << "\n";
+  log << "  TrossenMCAP to LeRobotV2 Converter\n";
+  log << std::string(banner_width, '=') << "\n";
+  log << "Configuration:\n";
+  for (const auto& line : config_lines) {
+    log << "  " << line << "\n";
+  }
+  log << std::string(banner_width, '=') << "\n";
 
   log << "\nCreating LeRobotV2 dataset structure...\n";
 
