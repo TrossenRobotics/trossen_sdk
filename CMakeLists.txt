@@ -207,11 +207,29 @@ FetchContent_Declare(
   SYSTEM
   GIT_REPOSITORY https://github.com/Interbotix/trossen_slate.git
   GIT_TAG ef6354e5bd6a39a49ca9952bb5ad7f277b7527e5
+  EXCLUDE_FROM_ALL
 )
 
 # Set BUILD_WITH_ROS option before making trossen_slate available
 set(BUILD_WITH_ROS OFF CACHE BOOL "Build trossen_slate without ROS" FORCE)
+# Disable trossen_slate demos (they fail to link in scikit-build environments)
+set(TROSSEN_SLATE_ENABLE_DEMOS OFF CACHE BOOL "Disable trossen_slate demos" FORCE)
+
+# Temporarily hide SKBUILD from trossen_slate so it doesn't try to build
+# its own pybind11 module (which would conflict with our target names)
+if(DEFINED SKBUILD)
+  set(_TROSSEN_SDK_SKBUILD_SAVE "${SKBUILD}")
+  unset(SKBUILD)
+  unset(SKBUILD CACHE)
+endif()
+
 FetchContent_MakeAvailable(trossen_slate)
+
+# Restore SKBUILD after trossen_slate is configured
+if(DEFINED _TROSSEN_SDK_SKBUILD_SAVE)
+  set(SKBUILD "${_TROSSEN_SDK_SKBUILD_SAVE}" CACHE STRING "" FORCE)
+  unset(_TROSSEN_SDK_SKBUILD_SAVE)
+endif()
 
 # Use the FetchContent source directory for include paths
 target_include_directories(trossen_sdk PUBLIC ${scservo_SOURCE_DIR}/src)
@@ -290,15 +308,141 @@ target_include_directories(trossen_sdk PUBLIC
   $<INSTALL_INTERFACE:include>
 )
 
-# Examples
-add_subdirectory(examples)
+# Examples and scripts (skip in scikit-build wheel builds)
+if(NOT DEFINED SKBUILD)
+  add_subdirectory(examples)
+  add_subdirectory(scripts)
+endif()
 
-# Scripts (offline data-processing tools; built after examples so demo_utils is available)
-add_subdirectory(scripts)
+# ─── Python bindings (pybind11) ──────────────────────────────────────────────
+# Follows the trossen_arm pattern: SKBUILD-driven, single binding .cpp,
+# module name matches package name, pybind11-stubgen for type stubs.
+option(BUILD_PYTHON_BINDINGS "Build Python pybind11 bindings" OFF)
 
-# Testing
-option(BUILD_TESTING "Build the testing tree" ON)
-if(BUILD_TESTING)
-  enable_testing()
-  add_subdirectory(tests)
+if(BUILD_PYTHON_BINDINGS OR DEFINED SKBUILD)
+  set(PYBIND11_FINDPYTHON ON)
+
+  # Try find_package first (installed or from scikit-build), then FetchContent
+  find_package(pybind11 CONFIG QUIET)
+  if(NOT pybind11_FOUND)
+    message(STATUS "pybind11 not found via find_package, fetching via FetchContent...")
+    FetchContent_Declare(
+      pybind11
+      GIT_REPOSITORY https://github.com/pybind/pybind11.git
+      GIT_TAG v2.12.0
+    )
+    FetchContent_MakeAvailable(pybind11)
+  endif()
+
+  find_package(Python REQUIRED COMPONENTS Interpreter)
+
+  # Determine architecture for trossen_slate's prebuilt chassis_driver
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
+    set(_SLATE_ARCH "x86_64")
+  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
+    set(_SLATE_ARCH "aarch64")
+  endif()
+
+  pybind11_add_module(trossen_sdk_python MODULE
+    python/trossen_sdk.cpp
+  )
+
+  target_link_libraries(trossen_sdk_python PRIVATE trossen_sdk)
+  target_include_directories(trossen_sdk_python PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/python
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+  )
+
+  # Override output name so the .so is trossen_sdk.cpython-*.so (not trossen_sdk_python)
+  # Set RPATH to $ORIGIN so all co-located shared libs find each other
+  set_target_properties(trossen_sdk_python PROPERTIES
+    OUTPUT_NAME trossen_sdk
+    INSTALL_RPATH "$ORIGIN"
+    BUILD_RPATH "$ORIGIN"
+  )
+  set_target_properties(trossen_sdk PROPERTIES
+    INSTALL_RPATH "$ORIGIN"
+    BUILD_RPATH "$ORIGIN"
+  )
+  set_target_properties(trossen_slate PROPERTIES
+    INSTALL_RPATH "$ORIGIN"
+    BUILD_RPATH "$ORIGIN"
+  )
+
+  if(TROSSEN_ENABLE_REALSENSE)
+    target_compile_definitions(trossen_sdk_python PRIVATE TROSSEN_ENABLE_REALSENSE)
+  endif()
+  if(TROSSEN_ENABLE_ZED)
+    target_compile_definitions(trossen_sdk_python PRIVATE TROSSEN_ENABLE_ZED)
+  endif()
+
+  # Copy the built module and dependency libraries into the Python package
+  # directory for development use (editable install / PYTHONPATH usage)
+  set(_PY_PKG_DIR ${CMAKE_CURRENT_SOURCE_DIR}/python/trossen_sdk)
+  add_custom_command(TARGET trossen_sdk_python POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy
+      $<TARGET_FILE:trossen_sdk_python>
+      ${_PY_PKG_DIR}/$<TARGET_FILE_NAME:trossen_sdk_python>
+    COMMAND ${CMAKE_COMMAND} -E copy
+      $<TARGET_FILE:trossen_sdk>
+      ${_PY_PKG_DIR}/$<TARGET_FILE_NAME:trossen_sdk>
+    COMMAND ${CMAKE_COMMAND} -E copy
+      $<TARGET_FILE:SCServo>
+      ${_PY_PKG_DIR}/$<TARGET_FILE_NAME:SCServo>
+    COMMAND ${CMAKE_COMMAND} -E copy
+      $<TARGET_FILE:trossen_slate>
+      ${_PY_PKG_DIR}/$<TARGET_FILE_NAME:trossen_slate>
+    COMMAND ${CMAKE_COMMAND} -E copy
+      ${trossen_slate_SOURCE_DIR}/lib/${_SLATE_ARCH}/libchassis_driver.so
+      ${_PY_PKG_DIR}/libchassis_driver.so
+    COMMENT "Copying trossen_sdk module and libraries to python/trossen_sdk/"
+  )
+
+  # Generate stub files for type hints (like trossen_arm)
+  # Uses || true to make stub generation non-fatal (may fail in isolated build
+  # environments due to missing system libraries at import time)
+  execute_process(
+    COMMAND ${Python_EXECUTABLE} -m pybind11_stubgen --help
+    RESULT_VARIABLE STUBGEN_RESULT
+    OUTPUT_QUIET ERROR_QUIET
+  )
+  if(STUBGEN_RESULT EQUAL 0)
+    add_custom_command(TARGET trossen_sdk_python POST_BUILD
+      COMMAND ${CMAKE_COMMAND} -E env
+        PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}
+        ${Python_EXECUTABLE} -m pybind11_stubgen
+          --numpy-array-use-type-var
+          --output-dir ${CMAKE_CURRENT_BINARY_DIR}/stubs
+          trossen_sdk || ${CMAKE_COMMAND} -E echo "Stub generation failed (non-fatal)"
+      COMMENT "Generating type stubs with pybind11-stubgen"
+      VERBATIM
+    )
+  else()
+    message(STATUS "pybind11-stubgen not found, skipping stub generation")
+  endif()
+
+  if(DEFINED SKBUILD)
+    install(TARGETS trossen_sdk_python
+      LIBRARY DESTINATION trossen_sdk)
+    # Bundle the C++ shared libraries so the Python module can find them at runtime
+    install(TARGETS trossen_sdk SCServo trossen_slate
+      LIBRARY DESTINATION trossen_sdk)
+    # Bundle trossen_slate's prebuilt chassis_driver library
+    install(FILES ${trossen_slate_SOURCE_DIR}/lib/${_SLATE_ARCH}/libchassis_driver.so
+      DESTINATION trossen_sdk)
+    install(
+      DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/stubs/
+      DESTINATION trossen_sdk)
+  endif()
+
+  message(STATUS "Python bindings enabled")
+endif()
+
+# Testing (skip in scikit-build wheel builds)
+if(NOT DEFINED SKBUILD)
+  option(BUILD_TESTING "Build the testing tree" ON)
+  if(BUILD_TESTING)
+    enable_testing()
+    add_subdirectory(tests)
+  endif()
 endif()

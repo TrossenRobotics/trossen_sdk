@@ -63,3 +63,20 @@ docs-serve: docs
 	@echo "Serving docs at http://localhost:$(DOCS_PORT)"
 	$(PYTHON) -m http.server $(DOCS_PORT) --directory $(DOCS_BUILD_DIR)/html
 .PHONY: docs-serve
+
+python-build:
+	mkdir -p build
+	cd build && cmake -DBUILD_PYTHON_BINDINGS=ON .. && make -j$(NPROC)
+.PHONY: python-build
+
+python-install:
+	pip install --no-build-isolation -e .
+.PHONY: python-install
+
+python-wheel:
+	pip wheel --no-build-isolation -w dist .
+.PHONY: python-wheel
+
+python-test:
+	python -m pytest python/tests/ -v
+.PHONY: python-test

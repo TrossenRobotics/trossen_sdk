@@ -1,0 +1,43 @@
+[project]
+name = "trossen_sdk"
+description = "Python bindings for the Trossen Robotics SDK"
+dynamic = ["version"]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy >= 1.22.4",
+]
+
+[build-system]
+requires = [
+    "numpy >= 1.22.4",
+    "pybind11 >= 2.12",
+    "pybind11-stubgen >= 2.5.3",
+    "scikit-build-core >= 0.5",
+]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+cmake.args = ["-DBUILD_PYTHON_BINDINGS=ON", "-DBUILD_TESTING=OFF"]
+wheel.packages = ["python/trossen_sdk"]
+sdist.exclude = [
+    ".github/**",
+    "benchmarks/**",
+    "build*/**",
+    "examples/**",
+    "scripts/**",
+    "tests/**",
+]
+wheel.exclude = [
+    ".github/**",
+    "benchmarks/**",
+    "build*/**",
+    "examples/**",
+    "scripts/**",
+    "tests/**",
+]
+
+[tool.scikit-build.cmake.define]
+BUILD_PYTHON_BINDINGS = "ON"
+BUILD_TESTING = "OFF"
