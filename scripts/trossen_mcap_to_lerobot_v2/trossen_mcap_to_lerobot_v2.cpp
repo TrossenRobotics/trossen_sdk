@@ -34,6 +34,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <queue>
 #include <opencv2/opencv.hpp>
 #include <regex>
 #include <string>
@@ -65,6 +66,26 @@ struct Odometry2DMessage {
   uint64_t timestamp_ns{0};
   double vel_x{0.0};
   double vel_theta{0.0};
+};
+
+// Counting semaphore for GPU encoder session limit (shared across all episode threads).
+struct GpuSemaphore {
+  std::mutex mtx;
+  std::condition_variable cv;
+  unsigned int available;
+  explicit GpuSemaphore(unsigned int n) : available(n) {}
+  void acquire() {
+    std::unique_lock<std::mutex> lock(mtx);
+    cv.wait(lock, [this] { return available > 0; });
+    --available;
+  }
+  void release() {
+    {
+      std::lock_guard<std::mutex> lock(mtx);
+      ++available;
+    }
+    cv.notify_one();
+  }
 };
 
 /**
@@ -231,6 +252,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
                       const std::string& video_encoder, const std::string& encoder_flags,
+                      unsigned int cam_encode_threads,
+                      GpuSemaphore* ep_encode_sem,
                       std::atomic<int64_t>& global_index_counter,
                       std::ostringstream& log);
 
@@ -251,6 +274,8 @@ static void print_usage(const char* program) {
   std::cerr << "                               e.g. --set lerobot_v2_backend.dataset_id=my_ds\n";
   std::cerr << "  --threads <N>                Number of parallel episode cores\n";
   std::cerr << "                               (default: 70% of hardware_concurrency)\n";
+  std::cerr << "  --encoder <mode>             Video encoder: auto, gpu, cpu\n";
+  std::cerr << "                               (default: auto, prefers GPU over CPU)\n";
   std::cerr << "  --dump-config                Print resolved config and exit\n";
   std::cerr << "  --help                       Show this help message\n";
   std::cerr << "\nExamples:\n";
@@ -276,16 +301,7 @@ static void print_usage(const char* program) {
 // ════════════════════════════════════════════════════
 // PROGRAM ENTRY POINT
 // ════════════════════════════════════════════════════
-// main() orchestrates the entire conversion pipeline:
-//   1. Parse CLI flags and load config
-//   2. Scan input folder for .mcap files
-//   3. Detect the best available GPU/CPU video encoder
-//   4. Build task list (skip already-converted episodes)
-//   5. Pre-create output directories
-//   6. Spawn a thread pool and convert all episodes in parallel
-//   7. Compute dataset statistics across all parquet files
-//   8. Generate README.md and print final summary
-// process_mcap_file() is called once per episode inside the thread pool (step 6).
+
 int main(int argc, char** argv) {
   // Reset terminal settings on exit in case FFmpeg corrupts them mid-encode
   std::atexit([]() { std::system("stty sane 2>/dev/null"); });
@@ -397,12 +413,43 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // Use 70% of cores to leave room for GPU driver and OS scheduler
+  // Thread count resolution — priority: CLI > config > auto 70%
+  // If the requested value exceeds hardware concurrency, warn and fall back to auto.
   unsigned int default_threads = std::max(1u, static_cast<unsigned int>(hw_threads * 0.7));
-  int requested_threads = cli.get_int("threads", static_cast<int>(default_threads));
-  requested_threads = std::max(1, std::min(requested_threads, static_cast<int>(hw_threads)));
-  unsigned int num_threads = static_cast<unsigned int>(requested_threads);
-  std::cout << "Using " << num_threads << " core(s) of " << hw_threads << " available\n\n";
+  int cli_threads = cli.get_int("threads", -1);
+  int config_threads = lerobot_config->threads;
+  unsigned int num_threads;
+  std::string threads_source;
+
+  if (cli_threads > 0) {
+    if (static_cast<unsigned int>(cli_threads) > hw_threads) {
+      std::cout << "[WARNING] --threads " << cli_threads
+                << " exceeds hardware concurrency (" << hw_threads
+                << "). Falling back to auto (" << default_threads << ").\n";
+      num_threads = default_threads;
+      threads_source = "auto (--threads " + std::to_string(cli_threads) + " exceeded hw limit)";
+    } else {
+      num_threads = static_cast<unsigned int>(cli_threads);
+      threads_source = "--threads " + std::to_string(num_threads);
+    }
+  } else if (config_threads > 0) {
+    if (static_cast<unsigned int>(config_threads) > hw_threads) {
+      std::cout << "[WARNING] config threads=" << config_threads
+                << " exceeds hardware concurrency (" << hw_threads
+                << "). Falling back to auto (" << default_threads << ").\n";
+      num_threads = default_threads;
+      threads_source = "auto (config threads=" + std::to_string(config_threads)
+                       + " exceeded hw limit)";
+    } else {
+      num_threads = static_cast<unsigned int>(config_threads);
+      threads_source = "config: threads=" + std::to_string(num_threads);
+    }
+  } else {
+    num_threads = default_threads;
+    threads_source = "auto: 70% of " + std::to_string(hw_threads);
+  }
+  std::cout << "Using " << num_threads << " core(s) of " << hw_threads
+            << " available  (" << threads_source << ")\n\n";
 
   std::string video_encoder;
   std::string encoder_flags;
@@ -413,26 +460,114 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // Probe AV1 encoders in priority order: NVIDIA GPU > AMD GPU > Intel GPU > CPU
-  if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_nvenc") == 0) {
-    video_encoder = "av1_nvenc";
-    encoder_flags = "-cq 30 -preset p6";
-    std::cout << "Video encoder: NVIDIA GPU (av1_nvenc)\n";
-  } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_amf") == 0) {
-    video_encoder = "av1_amf";
-    encoder_flags = "-rc cqp -qp 30";
-    std::cout << "Video encoder: AMD GPU (av1_amf)\n";
-  } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_qsv") == 0) {
-    video_encoder = "av1_qsv";
-    encoder_flags = "-global_quality 30";
-    std::cout << "Video encoder: Intel GPU (av1_qsv)\n";
-  } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q libsvtav1") == 0) {
-    video_encoder = "libsvtav1";
-    encoder_flags = "-crf 30 -g 30 -preset 6";
-    std::cout << "Video encoder: CPU (libsvtav1)\n";
+  // Encoder mode resolution — priority: CLI --encoder > config encoder > "auto"
+  // CLI uses empty string sentinel so "not passed" is distinguishable from "auto".
+  std::string cli_encoder = cli.get_string("encoder", "");
+  std::string config_encoder = lerobot_config->encoder;
+  std::string encoder_mode;
+  std::string encoder_label;
+
+  if (!cli_encoder.empty()) {
+    encoder_mode = cli_encoder;
+    encoder_label = "--encoder " + cli_encoder;
+  } else if (config_encoder != "auto" && !config_encoder.empty()) {
+    encoder_mode = config_encoder;
+    encoder_label = "config: encoder=" + config_encoder;
   } else {
-    std::cerr << "Error: No AV1 encoder found. Install ffmpeg with libsvtav1 or a GPU encoder.\n";
+    encoder_mode = "auto";
+    encoder_label = "auto-detected";
+  }
+
+  if (encoder_mode != "auto" && encoder_mode != "gpu" && encoder_mode != "cpu") {
+    std::cerr << "Error: encoder must be 'auto', 'gpu', or 'cpu' (got '"
+              << encoder_mode << "').\n";
     return 1;
+  }
+
+  if (encoder_mode == "cpu") {
+    if (std::system("ffmpeg -encoders 2>/dev/null | grep -q libsvtav1") == 0) {
+      video_encoder = "libsvtav1";
+      encoder_flags = "-crf 30 -g 30 -preset 6";
+      std::cout << "Video encoder: CPU (libsvtav1)  [" << encoder_label << "]\n";
+    } else {
+      std::cerr << "Error: libsvtav1 not found. Install ffmpeg with libsvtav1 support.\n";
+      return 1;
+    }
+  } else if (encoder_mode == "gpu") {
+    if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_nvenc") == 0) {
+      video_encoder = "av1_nvenc";
+      encoder_flags = "-cq 30 -preset p6";
+      std::cout << "Video encoder: NVIDIA GPU (av1_nvenc)  [" << encoder_label << "]\n";
+    } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_amf") == 0) {
+      video_encoder = "av1_amf";
+      encoder_flags = "-rc cqp -qp 30";
+      std::cout << "Video encoder: AMD GPU (av1_amf)  [" << encoder_label << "]\n";
+    } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_qsv") == 0) {
+      video_encoder = "av1_qsv";
+      encoder_flags = "-global_quality 30";
+      std::cout << "Video encoder: Intel GPU (av1_qsv)  [" << encoder_label << "]\n";
+    } else {
+      std::cerr << "Error: GPU encoder requested but no GPU AV1 encoder found.\n";
+      std::cerr << "       Try av1_nvenc (NVIDIA), av1_amf (AMD), or use encoder=auto.\n";
+      return 1;
+    }
+  } else {
+    // auto: probe GPU encoders in priority order, fall back to CPU
+    if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_nvenc") == 0) {
+      video_encoder = "av1_nvenc";
+      encoder_flags = "-cq 30 -preset p6";
+      std::cout << "Video encoder: NVIDIA GPU (av1_nvenc)  [" << encoder_label << "]\n";
+    } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_amf") == 0) {
+      video_encoder = "av1_amf";
+      encoder_flags = "-rc cqp -qp 30";
+      std::cout << "Video encoder: AMD GPU (av1_amf)  [" << encoder_label << "]\n";
+    } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_qsv") == 0) {
+      video_encoder = "av1_qsv";
+      encoder_flags = "-global_quality 30";
+      std::cout << "Video encoder: Intel GPU (av1_qsv)  [" << encoder_label << "]\n";
+    } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q libsvtav1") == 0) {
+      video_encoder = "libsvtav1";
+      encoder_flags = "-crf 30 -g 30 -preset 6";
+      std::cout << "Video encoder: CPU (libsvtav1)  [" << encoder_label << "]\n";
+    } else {
+      std::cerr << "Error: No AV1 encoder found. Install ffmpeg with libsvtav1 or GPU.\n";
+      return 1;
+    }
+  }
+
+  // Camera encode parallelism:
+  //   GPU encoder → all cameras within an episode encode simultaneously.
+  //              An episode-level semaphore controls how many episodes are in
+  //              the encoding phase at once, preventing NVENC session overflow.
+  //   CPU encoder → share cores fairly: floor(hw_cores / episode_slots).
+  //              Prevents oversubscribing the CPU when many episodes run in parallel.
+  unsigned int cam_encode_threads;
+  if (video_encoder == "libsvtav1") {
+    cam_encode_threads = std::max(1u, hw_threads / num_threads);
+    std::cout << "Camera encode: " << cam_encode_threads
+              << " thread(s) per episode"
+              << "  (CPU: " << hw_threads << " cores / "
+              << num_threads << " episodes)\n\n";
+  } else {
+    cam_encode_threads = std::numeric_limits<unsigned int>::max();
+    std::cout << "Camera encode: all cameras in parallel  (GPU)\n\n";
+  }
+
+  // Episode-level encode semaphore — limits how many episodes are in the video
+  // encoding phase simultaneously. Each episode holds one slot while ALL of its
+  // cameras encode in parallel, then releases the slot when they all finish.
+  // With ep_encode_slots=1: episodes take turns encoding, each gets full GPU
+  // bandwidth for its 8 cameras (~1.7s per episode vs 13.8s sequential).
+  // Raise to 2 if the GPU can sustain 2×cameras_per_episode concurrent sessions.
+  // nullptr for CPU encoder — cam_encode_threads already limits CPU load.
+  const unsigned int ep_encode_slots = 1;
+  std::unique_ptr<GpuSemaphore> ep_encode_sem_owner;
+  GpuSemaphore* ep_encode_sem = nullptr;
+  if (video_encoder != "libsvtav1") {
+    ep_encode_sem_owner = std::make_unique<GpuSemaphore>(ep_encode_slots);
+    ep_encode_sem = ep_encode_sem_owner.get();
+    std::cout << "Episode encode slots: " << ep_encode_slots
+              << "  (all cameras per episode in parallel)\n\n";
   }
 
   // Process all MCAP files
@@ -490,9 +625,6 @@ int main(int argc, char** argv) {
 
   // Pre-create all chunk directories before spawning workers to avoid
   // concurrent fs::create_directories calls on overlapping paths.
-  // Pre-create all chunk directories in the main thread BEFORE spawning workers.
-  // If workers created directories themselves, two episodes in the same chunk
-  // (e.g. episodes 0 and 1 both in chunk-000) would race on the same path.
   // Using std::error_code overload means already-existing dirs are silently ignored.
   for (const auto& task : tasks) {
     int ep_chunk = task.episode_index / chunk_size;
@@ -556,6 +688,7 @@ int main(int argc, char** argv) {
           result = process_mcap_file(task.mcap_path.string(), dataset_root_dir,
                                      task.episode_index, repository_id, dataset_id, chunk_size,
                                      video_encoder, encoder_flags,
+                                     cam_encode_threads, ep_encode_sem,
                                      global_index_counter, ep_log);
           {
             std::lock_guard<std::mutex> lk(cout_mutex);
@@ -742,19 +875,12 @@ int main(int argc, char** argv) {
 // ════════════════════════════════════════════════════
 // EPISODE CONVERSION PIPELINE
 // ════════════════════════════════════════════════════
-// This function is called once per episode by each worker thread.
-// It runs the full conversion pipeline for a single .mcap file:
-//   Phase 1 — Read MCAP: open file, extract metadata, parse joint states + camera frames
-//   Phase 2 — Write Parquet: align data to 30Hz grid, write columnar dataset file
-//   Phase 3 — Extract Images: decompress camera frames, save as JPGs on disk
-//   Phase 4 — Encode Videos: run FFmpeg to compress JPG sequences into AV1 MP4
-//   Phase 5 — Write Metadata: update info.json, episodes.jsonl, episodes_stats.jsonl
-// All output goes to `log` (ostringstream) instead of cout — the caller (worker thread)
-// flushes it atomically to the terminal when this function returns.
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
                       const std::string& video_encoder, const std::string& encoder_flags,
+                      unsigned int cam_encode_threads,
+                      GpuSemaphore* ep_encode_sem,
                       std::atomic<int64_t>& global_index_counter,
                       std::ostringstream& log) {
   ParquetConfig cfg;
@@ -847,15 +973,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   // ────────────────────────────────────────────────────────────
   // PHASE 1: Extract embedded metadata from MCAP file
   // ────────────────────────────────────────────────────────────
-  // The MCAP file may contain a "trossen_sdk_recording" metadata record with a
-  // "dataset_info" JSON blob. This includes:
-  //   - robot_name: e.g., "trossen_solo_ai", "trossen_mobile_ai"
-  //   - streams: per-stream joint names (e.g., streams.leader_left.joint_names)
-  //   - cameras: per-camera specs (height, width, fps, codec)
-  //   - base_velocity_names: names for mobile base velocity dimensions
-  // If present, this metadata is used to populate info.json with accurate names
-  // instead of generic placeholders like "joint_0", "joint_1", etc.
-  // ────────────────────────────────────────────────────────────
+
   nlohmann::json mcap_dataset_info;
   auto* data_source = reader.dataSource();
   const auto& meta_indexes = reader.metadataIndexes();
@@ -893,12 +1011,6 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   // ────────────────────────────────────────────────────────────
   // PHASE 2: Initialize channel tracking maps for message routing
   // ────────────────────────────────────────────────────────────
-  // These maps associate MCAP channel IDs with semantic stream identifiers:
-  //   - channel_id_to_stream: Joint state channels → stream names (e.g., "leader_left")
-  //   - camera_channels: Image channels → camera names (e.g., "cam_high")
-  //   - slate_base_channel_id: Mobile base odometry channel (if present)
-  // The leader/follower vectors accumulate detected arm streams for later use
-  // in determining which streams provide actions vs. observations.
   // ────────────────────────────────────────────────────────────
   std::map<mcap::ChannelId, std::string> channel_id_to_stream;  // Joint channels
   std::map<mcap::ChannelId, std::string> camera_channels;       // Camera channels
@@ -1499,84 +1611,150 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       return 1;
     }
 
-    size_t images_saved = 0;
-    for (const auto& messageView : image_reader.readMessages(onProblem)) {
-      auto it = camera_channels.find(messageView.channel->id);
-      if (it == camera_channels.end()) {
-        continue;
-      }
+    // Per-camera worker threads decode and write JPEGs in parallel.
+    // Producer reads MCAP sequentially (required for stream integrity) and
+    // dispatches raw bytes into each camera's bounded queue. Workers decode,
+    // color-convert, and imwrite in parallel. Encoding starts only after all
+    // workers join, so camera_frame_indices is fully populated beforehand.
+    struct CamExtractState {
+      std::queue<std::pair<size_t, std::vector<char>>> queue;
+      std::mutex mtx;
+      std::condition_variable cv;
+      bool producer_done{false};
+      std::atomic<size_t> saved{0};
+    };
+    const size_t max_queue_depth = 30;
 
-      const std::string& camera_name = it->second;
-      size_t frame_idx = camera_frame_indices[camera_name];
-
-      foxglove::RawImage raw_image;
-      if (!raw_image.ParseFromArray(messageView.message.data,
-                                    static_cast<int>(messageView.message.dataSize))) {
-        log << "Warning: Failed to parse RawImage message for " << camera_name << " frame "
-                  << frame_idx << "\n";
-        camera_frame_indices[camera_name]++;
-        continue;
-      }
-
-      int cv_type = -1;
-      if (raw_image.encoding() == "bgr8" || raw_image.encoding() == "8UC3") {
-        cv_type = CV_8UC3;
-      } else if (raw_image.encoding() == "rgb8") {
-        cv_type = CV_8UC3;
-      } else if (raw_image.encoding() == "rgba8") {
-        cv_type = CV_8UC4;
-      } else if (raw_image.encoding() == "bgra8") {
-        cv_type = CV_8UC4;
-      } else if (raw_image.encoding() == "mono8" || raw_image.encoding() == "8UC1") {
-        cv_type = CV_8UC1;
-      } else if (raw_image.encoding() == "mono16" || raw_image.encoding() == "16UC1") {
-        cv_type = CV_16UC1;
-      } else if (raw_image.encoding() == "32FC1") {
-        cv_type = CV_32FC1;
-      } else {
-        log << "Warning: Unsupported encoding '" << raw_image.encoding() << "' for "
-                  << camera_name << " frame " << frame_idx << "\n";
-        camera_frame_indices[camera_name]++;
-        continue;
-      }
-
-      cv::Mat image(raw_image.height(), raw_image.width(), cv_type,
-                    const_cast<char*>(raw_image.data().data()), raw_image.step());
-
-      if (raw_image.encoding() == "rgb8") {
-        cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
-      } else if (raw_image.encoding() == "rgba8") {
-        cv::cvtColor(image, image, cv::COLOR_RGBA2BGR);
-      } else if (raw_image.encoding() == "bgra8") {
-        cv::cvtColor(image, image, cv::COLOR_BGRA2BGR);
-      }
-
-      cv::Mat image_copy = image.clone();
-
-      if (image_copy.empty()) {
-        log << "Warning: Empty image for " << camera_name << " frame " << frame_idx << "\n";
-        camera_frame_indices[camera_name]++;
-        continue;
-      }
-
-      fs::path image_path = camera_dirs[camera_name] /
-                            trossen::io::backends::format_image_filename(frame_idx);
-
-      std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 95};
-      if (cv::imwrite(image_path.string(), image_copy, compression_params)) {
-        ++images_saved;
-        camera_frame_indices[camera_name]++;
-
-        if (images_saved % 50 == 0) {
-          log << "\r  Progress: " << images_saved << " images saved    " << std::flush;
-        }
-      } else {
-        log << "Warning: Failed to save image: " << image_path.string() << "\n";
-        camera_frame_indices[camera_name]++;
+    std::map<std::string, std::unique_ptr<CamExtractState>> cam_states;
+    for (const auto& kv : camera_channels) {
+      if (camera_dirs.count(kv.second)) {
+        cam_states[kv.second] = std::make_unique<CamExtractState>();
       }
     }
 
-    log << "\r  [ok] Saved " << images_saved << " images                    \n";
+    std::vector<std::thread> img_workers;
+    std::mutex img_log_mutex;
+
+    for (const auto& kv : cam_states) {
+      img_workers.emplace_back([&, cam_name = kv.first]() {
+        auto& cs = *cam_states.at(cam_name);
+        while (true) {
+          std::pair<size_t, std::vector<char>> item;
+          {
+            std::unique_lock<std::mutex> lock(cs.mtx);
+            cs.cv.wait(lock, [&] { return !cs.queue.empty() || cs.producer_done; });
+            if (cs.queue.empty()) return;
+            item = std::move(cs.queue.front());
+            cs.queue.pop();
+            cs.cv.notify_one();  // wake producer if blocked on a full queue
+          }
+
+          size_t frame_idx = item.first;
+          const auto& raw_bytes = item.second;
+
+          foxglove::RawImage raw_image;
+          if (!raw_image.ParseFromArray(raw_bytes.data(),
+                                        static_cast<int>(raw_bytes.size()))) {
+            std::lock_guard<std::mutex> lk(img_log_mutex);
+            log << "Warning: Failed to parse RawImage for "
+                << cam_name << " frame " << frame_idx << "\n";
+            continue;
+          }
+
+          int cv_type = -1;
+          if (raw_image.encoding() == "bgr8" || raw_image.encoding() == "8UC3") {
+            cv_type = CV_8UC3;
+          } else if (raw_image.encoding() == "rgb8") {
+            cv_type = CV_8UC3;
+          } else if (raw_image.encoding() == "rgba8") {
+            cv_type = CV_8UC4;
+          } else if (raw_image.encoding() == "bgra8") {
+            cv_type = CV_8UC4;
+          } else if (raw_image.encoding() == "mono8" || raw_image.encoding() == "8UC1") {
+            cv_type = CV_8UC1;
+          } else if (raw_image.encoding() == "mono16" ||
+                     raw_image.encoding() == "16UC1") {
+            cv_type = CV_16UC1;
+          } else if (raw_image.encoding() == "32FC1") {
+            cv_type = CV_32FC1;
+          } else {
+            std::lock_guard<std::mutex> lk(img_log_mutex);
+            log << "Warning: Unsupported encoding '" << raw_image.encoding()
+                << "' for " << cam_name << " frame " << frame_idx << "\n";
+            continue;
+          }
+
+          cv::Mat image(raw_image.height(), raw_image.width(), cv_type,
+                        const_cast<char*>(raw_image.data().data()),
+                        raw_image.step());
+          if (raw_image.encoding() == "rgb8") {
+            cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
+          } else if (raw_image.encoding() == "rgba8") {
+            cv::cvtColor(image, image, cv::COLOR_RGBA2BGR);
+          } else if (raw_image.encoding() == "bgra8") {
+            cv::cvtColor(image, image, cv::COLOR_BGRA2BGR);
+          }
+
+          cv::Mat image_copy = image.clone();
+          if (image_copy.empty()) {
+            std::lock_guard<std::mutex> lk(img_log_mutex);
+            log << "Warning: Empty image for " << cam_name
+                << " frame " << frame_idx << "\n";
+            continue;
+          }
+
+          fs::path image_path =
+              camera_dirs.at(cam_name) /
+              trossen::io::backends::format_image_filename(frame_idx);
+          std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 95};
+          if (!cv::imwrite(image_path.string(), image_copy, compression_params)) {
+            std::lock_guard<std::mutex> lk(img_log_mutex);
+            log << "Warning: Failed to save image: " << image_path.string() << "\n";
+          } else {
+            cs.saved.fetch_add(1);
+          }
+        }
+      });
+    }
+
+    // Producer: read MCAP sequentially, assign frame indices in order, push
+    // raw bytes to per-camera queues. Blocks when a queue is full (backpressure).
+    std::map<std::string, size_t> producer_frame_indices;
+    for (const auto& kv : cam_states) producer_frame_indices[kv.first] = 0;
+
+    for (const auto& messageView : image_reader.readMessages(onProblem)) {
+      auto it = camera_channels.find(messageView.channel->id);
+      if (it == camera_channels.end()) continue;
+      const std::string& cam_name = it->second;
+      if (!cam_states.count(cam_name)) continue;
+      size_t frame_idx = producer_frame_indices[cam_name]++;
+      std::vector<char> data(
+          reinterpret_cast<const char*>(messageView.message.data),
+          reinterpret_cast<const char*>(messageView.message.data) +
+              messageView.message.dataSize);
+      auto& cs = *cam_states.at(cam_name);
+      {
+        std::unique_lock<std::mutex> lock(cs.mtx);
+        cs.cv.wait(lock, [&] { return cs.queue.size() < max_queue_depth; });
+        cs.queue.push({frame_idx, std::move(data)});
+      }
+      cs.cv.notify_one();
+    }
+
+    // Signal workers that no more frames are coming, then wait for all to finish.
+    for (auto& kv : cam_states) {
+      std::lock_guard<std::mutex> lock(kv.second->mtx);
+      kv.second->producer_done = true;
+      kv.second->cv.notify_all();
+    }
+    for (auto& w : img_workers) w.join();
+
+    size_t total_saved = 0;
+    for (auto& kv : cam_states) {
+      camera_frame_indices[kv.first] = producer_frame_indices.at(kv.first);
+      total_saved += kv.second->saved.load();
+    }
+    log << "\r  [ok] Saved " << total_saved << " images                    \n";
     for (const auto& [camera_name, count] : camera_frame_indices) {
       log << "    - " << camera_name << ": " << count << " images\n";
     }
@@ -1592,12 +1770,22 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
  if (cfg.create_videos && !camera_dirs.empty()) {
     log << "\nEncoding videos from images...\n";
+    // Acquire an episode encode slot before spawning any camera thread.
+    // While this episode holds the slot, ALL its cameras encode in parallel.
+    // Other episodes that reach this point will block until this one finishes,
+    // preventing NVENC session overflow from many episodes encoding at once.
+    if (ep_encode_sem) ep_encode_sem->acquire();
+
     std::atomic<int> videos_created{0};
     std::vector<std::thread> cam_threads;
     std::mutex cam_pool_mutex;
     std::condition_variable cam_pool_cv;
+    std::mutex cam_log_mutex;  // serializes log writes from concurrent cam threads
     unsigned int cam_active = 0;
-    unsigned int max_cam_threads = 1;
+    // Clamp to actual camera count — UINT_MAX means "all cameras in parallel"
+    unsigned int max_cam_threads = std::min(
+        cam_encode_threads,
+        static_cast<unsigned int>(camera_dirs.size()));
 
     for (const auto& [camera_name, camera_dir] : camera_dirs) {
       if (camera_frame_indices[camera_name] == 0) {
@@ -1616,13 +1804,16 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       fs::path input_pattern = camera_dir / "image_%06d.jpg";
 
       std::ostringstream ffmpeg_cmd;
-      ffmpeg_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps << " -start_number 0"
+      ffmpeg_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps
+                 << " -start_number 0"
                  << " -i " << input_pattern.string() << " -frames:v "
                  << camera_frame_indices[camera_name]
-                 << " -c:v " << video_encoder << " " << encoder_flags << " -pix_fmt yuv420p -r 30 "
+                 << " -c:v " << video_encoder << " " << encoder_flags
+                 << " -pix_fmt yuv420p -r 30 "
                  << video_output.string() << " 2>/dev/null";
       std::ostringstream cpu_cmd;
-      cpu_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps << " -start_number 0"
+      cpu_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps
+              << " -start_number 0"
               << " -i " << input_pattern.string() << " -frames:v "
               << camera_frame_indices[camera_name]
               << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p -r 30 "
@@ -1638,22 +1829,29 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
       cam_threads.emplace_back(
           [cmd, cpu_fallback, cam, is_gpu, &log, &videos_created,
-           &cam_pool_mutex, &cam_pool_cv, &cam_active]() {
+           &cam_pool_mutex, &cam_pool_cv, &cam_active, &cam_log_mutex]() {
         int ret = std::system(cmd.c_str());
+
         if (ret == 0) {
           ++videos_created;
         } else if (is_gpu) {
-          // GPU encode failed — retry with CPU encoder
-          log << "  [WARNING] " << cam << " GPU encode failed (exit "
-              << ret << "), retrying with CPU\n";
+          // GPU encode failed — retry with CPU encoder (no slot needed)
+          {
+            std::lock_guard<std::mutex> lk(cam_log_mutex);
+            log << "  [WARNING] " << cam << " GPU encode failed (exit "
+                << ret << "), retrying with CPU\n";
+          }
           ret = std::system(cpu_fallback.c_str());
           if (ret == 0) {
             ++videos_created;
+            std::lock_guard<std::mutex> lk(cam_log_mutex);
             log << "  [ok] " << cam << " CPU fallback succeeded\n";
           } else {
+            std::lock_guard<std::mutex> lk(cam_log_mutex);
             log << "  [FAILED] " << cam << " GPU and CPU both failed\n";
           }
         } else {
+          std::lock_guard<std::mutex> lk(cam_log_mutex);
           log << "  [FAILED] " << cam << " (exit code " << ret << ")\n";
         }
         {
@@ -1667,6 +1865,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     for (auto& t : cam_threads) {
       t.join();
     }
+    // All cameras finished — release the episode encode slot so the next
+    // episode waiting on ep_encode_sem can start its parallel camera encodes.
+    if (ep_encode_sem) ep_encode_sem->release();
 
     if (videos_created.load() > 0) {
       log << "  [ok] Created " << videos_created.load() << " video(s)\n";
