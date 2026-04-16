@@ -75,7 +75,8 @@ private:
   SO101EndEffector end_effector_;
 
   /// Joint-space pose this arm moves to at session start (via stage()).
-  /// Empty = no staging.
+  /// Values are in normalized servo units. Length must equal get_num_joints();
+  /// validated at configure() time. Empty = no staging.
   std::vector<float> staged_position_;
 };
 }  // namespace trossen::hw::arm
