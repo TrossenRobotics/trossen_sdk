@@ -3,3 +3,8 @@ build*/
 output/
 results/
 *.log
+python/trossen_sdk/*.so
+__pycache__/
+.pytest_cache/
+*.egg-info/
+dist/
