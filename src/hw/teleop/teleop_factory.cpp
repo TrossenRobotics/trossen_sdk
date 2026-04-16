@@ -39,7 +39,7 @@ create_controllers_from_global_config() {
     return controllers;
   }
 
-  std::cout << "Starting teleop controllers...\n";
+  std::cout << "Constructing teleop controllers...\n";
   for (const auto& pair : cfg->pairs) {
     auto leader_hw = ActiveHardwareRegistry::get(pair.leader);
     if (!leader_hw) {
@@ -71,15 +71,23 @@ create_controllers_from_global_config() {
       }
     }
 
-    TeleopController::Config tc{};
-    tc.space = parse_space(pair.space);
-    tc.control_rate_hz = cfg->rate_hz;
-    controllers.push_back(std::make_unique<TeleopController>(
-      std::move(leader), std::move(follower), std::move(tc)));
+    try {
+      TeleopController::Config tc{};
+      tc.space = parse_space(pair.space);
+      tc.control_rate_hz = cfg->rate_hz;
+      controllers.push_back(std::make_unique<TeleopController>(
+        std::move(leader), std::move(follower), std::move(tc)));
 
-    std::cout << "  [ok] " << pair.leader << " -> "
-              << (pair.follower.empty() ? "(none)" : pair.follower)
-              << " @ " << cfg->rate_hz << " Hz (" << pair.space << ")\n";
+      const std::string follower_label =
+        pair.follower.empty() ? "(none)"
+        : (follower ? pair.follower : pair.follower + " (leader-only)");
+      std::cout << "  [ok] " << pair.leader << " -> " << follower_label
+                << " @ " << cfg->rate_hz << " Hz (" << pair.space << ")\n";
+    } catch (const std::exception& e) {
+      std::cout << "  [warn] Failed to create pair '" << pair.leader
+                << "' -> '" << pair.follower << "' (" << pair.space
+                << "): " << e.what() << ", skipping\n";
+    }
   }
   return controllers;
 }
