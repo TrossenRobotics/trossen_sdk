@@ -6,8 +6,11 @@
 #include "trossen_sdk/hw/teleop/teleop_controller.hpp"
 
 #include <chrono>
+#include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
+#include <string>
 
 namespace trossen::hw::teleop {
 
@@ -21,6 +24,10 @@ TeleopController::TeleopController(
 {
   if (!leader_) {
     throw std::invalid_argument("TeleopController: leader must not be null");
+  }
+  if (cfg_.control_rate_hz <= 0.0f || !std::isfinite(cfg_.control_rate_hz)) {
+    throw std::invalid_argument(
+      "TeleopController: control_rate_hz must be positive and finite");
   }
 
   // Resolve the requested space on both sides. Throws if the hardware does
@@ -39,11 +46,11 @@ TeleopController::TeleopController(
 }
 
 TeleopController::~TeleopController() {
-  // The destructor only needs to stop the mirror thread. Each hardware
-  // component is responsible for releasing its own driver in its own
-  // destructor — this avoids calling into potentially-torn-down hardware
-  // from a destructor that must not throw.
-  if (running_.exchange(false) && thread_.joinable()) {
+  // Signal stop (may already be false if the loop exited via exception)
+  // and always join if the thread is still joinable. Skipping join on a
+  // joinable thread causes std::terminate at destruction.
+  running_.store(false);
+  if (thread_.joinable()) {
     thread_.join();
   }
 }
@@ -118,7 +125,8 @@ void TeleopController::reset_teleop() {
 }
 
 void TeleopController::stop_teleop() {
-  if (running_.exchange(false) && thread_.joinable()) {
+  running_.store(false);
+  if (thread_.joinable()) {
     thread_.join();
   }
   // A repeated stop_teleop() is harmless: the arms' end_teleop()

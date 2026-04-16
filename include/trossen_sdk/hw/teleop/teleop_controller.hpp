@@ -62,12 +62,12 @@ public:
   /**
    * @brief Prepare hardware for a teleop episode.
    *
-   * Calls pre_episode() on both components, puts the leader into its
-   * teleop role, and calls sync_to_state on the leader with the follower's
-   * current state (so virtual leaders can align with the follower before
-   * mirroring starts). Does not start the mirror thread -- that is done
-   * by teleop(). Subsequent calls while the mirror is already running are
-   * no-ops.
+   * Always dispatches pre_episode() on both components. If the mirror loop
+   * is already running, returns after that — the follower is tracking the
+   * leader continuously and no further setup is needed. On the first call
+   * (before the mirror starts), also prepares teleop modes on both
+   * components and calls sync_to_state so virtual leaders can align with
+   * the follower. Does not start the mirror thread — that is teleop().
    */
   void prepare_teleop();
 
