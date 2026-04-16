@@ -104,7 +104,9 @@ struct type_caster<nlohmann::json> {
 
 template <>
 struct type_caster<nlohmann::ordered_json> {
-  PYBIND11_TYPE_CASTER(nlohmann::ordered_json, const_name("dict | list | str | int | float | bool | None"));
+  PYBIND11_TYPE_CASTER(
+    nlohmann::ordered_json,
+    const_name("dict | list | str | int | float | bool | None"));
 
   bool load(handle src, bool) {
     try {
