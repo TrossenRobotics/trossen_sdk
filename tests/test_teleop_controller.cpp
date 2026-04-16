@@ -19,7 +19,7 @@ namespace {
 using trossen::hw::teleop::JointSpaceTeleop;
 using trossen::hw::teleop::TeleopCapable;
 using trossen::hw::teleop::TeleopController;
-using trossen::hw::teleop::TeleopSpaceIO;
+using trossen::hw::teleop::TeleopTypeIO;
 
 /// A leader whose read() throws on every call.
 class ThrowingLeader : public TeleopCapable {
@@ -30,7 +30,7 @@ class ThrowingLeader : public TeleopCapable {
     void write(const std::vector<float>&) override {}
   } io_;
 public:
-  TeleopSpaceIO* as_space_io(Space) override { return &io_; }
+  TeleopTypeIO* as_space_io(Space) override { return &io_; }
 };
 
 /// A well-behaved leader that returns a fixed joint state.
@@ -40,7 +40,7 @@ class StubLeader : public TeleopCapable {
     void write(const std::vector<float>&) override {}
   } io_;
 public:
-  TeleopSpaceIO* as_space_io(Space) override { return &io_; }
+  TeleopTypeIO* as_space_io(Space) override { return &io_; }
 };
 
 // If the control loop throws, the controller must not std::terminate on
