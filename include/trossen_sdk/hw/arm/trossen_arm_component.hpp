@@ -6,7 +6,6 @@
 #ifndef TROSSEN_SDK__HW__ARM__TROSSEN_ARM_COMPONENT_HPP_
 #define TROSSEN_SDK__HW__ARM__TROSSEN_ARM_COMPONENT_HPP_
 
-#include <cstddef>
 #include <memory>
 #include <string>
 #include <vector>
@@ -37,6 +36,13 @@ public:
    */
   explicit TrossenArmComponent(std::string identifier) : HardwareComponent(identifier) {}
   ~TrossenArmComponent() override = default;
+
+  // Non-copyable, non-movable: the nested adapter views hold raw back-
+  // pointers to `this` that would dangle after a copy or move.
+  TrossenArmComponent(const TrossenArmComponent&) = delete;
+  TrossenArmComponent& operator=(const TrossenArmComponent&) = delete;
+  TrossenArmComponent(TrossenArmComponent&&) = delete;
+  TrossenArmComponent& operator=(TrossenArmComponent&&) = delete;
 
   /**
    * @brief Configure the arm from JSON
@@ -144,8 +150,7 @@ private:
   /// Empty = no staging.
   std::vector<float> staged_position_;
 
-  /// Trajectory time used by stage() and the end_teleop() rest move. Also
-  /// used by follower arms when aligning in prepare_for_teleop().
+  /// Trajectory time used by stage() and the end_teleop() rest move.
   float teleop_moving_time_s_{2.0f};
 };
 
