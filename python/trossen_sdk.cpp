@@ -77,6 +77,19 @@ namespace {
 #include "trossen_sdk/configuration/types/backends/null_backend_config.hpp"
 #include "trossen_sdk/configuration/types/runtime/session_manager_config.hpp"
 
+// Teleop
+#include "trossen_sdk/hw/teleop/teleop_capable.hpp"
+#include "trossen_sdk/hw/teleop/teleop_controller.hpp"
+#include "trossen_sdk/hw/teleop/teleop_factory.hpp"
+
+// Runtime (session manager + scheduler)
+#include "trossen_sdk/runtime/session_manager.hpp"
+#include "trossen_sdk/runtime/scheduler.hpp"
+
+// Utilities
+#include "trossen_sdk/utils/app_utils.hpp"
+#include "trossen_sdk/utils/keyboard_input_utils.hpp"
+
 namespace py = pybind11;
 
 // ─── Trampoline classes ─────────────────────────────────────────────────────
@@ -154,6 +167,45 @@ public:
   }
   void set_episode_index(uint32_t episode_index) override {
     PYBIND11_OVERRIDE(void, Backend, set_episode_index, episode_index);
+  }
+};
+
+/// Trampoline for TeleopTypeIO (virtual leaders in Python).
+class PyTeleopTypeIO : public trossen::hw::teleop::TeleopTypeIO {
+public:
+  using TeleopTypeIO::TeleopTypeIO;
+  std::vector<float> read() override {
+    PYBIND11_OVERRIDE_PURE(std::vector<float>, TeleopTypeIO, read);
+  }
+  void write(const std::vector<float>& cmd) override {
+    PYBIND11_OVERRIDE_PURE(void, TeleopTypeIO, write, cmd);
+  }
+  void sync_to_state(const std::vector<float>& state) override {
+    PYBIND11_OVERRIDE(void, TeleopTypeIO, sync_to_state, state);
+  }
+};
+
+/// Trampoline for TeleopCapable (all methods have no-op defaults).
+class PyTeleopCapable : public trossen::hw::teleop::TeleopCapable {
+public:
+  using TeleopCapable::TeleopCapable;
+  trossen::hw::teleop::TeleopTypeIO* as_space_io(Space space) override {
+    PYBIND11_OVERRIDE(trossen::hw::teleop::TeleopTypeIO*, TeleopCapable, as_space_io, space);
+  }
+  void prepare_for_teleop() override {
+    PYBIND11_OVERRIDE(void, TeleopCapable, prepare_for_teleop);
+  }
+  void end_teleop() override {
+    PYBIND11_OVERRIDE(void, TeleopCapable, end_teleop);
+  }
+  void stage() override {
+    PYBIND11_OVERRIDE(void, TeleopCapable, stage);
+  }
+  void pre_episode() override {
+    PYBIND11_OVERRIDE(void, TeleopCapable, pre_episode);
+  }
+  void post_episode() override {
+    PYBIND11_OVERRIDE(void, TeleopCapable, post_episode);
   }
 };
 
@@ -598,5 +650,272 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_static("from_json", &SdkConfig::from_json, py::arg("json"))
     .def("populate_global_config", &SdkConfig::populate_global_config);
 
-  // ── Sections 5-6 (teleop, session, utilities) added in PR C ─────────────
+  // ── 6. Teleop ────────────────────────────────────────────────────────────
+  using namespace trossen::hw::teleop;
+
+  py::enum_<TeleopCapable::Space>(m, "TeleopSpace")
+    .value("Joint", TeleopCapable::Space::Joint)
+    .value("Cartesian", TeleopCapable::Space::Cartesian)
+    .export_values();
+
+  py::class_<TeleopTypeIO, PyTeleopTypeIO,
+             std::shared_ptr<TeleopTypeIO>>(m, "TeleopTypeIO")
+    .def(py::init<>())
+    .def("read", &TeleopTypeIO::read)
+    .def("write", &TeleopTypeIO::write, py::arg("cmd"))
+    .def("sync_to_state", &TeleopTypeIO::sync_to_state, py::arg("state"));
+
+  py::class_<TeleopCapable, PyTeleopCapable,
+             std::shared_ptr<TeleopCapable>>(m, "TeleopCapable")
+    .def(py::init<>())
+    .def("as_space_io", &TeleopCapable::as_space_io,
+         py::arg("space"), py::return_value_policy::reference_internal)
+    .def("prepare_for_teleop", &TeleopCapable::prepare_for_teleop)
+    .def("end_teleop", &TeleopCapable::end_teleop)
+    .def("stage", &TeleopCapable::stage)
+    .def("pre_episode", &TeleopCapable::pre_episode)
+    .def("post_episode", &TeleopCapable::post_episode);
+
+  m.def("as_teleop_capable",
+    [](std::shared_ptr<trossen::hw::HardwareComponent> hw)
+        -> std::shared_ptr<TeleopCapable> {
+      return as_capable<TeleopCapable>(hw);
+    },
+    py::arg("hw"),
+    "Cast a HardwareComponent to TeleopCapable (returns None if not capable)");
+
+  m.def("space_name", [](TeleopCapable::Space s) {
+    return std::string(space_name(s));
+  }, py::arg("space"));
+  m.def("space_from_name", &space_from_name, py::arg("name"));
+
+  py::class_<TeleopController::Config>(m, "TeleopControllerConfig")
+    .def(py::init<>())
+    .def_readwrite("space", &TeleopController::Config::space)
+    .def_readwrite("control_rate_hz", &TeleopController::Config::control_rate_hz);
+
+  py::class_<TeleopController, std::shared_ptr<TeleopController>>(
+      m, "TeleopController")
+    .def(py::init<std::shared_ptr<TeleopCapable>,
+                  std::shared_ptr<TeleopCapable>,
+                  TeleopController::Config>(),
+         py::arg("leader"), py::arg("follower"), py::arg("config"))
+    .def("prepare_teleop", &TeleopController::prepare_teleop,
+         py::call_guard<py::gil_scoped_release>())
+    .def("teleop", &TeleopController::teleop,
+         py::call_guard<py::gil_scoped_release>())
+    .def("reset_teleop", &TeleopController::reset_teleop,
+         py::call_guard<py::gil_scoped_release>())
+    .def("stop_teleop", &TeleopController::stop_teleop,
+         py::call_guard<py::gil_scoped_release>())
+    .def("is_running", &TeleopController::is_running)
+    .def("leader", &TeleopController::leader)
+    .def("follower", &TeleopController::follower)
+    .def("space", &TeleopController::space);
+
+  m.def("create_teleop_controllers_from_global_config",
+    []() {
+      auto controllers = create_controllers_from_global_config();
+      std::vector<std::shared_ptr<TeleopController>> result;
+      result.reserve(controllers.size());
+      for (auto& c : controllers) {
+        result.push_back(std::shared_ptr<TeleopController>(c.release()));
+      }
+      return result;
+    },
+    "Build TeleopControllers from the global config teleop pairs");
+
+  // ── 7. Session + scheduler ──────────────────────────────────────────────
+  {
+    using namespace trossen::runtime;
+
+    py::enum_<UserAction>(m, "UserAction")
+      .value("kContinue", UserAction::kContinue)
+      .value("kReRecord", UserAction::kReRecord)
+      .value("kStop", UserAction::kStop)
+      .export_values();
+
+    py::class_<Scheduler::Config>(m, "SchedulerConfig")
+      .def(py::init<>())
+      .def_readwrite("high_res_cutover_ms", &Scheduler::Config::high_res_cutover_ms)
+      .def_readwrite("force_high_res", &Scheduler::Config::force_high_res)
+      .def_readwrite("default_spin_us", &Scheduler::Config::default_spin_us);
+
+    py::class_<Scheduler::TaskOptions>(m, "SchedulerTaskOptions")
+      .def(py::init<>())
+      .def_readwrite("force_high_res", &Scheduler::TaskOptions::force_high_res)
+      .def_readwrite("spin_threshold_us", &Scheduler::TaskOptions::spin_threshold_us)
+      .def_readwrite("name", &Scheduler::TaskOptions::name);
+
+    py::class_<Scheduler::TaskStats>(m, "SchedulerTaskStats")
+      .def_readonly("name", &Scheduler::TaskStats::name)
+      .def_readonly("ticks", &Scheduler::TaskStats::ticks)
+      .def_readonly("overruns", &Scheduler::TaskStats::overruns)
+      .def_readonly("avg_jitter_us", &Scheduler::TaskStats::avg_jitter_us)
+      .def_readonly("max_jitter_us", &Scheduler::TaskStats::max_jitter_us)
+      .def_readonly("high_res", &Scheduler::TaskStats::high_res)
+      .def_readonly("period_ns", &Scheduler::TaskStats::period_ns);
+
+    py::class_<Scheduler::Stats>(m, "SchedulerStats")
+      .def_readonly("wake_cycles_high", &Scheduler::Stats::wake_cycles_high)
+      .def_readonly("wake_cycles_normal", &Scheduler::Stats::wake_cycles_normal)
+      .def_readonly("high_res_ticks", &Scheduler::Stats::high_res_ticks)
+      .def_readonly("normal_ticks", &Scheduler::Stats::normal_ticks);
+
+    py::class_<SessionManager::Stats>(m, "SessionManagerStats")
+      .def(py::init<>())
+      .def_readwrite("current_episode_index",
+                     &SessionManager::Stats::current_episode_index)
+      .def_readwrite("episode_active", &SessionManager::Stats::episode_active)
+      .def_property("elapsed",
+        [](const SessionManager::Stats& s) { return s.elapsed.count(); },
+        [](SessionManager::Stats& s, double v) {
+          s.elapsed = std::chrono::duration<double>(v);
+        })
+      .def_property("remaining",
+        [](const SessionManager::Stats& s) -> py::object {
+          if (s.remaining.has_value()) return py::float_(s.remaining->count());
+          return py::none();
+        },
+        [](SessionManager::Stats& s, const py::object& obj) {
+          if (obj.is_none()) { s.remaining = std::nullopt; }
+          else { s.remaining = std::chrono::duration<double>(obj.cast<double>()); }
+        })
+      .def_readwrite("records_written_current",
+                     &SessionManager::Stats::records_written_current)
+      .def_readwrite("total_episodes_completed",
+                     &SessionManager::Stats::total_episodes_completed)
+      .def_property("recording_duration_s",
+        [](const SessionManager::Stats& s) -> py::object {
+          if (s.recording_duration_s.has_value()) return py::cast(*s.recording_duration_s);
+          return py::none();
+        },
+        [](SessionManager::Stats& s, const py::object& obj) {
+          s.recording_duration_s =
+              obj.is_none() ? std::nullopt : std::optional<double>(obj.cast<double>());
+        })
+      .def_property("preprocessing_duration_s",
+        [](const SessionManager::Stats& s) -> py::object {
+          if (s.preprocessing_duration_s.has_value()) return py::cast(*s.preprocessing_duration_s);
+          return py::none();
+        },
+        [](SessionManager::Stats& s, const py::object& obj) {
+          s.preprocessing_duration_s =
+              obj.is_none() ? std::nullopt : std::optional<double>(obj.cast<double>());
+        })
+      .def_property("postprocess_duration_s",
+        [](const SessionManager::Stats& s) -> py::object {
+          if (s.postprocess_duration_s.has_value()) return py::cast(*s.postprocess_duration_s);
+          return py::none();
+        },
+        [](SessionManager::Stats& s, const py::object& obj) {
+          s.postprocess_duration_s =
+              obj.is_none() ? std::nullopt : std::optional<double>(obj.cast<double>());
+        });
+
+    py::class_<SessionManager>(m, "SessionManager")
+      .def(py::init<>())
+      .def("add_producer", &SessionManager::add_producer,
+           py::arg("producer"), py::arg("poll_period"),
+           py::arg("opts") = Scheduler::TaskOptions{})
+      .def("add_push_producer", &SessionManager::add_push_producer,
+           py::arg("producer"))
+      .def("start_episode", &SessionManager::start_episode)
+      .def("stop_episode", &SessionManager::stop_episode)
+      .def("discard_current_episode", &SessionManager::discard_current_episode)
+      .def("discard_last_episode", &SessionManager::discard_last_episode)
+      .def("request_rerecord", &SessionManager::request_rerecord)
+      .def("is_episode_active", &SessionManager::is_episode_active)
+      .def("are_final_stats_emitted", &SessionManager::are_final_stats_emitted)
+      .def("wait_for_auto_stop", &SessionManager::wait_for_auto_stop,
+           py::arg("timeout") = std::chrono::milliseconds::max(),
+           py::call_guard<py::gil_scoped_release>())
+      .def("shutdown", &SessionManager::shutdown)
+      .def("stats", &SessionManager::stats)
+      .def("on_pre_episode", &SessionManager::on_pre_episode, py::arg("callback"))
+      .def("on_episode_started", &SessionManager::on_episode_started,
+           py::arg("callback"))
+      .def("on_episode_ended", &SessionManager::on_episode_ended,
+           py::arg("callback"))
+      .def("on_pre_shutdown", &SessionManager::on_pre_shutdown, py::arg("callback"))
+      .def("print_episode_header", &SessionManager::print_episode_header)
+      .def("print_stats_line", &SessionManager::print_stats_line, py::arg("stats"))
+      .def("wait_for_reset", &SessionManager::wait_for_reset,
+           py::call_guard<py::gil_scoped_release>())
+      .def("signal_reset_complete", &SessionManager::signal_reset_complete)
+      .def("monitor_episode", &SessionManager::monitor_episode,
+           py::arg("update_interval") = std::chrono::duration<double>(0.5),
+           py::arg("sleep_interval") = std::chrono::duration<double>(0.1),
+           py::arg("print_stats") = false,
+           py::call_guard<py::gil_scoped_release>())
+      .def("start_async_monitoring", &SessionManager::start_async_monitoring,
+           py::arg("update_interval") = std::chrono::duration<double>(0.5),
+           py::arg("sleep_interval") = std::chrono::duration<double>(0.1),
+           py::arg("print_stats") = false)
+      .def("get_async_monitor_stats", &SessionManager::get_async_monitor_stats);
+  }
+
+  // ── 8. Utilities ────────────────────────────────────────────────────────
+  {
+    using namespace trossen::utils;
+
+    m.def("install_signal_handler", &install_signal_handler,
+          "Install SIGINT handler for graceful shutdown");
+    m.def("get_stop_requested", []() { return g_stop_requested.load(); },
+          "Get the global stop-requested flag");
+    m.def("set_stop_requested", [](bool val) { g_stop_requested.store(val); },
+          py::arg("value"), "Set the global stop-requested flag");
+
+    m.def("print_episode_summary", &print_episode_summary,
+          py::arg("file_path"), py::arg("stats"));
+    m.def("print_config_banner", &print_config_banner,
+          py::arg("app_name"), py::arg("config_lines"));
+    m.def("print_final_summary", &print_final_summary,
+          py::arg("total_episodes"), py::arg("output_dir"),
+          py::arg("extra_info") = std::vector<std::string>{});
+
+    py::class_<SanityCheckConfig>(m, "SanityCheckConfig")
+      .def(py::init<>())
+      .def_readwrite("actual_duration_s", &SanityCheckConfig::actual_duration_s)
+      .def_readwrite("joint_producers", &SanityCheckConfig::joint_producers)
+      .def_readwrite("joint_rate_hz", &SanityCheckConfig::joint_rate_hz)
+      .def_readwrite("camera_producers", &SanityCheckConfig::camera_producers)
+      .def_readwrite("camera_fps", &SanityCheckConfig::camera_fps)
+      .def_readwrite("tolerance_percent", &SanityCheckConfig::tolerance_percent)
+      .def_readwrite("depth_camera_producers",
+                     &SanityCheckConfig::depth_camera_producers);
+
+    m.def("perform_sanity_check", &perform_sanity_check,
+          py::arg("episode_index"), py::arg("actual_records"), py::arg("config"));
+
+    m.def("interruptible_sleep", &interruptible_sleep, py::arg("duration"),
+          py::call_guard<py::gil_scoped_release>(),
+          "Sleep that returns early if Ctrl+C pressed");
+
+    m.def("generate_episode_path", &generate_episode_path,
+          py::arg("output_dir"), py::arg("episode_index"),
+          py::arg("extension") = "trossen_mcap");
+
+    m.def("announce", &announce, py::arg("message"), py::arg("block") = true,
+          "Announce a message via text-to-speech");
+
+    py::enum_<KeyPress>(m, "KeyPress")
+      .value("kNone", KeyPress::kNone)
+      .value("kRightArrow", KeyPress::kRightArrow)
+      .value("kLeftArrow", KeyPress::kLeftArrow)
+      .value("kUpArrow", KeyPress::kUpArrow)
+      .value("kDownArrow", KeyPress::kDownArrow)
+      .value("kSpace", KeyPress::kSpace)
+      .value("kEnter", KeyPress::kEnter)
+      .value("kQ", KeyPress::kQ)
+      .export_values();
+
+    py::class_<RawModeGuard>(m, "RawModeGuard")
+      .def(py::init<>())
+      .def("is_active", &RawModeGuard::is_active)
+      .def("__enter__", [](RawModeGuard& self) -> RawModeGuard& { return self; })
+      .def("__exit__", [](RawModeGuard&, py::object, py::object, py::object) {});
+
+    m.def("poll_keypress", &poll_keypress, "Non-blocking poll for a keypress");
+  }
 }
