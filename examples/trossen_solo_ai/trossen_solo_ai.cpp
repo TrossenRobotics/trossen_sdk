@@ -248,7 +248,9 @@ int main(int argc, char** argv) {
   // Episode started: begin mirroring (alongside recording)
   mgr.on_episode_started([&]() {
     for (auto& ctrl : controllers) ctrl->teleop();
-    std::cout << "Episode started - recording and mirroring active.\n";
+    std::cout << "Episode started - recording"
+              << (controllers.empty() ? "" : " and mirroring")
+              << " active.\n";
   });
 
   // Count depth-capable cameras once for sanity checks
@@ -277,9 +279,14 @@ int main(int argc, char** argv) {
     perform_sanity_check(stats.current_episode_index, stats.records_written_current, sanity_cfg);
   });
 
-  // Shutdown: stop mirror + return arms to rest
+  // Shutdown: stop mirror + return arms to rest. If teleop was disabled (no
+  // controllers), return each arm to rest directly so they don't stay in
+  // their last commanded pose.
   mgr.on_pre_shutdown([&]() {
     for (auto& ctrl : controllers) ctrl->stop_teleop();
+    if (controllers.empty()) {
+      for (auto& [id, arm] : arm_components) arm->end_teleop();
+    }
   });
 
   // ──────────────────────────────────────────────────────────
