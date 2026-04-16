@@ -436,10 +436,10 @@ int main(int argc, char** argv) {
     if (static_cast<unsigned int>(config_threads) > hw_threads) {
       std::cout << "[WARNING] config threads=" << config_threads
                 << " exceeds hardware concurrency (" << hw_threads
-                << "). Falling back to auto (" << default_threads << ").\n";
-      num_threads = default_threads;
-      threads_source = "auto (config threads=" + std::to_string(config_threads)
-                       + " exceeded hw limit)";
+                << "). Clamping to " << hw_threads << ".\n";
+      num_threads = hw_threads;
+      threads_source = "config: threads=" + std::to_string(hw_threads) + " (clamped from " +
+                       std::to_string(config_threads) + ")";
     } else {
       num_threads = static_cast<unsigned int>(config_threads);
       threads_source = "config: threads=" + std::to_string(num_threads);
@@ -652,23 +652,16 @@ int main(int argc, char** argv) {
     std::mutex cout_mutex;
     // protects task_index — without this two workers could grab the same episode
     std::mutex queue_mutex;
-    // workers sleep here when queue is empty, woken when work is available
-    std::condition_variable queue_cv;
     size_t task_index = 0;  // next task to claim — incremented under queue_mutex
-    bool done = false;  // signals workers to exit once all tasks are claimed
 
-    // Worker lambda — each of the num_threads threads runs this loop.
-    // The worker sleeps on queue_cv until a task is available, claims the next
-    // task under queue_mutex, then runs process_mcap_file() for that episode.
+    // Worker lambda: tasks are fully populated before workers spawn,
     // When all tasks are claimed and done==true, the worker returns and the thread exits.
     auto worker = [&]() {
       while (true) {
         EpisodeTask task;
         {
-          std::unique_lock<std::mutex> lock(queue_mutex);
-          // sleep until a task is available or done is set
-          queue_cv.wait(lock, [&] { return task_index < tasks.size() || done; });
-          if (task_index >= tasks.size()) return;  // queue empty and done — exit thread
+          std::lock_guard<std::mutex> lock(queue_mutex);
+          if (task_index >= tasks.size()) return;  // queue exhausted — exit thread
           task = tasks[task_index++];
         }
         auto ep_start = std::chrono::steady_clock::now();
@@ -704,7 +697,7 @@ int main(int argc, char** argv) {
           }
         // Catch all exceptions from process_mcap_file. Without this, an uncaught
         // exception kills the worker thread silently, leaving other workers waiting
-        // on queue_cv forever (deadlock). Catching here marks the episode failed
+        // forever (deadlock). Catching here marks the episode failed
         // and lets the worker continue to the next task.
         } catch (const std::exception& e) {
           std::lock_guard<std::mutex> lk(cout_mutex);
@@ -731,12 +724,6 @@ int main(int argc, char** argv) {
     for (unsigned int i = 0; i < num_threads; ++i) {
       workers.emplace_back(worker);
     }
-    queue_cv.notify_all();  // wake all workers so they start pulling tasks immediately
-    {
-      std::lock_guard<std::mutex> lock(queue_mutex);
-      done = true;  // signal that no more tasks will be added
-    }
-    queue_cv.notify_all();  // wake any workers blocked on empty queue so they exit cleanly
     for (auto& w : workers) {
       w.join();
     }
@@ -940,21 +927,6 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   fs::path images_dir = full_dataset_path / trossen::io::backends::IMAGES_DIR / chunk_dir_name;
   fs::path videos_dir = full_dataset_path / trossen::io::backends::VIDEO_DIR / chunk_dir_name;
   fs::path meta_dir = full_dataset_path / trossen::io::backends::METADATA_DIR;
-
-  try {
-    fs::create_directories(data_dir);
-    fs::create_directories(images_dir);
-    fs::create_directories(videos_dir);
-    fs::create_directories(meta_dir);
-
-    log << "  [ok] Created data directory:   " << data_dir.string() << "\n";
-    log << "  [ok] Created images directory: " << images_dir.string() << "\n";
-    log << "  [ok] Created videos directory: " << videos_dir.string() << "\n";
-    log << "  [ok] Created meta directory:   " << meta_dir.string() << "\n";
-  } catch (const std::exception& e) {
-    log << "Error: Failed to create directories: " << e.what() << "\n";
-    return 1;
-  }
 
   auto stage_start = std::chrono::steady_clock::now();
   log << "\nReading MCAP file...\n";
