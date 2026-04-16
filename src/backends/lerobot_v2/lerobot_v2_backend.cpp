@@ -508,7 +508,13 @@ void LeRobotV2Backend::write(const data::RecordBase& record) {
   if (auto img = dynamic_cast<const data::ImageRecord*>(&record)) {
     write_image(*img);
   } else {
-    // Unknown type ignored for now.
+    static bool warned = false;
+    if (!warned) {
+      std::cerr << "[LeRobotV2] Warning: received a non-image record (e.g. "
+                   "JointStateRecord) but joint-state writing is not yet "
+                   "implemented. Joint data will be dropped for this session.\n";
+      warned = true;
+    }
   }
 }
 
@@ -516,12 +522,18 @@ void LeRobotV2Backend::write_batch(std::span<const data::RecordBase* const> reco
   std::lock_guard<std::mutex> lock(write_mutex_);
   // TODO(shantanuparab-tr): add joint-state dispatch here alongside images
   // once the pairing described in write() above is implemented.
+  static bool warned = false;
   for (auto* r : records) {
     if (!r) {
       continue;
     }
     if (auto img = dynamic_cast<const data::ImageRecord*>(r)) {
       write_image(*img);
+    } else if (!warned) {
+      std::cerr << "[LeRobotV2] Warning: received a non-image record but "
+                   "joint-state writing is not yet implemented. Joint data "
+                   "will be dropped for this session.\n";
+      warned = true;
     }
   }
 }
