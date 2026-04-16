@@ -5,6 +5,8 @@
 
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+#include <algorithm>
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -55,12 +57,23 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
       "TrossenArmComponent: Failed to configure driver: " + std::string(e.what()));
   }
 
-  // Optional teleop tuning — used by stage() / end_teleop() / prepare_for_teleop().
+  // Optional teleop tuning — used by stage() / end_teleop().
   if (config.contains("staged_position")) {
-    staged_position_ = config.at("staged_position").get<std::vector<float>>();
+    auto pos = config.at("staged_position").get<std::vector<float>>();
+    if (pos.size() != static_cast<size_t>(driver_->get_num_joints())) {
+      throw std::runtime_error(
+        "TrossenArmComponent: 'staged_position' length (" +
+        std::to_string(pos.size()) + ") must match joint count (" +
+        std::to_string(driver_->get_num_joints()) + ")");
+    }
+    staged_position_ = std::move(pos);
   }
   if (config.contains("teleop_moving_time_s")) {
     teleop_moving_time_s_ = config.at("teleop_moving_time_s").get<float>();
+    if (teleop_moving_time_s_ < 0.0f || !std::isfinite(teleop_moving_time_s_)) {
+      throw std::runtime_error(
+        "TrossenArmComponent: 'teleop_moving_time_s' must be non-negative and finite");
+    }
   }
 
   // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
@@ -87,6 +100,12 @@ std::vector<float> TrossenArmComponent::read_joint() {
 
 void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
   if (!driver_) return;
+  if (cmd.size() != static_cast<size_t>(driver_->get_num_joints())) {
+    throw std::runtime_error(
+      "TrossenArmComponent::write_joint: expected " +
+      std::to_string(driver_->get_num_joints()) + " joints, got " +
+      std::to_string(cmd.size()));
+  }
   std::vector<double> pos_d(cmd.begin(), cmd.end());
   driver_->set_all_positions(pos_d, 0.0, false);
 }
