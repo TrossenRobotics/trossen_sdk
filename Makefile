@@ -2,7 +2,7 @@ NPROC ?= 4
 DOCS_DIR ?= docs
 DOCS_BUILD_DIR ?= $(DOCS_DIR)/_build
 DOCS_PORT ?= 8000
-PYTHON ?= python
+PYTHON ?= python3
 PIP ?= $(PYTHON) -m pip
 
 build:

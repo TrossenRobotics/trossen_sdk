@@ -7,7 +7,8 @@ This page describes how to prepare a Linux PC to build and run the Trossen SDK.
 What You Need
 =============
 
--   A Linux PC running Ubuntu 24.04.
+-   A Linux PC running Ubuntu 24.04 (recommended).
+    Ubuntu 22.04 is also supported on x86_64.
     Other distributions may work but are not regularly tested.
 -   A C++20-capable compiler toolchain and CMake 3.15 or newer.
 -   Network connectivity to the Trossen Arm Controller.

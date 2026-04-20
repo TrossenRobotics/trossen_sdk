@@ -25,11 +25,10 @@ autosectionlabel_prefix_document = True
 # sphinx_copybutton — strip "$ " prompts when copying shell blocks.
 copybutton_prompt_text = '$ '
 
-templates_path = ['_templates']
 source_suffix = '.rst'
 master_doc = 'index'
 language = 'en'
-exclude_patterns = ['build', 'Thumbs.db', '.DS_Store']
+exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
 pygments_style = 'sphinx'
 
 # -- HTML output -------------------------------------------------------------
@@ -114,4 +113,4 @@ class PatchedHTMLTranslator(HTMLTranslator):
 
 
 def setup(app):
-    app.set_translator('html', PatchedHTMLTranslator)
+    app.set_translator('html', PatchedHTMLTranslator, override=True)

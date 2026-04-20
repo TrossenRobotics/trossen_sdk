@@ -90,9 +90,9 @@ Topic names are derived from the ``stream_id`` of each producer.
     * - ``/cameras/{camera_id}/meta``
       - Key/value
       - Camera metadata
-    * - ``{stream_id}/odometry_2d/state``
+    * - ``{stream_id}/odom/state``
       - ``Odometry2D``
-      - Pose (m, rad), velocity (m/s, rad/s)
+      - Pose (m, rad), twist (m/s, rad/s)
 
 What's Next
 ===========

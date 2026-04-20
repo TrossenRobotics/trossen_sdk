@@ -119,8 +119,7 @@ table.docutils tr.row-even td {
 
 @font-face {
     font-family: 'Gilmer-Regular';
-    src: url('gilmer-regular.eot');
-    src: url('gilmer-regular.eot?#iefix') format('embedded-opentype'), url('gilmer-regular.woff2') format('woff2'), url('gilmer-regular.woff') format('woff'), url('gilmer-regular.ttf') format('truetype'), url('gilmer-regular.svg#youworkforthem') format('svg');
+    src: url('gilmer-regular.ttf') format('truetype');
     font-weight: normal;
     font-style: normal;
 }

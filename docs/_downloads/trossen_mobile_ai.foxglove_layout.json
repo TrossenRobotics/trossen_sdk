@@ -28,9 +28,9 @@
     },
     "Plot!odometry": {
       "paths": [
-        { "value": "slate_base/odometry_2d/state.velocity.x",   "enabled": true, "timestampMethod": "receiveTime" },
-        { "value": "slate_base/odometry_2d/state.velocity.y",   "enabled": true, "timestampMethod": "receiveTime" },
-        { "value": "slate_base/odometry_2d/state.velocity.wz",  "enabled": true, "timestampMethod": "receiveTime" }
+        { "value": "slate_base/odom/state.twist.linear_x",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "slate_base/odom/state.twist.linear_y",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "slate_base/odom/state.twist.angular_z",  "enabled": true, "timestampMethod": "receiveTime" }
       ],
       "showLegend": true, "legendDisplay": "floating", "isSynced": true, "xAxisVal": "timestamp"
     }

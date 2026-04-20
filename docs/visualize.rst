@@ -120,9 +120,9 @@ Names include the ``stream_id`` from your ``producers`` config.
     * - ``/cameras/{camera_id}/meta``
       - Key/value
       - Raw Messages (metadata reference)
-    * - ``{stream_id}/odometry_2d/state``
+    * - ``{stream_id}/odom/state``
       - ``Odometry2D``
-      - Plot (vx, vy, wz), Map (if 2D pose logged)
+      - Plot (``twist.linear_x``, ``twist.linear_y``, ``twist.angular_z``)
 
 What's Next
 ===========
