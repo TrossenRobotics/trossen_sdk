@@ -27,6 +27,7 @@
 #include <cmath>
 #include <cstdlib>
 #include <condition_variable>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -38,8 +39,11 @@
 #include <queue>
 #include <opencv2/opencv.hpp>
 #include <regex>
+#include <spawn.h>
 #include <string>
+#include <sys/wait.h>
 #include <thread>
+#include <unistd.h>
 #include <vector>
 
 #include "trossen_sdk/utils/app_utils.hpp"
@@ -255,7 +259,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
                       const std::string& video_encoder, const std::string& encoder_flags,
                       unsigned int cam_encode_threads,
                       GpuSemaphore* ep_encode_sem,
-                      std::atomic<int64_t>& global_index_counter,
+                      int64_t starting_index,
                       std::ostringstream& log,
                       const std::string& task_name, const std::string& robot_name,
                       float fps, bool create_videos,
@@ -429,9 +433,10 @@ int main(int argc, char** argv) {
     if (static_cast<unsigned int>(cli_threads) > hw_threads) {
       std::cout << "[WARNING] --threads " << cli_threads
                 << " exceeds hardware concurrency (" << hw_threads
-                << "). Falling back to auto (" << default_threads << ").\n";
-      num_threads = default_threads;
-      threads_source = "auto (--threads " + std::to_string(cli_threads) + " exceeded hw limit)";
+                << "). Clamping to " << hw_threads << ".\n";
+      num_threads = hw_threads;
+      threads_source = "--threads " + std::to_string(hw_threads) + " (clamped from " +
+                       std::to_string(cli_threads) + ")";
     } else {
       num_threads = static_cast<unsigned int>(cli_threads);
       threads_source = "--threads " + std::to_string(num_threads);
@@ -584,7 +589,8 @@ int main(int argc, char** argv) {
   struct EpisodeTask {
     fs::path mcap_path;
     int episode_index;
-    size_t display_idx;  // 1-based index for progress display
+    size_t display_idx;      // 1-based index for progress display
+    int64_t starting_index;  // first global row index for this episode
   };
   std::vector<EpisodeTask> tasks;
 
@@ -624,9 +630,35 @@ int main(int argc, char** argv) {
       }
     }
 
-    tasks.push_back({mcap_path, episode_index, i + 1});
+    tasks.push_back({mcap_path, episode_index, i + 1, 0});
   }
 
+  // Pre-scan each MCAP using readSummary (reads footer only, fast) to estimate
+  // row count per episode. Used to assign contiguous starting_index per episode
+  // so global indices are contiguous even when episodes run in parallel.
+  auto estimate_episode_rows = [](const fs::path& mcap_path) -> int64_t {
+    mcap::McapReader probe;
+    if (!probe.open(mcap_path.string()).ok()) return 0;
+    probe.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+    const auto& stats = probe.statistics();
+    if (!stats.has_value()) return 0;
+    const auto& channels = probe.channels();
+    int64_t min_joint = std::numeric_limits<int64_t>::max();
+    int64_t min_camera = std::numeric_limits<int64_t>::max();
+    for (const auto& [ch_id, count] : stats->channelMessageCounts) {
+      auto it = channels.find(ch_id);
+      if (it == channels.end()) continue;
+      const std::string& topic = it->second->topic;
+      if (topic.find("joints/state") != std::string::npos)
+        min_joint = std::min(min_joint, static_cast<int64_t>(count));
+      if (topic.find("/cameras/") != std::string::npos)
+        min_camera = std::min(min_camera, static_cast<int64_t>(count));
+    }
+    int64_t rows = (min_joint != std::numeric_limits<int64_t>::max()) ? min_joint : 0;
+    if (min_camera != std::numeric_limits<int64_t>::max())
+      rows = std::min(rows, min_camera);
+    return std::max(int64_t{0}, rows);
+  };
   // Pre-create all chunk directories before spawning workers to avoid
   // concurrent fs::create_directories calls on overlapping paths.
   // Using std::error_code overload means already-existing dirs are silently ignored.
@@ -755,7 +787,16 @@ int main(int argc, char** argv) {
   // across all episodes even when they complete out of order, including resumed
   // runs that skip already-converted episodes.
   fs::path data_root = fs::path(dataset_root_dir) / repository_id / dataset_id / "data";
-  std::atomic<int64_t> global_index_counter{initialize_global_index_counter(data_root)};
+  // Compute per-episode starting indices using pre-scan row estimates.
+  // This ensures each episode writes a contiguous block of global indices
+  // even when multiple episodes run in parallel.
+  {
+    int64_t offset = initialize_global_index_counter(data_root);
+    for (auto& task : tasks) {
+      task.starting_index = offset;
+      offset += estimate_episode_rows(task.mcap_path);
+    }
+  }
   auto total_start = std::chrono::steady_clock::now();
 
   if (!tasks.empty()) {
@@ -796,7 +837,7 @@ int main(int argc, char** argv) {
                                      task.episode_index, repository_id, dataset_id, chunk_size,
                                      video_encoder, encoder_flags,
                                      cam_encode_threads, ep_encode_sem,
-                                     global_index_counter, ep_log,
+                                     task.starting_index, ep_log,
                                      config_task_name, config_robot_name,
                                      config_fps, encode_videos, meta_mutex);
           {
@@ -994,11 +1035,14 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
                       const std::string& video_encoder, const std::string& encoder_flags,
                       unsigned int cam_encode_threads,
                       GpuSemaphore* ep_encode_sem,
-                      std::atomic<int64_t>& global_index_counter,
+                      int64_t starting_index,
                       std::ostringstream& log,
                       const std::string& task_name, const std::string& robot_name,
                       float fps, bool create_videos,
                       std::mutex& meta_mutex) {
+  // Local row counter starting at pre-assigned offset — guarantees contiguous
+  // indices per episode even when multiple episodes run in parallel.
+  std::atomic<int64_t> global_index_counter{starting_index};
   ParquetConfig cfg;
   cfg.mcap_file = mcap_file;
   cfg.dataset_root = dataset_root_dir;
@@ -1916,23 +1960,47 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
       fs::path input_pattern = camera_dir / "image_%06d.jpg";
 
-      std::ostringstream ffmpeg_cmd;
-      ffmpeg_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps
-                 << " -start_number 0"
-                 << " -i \"" << input_pattern.string() << "\" -frames:v "
-                 << camera_frame_indices[camera_name]
-                 << " -c:v " << video_encoder << " " << encoder_flags
-                 << " -pix_fmt yuv420p -r 30 "
-                 << "\"" << video_output.string() << "\" 2>/dev/null";
-      std::ostringstream cpu_cmd;
-      cpu_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps
-              << " -start_number 0"
-              << " -i \"" << input_pattern.string() << "\" -frames:v "
-              << camera_frame_indices[camera_name]
-              << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p -r 30 "
-              << "\"" << video_output.string() << "\" 2>/dev/null";
-      std::string cmd = ffmpeg_cmd.str();
-      std::string cpu_fallback = cpu_cmd.str();
+      std::vector<std::string> flag_tokens;
+      {
+        std::istringstream iss(encoder_flags);
+        std::string tok;
+        while (iss >> tok) flag_tokens.push_back(tok);
+      }
+      std::string fps_str = [&] { std::ostringstream o; o << cfg.camera_fps; return o.str(); }();
+      std::string frames_str = std::to_string(camera_frame_indices[camera_name]);
+
+      std::vector<std::string> gpu_args = {
+          "ffmpeg", "-y", "-loglevel", "error",
+          "-framerate", fps_str, "-start_number", "0",
+          "-i", input_pattern.string(), "-frames:v", frames_str,
+          "-c:v", video_encoder};
+      for (const auto& f : flag_tokens) gpu_args.push_back(f);
+      gpu_args.insert(gpu_args.end(),
+                      {"-pix_fmt", "yuv420p", "-r", "30", video_output.string()});
+
+      std::vector<std::string> cpu_args = {
+          "ffmpeg", "-y", "-loglevel", "error",
+          "-framerate", fps_str, "-start_number", "0",
+          "-i", input_pattern.string(), "-frames:v", frames_str,
+          "-c:v", "libsvtav1", "-crf", "30", "-g", "30", "-preset", "6",
+          "-pix_fmt", "yuv420p", "-r", "30", video_output.string()};
+
+      auto run_ffmpeg = [](const std::vector<std::string>& args) -> int {
+        std::vector<char*> argv;
+        for (const auto& a : args)
+          argv.push_back(const_cast<char*>(a.c_str()));
+        argv.push_back(nullptr);
+        posix_spawn_file_actions_t fa;
+        posix_spawn_file_actions_init(&fa);
+        posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+        pid_t pid;
+        int err = posix_spawnp(&pid, argv[0], &fa, nullptr, argv.data(), environ);
+        posix_spawn_file_actions_destroy(&fa);
+        if (err != 0) return -1;
+        int status;
+        waitpid(pid, &status, 0);
+        return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+      };
       std::string cam = camera_name;
       bool is_gpu = (video_encoder != "libsvtav1");
       {
@@ -1941,9 +2009,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
         ++cam_active;
       }
       cam_threads.emplace_back(
-          [cmd, cpu_fallback, cam, is_gpu, &log, &videos_created,
+          [gpu_args, cpu_args, run_ffmpeg, cam, is_gpu, &log, &videos_created,
            &cam_pool_mutex, &cam_pool_cv, &cam_active, &cam_log_mutex]() {
-        int ret = std::system(cmd.c_str());
+        int ret = run_ffmpeg(gpu_args);
 
         if (ret == 0) {
           ++videos_created;
@@ -1954,7 +2022,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
             log << "  [WARNING] " << cam << " GPU encode failed (exit "
                 << ret << "), retrying with CPU\n";
           }
-          ret = std::system(cpu_fallback.c_str());
+          ret = run_ffmpeg(cpu_args);
           if (ret == 0) {
             ++videos_created;
             std::lock_guard<std::mutex> lk(cam_log_mutex);
