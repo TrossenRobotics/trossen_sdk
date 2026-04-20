@@ -1,0 +1,57 @@
+{
+  "configById": {
+    "Image!high": {
+      "imageMode": { "imageTopic": "/cameras/camera_high/image", "calibrationTopic": "", "synchronize": false }
+    },
+    "Image!left_wrist": {
+      "imageMode": { "imageTopic": "/cameras/camera_left_wrist/image", "calibrationTopic": "", "synchronize": false }
+    },
+    "Image!right_wrist": {
+      "imageMode": { "imageTopic": "/cameras/camera_right_wrist/image", "calibrationTopic": "", "synchronize": false }
+    },
+    "Plot!positions": {
+      "paths": [
+        { "value": "leader_left/joints/state.positions[0]",    "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_left/joints/state.positions[1]",    "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_left/joints/state.positions[2]",    "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_right/joints/state.positions[0]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_right/joints/state.positions[1]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_right/joints/state.positions[2]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_left/joints/state.positions[0]",  "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_left/joints/state.positions[1]",  "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_left/joints/state.positions[2]",  "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_right/joints/state.positions[0]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_right/joints/state.positions[1]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_right/joints/state.positions[2]", "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "showLegend": true, "legendDisplay": "floating", "isSynced": true, "xAxisVal": "timestamp"
+    },
+    "Plot!odometry": {
+      "paths": [
+        { "value": "slate_base/odometry_2d/state.velocity.x",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "slate_base/odometry_2d/state.velocity.y",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "slate_base/odometry_2d/state.velocity.wz",  "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "showLegend": true, "legendDisplay": "floating", "isSynced": true, "xAxisVal": "timestamp"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": { "speed": 1 },
+  "layout": {
+    "first": {
+      "first": "Image!high",
+      "second": { "first": "Image!left_wrist", "second": "Image!right_wrist", "direction": "row", "splitPercentage": 50 },
+      "direction": "row",
+      "splitPercentage": 50
+    },
+    "second": {
+      "first": "Plot!positions",
+      "second": "Plot!odometry",
+      "direction": "row",
+      "splitPercentage": 65
+    },
+    "direction": "column",
+    "splitPercentage": 60
+  }
+}

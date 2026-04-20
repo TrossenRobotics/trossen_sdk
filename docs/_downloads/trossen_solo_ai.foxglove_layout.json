@@ -1,0 +1,106 @@
+{
+  "configById": {
+    "Image!main": {
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [0, 0, 0],
+        "targetOffset": [0, 0, 0],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "imageMode": {
+        "imageTopic": "/cameras/camera_main/image",
+        "calibrationTopic": "",
+        "synchronize": false
+      }
+    },
+    "Image!wrist": {
+      "cameraState": {
+        "distance": 20,
+        "perspective": true,
+        "phi": 60,
+        "target": [0, 0, 0],
+        "targetOffset": [0, 0, 0],
+        "thetaOffset": 45,
+        "fovy": 45,
+        "near": 0.5,
+        "far": 5000
+      },
+      "followMode": "follow-pose",
+      "imageMode": {
+        "imageTopic": "/cameras/camera_wrist/image",
+        "calibrationTopic": "",
+        "synchronize": false
+      }
+    },
+    "Plot!positions": {
+      "paths": [
+        { "value": "leader/joints/state.positions[0]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader/joints/state.positions[1]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader/joints/state.positions[2]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader/joints/state.positions[3]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader/joints/state.positions[4]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader/joints/state.positions[5]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader/joints/state.positions[6]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.positions[0]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.positions[1]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.positions[2]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.positions[3]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.positions[4]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.positions[5]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.positions[6]", "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": false,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "sidebarDimension": 240
+    },
+    "Plot!efforts": {
+      "paths": [
+        { "value": "follower/joints/state.efforts[0]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.efforts[1]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.efforts[2]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.efforts[3]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.efforts[4]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.efforts[5]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower/joints/state.efforts[6]", "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "showXAxisLabels": true,
+      "showYAxisLabels": true,
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "showPlotValuesInLegend": false,
+      "isSynced": true,
+      "xAxisVal": "timestamp",
+      "sidebarDimension": 240
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": { "speed": 1 },
+  "layout": {
+    "first": {
+      "first": "Image!main",
+      "second": "Image!wrist",
+      "direction": "row",
+      "splitPercentage": 50
+    },
+    "second": {
+      "first": "Plot!positions",
+      "second": "Plot!efforts",
+      "direction": "column",
+      "splitPercentage": 50
+    },
+    "direction": "column",
+    "splitPercentage": 55
+  }
+}

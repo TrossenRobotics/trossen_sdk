@@ -1,0 +1,6 @@
+sphinx
+sphinx-rtd-theme
+sphinx-copybutton
+sphinx-tabs
+sphinxcontrib-mermaid
+sphinxcontrib-youtube
