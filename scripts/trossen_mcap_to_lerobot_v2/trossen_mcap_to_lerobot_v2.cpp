@@ -25,6 +25,7 @@
 #include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <condition_variable>
 #include <filesystem>
 #include <fstream>
@@ -255,7 +256,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
                       unsigned int cam_encode_threads,
                       GpuSemaphore* ep_encode_sem,
                       std::atomic<int64_t>& global_index_counter,
-                      std::ostringstream& log);
+                      std::ostringstream& log,
+                      const std::string& task_name, const std::string& robot_name,
+                      float fps, bool create_videos,
+                      std::mutex& meta_mutex);
 
 // ──────────────────────────────────────────
 // Main entry point
@@ -641,15 +645,125 @@ int main(int argc, char** argv) {
     fs::create_directories(chunk_videos, ec);
     fs::create_directories(meta_dir, ec);
   }
+  // Scan existing parquet files to find the max stored index value.
+  // On resume/re-run, new episodes must continue from max+1 to avoid
+  // duplicate indices with already-converted (skipped) episodes.
+  auto initialize_global_index_counter = [](const fs::path& data_root) -> int64_t {
+    std::error_code ec;
+    if (!fs::exists(data_root, ec)) {
+      return 0;
+    }
+    int64_t next_index = 0;
+    for (fs::recursive_directory_iterator it(data_root, ec), end; it != end; it.increment(ec)) {
+      if (ec) {
+        std::cerr << "Warning: failed while scanning existing parquet files under "
+                  << data_root << ": " << ec.message() << std::endl;
+        break;
+      }
+      if (!it->is_regular_file(ec) || it->path().extension() != ".parquet") {
+        continue;
+      }
+      auto input_result = arrow::io::ReadableFile::Open(it->path().string());
+      if (!input_result.ok()) {
+        std::cerr << "Warning: failed to open parquet file " << it->path()
+                  << " to recover global index state: "
+                  << input_result.status().ToString() << std::endl;
+        continue;
+      }
+      auto open_result = parquet::arrow::OpenFile(
+        input_result.ValueOrDie(), arrow::default_memory_pool());
+      if (!open_result.ok()) {
+        std::cerr << "Warning: failed to read parquet metadata from " << it->path()
+                  << " to recover global index state: "
+                  << open_result.status().ToString() << std::endl;
+        continue;
+      }
+      auto reader = open_result.MoveValueUnsafe();
+      std::shared_ptr<arrow::Schema> schema;
+      auto schema_status = reader->GetSchema(&schema);
+      if (!schema_status.ok() || !schema) {
+        continue;
+      }
+      int index_column = schema->GetFieldIndex("index");
+      if (index_column < 0) {
+        continue;
+      }
+      std::shared_ptr<arrow::ChunkedArray> index_values;
+      auto read_status = reader->ReadColumn(index_column, &index_values);
+      if (!read_status.ok() || !index_values) {
+        continue;
+      }
+      int64_t file_max_index = -1;
+      for (const auto& chunk : index_values->chunks()) {
+        switch (chunk->type_id()) {
+          case arrow::Type::INT64: {
+            auto array = std::static_pointer_cast<arrow::Int64Array>(chunk);
+            for (int64_t i = 0; i < array->length(); ++i) {
+              if (!array->IsNull(i)) {
+                file_max_index = std::max(file_max_index, array->Value(i));
+              }
+            }
+            break;
+          }
+          case arrow::Type::INT32: {
+            auto array = std::static_pointer_cast<arrow::Int32Array>(chunk);
+            for (int64_t i = 0; i < array->length(); ++i) {
+              if (!array->IsNull(i)) {
+                file_max_index = std::max(file_max_index,
+                                          static_cast<int64_t>(array->Value(i)));
+              }
+            }
+            break;
+          }
+          case arrow::Type::UINT64: {
+            auto array = std::static_pointer_cast<arrow::UInt64Array>(chunk);
+            for (int64_t i = 0; i < array->length(); ++i) {
+              if (!array->IsNull(i) &&
+                  array->Value(i) <=
+                  static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
+                file_max_index = std::max(file_max_index,
+                                          static_cast<int64_t>(array->Value(i)));
+              }
+            }
+            break;
+          }
+          case arrow::Type::UINT32: {
+            auto array = std::static_pointer_cast<arrow::UInt32Array>(chunk);
+            for (int64_t i = 0; i < array->length(); ++i) {
+              if (!array->IsNull(i)) {
+                file_max_index = std::max(file_max_index,
+                                          static_cast<int64_t>(array->Value(i)));
+              }
+            }
+            break;
+          }
+          default:
+            std::cerr << "Warning: unsupported parquet index column type in "
+                      << it->path()
+                      << " while recovering global index state." << std::endl;
+            break;
+        }
+      }
+      if (file_max_index >= 0) {
+        next_index = std::max(next_index, file_max_index + 1);
+      }
+    }
+    return next_index;
+  };
   // Globally unique row index shared across all worker threads.
   // Each parquet row calls fetch_add(1) atomically — guarantees unique indices
-  // across all episodes even when they complete out of order.
-  std::atomic<int64_t> global_index_counter{0};
+  // across all episodes even when they complete out of order, including resumed
+  // runs that skip already-converted episodes.
+  fs::path data_root = fs::path(dataset_root_dir) / repository_id / dataset_id / "data";
+  std::atomic<int64_t> global_index_counter{initialize_global_index_counter(data_root)};
   auto total_start = std::chrono::steady_clock::now();
 
   if (!tasks.empty()) {
     // serializes terminal output — without this, lines from different episodes interleave
     std::mutex cout_mutex;
+    // serializes metadata writes — info.json, episodes.jsonl, tasks.jsonl, episodes_stats.jsonl
+    // are shared across all episodes and must not be written concurrently
+    std::mutex meta_mutex;
     // protects task_index — without this two workers could grab the same episode
     std::mutex queue_mutex;
     size_t task_index = 0;  // next task to claim — incremented under queue_mutex
@@ -682,7 +796,9 @@ int main(int argc, char** argv) {
                                      task.episode_index, repository_id, dataset_id, chunk_size,
                                      video_encoder, encoder_flags,
                                      cam_encode_threads, ep_encode_sem,
-                                     global_index_counter, ep_log);
+                                     global_index_counter, ep_log,
+                                     config_task_name, config_robot_name,
+                                     config_fps, encode_videos, meta_mutex);
           {
             std::lock_guard<std::mutex> lk(cout_mutex);
             // flush entire episode log atomically — no interleaving with other episodes
@@ -862,6 +978,16 @@ int main(int argc, char** argv) {
 // ════════════════════════════════════════════════════
 // EPISODE CONVERSION PIPELINE
 // ════════════════════════════════════════════════════
+// RAII guard for ep_encode_sem — guarantees release on every exit path
+// (normal return, exception, early return). Mirrors std::lock_guard pattern.
+struct EpEncodeGuard {
+  GpuSemaphore* sem;
+  explicit EpEncodeGuard(GpuSemaphore* s) : sem(s) { if (sem) sem->acquire(); }
+  ~EpEncodeGuard() { if (sem) sem->release(); }
+  EpEncodeGuard(const EpEncodeGuard&) = delete;
+  EpEncodeGuard& operator=(const EpEncodeGuard&) = delete;
+};
+
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
@@ -869,12 +995,19 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
                       unsigned int cam_encode_threads,
                       GpuSemaphore* ep_encode_sem,
                       std::atomic<int64_t>& global_index_counter,
-                      std::ostringstream& log) {
+                      std::ostringstream& log,
+                      const std::string& task_name, const std::string& robot_name,
+                      float fps, bool create_videos,
+                      std::mutex& meta_mutex) {
   ParquetConfig cfg;
   cfg.mcap_file = mcap_file;
   cfg.dataset_root = dataset_root_dir;
   cfg.repository_id = repository_id;
   cfg.dataset_id = dataset_id;
+  cfg.task_name = task_name;
+  cfg.robot_name = robot_name;
+  cfg.fps = fps;
+  cfg.create_videos = create_videos;
   cfg.chunk_size = chunk_size;
 
   namespace fs = std::filesystem;
@@ -1754,7 +1887,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     // While this episode holds the slot, ALL its cameras encode in parallel.
     // Other episodes that reach this point will block until this one finishes,
     // preventing NVENC session overflow from many episodes encoding at once.
-    if (ep_encode_sem) ep_encode_sem->acquire();
+    EpEncodeGuard ep_guard(ep_encode_sem);  // released automatically on scope exit
 
     std::atomic<int> videos_created{0};
     std::vector<std::thread> cam_threads;
@@ -1786,18 +1919,18 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       std::ostringstream ffmpeg_cmd;
       ffmpeg_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps
                  << " -start_number 0"
-                 << " -i " << input_pattern.string() << " -frames:v "
+                 << " -i \"" << input_pattern.string() << "\" -frames:v "
                  << camera_frame_indices[camera_name]
                  << " -c:v " << video_encoder << " " << encoder_flags
                  << " -pix_fmt yuv420p -r 30 "
-                 << video_output.string() << " 2>/dev/null";
+                 << "\"" << video_output.string() << "\" 2>/dev/null";
       std::ostringstream cpu_cmd;
       cpu_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps
               << " -start_number 0"
-              << " -i " << input_pattern.string() << " -frames:v "
+              << " -i \"" << input_pattern.string() << "\" -frames:v "
               << camera_frame_indices[camera_name]
               << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p -r 30 "
-              << video_output.string() << " 2>/dev/null";
+              << "\"" << video_output.string() << "\" 2>/dev/null";
       std::string cmd = ffmpeg_cmd.str();
       std::string cpu_fallback = cpu_cmd.str();
       std::string cam = camera_name;
@@ -1845,9 +1978,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     for (auto& t : cam_threads) {
       t.join();
     }
-    // All cameras finished — release the episode encode slot so the next
-    // episode waiting on ep_encode_sem can start its parallel camera encodes.
-    if (ep_encode_sem) ep_encode_sem->release();
+    // All cameras finished — ep_guard destructor releases the encode slot
+    // automatically, allowing the next episode to start its camera encodes.
 
     if (videos_created.load() > 0) {
       log << "  [ok] Created " << videos_created.load() << " video(s)\n";
@@ -1863,6 +1995,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   auto video_end = std::chrono::steady_clock::now();
   double video_encode_s = std::chrono::duration<double>(video_end - stage_start).count();
   stage_start = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> meta_lk(meta_mutex);  // serialize shared meta/ writes
   log << "\nGenerating metadata files...\n";
 
   // Check if info.json exists, create if needed
