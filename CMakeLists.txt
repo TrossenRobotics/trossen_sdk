@@ -7,6 +7,9 @@ project(trossen_sdk
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Pick up project-local Find modules (e.g. Findtrossen_vr.cmake).
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+
 # TODO: Discuss build options - do we want RealSense ON by default? What about other
 # optional hardware (e.g., Zed cameras)? Where do we draw the line between mandatory
 # and opt-in dependencies?
@@ -32,6 +35,7 @@ add_library(trossen_sdk SHARED
   src/hw/arm/feetech_bus.cpp
   src/hw/base/slate_base_component.cpp
   src/hw/base/slate_base_producer.cpp
+  src/hw/vr/vr_session.cpp
   src/hw/teleop/teleop_controller.cpp
   src/hw/teleop/teleop_factory.cpp
   src/hw/camera/opencv_camera_component.cpp
@@ -113,6 +117,7 @@ find_package(BZip2 REQUIRED)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(libtrossen_arm REQUIRED)
+find_package(trossen_vr REQUIRED)
 
 include(FetchContent)
 
@@ -241,6 +246,7 @@ target_link_libraries(
   Arrow::arrow_shared
   Parquet::parquet_shared
   libtrossen_arm
+  trossen_vr::trossen_vr
   SCServo
   trossen_slate
 )
