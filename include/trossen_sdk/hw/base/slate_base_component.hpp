@@ -8,8 +8,10 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "trossen_sdk/hw/hardware_component.hpp"
+#include "trossen_sdk/hw/teleop/teleop_capable.hpp"
 #include "trossen_slate/trossen_slate.hpp"
 
 namespace trossen::hw::base {
@@ -17,9 +19,12 @@ namespace trossen::hw::base {
 /**
  * @brief Hardware component for SLATE mobile base
  *
- * Wraps TrossenSlate driver and provides JSON configuration.
+ * Wraps TrossenSlate driver and provides JSON configuration. Implements
+ * teleop::BaseSpaceTeleop so a teleop leader (e.g. VR joystick) can drive the
+ * base with a 2-element `[linear_mps, angular_rps]` vector each tick.
  */
-class SlateBaseComponent : public HardwareComponent {
+class SlateBaseComponent : public HardwareComponent,
+                           public teleop::BaseSpaceTeleop {
 public:
   /**
    * @brief Constructor
@@ -63,6 +68,25 @@ public:
    * @return Shared pointer to driver
    */
   std::shared_ptr<trossen_slate::TrossenSlate> get_driver() const { return driver_; }
+
+  // ── teleop::BaseSpaceTeleop: IO contract ───────────────────────────────
+  // Base-space vector layout is `[linear_mps, angular_rps]`.
+
+  /// Return the base's current commanded velocity `[linear, angular]`.
+  std::vector<float> read() override;
+
+  /// Forward `[linear, angular]` to the driver's `set_cmd_vel`. Commands
+  /// shorter than two elements are ignored to keep the hot loop silent under
+  /// transient empty reads from a leader that has not synced yet.
+  void write(const std::vector<float>& cmd) override;
+
+  // ── teleop::TeleopCapable: lifecycle ───────────────────────────────────
+
+  /// Ensure motor torque is enabled before the mirror loop starts.
+  void prepare_for_teleop() override;
+
+  /// Zero the commanded velocity so the base coasts to a stop.
+  void end_teleop() override;
 
 private:
   std::shared_ptr<trossen_slate::TrossenSlate> driver_;

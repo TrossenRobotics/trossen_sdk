@@ -60,6 +60,28 @@ nlohmann::json SlateBaseComponent::get_info() const {
   return info;
 }
 
+std::vector<float> SlateBaseComponent::read() {
+  if (!driver_) return {0.0f, 0.0f};
+  auto vel = driver_->get_vel();
+  return {vel[0], vel[1]};
+}
+
+void SlateBaseComponent::write(const std::vector<float>& cmd) {
+  if (!driver_ || cmd.size() < 2) return;
+  driver_->set_cmd_vel(cmd[0], cmd[1]);
+}
+
+void SlateBaseComponent::prepare_for_teleop() {
+  if (!driver_) return;
+  std::string torque_result;
+  driver_->enable_motor_torque(true, torque_result);
+}
+
+void SlateBaseComponent::end_teleop() {
+  if (!driver_) return;
+  driver_->set_cmd_vel(0.0f, 0.0f);
+}
+
 // Register the hardware component with the hardware registry
 REGISTER_HARDWARE(SlateBaseComponent, "slate_base")
 
