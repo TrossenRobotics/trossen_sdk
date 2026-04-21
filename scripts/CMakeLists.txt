@@ -26,3 +26,8 @@ target_include_directories(trossen_mcap_to_lerobot_v2 PRIVATE
 )
 target_compile_definitions(trossen_mcap_to_lerobot_v2 PRIVATE MCAP_IMPLEMENTATION)
 target_link_libraries(trossen_mcap_to_lerobot_v2 trossen_sdk arrow parquet zstd lz4 protobuf ${OpenCV_LIBS})
+
+# Camera discovery tool
+find_package(realsense2 REQUIRED)
+add_executable(find_cameras find_cameras/find_cameras.cpp)
+target_link_libraries(find_cameras realsense2::realsense2 ${OpenCV_LIBS})
