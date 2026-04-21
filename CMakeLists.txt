@@ -37,6 +37,7 @@ add_library(trossen_sdk SHARED
   src/hw/base/slate_base_producer.cpp
   src/hw/vr/vr_session.cpp
   src/hw/vr/vr_arm_controller.cpp
+  src/hw/vr/vr_base_joystick.cpp
   src/hw/teleop/teleop_controller.cpp
   src/hw/teleop/teleop_factory.cpp
   src/hw/camera/opencv_camera_component.cpp
