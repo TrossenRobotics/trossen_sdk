@@ -19,6 +19,7 @@
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <parquet/arrow/reader.h>
+#include <parquet/statistics.h>
 #include <parquet/arrow/writer.h>
 
 #include <algorithm>
@@ -44,6 +45,7 @@
 #include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
+extern char** environ;  // POSIX environ — not guaranteed by C++ standard headers
 #include <vector>
 
 #include "trossen_sdk/utils/app_utils.hpp"
@@ -373,7 +375,6 @@ int main(int argc, char** argv) {
   const std::string config_task_name = lerobot_config->task_name;
   const std::string config_robot_name = lerobot_config->robot_name;
   const float config_fps = lerobot_config->fps;
-  const bool overwrite_existing = lerobot_config->overwrite_existing;
   const bool encode_videos = lerobot_config->encode_videos;
 
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -639,7 +640,8 @@ int main(int argc, char** argv) {
   auto estimate_episode_rows = [](const fs::path& mcap_path) -> int64_t {
     mcap::McapReader probe;
     if (!probe.open(mcap_path.string()).ok()) return 0;
-    probe.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+    auto summary_status = probe.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+    if (!summary_status.ok()) return 0;
     const auto& stats = probe.statistics();
     if (!stats.has_value()) return 0;
     const auto& channels = probe.channels();
@@ -673,9 +675,25 @@ int main(int argc, char** argv) {
     fs::path meta_dir = fs::path(dataset_root_dir) / repository_id / dataset_id / "meta";
     std::error_code ec;
     fs::create_directories(chunk_data, ec);
+    if (ec) {
+      std::cerr << "Error: failed to create " << chunk_data << ": " << ec.message() << "\n";
+      return 1;
+    }
     fs::create_directories(chunk_images, ec);
+    if (ec) {
+      std::cerr << "Error: failed to create " << chunk_images << ": " << ec.message() << "\n";
+      return 1;
+    }
     fs::create_directories(chunk_videos, ec);
+    if (ec) {
+      std::cerr << "Error: failed to create " << chunk_videos << ": " << ec.message() << "\n";
+      return 1;
+    }
     fs::create_directories(meta_dir, ec);
+    if (ec) {
+      std::cerr << "Error: failed to create " << meta_dir << ": " << ec.message() << "\n";
+      return 1;
+    }
   }
   // Scan existing parquet files to find the max stored index value.
   // On resume/re-run, new episodes must continue from max+1 to avoid
@@ -720,60 +738,28 @@ int main(int argc, char** argv) {
       if (index_column < 0) {
         continue;
       }
-      std::shared_ptr<arrow::ChunkedArray> index_values;
-      auto read_status = reader->ReadColumn(index_column, &index_values);
-      if (!read_status.ok() || !index_values) {
+      // Use row group statistics (min/max in footer) instead of reading
+      // the full column — O(1) vs O(total_rows), much faster at scale.
+      auto parquet_reader = reader->parquet_reader();
+      if (!parquet_reader) {
+        continue;
+      }
+      auto metadata = parquet_reader->metadata();
+      if (!metadata || metadata->num_row_groups() <= 0) {
         continue;
       }
       int64_t file_max_index = -1;
-      for (const auto& chunk : index_values->chunks()) {
-        switch (chunk->type_id()) {
-          case arrow::Type::INT64: {
-            auto array = std::static_pointer_cast<arrow::Int64Array>(chunk);
-            for (int64_t i = 0; i < array->length(); ++i) {
-              if (!array->IsNull(i)) {
-                file_max_index = std::max(file_max_index, array->Value(i));
-              }
-            }
-            break;
-          }
-          case arrow::Type::INT32: {
-            auto array = std::static_pointer_cast<arrow::Int32Array>(chunk);
-            for (int64_t i = 0; i < array->length(); ++i) {
-              if (!array->IsNull(i)) {
-                file_max_index = std::max(file_max_index,
-                                          static_cast<int64_t>(array->Value(i)));
-              }
-            }
-            break;
-          }
-          case arrow::Type::UINT64: {
-            auto array = std::static_pointer_cast<arrow::UInt64Array>(chunk);
-            for (int64_t i = 0; i < array->length(); ++i) {
-              if (!array->IsNull(i) &&
-                  array->Value(i) <=
-                  static_cast<uint64_t>(std::numeric_limits<int64_t>::max())) {
-                file_max_index = std::max(file_max_index,
-                                          static_cast<int64_t>(array->Value(i)));
-              }
-            }
-            break;
-          }
-          case arrow::Type::UINT32: {
-            auto array = std::static_pointer_cast<arrow::UInt32Array>(chunk);
-            for (int64_t i = 0; i < array->length(); ++i) {
-              if (!array->IsNull(i)) {
-                file_max_index = std::max(file_max_index,
-                                          static_cast<int64_t>(array->Value(i)));
-              }
-            }
-            break;
-          }
-          default:
-            std::cerr << "Warning: unsupported parquet index column type in "
-                      << it->path()
-                      << " while recovering global index state." << std::endl;
-            break;
+      for (int rg = 0; rg < metadata->num_row_groups(); ++rg) {
+        auto rg_meta = metadata->RowGroup(rg);
+        if (!rg_meta) continue;
+        auto col_meta = rg_meta->ColumnChunk(index_column);
+        if (!col_meta) continue;
+        auto stats = col_meta->statistics();
+        if (!stats || !stats->HasMinMax()) continue;
+        // Extract max as int64 regardless of physical type
+        auto typed = std::dynamic_pointer_cast<parquet::Int64Statistics>(stats);
+        if (typed) {
+          file_max_index = std::max(file_max_index, typed->max());
         }
       }
       if (file_max_index >= 0) {
@@ -1998,7 +1984,11 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
         posix_spawn_file_actions_destroy(&fa);
         if (err != 0) return -1;
         int status;
-        waitpid(pid, &status, 0);
+        int wp;
+        do {
+          wp = waitpid(pid, &status, 0);
+        } while (wp == -1 && errno == EINTR);
+        if (wp == -1) return -1;
         return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
       };
       std::string cam = camera_name;
@@ -2015,8 +2005,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
         if (ret == 0) {
           ++videos_created;
-        } else if (is_gpu) {
-          // GPU encode failed — retry with CPU encoder (no slot needed)
+        } else if (is_gpu && (ret == 187 || ret == 1)) {
+          // Exit 187 = NVENC session limit (47872 % 256 via WEXITSTATUS).
+          // Exit 1 = generic encoder init failure (also session-related).
+          // Other non-zero codes = real encoding errors — do not mask with CPU fallback.
           {
             std::lock_guard<std::mutex> lk(cam_log_mutex);
             log << "  [WARNING] " << cam << " GPU encode failed (exit "
