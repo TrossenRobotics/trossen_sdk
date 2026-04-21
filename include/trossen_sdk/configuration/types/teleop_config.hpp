@@ -26,12 +26,12 @@ struct TeleoperationPair {
   /// @brief Key in hardware.arms map for the follower arm
   std::string follower;
 
-  /// @brief Teleop space: "joint" or "cartesian". Defaults to "joint".
+  /// @brief Teleop space: "joint", "cartesian", or "base". Defaults to "joint".
   ///
   /// The factory converts this to teleop::TeleopCapable::Space. The chosen
-  /// space must be implemented (via JointSpaceTeleop / CartesianSpaceTeleop)
-  /// by both the leader and the follower — otherwise the controller throws
-  /// at construction.
+  /// space must be implemented (via JointSpaceTeleop / CartesianSpaceTeleop /
+  /// BaseSpaceTeleop) by both the leader and the follower — otherwise the
+  /// controller throws at construction.
   std::string space{"joint"};
 
   static TeleoperationPair from_json(const nlohmann::json& j) {
@@ -58,8 +58,8 @@ struct TeleoperationPair {
  *
  * The teleop loop mirrors each leader's state to its paired follower at the
  * specified rate. Set "enabled" to false to skip teleop (e.g. replay mode).
- * The "space" field on each pair selects the teleop space ("joint" or
- * "cartesian"); it defaults to "joint" if omitted.
+ * The "space" field on each pair selects the teleop space ("joint",
+ * "cartesian", or "base"); it defaults to "joint" if omitted.
  *
  * Per-arm tuning (staging pose, trajectory time, etc.) lives in each arm's
  * own hardware configuration block.

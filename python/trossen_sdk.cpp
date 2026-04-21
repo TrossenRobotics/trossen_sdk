@@ -656,6 +656,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
   py::enum_<TeleopCapable::Space>(m, "TeleopSpace")
     .value("Joint", TeleopCapable::Space::Joint)
     .value("Cartesian", TeleopCapable::Space::Cartesian)
+    .value("Base", TeleopCapable::Space::Base)
     .export_values();
 
   py::class_<TeleopTypeIO, PyTeleopTypeIO,

@@ -2,7 +2,7 @@
  * @file teleop_capable.hpp
  * @brief Mixin interfaces for teleop-capable hardware.
  *
- * Teleop capability is structured around four interfaces:
+ * Teleop capability is structured around five interfaces:
  *
  *   - TeleopTypeIO          : pure IO contract (`read()` / `write()`) that
  *                              the controller's hot loop talks to.
@@ -12,6 +12,8 @@
  *                              nullptr if unsupported).
  *   - JointSpaceTeleop       : TeleopCapable + TeleopTypeIO for joint space.
  *   - CartesianSpaceTeleop   : TeleopCapable + TeleopTypeIO for cartesian space.
+ *   - BaseSpaceTeleop        : TeleopCapable + TeleopTypeIO for mobile-base
+ *                              velocity space (2-vec [linear, angular]).
  *
  * A hardware component must implement at least one space child to be usable
  * by the teleop controller. The controller calls `as_space_io(cfg.space)`
@@ -113,7 +115,7 @@ public:
   /// `Count` is a sentinel (not a real space) used to make the descriptor
   /// table's compile-time check meaningful. When adding a new space,
   /// insert it before `Count` and add a matching row to `kSpaceDescriptors`.
-  enum class Space { Joint, Cartesian, Count };
+  enum class Space { Joint, Cartesian, Base, Count };
 
   virtual ~TeleopCapable() = default;
 
@@ -167,9 +169,10 @@ struct SpaceDescriptor {
   std::string_view     iface_name;  ///< C++ interface, e.g. "JointSpaceTeleop".
 };
 
-inline constexpr std::array<SpaceDescriptor, 2> kSpaceDescriptors{{
+inline constexpr std::array<SpaceDescriptor, 3> kSpaceDescriptors{{
   {TeleopCapable::Space::Joint,     "joint",     "JointSpaceTeleop"},
   {TeleopCapable::Space::Cartesian, "cartesian", "CartesianSpaceTeleop"},
+  {TeleopCapable::Space::Base,      "base",      "BaseSpaceTeleop"},
 }};
 
 // Compile-time check: every Space enum value has a descriptor row. The
@@ -231,6 +234,21 @@ class CartesianSpaceTeleop : public virtual TeleopCapable, public TeleopTypeIO {
 public:
   TeleopTypeIO* as_space_io(Space s) override {
     return s == Space::Cartesian ? static_cast<TeleopTypeIO*>(this) : nullptr;
+  }
+};
+
+/**
+ * @brief Mobile-base velocity teleop interface.
+ *
+ * Commands carry a 2-element vector `[linear_mps, angular_rps]`: translational
+ * velocity along the forward axis and yaw rate about the vertical axis. This
+ * is the natural command space for differential-drive / holonomic bases that
+ * accept `(linear, angular)` rather than an end-effector pose.
+ */
+class BaseSpaceTeleop : public virtual TeleopCapable, public TeleopTypeIO {
+public:
+  TeleopTypeIO* as_space_io(Space s) override {
+    return s == Space::Base ? static_cast<TeleopTypeIO*>(this) : nullptr;
   }
 };
 

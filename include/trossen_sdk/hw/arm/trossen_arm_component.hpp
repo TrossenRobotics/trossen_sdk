@@ -89,6 +89,8 @@ public:
     switch (space) {
       case Space::Joint:     return &joint_view_;
       case Space::Cartesian: return &cart_view_;
+      case Space::Base:      return nullptr;
+      case Space::Count:     return nullptr;
     }
     return nullptr;
   }
