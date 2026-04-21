@@ -1,0 +1,53 @@
+{
+  "robot_name": "trossen_vr_stationary",
+
+  "hardware": {
+    "arms": {
+      "follower_right": {
+        "ip_address":   "192.168.1.4",
+        "model":        "wxai_v0",
+        "end_effector": "wxai_v0_follower"
+      }
+    },
+    "cameras": []
+  },
+
+  "producers": [
+    {
+      "type":            "trossen_arm",
+      "hardware_id":     "follower_right",
+      "stream_id":       "follower_right",
+      "poll_rate_hz":    30.0,
+      "use_device_time": false
+    }
+  ],
+
+  "vr": {
+    "arm_controllers": {
+      "vr_right": {
+        "controller":       "right",
+        "vr_port":          5432,
+        "gripper_min_m":    0.0,
+        "gripper_max_m":    0.04,
+        "wait_for_quest_s": 120.0
+      }
+    }
+  },
+
+  "teleop": {
+    "enabled": true,
+    "rate_hz": 200.0,
+    "pairs": [
+      { "leader": "vr_right", "follower": "follower_right", "space": "cartesian" }
+    ]
+  },
+
+  "session": {
+    "backend_type": "trossen_mcap",
+    "max_duration": 30
+  },
+
+  "trossen_mcap_backend": {
+    "root": "data/trossen_vr_stationary"
+  }
+}

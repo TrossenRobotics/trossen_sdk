@@ -8,6 +8,10 @@ target_link_libraries(trossen_solo_ai trossen_sdk libtrossen_arm)
 add_executable(trossen_stationary_ai trossen_stationary_ai/trossen_stationary_ai.cpp)
 target_link_libraries(trossen_stationary_ai trossen_sdk libtrossen_arm)
 
+# Trossen VR Stationary — 1 Meta Quest leader + 1 follower arm, no cameras
+add_executable(trossen_vr_stationary trossen_vr_stationary/trossen_vr_stationary.cpp)
+target_link_libraries(trossen_vr_stationary trossen_sdk libtrossen_arm)
+
 # Trossen Mobile AI — bimanual + SLATE mobile base + 3 cameras
 add_executable(trossen_mobile_ai trossen_mobile_ai/trossen_mobile_ai.cpp)
 target_link_libraries(trossen_mobile_ai trossen_sdk libtrossen_arm)
