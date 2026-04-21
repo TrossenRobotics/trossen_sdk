@@ -112,8 +112,15 @@ void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
 
 std::vector<float> TrossenArmComponent::read_cartesian() {
   if (!driver_) return {};
-  const auto& p = driver_->get_robot_output().cartesian.positions;
-  return std::vector<float>(p.begin(), p.end());
+  const auto& out = driver_->get_robot_output();
+  // Layout: [x, y, z, rx, ry, rz, gripper_m]. The first six come from the
+  // driver's 6-DoF cartesian pose (translation + axis-angle rotation); the
+  // gripper opening is tracked in joint space and appended as a scalar.
+  std::vector<float> sample;
+  sample.reserve(out.cartesian.positions.size() + 1);
+  sample.assign(out.cartesian.positions.begin(), out.cartesian.positions.end());
+  sample.push_back(static_cast<float>(out.joint.gripper.position));
+  return sample;
 }
 
 void TrossenArmComponent::write_cartesian(const std::vector<float>& cmd) {
@@ -122,6 +129,10 @@ void TrossenArmComponent::write_cartesian(const std::vector<float>& cmd) {
   std::copy_n(cmd.begin(), 6, goal.begin());
   driver_->set_cartesian_positions(
     goal, trossen_arm::InterpolationSpace::cartesian, 0.0, false);
+  // Optional 7th element drives the gripper opening directly.
+  if (cmd.size() >= 7) {
+    driver_->set_gripper_position(static_cast<double>(cmd[6]), 0.0, false);
+  }
 }
 
 // ── Shared lifecycle ─────────────────────────────────────────────────────
