@@ -12,6 +12,21 @@
 
 namespace trossen::hw::arm {
 
+namespace {
+
+// Interpolation window handed to the driver on each cartesian / gripper
+// write during teleop. With the teleop loop superseding commands every few
+// ms, a non-zero goal_time lets the driver blend a short trajectory toward
+// each target instead of snapping — eliminating the buzz you get when the
+// VR sample noise is delivered as a step input. Cartesian uses the shorter
+// window so the arm tracks hand motion responsively; gripper uses a
+// slightly longer one so squeeze feels less twitchy. Tuned on wxai_v0 at
+// 200 Hz teleop.
+constexpr double kTeleopCartesianGoalTimeSeconds = 0.05;
+constexpr double kTeleopGripperGoalTimeSeconds   = 0.10;
+
+}  // namespace
+
 void TrossenArmComponent::configure(const nlohmann::json& config) {
   // Parse IP address
   if (!config.contains("ip_address")) {
@@ -128,10 +143,12 @@ void TrossenArmComponent::write_cartesian(const std::vector<float>& cmd) {
   std::array<double, 6> goal;
   std::copy_n(cmd.begin(), 6, goal.begin());
   driver_->set_cartesian_positions(
-    goal, trossen_arm::InterpolationSpace::cartesian, 0.0, false);
+    goal, trossen_arm::InterpolationSpace::cartesian,
+    kTeleopCartesianGoalTimeSeconds, false);
   // Optional 7th element drives the gripper opening directly.
   if (cmd.size() >= 7) {
-    driver_->set_gripper_position(static_cast<double>(cmd[6]), 0.0, false);
+    driver_->set_gripper_position(
+      static_cast<double>(cmd[6]), kTeleopGripperGoalTimeSeconds, false);
   }
 }
 
