@@ -25,21 +25,21 @@
     "cameras": [
       {
         "id":            "camera_high",
-        "serial_number": "130322272628",
+        "serial_number": "128422270115",
         "width":         640,
         "height":        480,
         "fps":           30
       },
       {
-        "id":            "camera_low",
-        "serial_number": "218622270304",
+        "id":            "camera_left_wrist",
+        "serial_number": "230322276010",
         "width":         640,
         "height":        480,
         "fps":           30
       },
       {
         "id":            "camera_right_wrist",
-        "serial_number": "218622274938",
+        "serial_number": "230322271348",
         "width":         640,
         "height":        480,
         "fps":           30
@@ -79,8 +79,8 @@
     },
     {
       "type":            "realsense_camera",
-      "hardware_id":     "camera_low",
-      "stream_id":       "camera_low",
+      "hardware_id":     "camera_left_wrist",
+      "stream_id":       "camera_left_wrist",
       "poll_rate_hz":    30.0,
       "encoding":        "bgr8",
       "use_device_time": true
