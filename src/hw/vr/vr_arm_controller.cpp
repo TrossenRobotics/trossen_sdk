@@ -62,6 +62,7 @@ double map_unit_to_range(double t, double lo, double hi) {
 
 VrArmControllerComponent::~VrArmControllerComponent() {
   if (session_held_) {
+    VrSession::instance().release_claims(get_identifier());
     VrSession::instance().release();
     session_held_ = false;
   }
@@ -97,6 +98,13 @@ void VrArmControllerComponent::configure(const nlohmann::json& config) {
 
   VrSession::instance().ensure_started(vr_port_);
   session_held_ = true;
+
+  // Declare which inputs this component consumes on its hand. Any
+  // other component trying to claim the same (hand, input) pair will
+  // fail configure() with a readable error.
+  VrSession::instance().claim_inputs(
+    controller_, get_identifier(),
+    {VrInput::kPose, VrInput::kTrigger});
 }
 
 nlohmann::json VrArmControllerComponent::get_info() const {

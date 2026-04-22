@@ -42,6 +42,7 @@ double VrBaseJoystickComponent::apply_deadzone(double v, double deadzone) {
 
 VrBaseJoystickComponent::~VrBaseJoystickComponent() {
   if (session_held_) {
+    VrSession::instance().release_claims(get_identifier());
     VrSession::instance().release();
     session_held_ = false;
   }
@@ -78,6 +79,10 @@ void VrBaseJoystickComponent::configure(const nlohmann::json& config) {
 
   VrSession::instance().ensure_started(vr_port_);
   session_held_ = true;
+
+  // Thumbstick is the only input this component consumes.
+  VrSession::instance().claim_inputs(
+    controller_, get_identifier(), {VrInput::kThumbstick});
 }
 
 nlohmann::json VrBaseJoystickComponent::get_info() const {
