@@ -25,6 +25,7 @@ a985f44f  vr: add VrSessionControlComponent (button source for SessionControl)
 c9e863e1  examples: migrate trossen_vr_stationary to SessionControl flow
 9cf104c7  examples: add VR mobile demo scaffold (WIP)
 10fda1e5  examples: bimanual arms + VR session-control in trossen_vr_mobile
+854b8806  vr: add native C++ mDNS advertiser to replace mdns_helper.py
 ```
 
 ## Proposed PR split
@@ -139,10 +140,12 @@ discussion; none are fixed on this branch yet.
    config or document the assumption. Fix in PR 3.
 5. **Split `da47d5ce`** from the stationary-demo PR before sending
    (see PR 5 above).
-6. **mDNS helper as an external Python dependency.** The stationary
-   demo requires a sidecar script; document as a known limitation and
-   file an issue to upstream mDNS advertisement into the C++
-   `trossen_vr` lib.
+6. ~~**mDNS helper as an external Python dependency.**~~ **Resolved**
+   by commit `854b8806` — a native C++ `VrMdnsAdvertiser` (Avahi-backed)
+   is constructed by both demos at startup. The Python helper stays in
+   the tree as a documented fallback when Avahi is unavailable on the
+   host. The advertiser likely belongs upstream in `trossen_vr`; move
+   it there when that repo is touched next.
 7. **Extract a `VrLeaderBase`.** The session / `wait_for_quest` /
    lifecycle boilerplate is duplicated across arm, base, and
    session-control components. A shared base is warranted now that
