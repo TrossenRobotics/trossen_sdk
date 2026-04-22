@@ -375,13 +375,19 @@ int main(int argc, char** argv) {
               << (controllers.empty() ? "" : " and mirroring") << " active.\n";
   });
   mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
+    // Order matters:
+    //   1. pause_teleop — stop the mirror thread so the VR controller
+    //      no longer drives the arms. Without this, operator
+    //      repositioning during the reset phase would still move the
+    //      follower.
+    //   2. reset_teleop — fire post_episode() hooks on both sides.
+    //   3. restage — move the arms to their configured staging poses.
+    //      The follower is now idle (mirror is paused) and can be
+    //      commanded directly to the staging pose.
+    // The next prepare_teleop() re-syncs so the new VR pose becomes
+    // the anchor without the arm snapping.
+    for (auto& ctrl : controllers) ctrl->pause_teleop();
     for (auto& ctrl : controllers) ctrl->reset_teleop();
-    // Send the arms back to their configured staging poses so the
-    // operator has a known-safe starting point for the next episode.
-    // wait_for_reset() then blocks (infinitely, when reset_duration
-    // is unset) while the operator repositions the VR controller;
-    // the next prepare_teleop() re-syncs so the new VR pose becomes
-    // the anchor.
     for (auto& ctrl : controllers) ctrl->restage();
     const std::string file_path =
       trossen::utils::generate_episode_path(root, stats.current_episode_index);

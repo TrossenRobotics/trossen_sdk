@@ -75,10 +75,24 @@ public:
    * @brief Start the mirror loop.
    *
    * Spawns the control thread that reads the leader and writes to the
-   * follower at control_rate_hz. No-op if already running; the mirror runs
-   * continuously across episodes.
+   * follower at control_rate_hz. No-op if already running. Also
+   * resumes from a prior `pause_teleop()` — drivers stay prepared
+   * across a pause/resume cycle, so a fresh driver bring-up is not
+   * needed on resume.
    */
   void teleop();
+
+  /**
+   * @brief Pause the mirror loop without tearing down drivers.
+   *
+   * Joins the control thread but does not call `end_teleop()`. The
+   * leader and follower keep their prepared driver state, so a
+   * subsequent `teleop()` resumes mirroring without repeating the
+   * first-time bring-up. Intended for the reset window between
+   * episodes, where the arms should stop following the leader so
+   * the operator can reposition safely.
+   */
+  void pause_teleop();
 
   /**
    * @brief Enter reset mode.
@@ -139,6 +153,16 @@ private:
   Config cfg_;
   std::thread thread_;
   std::atomic<bool> running_{false};
+
+  /// @brief First-time driver bring-up has completed.
+  ///
+  /// Distinct from `running_`: `running_` tracks whether the mirror
+  /// thread is live, while `driver_prepared_` tracks whether
+  /// `prepare_for_teleop()` has been dispatched to the leader and
+  /// follower. `pause_teleop()` clears `running_` but leaves the
+  /// drivers prepared, so a subsequent `teleop()` resumes without a
+  /// second driver bring-up.
+  bool driver_prepared_{false};
 };
 
 }  // namespace trossen::hw::teleop

@@ -142,13 +142,30 @@ void TrossenArmComponent::write_cartesian(const std::vector<float>& cmd) {
   if (!driver_ || cmd.size() < 6) return;
   std::array<double, 6> goal;
   std::copy_n(cmd.begin(), 6, goal.begin());
-  driver_->set_cartesian_positions(
-    goal, trossen_arm::InterpolationSpace::cartesian,
-    kTeleopCartesianGoalTimeSeconds, false);
+  // Unreachable / un-solvable cartesian targets are common during VR
+  // teleop — the operator swings the controller through poses the IK
+  // can't resolve. The driver throws on these; if we let the exception
+  // propagate it would terminate the mirror loop for the rest of the
+  // session. Swallow it silently so the next solvable sample recovers
+  // teleop naturally. The gripper call is independent and is guarded
+  // the same way so one bad cartesian sample doesn't also drop the
+  // gripper command.
+  try {
+    driver_->set_cartesian_positions(
+      goal, trossen_arm::InterpolationSpace::cartesian,
+      kTeleopCartesianGoalTimeSeconds, false);
+  } catch (const std::exception&) {
+    // Hold the last valid cartesian target; the arm's own trajectory
+    // blender decelerates gracefully if no fresh command arrives.
+  }
   // Optional 7th element drives the gripper opening directly.
   if (cmd.size() >= 7) {
-    driver_->set_gripper_position(
-      static_cast<double>(cmd[6]), kTeleopGripperGoalTimeSeconds, false);
+    try {
+      driver_->set_gripper_position(
+        static_cast<double>(cmd[6]), kTeleopGripperGoalTimeSeconds, false);
+    } catch (const std::exception&) {
+      // Same rationale as above; hold the last gripper command.
+    }
   }
 }
 

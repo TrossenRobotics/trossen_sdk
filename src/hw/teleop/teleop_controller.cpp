@@ -87,14 +87,17 @@ void TeleopController::prepare_teleop() {
     follower_->pre_episode();
   }
 
-  // First-episode setup: only run the one-shot driver bring-up
-  // (prepare_for_teleop) the first time through. Subsequent calls skip
-  // it — the hardware is already teleop-ready from the first episode.
-  if (!running_) {
+  // First-time driver bring-up: gated on `driver_prepared_`, not on
+  // `running_`. `pause_teleop()` clears `running_` between episodes
+  // without tearing down drivers, so we must not re-run the bring-up
+  // on resume.
+  if (!driver_prepared_) {
     if (follower_) {
       follower_->prepare_for_teleop();
     }
     leader_->prepare_for_teleop();
+    driver_prepared_ = true;
+    std::cout << "  [teleop] Arms ready for teleop\n";
   }
 
   // Always re-sync at the top of each episode so virtual leaders
@@ -105,10 +108,6 @@ void TeleopController::prepare_teleop() {
   // between episodes without the arm snapping on the next start.
   if (follower_io_) {
     leader_io_->sync_to_state(follower_io_->read());
-  }
-
-  if (!running_) {
-    std::cout << "  [teleop] Arms ready for teleop\n";
   }
 }
 
@@ -126,17 +125,28 @@ void TeleopController::reset_teleop() {
   }
 }
 
+void TeleopController::pause_teleop() {
+  // Stop the mirror thread but keep drivers prepared. This is the
+  // between-episode pause — the arms stop following the leader so
+  // the operator can reposition without the follower tracking, and
+  // resume via `teleop()` skips the driver bring-up because
+  // `driver_prepared_` is still true.
+  running_.store(false);
+  if (thread_.joinable()) {
+    thread_.join();
+  }
+}
+
 void TeleopController::restage() {
   // Mirror the constructor's staging call so the arms return to their
   // configured staging pose between episodes. sync_to_state captures
   // the new anchor on the next prepare_teleop() — callers should
   // invoke this after the current episode has stopped and before the
-  // next one starts.
+  // next one starts. Silent: the motion itself is the feedback.
   leader_->stage();
   if (follower_) {
     follower_->stage();
   }
-  std::cout << "  [teleop] Re-staging initiated\n";
 }
 
 void TeleopController::stop_teleop() {
@@ -151,6 +161,9 @@ void TeleopController::stop_teleop() {
   if (follower_) {
     follower_->end_teleop();
   }
+  // Clear the first-time gate so a subsequent prepare_teleop() (e.g.
+  // during a full session restart) re-runs the driver bring-up.
+  driver_prepared_ = false;
 }
 
 // ── Control loop ────────────────────────────────────────────────────────
