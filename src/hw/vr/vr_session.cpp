@@ -18,7 +18,24 @@ namespace {
 // well under human perceptual thresholds) without burning CPU.
 constexpr std::chrono::milliseconds kConnectPollInterval{50};
 
+bool is_valid_hand(const std::string& hand) {
+  return hand == "left" || hand == "right";
+}
+
 }  // namespace
+
+std::string_view vr_input_name(VrInput input) {
+  switch (input) {
+    case VrInput::kPose:       return "pose";
+    case VrInput::kTrigger:    return "trigger";
+    case VrInput::kGrip:       return "grip";
+    case VrInput::kThumbstick: return "thumbstick";
+    case VrInput::kButtonA:    return "button_a";
+    case VrInput::kButtonB:    return "button_b";
+    case VrInput::kMenu:       return "menu";
+  }
+  return "unknown";
+}
 
 VrSession& VrSession::instance() {
   static VrSession session;
@@ -130,6 +147,51 @@ bool VrSession::consume_start_signal(const std::string& controller_hand) {
   const bool rising_edge = (!prev && current);
   prev = current;
   return rising_edge;
+}
+
+void VrSession::claim_inputs(const std::string& hand,
+                             const std::string& component_id,
+                             std::initializer_list<VrInput> inputs) {
+  if (!is_valid_hand(hand)) {
+    throw std::runtime_error(
+      "VrSession::claim_inputs: hand must be 'left' or 'right', got '" +
+      hand + "'");
+  }
+  if (component_id.empty()) {
+    throw std::runtime_error(
+      "VrSession::claim_inputs: component_id must not be empty");
+  }
+
+  std::lock_guard<std::mutex> lock(mutex_);
+  // First pass: conflict detection. Done before any mutation so a
+  // partial claim never leaks on failure.
+  for (const auto input : inputs) {
+    const ClaimKey key{hand, input};
+    auto it = claims_.find(key);
+    if (it != claims_.end() && it->second != component_id) {
+      throw std::runtime_error(
+        std::string{"VrSession::claim_inputs: '"} +
+        std::string{vr_input_name(input)} + "' on hand '" + hand +
+        "' is already claimed by '" + it->second +
+        "'; requested by '" + component_id + "'");
+    }
+  }
+  // Second pass: apply. Idempotent when the same component re-claims.
+  for (const auto input : inputs) {
+    claims_[ClaimKey{hand, input}] = component_id;
+  }
+}
+
+void VrSession::release_claims(const std::string& component_id) {
+  if (component_id.empty()) return;
+  std::lock_guard<std::mutex> lock(mutex_);
+  for (auto it = claims_.begin(); it != claims_.end(); ) {
+    if (it->second == component_id) {
+      it = claims_.erase(it);
+    } else {
+      ++it;
+    }
+  }
 }
 
 }  // namespace trossen::hw::vr

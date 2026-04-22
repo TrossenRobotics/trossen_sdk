@@ -8,16 +8,41 @@
 
 #include <chrono>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 
 #include "trossen_vr/vr_manager.hpp"
 #include "trossen_vr/vr_types.hpp"
 
 namespace trossen::hw::vr {
+
+/**
+ * @brief Logical inputs a VR component can consume from the shared
+ * frame stream.
+ *
+ * Each VR hardware component (arm controller, base joystick, session
+ * control, …) claims a non-overlapping subset of these on its
+ * configured hand. `VrSession::claim_inputs()` enforces this so
+ * conflicts (e.g. two components fighting for the trigger) are caught
+ * at configure() time, not as silently-wrong teleop behavior.
+ */
+enum class VrInput {
+  kPose,        ///< 6-DOF hand pose (position + orientation).
+  kTrigger,     ///< Index trigger (analog).
+  kGrip,        ///< Side/grip button (analog or digital depending on device).
+  kThumbstick,  ///< 2-axis thumbstick.
+  kButtonA,     ///< A button (right) or X button (left).
+  kButtonB,     ///< B button (right) or Y button (left).
+  kMenu,        ///< Menu / system button.
+};
+
+std::string_view vr_input_name(VrInput input);
 
 /**
  * @brief Process-global shared VR connection.
@@ -91,8 +116,44 @@ public:
    * an in-VR button so the operator does not need to remove the headset.
    *
    * @param controller_hand "left" or "right" — which A-button to watch.
+   *
+   * @deprecated Use a `VrSessionControlComponent` attached via
+   *             `SessionManager::attach_session_control()` instead. This
+   *             method is retained only for the legacy stationary-demo
+   *             code path and will be removed once that demo migrates.
    */
   bool consume_start_signal(const std::string& controller_hand = "right");
+
+  /**
+   * @brief Reserve a set of logical inputs on one hand for a component.
+   *
+   * Each VR hardware component calls this in `configure()` to declare
+   * what it consumes from the shared frame stream. The session maintains
+   * a `(hand, input) -> component_id` map and throws if any requested
+   * input is already claimed by a *different* component.
+   *
+   * Calling `claim_inputs()` a second time with the same `(hand,
+   * component_id, inputs)` is idempotent — useful for components that
+   * can be reconfigured.
+   *
+   * @param hand          "left" or "right".
+   * @param component_id  Stable identifier of the claiming component
+   *                      (typically `HardwareComponent::get_identifier()`).
+   * @param inputs        Inputs to claim on that hand.
+   *
+   * @throws std::runtime_error on conflict or an unrecognized hand.
+   */
+  void claim_inputs(const std::string& hand,
+                    const std::string& component_id,
+                    std::initializer_list<VrInput> inputs);
+
+  /**
+   * @brief Release all claims held by `component_id`.
+   *
+   * Safe to call with no outstanding claims. Typically invoked from a
+   * VR component's destructor or `end_teleop()`.
+   */
+  void release_claims(const std::string& component_id);
 
   VrSession(const VrSession&)            = delete;
   VrSession& operator=(const VrSession&) = delete;
@@ -115,6 +176,26 @@ private:
   /// Last VRState sequence number we consumed a `VRCommand::Start` from.
   /// A fresh Start only fires once per frame sequence, not on repeated reads.
   std::uint64_t last_start_sequence_{0};
+
+  /// `(hand, input) -> component_id` claim table. Populated by
+  /// `claim_inputs()`, queried for conflicts, cleared by
+  /// `release_claims()` when a component tears down.
+  struct ClaimKey {
+    std::string hand;
+    VrInput     input;
+    bool operator==(const ClaimKey& other) const {
+      return hand == other.hand && input == other.input;
+    }
+  };
+  struct ClaimKeyHash {
+    std::size_t operator()(const ClaimKey& k) const noexcept {
+      // Combine the two cheaply; the table stays small (≤ 2 hands ×
+      // ~7 inputs), so collision behavior is irrelevant.
+      return std::hash<std::string>{}(k.hand) ^
+             (std::hash<int>{}(static_cast<int>(k.input)) << 1);
+    }
+  };
+  std::unordered_map<ClaimKey, std::string, ClaimKeyHash> claims_;
 };
 
 }  // namespace trossen::hw::vr
