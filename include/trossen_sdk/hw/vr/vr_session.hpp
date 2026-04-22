@@ -107,24 +107,6 @@ public:
   bool wait_for_connection(std::chrono::milliseconds timeout) const;
 
   /**
-   * @brief Return true once per "start" signal from the VR stream.
-   *
-   * A start signal is either a fresh `VRCommand::Start` on the most recent
-   * frame or a rising edge on the A-button of `controller_hand`. The call
-   * is stateful: the signal is consumed, and subsequent calls return false
-   * until the next rising edge. Designed to gate a demo's episode loop on
-   * an in-VR button so the operator does not need to remove the headset.
-   *
-   * @param controller_hand "left" or "right" — which A-button to watch.
-   *
-   * @deprecated Use a `VrSessionControlComponent` attached via
-   *             `SessionManager::attach_session_control()` instead. This
-   *             method is retained only for the legacy stationary-demo
-   *             code path and will be removed once that demo migrates.
-   */
-  bool consume_start_signal(const std::string& controller_hand = "right");
-
-  /**
    * @brief Reserve a set of logical inputs on one hand for a component.
    *
    * Each VR hardware component calls this in `configure()` to declare
@@ -168,14 +150,6 @@ private:
   std::unique_ptr<trossen_vr::VRManager> manager_;
   std::uint16_t                         port_{0};
   std::size_t                           ref_count_{0};
-
-  /// Rising-edge state for `consume_start_signal`. Keyed per hand so the
-  /// left and right A-buttons can be watched independently.
-  std::unordered_map<std::string, bool> prev_a_button_;
-
-  /// Last VRState sequence number we consumed a `VRCommand::Start` from.
-  /// A fresh Start only fires once per frame sequence, not on repeated reads.
-  std::uint64_t last_start_sequence_{0};
 
   /// `(hand, input) -> component_id` claim table. Populated by
   /// `claim_inputs()`, queried for conflicts, cleared by

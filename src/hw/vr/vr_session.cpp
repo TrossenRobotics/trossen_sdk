@@ -8,7 +8,6 @@
 #include <stdexcept>
 #include <string>
 #include <thread>
-#include <variant>
 
 namespace trossen::hw::vr {
 
@@ -108,45 +107,6 @@ bool VrSession::wait_for_connection(
     std::this_thread::sleep_for(kConnectPollInterval);
   }
   return is_quest_connected();
-}
-
-bool VrSession::consume_start_signal(const std::string& controller_hand) {
-  // Hold the session mutex for the whole call: we touch both the VR manager
-  // (via get_current_state()) and the rising-edge state tracked on this
-  // object. Both are cheap, so taking one lock keeps reasoning simple.
-  std::lock_guard<std::mutex> lock(mutex_);
-  if (!manager_) return false;
-
-  const auto frame_opt = manager_->get_current_state();
-  if (!frame_opt) return false;
-  const auto& frame = *frame_opt;
-
-  // (1) VRCommand::Start fires once per frame sequence. Using the frame's
-  // sequence number (monotonically increasing) guards against re-firing on
-  // the same frame if the caller polls faster than new frames arrive.
-  if (frame.command.has_value() &&
-      *frame.command == trossen_vr::VRCommand::Start &&
-      frame.sequence > last_start_sequence_) {
-    last_start_sequence_ = frame.sequence;
-    return true;
-  }
-
-  // (2) A-button rising edge on the configured hand. The VR protocol names
-  // digital buttons with the hand as a suffix-or-bare key; the shipping
-  // Meta Quest app uses bare "a"/"b" today, so accept both shapes.
-  const std::string suffixed_key = controller_hand + "_a";
-  const auto* press_ptr = [&]() -> const bool* {
-    auto it = frame.buttons.find(suffixed_key);
-    if (it == frame.buttons.end()) it = frame.buttons.find("a");
-    if (it == frame.buttons.end()) return nullptr;
-    return std::get_if<bool>(&it->second);
-  }();
-
-  bool& prev = prev_a_button_[controller_hand];
-  const bool current = press_ptr ? *press_ptr : false;
-  const bool rising_edge = (!prev && current);
-  prev = current;
-  return rising_edge;
 }
 
 void VrSession::claim_inputs(const std::string& hand,
