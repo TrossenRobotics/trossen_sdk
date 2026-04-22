@@ -24,6 +24,7 @@ da47d5ce  trossen_arm: smooth cartesian teleop with tuned goal times
 a985f44f  vr: add VrSessionControlComponent (button source for SessionControl)
 c9e863e1  examples: migrate trossen_vr_stationary to SessionControl flow
 9cf104c7  examples: add VR mobile demo scaffold (WIP)
+10fda1e5  examples: bimanual arms + VR session-control in trossen_vr_mobile
 ```
 
 ## Proposed PR split
@@ -106,11 +107,16 @@ PR 8 (mixin consumer pattern) and PR 9 (input claims).
 
 Drops `consume_start_signal` entirely. Depends on PR 10.
 
-### 12. VR mobile demo (scaffold)
-- `9cf104c7` trossen_vr_mobile WIP scaffold
+### 12. VR mobile demo (bimanual + session control)
+- `9cf104c7` trossen_vr_mobile initial scaffold
+- `10fda1e5` bimanual arms + VR session-control migration
 
-Not ready to ship — file-level scaffold only. Hold until PR 4 and
-PR 11 land, then finish the demo and open a PR.
+**Squash these two into a single commit when sending.** The scaffold
+commit on its own was never runnable (single arm, old gate pattern);
+the follow-up brings it to a working bimanual demo using the
+SessionControl flow. Depends on PR 4 (base joystick), PR 10 (VR
+session control), and PR 11 (stationary demo migration) for the
+pattern.
 
 ## Open items to address before sending PRs
 
