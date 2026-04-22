@@ -52,6 +52,11 @@ SessionManager::SessionManager(){
 }
 
 SessionManager::~SessionManager() {
+  // Release the attached session-control source before tearing down the
+  // rest of the manager so its reader thread stops firing callbacks
+  // into a half-destructed object.
+  detach_session_control();
+
   // Ensure monitoring threads are stopped
   monitoring_active_ = false;
   if (monitor_thread_.joinable()) {
@@ -64,6 +69,93 @@ SessionManager::~SessionManager() {
   }
 
   shutdown();
+}
+
+void SessionManager::attach_session_control(
+  std::shared_ptr<hw::session_control::SessionControlCapable> source)
+{
+  if (!source) {
+    throw std::invalid_argument("attach_session_control: source must not be null");
+  }
+  if (session_control_) {
+    throw std::runtime_error(
+      "attach_session_control: a session-control source is already attached. "
+      "Call detach_session_control() first.");
+  }
+
+  // Reset the event channel so a stale event from a previous attach
+  // does not fire spuriously on the next loop tick.
+  pending_event_.store(hw::session_control::SessionControlEvent::kNone);
+  source_disconnected_.store(false);
+
+  session_control_ = std::move(source);
+  session_control_->set_callbacks(
+    [this](hw::session_control::SessionControlEvent ev) { on_source_event(ev); },
+    [this]() { on_source_disconnect(); });
+  session_control_->start();
+}
+
+void SessionManager::detach_session_control() {
+  if (!session_control_) return;
+  // Stop first so no further callbacks fire into the mutex we are about
+  // to touch.
+  session_control_->stop();
+  session_control_.reset();
+  pending_event_.store(hw::session_control::SessionControlEvent::kNone);
+  source_disconnected_.store(false);
+}
+
+void SessionManager::on_source_event(hw::session_control::SessionControlEvent ev) {
+  // Coalesce: the last intent wins. Queueing human button presses
+  // across slow loop iterations causes confusing cascades (start →
+  // immediate stop-early → start again).
+  pending_event_.store(ev);
+
+  // Wake both condvars. The recording loop waits on `event_cv_`; the
+  // reset loop waits on `reset_cv_` for backward compatibility with
+  // `signal_reset_complete()`.
+  event_cv_.notify_all();
+  reset_cv_.notify_all();
+}
+
+void SessionManager::on_source_disconnect() {
+  source_disconnected_.store(true);
+  event_cv_.notify_all();
+  reset_cv_.notify_all();
+}
+
+UserAction SessionManager::interpret_event(
+  hw::session_control::SessionControlEvent ev,
+  Phase phase)
+{
+  using Event = hw::session_control::SessionControlEvent;
+
+  switch (ev) {
+    case Event::kStopSession:
+      return UserAction::kStop;
+
+    case Event::kRerecord:
+      // In both RECORDING and RESETTING the caller handles the discard
+      // (current vs. last); SessionManager only reports the intent.
+      rerecord_requested_.store(true);
+      return UserAction::kReRecord;
+
+    case Event::kStart:
+      // "Advance" — concrete meaning depends on phase.
+      if (phase == Phase::kResetting) {
+        reset_signaled_.store(true);
+      }
+      return UserAction::kContinue;
+
+    case Event::kStopEarly:
+      // Stop current recording; in RESETTING this is a no-op intent and
+      // we treat it as continue so the reset wait doesn't break oddly.
+      return UserAction::kContinue;
+
+    case Event::kNone:
+    default:
+      return UserAction::kContinue;
+  }
 }
 
 void SessionManager::shutdown() {
@@ -665,12 +757,16 @@ UserAction SessionManager::wait_for_reset() {
   // Enable raw terminal input to detect keypresses without Enter
   trossen::utils::RawModeGuard raw_mode;
 
-  // Helper: wait up to 100ms, waking early on signal_reset_complete()
+  // Helper: wait up to 100ms, waking early on signal_reset_complete(),
+  // a source event, or a source disconnect.
   auto wait_or_signal = [this]() {
     std::unique_lock<std::mutex> lk(reset_mutex_);
     reset_cv_.wait_for(lk, std::chrono::milliseconds(100), [this]() {
       return reset_signaled_.load() || rerecord_requested_.load() ||
-             trossen::utils::g_stop_requested;
+             trossen::utils::g_stop_requested ||
+             source_disconnected_.load() ||
+             pending_event_.load() !=
+               hw::session_control::SessionControlEvent::kNone;
     });
   };
 
@@ -685,6 +781,18 @@ UserAction SessionManager::wait_for_reset() {
       return UserAction::kReRecord;
     }
     return UserAction::kContinue;
+  };
+
+  // Drain any pending event from the attached session-control source.
+  // Returns a non-kContinue action (or sets reset_signaled_) when the
+  // source's latest intent maps to one.
+  auto drain_source_event = [this]() -> UserAction {
+    auto pending = pending_event_.exchange(
+      hw::session_control::SessionControlEvent::kNone);
+    if (pending == hw::session_control::SessionControlEvent::kNone) {
+      return UserAction::kContinue;
+    }
+    return interpret_event(pending, Phase::kResetting);
   };
 
   if (cfg_->reset_duration.has_value()) {
@@ -704,31 +812,41 @@ UserAction SessionManager::wait_for_reset() {
 
     for (int i = total_seconds; i > 0; --i) {
       if (trossen::utils::g_stop_requested || reset_signaled_.load()) break;
+      if (source_disconnected_.load()) return UserAction::kStop;
       if (rerecord_requested_.load()) return UserAction::kReRecord;
       std::cout << "  " << i << "...\n";
       for (int ms = 0; ms < 10; ++ms) {
         if (trossen::utils::g_stop_requested || reset_signaled_.load()) break;
+        if (source_disconnected_.load()) return UserAction::kStop;
         if (rerecord_requested_.load()) return UserAction::kReRecord;
+        auto source_action = drain_source_event();
+        if (source_action == UserAction::kReRecord) return UserAction::kReRecord;
+        if (source_action == UserAction::kStop) return UserAction::kStop;
         auto action = poll_keys();
         if (action == UserAction::kReRecord) return UserAction::kReRecord;
         wait_or_signal();
       }
     }
   } else {
-    // Infinite wait: block until keypress, signal, or Ctrl+C
+    // Infinite wait: block until keypress, signal, source event, or Ctrl+C
     std::cout << "\nWaiting for input...\n"
               << "  (-> continue | <- re-record)\n";
     trossen::utils::announce("Reset time. Waiting for input.");
 
     while (!trossen::utils::g_stop_requested &&
            !reset_signaled_.load() &&
-           !rerecord_requested_.load()) {
+           !rerecord_requested_.load() &&
+           !source_disconnected_.load()) {
+      auto source_action = drain_source_event();
+      if (source_action == UserAction::kReRecord) return UserAction::kReRecord;
+      if (source_action == UserAction::kStop) return UserAction::kStop;
       auto action = poll_keys();
       if (action == UserAction::kReRecord) return UserAction::kReRecord;
       wait_or_signal();
     }
   }
 
+  if (source_disconnected_.load()) return UserAction::kStop;
   if (trossen::utils::g_stop_requested) return UserAction::kStop;
   if (rerecord_requested_.load()) return UserAction::kReRecord;
   return UserAction::kContinue;
@@ -746,18 +864,45 @@ UserAction SessionManager::monitor_episode(
 {
   rerecord_requested_.store(false);
 
-  // Enable raw terminal input to detect keypresses during recording
+  // Enable raw terminal input to detect keypresses during recording.
+  // (Still live for back-compat; the KeyboardComponent migration will
+  // move this behaviour into an attached session-control source.)
   trossen::utils::RawModeGuard raw_mode;
 
   auto last_update = std::chrono::steady_clock::now();
 
   while (!are_final_stats_emitted()) {
-    // Check for re-record request
+    // Halt on disconnect of the attached session-control source. The
+    // caller is responsible for saving the partial recording via its
+    // normal stop_episode() path after we return kStop.
+    if (source_disconnected_.load()) {
+      return UserAction::kStop;
+    }
+
+    // Drain any event pushed by the attached source. Coalescing means
+    // we only see the most recent intent — good enough for human-scale
+    // input and avoids cascades on slow loops.
+    auto pending = pending_event_.exchange(
+      hw::session_control::SessionControlEvent::kNone);
+    if (pending != hw::session_control::SessionControlEvent::kNone) {
+      auto action = interpret_event(pending, Phase::kRecording);
+      if (action != UserAction::kContinue) return action;
+      // kStart / kStopEarly in RECORDING both mean "stop current and
+      // move on" — bubble up to the caller as kContinue so it calls
+      // stop_episode() and advances the index.
+      if (pending == hw::session_control::SessionControlEvent::kStart ||
+          pending == hw::session_control::SessionControlEvent::kStopEarly) {
+        return UserAction::kContinue;
+      }
+    }
+
+    // Legacy: re-record flag may be set by request_rerecord() from an
+    // external thread even without an attached source.
     if (rerecord_requested_.load()) {
       return UserAction::kReRecord;
     }
 
-    // Poll for arrow keys: left = re-record, right = early exit to next episode
+    // Legacy: poll for arrow keys. Left = re-record, right = early exit.
     auto key = trossen::utils::poll_keypress();
     if (key == trossen::utils::KeyPress::kLeftArrow) {
       rerecord_requested_.store(true);
@@ -775,7 +920,18 @@ UserAction SessionManager::monitor_episode(
       }
       last_update = now;
     }
-    std::this_thread::sleep_for(sleep_interval);
+
+    // Sleep on the event condvar rather than a bare sleep_for — an
+    // event or disconnect wakes us immediately; otherwise the stats
+    // tick fires on the timeout.
+    std::unique_lock<std::mutex> lk(event_mutex_);
+    event_cv_.wait_for(lk, sleep_interval, [this] {
+      return pending_event_.load() !=
+               hw::session_control::SessionControlEvent::kNone ||
+             source_disconnected_.load() ||
+             rerecord_requested_.load() ||
+             trossen::utils::g_stop_requested;
+    });
   }
 
   if (trossen::utils::g_stop_requested) return UserAction::kStop;

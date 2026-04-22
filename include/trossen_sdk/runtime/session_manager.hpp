@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "trossen_sdk/hw/producer_base.hpp"
+#include "trossen_sdk/hw/session_control/session_control_capable.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/io/sink.hpp"
@@ -386,6 +387,34 @@ public:
    */
   Stats get_async_monitor_stats();
 
+  // =========================================================================
+  // Session-control input (single-source, push-based)
+  // =========================================================================
+
+  /**
+   * @brief Attach the session-control input source.
+   *
+   * Exactly one source may be attached at a time — a hardware component
+   * that implements `SessionControlCapable` (VR controller, keyboard,
+   * foot pedal, etc.). Event and disconnect callbacks are registered on
+   * the source and the source is started; subsequent intents surface
+   * through `monitor_episode()` and `wait_for_reset()` without polling.
+   *
+   * @param source Non-null shared pointer to the source to attach.
+   * @throws std::invalid_argument if `source` is null.
+   * @throws std::runtime_error    if a source is already attached.
+   */
+  void attach_session_control(
+    std::shared_ptr<hw::session_control::SessionControlCapable> source);
+
+  /**
+   * @brief Detach the current session-control source, if any.
+   *
+   * Stops the source, clears the attachment, and resets the internal
+   * pending-event channel. Safe to call if no source is attached.
+   */
+  void detach_session_control();
+
 private:
   /// @brief Configuration
   std::shared_ptr<trossen::configuration::SessionManagerConfig> cfg_;
@@ -527,6 +556,55 @@ private:
    * Checks elapsed time and calls stop_episode() when max_duration reached
    */
   void monitor_duration();
+
+  // ── Session-control internals ──────────────────────────────────────────
+
+  /// @brief Recording-loop phase used to resolve state-dependent events.
+  ///
+  /// `interpret_event()` maps an abstract `SessionControlEvent` (e.g.
+  /// `kStart`) plus the current phase to a concrete `UserAction`. The
+  /// phase is set by `monitor_episode()` / `wait_for_reset()` as they
+  /// enter and leave their loops.
+  enum class Phase { kIdle, kRecording, kResetting };
+
+  /// @brief Attached session-control source (nullable). Single source at
+  /// a time; `attach_session_control()` enforces the invariant.
+  std::shared_ptr<hw::session_control::SessionControlCapable> session_control_;
+
+  /// @brief Event coalescing slot. The last event from the attached
+  /// source overwrites any prior pending event — human-scale input
+  /// should never queue up behind slow loop iterations.
+  std::atomic<hw::session_control::SessionControlEvent> pending_event_{
+    hw::session_control::SessionControlEvent::kNone};
+
+  /// @brief Set by the attached source's disconnect callback. Triggers a
+  /// clean halt in the next loop iteration (current episode saved, then
+  /// session exits).
+  std::atomic<bool> source_disconnected_{false};
+
+  /// @brief Mutex + condvar for the event channel. Replaces the prior
+  /// sleep-polling in the recording / reset loops. Also used as the
+  /// wakeup surface for `signal_reset_complete()` (kept backward-compatible).
+  std::mutex event_mutex_;
+  std::condition_variable event_cv_;
+
+  /// @brief Callback the attached source invokes on each detected intent.
+  /// Stores the event and wakes both the event condvar and the legacy
+  /// reset condvar so either loop wakes promptly.
+  void on_source_event(hw::session_control::SessionControlEvent ev);
+
+  /// @brief Callback the attached source invokes when it becomes
+  /// permanently unusable (Quest disconnects, stdin closes, etc.).
+  /// Flags the disconnect; loops observe it and halt cleanly.
+  void on_source_disconnect();
+
+  /// @brief Translate an event + phase into the corresponding UserAction.
+  ///
+  /// The dispatch table lives here so event sources never need to know
+  /// about the session's current phase.
+  UserAction interpret_event(
+    hw::session_control::SessionControlEvent ev,
+    Phase phase);
 };
 
 }  // namespace trossen::runtime
