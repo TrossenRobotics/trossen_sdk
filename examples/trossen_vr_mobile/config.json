@@ -1,0 +1,121 @@
+{
+  "robot_name": "trossen_vr_mobile",
+
+  "hardware": {
+    "arms": {
+      "follower_right": {
+        "ip_address":   "192.168.1.4",
+        "model":        "wxai_v0",
+        "end_effector": "wxai_v0_follower"
+      }
+    },
+    "mobile_base": {
+      "reset_odometry": false,
+      "enable_torque":  true
+    },
+    "cameras": [
+      {
+        "id":            "camera_high",
+        "serial_number": "130322272628",
+        "width":         640,
+        "height":        480,
+        "fps":           30
+      },
+      {
+        "id":            "camera_low",
+        "serial_number": "218622270304",
+        "width":         640,
+        "height":        480,
+        "fps":           30
+      },
+      {
+        "id":            "camera_right_wrist",
+        "serial_number": "218622274938",
+        "width":         640,
+        "height":        480,
+        "fps":           30
+      }
+    ]
+  },
+
+  "producers": [
+    {
+      "type":            "trossen_arm",
+      "hardware_id":     "follower_right",
+      "stream_id":       "follower_right",
+      "poll_rate_hz":    30.0,
+      "use_device_time": false
+    },
+    {
+      "type":            "slate_base",
+      "hardware_id":     "slate_base",
+      "stream_id":       "slate_base",
+      "poll_rate_hz":    30.0,
+      "use_device_time": false
+    },
+    {
+      "type":            "realsense_camera",
+      "hardware_id":     "camera_high",
+      "stream_id":       "camera_high",
+      "poll_rate_hz":    30.0,
+      "encoding":        "bgr8",
+      "use_device_time": true
+    },
+    {
+      "type":            "realsense_camera",
+      "hardware_id":     "camera_low",
+      "stream_id":       "camera_low",
+      "poll_rate_hz":    30.0,
+      "encoding":        "bgr8",
+      "use_device_time": true
+    },
+    {
+      "type":            "realsense_camera",
+      "hardware_id":     "camera_right_wrist",
+      "stream_id":       "camera_right_wrist",
+      "poll_rate_hz":    30.0,
+      "encoding":        "bgr8",
+      "use_device_time": true
+    }
+  ],
+
+  "vr": {
+    "arm_controllers": {
+      "vr_right": {
+        "controller":       "right",
+        "vr_port":          5432,
+        "gripper_min_m":    0.0,
+        "gripper_max_m":    0.04,
+        "wait_for_quest_s": 120.0
+      }
+    },
+    "base_joysticks": {
+      "vr_base": {
+        "controller":       "left",
+        "vr_port":          5432,
+        "max_linear_mps":   0.5,
+        "max_angular_rps":  1.0,
+        "deadzone":         0.1,
+        "wait_for_quest_s": 120.0
+      }
+    }
+  },
+
+  "teleop": {
+    "enabled": true,
+    "rate_hz": 1000.0,
+    "pairs": [
+      { "leader": "vr_right", "follower": "follower_right", "space": "cartesian" },
+      { "leader": "vr_base",  "follower": "slate_base",     "space": "base"      }
+    ]
+  },
+
+  "session": {
+    "backend_type": "trossen_mcap",
+    "max_duration": 30
+  },
+
+  "trossen_mcap_backend": {
+    "root": "data/trossen_vr_mobile"
+  }
+}
