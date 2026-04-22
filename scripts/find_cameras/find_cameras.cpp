@@ -56,7 +56,8 @@ static std::string v4l2_device_name(int index)
 static bool is_realsense_v4l2(int index)
 {
   std::string name = v4l2_device_name(index);
-  std::transform(name.begin(), name.end(), name.begin(), ::tolower);
+  std::transform(name.begin(), name.end(), name.begin(),
+    [](unsigned char c) { return std::tolower(c); });
   return name.find("realsense") != std::string::npos;
 }
 
@@ -125,8 +126,11 @@ static std::vector<CameraInfo> discover_realsense(const fs::path& output_dir)
           CV_8UC3,
           const_cast<void*>(color.get_data()),
           cv::Mat::AUTO_STEP);
-        cv::imwrite(info.preview_path.string(), img);
-        info.preview_ok = true;
+        info.preview_ok = cv::imwrite(info.preview_path.string(), img);
+        if (!info.preview_ok) {
+          std::cerr << "  [warn] failed to write preview image to "
+                    << info.preview_path << "\n";
+        }
       }
       pipeline.stop();
     } catch (const rs2::error& e) {
@@ -184,7 +188,10 @@ static std::vector<CameraInfo> discover_opencv(const fs::path& output_dir)
     cv::Mat frame;
     double last_brightness = -1.0;
     for (int w = 0; w < 30; ++w) {
-      cap.read(frame);
+      if (!cap.read(frame)) {
+        frame.release();
+        break;
+      }
       if (frame.empty()) break;
       double brightness = cv::mean(frame)[0];
       if (last_brightness > 0 &&
@@ -193,8 +200,11 @@ static std::vector<CameraInfo> discover_opencv(const fs::path& output_dir)
     }
 
     if (!frame.empty()) {
-      cv::imwrite(info.preview_path.string(), frame);
-      info.preview_ok = true;
+      info.preview_ok = cv::imwrite(info.preview_path.string(), frame);
+      if (!info.preview_ok) {
+        std::cerr << "  [warn] failed to write preview image to "
+                  << info.preview_path << "\n";
+      }
     }
     cap.release();
 
@@ -225,7 +235,8 @@ int main(int argc, char** argv)
     if (arg == "--help") {
       std::cout << "Usage: " << argv[0] << " [--output DIR]\n";
       std::cout << "\nOptions:\n";
-      std::cout << "  --output DIR    Preview output directory (default: ./camera_discovery)\n";
+      std::cout << "  --output DIR    Preview output directory (default: "
+                << output_dir.string() << ")\n";
       std::cout << "  --help          Show this help\n";
       std::cout << "\nOutput layout:\n";
       std::cout << "  <output>/realsense_<serial>.jpg\n";
