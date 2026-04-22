@@ -38,6 +38,7 @@ add_library(trossen_sdk SHARED
   src/hw/vr/vr_session.cpp
   src/hw/vr/vr_arm_controller.cpp
   src/hw/vr/vr_base_joystick.cpp
+  src/hw/vr/vr_session_control.cpp
   src/hw/keyboard/keyboard_component.cpp
   src/hw/teleop/teleop_controller.cpp
   src/hw/teleop/teleop_factory.cpp
