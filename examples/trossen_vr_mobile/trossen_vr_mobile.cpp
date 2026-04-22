@@ -384,11 +384,16 @@ int main(int argc, char** argv) {
     //   3. restage — move the arms to their configured staging poses.
     //      The follower is now idle (mirror is paused) and can be
     //      commanded directly to the staging pose.
-    // The next prepare_teleop() re-syncs so the new VR pose becomes
-    // the anchor without the arm snapping.
+    //   4. Wait for staging to complete. restage() is non-blocking so
+    //      multiple arms move in parallel; this sleep covers the
+    //      trajectory time so the arm is actually settled when the
+    //      next prepare_teleop() fires sync_to_state. A mid-trajectory
+    //      sync captures a garbage `T_offset` and the next episode's
+    //      teleop extrapolates wildly from there.
     for (auto& ctrl : controllers) ctrl->pause_teleop();
     for (auto& ctrl : controllers) ctrl->reset_teleop();
     for (auto& ctrl : controllers) ctrl->restage();
+    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
     const std::string file_path =
       trossen::utils::generate_episode_path(root, stats.current_episode_index);
     trossen::utils::print_episode_summary(file_path, stats);

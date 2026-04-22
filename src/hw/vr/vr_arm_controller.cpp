@@ -199,6 +199,32 @@ std::vector<float> VrArmControllerComponent::read() {
   std::vector<float> out(7);
   for (int i = 0; i < 6; ++i) out[i] = static_cast<float>(cart[i]);
   out[6] = static_cast<float>(gripper);
+
+  // Reject pathological single-tick deltas — bad VR samples and
+  // axis-angle representation flips near π produce huge jumps in
+  // `cart` that the driver would try to interpolate through, flinging
+  // the arm to an extreme pose. Caps are per-tick (at 200 Hz teleop:
+  // 10 m/s translation, ~60 rad/s rotation — both already above any
+  // physical operator motion). When exceeded, hold `last_good_` so
+  // the arm stays put until the next solvable sample arrives.
+  constexpr double kMaxTickTranslationM = 0.05;
+  constexpr double kMaxTickRotationRad  = 0.30;
+  double dp2 = 0.0;
+  double dr2 = 0.0;
+  for (int i = 0; i < 3; ++i) {
+    const double dp = out[i]     - last_good_[i];
+    const double dr = out[i + 3] - last_good_[i + 3];
+    dp2 += dp * dp;
+    dr2 += dr * dr;
+  }
+  if (std::sqrt(dp2) > kMaxTickTranslationM ||
+      std::sqrt(dr2) > kMaxTickRotationRad) {
+    // Hold last good — but still accept the gripper update, which is
+    // a scalar and can't produce wild motion.
+    last_good_[6] = out[6];
+    return last_good_;
+  }
+
   last_good_ = out;
   return out;
 }
