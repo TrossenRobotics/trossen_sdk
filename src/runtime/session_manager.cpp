@@ -754,8 +754,13 @@ UserAction SessionManager::wait_for_reset() {
   reset_signaled_.store(false);
   rerecord_requested_.store(false);
 
-  // Enable raw terminal input to detect keypresses without Enter
-  trossen::utils::RawModeGuard raw_mode;
+  // Raw terminal only when no session-control source is attached — an
+  // attached source owns its own terminal / reader.
+  const bool use_inline_keyboard = !static_cast<bool>(session_control_);
+  std::unique_ptr<trossen::utils::RawModeGuard> raw_mode;
+  if (use_inline_keyboard) {
+    raw_mode = std::make_unique<trossen::utils::RawModeGuard>();
+  }
 
   // Helper: wait up to 100ms, waking early on signal_reset_complete(),
   // a source event, or a source disconnect.
@@ -770,7 +775,8 @@ UserAction SessionManager::wait_for_reset() {
     });
   };
 
-  auto poll_keys = [this]() -> UserAction {
+  auto poll_keys = [this, use_inline_keyboard]() -> UserAction {
+    if (!use_inline_keyboard) return UserAction::kContinue;
     auto key = trossen::utils::poll_keypress();
     if (key == trossen::utils::KeyPress::kRightArrow) {
       reset_signaled_.store(true);
@@ -864,10 +870,16 @@ UserAction SessionManager::monitor_episode(
 {
   rerecord_requested_.store(false);
 
-  // Enable raw terminal input to detect keypresses during recording.
-  // (Still live for back-compat; the KeyboardComponent migration will
-  // move this behaviour into an attached session-control source.)
-  trossen::utils::RawModeGuard raw_mode;
+  // Enable raw terminal input to detect keypresses during recording —
+  // but only if no session-control source is attached. When a source is
+  // attached (e.g. KeyboardComponent or a VR button component) it owns
+  // the terminal / its own reader thread, and polling stdin in
+  // parallel would race on the same FD.
+  const bool use_inline_keyboard = !static_cast<bool>(session_control_);
+  std::unique_ptr<trossen::utils::RawModeGuard> raw_mode;
+  if (use_inline_keyboard) {
+    raw_mode = std::make_unique<trossen::utils::RawModeGuard>();
+  }
 
   auto last_update = std::chrono::steady_clock::now();
 
@@ -903,13 +915,17 @@ UserAction SessionManager::monitor_episode(
     }
 
     // Legacy: poll for arrow keys. Left = re-record, right = early exit.
-    auto key = trossen::utils::poll_keypress();
-    if (key == trossen::utils::KeyPress::kLeftArrow) {
-      rerecord_requested_.store(true);
-      return UserAction::kReRecord;
-    }
-    if (key == trossen::utils::KeyPress::kRightArrow) {
-      return UserAction::kContinue;
+    // Skipped when a session-control source is attached — that source
+    // owns the terminal / its own reader.
+    if (use_inline_keyboard) {
+      auto key = trossen::utils::poll_keypress();
+      if (key == trossen::utils::KeyPress::kLeftArrow) {
+        rerecord_requested_.store(true);
+        return UserAction::kReRecord;
+      }
+      if (key == trossen::utils::KeyPress::kRightArrow) {
+        return UserAction::kContinue;
+      }
     }
 
     auto now = std::chrono::steady_clock::now();
