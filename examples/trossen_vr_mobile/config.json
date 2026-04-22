@@ -110,12 +110,13 @@
     },
     "base_joysticks": {
       "vr_base": {
-        "controller":       "left",
-        "vr_port":          5432,
-        "max_linear_mps":   0.5,
-        "max_angular_rps":  1.0,
-        "deadzone":         0.1,
-        "wait_for_quest_s": 120.0
+        "linear_controller":  "right",
+        "angular_controller": "left",
+        "vr_port":            5432,
+        "max_linear_mps":     0.5,
+        "max_angular_rps":    1.0,
+        "deadzone":           0.1,
+        "wait_for_quest_s":   120.0
       }
     },
     "session_control": {

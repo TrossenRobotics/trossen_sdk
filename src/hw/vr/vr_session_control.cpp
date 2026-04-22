@@ -212,15 +212,20 @@ void VrSessionControlComponent::stop() {
   }
 }
 
-std::string VrSessionControlComponent::input_to_key(VrInput input) const {
-  // The VR protocol uses `<hand>_<button>` keys (e.g. "right_a").
+std::vector<std::string>
+VrSessionControlComponent::input_to_keys(VrInput input) const {
+  // The Meta Quest protocol is inconsistent: A/B/menu are often sent
+  // bare (only the right controller has A/B, so "a" is unambiguous),
+  // while grip/trigger are always per-hand (both controllers have
+  // them). Probe the suffixed form first to respect a caller who
+  // *does* advertise "right_a", then fall back to the bare form.
   switch (input) {
-    case VrInput::kButtonA: return controller_ + "_a";
-    case VrInput::kButtonB: return controller_ + "_b";
-    case VrInput::kMenu:    return controller_ + "_menu";
-    case VrInput::kTrigger: return controller_ + "_trigger";
-    case VrInput::kGrip:    return controller_ + "_grip";
-    default:                return "";
+    case VrInput::kButtonA: return {controller_ + "_a",       "a"};
+    case VrInput::kButtonB: return {controller_ + "_b",       "b"};
+    case VrInput::kMenu:    return {controller_ + "_menu",    "menu"};
+    case VrInput::kTrigger: return {controller_ + "_trigger", "trigger"};
+    case VrInput::kGrip:    return {controller_ + "_grip",    "grip"};
+    default:                return {};
   }
 }
 
@@ -274,22 +279,26 @@ void VrSessionControlComponent::reader_loop() {
         // ran once and must not fire again.
       }
 
-      // Rising-edge detection per bound input.
+      // Rising-edge detection per bound input. Probe each candidate
+      // key in order; the first key that resolves to a value wins.
       for (const auto& b : bindings_) {
-        const std::string key = input_to_key(b.input);
-        const auto it = frame.buttons.find(key);
+        const auto keys = input_to_keys(b.input);
         bool pressed = false;
-        if (it != frame.buttons.end()) {
+        for (const auto& key : keys) {
+          const auto it = frame.buttons.find(key);
+          if (it == frame.buttons.end()) continue;
           if (is_digital(b.input)) {
             if (const bool* v = std::get_if<bool>(&it->second)) {
               pressed = *v;
+              break;
             }
           } else {
             if (const double* d = std::get_if<double>(&it->second)) {
               pressed = (*d >= analog_threshold_);
+              break;
             } else if (const bool* v = std::get_if<bool>(&it->second)) {
-              // Digital trigger variant — treat press as above-threshold.
               pressed = *v;
+              break;
             }
           }
         }

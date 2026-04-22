@@ -26,6 +26,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/session_control/session_control_capable.hpp"
@@ -106,9 +107,12 @@ private:
   /// Reader-thread loop: samples the VR frame stream and emits events.
   void reader_loop();
 
-  /// Map the canonical input to the raw button-map key on the
-  /// configured hand, e.g. (kButtonA, "right") -> "right_a".
-  std::string input_to_key(VrInput input) const;
+  /// Ordered list of button-map keys to probe for a given input on
+  /// the configured hand — first match wins in the frame's button
+  /// map. The shipping Meta Quest app sends A/B as bare keys
+  /// (`"a"`, `"b"`) while grip/trigger are always per-hand
+  /// (`"right_grip"`), so we have to try both shapes.
+  std::vector<std::string> input_to_keys(VrInput input) const;
 
   /// True if an input is a digital button (bool in the protocol).
   /// False for analog inputs (trigger, grip) that use a threshold.

@@ -17,19 +17,23 @@
 namespace trossen::hw::vr {
 
 /**
- * @brief Virtual base-velocity leader driven by a Meta Quest thumbstick.
+ * @brief Virtual base-velocity leader driven by Meta Quest thumbstick(s).
  *
- * Each `read()` samples the configured thumbstick and returns a 2-element
- * vector `[linear_mps, angular_rps]`:
- *  - `<controller>_thumbstick_y` maps to forward/backward linear velocity.
- *  - `<controller>_thumbstick_x` maps to yaw rate (with the sign negated so
- *    that pushing the stick left yields a positive yaw rate, matching the
+ * Each `read()` samples the configured thumbstick(s) and returns a
+ * 2-element vector `[linear_mps, angular_rps]`:
+ *  - `<linear_controller>_thumbstick_y`  → forward/backward linear velocity.
+ *  - `<angular_controller>_thumbstick_x` → yaw rate (sign negated so that
+ *    pushing the stick left yields a positive yaw rate, matching the
  *    right-hand rule around the vertical axis).
  *
- * Values below `deadzone` (in absolute magnitude) are clamped to zero; above
- * `deadzone` they are rescaled so the effective travel starts at zero at the
- * deadzone boundary and reaches ±1 at the stick limit, then multiplied by
- * `max_linear_mps` / `max_angular_rps`.
+ * The two axes can come from the same or different controllers.
+ * When different (e.g. right thumbstick for linear, left for yaw), the
+ * component claims the thumbstick input on both hands.
+ *
+ * Values below `deadzone` (in absolute magnitude) are clamped to zero;
+ * above `deadzone` they are rescaled so the effective travel starts at
+ * zero at the deadzone boundary and reaches ±1 at the stick limit, then
+ * multiplied by `max_linear_mps` / `max_angular_rps`.
  *
  * The component is a leader only: `write()` is a no-op. It shares the
  * process-wide VrSession with the VR arm controller(s), so one WebSocket
@@ -51,8 +55,15 @@ public:
   /**
    * @brief Configure from JSON.
    *
-   * Required:
-   *   - `controller` : "left" or "right" — which thumbstick to read.
+   * Required (one of):
+   *   - `controller` : "left" or "right" — single-hand mode. Both linear
+   *                    and angular axes come from this controller's
+   *                    thumbstick. Kept for backward compatibility.
+   *   - `linear_controller` + `angular_controller` : per-axis split
+   *                    mode. Each may independently be "left" or
+   *                    "right"; they can be the same (equivalent to
+   *                    the single-hand form) or different (e.g. right
+   *                    thumbstick for linear, left for yaw).
    *
    * Optional:
    *   - `vr_port`          : WebSocket port (default 5432).
@@ -86,8 +97,11 @@ private:
   /// Rescale `v` from `[-1, 1]` to `[-1, 1]` with a centered deadzone applied.
   static double apply_deadzone(double v, double deadzone);
 
-  /// Config
-  std::string   controller_{"left"};
+  /// Config — per-axis hand assignment. Set identically (both "left"
+  /// or both "right") for single-hand mode; set differently for a
+  /// split layout (e.g. right-stick linear, left-stick yaw).
+  std::string   linear_controller_{"left"};
+  std::string   angular_controller_{"left"};
   std::uint16_t vr_port_{5432};
   double        max_linear_mps_{0.5};
   double        max_angular_rps_{1.0};

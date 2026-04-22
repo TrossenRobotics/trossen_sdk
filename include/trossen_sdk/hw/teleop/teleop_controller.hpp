@@ -97,6 +97,21 @@ public:
    */
   void stop_teleop();
 
+  /**
+   * @brief Re-run the staging poses on both leader and follower.
+   *
+   * The constructor stages once at session start. Callers that want
+   * the arms returned to their staging pose between episodes invoke
+   * this explicitly — typically from a SessionManager
+   * `on_episode_ended` callback so the operator can pause, reposition
+   * the leader (e.g. a VR controller), and start the next episode
+   * from a known-safe configuration. The follower sync_to_state on
+   * the next `prepare_teleop()` call captures the new VR anchor.
+   *
+   * No-op for hardware that overrides `stage()` with a no-op default.
+   */
+  void restage();
+
   /// @brief Check if the control loop is running.
   bool is_running() const { return running_.load(); }
 

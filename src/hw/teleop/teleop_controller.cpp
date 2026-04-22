@@ -87,27 +87,29 @@ void TeleopController::prepare_teleop() {
     follower_->pre_episode();
   }
 
-  // The mirror loop runs continuously across episodes; return early if it
-  // is already running.
-  if (running_) {
-    return;
+  // First-episode setup: only run the one-shot driver bring-up
+  // (prepare_for_teleop) the first time through. Subsequent calls skip
+  // it — the hardware is already teleop-ready from the first episode.
+  if (!running_) {
+    if (follower_) {
+      follower_->prepare_for_teleop();
+    }
+    leader_->prepare_for_teleop();
   }
 
-  // First-episode setup. Each arm reads its configured role and trajectory
-  // parameters from its own members; the controller only signals the
-  // lifecycle transition.
-  if (follower_) {
-    follower_->prepare_for_teleop();
-  }
-  leader_->prepare_for_teleop();
-
-  // Let virtual leaders align their internal state to the follower's
-  // current pose before the mirror loop starts. Real-hardware leaders
-  // inherit the no-op default.
+  // Always re-sync at the top of each episode so virtual leaders
+  // (e.g. VR controllers) capture a fresh anchor against the
+  // follower's current pose. For real-hardware leaders
+  // sync_to_state is a no-op by default, so this is safe to always
+  // run. The re-sync lets the operator reposition the VR controller
+  // between episodes without the arm snapping on the next start.
   if (follower_io_) {
     leader_io_->sync_to_state(follower_io_->read());
   }
-  std::cout << "  [teleop] Arms ready for teleop\n";
+
+  if (!running_) {
+    std::cout << "  [teleop] Arms ready for teleop\n";
+  }
 }
 
 void TeleopController::teleop() {
@@ -122,6 +124,19 @@ void TeleopController::reset_teleop() {
   if (follower_) {
     follower_->post_episode();
   }
+}
+
+void TeleopController::restage() {
+  // Mirror the constructor's staging call so the arms return to their
+  // configured staging pose between episodes. sync_to_state captures
+  // the new anchor on the next prepare_teleop() — callers should
+  // invoke this after the current episode has stopped and before the
+  // next one starts.
+  leader_->stage();
+  if (follower_) {
+    follower_->stage();
+  }
+  std::cout << "  [teleop] Re-staging initiated\n";
 }
 
 void TeleopController::stop_teleop() {

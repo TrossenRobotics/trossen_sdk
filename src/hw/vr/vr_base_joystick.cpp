@@ -49,16 +49,41 @@ VrBaseJoystickComponent::~VrBaseJoystickComponent() {
 }
 
 void VrBaseJoystickComponent::configure(const nlohmann::json& config) {
-  if (!config.contains("controller")) {
+  // Two accepted shapes:
+  //   * Legacy: `controller` alone → both axes from that hand.
+  //   * Split:  `linear_controller` and/or `angular_controller`, with
+  //             the other one (if missing) falling back to `controller`
+  //             or to "left". Either or both may be set.
+  const bool has_linear  = config.contains("linear_controller");
+  const bool has_angular = config.contains("angular_controller");
+  const bool has_legacy  = config.contains("controller");
+
+  if (!has_linear && !has_angular && !has_legacy) {
     throw std::runtime_error(
-      "VrBaseJoystickComponent: 'controller' is required (\"left\" or \"right\")");
+      "VrBaseJoystickComponent: one of 'controller', "
+      "'linear_controller', or 'angular_controller' is required");
   }
-  controller_ = config.at("controller").get<std::string>();
-  if (controller_ != "left" && controller_ != "right") {
-    throw std::runtime_error(
-      "VrBaseJoystickComponent: 'controller' must be \"left\" or \"right\", got \"" +
-      controller_ + "\"");
-  }
+
+  const std::string fallback = has_legacy
+    ? config.at("controller").get<std::string>()
+    : std::string{"left"};
+
+  linear_controller_  = has_linear
+    ? config.at("linear_controller").get<std::string>()
+    : fallback;
+  angular_controller_ = has_angular
+    ? config.at("angular_controller").get<std::string>()
+    : fallback;
+
+  auto validate = [](const char* field, const std::string& v) {
+    if (v != "left" && v != "right") {
+      throw std::runtime_error(
+        std::string{"VrBaseJoystickComponent: '"} + field +
+        "' must be \"left\" or \"right\", got \"" + v + "\"");
+    }
+  };
+  validate("linear_controller",  linear_controller_);
+  validate("angular_controller", angular_controller_);
 
   vr_port_         = config.value("vr_port",         static_cast<std::uint16_t>(5432));
   max_linear_mps_  = config.value("max_linear_mps",  0.5);
@@ -80,21 +105,27 @@ void VrBaseJoystickComponent::configure(const nlohmann::json& config) {
   VrSession::instance().ensure_started(vr_port_);
   session_held_ = true;
 
-  // Thumbstick is the only input this component consumes.
+  // Claim the thumbstick on each hand we read from. In split mode that
+  // covers both left and right; in single-hand mode only one of them.
   VrSession::instance().claim_inputs(
-    controller_, get_identifier(), {VrInput::kThumbstick});
+    linear_controller_, get_identifier(), {VrInput::kThumbstick});
+  if (angular_controller_ != linear_controller_) {
+    VrSession::instance().claim_inputs(
+      angular_controller_, get_identifier(), {VrInput::kThumbstick});
+  }
 }
 
 nlohmann::json VrBaseJoystickComponent::get_info() const {
   return nlohmann::json{
-    {"type",             get_type()},
-    {"identifier",       get_identifier()},
-    {"controller",       controller_},
-    {"vr_port",          vr_port_},
-    {"max_linear_mps",   max_linear_mps_},
-    {"max_angular_rps",  max_angular_rps_},
-    {"deadzone",         deadzone_},
-    {"connected",        VrSession::instance().is_quest_connected()},
+    {"type",                get_type()},
+    {"identifier",          get_identifier()},
+    {"linear_controller",   linear_controller_},
+    {"angular_controller",  angular_controller_},
+    {"vr_port",             vr_port_},
+    {"max_linear_mps",      max_linear_mps_},
+    {"max_angular_rps",     max_angular_rps_},
+    {"deadzone",            deadzone_},
+    {"connected",           VrSession::instance().is_quest_connected()},
   };
 }
 
@@ -118,14 +149,18 @@ std::vector<float> VrBaseJoystickComponent::read() {
   const auto frame = VrSession::instance().latest_frame();
   if (!frame) return {0.0f, 0.0f};
 
-  const std::string y_key = controller_ + "_thumbstick_y";
-  const std::string x_key = controller_ + "_thumbstick_x";
+  // Read Y from the linear controller's stick and X from the angular
+  // controller's stick. They can be the same hand (single-stick mode)
+  // or different hands (split mode).
+  const std::string y_key = linear_controller_  + "_thumbstick_y";
+  const std::string x_key = angular_controller_ + "_thumbstick_x";
   const double y = apply_deadzone(read_axis(*frame, y_key), deadzone_);
   const double x = apply_deadzone(read_axis(*frame, x_key), deadzone_);
 
-  // Forward stick → forward velocity; left stick → positive yaw (CCW about
-  // the vertical axis), so we negate x. `max_*` caps are applied after the
-  // deadzone rescale so full-deflection matches the user-configured limit.
+  // Forward stick → forward velocity; left stick → positive yaw (CCW
+  // about the vertical axis), so we negate x. `max_*` caps are applied
+  // after the deadzone rescale so full-deflection matches the
+  // user-configured limit.
   const double linear  =  y * max_linear_mps_;
   const double angular = -x * max_angular_rps_;
   return {static_cast<float>(linear), static_cast<float>(angular)};

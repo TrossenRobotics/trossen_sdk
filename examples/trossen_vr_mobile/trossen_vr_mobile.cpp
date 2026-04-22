@@ -376,6 +376,13 @@ int main(int argc, char** argv) {
   });
   mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
     for (auto& ctrl : controllers) ctrl->reset_teleop();
+    // Send the arms back to their configured staging poses so the
+    // operator has a known-safe starting point for the next episode.
+    // wait_for_reset() then blocks (infinitely, when reset_duration
+    // is unset) while the operator repositions the VR controller;
+    // the next prepare_teleop() re-syncs so the new VR pose becomes
+    // the anchor.
+    for (auto& ctrl : controllers) ctrl->restage();
     const std::string file_path =
       trossen::utils::generate_episode_path(root, stats.current_episode_index);
     trossen::utils::print_episode_summary(file_path, stats);
