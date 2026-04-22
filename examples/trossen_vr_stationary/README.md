@@ -6,10 +6,11 @@ real-hardware smoke test for the VR integration.
 
 ## Flow
 
-1. **Launch the mDNS helper** in a second terminal (see "Run" below). The
-   Meta Quest app uses mDNS to discover teleop servers; the C++ trossen_vr
-   library does not yet advertise, so without the helper the Quest can see
-   the WebSocket but will not stream data.
+1. **mDNS advertisement is built in.** The demo advertises itself via
+   Avahi (`_trossen-vr._tcp`) on startup, so the Quest's server picker
+   finds this host automatically. No second terminal needed. The old
+   `mdns_helper.py` remains as a fallback if Avahi is unavailable on
+   the host.
 2. **Launch the demo**. Hardware initializes:
    - The follower arm handshakes over TCP.
    - `VrArmControllerComponent` binds the VR WebSocket port (default `5432`).
@@ -26,18 +27,19 @@ real-hardware smoke test for the VR integration.
 
 ## Run
 
-Terminal 1 — mDNS advertiser (uses the trossen_vr repo's Python env):
+```bash
+cd ~/trossen_sdk
+./build/examples/trossen_vr_stationary
+```
+
+The demo advertises itself over mDNS automatically. If the log shows
+`[warn] mDNS advertisement failed`, Avahi is not reachable on this
+host — install `avahi-daemon` (usually the default on Ubuntu / Jetson),
+or fall back to running `mdns_helper.py` in a second terminal:
 
 ```bash
 cd ~/trossen_vr
 python3 ~/trossen_sdk/examples/trossen_vr_stationary/mdns_helper.py --port 5432
-```
-
-Terminal 2 — the demo:
-
-```bash
-cd ~/trossen_sdk
-./build/examples/trossen_vr_stationary
 ```
 
 CLI overrides with `--set KEY=VALUE` work on any nested config key, e.g.:

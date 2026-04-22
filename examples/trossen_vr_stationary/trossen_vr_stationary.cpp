@@ -39,6 +39,7 @@
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/hw/teleop/teleop_factory.hpp"
 #include "trossen_sdk/hw/vr/vr_arm_controller.hpp"
+#include "trossen_sdk/hw/vr/vr_mdns_advertiser.hpp"
 #include "trossen_sdk/hw/vr/vr_session.hpp"
 #include "trossen_sdk/hw/vr/vr_session_control.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
@@ -149,6 +150,34 @@ int main(int argc, char** argv) {
       std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(component);
     std::cout << "  [ok] Arm [" << id << "] configured ("
               << arm_cfg.ip_address << ")\n";
+  }
+
+  // ── Advertise the host over mDNS so the Quest app can discover it ──────
+  //
+  // Native C++ replacement for the old `mdns_helper.py` sidecar. Starts
+  // before any VR component so the Quest can see the server as soon as
+  // the WebSocket port opens.
+
+  std::uint16_t vr_port = 5432;
+  if (vr_cfg.contains("arm_controllers")) {
+    for (const auto& [_, entry] : vr_cfg["arm_controllers"].items()) {
+      if (entry.contains("vr_port")) {
+        vr_port = entry.at("vr_port").get<std::uint16_t>();
+        break;
+      }
+    }
+  }
+
+  trossen::hw::vr::VrMdnsAdvertiser mdns;
+  try {
+    mdns.start(vr_port, "TrossenVR");
+    std::cout << "  [ok] mDNS advertising TrossenVR on port " << vr_port
+              << " (_trossen-vr._tcp)\n";
+  } catch (const std::exception& e) {
+    std::cerr << "  [warn] mDNS advertisement failed: " << e.what() << "\n"
+              << "         The Quest may not auto-discover this host; "
+                 "connect manually by IP or run mdns_helper.py as a "
+                 "fallback.\n";
   }
 
   // ── Initialize VR arm controller(s) — binds the WebSocket port ──────────

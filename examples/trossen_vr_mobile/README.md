@@ -17,8 +17,11 @@ conflicting configurations fail loudly at configure() time.
 
 ## Flow
 
-1. **Launch the mDNS helper** (same one used by the stationary demo) in a
-   second terminal so the Quest app can discover this machine.
+1. **mDNS advertisement is built in.** The demo advertises itself via
+   Avahi (`_trossen-vr._tcp`) on startup, so the Quest's server picker
+   finds this host automatically. No second terminal needed. The old
+   `mdns_helper.py` remains as a fallback if Avahi is unavailable on
+   the host.
 2. **Launch the demo**. Hardware init runs in this order:
    - Both follower arms handshake over TCP.
    - SLATE base initializes (motor torque on, odometry ready).
@@ -41,19 +44,14 @@ conflicting configurations fail loudly at configure() time.
 
 ## Run
 
-Terminal 1 — mDNS advertiser (reuses the stationary demo's helper):
-
-```bash
-cd ~/trossen_vr
-python3 ~/trossen_sdk/examples/trossen_vr_stationary/mdns_helper.py --port 5432
-```
-
-Terminal 2 — the demo:
-
 ```bash
 cd ~/trossen_sdk
 ./build/examples/trossen_vr_mobile
 ```
+
+mDNS is advertised automatically. If Avahi isn't available on this
+host, the demo logs a warning and you can fall back to the Python
+helper as in the stationary demo.
 
 Override hardware addresses as needed:
 
@@ -104,8 +102,10 @@ Supported events: `start`, `stop_early`, `rerecord`, `stop_session`.
 
 ## Troubleshooting
 
-- **Quest never connects**: mDNS helper not running (see Terminal 1), or a
-  firewall is blocking port 5432.
+- **Quest never connects**: Avahi not running on the host (check
+  `systemctl status avahi-daemon`) or a firewall is blocking port 5432.
+  If Avahi is unavailable, the Python `mdns_helper.py` can be used as a
+  fallback.
 - **A press does nothing**: session-control claims the A button on the
   `controller` configured under `vr.session_control`. Confirm it matches
   the hand you're pressing.

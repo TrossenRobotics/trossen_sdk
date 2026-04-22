@@ -39,6 +39,7 @@ add_library(trossen_sdk SHARED
   src/hw/vr/vr_arm_controller.cpp
   src/hw/vr/vr_base_joystick.cpp
   src/hw/vr/vr_session_control.cpp
+  src/hw/vr/vr_mdns_advertiser.cpp
   src/hw/keyboard/keyboard_component.cpp
   src/hw/teleop/teleop_controller.cpp
   src/hw/teleop/teleop_factory.cpp
@@ -122,6 +123,12 @@ find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(libtrossen_arm REQUIRED)
 find_package(trossen_vr REQUIRED)
+
+# Avahi client — used by VrMdnsAdvertiser so the Quest app can discover
+# the host without running a separate Python mDNS helper. Requires
+# `libavahi-client-dev` at build time and avahi-daemon on the runtime
+# host (default on Ubuntu / Jetson images).
+pkg_check_modules(AVAHI_CLIENT REQUIRED IMPORTED_TARGET avahi-client)
 
 include(FetchContent)
 
@@ -307,6 +314,10 @@ list(APPEND TROSSEN_PROTO_HDRS ${RAWIMAGE_PROTO_HDR})
 
 target_sources(trossen_sdk PRIVATE ${TROSSEN_PROTO_SRCS} ${TROSSEN_PROTO_HDRS})
 target_link_libraries(trossen_sdk PUBLIC ${Protobuf_LIBRARIES})
+# Avahi is a private implementation detail — headers stay behind the
+# VrMdnsAdvertiser pimpl so public SDK consumers don't transitively see
+# <avahi-client/*.h>.
+target_link_libraries(trossen_sdk PRIVATE PkgConfig::AVAHI_CLIENT)
 target_include_directories(trossen_sdk PUBLIC
   ${Protobuf_INCLUDE_DIRS}
   ${CMAKE_CURRENT_BINARY_DIR}

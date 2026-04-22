@@ -48,6 +48,7 @@
 #include "trossen_sdk/hw/teleop/teleop_factory.hpp"
 #include "trossen_sdk/hw/vr/vr_arm_controller.hpp"
 #include "trossen_sdk/hw/vr/vr_base_joystick.hpp"
+#include "trossen_sdk/hw/vr/vr_mdns_advertiser.hpp"
 #include "trossen_sdk/hw/vr/vr_session.hpp"
 #include "trossen_sdk/hw/vr/vr_session_control.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
@@ -204,6 +205,30 @@ int main(int argc, char** argv) {
     trossen::hw::ActiveHardwareRegistry::register_active(
       "slate_base", slate_base_component);
     std::cout << "  [ok] SLATE mobile base configured\n";
+  }
+
+  // ── Advertise the host over mDNS so the Quest app can discover it ──────
+
+  std::uint16_t vr_port = 5432;
+  if (vr_cfg.contains("arm_controllers")) {
+    for (const auto& [_, entry] : vr_cfg["arm_controllers"].items()) {
+      if (entry.contains("vr_port")) {
+        vr_port = entry.at("vr_port").get<std::uint16_t>();
+        break;
+      }
+    }
+  }
+
+  trossen::hw::vr::VrMdnsAdvertiser mdns;
+  try {
+    mdns.start(vr_port, "TrossenVR");
+    std::cout << "  [ok] mDNS advertising TrossenVR on port " << vr_port
+              << " (_trossen-vr._tcp)\n";
+  } catch (const std::exception& e) {
+    std::cerr << "  [warn] mDNS advertisement failed: " << e.what() << "\n"
+              << "         The Quest may not auto-discover this host; "
+                 "connect manually by IP or run mdns_helper.py as a "
+                 "fallback.\n";
   }
 
   // ── Initialize VR leaders (binds shared WebSocket port) ─────────────────
