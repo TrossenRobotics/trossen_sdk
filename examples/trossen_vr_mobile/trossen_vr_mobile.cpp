@@ -1,15 +1,22 @@
 /**
  * @file trossen_vr_mobile.cpp
- * @brief VR-driven mobile AI demo — 1 follower arm + SLATE base, no cameras.
+ * @brief VR-driven bimanual mobile AI demo — two follower arms + SLATE base.
  *
- * Extends `trossen_vr_stationary` with mobile-base teleop:
- *   - Right VR controller → follower arm (cartesian pose + gripper).
- *   - Left VR thumbstick  → SLATE base (linear forward, angular yaw).
+ * Extends `trossen_vr_stationary` with a second follower arm and a mobile
+ * base, all driven from a single Meta Quest:
+ *   - Left  VR controller → follower_left arm  (cartesian pose + gripper).
+ *   - Right VR controller → follower_right arm (cartesian pose + gripper).
+ *   - Left  VR thumbstick → SLATE base (linear forward, angular yaw).
+ *   - Right VR buttons    → session control (A = start/advance, B = re-record,
+ *                           grip = end session).
  *
- * Both leaders share one process-wide VrSession (one WebSocket to the Quest),
- * so "left hand does base, right hand does arm" just works from a single
- * connection. The wait-for-Quest + start-signal gate is the same as in the
- * stationary demo.
+ * All VR components share one process-wide VrSession (one WebSocket to the
+ * Quest) and claim non-overlapping inputs via VrSession::claim_inputs(), so
+ * conflicting configurations fail at configure() time with a clear error.
+ *
+ * Session-control events from the right-hand buttons are attached to the
+ * SessionManager via `attach_session_control()` — no custom start-signal
+ * gate is needed; `wait_for_reset()` does the work.
  *
  * Usage:
  *   ./trossen_vr_mobile [OPTIONS]
@@ -42,11 +49,11 @@
 #include "trossen_sdk/hw/vr/vr_arm_controller.hpp"
 #include "trossen_sdk/hw/vr/vr_base_joystick.hpp"
 #include "trossen_sdk/hw/vr/vr_session.hpp"
+#include "trossen_sdk/hw/vr/vr_session_control.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 #include "trossen_sdk/utils/app_utils.hpp"
-#include "trossen_sdk/utils/keyboard_input_utils.hpp"
 
 namespace {
 
@@ -60,62 +67,6 @@ void print_usage(const char* program) {
     "  --set KEY=VALUE    Override a config value using dot notation (repeatable)\n"
     "  --dump-config      Print merged config as JSON and exit\n"
     "  --help             Show this help and exit\n";
-}
-
-/// Primary hand used by the start-signal gate. Prefer the arm-controller
-/// hand over the joystick hand so the operator's "press A to begin" action
-/// is on the controller they are already pointing at the robot.
-std::string pick_primary_hand(const nlohmann::json& vr_cfg) {
-  if (vr_cfg.contains("arm_controllers") &&
-      vr_cfg["arm_controllers"].is_object()) {
-    for (const auto& [_, entry] : vr_cfg["arm_controllers"].items()) {
-      if (entry.contains("controller")) {
-        return entry["controller"].get<std::string>();
-      }
-    }
-  }
-  if (vr_cfg.contains("base_joysticks") &&
-      vr_cfg["base_joysticks"].is_object()) {
-    for (const auto& [_, entry] : vr_cfg["base_joysticks"].items()) {
-      if (entry.contains("controller")) {
-        return entry["controller"].get<std::string>();
-      }
-    }
-  }
-  return "right";
-}
-
-/// Block until the operator signals "start" (VR A-button, VRCommand::Start,
-/// or ENTER in the terminal). Returns false on Ctrl+C.
-bool wait_for_start_signal(const std::string& primary_hand) {
-  auto& session = trossen::hw::vr::VrSession::instance();
-  trossen::utils::RawModeGuard raw_mode;
-
-  std::cout << "\nPut on the Meta Quest and launch the VR app.\n"
-               "Press the A-button on the " << primary_hand
-            << " controller (or ENTER in this terminal) to start teleoperation.\n"
-               "(Ctrl+C to abort)\n\n";
-
-  bool last_connected = false;
-  while (!trossen::utils::g_stop_requested) {
-    const bool connected = session.is_quest_connected();
-    if (connected != last_connected) {
-      std::cout << "  Quest: " << (connected ? "CONNECTED" : "waiting...")
-                << "\n";
-      last_connected = connected;
-    }
-
-    if (connected && session.consume_start_signal(primary_hand)) return true;
-
-    const auto key = trossen::utils::poll_keypress();
-    if (key == trossen::utils::KeyPress::kEnter) {
-      if (connected) return true;
-      std::cout << "  (ignored ENTER — Quest not yet connected)\n";
-    }
-
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  }
-  return false;
 }
 
 }  // namespace
@@ -287,7 +238,20 @@ int main(int argc, char** argv) {
     }
   }
 
-  const std::string primary_hand = pick_primary_hand(vr_cfg);
+  // VR session-control component — buttons on the Quest drive episode
+  // start / re-record / stop-session through the SessionManager's
+  // SessionControlCapable channel, so no custom start-signal gate.
+  std::shared_ptr<trossen::hw::vr::VrSessionControlComponent> session_control;
+  if (vr_cfg.contains("session_control")) {
+    const auto& entry = vr_cfg["session_control"];
+    auto component = trossen::hw::HardwareRegistry::create(
+      "vr_session_control", "vr_session_control", entry, true);
+    session_control =
+      std::dynamic_pointer_cast<trossen::hw::vr::VrSessionControlComponent>(
+        component);
+    std::cout << "  [ok] VR session control configured ("
+              << entry.value("controller", std::string{"right"}) << " hand)\n";
+  }
 
   // ── Initialize cameras ──────────────────────────────────────────────────
   // Create each camera hardware component ahead of producer construction so
@@ -398,12 +362,34 @@ int main(int argc, char** argv) {
     }
   });
 
-  // ── Pre-session gate ────────────────────────────────────────────────────
+  // ── Attach session-control source ───────────────────────────────────────
+  //
+  // With a VrSessionControlComponent attached, A/B/grip buttons drive the
+  // SessionManager loops directly. The initial `wait_for_reset()` doubles
+  // as the pre-session gate — operator puts on the headset, presses A,
+  // recording begins.
 
-  if (!wait_for_start_signal(primary_hand)) {
-    std::cout << "\nAborted before first episode.\n";
-    mgr.shutdown();
-    return 0;
+  if (session_control) {
+    mgr.attach_session_control(session_control);
+    std::cout << "\nPut on the Meta Quest and press A on the controller to "
+                 "start recording.\n"
+                 "  A    = start / skip-reset / stop-current-and-advance\n"
+                 "  B    = re-record current or last episode\n"
+                 "  grip = end session\n\n";
+  } else {
+    std::cout << "\n(No VR session-control configured — using keyboard: "
+                 "-> continue, <- re-record, Ctrl+C to end.)\n\n";
+  }
+
+  {
+    const auto initial = mgr.wait_for_reset();
+    if (initial == trossen::runtime::UserAction::kStop ||
+        trossen::utils::g_stop_requested) {
+      std::cout << "\nAborted before first episode.\n";
+      mgr.detach_session_control();
+      mgr.shutdown();
+      return 0;
+    }
   }
 
   // ── Episode loop ────────────────────────────────────────────────────────
@@ -446,11 +432,15 @@ int main(int argc, char** argv) {
       break;
     }
 
-    std::cout << "\nEpisode complete. Press A (or ENTER) to record the next "
-                 "episode, or Ctrl+C to end the session.\n";
-    if (!wait_for_start_signal(primary_hand)) break;
+    action = mgr.wait_for_reset();
+    if (action == trossen::runtime::UserAction::kStop) break;
+    if (action == trossen::runtime::UserAction::kReRecord) {
+      mgr.discard_last_episode();
+      continue;
+    }
   }
 
+  mgr.detach_session_control();
   mgr.shutdown();
 
   const auto final_stats = mgr.stats();

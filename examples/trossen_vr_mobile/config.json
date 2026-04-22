@@ -3,6 +3,11 @@
 
   "hardware": {
     "arms": {
+      "follower_left": {
+        "ip_address":   "192.168.1.5",
+        "model":        "wxai_v0",
+        "end_effector": "wxai_v0_follower"
+      },
       "follower_right": {
         "ip_address":   "192.168.1.4",
         "model":        "wxai_v0",
@@ -39,6 +44,13 @@
   },
 
   "producers": [
+    {
+      "type":            "trossen_arm",
+      "hardware_id":     "follower_left",
+      "stream_id":       "follower_left",
+      "poll_rate_hz":    30.0,
+      "use_device_time": false
+    },
     {
       "type":            "trossen_arm",
       "hardware_id":     "follower_right",
@@ -81,6 +93,13 @@
 
   "vr": {
     "arm_controllers": {
+      "vr_left": {
+        "controller":       "left",
+        "vr_port":          5432,
+        "gripper_min_m":    0.0,
+        "gripper_max_m":    0.04,
+        "wait_for_quest_s": 120.0
+      },
       "vr_right": {
         "controller":       "right",
         "vr_port":          5432,
@@ -98,6 +117,18 @@
         "deadzone":         0.1,
         "wait_for_quest_s": 120.0
       }
+    },
+    "session_control": {
+      "controller":           "right",
+      "vr_port":              5432,
+      "wait_for_quest_s":     120.0,
+      "poll_interval_ms":     50,
+      "disconnect_timeout_s": 2.0,
+      "bindings": {
+        "button_a": "start",
+        "button_b": "rerecord",
+        "grip":     "stop_session"
+      }
     }
   },
 
@@ -105,6 +136,7 @@
     "enabled": true,
     "rate_hz": 1000.0,
     "pairs": [
+      { "leader": "vr_left",  "follower": "follower_left",  "space": "cartesian" },
       { "leader": "vr_right", "follower": "follower_right", "space": "cartesian" },
       { "leader": "vr_base",  "follower": "slate_base",     "space": "base"      }
     ]
