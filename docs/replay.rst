@@ -81,7 +81,7 @@ Arms not listed in the config are skipped.
 
     .. group-tab:: Solo
 
-        .. code-block:: json5
+        .. code-block:: javascript
 
             {
               "replay": {
@@ -100,7 +100,7 @@ Arms not listed in the config are skipped.
 
     .. group-tab:: Stationary
 
-        .. code-block:: json5
+        .. code-block:: javascript
 
             {
               "replay": {
@@ -126,7 +126,7 @@ Arms not listed in the config are skipped.
 
     .. group-tab:: Mobile
 
-        .. code-block:: json5
+        .. code-block:: javascript
 
             {
               "replay": {

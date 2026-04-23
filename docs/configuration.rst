@@ -48,7 +48,7 @@ Schema Reference
 
 A config is a JSON object with six top-level keys, used by every example:
 
-.. code-block:: json5
+.. code-block:: javascript
 
     {
       "robot_name":  "my_robot",    // Identifier stored in dataset metadata
@@ -134,7 +134,7 @@ Producers
 Each entry describes one data stream that the SDK will poll and record.
 Add one producer per arm, one per camera, and one per mobile base.
 
-.. code-block:: json5
+.. code-block:: javascript
 
     {
       "type":           "trossen_arm",      // Producer type (table below)
@@ -173,7 +173,7 @@ Supported producer types:
 Teleop
 ------
 
-.. code-block:: json5
+.. code-block:: javascript
 
     "teleop": {
       "enabled": true,        // Set false to disable teleop
@@ -188,7 +188,7 @@ Teleop
 Backend
 -------
 
-.. code-block:: json5
+.. code-block:: javascript
 
     "backend": {
       "root":             "~/.trossen_sdk",   // Directory where episodes are written
@@ -203,7 +203,7 @@ Episode numbers are assigned automatically and resume from the highest existing 
 Session
 -------
 
-.. code-block:: json5
+.. code-block:: javascript
 
     "session": {
       "max_duration":   20.0,            // Seconds per episode
@@ -255,7 +255,7 @@ See `Finding Device Identifiers`_ below for how to look up each value.
         The solo config has **2 arms** and **2 cameras**.
         Replace the placeholders in ``examples/trossen_solo_ai/config.json``:
 
-        .. code-block:: json5
+        .. code-block:: javascript
 
             "hardware": {
               "arms": {
@@ -277,7 +277,7 @@ See `Finding Device Identifiers`_ below for how to look up each value.
         The stationary config has **4 arms** (left/right leader + left/right follower) and **4 cameras**.
         Replace the placeholders in ``examples/trossen_stationary_ai/config.json``:
 
-        .. code-block:: json5
+        .. code-block:: javascript
 
             "hardware": {
               "arms": {
@@ -306,7 +306,7 @@ See `Finding Device Identifiers`_ below for how to look up each value.
         The mobile config has the same **4 arms** as stationary, **3 cameras**, and a ``mobile_base`` block.
         Replace the placeholders in ``examples/trossen_mobile_ai/config.json``:
 
-        .. code-block:: json5
+        .. code-block:: javascript
 
             "hardware": {
               "arms": {

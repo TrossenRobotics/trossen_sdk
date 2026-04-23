@@ -81,7 +81,7 @@ All conversion settings live in a single JSON config file.
 By default, the tool loads ``scripts/trossen_mcap_to_lerobot_v2/config.json`` from the repository root.
 Point it at a different config with ``--config <path>``.
 
-.. code-block:: json5
+.. code-block:: javascript
 
     {
       "lerobot_v2_backend": {
@@ -225,7 +225,7 @@ Each episode produces one ``.parquet`` file (SNAPPY compression) with the follow
 Dataset Metadata (info.json)
 ============================
 
-.. code-block:: json5
+.. code-block:: javascript
 
     {
       "codebase_version": "v2.1",
@@ -252,7 +252,7 @@ Episode Statistics (episodes_stats.jsonl)
 
 One JSON line per episode, appended after each conversion:
 
-.. code-block:: json5
+.. code-block:: javascript
 
     {
       "episode_index": 0,
