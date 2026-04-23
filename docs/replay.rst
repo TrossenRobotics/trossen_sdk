@@ -188,6 +188,7 @@ Playback Behavior
 -   Before playback begins, the tool moves each listed arm to the recorded starting position so the trajectory starts from a known state.
 -   The tool requires ``libtrossen_arm`` to be installed for arm control.
     This is the same library the SDK uses for recording.
+-   For episodes containing mobile-base streams, the tool uses ``trossen_slate`` to drive the base.
 
 What's Next
 ===========

@@ -270,25 +270,25 @@ Statistics are computed directly from the converted frame data, so they always r
 Troubleshooting
 ===============
 
-.. warning::
+Missing Arrow/Parquet libraries
+-------------------------------
 
-    **Missing Arrow/Parquet libraries.**
-    Install the Apache Arrow APT repo and development packages.
-    See the Parquet section in :doc:`/installation`.
+Install the Apache Arrow APT repo and development packages.
+See the Parquet section in :doc:`/installation`.
 
-.. warning::
+FFmpeg not found or codec error
+-------------------------------
 
-    **FFmpeg not found or codec error.**
-    Install FFmpeg with ``sudo apt-get install ffmpeg``.
-    The tool shells out to FFmpeg for AV1 encoding of the image streams.
+Install FFmpeg with ``sudo apt-get install ffmpeg``.
+The tool shells out to FFmpeg for AV1 encoding of the image streams.
 
-.. warning::
+Episode numbering mismatch
+--------------------------
 
-    **Episode numbering mismatch.**
-    The tool extracts episode indices from the MCAP filename.
-    Filenames must follow ``episode_NNNNNN.mcap`` (six-digit zero-padded).
-    This is the format the SDK writes natively.
-    Do not rename the files.
+The tool extracts episode indices from the MCAP filename.
+Filenames must follow ``episode_NNNNNN.mcap`` (six-digit zero-padded).
+This is the format the SDK writes natively.
+Do not rename the files.
 
 What's Next
 ===========
