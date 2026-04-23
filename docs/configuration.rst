@@ -3,14 +3,6 @@ Configuration
 =============
 
 Every recording session in the Trossen SDK is driven by a single JSON configuration file.
-This page is split into three parts:
-
-#.  **Schema reference**.
-    What every key means, the same for every robot.
-#.  **Configuring your robot**.
-    Which values you need to change for your setup.
-#.  **Finding device identifiers**.
-    How to look up IP addresses, camera serial numbers, and other values the config needs.
 
 .. contents::
     :local:
@@ -226,11 +218,6 @@ Session
       "reset_duration": 5.0              // Pause between episodes (see table)
     }
 
-.. warning::
-
-    Always set both ``max_duration`` and ``max_episodes``.
-    Running without limits requires manual Ctrl+C to stop each episode and risks inconsistent dataset sizes.
-
 ``reset_duration`` behavior:
 
 .. list-table::
@@ -358,41 +345,10 @@ See `Finding Device Identifiers`_ below for how to look up each value.
 Finding Device Identifiers
 ==========================
 
-This section covers the most common "what value goes here?" questions.
-
-Arm IP Addresses
-----------------
-
-Each arm controller ships with a factory IP on the ``192.168.1.0/24`` subnet.
-To change it, connect one controller at a time and use the Trossen Arm configuration tools.
-See the `Trossen Arm network setup guide <https://docs.trossenrobotics.com/trossen_arm/main/getting_started/software_setup.html>`_.
-
-Verify connectivity before editing the config:
-
-.. code-block:: bash
-
-    ping -c 3 192.168.1.2
-
 RealSense Serial Numbers
 ------------------------
 
-With the RealSense SDK installed, you have two ways to list connected cameras.
-
-**Option 1: Command line.**
-List every connected camera and its serial:
-
-.. code-block:: bash
-
-    rs-enumerate-devices -s
-
-Each line looks like::
-
-    RealSense D435    123456789012    ...
-
-The 12-digit number is the value for ``serial_number`` in ``hardware.cameras``.
-
-**Option 2: RealSense Viewer (GUI).**
-Launch the official viewer:
+With the RealSense SDK installed, launch the official viewer:
 
 .. code-block:: bash
 
@@ -400,47 +356,7 @@ Launch the official viewer:
 
 Each connected camera appears in the left panel.
 Hover over a camera's name to see its serial number, or expand the **Info** section in the camera's settings to copy it.
-This is the easiest way to map physical cameras to ``hardware.cameras`` entries.
-Unplug all cameras except the one you are labeling, read the serial, then plug in the next one.
-
-Stereolabs ZED Serial Numbers
------------------------------
-
-With the ZED SDK installed, you have two ways to list connected cameras.
-
-**Option 1: ZED Explorer (GUI).**
-Launch the main ZED viewer:
-
-.. code-block:: bash
-
-    /usr/local/zed/tools/ZED_Explorer
-
-Each connected camera is listed at the top of the window with its serial number.
-This is the easiest way to map physical cameras to ``hardware.cameras`` entries.
-Unplug all cameras except the one you are labeling, read the serial, then plug in the next one.
-
-**Option 2: ZED Diagnostic (GUI).**
-Launch the diagnostic tool:
-
-.. code-block:: bash
-
-    /usr/local/zed/tools/ZED_Diagnostic
-
-The GUI lists every connected camera with its serial number.
-
-Use either value for ``serial_number`` in ``hardware.cameras`` for an entry with ``"type": "zed_camera"`` in ``producers``.
-
-OpenCV / USB Camera Device Paths
---------------------------------
-
-For generic USB cameras, use the ``/dev/video*`` path instead of a serial number.
-List available devices:
-
-.. code-block:: bash
-
-    v4l2-ctl --list-devices
-
-Use the returned ``/dev/videoN`` path as the camera's ``serial_number`` field and set ``"type": "opencv_camera"`` in the corresponding ``producers`` entry.
+Plug in every camera, open its live stream in the viewer, and match the feed to the serial by its field of view.
 
 --------------------------------------------------------------------------------
 

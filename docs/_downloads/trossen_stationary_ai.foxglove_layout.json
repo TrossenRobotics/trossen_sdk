@@ -1,16 +1,16 @@
 {
   "configById": {
     "Image!high": {
-      "imageMode": { "imageTopic": "/cameras/camera_high/image", "calibrationTopic": "", "synchronize": false }
+      "imageMode": { "imageTopic": "/cameras/camera_high/image" }
     },
     "Image!low": {
-      "imageMode": { "imageTopic": "/cameras/camera_low/image", "calibrationTopic": "", "synchronize": false }
+      "imageMode": { "imageTopic": "/cameras/camera_low/image" }
     },
     "Image!left_wrist": {
-      "imageMode": { "imageTopic": "/cameras/camera_left_wrist/image", "calibrationTopic": "", "synchronize": false }
+      "imageMode": { "imageTopic": "/cameras/camera_left_wrist/image" }
     },
     "Image!right_wrist": {
-      "imageMode": { "imageTopic": "/cameras/camera_right_wrist/image", "calibrationTopic": "", "synchronize": false }
+      "imageMode": { "imageTopic": "/cameras/camera_right_wrist/image" }
     },
     "Plot!positions_left": {
       "paths": [

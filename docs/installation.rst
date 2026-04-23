@@ -154,18 +154,6 @@ If you are building on a machine without the librealsense headers installed, dis
     cmake .. -DTROSSEN_ENABLE_REALSENSE=OFF
     make -j$(nproc)
 
-Convenience Targets
--------------------
-
-The top-level ``Makefile`` wraps the most common CMake invocations.
-From the repo root:
-
-.. code-block:: bash
-
-    make build           # Standard build
-    make test            # Build and run tests
-    make realsense       # Shortcut for -DTROSSEN_ENABLE_REALSENSE=ON
-
 Verifying the Install
 =====================
 

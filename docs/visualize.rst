@@ -75,6 +75,12 @@ Ready-Made Layout
 A Foxglove layout matching each default robot config is included with these docs.
 Download the one that matches your robot, then in Foxglove Studio choose **Layouts → Import from file** and select the JSON.
 
+.. figure:: diagrams/trossen_stationary_foxglove_layout.png
+    :align: center
+    :alt: Trossen stationary layout loaded in Foxglove Studio
+
+    Example: the stationary layout rendering a recorded episode — four camera feeds on top, leader/follower joint plots on the bottom.
+
 .. tabs::
 
     .. group-tab:: Solo
@@ -129,7 +135,7 @@ What's Next
 
 Once you have verified an episode visually:
 
--   Convert the dataset to LeRobot V2 for training.
-    See :doc:`/convert`.
 -   Replay an episode back onto hardware.
     See :doc:`/replay`.
+-   Convert the dataset to LeRobot V2 for training.
+    See :doc:`/convert`.

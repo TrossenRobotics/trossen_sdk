@@ -293,9 +293,5 @@ Troubleshooting
 What's Next
 ===========
 
-With your dataset in LeRobot V2 format, you can:
-
--   Train a policy with LeRobot.
-    See the `Trossen LeRobot training guide <https://docs.trossenrobotics.com/trossen_arm/main/tutorials/lerobot/train_and_evaluate.html>`_.
--   Replay an individual ``.mcap`` episode back onto hardware.
-    See :doc:`/replay`.
+With your dataset in LeRobot V2 format, you can train a policy with LeRobot.
+See the `Trossen LeRobot training guide <https://docs.trossenrobotics.com/trossen_arm/main/tutorials/lerobot/train_and_evaluate.html>`_.

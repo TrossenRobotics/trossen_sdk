@@ -41,7 +41,24 @@ Run the Demo
             ./build/examples/trossen_mobile_ai \
                 --config examples/trossen_mobile_ai/config.json
 
-If you omit ``--config``, the demo loads the ``config.json`` next to the source file.
+If you omit ``--config``, the demo loads its default config file:
+
+.. list-table::
+    :align: center
+    :header-rows: 1
+    :class: centered-table
+
+    * - Robot
+      - Default config path
+    * - Solo
+      - ``examples/trossen_solo_ai/config.json``
+    * - Stationary
+      - ``examples/trossen_stationary_ai/config.json``
+    * - Mobile
+      - ``examples/trossen_mobile_ai/config.json``
+
+These paths are resolved relative to the directory you launch the binary from (typically the repo root).
+Edit the file in place to change the default, or pass ``--config <path>`` to point at a different file.
 
 Append ``--dump-config`` to any of the commands above to print the merged configuration and exit without touching hardware.
 
@@ -101,7 +118,7 @@ With ``.mcap`` episodes on disk:
 
 -   Open them in Foxglove Studio.
     See :doc:`/visualize`.
--   Convert them to LeRobot V2 for training.
-    See :doc:`/convert`.
 -   Replay an episode back on hardware.
     See :doc:`/replay`.
+-   Convert them to LeRobot V2 for training.
+    See :doc:`/convert`.

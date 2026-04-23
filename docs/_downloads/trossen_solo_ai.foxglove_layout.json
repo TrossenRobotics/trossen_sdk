@@ -1,42 +1,10 @@
 {
   "configById": {
     "Image!main": {
-      "cameraState": {
-        "distance": 20,
-        "perspective": true,
-        "phi": 60,
-        "target": [0, 0, 0],
-        "targetOffset": [0, 0, 0],
-        "thetaOffset": 45,
-        "fovy": 45,
-        "near": 0.5,
-        "far": 5000
-      },
-      "followMode": "follow-pose",
-      "imageMode": {
-        "imageTopic": "/cameras/camera_main/image",
-        "calibrationTopic": "",
-        "synchronize": false
-      }
+      "imageMode": { "imageTopic": "/cameras/camera_main/image" }
     },
     "Image!wrist": {
-      "cameraState": {
-        "distance": 20,
-        "perspective": true,
-        "phi": 60,
-        "target": [0, 0, 0],
-        "targetOffset": [0, 0, 0],
-        "thetaOffset": 45,
-        "fovy": 45,
-        "near": 0.5,
-        "far": 5000
-      },
-      "followMode": "follow-pose",
-      "imageMode": {
-        "imageTopic": "/cameras/camera_wrist/image",
-        "calibrationTopic": "",
-        "synchronize": false
-      }
+      "imageMode": { "imageTopic": "/cameras/camera_wrist/image" }
     },
     "Plot!positions": {
       "paths": [

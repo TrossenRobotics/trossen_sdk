@@ -194,4 +194,3 @@ What's Next
 
 -   Convert the dataset to LeRobot V2 for training.
     See :doc:`/convert`.
--   Revisit :doc:`/visualize` to inspect a recorded trajectory before replaying it.
