@@ -7,7 +7,10 @@
  * each, and saves previews to an output directory.  Use the preview images
  * to determine which physical camera maps to which serial number or device
  * index, then populate your config files accordingly.
-
+ *
+ * Usage:
+ *   ./find_cameras [realsense|opencv|all] [--output DIR]
+ *
  * Output layout:
  *   <output>/realsense_<serial>.jpg
  *   <output>/opencv_<index>.jpg
@@ -29,7 +32,7 @@
 namespace fs = std::filesystem;
 
 // ---------------------------------------------------------------------------
-// Helpers
+// CameraInfo
 // ---------------------------------------------------------------------------
 
 struct CameraInfo {
@@ -41,6 +44,10 @@ struct CameraInfo {
   bool        preview_ok;
   fs::path    preview_path;
 };
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
 
 static std::string v4l2_device_name(int index)
 {
@@ -65,162 +72,166 @@ static bool is_realsense_v4l2(int index)
 // RealSense discovery
 // ---------------------------------------------------------------------------
 
-static std::vector<CameraInfo> discover_realsense(const fs::path& output_dir)
-{
-  std::vector<CameraInfo> results;
+struct RealSenseDiscovery {
+  static std::vector<CameraInfo> find(const fs::path& output_dir)
+  {
+    std::vector<CameraInfo> results;
 
-  rs2::context    ctx;
-  rs2::device_list devices = ctx.query_devices();
+    rs2::context     ctx;
+    rs2::device_list devices = ctx.query_devices();
 
-  if (devices.size() == 0) {
-    std::cout << "  none found\n";
-    return results;
-  }
-
-  for (uint32_t i = 0; i < devices.size(); ++i) {
-    rs2::device dev    = devices[i];
-    std::string serial = dev.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER);
-    std::string name   = dev.get_info(RS2_CAMERA_INFO_NAME);
-
-    CameraInfo info;
-    info.type         = "realsense";
-    info.identifier   = serial;
-    info.width        = 640;
-    info.height       = 480;
-    info.fps          = 30;
-    info.preview_ok   = false;
-    info.preview_path = output_dir / ("realsense_" + serial + ".jpg");
-
-    rs2::pipeline pipeline;
-    rs2::config   cfg;
-    cfg.enable_device(serial);
-    cfg.enable_stream(RS2_STREAM_COLOR, 640, 480, RS2_FORMAT_BGR8, 30);
-
-    try {
-      rs2::pipeline_profile profile = pipeline.start(cfg);
-
-      auto color_profile =
-        profile.get_stream(RS2_STREAM_COLOR).as<rs2::video_stream_profile>();
-      info.width  = color_profile.width();
-      info.height = color_profile.height();
-      info.fps    = static_cast<int>(color_profile.fps());
-
-      float last_exposure = -1.0f;
-      for (int w = 0; w < 30; ++w) {
-        rs2::frameset f     = pipeline.wait_for_frames();
-        rs2::frame    color = f.get_color_frame();
-        if (color) {
-          float exposure = color.get_frame_metadata(RS2_FRAME_METADATA_ACTUAL_EXPOSURE);
-          if (last_exposure > 0 &&
-              std::abs(exposure - last_exposure) / last_exposure < 0.02f) break;
-          last_exposure = exposure;
-        }
-      }
-
-      rs2::frameset frames = pipeline.wait_for_frames();
-      rs2::frame    color  = frames.get_color_frame();
-      if (color) {
-        rs2::video_frame vf = color.as<rs2::video_frame>();
-        cv::Mat img(
-          cv::Size(vf.get_width(), vf.get_height()),
-          CV_8UC3,
-          const_cast<void*>(color.get_data()),
-          cv::Mat::AUTO_STEP);
-        info.preview_ok = cv::imwrite(info.preview_path.string(), img);
-        if (!info.preview_ok) {
-          std::cerr << "  [warn] failed to write preview image to "
-                    << info.preview_path << "\n";
-        }
-      }
-      pipeline.stop();
-    } catch (const rs2::error& e) {
-      std::cerr << "  [warn] " << serial << ": " << e.what() << "\n";
+    if (devices.size() == 0) {
+      std::cout << "  none found\n";
+      return results;
     }
 
-    std::cout << "  [" << (info.preview_ok ? "ok  " : "warn") << "] "
-              << "realsense  serial=" << serial
-              << "  " << info.width << "x" << info.height << " @ " << info.fps << " fps"
-              << "  (" << name << ")\n";
+    for (uint32_t i = 0; i < devices.size(); ++i) {
+      rs2::device dev    = devices[i];
+      std::string serial = dev.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER);
+      std::string name   = dev.get_info(RS2_CAMERA_INFO_NAME);
 
-    results.push_back(info);
+      CameraInfo info;
+      info.type         = "realsense";
+      info.identifier   = serial;
+      info.width        = 640;
+      info.height       = 480;
+      info.fps          = 30;
+      info.preview_ok   = false;
+      info.preview_path = output_dir / ("realsense_" + serial + ".jpg");
+
+      rs2::pipeline pipeline;
+      rs2::config   cfg;
+      cfg.enable_device(serial);
+      cfg.enable_stream(RS2_STREAM_COLOR, 640, 480, RS2_FORMAT_BGR8, 30);
+
+      try {
+        rs2::pipeline_profile profile = pipeline.start(cfg);
+
+        auto color_profile =
+          profile.get_stream(RS2_STREAM_COLOR).as<rs2::video_stream_profile>();
+        info.width  = color_profile.width();
+        info.height = color_profile.height();
+        info.fps    = static_cast<int>(color_profile.fps());
+
+        float last_exposure = -1.0f;
+        for (int w = 0; w < 30; ++w) {
+          rs2::frameset f     = pipeline.wait_for_frames();
+          rs2::frame    color = f.get_color_frame();
+          if (color) {
+            float exposure = color.get_frame_metadata(RS2_FRAME_METADATA_ACTUAL_EXPOSURE);
+            if (last_exposure > 0 &&
+                std::abs(exposure - last_exposure) / last_exposure < 0.02f) break;
+            last_exposure = exposure;
+          }
+        }
+
+        rs2::frameset frames = pipeline.wait_for_frames();
+        rs2::frame    color  = frames.get_color_frame();
+        if (color) {
+          rs2::video_frame vf = color.as<rs2::video_frame>();
+          cv::Mat img(
+            cv::Size(vf.get_width(), vf.get_height()),
+            CV_8UC3,
+            const_cast<void*>(color.get_data()),
+            cv::Mat::AUTO_STEP);
+          info.preview_ok = cv::imwrite(info.preview_path.string(), img);
+          if (!info.preview_ok) {
+            std::cerr << "  [warn] failed to write preview image to "
+                      << info.preview_path << "\n";
+          }
+        }
+        pipeline.stop();
+      } catch (const rs2::error& e) {
+        std::cerr << "  [warn] " << serial << ": " << e.what() << "\n";
+      }
+
+      std::cout << "  [" << (info.preview_ok ? "ok  " : "warn") << "] "
+                << "realsense  serial=" << serial
+                << "  " << info.width << "x" << info.height << " @ " << info.fps << " fps"
+                << "  (" << name << ")\n";
+
+      results.push_back(info);
+    }
+
+    return results;
   }
-
-  return results;
-}
+};
 
 // ---------------------------------------------------------------------------
 // OpenCV / V4L2 discovery
 // ---------------------------------------------------------------------------
 
-static std::vector<CameraInfo> discover_opencv(const fs::path& output_dir)
-{
-  std::vector<CameraInfo> results;
-  bool any_found = false;
+struct OpenCVDiscovery {
+  static std::vector<CameraInfo> find(const fs::path& output_dir)
+  {
+    std::vector<CameraInfo> results;
+    bool any_found = false;
 
-  for (int idx = 0; idx < 64; ++idx) {
-    if (!fs::exists("/dev/video" + std::to_string(idx))) continue;
-    if (is_realsense_v4l2(idx)) continue;
+    for (int idx = 0; idx < 64; ++idx) {
+      if (!fs::exists("/dev/video" + std::to_string(idx))) continue;
+      if (is_realsense_v4l2(idx)) continue;
 
-    int devnull     = open("/dev/null", O_WRONLY);
-    int saved_stderr = dup(2);
-    dup2(devnull, 2);
-    cv::VideoCapture cap(idx, cv::CAP_V4L2);
-    dup2(saved_stderr, 2);
-    close(saved_stderr);
-    close(devnull);
-    if (!cap.isOpened()) {
+      int devnull      = open("/dev/null", O_WRONLY);
+      int saved_stderr = dup(2);
+      dup2(devnull, 2);
+      cv::VideoCapture cap(idx, cv::CAP_V4L2);
+      dup2(saved_stderr, 2);
+      close(saved_stderr);
+      close(devnull);
+      if (!cap.isOpened()) {
+        cap.release();
+        continue;
+      }
+
+      any_found = true;
+      std::string dev_name = v4l2_device_name(idx);
+
+      CameraInfo info;
+      info.type         = "opencv";
+      info.identifier   = std::to_string(idx);
+      info.width        = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
+      info.height       = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
+      info.fps          = static_cast<int>(cap.get(cv::CAP_PROP_FPS));
+      info.preview_ok   = false;
+      info.preview_path = output_dir / ("opencv_" + std::to_string(idx) + ".jpg");
+
+      cv::Mat frame;
+      double last_brightness = -1.0;
+      for (int w = 0; w < 30; ++w) {
+        if (!cap.read(frame)) {
+          frame.release();
+          break;
+        }
+        if (frame.empty()) break;
+        double brightness = cv::mean(frame)[0];
+        if (last_brightness > 0 &&
+            std::abs(brightness - last_brightness) / last_brightness < 0.02) break;
+        last_brightness = brightness;
+      }
+
+      if (!frame.empty()) {
+        info.preview_ok = cv::imwrite(info.preview_path.string(), frame);
+        if (!info.preview_ok) {
+          std::cerr << "  [warn] failed to write preview image to "
+                    << info.preview_path << "\n";
+        }
+      }
       cap.release();
-      continue;
+
+      std::cout << "  [" << (info.preview_ok ? "ok  " : "warn") << "] "
+                << "opencv     index=" << idx
+                << "  " << info.width << "x" << info.height << " @ " << info.fps << " fps";
+      if (!dev_name.empty()) std::cout << "  (" << dev_name << ")";
+      std::cout << "\n";
+
+      results.push_back(info);
     }
 
-    any_found = true;
-    std::string dev_name = v4l2_device_name(idx);
+    if (!any_found) std::cout << "  none found\n";
 
-    CameraInfo info;
-    info.type         = "opencv";
-    info.identifier   = std::to_string(idx);
-    info.width        = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH));
-    info.height       = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT));
-    info.fps          = static_cast<int>(cap.get(cv::CAP_PROP_FPS));
-    info.preview_ok   = false;
-    info.preview_path = output_dir / ("opencv_" + std::to_string(idx) + ".jpg");
-
-    cv::Mat frame;
-    double last_brightness = -1.0;
-    for (int w = 0; w < 30; ++w) {
-      if (!cap.read(frame)) {
-        frame.release();
-        break;
-      }
-      if (frame.empty()) break;
-      double brightness = cv::mean(frame)[0];
-      if (last_brightness > 0 &&
-          std::abs(brightness - last_brightness) / last_brightness < 0.02) break;
-      last_brightness = brightness;
-    }
-
-    if (!frame.empty()) {
-      info.preview_ok = cv::imwrite(info.preview_path.string(), frame);
-      if (!info.preview_ok) {
-        std::cerr << "  [warn] failed to write preview image to "
-                  << info.preview_path << "\n";
-      }
-    }
-    cap.release();
-
-    std::cout << "  [" << (info.preview_ok ? "ok  " : "warn") << "] "
-              << "opencv     index=" << idx
-              << "  " << info.width << "x" << info.height << " @ " << info.fps << " fps";
-    if (!dev_name.empty()) std::cout << "  (" << dev_name << ")";
-    std::cout << "\n";
-
-    results.push_back(info);
+    return results;
   }
-
-  if (!any_found) std::cout << "  none found\n";
-
-  return results;
-}
+};
 
 // ---------------------------------------------------------------------------
 // main
@@ -228,12 +239,17 @@ static std::vector<CameraInfo> discover_opencv(const fs::path& output_dir)
 
 int main(int argc, char** argv)
 {
-  fs::path output_dir = "./scripts/find_cameras/camera_discovery";
+  fs::path    output_dir = "./scripts/find_cameras/camera_discovery";
+  std::string type       = "all";
 
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
     if (arg == "--help") {
-      std::cout << "Usage: " << argv[0] << " [--output DIR]\n";
+      std::cout << "Usage: " << argv[0] << " [realsense|opencv|all] [--output DIR]\n";
+      std::cout << "\nArguments:\n";
+      std::cout << "  realsense       Discover RealSense cameras only\n";
+      std::cout << "  opencv          Discover OpenCV/V4L2 cameras only\n";
+      std::cout << "  all             Discover all cameras (default)\n";
       std::cout << "\nOptions:\n";
       std::cout << "  --output DIR    Preview output directory (default: "
                 << output_dir.string() << ")\n";
@@ -244,22 +260,29 @@ int main(int argc, char** argv)
       return 0;
     } else if (arg == "--output" && i + 1 < argc) {
       output_dir = argv[++i];
+    } else if (arg == "realsense" || arg == "opencv" || arg == "all") {
+      type = arg;
     }
   }
 
+  if (fs::exists(output_dir)) fs::remove_all(output_dir);
   fs::create_directories(output_dir);
 
   std::cout << "\n=== CAMERAS ===\n\n";
 
-  std::cout << "RealSense cameras:\n";
-  std::vector<CameraInfo> rs_cameras = discover_realsense(output_dir);
-
-  std::cout << "\nOpenCV / V4L2 cameras:\n";
-  std::vector<CameraInfo> cv_cameras = discover_opencv(output_dir);
-
   std::vector<CameraInfo> all;
-  all.insert(all.end(), rs_cameras.begin(), rs_cameras.end());
-  all.insert(all.end(), cv_cameras.begin(), cv_cameras.end());
+
+  if (type == "realsense" || type == "all") {
+    std::cout << "RealSense cameras:\n";
+    auto rs = RealSenseDiscovery::find(output_dir);
+    all.insert(all.end(), rs.begin(), rs.end());
+  }
+
+  if (type == "opencv" || type == "all") {
+    std::cout << "\nOpenCV / V4L2 cameras:\n";
+    auto cv = OpenCVDiscovery::find(output_dir);
+    all.insert(all.end(), cv.begin(), cv.end());
+  }
 
   if (all.empty()) {
     std::cout << "\nNo cameras found.\n";
@@ -277,7 +300,7 @@ int main(int argc, char** argv)
             << std::string(80, '-') << "\n";
 
   for (const auto& cam : all) {
-    std::string res = std::to_string(cam.width) + "x" + std::to_string(cam.height);
+    std::string res     = std::to_string(cam.width) + "x" + std::to_string(cam.height);
     std::string fps_str = (cam.fps > 0) ? std::to_string(cam.fps) : "?";
     std::cout << std::left
               << std::setw(12) << cam.type
