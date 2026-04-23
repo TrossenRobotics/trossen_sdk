@@ -14,7 +14,7 @@ What You Need
 Before editing a config, complete :doc:`/installation` and have the following information available:
 
 -   Arm controller IP addresses.
--   Camera serial numbers (for Stereolabs ZED or RealSense) or ``/dev/video*`` paths (for USB cameras).
+-   Camera serial numbers (for Stereolabs ZED or RealSense) or ``/dev/video*`` paths (for V4L2 USB cameras).
 -   The mobile base serial port, if applicable.
 
 Starting From an Example
@@ -154,22 +154,16 @@ Supported producer types:
 
     * - ``type``
       - Description
-      - Notes
     * - ``trossen_arm``
       - Trossen AI Kit arm
-      - Up to 200 Hz
     * - ``zed_camera``
-      - Stereolabs ZED
-      - Jetson only; requires ``-DTROSSEN_ENABLE_ZED=ON``
+      - Stereolabs ZED (Jetson only; requires ``-DTROSSEN_ENABLE_ZED=ON``)
     * - ``realsense_camera``
       - RealSense RGB
-      - ``encoding: "bgr8"``
     * - ``opencv_camera``
-      - V4L2 USB camera
-      - Any ``/dev/video*``
+      - V4L2 USB camera (any ``/dev/video*``)
     * - ``slate_base``
       - SLATE mobile base
-      - Odometry stream
 
 .. tip::
 

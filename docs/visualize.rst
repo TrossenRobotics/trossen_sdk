@@ -118,16 +118,13 @@ Names include the ``stream_id`` from your ``producers`` config.
       - Schema
       - Suggested Foxglove Panel
     * - ``{stream_id}/joints/state``
-      - ``foxglove.JointState``
+      - ``trossen_sdk.msg.JointState``
       - Plot (positions, velocities), State Transitions
     * - ``/cameras/{camera_id}/image``
       - ``foxglove.RawImage``
       - Image
-    * - ``/cameras/{camera_id}/meta``
-      - Key/value
-      - Raw Messages (metadata reference)
     * - ``{stream_id}/odom/state``
-      - ``Odometry2D``
+      - ``trossen_sdk.msg.Odometry2D``
       - Plot (``twist.linear_x``, ``twist.linear_y``, ``twist.angular_z``)
 
 What's Next

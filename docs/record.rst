@@ -99,16 +99,13 @@ Topic names are derived from the ``stream_id`` of each producer.
       - Schema
       - Content
     * - ``{stream_id}/joints/state``
-      - ``foxglove.JointState``
+      - ``trossen_sdk.msg.JointState``
       - Joint positions (rad), velocities (rad/s), efforts (Nm)
     * - ``/cameras/{camera_id}/image``
       - ``foxglove.RawImage``
       - Width, height, encoding, pixel data
-    * - ``/cameras/{camera_id}/meta``
-      - Key/value
-      - Camera metadata
     * - ``{stream_id}/odom/state``
-      - ``Odometry2D``
+      - ``trossen_sdk.msg.Odometry2D``
       - Pose (m, rad), twist (m/s, rad/s)
 
 What's Next

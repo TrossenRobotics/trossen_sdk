@@ -4,17 +4,6 @@ Installation and Setup
 
 This page describes how to prepare a Linux PC to build and run the Trossen SDK.
 
-What You Need
-=============
-
--   A Linux PC running Ubuntu 24.04 (recommended).
-    Ubuntu 22.04 is also supported on x86_64.
-    Other distributions may work but are not regularly tested.
--   A C++20-capable compiler toolchain and CMake 3.15 or newer.
--   Network connectivity to the Trossen Arm Controller.
-    See the `Trossen Arm network setup <https://docs.trossenrobotics.com/trossen_arm/main/getting_started/software_setup.html>`_ guide.
--   Optional: NVIDIA Jetson if you plan to use Stereolabs ZED cameras.
-
 Supported Platforms
 ===================
 
@@ -147,12 +136,24 @@ Disabling RealSense
 -------------------
 
 RealSense support is **on** by default.
-If you are building on a machine without the librealsense headers installed, disable it explicitly.
+If you are building without librealsense installed, or are not using RealSense cameras, disable it explicitly.
 
 .. code-block:: bash
 
     cmake .. -DTROSSEN_ENABLE_REALSENSE=OFF
     make -j$(nproc)
+
+Convenience Targets
+-------------------
+
+The top-level ``Makefile`` wraps the most common CMake invocations.
+From the repo root:
+
+.. code-block:: bash
+
+    make build           # Standard build
+    make test            # Build and run tests
+    make realsense       # Shortcut for -DTROSSEN_ENABLE_REALSENSE=ON
 
 Verifying the Install
 =====================
