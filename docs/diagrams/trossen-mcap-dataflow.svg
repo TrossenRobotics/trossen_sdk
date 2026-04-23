@@ -139,9 +139,9 @@
   <!-- Channels block -->
   <rect x="480" y="611" width="360" height="70" rx="5" fill="#fff" stroke="#34d399" stroke-width="1.2"/>
   <text x="660" y="629" text-anchor="middle" font-size="10" font-weight="600" fill="#065f46">Channels (one per stream)</text>
-  <text x="660" y="643" text-anchor="middle" font-size="9" fill="#059669">/leader/joints/state  (JointState @ 200Hz)</text>
-  <text x="660" y="655" text-anchor="middle" font-size="9" fill="#059669">/cameras/main/image  (RawImage @ 30fps)</text>
-  <text x="660" y="667" text-anchor="middle" font-size="9" fill="#059669">/base/odom/state  (Odometry2D @ 50Hz)</text>
+  <text x="660" y="643" text-anchor="middle" font-size="9" fill="#059669">/leader/joints/state  (JointState)</text>
+  <text x="660" y="655" text-anchor="middle" font-size="9" fill="#059669">/cameras/main/image  (RawImage)</text>
+  <text x="660" y="667" text-anchor="middle" font-size="9" fill="#059669">/base/odom/state  (Odometry2D)</text>
 
   <!-- Arrow: MCAP -> Converter (green, from green MCAP block) -->
   <line x1="480" y1="694" x2="480" y2="724" stroke="#059669" stroke-width="1.5" marker-end="url(#arr-green)"/>
