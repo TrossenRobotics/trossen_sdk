@@ -12,12 +12,15 @@
 #ifndef TROSSEN_SDK__HW__CAMERA__ZED_CAMERA_COMPONENT_HPP_
 #define TROSSEN_SDK__HW__CAMERA__ZED_CAMERA_COMPONENT_HPP_
 
+#include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "nlohmann/json.hpp"
 #include "sl/Camera.hpp"
 
+#include "trossen_sdk/hw/discovery_registry.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
 
 namespace trossen::hw::camera {
@@ -90,6 +93,18 @@ public:
 
   /// @brief Get the configured depth mode string (for logging)
   const std::string& get_depth_mode_str() const { return depth_mode_str_; }
+
+  /**
+   * @brief Enumerate connected ZED cameras. Not yet implemented.
+   *
+   * Currently a no-op stub: prints a "not yet implemented" notice and returns
+   * an empty list. Intended to mirror the RealSense/OpenCV discovery contract
+   * once the ZED preview-capture path is wired up.
+   *
+   * @param output_dir Unused. Reserved for future preview-JPEG output.
+   * @return Empty vector.
+   */
+  static std::vector<DiscoveredHardware> find(const std::filesystem::path& output_dir);
 
 private:
   /// @brief Parse a depth mode string to sl::DEPTH_MODE

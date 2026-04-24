@@ -24,6 +24,7 @@ add_library(trossen_sdk SHARED
   src/configuration/sdk_config.cpp
   src/hw/hardware_registry.cpp
   src/hw/active_hardware_registry.cpp
+  src/hw/discovery_registry.cpp
   src/hw/arm/trossen_arm_component.cpp
   src/hw/arm/so101_arm_component.cpp
   src/hw/arm/trossen_arm_producer.cpp
@@ -43,6 +44,7 @@ add_library(trossen_sdk SHARED
   src/runtime/producer_registry.cpp
   src/runtime/push_producer_registry.cpp
   src/utils/app_utils.cpp
+  src/utils/camera_utils.cpp
   src/utils/keyboard_input_utils.cpp
 )
 

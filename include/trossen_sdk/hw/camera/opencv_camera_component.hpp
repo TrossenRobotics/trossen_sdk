@@ -6,12 +6,15 @@
 #ifndef TROSSEN_SDK__HW__CAMERA__OPENCV_CAMERA_COMPONENT_HPP_
 #define TROSSEN_SDK__HW__CAMERA__OPENCV_CAMERA_COMPONENT_HPP_
 
+#include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "opencv2/core.hpp"
 #include "opencv2/videoio.hpp"
 
+#include "trossen_sdk/hw/discovery_registry.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
 
 namespace trossen::hw::camera {
@@ -82,6 +85,19 @@ public:
    * @return true if VideoCapture is open
    */
   bool is_opened() const;
+
+  /**
+   * @brief Enumerate V4L2 video devices accessible through OpenCV.
+   *
+   * Probes @c /dev/video0 .. @c /dev/video63, opens each openable node, reads
+   * a stable frame, and writes it as @c opencv_<index>.jpg inside @p output_dir.
+   *
+   * @param output_dir Directory to write preview JPEGs into. Must already exist.
+   * @return One @c DiscoveredHardware per openable V4L2 device. @c details
+   *         carries @c width / @c height / @c fps / @c preview_path; @c ok
+   *         reflects preview-write success.
+   */
+  static std::vector<DiscoveredHardware> find(const std::filesystem::path& output_dir);
 
 private:
   /// @brief Underlying VideoCapture device

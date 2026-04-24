@@ -6,11 +6,14 @@
 #ifndef TROSSEN_SDK__HW__CAMERA__REALSENSE_CAMERA_COMPONENT_HPP_
 #define TROSSEN_SDK__HW__CAMERA__REALSENSE_CAMERA_COMPONENT_HPP_
 
+#include <filesystem>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "librealsense2/rs.hpp"
 
+#include "trossen_sdk/hw/discovery_registry.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
 
 namespace trossen::hw::camera {
@@ -117,6 +120,21 @@ public:
    * @return true if depth should be aligned to color
    */
   bool get_align_depth_to_color() const { return align_depth_to_color_; }
+
+  /**
+   * @brief Enumerate connected RealSense cameras and capture a preview of each.
+   *
+   * Queries the RealSense runtime for attached devices, briefly starts each
+   * device's color pipeline long enough to capture a stable frame, and writes
+   * that frame as @c realsense_<serial>.jpg inside @p output_dir.
+   *
+   * @param output_dir Directory to write preview JPEGs into. Must already exist.
+   * @return One @c DiscoveredHardware per connected RealSense device. Empty if
+   *         none are present. Never throws; errors are logged and the offending
+   *         entry's @c ok flag is left false. @c details carries
+   *         @c width / @c height / @c fps / @c preview_path.
+   */
+  static std::vector<DiscoveredHardware> find(const std::filesystem::path& output_dir);
 
 private:
   /// @brief Realsense pipeline profile

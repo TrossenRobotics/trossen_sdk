@@ -3,3 +3,4 @@ build*/
 output/
 results/
 *.log
+scripts/find_hardware/discovery/

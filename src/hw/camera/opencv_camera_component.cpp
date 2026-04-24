@@ -3,12 +3,19 @@
  * @brief Implementation of OpenCvCameraComponent
  */
 
- #include <iostream>
+#include <cmath>
+#include <fcntl.h>
+#include <iostream>
 #include <stdexcept>
 #include <string>
+#include <unistd.h>
+
+#include "opencv2/opencv.hpp"
 
 #include "trossen_sdk/hw/camera/opencv_camera_component.hpp"
+#include "trossen_sdk/hw/discovery_registry.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/utils/camera_utils.hpp"
 
 namespace trossen::hw::camera {
 
@@ -142,6 +149,70 @@ bool OpenCvCameraComponent::is_opened() const {
   return capture_ && capture_->isOpened();
 }
 
+std::vector<DiscoveredHardware> OpenCvCameraComponent::find(
+  const std::filesystem::path& output_dir)
+{
+  std::vector<DiscoveredHardware> results;
+
+  for (int idx = 0; idx < 64; ++idx) {
+    if (!std::filesystem::exists("/dev/video" + std::to_string(idx))) continue;
+
+    // OpenCV prints a V4L2 error to stderr for every unopenable node; silence
+    // it so the probe output stays clean.
+    int devnull      = ::open("/dev/null", O_WRONLY);
+    int saved_stderr = ::dup(2);
+    ::dup2(devnull, 2);
+    cv::VideoCapture cap(idx, cv::CAP_V4L2);
+    ::dup2(saved_stderr, 2);
+    ::close(saved_stderr);
+    ::close(devnull);
+    if (!cap.isOpened()) {
+      cap.release();
+      continue;
+    }
+
+    DiscoveredHardware info;
+    info.type       = "opencv_camera";
+    info.identifier = std::to_string(idx);
+
+    std::filesystem::path preview_path = output_dir / ("opencv_" + info.identifier + ".jpg");
+    info.details = {
+      {"width",        static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH))},
+      {"height",       static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT))},
+      {"fps",          static_cast<int>(cap.get(cv::CAP_PROP_FPS))},
+      {"preview_path", preview_path.string()},
+    };
+
+    // Read frames until we have one that is both valid (not black / blown out /
+    // flat fill) and whose brightness has settled. is_valid_preview_frame()
+    // gates the exit so a degenerate warmup frame is never committed.
+    cv::Mat frame;
+    cv::Mat best_frame;
+    double last_brightness = -1.0;
+    for (int w = 0; w < utils::kPreviewMaxWarmupFrames; ++w) {
+      if (!cap.read(frame) || frame.empty()) continue;
+      if (!utils::is_valid_preview_frame(frame)) continue;
+      best_frame = frame.clone();
+      double brightness = cv::mean(frame)[0];
+      if (last_brightness > 0 &&
+          std::abs(brightness - last_brightness) / last_brightness < 0.02) break;
+      last_brightness = brightness;
+    }
+
+    info.ok = !best_frame.empty() && cv::imwrite(preview_path.string(), best_frame);
+    if (!info.ok) {
+      std::cerr << "[OpenCvCameraComponent::find] no valid frame captured for "
+                << preview_path << "\n";
+    }
+    cap.release();
+
+    results.push_back(info);
+  }
+
+  return results;
+}
+
 REGISTER_HARDWARE(OpenCvCameraComponent, "opencv_camera")
+REGISTER_HARDWARE_DISCOVERY(OpenCvCameraComponent, "opencv_camera")
 
 }  // namespace trossen::hw::camera
