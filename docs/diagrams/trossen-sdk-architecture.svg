@@ -80,7 +80,7 @@
   <rect x="80" y="395" width="240" height="56" rx="5" fill="#ffffff" stroke="#fb923c" stroke-width="1.2"/>
   <text x="200" y="417" text-anchor="middle" font-size="11" font-weight="600" fill="#c2410c">PolledProducer</text>
   <text x="200" y="433" text-anchor="middle" font-size="9" fill="#9a3412">Arms  |  USB Cameras  |  Teleop</text>
-  <text x="200" y="445" text-anchor="middle" font-size="9" fill="#9a3412">up to 200 Hz</text>
+  <text x="200" y="445" text-anchor="middle" font-size="9" fill="#9a3412">Configurable poll rate</text>
 
   <!-- Push Producer -->
   <rect x="340" y="395" width="220" height="56" rx="5" fill="#ffffff" stroke="#fb923c" stroke-width="1.2"/>

@@ -1,0 +1,73 @@
+{
+  "configById": {
+    "Image!high": {
+      "imageMode": { "imageTopic": "/cameras/camera_high/image" }
+    },
+    "Image!low": {
+      "imageMode": { "imageTopic": "/cameras/camera_low/image" }
+    },
+    "Image!left_wrist": {
+      "imageMode": { "imageTopic": "/cameras/camera_left_wrist/image" }
+    },
+    "Image!right_wrist": {
+      "imageMode": { "imageTopic": "/cameras/camera_right_wrist/image" }
+    },
+    "Plot!positions_left": {
+      "paths": [
+        { "value": "leader_left/joints/state.positions[0]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_left/joints/state.positions[1]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_left/joints/state.positions[2]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_left/joints/state.positions[3]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_left/joints/state.positions[4]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_left/joints/state.positions[5]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_left/joints/state.positions[6]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_left/joints/state.positions[0]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_left/joints/state.positions[1]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_left/joints/state.positions[2]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_left/joints/state.positions[3]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_left/joints/state.positions[4]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_left/joints/state.positions[5]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_left/joints/state.positions[6]", "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "showLegend": true, "legendDisplay": "floating", "isSynced": true, "xAxisVal": "timestamp"
+    },
+    "Plot!positions_right": {
+      "paths": [
+        { "value": "leader_right/joints/state.positions[0]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_right/joints/state.positions[1]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_right/joints/state.positions[2]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_right/joints/state.positions[3]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_right/joints/state.positions[4]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_right/joints/state.positions[5]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "leader_right/joints/state.positions[6]",   "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_right/joints/state.positions[0]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_right/joints/state.positions[1]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_right/joints/state.positions[2]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_right/joints/state.positions[3]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_right/joints/state.positions[4]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_right/joints/state.positions[5]", "enabled": true, "timestampMethod": "receiveTime" },
+        { "value": "follower_right/joints/state.positions[6]", "enabled": true, "timestampMethod": "receiveTime" }
+      ],
+      "showLegend": true, "legendDisplay": "floating", "isSynced": true, "xAxisVal": "timestamp"
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": { "speed": 1 },
+  "layout": {
+    "first": {
+      "first": { "first": "Image!high",        "second": "Image!low",         "direction": "row", "splitPercentage": 50 },
+      "second":{ "first": "Image!left_wrist",  "second": "Image!right_wrist", "direction": "row", "splitPercentage": 50 },
+      "direction": "column",
+      "splitPercentage": 50
+    },
+    "second": {
+      "first": "Plot!positions_left",
+      "second": "Plot!positions_right",
+      "direction": "row",
+      "splitPercentage": 50
+    },
+    "direction": "column",
+    "splitPercentage": 60
+  }
+}

@@ -1,0 +1,223 @@
+/* Sidebar Docs Home Link */
+
+div.sidebartitle-docs-home a {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #ffffff;
+    padding-top: 10px;
+    padding-bottom: 10px;
+    flex: 1;
+    font-weight: 700;
+}
+
+div.sidebartitle-docs-home a:hover {
+    background: hsla(0, 0%, 100%, .1);
+    outline: 0;
+}
+
+div.sidebartitle-docs-home-hr {
+    max-width: 100%;
+    display: flex;
+    justify-content: center;
+}
+
+div.sidebartitle-docs-home-hr > hr {
+    margin: 5px 0;
+    max-width: 90%;
+    flex: 1;
+}
+
+
+/* Sidebar header (and topbar for mobile) */
+
+.wy-side-nav-search,
+.wy-nav-top {
+    background: #1e1d22;
+}
+
+
+/* Sidebar */
+
+.wy-nav-side {
+    background: #f2f2f2;
+}
+
+
+/* Wider content */
+
+.wy-nav-content {
+    max-width: 90% !important;
+}
+
+
+/* Menu Text Color */
+
+.wy-menu-vertical {
+    color: black !important;
+    font-size: 95%
+}
+
+.wy-menu-vertical a {
+    color: black !important;
+    font-size: 95%
+}
+
+.wy-menu-vertical a:hover {
+    background-color: #c7c7c7;
+    cursor: pointer
+}
+
+
+/* all links (visited or not) should be the same color */
+
+a:visited {
+    text-decoration: none;
+    color: #2980b9;
+}
+
+a {
+    text-decoration: none;
+    color: #2980b9;
+}
+
+
+/*
+    override table width restrictions
+    https://github.com/readthedocs/sphinx_rtd_theme/issues/117#issuecomment-41506687
+ */
+
+.wy-table-responsive table td,
+.wy-table-responsive table th {
+    white-space: normal;
+}
+
+.wy-table-responsive {
+    margin-bottom: 24px;
+    max-width: 100%;
+    overflow: visible;
+}
+
+
+/*
+    Override alternating table colors
+        This is to make single-row tables look better
+ */
+
+table.docutils tr.row-odd td {
+    background-color: transparent !important;
+}
+
+table.docutils tr.row-even td {
+    background-color: #f3f6f6 !important;
+}
+
+
+/*
+    change default font to Gilmer-Regular
+*/
+
+@font-face {
+    font-family: 'Gilmer-Regular';
+    src: url('gilmer-regular.ttf') format('truetype');
+    font-weight: normal;
+    font-style: normal;
+}
+
+body,
+.rst-content .toctree-wrapper>p.caption,
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+legend {
+    font-family: "Gilmer-Regular" !important;
+}
+
+
+/*
+    style the "View Package on GitHub" Buttons
+*/
+
+a.docs-view-on-github-button {
+    background-color: #00b0f0;
+    border: none;
+    color: white;
+    padding: 15px 32px;
+    text-align: center;
+    vertical-align: center;
+    text-decoration: none;
+    display: flex;
+    font-size: 16px;
+    margin-top: 4px;
+    margin-left: 14px;
+    margin-bottom: 24px;
+    cursor: pointer;
+    border-radius: 8px;
+    font-weight: bold;
+    width: 300px;
+    align-items: center;
+}
+
+img.docs-view-on-github-button-gh-logo {
+    vertical-align: center;
+    text-align: center;
+    margin-bottom: 0px !important;
+    padding-right: 10px;
+}
+
+
+/*
+    Change the code highlights style and gp icon
+*/
+
+div.highlight {
+    background-color: #eaeef2;
+}
+
+.highlight span.gp {
+    color: #404040;
+    font-weight: bold;
+}
+
+.rst-content .toctree-wrapper ul li>ul {
+    margin-top: 0px;
+    margin-bottom: 0px;
+}
+
+/* gif start on click */
+
+.static,
+.active-ca {
+    grid-column: 1;
+    grid-row: 1;
+    width: 75px;
+    height: 50px;
+    margin-left: 15px;
+    background-position: center;
+    background-size: 75% 75%;
+    padding-top: 5px;
+    padding-right: 9px;
+    padding-bottom: 5px;
+    padding-left: 9px;
+    margin-bottom: auto;
+    margin-top: auto;
+}
+
+.static:hover {
+    opacity: 0;
+}
+
+
+/* If element I want affected is inside the container */
+
+label.static-container:hover .static {
+    opacity: 0;
+}
+
+/* centered-table class centers table cell contents */
+.centered-table td {
+    text-align: center;
+}

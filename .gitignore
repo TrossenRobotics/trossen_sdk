@@ -3,3 +3,5 @@ build*/
 output/
 results/
 *.log
+docs/_build/
+.venv/
