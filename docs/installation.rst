@@ -39,6 +39,8 @@ Install the base build toolchain and runtime libraries required by the SDK and i
         libopencv-dev \
         libprotobuf-dev \
         protobuf-compiler \
+        libfastcdr-dev \
+        libfastrtps-dev \
         ffmpeg
 
 Apache Parquet
