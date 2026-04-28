@@ -87,6 +87,12 @@ Install the RealSense SDK 2.0 by following the `librealsense distribution guide 
 
 .. note::
 
+    The two important packages from the RealSense repository are ``librealsense2-dev`` and ``librealsense2-utils``.
+    ``realsense-viewer`` only needs ``librealsense2-utils``, but ``find_package(realsense2)`` in CMake needs the headers and CMake config from ``librealsense2-dev``.
+    If ``realsense-viewer`` works but the SDK build fails to find RealSense, it means the runtime is installed but the dev package is missing.
+
+.. note::
+
     RealSense depth capture is supported alongside RGB, but enabling it significantly increases USB bandwidth.
     When running multiple cameras, prefer short, high-quality USB 3.0 cables and distribute cameras across independent USB host controllers.
 
