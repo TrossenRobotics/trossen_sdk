@@ -39,6 +39,8 @@ Install the base build toolchain and runtime libraries required by the SDK and i
         libopencv-dev \
         libprotobuf-dev \
         protobuf-compiler \
+        libfastcdr-dev \
+        libfastrtps-dev \
         ffmpeg
 
 Apache Parquet
@@ -82,6 +84,12 @@ RealSense (Optional, On by Default)
 
 RealSense camera support is enabled by default.
 Install the RealSense SDK 2.0 by following the `librealsense distribution guide <https://github.com/IntelRealSense/librealsense/blob/master/doc/distribution_linux.md>`_.
+
+.. note::
+
+    The two important packages from the RealSense repository are ``librealsense2-dev`` and ``librealsense2-utils``.
+    ``realsense-viewer`` only needs ``librealsense2-utils``, but ``find_package(realsense2)`` in CMake needs the headers and CMake config from ``librealsense2-dev``.
+    If ``realsense-viewer`` works but the SDK build fails to find RealSense, it means the runtime is installed but the dev package is missing.
 
 .. note::
 

@@ -105,6 +105,8 @@ sudo apt-get install -y \
     cmake \
     libopencv-dev \
     libprotobuf-dev \
+    libfastcdr-dev \
+    libfastrtps-dev \
     protobuf-compiler \
     ffmpeg
 ```
@@ -151,6 +153,8 @@ Required for Stereolabs ZED cameras. ZED cameras use GMSL connectors and are sup
 ### RealSense
 
 Required for RealSense cameras. Install the RealSense SDK 2.0 by following the [official installation guide](https://github.com/IntelRealSense/librealsense/blob/master/doc/distribution_linux.md).
+
+> **Note:** The two important packages from the RealSense repository are `librealsense2-dev` and `librealsense2-utils`. `realsense-viewer` only needs `librealsense2-utils`, but `find_package(realsense2)` in CMake needs the headers and CMake config from `librealsense2-dev`. If `realsense-viewer` works but the SDK build fails to find RealSense, it means the runtime is installed but the dev package is missing.
 
 ---
 
