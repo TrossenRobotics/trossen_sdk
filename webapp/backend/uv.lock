@@ -526,7 +526,7 @@ wheels = [
 
 [[package]]
 name = "trossen-sdk"
-source = { editable = "../../trossen_sdk" }
+source = { editable = "../../" }
 dependencies = [
     { name = "numpy" },
 ]
@@ -551,7 +551,7 @@ requires-dist = [
     { name = "alembic", specifier = ">=1.13" },
     { name = "fastapi", specifier = ">=0.115" },
     { name = "sqlmodel", specifier = ">=0.0.22" },
-    { name = "trossen-sdk", editable = "../../trossen_sdk" },
+    { name = "trossen-sdk", editable = "../../" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.30" },
 ]
 

@@ -32,3 +32,16 @@ docker-compose.yml
 *.log
 tmp/
 temp/
+
+# webapp dev artifacts (relevant when the webapp backend image is built
+# with the repo root as the context).
+webapp/**/node_modules
+webapp/**/.venv
+webapp/**/__pycache__
+webapp/**/*.pyc
+webapp/**/.pytest_cache
+webapp/**/dist
+webapp/**/build
+webapp/**/.env
+webapp/**/.env.local
+webapp/**/.env.*.local
