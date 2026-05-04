@@ -1,0 +1,96 @@
+{
+  "name": "Trossen Solo AI",
+  "config": {
+    "robot_name": "trossen_solo_ai",
+
+    "hardware": {
+      "arms": {
+        "leader": {
+          "ip_address":          "192.168.1.2",
+          "model":               "wxai_v0",
+          "end_effector":        "wxai_v0_leader",
+          "staged_position":     [0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0],
+          "teleop_moving_time_s": 2.0
+        },
+        "follower": {
+          "ip_address":          "192.168.1.4",
+          "model":               "wxai_v0",
+          "end_effector":        "wxai_v0_follower",
+          "staged_position":     [0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0],
+          "teleop_moving_time_s": 2.0
+        }
+      },
+      "cameras": [
+        {
+          "id":            "camera_main",
+          "serial_number": "128422271347",
+          "width":         640,
+          "height":        480,
+          "fps":           30
+        },
+        {
+          "id":            "camera_wrist",
+          "serial_number": "218622270304",
+          "width":         640,
+          "height":        480,
+          "fps":           30
+        }
+      ]
+    },
+
+    "producers": [
+      {
+        "type":            "trossen_arm",
+        "hardware_id":     "leader",
+        "stream_id":       "leader",
+        "poll_rate_hz":    30.0,
+        "use_device_time": false
+      },
+      {
+        "type":            "trossen_arm",
+        "hardware_id":     "follower",
+        "stream_id":       "follower",
+        "poll_rate_hz":    30.0,
+        "use_device_time": false
+      },
+      {
+        "type":            "realsense_camera",
+        "hardware_id":     "camera_main",
+        "stream_id":       "camera_main",
+        "poll_rate_hz":    30.0,
+        "encoding":        "bgr8",
+        "use_device_time": true
+      },
+      {
+        "type":            "realsense_camera",
+        "hardware_id":     "camera_wrist",
+        "stream_id":       "camera_wrist",
+        "poll_rate_hz":    30.0,
+        "encoding":        "bgr8",
+        "use_device_time": true
+      }
+    ],
+
+    "teleop": {
+      "enabled": true,
+      "rate_hz": 1000.0,
+      "pairs": [
+        { "leader": "leader", "follower": "follower" }
+      ]
+    },
+
+    "backend": {
+      "root":             "~/.trossen_sdk",
+      "dataset_id":       "solo_dataset0",
+      "compression":      "",
+      "chunk_size_bytes": 4194304
+    },
+
+    "session": {
+      "max_duration":  100.0,
+      "max_episodes":  5,
+      "backend_type":  "trossen_mcap",
+      "reset_duration": 5.0
+    }
+  }
+}

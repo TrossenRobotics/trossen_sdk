@@ -1,0 +1,31 @@
+{
+  "name": "trossen-sdk-webapp",
+  "version": "0.1.0",
+  "description": "Trossen SDK desktop and webapp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview"
+  },
+  "author": "Shantanu Parab",
+  "license": "ISC",
+  "dependencies": {
+    "lucide-react": "^1.14.0",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "react-router": "^7.14.2",
+    "sonner": "^2.0.7"
+  },
+  "devDependencies": {
+    "@tailwindcss/vite": "^4.2.4",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.1",
+    "tailwindcss": "^4.2.4",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.10"
+  }
+}

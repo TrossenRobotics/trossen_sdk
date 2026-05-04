@@ -1,0 +1,15 @@
+[project]
+name = "trossen-sdk-webapp-backend"
+version = "0.1.0"
+description = "Backend for Trossen SDK Webapp"
+requires-python = ">=3.12"
+dependencies = [
+    "alembic>=1.13",
+    "fastapi>=0.115",
+    "sqlmodel>=0.0.22",
+    "trossen-sdk",
+    "uvicorn[standard]>=0.30",
+]
+
+[tool.uv.sources]
+trossen-sdk = { path = "../..", editable = true }

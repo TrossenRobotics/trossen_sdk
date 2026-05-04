@@ -48,3 +48,28 @@ python-wheel:
 python-test:
 	python -m pytest python/tests/ -v
 .PHONY: python-test
+
+# --- webapp (optional Python+TS app under webapp/) -------------------------
+
+webapp-backend-install:
+	cd webapp/backend && uv sync
+.PHONY: webapp-backend-install
+
+webapp-backend:
+	cd webapp/backend && uv run uvicorn app.main:app --reload
+.PHONY: webapp-backend
+
+webapp-frontend-install:
+	cd webapp/frontend && npm install
+.PHONY: webapp-frontend-install
+
+webapp-frontend:
+	cd webapp/frontend && npm run dev
+.PHONY: webapp-frontend
+
+webapp-frontend-build:
+	cd webapp/frontend && npm run build
+.PHONY: webapp-frontend-build
+
+webapp-install: webapp-backend-install webapp-frontend-install
+.PHONY: webapp-install

@@ -8,3 +8,13 @@ __pycache__/
 .pytest_cache/
 *.egg-info/
 dist/
+
+# webapp
+webapp/frontend/node_modules/
+webapp/frontend/dist/
+webapp/backend/.venv/
+webapp/**/*.py[cod]
+webapp/**/.pytest_cache/
+webapp/.env
+webapp/.env.local
+webapp/.env.*.local
