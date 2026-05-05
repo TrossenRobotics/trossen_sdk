@@ -118,8 +118,8 @@ private:
 
   // Space-specific IO views resolved from the leader/follower components.
   // Non-owning — lifetime is tied to the shared_ptrs above.
-  TeleopSpaceIO* leader_io_{nullptr};
-  TeleopSpaceIO* follower_io_{nullptr};
+  TeleopTypeIO* leader_io_{nullptr};
+  TeleopTypeIO* follower_io_{nullptr};
 
   Config cfg_;
   std::thread thread_;

@@ -4,14 +4,14 @@
  *
  * Teleop capability is structured around four interfaces:
  *
- *   - TeleopSpaceIO          : pure IO contract (`read()` / `write()`) that
+ *   - TeleopTypeIO          : pure IO contract (`read()` / `write()`) that
  *                              the controller's hot loop talks to.
  *   - TeleopCapable          : base mixin with space-agnostic lifecycle hooks
  *                              and a single `as_space_io(Space)` accessor that
  *                              returns the IO view for the requested space (or
  *                              nullptr if unsupported).
- *   - JointSpaceTeleop       : TeleopCapable + TeleopSpaceIO for joint space.
- *   - CartesianSpaceTeleop   : TeleopCapable + TeleopSpaceIO for cartesian space.
+ *   - JointSpaceTeleop       : TeleopCapable + TeleopTypeIO for joint space.
+ *   - CartesianSpaceTeleop   : TeleopCapable + TeleopTypeIO for cartesian space.
  *
  * A hardware component must implement at least one space child to be usable
  * by the teleop controller. The controller calls `as_space_io(cfg.space)`
@@ -30,7 +30,7 @@
  *
  * Multi-space hardware (a component that supports more than one space)
  * inherits TeleopCapable directly and exposes each space through a nested
- * adapter sub-object that implements TeleopSpaceIO. The component overrides
+ * adapter sub-object that implements TeleopTypeIO. The component overrides
  * `as_space_io` with a switch that dispatches to the correct adapter.
  *
  * ── Adding a new teleop space ─────────────────────────────────────────────
@@ -38,7 +38,7 @@
  *  1. Add a new value to the `Space` enum below, before the `Count` sentinel.
  *  2. Add a row to `kSpaceDescriptors` (name + interface name for errors).
  *  3. Add a child class (e.g. `VelocitySpaceTeleop`) that inherits
- *     `TeleopCapable` virtually and `TeleopSpaceIO`, mirroring the existing
+ *     `TeleopCapable` virtually and `TeleopTypeIO`, mirroring the existing
  *     joint/cartesian children.
  *  4. Any hardware that should support the new space either inherits the new
  *     child (single-space) or extends its `as_space_io` switch (multi-space).
@@ -64,14 +64,14 @@ namespace trossen::hw::teleop {
  * @brief Pure IO contract the teleop hot loop calls every tick.
  *
  * Each space child inherits this, allowing the controller to hold a single
- * `TeleopSpaceIO*` regardless of which space is active. The interface is
+ * `TeleopTypeIO*` regardless of which space is active. The interface is
  * intentionally narrow: only `read()` and `write()` differ per space.
  * Space-agnostic setup (alignment, mode changes) lives on
  * `TeleopCapable::prepare_for_teleop`.
  */
-class TeleopSpaceIO {
+class TeleopTypeIO {
 public:
-  virtual ~TeleopSpaceIO() = default;
+  virtual ~TeleopTypeIO() = default;
 
   /// Return the component's current state in this space (leader role).
   ///
@@ -119,8 +119,8 @@ public:
 
   /// Return the IO view for `space`, or nullptr if this hardware does not
   /// implement that space. Called by TeleopController at construction to
-  /// resolve the leader and follower to concrete `TeleopSpaceIO*`s.
-  virtual TeleopSpaceIO* as_space_io(Space space) {
+  /// resolve the leader and follower to concrete `TeleopTypeIO*`s.
+  virtual TeleopTypeIO* as_space_io(Space space) {
     (void)space;
     return nullptr;
   }
@@ -217,20 +217,20 @@ space_from_name(std::string_view name) {
  * Direct inheritance auto-wires `as_space_io(Space::Joint)` to return `this`,
  * so single-space hardware (e.g. SO101 arm) needs no extra plumbing.
  */
-class JointSpaceTeleop : public virtual TeleopCapable, public TeleopSpaceIO {
+class JointSpaceTeleop : public virtual TeleopCapable, public TeleopTypeIO {
 public:
-  TeleopSpaceIO* as_space_io(Space s) override {
-    return s == Space::Joint ? static_cast<TeleopSpaceIO*>(this) : nullptr;
+  TeleopTypeIO* as_space_io(Space s) override {
+    return s == Space::Joint ? static_cast<TeleopTypeIO*>(this) : nullptr;
   }
 };
 
 /**
  * @brief Cartesian-space teleop interface. Inherit to unlock cartesian teleop.
  */
-class CartesianSpaceTeleop : public virtual TeleopCapable, public TeleopSpaceIO {
+class CartesianSpaceTeleop : public virtual TeleopCapable, public TeleopTypeIO {
 public:
-  TeleopSpaceIO* as_space_io(Space s) override {
-    return s == Space::Cartesian ? static_cast<TeleopSpaceIO*>(this) : nullptr;
+  TeleopTypeIO* as_space_io(Space s) override {
+    return s == Space::Cartesian ? static_cast<TeleopTypeIO*>(this) : nullptr;
   }
 };
 

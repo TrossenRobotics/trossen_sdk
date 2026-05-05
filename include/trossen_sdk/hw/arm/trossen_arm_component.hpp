@@ -85,7 +85,7 @@ public:
   // ── TeleopCapable: space-view accessor ───────────────────────────────────
   // Returns the adapter view for the requested space. Extend the switch to
   // add a new space.
-  teleop::TeleopSpaceIO* as_space_io(Space space) override {
+  teleop::TeleopTypeIO* as_space_io(Space space) override {
     switch (space) {
       case Space::Joint:     return &joint_view_;
       case Space::Cartesian: return &cart_view_;

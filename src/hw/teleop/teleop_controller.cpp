@@ -59,8 +59,8 @@ TeleopController::~TeleopController() {
 
 void TeleopController::resolve_space_views() {
   auto resolve = [this](const std::shared_ptr<TeleopCapable>& hw,
-                        const char* role) -> TeleopSpaceIO* {
-    TeleopSpaceIO* io = hw->as_space_io(cfg_.space);
+                        const char* role) -> TeleopTypeIO* {
+    TeleopTypeIO* io = hw->as_space_io(cfg_.space);
     if (!io) {
       throw std::invalid_argument(
         std::string("TeleopController: ") + role +
