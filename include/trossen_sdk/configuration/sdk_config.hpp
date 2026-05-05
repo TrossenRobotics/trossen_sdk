@@ -39,7 +39,7 @@
  *   "teleop": {
  *     "enabled": true,
  *     "rate_hz": 1000.0,
- *     "pairs": [ { "leader": "<id>", "follower": "<id>" }, ... ]
+ *     "pairs": [ { "leader": "<id>", "follower": "<id>", "space": "joint" }, ... ]
  *   },
  *   "backend": {
  *     "root": "~/trossen_data",
@@ -131,9 +131,10 @@ struct SdkConfig {
   static SdkConfig from_json(const nlohmann::json& j);
 
   /**
-   * @brief Load session and backend configs into the GlobalConfig singleton
+   * @brief Load session, backend, and teleop configs into the GlobalConfig singleton
    *
-   * Must be called before constructing a SessionManager.
+   * Must be called before constructing a SessionManager or using the teleop
+   * factory.
    */
   void populate_global_config() const;
 };
