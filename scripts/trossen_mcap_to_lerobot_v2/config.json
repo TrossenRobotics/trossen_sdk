@@ -13,6 +13,8 @@
     "episode_index": 0,
     "chunk_size": 2,
     "robot_name": "trossen_solo_ai",
-    "fps": 30.0
+    "fps": 30.0,
+    "threads": 0,
+    "encoder": "auto"
   }
 }
