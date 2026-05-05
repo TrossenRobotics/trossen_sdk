@@ -71,6 +71,9 @@ target_link_libraries(test_keyboard_input_utils PRIVATE trossen_sdk GTest::gtest
 add_executable(test_announce test_announce.cpp)
 target_link_libraries(test_announce PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_teleop_space_helpers test_teleop_space_helpers.cpp)
+target_link_libraries(test_teleop_space_helpers PRIVATE trossen_sdk GTest::gtest_main)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -95,3 +98,4 @@ gtest_discover_tests(test_session_manager)
 gtest_discover_tests(test_session_manager_discard)
 gtest_discover_tests(test_keyboard_input_utils)
 gtest_discover_tests(test_announce)
+gtest_discover_tests(test_teleop_space_helpers)
