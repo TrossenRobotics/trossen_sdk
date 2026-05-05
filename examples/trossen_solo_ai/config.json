@@ -4,14 +4,18 @@
   "hardware": {
     "arms": {
       "leader": {
-        "ip_address":   "192.168.1.2",
-        "model":        "wxai_v0",
-        "end_effector": "wxai_v0_leader"
+        "ip_address":          "192.168.1.2",
+        "model":               "wxai_v0",
+        "end_effector":        "wxai_v0_leader",
+        "staged_position":     [0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0],
+        "teleop_moving_time_s": 2.0
       },
       "follower": {
-        "ip_address":   "192.168.1.4",
-        "model":        "wxai_v0",
-        "end_effector": "wxai_v0_follower"
+        "ip_address":          "192.168.1.4",
+        "model":               "wxai_v0",
+        "end_effector":        "wxai_v0_follower",
+        "staged_position":     [0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0],
+        "teleop_moving_time_s": 2.0
       }
     },
     "cameras": [
