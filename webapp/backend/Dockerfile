@@ -9,7 +9,12 @@
 FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
-ENV TROSSEN_ARM_VERSION=1.9.0
+# libtrossen_arm is pinned by commit SHA on `main`. Arm controller
+# firmware v1.10.0 requires a matching driver major.minor (the library
+# enforces "the major and minor versions of the driver and controller
+# firmware must match" at configure() time), and upstream hasn't tagged
+# v1.10.0 yet. Switch back to a `v$VERSION` tag once they do.
+ENV TROSSEN_ARM_REF=2601a8666aa488e9c112a69bc38b1800534e85d1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -51,16 +56,18 @@ RUN wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --shor
 # libtrossen-arm (TCP driver for the arms).
 # --http1.1 + --max-time + --retry guard against the GitHub CDN holding the
 # connection open after the body is delivered (observed inside BuildKit).
+# GitHub's archive-by-SHA endpoint produces a top-level dir named
+# `trossen_arm-<sha>`, matching the cd target below.
 RUN curl -fSL --http1.1 \
         --connect-timeout 30 --max-time 300 \
         --retry 3 --retry-delay 5 --retry-max-time 600 \
-        https://github.com/TrossenRobotics/trossen_arm/archive/refs/tags/v$TROSSEN_ARM_VERSION.tar.gz \
+        https://github.com/TrossenRobotics/trossen_arm/archive/$TROSSEN_ARM_REF.tar.gz \
         -o trossen_arm.tar.gz \
     && tar -xzf trossen_arm.tar.gz \
-    && cd trossen_arm-$TROSSEN_ARM_VERSION \
+    && cd trossen_arm-$TROSSEN_ARM_REF \
     && make install \
     && cd .. \
-    && rm -rf trossen_arm-$TROSSEN_ARM_VERSION trossen_arm.tar.gz
+    && rm -rf trossen_arm-$TROSSEN_ARM_REF trossen_arm.tar.gz
 
 # librealsense2 from realsenseai's Debian apt repo. Required by
 # `find_package(realsense2)` in the SDK's CMakeLists.txt when the default
