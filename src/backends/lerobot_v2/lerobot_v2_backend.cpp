@@ -20,8 +20,6 @@
 #include "parquet/arrow/reader.h"
 
 #include "trossen_sdk/data/record.hpp"
-#include "trossen_sdk/hw/arm/teleop_arm_producer.hpp"
-#include "trossen_sdk/hw/arm/teleop_mock_joint_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
@@ -502,26 +500,40 @@ bool LeRobotV2Backend::open() {
 void LeRobotV2Backend::write(const data::RecordBase& record) {
   std::lock_guard<std::mutex> lock(write_mutex_);
 
-  // Decide type by RTTI (simple approach for now)
-  if (auto js = dynamic_cast<const data::TeleopJointStateRecord*>(&record)) {
-    write_joint_state(*js);
-  } else if (auto img = dynamic_cast<const data::ImageRecord*>(&record)) {
+  // Decide type by RTTI (simple approach for now).
+  // TODO(shantanuparab-tr): add joint-state writing. Each arm emits its
+  // own JointStateRecord; pairing leader/follower streams by stream_id
+  // (driven by the teleop pair config) and combining them into the
+  // parquet action/observation columns is the work to do.
+  if (auto img = dynamic_cast<const data::ImageRecord*>(&record)) {
     write_image(*img);
   } else {
-    // Unknown type ignored for now
+    static bool warned = false;
+    if (!warned) {
+      std::cerr << "[LeRobotV2] Warning: received a non-image record (e.g. "
+                   "JointStateRecord) but joint-state writing is not yet "
+                   "implemented. Joint data will be dropped for this session.\n";
+      warned = true;
+    }
   }
 }
 
 void LeRobotV2Backend::write_batch(std::span<const data::RecordBase* const> records) {
   std::lock_guard<std::mutex> lock(write_mutex_);
+  // TODO(shantanuparab-tr): add joint-state dispatch here alongside images
+  // once the pairing described in write() above is implemented.
+  static bool warned = false;
   for (auto* r : records) {
     if (!r) {
       continue;
     }
-    if (auto js = dynamic_cast<const data::TeleopJointStateRecord*>(r)) {
-      write_joint_state(*js);
-    } else if (auto img = dynamic_cast<const data::ImageRecord*>(r)) {
+    if (auto img = dynamic_cast<const data::ImageRecord*>(r)) {
       write_image(*img);
+    } else if (!warned) {
+      std::cerr << "[LeRobotV2] Warning: received a non-image record but "
+                   "joint-state writing is not yet implemented. Joint data "
+                   "will be dropped for this session.\n";
+      warned = true;
     }
   }
 }
@@ -959,99 +971,10 @@ void LeRobotV2Backend::discard_episode() {
   }
 }
 
-void LeRobotV2Backend::write_joint_state(const data::RecordBase& base) {
-  const auto& js = static_cast<const data::TeleopJointStateRecord&>(base);
-
-  // Frame indexing strategy for multi-source data streams:
-  //
-  // PROBLEM: Each data source (camera, sensor, etc.) produces frames with global sequence IDs,
-  // but we need local frame indices that reset to 0 at the start of each recording episode.
-  //
-  // SOLUTION: Track the starting sequence ID for each source, then calculate:
-  // frame_index = current_sequence_id - starting_sequence_id_for_this_source
-  //
-  // ASSUMPTION: The first sequence ID we observe from a source marks the beginning
-  // of a new episode for that source.
-
-  if (source_frame_indices_.find(js.id) == source_frame_indices_.end()) {
-    source_frame_indices_[js.id] = js.seq;
-  }
-  int frame_id = js.seq - source_frame_indices_[js.id];
-
-  // Create builders for one frame
-  arrow::FloatBuilder ts_builder;
-  arrow::ListBuilder obs_builder(arrow::default_memory_pool(),
-                                 std::make_shared<arrow::DoubleBuilder>());
-  arrow::ListBuilder act_builder(arrow::default_memory_pool(),
-                                 std::make_shared<arrow::DoubleBuilder>());
-  arrow::Int64Builder epi_idx_builder, frame_idx_builder, index_builder, task_idx_builder;
-
-  auto* obs_val = static_cast<arrow::DoubleBuilder*>(obs_builder.value_builder());
-  auto* act_val = static_cast<arrow::DoubleBuilder*>(act_builder.value_builder());
-
-  auto check_status = [](const arrow::Status &st, const char *msg) {
-    if (!st.ok()) {
-      std::cerr << "[Arrow Error] " << msg << ": " << st.ToString() << std::endl;
-    }
-  };
-
-
-  // Append timestamp
-  check_status(
-    ts_builder.Append(static_cast<float>(frame_id) / cfg_->fps),
-    "Failed to append timestamp");
-
-  // Observation list
-  check_status(obs_builder.Append(), "Failed to append observation list");
-  for (auto v : js.observations) {
-    check_status(obs_val->Append(v), "Failed to append observation value");
-  }
-
-  // Action list
-  check_status(act_builder.Append(), "Failed to append action list");
-  for (auto v : js.actions) {
-    check_status(act_val->Append(v), "Failed to append action value");
-  }
-
-  // Scalar columns
-  check_status(epi_idx_builder.Append(episode_index_), "Failed to append episode index");
-  check_status(frame_idx_builder.Append(frame_id), "Failed to append frame index");
-  check_status(index_builder.Append(js.seq), "Failed to append global index");
-  check_status(task_idx_builder.Append(0), "Failed to append task index");
-
-  std::shared_ptr<arrow::Array> ts_arr, obs_arr, act_arr, epi_arr, frame_arr, idx_arr, task_arr;
-
-  // Helper lambda to finish builders and handle errors (no spdlog)
-  auto finish_builder = [](auto &builder, std::shared_ptr<arrow::Array> &array,
-                          const char *name) -> bool {
-    auto status = builder.Finish(&array);
-    if (!status.ok()) {
-      std::cerr << "[Arrow Error] Failed to finish " << name
-                << " builder: " << status.ToString() << std::endl;
-      return false;
-    }
-    return true;
-  };
-
-  // Use helper for all builders
-  if (!finish_builder(ts_builder, ts_arr, "timestamp")) return;
-  if (!finish_builder(obs_builder, obs_arr, "observation")) return;
-  if (!finish_builder(act_builder, act_arr, "action")) return;
-  if (!finish_builder(epi_idx_builder, epi_arr, "episode index")) return;
-  if (!finish_builder(frame_idx_builder, frame_arr, "frame index")) return;
-  if (!finish_builder(index_builder, idx_arr, "index")) return;
-  if (!finish_builder(task_idx_builder, task_arr, "task index")) return;
-
-  // Create single-row batch
-  auto batch = arrow::RecordBatch::Make(schema_, 1,
-      {ts_arr, obs_arr, act_arr, epi_arr, frame_arr, idx_arr, task_arr});
-
-  auto status = writer_->WriteRecordBatch(*batch);
-
-  if (!status.ok()) {
-    throw std::runtime_error("Failed to write Parquet record batch: " + status.ToString());
-  }
-}
+// TODO(shantanuparab-tr): add a `write_joint_state` method that pairs
+// leader/follower JointStateRecord streams (using the stream_id pairing
+// in the teleop config) into the action/observation columns this
+// backend's parquet schema expects.
 
 void LeRobotV2Backend::write_image(const data::RecordBase& base) {
   const auto& img = static_cast<const data::ImageRecord&>(base);
