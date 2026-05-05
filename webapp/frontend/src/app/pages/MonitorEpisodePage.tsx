@@ -32,7 +32,7 @@ interface LogEntry {
 }
 
 // State machine matching the SDK demo flow
-type Phase = 'not_started' | 'recording' | 'resetting' | 'complete';
+type Phase = 'not_started' | 'recording' | 'resetting' | 'complete' | 'stopped';
 
 function ConnectionBadge({ status }: { status: WsStatus }) {
   const label =
@@ -203,7 +203,10 @@ export function MonitorEpisodePage() {
     try {
       addLog('info', 'Stopping session...');
       await apiPost(`${apiBase}/stop`);
-      setPhase('complete');
+      // Optimistic terminal phase. The authoritative banner / log lines
+      // are still set by the `session_complete` WS event once the
+      // recorder finishes winding down (with `final_status` from the DB).
+      setPhase('stopped');
       setElapsed(0);
     } catch (err) {
       const msg = describeError(err);
@@ -296,6 +299,8 @@ export function MonitorEpisodePage() {
         episode_index?: number;
         message?: string;
         total_episodes?: number;
+        episodes_recorded?: number;
+        final_status?: string;
         dry_run?: boolean;
       };
       if (data.event === 'ready') addLog('success', 'Bridge ready');
@@ -318,15 +323,25 @@ export function MonitorEpisodePage() {
         setPhase('resetting');
         addLog('warning', `Episode ${data.episode_index ?? ''} discarded — reset phase`);
       } else if (data.event === 'session_complete') {
-        setPhase('complete');
         if (data.dry_run) {
           // Backend reset the disk record back to pending so the user
           // can rehearse again. Mirror that locally so Run Again works
           // without a refetch.
+          setPhase('complete');
           setSession(prev => prev ? { ...prev, status: 'pending', current_episode: 0 } : prev);
           setCurrentEpisode(0);
           addLog('success', 'Dry run complete — no data was recorded');
+        } else if (data.final_status === 'paused') {
+          // User-initiated stop: backend left the row paused with the
+          // in-flight slot discarded. Resume from RecordPage re-records
+          // the same slot, so we surface a clearly different terminal
+          // banner (Stopped vs Complete) rather than implying success.
+          setPhase('stopped');
+          const recorded = data.episodes_recorded ?? 0;
+          const total = data.total_episodes ?? 0;
+          addLog('warning', `Session stopped — ${recorded} of ${total} episodes saved`);
         } else {
+          setPhase('complete');
           addLog('success', 'All episodes recorded — session complete');
         }
       } else if (data.event === 'error') {
@@ -389,7 +404,8 @@ export function MonitorEpisodePage() {
               addLog('warning', `Episode exceeded max duration (${dur}s) — checking status`);
               apiGet<Session>(`/api/sessions/${sessionId}`)
                 .then(data => {
-                  if (data.status !== 'active') setPhase('complete');
+                  if (data.status === 'paused') setPhase('stopped');
+                  else if (data.status !== 'active') setPhase('complete');
                   else { setPhase('resetting'); setCurrentEpisode(ep => ep + 1); }
                 })
                 .catch(() => {
@@ -476,6 +492,7 @@ export function MonitorEpisodePage() {
     recording: 'Recording',
     resetting: resetCountdown > 0 ? `Reset (${resetCountdown}s)` : 'Reset — press Next',
     complete: 'Complete',
+    stopped: 'Stopped',
   }[phase];
 
   const statusColor = {
@@ -483,6 +500,7 @@ export function MonitorEpisodePage() {
     recording: 'text-green-500',
     resetting: 'text-yellow-500',
     complete: 'text-[#55bde3]',
+    stopped: 'text-yellow-500',
   }[phase];
 
   return (
@@ -575,6 +593,7 @@ export function MonitorEpisodePage() {
                 : `Reset — press Next to start episode ${currentEpisode}`
               )}
               {phase === 'complete' && `Complete — ${currentEpisode} of ${totalEpisodes} episodes recorded`}
+              {phase === 'stopped' && `Stopped — ${currentEpisode} of ${totalEpisodes} episodes saved (Resume from Record page)`}
             </div>
             {phase === 'recording' && (
               <div className="text-white text-[12px] relative z-10 font-mono">{episodeProgress}%</div>
@@ -710,10 +729,13 @@ export function MonitorEpisodePage() {
               </div>
             );
           })()
-        ) : phase === 'complete' ? (
-          /* Completion buttons. Dry-run completion drops "View Dataset"
-             (no dataset exists) and offers Run Again so the user can
-             rehearse repeatedly without leaving the page. */
+        ) : (phase === 'complete' || phase === 'stopped') ? (
+          /* Terminal-state buttons. Reached by natural completion,
+             user-initiated stop (status=paused, partial discarded), or
+             a dry-run finish. Dry-run drops "View Dataset" (no dataset
+             exists) and offers Run Again so the user can rehearse
+             repeatedly without leaving the page; for a real-run stop
+             the user navigates back to RecordPage to Resume the session. */
           <div className="flex justify-center gap-[16px]">
             <button
               onClick={() => navigate('/record')}

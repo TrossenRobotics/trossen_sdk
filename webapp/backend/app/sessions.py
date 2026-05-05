@@ -49,20 +49,17 @@ __all__ = [
 
 # Allowed (current_status, action) → new_status transitions.
 #
-# "stop" is the user-initiated mid-session interrupt → paused (recoverable).
-# "complete" is the recorder loop's natural-exit signal after the last
-# episode → completed (terminal). Splitting them lets the disk reflect
-# whether the user gave up partway or actually finished.
+# "stop" is the user-initiated mid-session interrupt → paused (recoverable):
+# the recorder discards the in-flight partial so a Resume re-records the
+# same slot. "complete" is the recorder loop's natural-exit signal after
+# every scheduled episode finished → completed (terminal). A user Stop
+# never auto-promotes to completed, even on the last episode — the partial
+# is thrown away and the session stays paused.
 _TRANSITIONS = {
     ("pending", "start"): "active",
     ("paused", "start"): "active",
     ("active", "stop"): "paused",
     ("active", "complete"): "completed",
-    # Promotion path used by the recorder cleanup when a user-initiated
-    # stop happened to land on the last episode — the SDK keeps the
-    # partial recording as a finalized episode, so the dataset is in
-    # fact complete even though /stop already moved disk to paused.
-    ("paused", "complete"): "completed",
 }
 
 

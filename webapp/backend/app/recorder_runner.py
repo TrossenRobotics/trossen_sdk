@@ -261,7 +261,18 @@ def _run_episode_loop(
                 break
 
             if polling_outcome == "stop":
-                print(f"{tag} stop signaled during episode {episode_index}", flush=True)
+                print(f"{tag} stop signaled during episode {episode_index}, "
+                      f"discarding partial", flush=True)
+                try:
+                    if mgr.is_episode_active():
+                        mgr.discard_current_episode()
+                except Exception as e:
+                    print(f"{tag} discard_current_episode failed: {e}", flush=True)
+                _emit({
+                    "type": "event",
+                    "event": "episode_discarded",
+                    "episode_index": episode_index,
+                })
                 break
 
             retry_this_episode = False

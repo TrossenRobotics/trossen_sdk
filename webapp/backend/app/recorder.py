@@ -530,8 +530,10 @@ def _finalize_session_complete(
     Mirrors the previous in-process post-loop block:
       - sync session.current_episode to the SDK's authoritative count
       - dry runs: `active|paused → pending` (rehearsal leaves no progress)
-      - real runs: `active → completed`, or `paused → completed` if the
-        user stopped on the last episode and the SDK kept the partial
+      - real runs: `active → completed` (natural end of the schedule); a
+        user Stop already moved status to `paused` and the in-flight
+        partial was discarded, so paused stays paused here regardless of
+        which episode it landed on
       - publish the final `session_complete` lifecycle event
     """
     sdk_episodes_completed = -1
@@ -562,17 +564,20 @@ def _finalize_session_complete(
             transition_session(session_id, "complete")
         except ValueError:
             pass
-    elif sess.status == "paused" and sess.current_episode >= num_episodes:
-        try:
-            transition_session(session_id, "complete")
-        except ValueError:
-            pass
 
+    # Re-read after any transitions so the WS payload reflects the
+    # session's terminal status — the frontend needs this to distinguish
+    # a natural completion ("completed") from a user-initiated stop
+    # ("paused") and pick the right toast / phase. Falling back to the
+    # last-known sess if the row vanished mid-finalize keeps us robust.
+    final_sess = get_session(session_id) or sess
     bus.publish(session_id, {
         "type": "lifecycle",
         "data": {
             "event": "session_complete",
             "total_episodes": num_episodes,
+            "episodes_recorded": final_sess.current_episode,
+            "final_status": final_sess.status,
             "dry_run": dry_run,
         },
     })
