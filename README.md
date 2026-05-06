@@ -13,6 +13,7 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Stereolab
 - [Installation](#installation)
 - [Building](#building)
 - [Quick Start](#quick-start)
+- [Desktop App (no CLI)](#desktop-app-no-cli)
 - [Interactive Episode Controls](#interactive-episode-controls)
 - [Configuration Reference](#configuration-reference)
 - [Converting to LeRobot V2](#converting-to-lerobot-v2)
@@ -208,6 +209,18 @@ All examples follow the same pattern:
 Episodes are saved to the directory set in `backend.root` (default: `~/.trossen_sdk/<dataset_id>/`).
 
 > The example scripts are starting points. The [Architecture Overview](#architecture-overview) section below explains how to write your own recording script or extend the SDK with new hardware.
+
+---
+
+## Desktop App (no CLI)
+
+If you prefer a graphical interface to the CLI tooling above, the repo
+ships an Electron-based desktop app for recording sessions, browsing
+datasets, and converting MCAP → LeRobot V2 — all without writing config
+files or running uvicorn manually. It packages as a single Linux
+`AppImage`.
+
+See [`webapp/README.md`](webapp/README.md) for build and use instructions.
 
 ---
 
