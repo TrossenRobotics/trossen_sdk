@@ -158,6 +158,8 @@ function createWindow() {
     width: 1400,
     height: 900,
     title: 'Trossen SDK',
+    frame: false,       // drop titlebar + window controls
+    fullscreen: true,   // try true fullscreen first…
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -172,6 +174,52 @@ function createWindow() {
     // live on the same origin (no CORS, no proxy).
     mainWindow.loadURL(BACKEND_URL);
   }
+
+  // Some Linux WMs ignore the fullscreen flag at creation. Re-assert it once
+  // the WM has placed the window, and fall back to maximize() if the WM also
+  // refuses setFullScreen — combined with frame:false, that looks identical.
+  mainWindow.once('ready-to-show', () => {
+    mainWindow.setFullScreen(true);
+    if (!mainWindow.isFullScreen()) {
+      mainWindow.maximize();
+    }
+  });
+
+  // We dropped the default application menu, which also dropped its built-in
+  // accelerators. Re-add the few that matter for an operator at the rig:
+  //   F11    toggle fullscreen
+  //   Esc    exit fullscreen (only consumed when actually fullscreen so the
+  //          React app still sees Esc for closing modals etc.)
+  //   Ctrl+Q quit cleanly
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+
+    if (input.key === 'F11') {
+      const inFull = mainWindow.isFullScreen() || mainWindow.isMaximized();
+      if (inFull) {
+        mainWindow.setFullScreen(false);
+        mainWindow.unmaximize();
+      } else {
+        mainWindow.setFullScreen(true);
+        if (!mainWindow.isFullScreen()) mainWindow.maximize();
+      }
+      event.preventDefault();
+      return;
+    }
+
+    if (input.key === 'Escape' &&
+        (mainWindow.isFullScreen() || mainWindow.isMaximized())) {
+      mainWindow.setFullScreen(false);
+      mainWindow.unmaximize();
+      event.preventDefault();
+      return;
+    }
+
+    if ((input.control || input.meta) && input.key.toLowerCase() === 'q') {
+      app.quit();
+      event.preventDefault();
+    }
+  });
 
   mainWindow.on('closed', () => {
     mainWindow = null;
