@@ -1,0 +1,20 @@
+{
+  "name": "trossen-sdk-webapp-electron",
+  "version": "0.1.0",
+  "description": "Electron desktop wrapper for the Trossen SDK webapp",
+  "main": "main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron . --no-sandbox",
+    "build:frontend": "cd ../frontend && npm install && npm run build",
+    "sync:backend": "cd ../backend && uv sync",
+    "prepare:prod": "npm run build:frontend && npm run sync:backend",
+    "start:prod": "ELECTRON_PROD=1 electron . --no-sandbox",
+    "prepare:appimage": "npm run prepare:prod && bash scripts/prepare-appimage.sh",
+    "build:appimage": "npm run prepare:appimage && electron-builder --linux AppImage"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  }
+}

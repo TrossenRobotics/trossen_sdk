@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -6,6 +7,7 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from app import hw_status
@@ -608,3 +610,12 @@ async def session_ws(ws: WebSocket, session_id: str) -> None:
         pass
     finally:
         bus.unsubscribe(session_id, queue)
+
+
+# Serve the built frontend at the root when packaged. Electron sets
+# TROSSEN_FRONTEND_DIST to the resources path; in dev the variable is
+# unset and Vite serves the frontend separately on :5173. Mounting at "/"
+# happens after all API routes so /api/* always wins the route match.
+_frontend_dist = os.environ.get("TROSSEN_FRONTEND_DIST")
+if _frontend_dist and Path(_frontend_dist).is_dir():
+    app.mount("/", StaticFiles(directory=_frontend_dist, html=True), name="frontend")

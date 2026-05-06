@@ -1,0 +1,46 @@
+appId: com.trossen.sdk-webapp
+productName: Trossen SDK
+copyright: Copyright Trossen Robotics
+
+directories:
+  output: dist
+  buildResources: build-resources
+
+# We only ship Linux for now.
+linux:
+  target:
+    - AppImage
+  category: Development
+  artifactName: ${productName}-${version}.${ext}
+  # Modern Ubuntu blocks unprivileged user namespaces via AppArmor and
+  # AppImages can't ship a setuid-root chrome-sandbox helper, so Chromium's
+  # SUID sandbox aborts on launch. Pass --no-sandbox at the binary level so
+  # double-clicking the AppImage just works. Acceptable here: the renderer
+  # only loads localhost content from a backend running as the same user.
+  executableArgs:
+    - --no-sandbox
+
+# Files INSIDE the Electron app bundle (asar). Just main.js + npm metadata —
+# everything heavy goes in extraResources so it stays unpacked and reachable
+# at runtime via process.resourcesPath.
+files:
+  - main.js
+  - package.json
+  - "!**/.DS_Store"
+
+# Files COPIED next to the bundle, accessible at runtime as
+# `${process.resourcesPath}/<to>`. main.js already knows these paths.
+# Sourced from build-staging/ which is created by scripts/prepare-appimage.sh
+# — that script bundles uv's standalone Python install and rewrites the
+# venv's symlinks to be relative so they survive AppImage packaging.
+extraResources:
+  - from: build-staging/python
+    to: python
+  - from: build-staging/backend
+    to: backend
+  - from: build-staging/frontend-dist
+    to: frontend-dist
+
+# AppImage runtime opts. Don't auto-update; this is internal tooling.
+appImage:
+  license: null
