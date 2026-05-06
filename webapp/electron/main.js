@@ -11,10 +11,14 @@
 //   4. On window close / app quit → SIGTERM the backend so it doesn't
 //      outlive the GUI.
 
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, Menu } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const http = require('http');
+
+// Drop the default File/Edit/View/Window/Help menu — none of those entries
+// do anything meaningful for this app, and the menu bar takes vertical space.
+Menu.setApplicationMenu(null);
 
 const BACKEND_HOST = '127.0.0.1';
 const BACKEND_PORT = 8000;
