@@ -33,9 +33,11 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import sys
 import threading
 import time
+from contextlib import contextmanager
 from typing import Any
 
 import trossen_sdk as ts
@@ -44,6 +46,40 @@ import trossen_sdk as ts
 _READY_PREFIX = "__READY__:"
 _SUCCESS_PREFIX = "__SUCCESS__:"
 _ERROR_PREFIX = "__ERROR__:"
+
+
+_BLOCKABLE_SIGNALS = frozenset(range(1, signal.NSIG)) - {
+    signal.SIGKILL,
+    signal.SIGSTOP,
+}
+
+
+@contextmanager
+def _block_signals_on_this_thread() -> Any:
+    """Block all maskable signals on the calling thread for the body.
+
+    POSIX guarantees that a thread spawned via pthread_create inherits
+    the calling thread's signal mask. Wrapping SDK calls that spawn
+    native threads (the libtrossen_arm UDP control loop, the teleop
+    mirror loop) in this context manager ensures those threads are born
+    with every signal blocked, so a signal delivered to the process can
+    never interrupt their blocking recvfrom() with EINTR.
+
+    libtrossen_arm at the main-branch SHA we pin does not retry on
+    EINTR — an interrupted UDP read throws trossen_arm::RuntimeError out
+    of the control loop, which unwinds past a noexcept thread boundary
+    and aborts the process (SIGABRT, exit code -6). Masking signals on
+    the SDK threads sidesteps that path entirely.
+
+    The Python main thread's original mask is restored on exit, so the
+    interpreter keeps receiving SIGINT/SIGTERM normally for clean
+    shutdown.
+    """
+    old = signal.pthread_sigmask(signal.SIG_BLOCK, _BLOCKABLE_SIGNALS)
+    try:
+        yield
+    finally:
+        signal.pthread_sigmask(signal.SIG_SETMASK, old)
 
 
 def _emit(payload: dict[str, Any]) -> None:
@@ -240,7 +276,12 @@ def _run_episode_loop(
                 next_event.clear()
                 rerecord_event.clear()
                 print(f"{tag} starting episode {episode_index}", flush=True)
-                if not mgr.start_episode():
+                # start_episode fires on_pre_episode → ctrl.teleop(), which
+                # spawns the teleop mirror thread; mask signals so it
+                # inherits a blocked mask (see _block_signals_on_this_thread).
+                with _block_signals_on_this_thread():
+                    started = mgr.start_episode()
+                if not started:
                     print(f"{tag} start_episode({episode_index}) returned False, "
                           f"exiting loop", flush=True)
                     break
@@ -446,8 +487,14 @@ def main() -> int:
 
     mgr: ts.SessionManager | None = None
     try:
-        mgr, _controllers = _build_session_manager(config)
-        if not mgr.start_episode():
+        # Both _build_session_manager and the first start_episode spawn
+        # native SDK threads (UDP control loop, teleop mirror loop) that
+        # must inherit a fully-blocked signal mask. See
+        # _block_signals_on_this_thread for the EINTR-abort rationale.
+        with _block_signals_on_this_thread():
+            mgr, _controllers = _build_session_manager(config)
+            started = mgr.start_episode()
+        if not started:
             mgr.shutdown()
             print(f"{_ERROR_PREFIX} SessionManager.start_episode() returned False",
                   flush=True)
