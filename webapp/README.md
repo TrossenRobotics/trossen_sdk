@@ -98,7 +98,7 @@ The application opens directly in fullscreen mode with no titlebar.
 | **Ctrl+Q**  | Quit the application                |
 | **Alt+F4**  | Close the window (also quits)       |
 
-The app's left sidebar has three pages:
+The app's top navigation bar has three pages:
 
 - **Record** (default) — start recording sessions.
 - **Configuration** — view and edit the hardware *systems*.
@@ -144,17 +144,22 @@ Click a system to open its configuration. Update:
   the IP addresses are operator-editable.
 - **Camera serials / device indices** — RealSense cameras are addressed by
   their serial number (printed on the device).
-- **Other parameters** — frame rates, resolutions, episode duration,
-  reset duration, number of episodes, dataset ID. Defaults are sensible;
-  only change them if you have a reason to.
+- **Camera parameters** — frame rates and resolutions per camera.
+  Defaults are sensible; only change them if you have a reason to.
+
+Recording-level parameters (dataset ID, episode duration, number of
+episodes) are *not* part of the system — they're set when you create a
+session on the Record page. See section 4.
 
 Save when done.
 
 ### Test
 
-The **Test** button on each system runs each arm through a quick connection
-check (connect → move to sleep pose → disconnect). Use it to confirm that
-the arms are powered on and the network is right *before* recording.
+The **Test** button on each system exercises every piece of hardware
+the system declares — arms (connect → move to sleep pose → disconnect),
+each RealSense / USB camera, and the SLATE mobile base if present. Use
+it to confirm everything is powered on, networked, and addressable
+*before* starting a recording session.
 
 ---
 
@@ -162,6 +167,45 @@ the arms are powered on and the network is right *before* recording.
 
 Open **Record**. Pick the system you configured and either start a new
 session or continue an existing one.
+
+### Creating a new session
+
+When you start a new session, you provide:
+
+- **Dataset ID** — the directory name under the MCAP root where
+  episodes for this session are written.
+- **Episode duration** — how long each episode records before the app
+  finalises it and moves to the reset phase.
+- **Number of episodes** — how many episodes this session should
+  capture in total.
+
+Other recording parameters (frame rates, camera resolutions, arm IPs)
+come from the *system* you picked — see section 3.
+
+### Session states
+
+A session is always in one of these states. The Record page badges the
+session with its current state.
+
+- **Pending** — the session has been created but no episode has been
+  recorded yet. Press **Start** to begin.
+- **Active** — the session is currently recording. Open the
+  **Monitor** page to watch live stats (current episode, records
+  written, elapsed time).
+- **Paused** — the user manually stopped the session before all
+  configured episodes were recorded. The session can be **resumed**;
+  recording continues at the next episode index.
+- **Error** — something went wrong (hardware disconnect, driver
+  crash, configuration mismatch, etc.). To recover:
+  1. Fix the underlying issue (re-cable an arm, restart a camera,
+     correct a config typo, …).
+  2. Click **Clear Error** on the session.
+  3. Run **Test** on the system to confirm the hardware is healthy
+     again.
+  4. The session transitions to **Paused** and can be resumed.
+- **Completed** — every configured episode has been recorded. The
+  session is read-only at this point; create a new session to record
+  more.
 
 ### Session lifecycle
 
