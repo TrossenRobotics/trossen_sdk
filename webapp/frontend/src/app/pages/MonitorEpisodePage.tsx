@@ -2,6 +2,7 @@ import { Camera, Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Setting
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
+import { announce } from '@/lib/announce';
 import { logError } from '@/lib/logger';
 import { useHwStatus } from '@/lib/HwStatusContext';
 import { apiGet, apiPost, describeError } from '@/lib/api';
@@ -308,12 +309,17 @@ export function MonitorEpisodePage() {
         setPhase('recording');
         setElapsed(0);
         addLog('success', `Episode ${data.episode_index ?? ''} started — recording`);
+        // Phrasing mirrors the SDK's `announce()` in
+        // session_manager.cpp:281 so terminal-mode demos and the webapp
+        // sound the same to an operator.
+        announce(`Episode ${data.episode_index ?? ''} started`);
       } else if (data.event === 'episode_ended') {
         const idx = (data.episode_index ?? 0) + 1;
         setCurrentEpisode(idx);
         setElapsed(0);
         setPhase('resetting');
         addLog('success', `Episode saved (${idx} total) — resetting`);
+        announce(`Episode ${data.episode_index ?? ''} complete`);
       } else if (data.event === 'episode_discarded') {
         // Re-record discarded the slot; backend now runs (or restarts) the
         // reset window before re-attempting the same index. currentEpisode
@@ -322,6 +328,7 @@ export function MonitorEpisodePage() {
         setElapsed(0);
         setPhase('resetting');
         addLog('warning', `Episode ${data.episode_index ?? ''} discarded — reset phase`);
+        announce(`Episode ${data.episode_index ?? ''} discarded`);
       } else if (data.event === 'session_complete') {
         if (data.dry_run) {
           // Backend reset the disk record back to pending so the user
@@ -331,6 +338,7 @@ export function MonitorEpisodePage() {
           setSession(prev => prev ? { ...prev, status: 'pending', current_episode: 0 } : prev);
           setCurrentEpisode(0);
           addLog('success', 'Dry run complete — no data was recorded');
+          announce('Dry run complete');
         } else if (data.final_status === 'paused') {
           // User-initiated stop: backend left the row paused with the
           // in-flight slot discarded. Resume from RecordPage re-records
@@ -340,9 +348,11 @@ export function MonitorEpisodePage() {
           const recorded = data.episodes_recorded ?? 0;
           const total = data.total_episodes ?? 0;
           addLog('warning', `Session stopped — ${recorded} of ${total} episodes saved`);
+          announce('Session stopped');
         } else {
           setPhase('complete');
           addLog('success', 'All episodes recorded — session complete');
+          announce('Session complete');
         }
       } else if (data.event === 'error') {
         setPhase('complete');

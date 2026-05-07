@@ -1,8 +1,9 @@
 import { Link, useLocation } from "react-router";
-import { Menu, X } from "lucide-react";
+import { Menu, X, Volume2, VolumeX } from "lucide-react";
 import { useState } from "react";
 import imgTrossen2025White2 from '@/assets/6ef806f936e829141b2fab202fa6f7601e3a5a7b.png';
 import { useHwStatus } from '@/lib/HwStatusContext';
+import { useAnnounceEnabled, setAnnounceEnabled, announce } from '@/lib/announce';
 
 const navLinks = [
   { to: "/record", label: "Record", match: ["/", "/record"] },
@@ -14,11 +15,21 @@ export function Header() {
   const location = useLocation();
   const [mobileOpen, setMobileOpen] = useState(false);
   const { testingSystemId } = useHwStatus();
+  const announceEnabled = useAnnounceEnabled();
   // Block all in-app nav while a Hardware Test is mid-flight. Switching
   // pages would unmount ConfigurationPage and orphan the request, but
   // the backend would keep talking to hardware and the user would be
   // left with a Testing… UI in the wrong place.
   const navLocked = testingSystemId !== null;
+
+  // Toggle TTS cues + speak a short confirmation so the user gets
+  // immediate feedback that audio is working. The confirmation only
+  // plays when transitioning OFF→ON; turning audio off should be silent.
+  const toggleAnnounce = () => {
+    const next = !announceEnabled;
+    setAnnounceEnabled(next);
+    if (next) announce('Audio cues on');
+  };
 
   const isActive = (match: string[]) =>
     match.some(p => location.pathname === p || (p !== "/" && location.pathname.startsWith(p)));
@@ -84,6 +95,20 @@ export function Header() {
             renderNavItem(link, "h-full flex items-center justify-center px-4 xl:px-[37px] text-sm xl:text-base")
           )}
         </nav>
+
+        {/* Audio cue toggle. Mirrors the SDK's `announce()` (spd-say)
+            but plays in the user's browser so it works in Docker and
+            for remote operators. */}
+        <button
+          className="text-[#b9b8ae] hover:text-white p-2 mr-1"
+          onClick={toggleAnnounce}
+          title={announceEnabled ? 'Mute audio cues' : 'Unmute audio cues'}
+          aria-pressed={announceEnabled}
+        >
+          {announceEnabled
+            ? <Volume2 className="w-5 h-5" />
+            : <VolumeX className="w-5 h-5" />}
+        </button>
 
         {/* Mobile hamburger */}
         <button
