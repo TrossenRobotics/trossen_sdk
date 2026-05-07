@@ -76,6 +76,24 @@ class ConvertBody(BaseModel):
     overwrite_existing: bool
 
 
+# Encoder log lines that the converter can't suppress at source but
+# are pure noise to the operator. Matched as a substring on each line
+# from the merged stdout/stderr stream before it reaches the SSE
+# consumer. Add new entries here rather than scattering filters.
+_NOISE_SUBSTRINGS = (
+    # libsvtav1 logs this once per worker thread on every encode start
+    # because it can't elevate its scheduling priority without
+    # CAP_SYS_NICE. Cosmetic only — the encode runs at default priority
+    # and produces correct output.
+    "Svt[warn]: Failed to set thread priority",
+)
+
+
+def _is_noise(line: str) -> bool:
+    """True if `line` is a known-cosmetic encoder warning to drop."""
+    return any(needle in line for needle in _NOISE_SUBSTRINGS)
+
+
 def _sse(event_type: str, **fields: object) -> str:
     """Format a single Server-Sent Events frame.
 
@@ -136,6 +154,27 @@ def _summarize_output(p: Path) -> tuple[int, int]:
     return total, count
 
 
+def _is_partial_success(output_path: Path) -> int:
+    """Return episode count if output is a usable LeRobotV2 dataset, else 0.
+
+    The C++ converter exits with code 1 if *any* episode fails, even when
+    other episodes converted cleanly and the resulting dataset is fully
+    usable. We check for the canonical metadata file and a non-empty
+    episode count to distinguish "partial success worth surfacing" from
+    "complete failure with no output".
+    """
+    info_path = output_path / "meta" / "info.json"
+    if not info_path.is_file():
+        return 0
+    try:
+        with info_path.open("r", encoding="utf-8") as f:
+            info = json.load(f)
+        total = int(info.get("total_episodes", 0))
+        return total if total > 0 else 0
+    except (OSError, ValueError, json.JSONDecodeError):
+        return 0
+
+
 def validate_body(body: ConvertBody) -> str | None:
     """Return an error message if the body has unsafe values, else None.
 
@@ -194,7 +233,7 @@ async def stream_conversion(body: ConvertBody, mcap_path: Path) -> AsyncIterator
             if not line_bytes:
                 break
             line = line_bytes.decode(errors="replace").rstrip("\r\n")
-            if line:
+            if line and not _is_noise(line):
                 yield _sse("progress", message=line)
 
         rc = await proc.wait()
@@ -209,7 +248,36 @@ async def stream_conversion(body: ConvertBody, mcap_path: Path) -> AsyncIterator
                 repository_id=body.repository_id,
             )
         else:
-            yield _sse("error", message=f"Converter exited with code {rc}")
+            # The C++ converter returns 1 when any episode in the batch fails,
+            # even when others succeeded. Inspect the output dir to tell the
+            # two apart so the frontend can show a success card with a
+            # warning for partial runs instead of a hard error.
+            episodes = _is_partial_success(output_path)
+            if episodes > 0:
+                size, files = _summarize_output(output_path)
+                yield _sse(
+                    "complete",
+                    output_path=str(output_path),
+                    output_size_bytes=size,
+                    output_files=files,
+                    dataset_id=body.dataset_id,
+                    repository_id=body.repository_id,
+                    partial=True,
+                    episodes=episodes,
+                    warning=(
+                        f"Converted {episodes} episode(s); some episodes failed "
+                        "(see log). Common cause: an episode was stopped before any "
+                        "joint-state frame was recorded."
+                    ),
+                )
+            else:
+                yield _sse(
+                    "error",
+                    message=(
+                        f"Converter exited with code {rc} and produced no usable "
+                        "output. See the log above for the failing step."
+                    ),
+                )
 
     except asyncio.CancelledError:
         # SSE client disconnected. Tear down the subprocess and remove

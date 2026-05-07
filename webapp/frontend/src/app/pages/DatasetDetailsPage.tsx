@@ -9,7 +9,7 @@ import { apiDelete, ApiError, describeError } from '@/lib/api';
 import { formatBytes, formatDate } from '@/lib/format';
 import type { McapDataset, LeRobotDataset } from '@/lib/types';
 
-interface ConvertResult { output_path: string; output_size_bytes: number; output_files: number; dataset_id: string; repository_id: string; }
+interface ConvertResult { output_path: string; output_size_bytes: number; output_files: number; dataset_id: string; repository_id: string; partial?: boolean; warning?: string; episodes?: number; }
 interface FramesResponse { cameras?: Record<string, string[]>; }
 
 // Minimal narrowed view of LeRobot info.json. The backend exposes the full
@@ -256,8 +256,9 @@ export function DatasetDetailsPage() {
               toast.error(data.message);
             }
             else if (data.type === 'complete') {
-              setConvertResult({ output_path: data.output_path, output_size_bytes: data.output_size_bytes, output_files: data.output_files, dataset_id: data.dataset_id, repository_id: data.repository_id });
-              toast.success('Conversion complete');
+              setConvertResult({ output_path: data.output_path, output_size_bytes: data.output_size_bytes, output_files: data.output_files, dataset_id: data.dataset_id, repository_id: data.repository_id, partial: data.partial, warning: data.warning, episodes: data.episodes });
+              if (data.partial) toast.warning(data.warning ?? 'Conversion finished with some failed episodes');
+              else toast.success('Conversion complete');
               refetchLerobot();
               refreshDatasets();
             }
@@ -525,8 +526,21 @@ export function DatasetDetailsPage() {
 
             {convertResult ? (
               <div className="p-5 space-y-4">
-                <div className="bg-green-500/10 border border-green-500 p-4 rounded">
-                  <div className="text-green-400 text-sm font-bold mb-3">Conversion Complete</div>
+                {convertResult.partial && (
+                  <div className="bg-yellow-500/10 border border-yellow-500 p-4 rounded">
+                    <div className="text-yellow-400 text-sm font-bold mb-1">Partial Conversion</div>
+                    <div className="text-yellow-200 text-xs">
+                      {convertResult.warning ?? 'Some episodes failed to convert. The dataset is usable but incomplete.'}
+                      {typeof convertResult.episodes === 'number' && (
+                        <> Wrote {convertResult.episodes} episode(s).</>
+                      )}
+                    </div>
+                  </div>
+                )}
+                <div className={`${convertResult.partial ? 'bg-[#0b0b0b] border-[#252525]' : 'bg-green-500/10 border-green-500'} border p-4 rounded`}>
+                  <div className={`${convertResult.partial ? 'text-white' : 'text-green-400'} text-sm font-bold mb-3`}>
+                    {convertResult.partial ? 'Output Dataset' : 'Conversion Complete'}
+                  </div>
                   <div className="space-y-3">
                     <div>
                       <span className="text-[#b9b8ae] text-xs uppercase block mb-1">Output Path</span>
