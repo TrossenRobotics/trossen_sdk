@@ -38,6 +38,11 @@ services:
       # Named volume keeps the .venv (and the compiled pybind extension)
       # out of the host source tree.
       - backend_venv:/app/webapp/backend/.venv
+      # Persistent CMake build dir for the SDK's C++ scripts (currently the
+      # MCAP→LeRobotV2 converter). Lives outside /app on purpose so the host
+      # toolchain's cache is never reused by the container, and is volume-
+      # backed so the first-launch build cost doesn't repeat on every restart.
+      - backend_cpp_build:/var/cache/trossen_sdk/build
       # Host-writable data dirs. Datasets, configs, and the SQLite DB land
       # under the operator's home directory and survive container teardown.
       - ${HOME}/.trossen_sdk:/root/.trossen_sdk                          # MCAP recordings
@@ -70,4 +75,5 @@ services:
 
 volumes:
   backend_venv:
+  backend_cpp_build:
   frontend_node_modules:

@@ -96,14 +96,14 @@ WORKDIR /app/webapp/backend
 
 EXPOSE 8000
 
-# `uv sync` resolves dependencies (including the editable trossen_sdk install,
-# which triggers a scikit-build-core compile of the pybind bindings) and then
-# launches uvicorn.
-#
-# Dev hot-reload (--reload + inotify on /app/webapp/backend/app) competes
-# with the recorder subprocess for CPU and can starve the arm UDP control
-# loop, causing dropped packets during teleop. Off by default; opt in with
-#   UVICORN_RELOAD=1 docker compose up
-# (or set it in a .env file / compose override) when you actually want
-# source edits to land without a container restart.
-CMD ["bash", "-lc", "uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 ${UVICORN_RELOAD:+--reload --reload-dir /app/webapp/backend/app}"]
+# Out-of-source build dir for the C++ scripts (e.g., trossen_mcap_to_lerobot_v2).
+# Held outside /app so the host's CMake cache (potentially using a different
+# compiler) is never shared with the container's. Backed by a named volume in
+# docker-compose.yml, so the build is incremental across container restarts.
+ENV TROSSEN_DOCKER_BUILD_DIR=/var/cache/trossen_sdk/build
+ENV TROSSEN_CONVERTER_BIN=${TROSSEN_DOCKER_BUILD_DIR}/scripts/trossen_mcap_to_lerobot_v2
+
+# Entrypoint runs `uv sync`, builds the converter binary if missing, and then
+# launches uvicorn. See docker-entrypoint.sh for details on the steps and the
+# UVICORN_RELOAD opt-in for dev hot-reload.
+CMD ["bash", "-lc", "/app/webapp/backend/docker-entrypoint.sh"]

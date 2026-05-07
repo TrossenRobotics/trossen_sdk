@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import shutil
 from pathlib import Path
 from typing import AsyncIterator
@@ -33,14 +34,25 @@ from pydantic import BaseModel
 from app.io_utils import is_safe_id
 
 
-# Hard-coded paths to the SDK build artifacts. A future commit can
-# resolve these via env vars or a settings field; for now the SDK is
-# installed at a known location on the dev machine.
+# Repo root resolved from this file's location: webapp/backend/app/converter.py
+# → parents[3] is the SDK repo root. Works on host (parent dir of webapp/) and
+# in Docker (/app, where the repo is bind-mounted by docker-compose).
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+# Paths to the SDK's C++ converter binary and its default config. Both can be
+# overridden via env vars so deployments (Docker, packaged installs, CI) that
+# place the artifacts elsewhere don't need to patch this file.
 CONVERTER_BIN = Path(
-    "/home/trossen-roboticsd/trossen_sdk/build/scripts/trossen_mcap_to_lerobot_v2"
+    os.environ.get(
+        "TROSSEN_CONVERTER_BIN",
+        str(_REPO_ROOT / "build" / "scripts" / "trossen_mcap_to_lerobot_v2"),
+    )
 )
 DEFAULT_CONFIG = Path(
-    "/home/trossen-roboticsd/trossen_sdk/scripts/trossen_mcap_to_lerobot_v2/config.json"
+    os.environ.get(
+        "TROSSEN_CONVERTER_CONFIG",
+        str(_REPO_ROOT / "scripts" / "trossen_mcap_to_lerobot_v2" / "config.json"),
+    )
 )
 
 
@@ -149,6 +161,21 @@ async def stream_conversion(body: ConvertBody, mcap_path: Path) -> AsyncIterator
     """
     output_root = Path(body.root).expanduser()
     output_path = output_root / body.repository_id / body.dataset_id
+
+    # Pre-flight: surface a clear, actionable error if the C++ binary isn't
+    # present, instead of letting the user see "Converter exited with code 127"
+    # (the bash exit status for "command not found").
+    if not CONVERTER_BIN.is_file() or not os.access(CONVERTER_BIN, os.X_OK):
+        yield _sse(
+            "error",
+            message=(
+                f"Converter binary not found or not executable at {CONVERTER_BIN}. "
+                "Build the SDK first: run `make build` from the repo root "
+                "(or set TROSSEN_CONVERTER_BIN to point at an existing binary)."
+            ),
+        )
+        return
+
     args = _build_args(body, mcap_path, output_root)
 
     proc = await asyncio.create_subprocess_exec(
