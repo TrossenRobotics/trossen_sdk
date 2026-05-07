@@ -32,6 +32,7 @@ from app.sessions import (
     get_session,
     list_sessions,
     reset_to_pending,
+    robot_name_for_dataset,
     sessions_for_dataset,
     update_session,
     force_session_to_error,
@@ -117,6 +118,10 @@ def get_mcap_dataset(dataset_id: str) -> McapDataset:
         raise HTTPException(
             status_code=404, detail=f"MCAP dataset '{dataset_id}' not found"
         )
+    # Tag the canonical robot identifier (e.g. trossen_solo_ai) from the
+    # recording session, so the LeRobot Convert form can pre-populate
+    # `robot_name` correctly instead of falling back to the dataset id.
+    result.robot_name = robot_name_for_dataset(dataset_id, "mcap")
     return result
 
 

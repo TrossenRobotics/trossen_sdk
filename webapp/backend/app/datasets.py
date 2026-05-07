@@ -65,7 +65,11 @@ class McapEpisode(BaseModel):
 class McapDataset(BaseModel):
     """Detail shape for GET /api/datasets/{id}.
 
-    Mirrors McapDataset in frontend/src/lib/types.ts.
+    Mirrors McapDataset in frontend/src/lib/types.ts. `robot_name` is the
+    canonical robot identifier (e.g. `trossen_solo_ai`) recorded with the
+    dataset; populated by joining sessions → system.config.robot_name.
+    None when no recording session is on file (e.g. an externally copied
+    MCAP), in which case the convert UI falls back to a manual entry.
     """
     id: str
     episode_count: int
@@ -74,6 +78,7 @@ class McapDataset(BaseModel):
     episodes: list[McapEpisode]
     created_at: str | None = None
     updated_at: str | None = None
+    robot_name: str | None = None
 
 
 class LeRobotFile(BaseModel):

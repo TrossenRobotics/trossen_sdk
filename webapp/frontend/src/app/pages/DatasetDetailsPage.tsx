@@ -128,16 +128,19 @@ export function DatasetDetailsPage() {
     encode_videos: true, overwrite_existing: false,
   });
 
-  // Seed convertForm from whichever variant arrives first.
+  // Seed convertForm from whichever variant arrives first. `robot_name`
+  // comes from the recording session's system (e.g. `trossen_solo_ai`)
+  // when available; otherwise we leave it blank for the user to fill in
+  // (the dataset id is rarely the right value).
   useEffect(() => {
     if (mcap) {
       setConvertForm(prev => ({
         ...prev,
         dataset_id: mcap.id,
-        robot_name: mcap.id,
+        robot_name: mcap.robot_name ?? prev.robot_name,
       }));
     } else if (mcapMissing && id) {
-      setConvertForm(prev => ({ ...prev, dataset_id: id, robot_name: id }));
+      setConvertForm(prev => ({ ...prev, dataset_id: id }));
     }
   }, [mcap, mcapMissing, id]);
 

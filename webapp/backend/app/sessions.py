@@ -35,6 +35,7 @@ __all__ = [
     "list_sessions",
     "get_session",
     "sessions_for_dataset",
+    "robot_name_for_dataset",
     "create_session",
     "update_session",
     "delete_session",
@@ -159,6 +160,26 @@ def sessions_for_dataset(dataset_id: str, fmt: str) -> list[Session]:
             Session.backend_type.ilike(needle),
         )
         return list(db.exec(stmt).all())
+
+
+def robot_name_for_dataset(dataset_id: str, fmt: str = "mcap") -> str | None:
+    """Return the canonical robot identifier (e.g. `trossen_solo_ai`) for
+    the dataset, or None when no recording session is on file.
+
+    Resolves session → system → `system.config.robot_name`. Picks the
+    most recently created session for the dataset to handle the case
+    where a dataset id was reused across systems (rare but possible).
+    """
+    sessions = sessions_for_dataset(dataset_id, fmt)
+    if not sessions:
+        return None
+    # `created_at` is an ISO-8601 string, lex-sortable for our purposes.
+    sessions.sort(key=lambda s: s.created_at or "", reverse=True)
+    system = get_system(sessions[0].system_id)
+    if system is None:
+        return None
+    name = system.config.get("robot_name") if isinstance(system.config, dict) else None
+    return name if isinstance(name, str) and name else None
 
 
 def create_session(body: CreateSessionBody) -> Session | None:

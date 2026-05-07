@@ -61,6 +61,9 @@ export interface McapDataset {
     episodes: McapEpisode[];
     created_at?: string;
     updated_at?: string;
+    // Canonical robot identifier (e.g. `trossen_solo_ai`) resolved from
+    // the recording session's system; absent for externally-copied MCAPs.
+    robot_name?: string;
 }
 
 /**
