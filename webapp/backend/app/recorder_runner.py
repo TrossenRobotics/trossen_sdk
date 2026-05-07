@@ -38,6 +38,7 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
+from pathlib import Path
 from typing import Any
 
 import trossen_sdk as ts
@@ -87,11 +88,62 @@ def _emit(payload: dict[str, Any]) -> None:
     print(json.dumps(payload), flush=True)
 
 
+def _episode_has_joint_state(path: Path) -> bool:
+    """Return True iff `path` is a parseable MCAP with at least one
+    message on a `*/joints/state` channel.
+
+    Used to detect the "ghost episode" case: the SDK opens a new MCAP
+    file at start_episode and writes a header even before any producer
+    ticks. If the episode is stopped (e.g. the timer expires immediately
+    or the user hits Next before the trossen_arm producer has emitted a
+    frame), stop_episode finalizes a tiny (~1 KB) file with no
+    JointState records that the LeRobotV2 converter later rejects with
+    `Error: No joint state channels found in MCAP file`. Mirrors the
+    converter's own detection rule (substring "/joints/state" on the
+    channel topic; see trossen_mcap_to_lerobot_v2.cpp:714).
+
+    Defensive: any parse error (corrupt header, premature EOF) counts as
+    "no joint state" so the caller deletes the file. The mcap library
+    raises a variety of typed exceptions plus stdlib OSError on read
+    failures; catch broadly because the recovery action is the same.
+    """
+    try:
+        from mcap.reader import make_reader
+    except ImportError:
+        # mcap dep missing — skip the check rather than blocking the
+        # recorder. Surfaces as the original "no joint state" failure
+        # at conversion time, matching pre-fix behaviour.
+        return True
+    try:
+        with path.open("rb") as fd:
+            reader = make_reader(fd)
+            for _schema, channel, _msg in reader.iter_messages():
+                if channel.topic and "/joints/state" in channel.topic:
+                    return True
+    except Exception:
+        return False
+    return False
+
+
+def _episode_file_is_empty(mcap_root: str, episode_index: int) -> bool:
+    """Return True iff `<mcap_root>/episode_{N:06d}.mcap` exists but has
+    no joint-state data. Used to decide whether to discard the episode
+    via `mgr.discard_last_episode()`.
+
+    Returns False when the file is missing (e.g. SDK already discarded
+    it for another reason) — there is nothing more for us to clean up.
+    """
+    path = Path(mcap_root) / f"episode_{episode_index:06d}.mcap"
+    if not path.is_file():
+        return False
+    return not _episode_has_joint_state(path)
+
+
 def _build_session_manager(
     config: dict[str, Any],
-) -> tuple[ts.SessionManager, list]:
+) -> tuple[ts.SessionManager, list, str]:
     """Run the canonical SDK bootstrap from `trossen_solo_ai.py` and return
-    `(manager, controllers)`.
+    `(manager, controllers, mcap_root)`.
 
     Steps mirror the previous in-process implementation:
       1. SdkConfig.from_json(config) → cfg.populate_global_config()
@@ -103,7 +155,9 @@ def _build_session_manager(
 
     Returns the manager and the controllers list separately so the caller
     can keep a reference for the lifetime of the session (the SDK only
-    holds weak references via its callbacks).
+    holds weak references via its callbacks). `mcap_root` is exposed so
+    the episode loop can locate just-finalized files for the empty-episode
+    cleanup pass.
     """
     ts.ActiveHardwareRegistry.clear()
 
@@ -156,7 +210,7 @@ def _build_session_manager(
     mgr.on_pre_episode(lambda: (_start_controllers(controllers), True)[-1])
     mgr.on_pre_shutdown(lambda: _stop_controllers(controllers))
 
-    return mgr, controllers
+    return mgr, controllers, cfg.mcap_backend.root
 
 
 def _start_controllers(controllers: list) -> None:
@@ -243,6 +297,7 @@ def _run_episode_loop(
     reset_duration: float,
     start_episode_index: int,
     dry_run: bool,
+    mcap_root: str,
 ) -> None:
     """Drive episodes from `start_episode_index..num_episodes-1` to completion.
 
@@ -339,17 +394,50 @@ def _run_episode_loop(
                           f"ending early", flush=True)
                     if mgr.is_episode_active():
                         mgr.stop_episode()
-                print(f"{tag} episode {episode_index} ended", flush=True)
-                _emit({
-                    "type": "event",
-                    "event": "episode_ended",
-                    "episode_index": episode_index,
-                })
-                _emit({
-                    "type": "event",
-                    "event": "current_episode",
-                    "value": episode_index + 1,
-                })
+                # Drop ghost episodes (file finalized with no joint-state
+                # records — usually because the episode ended before the
+                # arm producer ticked). Mirror the rerecord pattern: call
+                # `mgr.discard_last_episode()` to delete the file and
+                # roll back the SDK counters, emit `episode_discarded`,
+                # leave `current_episode` pointing at this same slot, and
+                # set retry_this_episode so the loop re-records into it.
+                # Retrying (rather than skipping) is required because the
+                # SDK derives its next slot from `scan_existing_episodes`
+                # (max filename index + 1) — deleting without retrying
+                # would cause the next iteration to silently overwrite a
+                # slot the Python loop has already advanced past.
+                if _episode_file_is_empty(mcap_root, episode_index):
+                    print(f"{tag} episode {episode_index} has no joint-state "
+                          f"data; discarding and re-recording", flush=True)
+                    try:
+                        mgr.discard_last_episode()
+                    except Exception as e:
+                        print(f"{tag} discard_last_episode failed for empty "
+                              f"episode {episode_index}: {e}", flush=True)
+                    _emit({
+                        "type": "event",
+                        "event": "episode_discarded",
+                        "episode_index": episode_index,
+                        "reason": "no_joint_state",
+                    })
+                    _emit({
+                        "type": "event",
+                        "event": "current_episode",
+                        "value": episode_index,
+                    })
+                    retry_this_episode = True
+                else:
+                    print(f"{tag} episode {episode_index} ended", flush=True)
+                    _emit({
+                        "type": "event",
+                        "event": "episode_ended",
+                        "episode_index": episode_index,
+                    })
+                    _emit({
+                        "type": "event",
+                        "event": "current_episode",
+                        "value": episode_index + 1,
+                    })
 
             is_terminal = (
                 episode_index == num_episodes - 1 and not retry_this_episode
@@ -492,7 +580,7 @@ def main() -> int:
         # must inherit a fully-blocked signal mask. See
         # _block_signals_on_this_thread for the EINTR-abort rationale.
         with _block_signals_on_this_thread():
-            mgr, _controllers = _build_session_manager(config)
+            mgr, _controllers, mcap_root = _build_session_manager(config)
             started = mgr.start_episode()
         if not started:
             mgr.shutdown()
@@ -538,6 +626,7 @@ def main() -> int:
             reset_duration,
             start_episode_index,
             dry_run,
+            mcap_root,
         )
     except Exception as e:
         # Discard the partial recording for the in-flight episode so a

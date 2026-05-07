@@ -6,6 +6,7 @@ requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13",
     "fastapi>=0.115",
+    "mcap>=1.2",
     "sqlmodel>=0.0.22",
     "trossen-sdk",
     "uvicorn[standard]>=0.30",
