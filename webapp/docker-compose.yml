@@ -47,6 +47,11 @@ services:
     group_add:
       - video        # /dev/video* for OpenCV / V4L2 cameras
       - plugdev      # USB hot-plug
+    environment:
+      # Set UVICORN_RELOAD=1 in the host shell (or a .env file) to turn on
+      # uvicorn --reload for dev. Off by default to keep the arm UDP loop
+      # from being starved by inotify wakeups during teleop.
+      UVICORN_RELOAD: ${UVICORN_RELOAD:-}
     restart: unless-stopped
 
   frontend:

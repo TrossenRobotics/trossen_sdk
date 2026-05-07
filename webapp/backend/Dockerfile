@@ -98,5 +98,12 @@ EXPOSE 8000
 
 # `uv sync` resolves dependencies (including the editable trossen_sdk install,
 # which triggers a scikit-build-core compile of the pybind bindings) and then
-# launches uvicorn with --reload so source edits land without a rebuild.
-CMD ["bash", "-lc", "uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload --reload-dir /app/webapp/backend/app"]
+# launches uvicorn.
+#
+# Dev hot-reload (--reload + inotify on /app/webapp/backend/app) competes
+# with the recorder subprocess for CPU and can starve the arm UDP control
+# loop, causing dropped packets during teleop. Off by default; opt in with
+#   UVICORN_RELOAD=1 docker compose up
+# (or set it in a .env file / compose override) when you actually want
+# source edits to land without a container restart.
+CMD ["bash", "-lc", "uv sync && uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 ${UVICORN_RELOAD:+--reload --reload-dir /app/webapp/backend/app}"]
