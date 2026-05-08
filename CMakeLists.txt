@@ -206,30 +206,19 @@ FetchContent_Declare(
   trossen_slate
   SYSTEM
   GIT_REPOSITORY https://github.com/Interbotix/trossen_slate.git
-  GIT_TAG ef6354e5bd6a39a49ca9952bb5ad7f277b7527e5
+  GIT_TAG dd16cc8c327ce0269f839893520a302b47905d43
   EXCLUDE_FROM_ALL
 )
 
-# Set BUILD_WITH_ROS option before making trossen_slate available
+# Configure trossen_slate before fetching: skip ROS, skip demo executables, and skip
+# trossen_slate's own pybind module (trossen_sdk provides bindings for slate via its
+# own module).
 set(BUILD_WITH_ROS OFF CACHE BOOL "Build trossen_slate without ROS" FORCE)
-# Disable trossen_slate demos (they fail to link in scikit-build environments)
-set(TROSSEN_SLATE_ENABLE_DEMOS OFF CACHE BOOL "Disable trossen_slate demos" FORCE)
-
-# Temporarily hide SKBUILD from trossen_slate so it doesn't try to build
-# its own pybind11 module (which would conflict with our target names)
-if(DEFINED SKBUILD)
-  set(_TROSSEN_SDK_SKBUILD_SAVE "${SKBUILD}")
-  unset(SKBUILD)
-  unset(SKBUILD CACHE)
-endif()
+set(BUILD_DEMOS OFF CACHE BOOL "Skip trossen_slate demo executables" FORCE)
+set(TROSSEN_SLATE_BUILD_PYTHON_BINDINGS OFF CACHE BOOL
+  "Skip trossen_slate's pybind module; trossen_sdk provides its own" FORCE)
 
 FetchContent_MakeAvailable(trossen_slate)
-
-# Restore SKBUILD after trossen_slate is configured
-if(DEFINED _TROSSEN_SDK_SKBUILD_SAVE)
-  set(SKBUILD "${_TROSSEN_SDK_SKBUILD_SAVE}" CACHE STRING "" FORCE)
-  unset(_TROSSEN_SDK_SKBUILD_SAVE)
-endif()
 
 # Use the FetchContent source directory for include paths
 target_include_directories(trossen_sdk PUBLIC ${scservo_SOURCE_DIR}/src)
@@ -336,13 +325,6 @@ if(BUILD_PYTHON_BINDINGS OR DEFINED SKBUILD)
 
   find_package(Python REQUIRED COMPONENTS Interpreter)
 
-  # Determine architecture for trossen_slate's prebuilt chassis_driver
-  if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
-    set(_SLATE_ARCH "x86_64")
-  elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
-    set(_SLATE_ARCH "aarch64")
-  endif()
-
   pybind11_add_module(trossen_sdk_python MODULE
     python/trossen_sdk.cpp
   )
@@ -393,7 +375,7 @@ if(BUILD_PYTHON_BINDINGS OR DEFINED SKBUILD)
       $<TARGET_FILE:trossen_slate>
       ${_PY_PKG_DIR}/$<TARGET_FILE_NAME:trossen_slate>
     COMMAND ${CMAKE_COMMAND} -E copy
-      ${trossen_slate_SOURCE_DIR}/lib/${_SLATE_ARCH}/libchassis_driver.so
+      ${TROSSEN_SLATE_CHASSIS_DRIVER_LIBRARY}
       ${_PY_PKG_DIR}/libchassis_driver.so
     COMMENT "Copying trossen_sdk module and libraries to python/trossen_sdk/"
   )
@@ -428,7 +410,7 @@ if(BUILD_PYTHON_BINDINGS OR DEFINED SKBUILD)
     install(TARGETS trossen_sdk SCServo trossen_slate
       LIBRARY DESTINATION trossen_sdk)
     # Bundle trossen_slate's prebuilt chassis_driver library
-    install(FILES ${trossen_slate_SOURCE_DIR}/lib/${_SLATE_ARCH}/libchassis_driver.so
+    install(FILES ${TROSSEN_SLATE_CHASSIS_DRIVER_LIBRARY}
       DESTINATION trossen_sdk)
     install(
       DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}/stubs/
