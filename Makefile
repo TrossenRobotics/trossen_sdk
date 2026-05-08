@@ -78,5 +78,9 @@ python-wheel:
 .PHONY: python-wheel
 
 python-test:
-	python -m pytest python/tests/ -v
+	@if [ -d python/tests ]; then \
+		python -m pytest python/tests/ -v; \
+	else \
+		echo "python-test: python/tests/ not present; nothing to run"; \
+	fi
 .PHONY: python-test
