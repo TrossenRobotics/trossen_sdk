@@ -56,7 +56,13 @@ struct type_caster<cv::Mat> {
 
   // C++ -> Python
   static handle cast(const cv::Mat& src, return_value_policy, handle) {
-    if (src.empty()) return pybind11::none().release();
+    // Empty cv::Mat → empty (0, 0) uint8 ndarray. Keeping this symmetric with
+    // load() (which only accepts ndarrays) means callers can rely on the
+    // caster always producing a numpy.ndarray, and an empty result roundtrips
+    // back into an empty cv::Mat.
+    if (src.empty()) {
+      return pybind11::array(pybind11::dtype::of<uint8_t>(), {0, 0}).release();
+    }
 
     cv::Mat contiguous;
     if (src.isContinuous()) {
