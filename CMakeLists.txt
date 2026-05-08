@@ -305,7 +305,6 @@ endif()
 
 # ─── Python bindings (pybind11) ──────────────────────────────────────────────
 # Follows the trossen_arm pattern: SKBUILD-driven, single binding .cpp,
-# module name matches package name, pybind11-stubgen for type stubs.
 option(BUILD_PYTHON_BINDINGS "Build Python pybind11 bindings" OFF)
 
 if(BUILD_PYTHON_BINDINGS OR DEFINED SKBUILD)
@@ -318,7 +317,7 @@ if(BUILD_PYTHON_BINDINGS OR DEFINED SKBUILD)
     FetchContent_Declare(
       pybind11
       GIT_REPOSITORY https://github.com/pybind/pybind11.git
-      GIT_TAG v2.12.0
+      GIT_TAG 3e9dfa2866941655c56877882565e7577de6fc7b  # v2.12.0
     )
     FetchContent_MakeAvailable(pybind11)
   endif()
@@ -361,26 +360,31 @@ if(BUILD_PYTHON_BINDINGS OR DEFINED SKBUILD)
   # Copy the built module and dependency libraries into the Python package
   # directory for development use (editable install / PYTHONPATH usage)
   set(_PY_PKG_DIR ${CMAKE_CURRENT_SOURCE_DIR}/python/trossen_sdk)
+  set(_PY_PKG_TARGETS
+    trossen_sdk_python
+    trossen_sdk
+    SCServo
+    trossen_slate
+  )
+  set(_PY_PKG_COPY_COMMANDS "")
+  foreach(_tgt IN LISTS _PY_PKG_TARGETS)
+    list(APPEND _PY_PKG_COPY_COMMANDS
+      COMMAND ${CMAKE_COMMAND} -E copy
+        $<TARGET_FILE:${_tgt}>
+        ${_PY_PKG_DIR}/$<TARGET_FILE_NAME:${_tgt}>
+    )
+  endforeach()
+
   add_custom_command(TARGET trossen_sdk_python POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy
-      $<TARGET_FILE:trossen_sdk_python>
-      ${_PY_PKG_DIR}/$<TARGET_FILE_NAME:trossen_sdk_python>
-    COMMAND ${CMAKE_COMMAND} -E copy
-      $<TARGET_FILE:trossen_sdk>
-      ${_PY_PKG_DIR}/$<TARGET_FILE_NAME:trossen_sdk>
-    COMMAND ${CMAKE_COMMAND} -E copy
-      $<TARGET_FILE:SCServo>
-      ${_PY_PKG_DIR}/$<TARGET_FILE_NAME:SCServo>
-    COMMAND ${CMAKE_COMMAND} -E copy
-      $<TARGET_FILE:trossen_slate>
-      ${_PY_PKG_DIR}/$<TARGET_FILE_NAME:trossen_slate>
+    ${_PY_PKG_COPY_COMMANDS}
+    # chassis_driver is a file path, not a CMake target, so it's handled separately
     COMMAND ${CMAKE_COMMAND} -E copy
       ${TROSSEN_SLATE_CHASSIS_DRIVER_LIBRARY}
       ${_PY_PKG_DIR}/libchassis_driver.so
     COMMENT "Copying trossen_sdk module and libraries to python/trossen_sdk/"
   )
 
-  # Generate stub files for type hints (like trossen_arm)
+  # Generate stub files for type hints
   # Uses || true to make stub generation non-fatal (may fail in isolated build
   # environments due to missing system libraries at import time)
   execute_process(

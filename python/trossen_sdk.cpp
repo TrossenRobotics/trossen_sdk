@@ -1,14 +1,6 @@
 /**
  * @file trossen_sdk.cpp
  * @brief Python bindings for the Trossen SDK (pybind11).
- *
- * Binding sections are added incrementally across the PR stack:
- *   1. Version constants  (this PR)
- *   2. Data types          (PR B)
- *   3. Hardware + producers (PR B)
- *   4. Config types         (PR B)
- *   5. Teleop + session     (PR C)
- *   6. Utilities            (PR C)
  */
 
 #include <pybind11/pybind11.h>

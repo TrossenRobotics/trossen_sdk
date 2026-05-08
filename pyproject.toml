@@ -1,7 +1,7 @@
 [project]
 name = "trossen_sdk"
 description = "Python bindings for the Trossen Robotics SDK"
-dynamic = ["version"]
+version = "0.1.0"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
@@ -19,7 +19,6 @@ build-backend = "scikit_build_core.build"
 
 [tool.scikit-build]
 cmake.build-type = "Release"
-cmake.args = ["-DBUILD_PYTHON_BINDINGS=ON", "-DBUILD_TESTING=OFF"]
 wheel.packages = ["python/trossen_sdk"]
 sdist.exclude = [
     ".github/**",
@@ -30,12 +29,27 @@ sdist.exclude = [
     "tests/**",
 ]
 wheel.exclude = [
+    ".cache/**",
+    ".claude/**",
+    ".clang-format",
+    ".dockerignore",
     ".github/**",
+    ".gitignore",
+    ".pre-commit-config.yaml",
+    ".pytest_cache/**",
+    ".vscode/**",
     "benchmarks/**",
     "build*/**",
+    "cmake/**",
+    "CPPLINT.cfg",
+    "docs/**",
+    "Dockerfile",
     "examples/**",
+    "Makefile",
+    "results/**",
     "scripts/**",
     "tests/**",
+    "uv.lock",
 ]
 
 [tool.scikit-build.cmake.define]
