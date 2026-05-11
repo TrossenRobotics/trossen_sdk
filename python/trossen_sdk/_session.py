@@ -1,6 +1,6 @@
 """Pythonic convenience wrappers for the Trossen SDK."""
 
-from trossen_sdk.trossen_sdk import SessionManager
+from .trossen_sdk import SessionManager
 
 
 class Episode:
