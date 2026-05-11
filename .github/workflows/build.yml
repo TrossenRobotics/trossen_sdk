@@ -15,9 +15,6 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Cover every platform listed in docs/installation.rst. Jetson L4T is
-        # not a GitHub-hosted runner; ubuntu-22.04-arm is the closest proxy
-        # (JetPack 6 is Ubuntu-22.04 based).
         os:
           - ubuntu-22.04
           - ubuntu-24.04
