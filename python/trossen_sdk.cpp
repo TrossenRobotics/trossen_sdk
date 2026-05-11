@@ -711,7 +711,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
       std::vector<std::shared_ptr<TeleopController>> result;
       result.reserve(controllers.size());
       for (auto& c : controllers) {
-        result.push_back(std::shared_ptr<TeleopController>(c.release()));
+        result.push_back(std::shared_ptr<TeleopController>(std::move(c)));
       }
       return result;
     },
@@ -755,7 +755,6 @@ PYBIND11_MODULE(trossen_sdk, m) {
       .def_readonly("normal_ticks", &Scheduler::Stats::normal_ticks);
 
     py::class_<SessionManager::Stats>(m, "SessionManagerStats")
-      .def(py::init<>())
       .def_readwrite("current_episode_index",
                      &SessionManager::Stats::current_episode_index)
       .def_readwrite("episode_active", &SessionManager::Stats::episode_active)
@@ -904,9 +903,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
 
     py::class_<RawModeGuard>(m, "RawModeGuard")
       .def(py::init<>())
-      .def("is_active", &RawModeGuard::is_active)
-      .def("__enter__", [](RawModeGuard& self) -> RawModeGuard& { return self; })
-      .def("__exit__", [](RawModeGuard&, py::object, py::object, py::object) {});
+      .def("is_active", &RawModeGuard::is_active);
 
     m.def("poll_keypress", &poll_keypress, "Non-blocking poll for a keypress");
   }
