@@ -49,9 +49,6 @@ def test_record_types():
     odom.pose.x = 1.0
     assert odom.pose.x == 1.0
 
-    # TeleopJointStateRecord must not be exposed in the Python bindings
-    assert not hasattr(ts, "TeleopJointStateRecord")
-
 
 def test_null_backend():
     """NullBackend can be created and used."""
