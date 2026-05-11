@@ -47,3 +47,4 @@ repos:
   rev: 350702a4d39395571bd118c9a3cff0a573488d61  # 2.0.2
   hooks:
   - id: cpplint
+    exclude: ^python/  # pybind11 headers use patterns cpplint doesn't handle

@@ -1,0 +1,54 @@
+[project]
+name = "trossen_sdk"
+description = "Python bindings for the Trossen Robotics SDK"
+dynamic = ["version"]
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "numpy >= 1.22.4",
+]
+
+[build-system]
+requires = [
+    "numpy >= 1.22.4",
+    "pybind11 >= 2.12",
+    "pybind11-stubgen >= 2.5.3",
+    "scikit-build-core >= 0.5",
+]
+build-backend = "scikit_build_core.build"
+
+[tool.scikit-build]
+cmake.build-type = "Release"
+wheel.packages = ["python/trossen_sdk"]
+sdist.exclude = [
+    ".github/**",
+    "benchmarks/**",
+    "build*/**",
+    "examples/**",
+    "scripts/**",
+    "tests/**",
+]
+wheel.exclude = [
+    "**/__pycache__/**",
+    "**/*.pyc",
+    "**/*.pyo",
+    "**/.mypy_cache/**",
+    "**/.pytest_cache/**",
+    "**/.ruff_cache/**",
+    "**/*.egg-info/**",
+    "**/.DS_Store",
+]
+
+# Source the wheel version dynamically from the C++ version constants in
+# include/trossen_sdk/version.hpp so we have a single source of truth.
+# Bumping VERSION_MAJOR/MINOR/PATCH there automatically propagates to the
+# wheel metadata; the build fails loudly if the regex stops matching.
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.regex"
+input = "include/trossen_sdk/version.hpp"
+regex = '''(?s)VERSION_MAJOR\s*=\s*(?P<major>\d+).*?VERSION_MINOR\s*=\s*(?P<minor>\d+).*?VERSION_PATCH\s*=\s*(?P<patch>\d+)'''
+result = "{major}.{minor}.{patch}"
+
+[tool.scikit-build.cmake.define]
+BUILD_PYTHON_BINDINGS = "ON"
+BUILD_TESTING = "OFF"
