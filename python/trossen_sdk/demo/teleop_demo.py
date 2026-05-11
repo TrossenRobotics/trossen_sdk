@@ -1,5 +1,3 @@
-# Copyright 2025 Trossen Robotics
-#
 # Purpose:
 # Demonstrates the TeleopController abstraction using mock hardware.
 # No real hardware needed — uses MockArm components that simulate

@@ -1,5 +1,3 @@
-# Copyright 2025 Trossen Robotics
-#
 # Purpose:
 # Single arm pair AI Kit data collection — 1 leader + 1 follower + 2 cameras.
 # Python equivalent of examples/trossen_solo_ai/trossen_solo_ai.cpp.

@@ -1,5 +1,3 @@
-# Copyright 2025 Trossen Robotics
-#
 # Purpose:
 # This script demonstrates the HardwareRegistry and ActiveHardwareRegistry
 # systems using mock hardware (no real devices required).

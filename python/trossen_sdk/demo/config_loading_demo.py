@@ -1,5 +1,3 @@
-# Copyright 2025 Trossen Robotics
-#
 # Purpose:
 # This script demonstrates how to load and inspect SDK configuration
 # from a JSON file, similar to how the C++ examples parse config.

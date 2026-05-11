@@ -1,5 +1,3 @@
-# Copyright 2025 Trossen Robotics
-#
 # Purpose:
 # This script demonstrates SessionManager lifecycle callbacks.
 

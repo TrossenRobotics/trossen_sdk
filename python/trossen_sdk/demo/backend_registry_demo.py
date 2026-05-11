@@ -1,5 +1,3 @@
-# Copyright 2025 Trossen Robotics
-#
 # Purpose:
 # This script demonstrates the BackendRegistry system — creating backends at
 # runtime without hardcoded type checking.

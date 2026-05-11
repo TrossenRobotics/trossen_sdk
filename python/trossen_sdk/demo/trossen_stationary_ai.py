@@ -1,5 +1,3 @@
-# Copyright 2025 Trossen Robotics
-#
 # Purpose:
 # Bimanual AI Kit data collection — 2 leader + 2 follower arms + 4 cameras.
 # Python equivalent of examples/trossen_stationary_ai/trossen_stationary_ai.cpp.

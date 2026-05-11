@@ -1,5 +1,3 @@
-# Copyright 2025 Trossen Robotics
-#
 # Purpose:
 # This script demonstrates the ProducerRegistry system — creating producers
 # via the registry with both hardware-backed and mock producers.

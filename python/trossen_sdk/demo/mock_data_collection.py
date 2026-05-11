@@ -1,5 +1,3 @@
-# Copyright 2025 Trossen Robotics
-#
 # Purpose:
 # This script demonstrates a full data collection workflow using mock
 # producers (no real hardware required). It mirrors the structure of

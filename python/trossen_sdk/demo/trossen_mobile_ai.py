@@ -1,5 +1,3 @@
-# Copyright 2025 Trossen Robotics
-#
 # Purpose:
 # Mobile bimanual AI Kit data collection — 2 leader + 2 follower arms
 # + 4 cameras + SLATE mobile base.
