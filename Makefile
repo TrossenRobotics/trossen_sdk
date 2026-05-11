@@ -70,16 +70,16 @@ python-build:
 .PHONY: python-build
 
 python-install:
-	pip install --no-build-isolation -e .
+	$(PIP) install --no-build-isolation -e .
 .PHONY: python-install
 
 python-wheel:
-	pip wheel --no-build-isolation -w dist .
+	$(PIP) wheel --no-build-isolation -w dist .
 .PHONY: python-wheel
 
 python-test:
 	@if [ -d python/tests ]; then \
-		python -m pytest python/tests/ -v; \
+		$(PYTHON) -m pytest python/tests/ -v; \
 	else \
 		echo "python-test: python/tests/ not present; nothing to run"; \
 	fi
