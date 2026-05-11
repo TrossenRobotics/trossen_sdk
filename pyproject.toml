@@ -29,27 +29,7 @@ sdist.exclude = [
     "tests/**",
 ]
 wheel.exclude = [
-    ".cache/**",
-    ".claude/**",
-    ".clang-format",
-    ".dockerignore",
-    ".github/**",
-    ".gitignore",
-    ".pre-commit-config.yaml",
-    ".pytest_cache/**",
-    ".vscode/**",
-    "benchmarks/**",
-    "build*/**",
-    "cmake/**",
-    "CPPLINT.cfg",
-    "docs/**",
-    "Dockerfile",
-    "examples/**",
-    "Makefile",
-    "results/**",
-    "scripts/**",
-    "tests/**",
-    "uv.lock",
+    "**/__pycache__/**",
 ]
 
 # Source the wheel version dynamically from the C++ version constants in
