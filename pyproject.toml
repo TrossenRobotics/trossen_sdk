@@ -30,6 +30,13 @@ sdist.exclude = [
 ]
 wheel.exclude = [
     "**/__pycache__/**",
+    "**/*.pyc",
+    "**/*.pyo",
+    "**/.mypy_cache/**",
+    "**/.pytest_cache/**",
+    "**/.ruff_cache/**",
+    "**/*.egg-info/**",
+    "**/.DS_Store",
 ]
 
 # Source the wheel version dynamically from the C++ version constants in
