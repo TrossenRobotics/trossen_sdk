@@ -50,7 +50,7 @@ namespace {
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/types.hpp"
 
-// Runtime (producer registries only — session manager deferred to PR C)
+// Runtime (producer registries)
 #include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 
