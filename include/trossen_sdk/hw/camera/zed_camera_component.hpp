@@ -95,11 +95,11 @@ public:
   const std::string& get_depth_mode_str() const { return depth_mode_str_; }
 
   /**
-   * @brief Enumerate connected ZED cameras. Not yet implemented.
+   * @brief Enumerate connected ZED cameras.
    *
-   * Currently a no-op stub: prints a "not yet implemented" notice and returns
-   * an empty list. Intended to mirror the RealSense/OpenCV discovery contract
-   * once the ZED preview-capture path is wired up.
+   * Stub: prints a "not yet implemented" notice and returns an empty list.
+   * Intended to mirror the RealSense/OpenCV discovery contract once the ZED
+   * preview-capture path is wired up.
    *
    * @param output_dir Unused. Reserved for future preview-JPEG output.
    * @return Empty vector.

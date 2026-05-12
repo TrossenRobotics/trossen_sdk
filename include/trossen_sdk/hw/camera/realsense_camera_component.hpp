@@ -128,7 +128,7 @@ public:
    * device's color pipeline long enough to capture a stable frame, and writes
    * that frame as @c realsense_<serial>.jpg inside @p output_dir.
    *
-   * @param output_dir Directory to write preview JPEGs into. Must already exist.
+   * @param output_dir Directory to write preview JPEGs into. Created if missing.
    * @return One @c DiscoveredHardware per connected RealSense device. Empty if
    *         none are present. Never throws; errors are logged and the offending
    *         entry's @c ok flag is left false. @c details carries

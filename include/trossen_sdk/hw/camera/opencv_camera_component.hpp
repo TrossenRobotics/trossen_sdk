@@ -92,7 +92,7 @@ public:
    * Probes @c /dev/video0 .. @c /dev/video63, opens each openable node, reads
    * a stable frame, and writes it as @c opencv_<index>.jpg inside @p output_dir.
    *
-   * @param output_dir Directory to write preview JPEGs into. Must already exist.
+   * @param output_dir Directory to write preview JPEGs into. Created if missing.
    * @return One @c DiscoveredHardware per openable V4L2 device. @c details
    *         carries @c width / @c height / @c fps / @c preview_path; @c ok
    *         reflects preview-write success.

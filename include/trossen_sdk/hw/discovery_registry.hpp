@@ -40,15 +40,15 @@ struct DiscoveredHardware {
   nlohmann::json details;
 
   /// @brief True if the probe completed end-to-end (including any side artifact).
-  bool ok = true;
+  bool ok{false};
 };
 
 /**
  * @brief Static registry mapping a hardware type key to its discovery function.
  *
- * Mirrors @c HardwareRegistry: components self-register at static-init time
- * via the @c REGISTER_HARDWARE_DISCOVERY macro. Types that have no enumeration
- * API simply don't register; @c find() returns @c std::nullopt for those.
+ * Components self-register at static-init time via the
+ * @c REGISTER_HARDWARE_DISCOVERY macro. Types that have no enumeration API
+ * simply don't register; @c find() returns @c std::nullopt for those.
  *
  * Discovery is intentionally opt-in: a component can register with
  * @c HardwareRegistry (construction) but not here (no way to enumerate), or
@@ -97,8 +97,7 @@ class DiscoveryRegistry {
 /**
  * @brief Register a static @c find() method as a discovery function.
  *
- * Mirrors @c REGISTER_HARDWARE. Place alongside the existing registration in
- * the component's @c .cpp file.
+ * Place alongside the existing registration in the component's @c .cpp file.
  *
  * @param ClassName  Component class with a @c static std::vector<DiscoveredHardware>
  *                   find(const std::filesystem::path&).

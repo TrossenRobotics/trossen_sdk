@@ -3,12 +3,13 @@
  * @brief Implementation of OpenCvCameraComponent
  */
 
-#include <cmath>
 #include <fcntl.h>
+#include <unistd.h>
+
+#include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <string>
-#include <unistd.h>
 
 #include "opencv2/opencv.hpp"
 
@@ -154,6 +155,9 @@ std::vector<DiscoveredHardware> OpenCvCameraComponent::find(
 {
   std::vector<DiscoveredHardware> results;
 
+  // Ensure the preview directory exists.
+  std::filesystem::create_directories(output_dir);
+
   for (int idx = 0; idx < 64; ++idx) {
     if (!std::filesystem::exists("/dev/video" + std::to_string(idx))) continue;
 
@@ -175,7 +179,7 @@ std::vector<DiscoveredHardware> OpenCvCameraComponent::find(
     info.type       = "opencv_camera";
     info.identifier = std::to_string(idx);
 
-    std::filesystem::path preview_path = output_dir / ("opencv_" + info.identifier + ".jpg");
+    std::filesystem::path preview_path = output_dir / (info.type + "_" + info.identifier + ".jpg");
     info.details = {
       {"width",        static_cast<int>(cap.get(cv::CAP_PROP_FRAME_WIDTH))},
       {"height",       static_cast<int>(cap.get(cv::CAP_PROP_FRAME_HEIGHT))},
@@ -185,7 +189,7 @@ std::vector<DiscoveredHardware> OpenCvCameraComponent::find(
 
     // Read frames until we have one that is both valid (not black / blown out /
     // flat fill) and whose brightness has settled. is_valid_preview_frame()
-    // gates the exit so a degenerate warmup frame is never committed.
+    // gates the exit so a warmup frame is never committed.
     cv::Mat frame;
     cv::Mat best_frame;
     double last_brightness = -1.0;

@@ -33,6 +33,6 @@ target_link_libraries(trossen_mcap_to_lerobot_v2 trossen_sdk arrow parquet zstd 
 # supports enumeration self-registers a find() function inside libtrossen_sdk;
 # this binary just dispatches to the registry, so no per-vendor #ifdefs or link
 # flags are needed here.
-add_executable(find_hardware find_hardware/find_hardware.cpp)
-target_link_libraries(find_hardware trossen_sdk)
-install(TARGETS find_hardware DESTINATION bin)
+add_executable(tr_sdk_find_hardware find_hardware/find_hardware.cpp)
+target_link_libraries(tr_sdk_find_hardware trossen_sdk)
+install(TARGETS tr_sdk_find_hardware DESTINATION bin)

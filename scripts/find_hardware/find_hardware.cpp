@@ -49,7 +49,7 @@ void print_help(const char* argv0, const fs::path& default_out) {
 }  // namespace
 
 int main(int argc, char** argv) {
-  fs::path    output_dir = "./scripts/find_hardware/discovery";
+  fs::path    output_dir = "/tmp/tr_sdk_find_hardware";
   std::string type;
 
   for (int i = 1; i < argc; ++i) {

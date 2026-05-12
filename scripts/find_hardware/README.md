@@ -1,6 +1,6 @@
 # find_hardware
 
-Discovers connected hardware of a chosen type (today: RealSense and OpenCV/V4L2 cameras), captures a preview image (or other side artifact) from each, and prints a summary table. Use the previews to identify which physical device maps to which serial number or device index, then populate your config files accordingly.
+Discovers connected hardware of a chosen type, captures a preview image (or other side artifact) from each, and prints a summary table. Use the previews to identify which physical device maps to which serial number or device index, then populate your config files accordingly.
 
 This executable is a thin CLI over `trossen::hw::DiscoveryRegistry`. Each hardware component that supports enumeration self-registers a `find()` function next to its existing `REGISTER_HARDWARE(...)` line; the registry dispatches by the same type key the config system uses (e.g. `"realsense_camera"`). Components with no enumeration API simply don't register — the CLI reports "no discovery support" for those types.
 
@@ -9,28 +9,28 @@ Which types appear in the registry depends on which vendor integrations the libr
 ## Usage
 
 ```bash
-./build/scripts/find_hardware <type> [--output DIR]
+./build/scripts/tr_sdk_find_hardware <type> [--output DIR]
 ```
 
 Run once per hardware type you want to inspect, using the same type key you would use in config:
 
 ```bash
-./build/scripts/find_hardware realsense_camera
-./build/scripts/find_hardware opencv_camera
+./build/scripts/tr_sdk_find_hardware realsense_camera
+./build/scripts/tr_sdk_find_hardware opencv_camera
 ```
 
 | Argument | Default | Description |
 |----------|---------|-------------|
 | `<type>` | — (required) | Hardware type key. Run `--help` for the list registered in this build |
-| `--output DIR` | `./scripts/find_hardware/discovery` | Directory to write preview images |
+| `--output DIR` | `/tmp/tr_sdk_find_hardware` | Directory to write preview images |
 | `--help` | | Show usage and list supported types |
 
 ## Output
 
 ```
-scripts/find_hardware/discovery/
-  realsense_<serial>.jpg    # from ./find_hardware realsense_camera
-  opencv_<index>.jpg        # from ./find_hardware opencv_camera
+/tmp/tr_sdk_find_hardware/
+  realsense_<serial>.jpg    # from ./tr_sdk_find_hardware realsense_camera
+  opencv_<index>.jpg        # from ./tr_sdk_find_hardware opencv_camera
 ```
 
 Example summary table:
