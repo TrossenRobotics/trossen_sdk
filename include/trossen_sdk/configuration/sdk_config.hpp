@@ -55,8 +55,8 @@
  * }
  * @endcode
  *
- * @note Recording is currently supported in TrossenMCAP format only.
- *       Use the trossen_mcap_to_lerobot_v2 tool to convert recorded data to LeRobotV2 format.
+ * @note The set of available recording backends is determined at runtime
+ *       by the BackendRegistry; selection is driven by `session.backend_type`.
  */
 
 #ifndef TROSSEN_SDK__CONFIGURATION__SDK_CONFIG_HPP_
@@ -116,7 +116,7 @@ struct SdkConfig {
   /// @brief Teleoperation setup
   TeleoperationConfig teleop;
 
-  /// @brief TrossenMCAP backend configuration (the only supported recording format)
+  /// @brief TrossenMCAP backend configuration
   TrossenMCAPBackendConfig mcap_backend;
 
   /// @brief Session manager settings (episode duration, max episodes, backend selection)

@@ -3,12 +3,18 @@
  * @brief Implementation of RealsenseCameraComponent
  */
 
+#include <cmath>
+#include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 
+#include "opencv2/opencv.hpp"
+
 #include "trossen_sdk/hw/camera/realsense_camera_component.hpp"
+#include "trossen_sdk/hw/discovery_registry.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/utils/camera_utils.hpp"
 
 namespace trossen::hw::camera {
 
@@ -155,6 +161,162 @@ bool RealsenseCameraComponent::is_opened() const {
   }
 }
 
+std::vector<DiscoveredHardware> RealsenseCameraComponent::find(
+  const std::filesystem::path& output_dir)
+{
+  std::vector<DiscoveredHardware> results;
+
+  // Ensure the preview directory exists.
+  std::filesystem::create_directories(output_dir);
+
+  rs2::context ctx;
+  rs2::device_list devices = ctx.query_devices();
+
+  for (uint32_t i = 0; i < devices.size(); ++i) {
+    rs2::device dev = devices[i];
+
+    DiscoveredHardware info;
+    info.type         = "realsense_camera";
+    info.identifier   = dev.get_info(RS2_CAMERA_INFO_SERIAL_NUMBER);
+    info.product_name = dev.get_info(RS2_CAMERA_INFO_NAME);
+
+    int width  = 640;
+    int height = 480;
+    int fps    = 30;
+    std::filesystem::path preview_path = output_dir / (info.type + "_" + info.identifier + ".jpg");
+
+    rs2::pipeline pipeline;
+    rs2::config   cfg;
+    cfg.enable_device(info.identifier);
+    cfg.enable_stream(RS2_STREAM_COLOR, width, height, RS2_FORMAT_BGR8, fps);
+
+    try {
+      rs2::pipeline_profile profile = pipeline.start(cfg);
+
+      auto color_profile =
+        profile.get_stream(RS2_STREAM_COLOR).as<rs2::video_stream_profile>();
+      width  = color_profile.width();
+      height = color_profile.height();
+      fps    = static_cast<int>(color_profile.fps());
+
+      // Decide whether to gate warmup on auto-exposure convergence.
+      //
+      // The exposure gate is only meaningful when:
+      //   1) The color sensor has auto-exposure enabled (otherwise ACTUAL_EXPOSURE
+      //      is constant and the "settle" check is a no-op or, worse, would block
+      //      until kPreviewMaxWarmupFrames if the first reading happens to differ).
+      //   2) The driver/firmware actually reports the ACTUAL_EXPOSURE per-frame
+      //      metadata. Not all RealSense SKUs / kernels expose this; calling
+      //      get_frame_metadata() on an unsupported field throws rs2::error.
+      //
+      // When either condition fails (use_exposure_gate == false), we fall back to
+      // "take the first frame that passes is_valid_preview_frame() and stop".
+      // Otherwise we keep iterating until consecutive valid frames have an
+      // ACTUAL_EXPOSURE delta below 2 percent, indicating AE has converged.
+      //
+      // All rs2 probe calls below are wrapped so this function continues to
+      // respect its "never throws past the outer try/catch" contract: on any
+      // rs2::error we log and fall back to no-gate behavior.
+      bool use_exposure_gate = false;
+      try {
+        rs2::sensor color_sensor = profile.get_device().first<rs2::color_sensor>();
+
+        bool ae_enabled = false;
+        if (color_sensor.supports(RS2_OPTION_ENABLE_AUTO_EXPOSURE)) {
+          ae_enabled =
+            color_sensor.get_option(RS2_OPTION_ENABLE_AUTO_EXPOSURE) != 0.0f;
+        }
+
+        bool metadata_supported = false;
+        if (ae_enabled) {
+          // Probe one frame to confirm ACTUAL_EXPOSURE metadata is populated.
+          rs2::frameset probe_fs = pipeline.wait_for_frames();
+          rs2::frame    probe    = probe_fs.get_color_frame();
+          if (probe &&
+              probe.supports_frame_metadata(RS2_FRAME_METADATA_ACTUAL_EXPOSURE)) {
+            metadata_supported = true;
+          }
+        }
+
+        use_exposure_gate = ae_enabled && metadata_supported;
+      } catch (const rs2::error& e) {
+        std::cerr << "[RealsenseCameraComponent::find] " << info.identifier
+                  << ": exposure-gate probe failed (" << e.what()
+                  << "); falling back to first-valid-frame\n";
+        use_exposure_gate = false;
+      }
+
+      // Grab frames until one passes the validator (not black, not saturated,
+      // not a flat-fill startup buffer). If use_exposure_gate is true we
+      // additionally wait for auto-exposure to settle; otherwise we stop on the
+      // first valid frame.
+      cv::Mat best_frame;
+      float last_exposure = -1.0f;
+      for (int w = 0; w < utils::kPreviewMaxWarmupFrames; ++w) {
+        rs2::frameset fs    = pipeline.wait_for_frames();
+        rs2::frame    color = fs.get_color_frame();
+        if (!color) continue;
+
+        rs2::video_frame vf = color.as<rs2::video_frame>();
+        cv::Mat img(
+          cv::Size(vf.get_width(), vf.get_height()),
+          CV_8UC3,
+          const_cast<void*>(color.get_data()),
+          cv::Mat::AUTO_STEP);
+        if (!utils::is_valid_preview_frame(img)) continue;
+
+        best_frame = img.clone();  // decouple from RealSense's frame buffer
+
+        if (!use_exposure_gate) {
+          break;
+        }
+
+        try {
+          float exposure =
+            color.get_frame_metadata(RS2_FRAME_METADATA_ACTUAL_EXPOSURE);
+          if (last_exposure > 0 &&
+              std::abs(exposure - last_exposure) / last_exposure < 0.02f) break;
+          last_exposure = exposure;
+        } catch (const rs2::error& e) {
+          // Metadata vanished mid-loop (driver hiccup); disable the gate and
+          // accept this frame so we don't burn the full warmup budget.
+          std::cerr << "[RealsenseCameraComponent::find] " << info.identifier
+                    << ": ACTUAL_EXPOSURE metadata read failed mid-warmup ("
+                    << e.what() << "); accepting current frame\n";
+          break;
+        }
+      }
+
+      if (!best_frame.empty()) {
+        info.ok = cv::imwrite(preview_path.string(), best_frame);
+        if (!info.ok) {
+          std::cerr << "[RealsenseCameraComponent::find] failed to write preview to "
+                    << preview_path << "\n";
+        }
+      } else {
+        std::cerr << "[RealsenseCameraComponent::find] " << info.identifier
+                  << ": no valid frame captured within " << utils::kPreviewMaxWarmupFrames
+                  << " warmup frames\n";
+      }
+      pipeline.stop();
+    } catch (const rs2::error& e) {
+      std::cerr << "[RealsenseCameraComponent::find] " << info.identifier << ": "
+                << e.what() << "\n";
+    }
+
+    info.details = {
+      {"width",        width},
+      {"height",       height},
+      {"fps",          fps},
+      {"preview_path", preview_path.string()},
+    };
+    results.push_back(info);
+  }
+
+  return results;
+}
+
 REGISTER_HARDWARE(RealsenseCameraComponent, "realsense_camera")
+REGISTER_HARDWARE_DISCOVERY(RealsenseCameraComponent, "realsense_camera")
 
 }  // namespace trossen::hw::camera

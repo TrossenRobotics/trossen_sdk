@@ -1,6 +1,6 @@
 # Trossen SDK
 
-A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Stereolabs ZED cameras, RealSense cameras, and the SLATE mobile base. Episodes are recorded to the **TrossenMCAP** format and can be converted to **LeRobot V2** format for training.
+A C++ SDK for recording robot demonstrations. See the [Supported Hardware](#supported-hardware) table for the currently supported arms, cameras, and mobile bases, and the [backends](#supported-hardware) section for available recording formats.
 
 ---
 
