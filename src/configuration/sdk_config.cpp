@@ -5,6 +5,11 @@
 
 #include "trossen_sdk/configuration/sdk_config.hpp"
 
+#include <iostream>
+#include <string>
+#include <unordered_map>
+#include <unordered_set>
+
 #include "trossen_sdk/configuration/global_config.hpp"
 
 namespace trossen::configuration {
@@ -47,6 +52,59 @@ SdkConfig SdkConfig::from_json(const nlohmann::json& j) {
   if (j.contains("producers") && j.at("producers").is_array()) {
     for (const auto& p : j.at("producers")) {
       c.producers.push_back(ProducerConfig::from_json(p));
+    }
+  }
+
+  if (j.contains("observers")) {
+    if (!j.at("observers").is_array()) {
+      throw std::runtime_error(
+        "SdkConfig: top-level 'observers' must be an array");
+    }
+    {
+      size_t i = 0;
+      for (const auto& o : j.at("observers")) {
+        try {
+          c.observers.push_back(ObserverConfig::from_json(o));
+        } catch (const std::exception& e) {
+          throw std::runtime_error(
+            "SdkConfig: failed to parse observers[" + std::to_string(i) + "]: " +
+            e.what());
+        }
+        ++i;
+      }
+    }
+    std::unordered_map<std::string, size_t> seen_ids;
+    for (size_t i = 0; i < c.observers.size(); ++i) {
+      const auto& id = c.observers[i].id;
+      auto it = seen_ids.find(id);
+      if (it != seen_ids.end()) {
+        throw std::runtime_error(
+          "SdkConfig: duplicate observer id '" + id + "' (observers[" +
+          std::to_string(it->second) + "] and observers[" + std::to_string(i) +
+          "]). Provide an explicit 'id' field so observers can be distinguished in "
+          "logs and stats.");
+      }
+      seen_ids.emplace(id, i);
+    }
+
+    // Warn (rather than error) on observer subscriptions whose record_id doesn't match
+    // any producer stream_id, since records may come from non-producer sources. The
+    // warning fires even when there are no producers - an observer subscribing to a
+    // stream nothing in this config emits is still worth flagging.
+    std::unordered_set<std::string> producer_stream_ids;
+    for (const auto& p : c.producers) {
+      if (!p.stream_id.empty()) producer_stream_ids.insert(p.stream_id);
+    }
+    for (const auto& obs : c.observers) {
+      if (!obs.enabled) continue;
+      for (const auto& sub : obs.subscriptions) {
+        if (producer_stream_ids.find(sub.record_id) == producer_stream_ids.end()) {
+          std::cerr << "SdkConfig: observer '" << obs.id << "' subscribes to '"
+                    << sub.record_id << "' but no producer in this config emits "
+                    << "that stream_id. The subscription will receive no records "
+                    << "unless another source produces it." << std::endl;
+        }
+      }
     }
   }
 
