@@ -89,6 +89,11 @@ target_link_libraries(test_observer_registry PRIVATE trossen_sdk GTest::gtest_ma
 add_executable(test_session_manager_observers test_session_manager_observers.cpp)
 target_link_libraries(test_session_manager_observers PRIVATE trossen_sdk GTest::gtest_main)
 
+if(TROSSEN_ENABLE_RERUN_OBSERVER)
+  add_executable(test_rerun_observer test_rerun_observer.cpp)
+  target_link_libraries(test_rerun_observer PRIVATE trossen_sdk GTest::gtest_main)
+endif()
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -119,3 +124,6 @@ gtest_discover_tests(test_teleop_config)
 gtest_discover_tests(test_observer_base)
 gtest_discover_tests(test_observer_registry)
 gtest_discover_tests(test_session_manager_observers)
+if(TROSSEN_ENABLE_RERUN_OBSERVER)
+  gtest_discover_tests(test_rerun_observer)
+endif()
