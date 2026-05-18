@@ -20,6 +20,28 @@
 
 namespace trossen::runtime {
 
+namespace {
+
+// Shared fan-out used by both the push-producer and polled-producer emit lambdas so the
+// per-record path stays in lockstep across them.
+void fan_out_record_(
+  io::Sink* sink,
+  const std::vector<std::shared_ptr<observer::ObserverBase>>& observers,
+  std::shared_ptr<data::RecordBase> rec)
+{
+  if (!rec) return;
+  if (observers.empty()) {
+    sink->enqueue(std::move(rec));
+    return;
+  }
+  sink->enqueue(rec);
+  for (const auto& obs : observers) {
+    obs->offer(rec);
+  }
+}
+
+}  // namespace
+
 SessionManager::SessionManager(){
   // This allows us to access the global configuration for the Session Manager
   // without passing it explicitly.
@@ -67,7 +89,18 @@ SessionManager::~SessionManager() {
 }
 
 void SessionManager::shutdown() {
+  // stop_episode() runs first so episode-ended callbacks fire against a still-non-
+  // terminal SessionManager; shutdown_called_ latches afterwards and gates start_episode().
   stop_episode();
+  shutdown_called_ = true;
+
+  // Observers stop here, not at episode boundaries. Producers have already stopped
+  // emitting via stop_episode(), so no in-flight offer() can race.
+  for (auto& obs : observers_) {
+    if (obs) {
+      obs->stop();
+    }
+  }
 
   // Fire pre-shutdown callbacks once, after recording has stopped.
   // Useful for returning hardware to safe positions while post-processing runs.
@@ -118,7 +151,24 @@ void SessionManager::add_push_producer(std::shared_ptr<hw::PushProducer> produce
   push_producer_entries_.push_back(PushProducerEntry{.producer = std::move(producer)});
 }
 
+void SessionManager::add_observer(std::shared_ptr<observer::ObserverBase> observer) {
+  if (!observer) {
+    throw std::invalid_argument("Cannot add null observer");
+  }
+  if (observers_started_) {
+    throw std::runtime_error(
+      "Cannot add observers after the first start_episode(). Register all observers "
+      "before starting the first episode.");
+  }
+  observers_.push_back(std::move(observer));
+}
+
 bool SessionManager::start_episode() {
+  if (shutdown_called_) {
+    std::cerr << "SessionManager::start_episode() refused: shutdown() has been called; "
+              << "SessionManager is terminal." << std::endl;
+    return false;
+  }
   // Guard: already active
   if (episode_active_) {
     std::cerr << "Episode already active. Call stop_episode() first." << std::endl;
@@ -189,6 +239,18 @@ bool SessionManager::start_episode() {
   // Capture initial record count for this episode (for stats delta calculation)
   episode_start_record_count_ = current_sink_->processed_count();
 
+  // Lazy-start observers on the first episode. Failed observers are marked dead and
+  // skipped from the fan-out snapshot; the session continues without them.
+  if (!observers_started_) {
+    observers_started_ = true;
+    for (auto& obs : observers_) {
+      if (!obs->start()) {
+        std::cerr << "Observer '" << obs->name()
+                  << "' failed to start; continuing session without it." << std::endl;
+      }
+    }
+  }
+
   // Helper to tear down push producers, sink, and backend on early abort
   auto cleanup_and_abort = [&]() -> bool {
     for (const auto& ppe : push_producer_entries_) {
@@ -200,15 +262,24 @@ bool SessionManager::start_episode() {
     return false;
   };
 
+  // Snapshot of healthy observers for the per-record fan-out. Dead observers
+  // (start() failure) are filtered out so the emit lambdas never dispatch into them.
+  std::vector<std::shared_ptr<observer::ObserverBase>> observers_snapshot;
+  observers_snapshot.reserve(observers_.size());
+  for (const auto& obs : observers_) {
+    if (obs && !obs->is_dead()) {
+      observers_snapshot.push_back(obs);
+    }
+  }
+
   // Start push producers (own threads, emit into current sink)
   // Capture shared_ptr to ensure Sink lifetime outlives any in-flight emit callbacks
   std::shared_ptr<io::Sink> sink_shared = current_sink_;
   for (const auto& ppe : push_producer_entries_) {
-    bool started = ppe.producer->start([sink_shared](std::shared_ptr<data::RecordBase> rec) {
-      if (rec) {
-        sink_shared->enqueue(std::move(rec));
-      }
-    });
+    bool started = ppe.producer->start(
+      [sink_shared, observers_snapshot](std::shared_ptr<data::RecordBase> rec) {
+        fan_out_record_(sink_shared.get(), observers_snapshot, std::move(rec));
+      });
     if (!started) {
       std::cerr << "Failed to start push producer; aborting episode startup." << std::endl;
       return cleanup_and_abort();
@@ -238,14 +309,16 @@ bool SessionManager::start_episode() {
     // Capture raw pointer to sink (safe: sink lifetime managed by Session Manager)
     auto* sink_ptr = current_sink_.get();
 
-    // Add task that polls producer and enqueues records
-    scheduler_->add_task(pt.period, [producer = pt.producer, sink_ptr]() {
-      producer->poll([sink_ptr](std::shared_ptr<data::RecordBase> rec) {
-        if (rec) {
-          sink_ptr->enqueue(std::move(rec));
-        }
-      });
-    }, pt.opts);
+    // The outer lambda owns observers_snapshot by value (its lifetime spans the task);
+    // the inner lambda captures it by reference since poll() invokes emit synchronously
+    // and never stores it, avoiding a per-tick vector copy.
+    scheduler_->add_task(pt.period,
+      [producer = pt.producer, sink_ptr, observers_snapshot]() {
+        producer->poll(
+          [sink_ptr, &observers_snapshot](std::shared_ptr<data::RecordBase> rec) {
+            fan_out_record_(sink_ptr, observers_snapshot, std::move(rec));
+          });
+      }, pt.opts);
   }
 
   // Start scheduler (begins polling producers)
@@ -548,6 +621,23 @@ SessionManager::Stats SessionManager::stats_unlocked() const {
 SessionManager::Stats SessionManager::stats() const {
   std::lock_guard<std::mutex> lock(episode_mutex_);
   return stats_unlocked();
+}
+
+std::vector<SessionManager::ObserverStatsEntry>
+SessionManager::observer_stats() const {
+  std::lock_guard<std::mutex> lock(episode_mutex_);
+  std::vector<ObserverStatsEntry> out;
+  out.reserve(observers_.size());
+  for (const auto& obs : observers_) {
+    if (!obs) continue;
+    ObserverStatsEntry e;
+    e.name = obs->name();
+    e.stats = obs->stats();
+    e.is_running = obs->is_running();
+    e.is_dead = obs->is_dead();
+    out.push_back(std::move(e));
+  }
+  return out;
 }
 
 void SessionManager::on_pre_episode(PreEpisodeCallback cb) {
