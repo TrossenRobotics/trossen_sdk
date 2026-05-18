@@ -83,6 +83,9 @@ target_link_libraries(test_teleop_config PRIVATE trossen_sdk GTest::gtest_main)
 add_executable(test_observer_base test_observer_base.cpp)
 target_link_libraries(test_observer_base PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_observer_registry test_observer_registry.cpp)
+target_link_libraries(test_observer_registry PRIVATE trossen_sdk GTest::gtest_main)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -111,3 +114,4 @@ gtest_discover_tests(test_teleop_space_helpers)
 gtest_discover_tests(test_teleop_controller)
 gtest_discover_tests(test_teleop_config)
 gtest_discover_tests(test_observer_base)
+gtest_discover_tests(test_observer_registry)
