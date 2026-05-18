@@ -26,6 +26,7 @@
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/io/sink.hpp"
+#include "trossen_sdk/observer/observer_base.hpp"
 #include "trossen_sdk/runtime/scheduler.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/types/runtime/session_manager_config.hpp"
@@ -51,6 +52,12 @@ enum class UserAction {
  * - Tracking episode index and duration
  * - Auto-stopping episodes when duration limits are reached
  * - Draining queued records before closing episodes
+ *
+ * Thread safety: add_*, start_episode, stop_episode, discard_*, and shutdown must be
+ * called from a single orchestrating thread. Read-only methods (stats, observer_stats,
+ * is_episode_active) are safe to call concurrently.
+ *
+ * shutdown() is terminal: once it returns, the SessionManager cannot be reused.
  */
 class SessionManager {
 public:
@@ -94,6 +101,20 @@ public:
    * Must be called before start_episode().
    */
   void add_push_producer(std::shared_ptr<hw::PushProducer> producer);
+
+  /**
+   * @brief Register a non-durable Observer.
+   *
+   * Observers fan out from each producer alongside the Sink without blocking the durable
+   * write path. They start lazily on the first ``start_episode()`` call, persist across
+   * episode boundaries, and stop at ``shutdown()``.
+   *
+   * @param observer Fully-configured observer (subscriptions already added).
+   *
+   * @throws std::invalid_argument if @p observer is null.
+   * @throws std::runtime_error if called after the first ``start_episode()``.
+   */
+  void add_observer(std::shared_ptr<observer::ObserverBase> observer);
 
   /**
    * @brief Start a new episode
@@ -233,6 +254,31 @@ public:
    * @brief Get current statistics
    */
   Stats stats() const;
+
+  /**
+   * @brief Per-observer status snapshot.
+   *
+   * (is_running, is_dead) interpretation:
+   *   - (false, false) - registered but not yet started, or stopped.
+   *   - (true,  false) - worker active; accepting records.
+   *   - (false, true)  - start() failed; terminal. Excluded from fan-out.
+   */
+  struct ObserverStatsEntry {
+    /// Observer name (as passed to its constructor).
+    std::string name;
+    /// Cumulative counters from ``ObserverBase::stats()``.
+    observer::ObserverBase::Stats stats;
+    /// True if the observer's worker thread is currently running.
+    bool is_running{false};
+    /// True if ``start()`` failed for this observer.
+    bool is_dead{false};
+  };
+
+  /**
+   * @brief Snapshot of every registered observer's counters and run-state, in
+   *        registration order.
+   */
+  std::vector<ObserverStatsEntry> observer_stats() const;
 
   // =========================================================================
   // Lifecycle callbacks
@@ -497,6 +543,16 @@ private:
 
   /// @brief Registered push producers (persists across episodes)
   std::vector<PushProducerEntry> push_producer_entries_;
+
+  /// @brief Registered observers; persist across episodes
+  std::vector<std::shared_ptr<observer::ObserverBase>> observers_;
+
+  /// @brief Set after the first start_episode(); locks observer registration and gates
+  ///        the lazy-start path.
+  bool observers_started_{false};
+
+  /// @brief Set when shutdown() has been called; start_episode() refuses afterwards.
+  bool shutdown_called_{false};
 
   /**
    * @brief Create backend instance for the given episode
