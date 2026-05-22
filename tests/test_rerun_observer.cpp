@@ -59,6 +59,44 @@ TEST(RerunObserverTest, Construct_HonoursIdRerunUrlAndAppId) {
   EXPECT_EQ(obs.subscription_count(), 2u);
 }
 
+TEST(RerunObserverTest, Construct_AcceptsKnownJointFields) {
+  auto cfg = json::parse(R"({
+    "type": "rerun",
+    "subscriptions": [{
+      "record_id":   "arm",
+      "throttle_hz": 30.0,
+      "fields":      ["positions"]
+    }]
+  })");
+  EXPECT_NO_THROW(RerunObserver{cfg});
+}
+
+TEST(RerunObserverTest, Construct_RejectsUnknownJointFieldName) {
+  // Typo-style protection: unknown field names throw at construction so an operator
+  // mistake surfaces immediately instead of silently dropping every frame.
+  auto cfg = json::parse(R"({
+    "type": "rerun",
+    "subscriptions": [{
+      "record_id":   "arm",
+      "throttle_hz": 30.0,
+      "fields":      ["psotions"]
+    }]
+  })");
+  EXPECT_THROW(RerunObserver{cfg}, std::runtime_error);
+}
+
+TEST(RerunObserverTest, Construct_RejectsNonArrayFields) {
+  auto cfg = json::parse(R"({
+    "type": "rerun",
+    "subscriptions": [{
+      "record_id":   "arm",
+      "throttle_hz": 30.0,
+      "fields":      "positions"
+    }]
+  })");
+  EXPECT_THROW(RerunObserver{cfg}, std::runtime_error);
+}
+
 TEST(RerunObserverTest, Construct_SpawnDefaultsOffAndHonoursExplicitTrue) {
   // spawn defaults to false (connect_grpc path).
   auto cfg_default = json::parse(R"({

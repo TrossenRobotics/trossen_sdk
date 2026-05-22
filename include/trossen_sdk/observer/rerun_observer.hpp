@@ -172,6 +172,12 @@ private:
     std::optional<ImagePaths> image_paths;
     std::optional<JointPaths> joint_paths;
     std::optional<OdomPaths> odom_paths;
+
+    /// Optional per-subscription field filter. When set (non-empty), only the
+    /// listed field names are forwarded to ReRun for ``JointStateRecord`` (subset
+    /// of ``positions`` / ``velocities`` / ``efforts``). Empty / nullopt means
+    /// "log all available fields" (default, backward compatible).
+    std::optional<std::unordered_set<std::string>> joint_field_filter;
   };
 
   std::string rerun_url_;

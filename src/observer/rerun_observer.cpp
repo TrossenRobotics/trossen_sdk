@@ -112,6 +112,37 @@ RerunObserver::RerunObserver(const nlohmann::json& cfg)
     }
     const auto record_id = sub_j.at("record_id").get<std::string>();
     const auto throttle_hz = sub_j.at("throttle_hz").get<double>();
+
+    // Optional per-subscription field filter. When present, only the listed joint-state
+    // fields are forwarded; unknown field names are rejected at construction time so a
+    // typo surfaces immediately rather than silently dropping every frame.
+    if (sub_j.contains("fields")) {
+      if (!sub_j.at("fields").is_array()) {
+        throw std::runtime_error(
+          "RerunObserver: 'fields' must be an array of strings for record_id '" +
+          record_id + "'");
+      }
+      static const std::unordered_set<std::string> kJointFieldNames = {
+        "positions", "velocities", "efforts"};
+      std::unordered_set<std::string> filter;
+      for (const auto& f : sub_j.at("fields")) {
+        if (!f.is_string() || f.get<std::string>().empty()) {
+          throw std::runtime_error(
+            "RerunObserver: 'fields' entries must be non-empty strings for "
+            "record_id '" + record_id + "'");
+        }
+        const auto name = f.get<std::string>();
+        if (kJointFieldNames.count(name) == 0) {
+          throw std::runtime_error(
+            "RerunObserver: unknown joint-state field '" + name + "' in 'fields' for "
+            "record_id '" + record_id + "' (allowed: positions, velocities, efforts)");
+        }
+        filter.insert(name);
+      }
+      // Pre-populate the slot so dispatch_ sees the filter on the very first record.
+      subscription_state_[record_id].joint_field_filter = std::move(filter);
+    }
+
     add_subscription(record_id, throttle_hz,
                      [this, record_id](const std::shared_ptr<data::RecordBase>& rec) {
                        dispatch_(record_id, rec);
@@ -282,15 +313,22 @@ void RerunObserver::dispatch_(const std::string& record_id,
         record_id + "/efforts"};
     }
     const auto& jp = *state.joint_paths;
-    if (!js->positions.empty()) {
+    // Honour the per-subscription field filter if one was configured. When unset, all
+    // populated fields are forwarded (legacy default). The filter is validated at
+    // construction time, so we trust its contents here.
+    const auto& filter = state.joint_field_filter;
+    auto wants = [&filter](const char* name) noexcept {
+      return !filter.has_value() || filter->count(name) > 0;
+    };
+    if (!js->positions.empty() && wants("positions")) {
       std::vector<double> pos(js->positions.begin(), js->positions.end());
       rec_->log(jp.positions, rerun::Scalars(std::move(pos)));
     }
-    if (!js->velocities.empty()) {
+    if (!js->velocities.empty() && wants("velocities")) {
       std::vector<double> vel(js->velocities.begin(), js->velocities.end());
       rec_->log(jp.velocities, rerun::Scalars(std::move(vel)));
     }
-    if (!js->efforts.empty()) {
+    if (!js->efforts.empty() && wants("efforts")) {
       std::vector<double> eff(js->efforts.begin(), js->efforts.end());
       rec_->log(jp.efforts, rerun::Scalars(std::move(eff)));
     }
