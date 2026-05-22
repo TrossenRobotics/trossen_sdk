@@ -91,7 +91,10 @@ target_link_libraries(test_session_manager_observers PRIVATE trossen_sdk GTest::
 
 if(TROSSEN_ENABLE_RERUN_OBSERVER)
   add_executable(test_rerun_observer test_rerun_observer.cpp)
-  target_link_libraries(test_rerun_observer PRIVATE trossen_sdk GTest::gtest_main)
+  # rerun_sdk is PRIVATE to trossen_sdk so its include dirs aren't propagated; the
+  # lifetime-stress test constructs ``rerun::archetypes::Image`` directly, so link the
+  # SDK here too to pull in the public headers.
+  target_link_libraries(test_rerun_observer PRIVATE trossen_sdk rerun_sdk GTest::gtest_main)
 endif()
 
 # Enable CTest integration

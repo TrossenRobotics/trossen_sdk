@@ -172,6 +172,9 @@ if(TROSSEN_ENABLE_RERUN_OBSERVER)
   # its own copy of personality / panic handler symbols. --allow-multiple-definition lets
   # the linker pick one duplicate-symbol copy without error - the documented workaround
   # for combining multiple Rust static libs in a single C++ shared library.
+  # See: https://github.com/rust-lang/rust/issues/44322 (canonical rust-lang issue on
+  #   duplicate runtime symbols from multiple staticlibs)
+  # See: https://sourceware.org/binutils/docs/ld/Options.html (GNU ld --allow-multiple-definition)
   #
   # TODO(observer-rerun): produce a symbol-collision audit (`nm libtrossen_sdk.so | sort
   # | uniq -d`) and exercise the Rust panic path under ASan to validate this is safe.
