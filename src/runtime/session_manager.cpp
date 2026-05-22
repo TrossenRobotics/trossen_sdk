@@ -262,12 +262,13 @@ bool SessionManager::start_episode() {
     return false;
   };
 
-  // Snapshot of healthy observers for the per-record fan-out. Dead observers
-  // (start() failure) are filtered out so the emit lambdas never dispatch into them.
+  // Snapshot of healthy observers for the per-record fan-out. Stopped observers
+  // (clean stop or failed start) are filtered out so the emit lambdas never
+  // dispatch into them.
   std::vector<std::shared_ptr<observer::ObserverBase>> observers_snapshot;
   observers_snapshot.reserve(observers_.size());
   for (const auto& obs : observers_) {
-    if (obs && !obs->is_dead()) {
+    if (obs && !obs->is_stopped()) {
       observers_snapshot.push_back(obs);
     }
   }
@@ -634,7 +635,7 @@ SessionManager::observer_stats() const {
     e.name = obs->name();
     e.stats = obs->stats();
     e.is_running = obs->is_running();
-    e.is_dead = obs->is_dead();
+    e.is_stopped = obs->is_stopped();
     out.push_back(std::move(e));
   }
   return out;

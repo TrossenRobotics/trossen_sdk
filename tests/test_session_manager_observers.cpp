@@ -281,7 +281,7 @@ TEST_F(SessionManagerObserversTest, DeadObserver_NotOfferedRecords) {
   std::this_thread::sleep_for(std::chrono::milliseconds(80));
   sm.stop_episode();
 
-  EXPECT_TRUE(dead->is_dead());
+  EXPECT_TRUE(dead->is_stopped());
   EXPECT_EQ(dead->stats().offered, 0u);
 }
 
@@ -313,7 +313,7 @@ TEST_F(SessionManagerObserversTest, ThrowingHandler_DoesNotAffectSession) {
   EXPECT_GT(throwing->stats().offered, 0u) << "producer was never scheduled";
   EXPECT_GT(throwing->stats().handler_exceptions, 0u);
   EXPECT_GT(healthy->stats().accepted, 0u);
-  EXPECT_FALSE(throwing->is_dead());  // handler exceptions don't kill the observer
+  EXPECT_FALSE(throwing->is_stopped());  // handler exceptions don't latch stopped
   EXPECT_TRUE(throwing->is_running());
 }
 
@@ -336,7 +336,7 @@ TEST_F(SessionManagerObserversTest, ObserverStats_ReturnsAllObservers) {
   EXPECT_EQ(stats[0].name, "obs_a");
   EXPECT_EQ(stats[1].name, "obs_b");
   EXPECT_TRUE(stats[0].is_running);
-  EXPECT_FALSE(stats[0].is_dead);
+  EXPECT_FALSE(stats[0].is_stopped);
   EXPECT_GT(stats[0].stats.offered, 0u);
   EXPECT_GT(stats[0].stats.accepted, 0u);
   // obs_b is offered records but accepts none (different stream).
