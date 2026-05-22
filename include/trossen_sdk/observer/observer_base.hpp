@@ -305,6 +305,13 @@ public:
     return running_.load(std::memory_order_acquire);
   }
 
+  /// True if the observer has latched stopped (clean stop or failed start) and
+  /// cannot be restarted. Callers use this to filter terminal observers out of
+  /// per-record fan-out and to surface "permanently out of service" in stats.
+  bool is_stopped() const noexcept {
+    return stopped_.load(std::memory_order_acquire);
+  }
+
   /**
    * @brief Atomic snapshot of cumulative counters.
    *
