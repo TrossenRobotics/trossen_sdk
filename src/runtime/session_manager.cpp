@@ -355,6 +355,24 @@ bool SessionManager::start_episode() {
   trossen::utils::announce(
     "Episode " + std::to_string(next_episode_index_) + " started", false);
 
+  // Fan out the episode-start hook to every running observer before user callbacks
+  // run, so user code sees observers that have already reset any per-episode state.
+  // start_episode() does not hold episode_mutex_, so this is naturally outside the
+  // lock - same contract as on_episode_end below (see teardown_episode comment).
+  const uint32_t started_episode_index = next_episode_index_;
+  for (const auto& obs : observers_) {
+    if (obs && obs->is_running()) {
+      try {
+        obs->on_episode_start(started_episode_index);
+      } catch (const std::exception& e) {
+        // on_episode_start is declared noexcept, but a misbehaving subclass could
+        // still terminate via throw - guard belt-and-suspenders.
+        std::cerr << "Observer '" << obs->name()
+                  << "' on_episode_start error: " << e.what() << std::endl;
+      }
+    }
+  }
+
   // Invoke episode-started callbacks
   for (const auto& cb : episode_started_cbs_) {
     try {
@@ -482,14 +500,30 @@ void SessionManager::teardown_episode(bool discard) {
     Stats final_stats = stats_unlocked();
     final_stats.current_episode_index = finished_episode_index;
 
-    // Snapshot the callback list under the lock so a concurrent on_episode_ended()
-    // registration cannot race with the dispatch loop below.
+    // Snapshot the callback list and the observers list under the lock so concurrent
+    // registration (on_episode_ended()) or shutdown cannot race with the dispatch
+    // loops below.
     auto callbacks_snapshot = episode_ended_cbs_;
+    auto observers_snapshot = observers_;
 
     // Release episode_mutex_ before dispatching callbacks. Callbacks must be free to
     // call back into the SessionManager (observer_stats, stats, etc.) without deadlock;
     // see the unique_lock comment at the top of this function.
     lock.unlock();
+
+    // Fan out the episode-end hook to every running observer before user callbacks
+    // run, so user code (telemetry sidecar, summary print, etc.) sees observers that
+    // have already finalised their per-episode state.
+    for (const auto& obs : observers_snapshot) {
+      if (obs && obs->is_running()) {
+        try {
+          obs->on_episode_end(finished_episode_index);
+        } catch (const std::exception& e) {
+          std::cerr << "Observer '" << obs->name()
+                    << "' on_episode_end error: " << e.what() << std::endl;
+        }
+      }
+    }
 
     // Invoke episode-ended callbacks
     for (const auto& cb : callbacks_snapshot) {

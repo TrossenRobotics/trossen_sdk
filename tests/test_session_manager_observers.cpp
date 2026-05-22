@@ -78,6 +78,27 @@ protected:
   bool on_start() override { return false; }
 };
 
+/// Observer that records every on_episode_start / on_episode_end invocation
+/// (with the episode index argument) so tests can assert ordering and payload.
+class EpisodeBoundaryObserver : public ObserverBase {
+public:
+  EpisodeBoundaryObserver() : ObserverBase("episode_boundary") {
+    add_subscription("mock/joints", 100.0,
+                     [](const std::shared_ptr<RecordBase>&) {});
+  }
+
+  std::vector<uint32_t> started_indices;
+  std::vector<uint32_t> ended_indices;
+
+protected:
+  void on_episode_start(uint32_t episode_index) noexcept override {
+    started_indices.push_back(episode_index);
+  }
+  void on_episode_end(uint32_t episode_index) noexcept override {
+    ended_indices.push_back(episode_index);
+  }
+};
+
 class SessionManagerObserversTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
@@ -421,4 +442,84 @@ TEST_F(SessionManagerObserversTest, OnEpisodeEndedCallback_CanCallObserverStats)
   EXPECT_TRUE(callback_completed.load());
   EXPECT_EQ(observer_stats_size.load(), 1u);
   EXPECT_EQ(seen_episode_index.load(), 0u);
+}
+
+TEST_F(SessionManagerObserversTest, EpisodeBoundaryHooks_FireOncePerEpisode) {
+  // on_episode_start / on_episode_end fire exactly once per running observer per
+  // episode, and the index reported to on_episode_end matches the index reported to
+  // the matching on_episode_start. The test fixture uses the null backend, which
+  // resets next_episode_index_ to 0 via scan_existing_episodes() at every
+  // start_episode() - so this test does not assume monotonically increasing indices
+  // (that contract is enforced only by persistent backends).
+  SessionManager sm;
+  auto obs = std::make_shared<EpisodeBoundaryObserver>();
+  sm.add_observer(obs);
+  sm.add_producer(std::make_shared<MockPolledProducer>(),
+                  std::chrono::milliseconds(5));
+
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  sm.stop_episode();
+
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  sm.stop_episode();
+
+  ASSERT_EQ(obs->started_indices.size(), 2u);
+  ASSERT_EQ(obs->ended_indices.size(), 2u);
+  EXPECT_EQ(obs->started_indices[0], obs->ended_indices[0]);
+  EXPECT_EQ(obs->started_indices[1], obs->ended_indices[1]);
+}
+
+TEST_F(SessionManagerObserversTest, EpisodeBoundaryHooks_SkipFailedStartObservers) {
+  // Observers whose start() failed (is_running() == false, is_stopped() == true) must
+  // not receive episode-boundary hook calls - they are terminal.
+  SessionManager sm;
+  auto live = std::make_shared<EpisodeBoundaryObserver>();
+  auto dead = std::make_shared<DeadObserver>();
+  sm.add_observer(live);
+  sm.add_observer(dead);
+  sm.add_producer(std::make_shared<MockPolledProducer>(),
+                  std::chrono::milliseconds(5));
+
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  sm.stop_episode();
+
+  EXPECT_EQ(live->started_indices.size(), 1u);
+  EXPECT_EQ(live->ended_indices.size(), 1u);
+  EXPECT_TRUE(dead->is_stopped());
+  EXPECT_FALSE(dead->is_running());
+}
+
+TEST_F(SessionManagerObserversTest, EpisodeEndHook_CanCallObserverStats) {
+  // on_episode_end runs outside episode_mutex_ (same contract as on_episode_ended
+  // user callbacks). Subclasses are free to call back into the SessionManager from
+  // inside the hook without deadlocking - pin that contract.
+  class CallbackObserver : public ObserverBase {
+   public:
+    explicit CallbackObserver(SessionManager* sm)
+      : ObserverBase("callback"), sm_(sm) {
+      add_subscription("mock/joints", 100.0,
+                       [](const std::shared_ptr<RecordBase>&) {});
+    }
+    std::atomic<size_t> end_observer_count{0};
+    void on_episode_end(uint32_t episode_index) noexcept override {
+      (void)episode_index;
+      end_observer_count.store(sm_->observer_stats().size());
+    }
+   private:
+    SessionManager* sm_;
+  };
+  SessionManager sm;
+  auto obs = std::make_shared<CallbackObserver>(&sm);
+  sm.add_observer(obs);
+  sm.add_producer(std::make_shared<MockPolledProducer>(),
+                  std::chrono::milliseconds(5));
+
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  sm.stop_episode();
+
+  EXPECT_EQ(obs->end_observer_count.load(), 1u);
 }
