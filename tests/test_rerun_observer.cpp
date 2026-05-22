@@ -114,7 +114,7 @@ TEST(RerunObserverRegistryTest, CreateViaRegistry_Roundtrips) {
 
 TEST(RerunObserverTest, Start_FailsCleanly_WhenViewerUnreachable) {
   // Point at a port that is almost certainly not listening; connect_grpc must report an
-  // error and the observer must dead-mark instead of throwing or hanging.
+  // error and the observer must latch stopped instead of throwing or hanging.
   auto cfg = json::parse(R"({
     "type":      "rerun",
     "id":        "unreachable",
@@ -122,10 +122,10 @@ TEST(RerunObserverTest, Start_FailsCleanly_WhenViewerUnreachable) {
     "subscriptions": [{"record_id": "arm", "throttle_hz": 30.0}]
   })");
   RerunObserver obs(cfg);
-  // start() returns false on transport failure; the observer is dead-marked.
+  // start() returns false on transport failure; the observer latches stopped.
   const bool ok = obs.start();
   if (!ok) {
-    EXPECT_TRUE(obs.is_dead());
+    EXPECT_TRUE(obs.is_stopped());
   } else {
     // Some rerun-cpp builds lazily connect and only fail on first log(); accept either
     // outcome and just make sure stop() is idempotent.
