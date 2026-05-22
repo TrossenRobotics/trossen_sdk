@@ -389,8 +389,12 @@ void SessionManager::teardown_episode(bool discard) {
     monitor_thread_.join();
   }
 
-  // Now safely acquire lock and do cleanup
-  std::lock_guard<std::mutex> lock(episode_mutex_);
+  // Now safely acquire lock and do cleanup. We use unique_lock (not lock_guard) so we
+  // can release the mutex before dispatching on_episode_ended callbacks below - those
+  // callbacks routinely want to call observer_stats() / stats(), both of which re-acquire
+  // episode_mutex_ via lock_guard. std::mutex is non-recursive, so dispatching callbacks
+  // while still holding the lock would deadlock on the first such accessor call.
+  std::unique_lock<std::mutex> lock(episode_mutex_);
 
   if (!episode_active_) {
     return;  // no-op if not active
@@ -478,8 +482,17 @@ void SessionManager::teardown_episode(bool discard) {
     Stats final_stats = stats_unlocked();
     final_stats.current_episode_index = finished_episode_index;
 
+    // Snapshot the callback list under the lock so a concurrent on_episode_ended()
+    // registration cannot race with the dispatch loop below.
+    auto callbacks_snapshot = episode_ended_cbs_;
+
+    // Release episode_mutex_ before dispatching callbacks. Callbacks must be free to
+    // call back into the SessionManager (observer_stats, stats, etc.) without deadlock;
+    // see the unique_lock comment at the top of this function.
+    lock.unlock();
+
     // Invoke episode-ended callbacks
-    for (const auto& cb : episode_ended_cbs_) {
+    for (const auto& cb : callbacks_snapshot) {
       try {
         cb(final_stats);
       } catch (const std::exception& e) {

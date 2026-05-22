@@ -385,3 +385,40 @@ TEST_F(SessionManagerObserversTest, DiscardEpisode_PreservesObservers) {
   EXPECT_GE(obs->stats().accepted, accepted_before);
   EXPECT_TRUE(obs->is_running());
 }
+
+TEST_F(SessionManagerObserversTest, OnEpisodeEndedCallback_CanCallObserverStats) {
+  // Regression: on_episode_ended callbacks used to be dispatched while episode_mutex_
+  // was held. observer_stats() / stats() re-acquire that same (non-recursive) mutex,
+  // so any callback that touched stats hung the SessionManager forever. The fix moves
+  // callback dispatch outside the locked region. This test pins that contract by
+  // calling both accessors from inside the callback and asserting we reach the
+  // post-callback assertion (i.e. did not deadlock).
+  SessionManager sm;
+  std::atomic<int> counter{0};
+  sm.add_observer(std::make_shared<CountingObserver>(
+    "obs", "mock/joints", 100.0, &counter));
+  sm.add_producer(std::make_shared<MockPolledProducer>(),
+                  std::chrono::milliseconds(5));
+
+  std::atomic<bool> callback_completed{false};
+  std::atomic<size_t> observer_stats_size{0};
+  std::atomic<uint32_t> seen_episode_index{0};
+  sm.on_episode_ended(
+    [&](const SessionManager::Stats& s) {
+      // Both of these used to deadlock. They must return without hanging.
+      const auto obs_stats = sm.observer_stats();
+      const auto sess_stats = sm.stats();
+      observer_stats_size.store(obs_stats.size());
+      seen_episode_index.store(s.current_episode_index);
+      (void)sess_stats;
+      callback_completed.store(true);
+    });
+
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  sm.stop_episode();
+
+  EXPECT_TRUE(callback_completed.load());
+  EXPECT_EQ(observer_stats_size.load(), 1u);
+  EXPECT_EQ(seen_episode_index.load(), 0u);
+}
