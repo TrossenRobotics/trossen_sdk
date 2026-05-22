@@ -213,9 +213,13 @@ void RerunObserver::dispatch_(const std::string& record_id,
   };
 
   // Use the producer-side monotonic capture time so the timeline does not jump backwards
-  // on system-clock adjustments.
+  // on system-clock adjustments. Log as a wall-clock timestamp (epoch-anchored) rather
+  // than a duration so the viewer renders human-readable times ("22:29:04.512") instead
+  // of large day-based offsets - producer timestamps on this SDK happen to be epoch-
+  // anchored on Linux (steady_clock here resolves to CLOCK_MONOTONIC, which is itself
+  // epoch-anchored on many distros).
   const double t_secs = static_cast<double>(rec->ts.monotonic.to_ns()) * 1e-9;
-  rec_->set_time_duration_secs("monotonic", t_secs);
+  rec_->set_time_timestamp_secs_since_epoch("monotonic", t_secs);
 
   if (auto* img = dynamic_cast<data::ImageRecord*>(rec.get())) {
     if (img->image.empty() || img->width == 0 || img->height == 0) {
