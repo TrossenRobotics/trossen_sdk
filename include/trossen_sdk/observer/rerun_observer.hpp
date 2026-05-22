@@ -129,6 +129,28 @@ public:
     return skipped_frames_.load(std::memory_order_relaxed);
   }
 
+  /**
+   * @brief Clear every subscribed entity tree at the start of a new episode.
+   *
+   * Logs a recursive ``rerun::archetypes::Clear`` to each ``record_id`` we have
+   * dispatched data into, so the viewer drops the previous episode's history before
+   * the new episode's first records arrive. Two problems this fixes:
+   *
+   *   - **Autoscale collapse on cross-episode pose jumps.** A new episode that starts
+   *     at a very different pose from where the last one ended forces rerun's auto-Y
+   *     to span both clusters, squashing the dense pre-jump data against the axis
+   *     edge (it looks like the plot vanished). Clearing keeps each episode's plot
+   *     on its own auto-Y range.
+   *   - **Cross-episode line interpolation.** Without a clear, scalar plots draw a
+   *     long segment connecting the last sample of episode N to the first sample of
+   *     episode N+1; that single steep line is visually misleading.
+   *
+   * Per-record on-disk capture (MCAP, etc.) is unaffected - this only clears what the
+   * live viewer renders. Dispatched outside ``episode_mutex_`` per the
+   * ``ObserverBase::on_episode_start`` contract.
+   */
+  void on_episode_start(uint32_t episode_index) noexcept override;
+
 protected:
   /// Open the ReRun gRPC connection. Returns ``false`` on transport failure.
   bool on_start() override;

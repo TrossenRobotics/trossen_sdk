@@ -191,6 +191,31 @@ void RerunObserver::on_stop() {
   rec_.reset();
 }
 
+void RerunObserver::on_episode_start(uint32_t episode_index) noexcept {
+  (void)episode_index;
+  // No-op if the transport is closed (failed connect, or hook ran before on_start) -
+  // there is nothing to clear in the viewer until we have a recording stream.
+  if (!rec_) {
+    return;
+  }
+  // Iterate every record_id we have dispatched into so far. subscription_state_ is
+  // populated lazily in dispatch_(), so on episode 0 this is typically empty (clears
+  // nothing - correct; nothing to clear). On episode 1+ each previously-seen
+  // record_id gets a recursive Clear, which drops every child entity under it
+  // (e.g. ``slate_base/pose/x``, ``slate_base/twist/linear_x`` etc.) from the viewer's
+  // active time range. The cached path strings inside PerSubscriptionState stay
+  // intact - re-stamping them on the next record is harmless and avoids a per-episode
+  // rebuild on the hot path.
+  try {
+    for (const auto& [record_id, _] : subscription_state_) {
+      rec_->log(record_id, rerun::archetypes::Clear(/*is_recursive=*/true));
+    }
+  } catch (...) {
+    // Swallow: a faulty rerun-cpp call must not raise into SessionManager's fan-out
+    // (the hook is declared noexcept and any throw would terminate the process).
+  }
+}
+
 void RerunObserver::dispatch_(const std::string& record_id,
                               const std::shared_ptr<data::RecordBase>& rec) {
   if (!rec_ || !rec) {
