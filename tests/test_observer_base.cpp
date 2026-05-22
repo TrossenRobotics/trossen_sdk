@@ -158,26 +158,27 @@ TEST(ObserverBase, Start_Stop_WithoutSubscriptions_IsClean) {
   EXPECT_TRUE(obs.start());
   EXPECT_TRUE(obs.is_running());
   EXPECT_TRUE(obs.on_start_called());
-  EXPECT_FALSE(obs.is_dead());
   obs.stop();
   EXPECT_FALSE(obs.is_running());
   EXPECT_TRUE(obs.on_stop_called());
 }
 
-TEST(ObserverBase, Start_Failure_MarksDead_NoWorkerThread) {
+TEST(ObserverBase, Start_Failure_LatchesStopped_NoWorkerThread) {
   FailingObserver obs(/*throw_in_start=*/false);
   EXPECT_FALSE(obs.start());
-  EXPECT_TRUE(obs.is_dead());
   EXPECT_FALSE(obs.is_running());
+  // A subsequent start() must remain refused (stopped_ is latched).
+  EXPECT_FALSE(obs.start());
   // Offering after a failed start must remain noexcept and not crash.
   EXPECT_NO_THROW(obs.offer(make_joint_record("arm")));
 }
 
-TEST(ObserverBase, Start_Exception_MarksDead) {
+TEST(ObserverBase, Start_Exception_LatchesStopped) {
   FailingObserver obs(/*throw_in_start=*/true);
   EXPECT_FALSE(obs.start());
-  EXPECT_TRUE(obs.is_dead());
   EXPECT_FALSE(obs.is_running());
+  // A subsequent start() must remain refused (stopped_ is latched).
+  EXPECT_FALSE(obs.start());
 }
 
 TEST(ObserverBase, Stop_IsIdempotent) {
@@ -219,7 +220,7 @@ TEST(ObserverBase, Start_AfterFailedStart_IsRefused) {
 
   CountingFailingObserver obs;
   EXPECT_FALSE(obs.start());
-  EXPECT_TRUE(obs.is_dead());
+  EXPECT_FALSE(obs.is_running());
   EXPECT_EQ(obs.on_start_calls(), 1);
 
   EXPECT_FALSE(obs.start());

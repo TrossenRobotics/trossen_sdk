@@ -123,20 +123,17 @@ public:
       throw std::invalid_argument(
         "ObserverBase::add_subscription requires a non-empty record_id");
     }
-    // Negated > comparison deliberately rejects NaN (NaN > 0.0 is false). Do NOT
-    // simplify to ``throttle_hz <= 0`` - that admits NaN.
-    if (!(throttle_hz > 0.0)) {
-      throw std::invalid_argument(
-        "ObserverBase::add_subscription requires throttle_hz > 0");
-    }
     // Lower bound keeps the int64 nanosecond period clear of overflow; upper bound stays
     // above scheduler granularity to avoid a perpetual catch-up loop on the worker.
+    // Negated in-range comparison deliberately rejects NaN (every comparison against NaN
+    // is false, so !(NaN >= lo && NaN <= hi) is true). Do NOT simplify to
+    // ``throttle_hz < kMin || throttle_hz > kMax`` - that admits NaN, which later becomes
+    // an int64 nanosecond period (NaN -> int64 is UB).
     constexpr double kMinThrottleHz = 1e-3;
     constexpr double kMaxThrottleHz = 1e4;
-    if (throttle_hz < kMinThrottleHz || throttle_hz > kMaxThrottleHz) {
+    if (!(throttle_hz >= kMinThrottleHz && throttle_hz <= kMaxThrottleHz)) {
       throw std::invalid_argument(
-        "ObserverBase::add_subscription throttle_hz outside supported range "
-        "[1e-3, 1e4]");
+        "ObserverBase::add_subscription requires throttle_hz in [1e-3, 1e4]");
     }
     if (!handler) {
       throw std::invalid_argument(
@@ -159,11 +156,12 @@ public:
    * @brief Start the worker thread.
    *
    * Calls ``on_start()`` exactly once. If ``on_start()`` returns ``false`` or throws, the
-   * observer is marked dead (``is_dead()`` returns ``true``) and the worker thread is not
-   * launched. The caller (typically ``SessionManager``) is expected to continue the session
-   * without this observer.
+   * observer is latched stopped and ``start()`` returns ``false``, and the worker thread is
+   * not launched. The caller (typically ``SessionManager``) is expected to continue the
+   * session without this observer.
    *
-   * @return ``true`` on success; ``false`` if the observer is dead.
+   * @return ``true`` on success; ``false`` if the observer failed to start or was already
+   *         stopped.
    */
   bool start() {
     // One-shot: a stopped or previously-failed observer cannot be restarted; refusing
@@ -173,7 +171,7 @@ public:
     }
     if (running_.exchange(true, std::memory_order_acq_rel)) {
       // Already started.
-      return !dead_.load(std::memory_order_acquire);
+      return true;
     }
 
     bool ok = false;
@@ -189,7 +187,6 @@ public:
     }
 
     if (!ok) {
-      dead_.store(true, std::memory_order_release);
       running_.store(false, std::memory_order_release);
       stopped_.store(true, std::memory_order_release);
       return false;
@@ -199,8 +196,7 @@ public:
       worker_ = std::thread(&ObserverBase::worker_loop_, this);
     } catch (...) {
       // Thread creation failed (e.g. resource exhaustion). Roll back: invoke the
-      // subclass cleanup hook to undo on_start(), then latch the observer dead.
-      dead_.store(true, std::memory_order_release);
+      // subclass cleanup hook to undo on_start(), then latch the observer stopped.
       running_.store(false, std::memory_order_release);
       stopped_.store(true, std::memory_order_release);
       try {
@@ -268,7 +264,7 @@ public:
     if (!rec) {
       return;
     }
-    if (dead_.load(std::memory_order_relaxed)) {
+    if (stopped_.load(std::memory_order_relaxed)) {
       return;
     }
     offered_.fetch_add(1, std::memory_order_relaxed);
@@ -291,18 +287,17 @@ public:
         overwritten_.fetch_add(1, std::memory_order_relaxed);
       }
 
-      // notify_one without holding cv_mutex_ is sound: the worker's wait predicate is a
-      // clock read (now >= deadline). A missed notify only delays the next tick to the
-      // deadline.
+      // notify_one without holding cv_mutex_ is sound: the worker's wait_until()
+      // predicate gates on (shutdown || clock::now() >= next_deadline), so a
+      // premature notify (record arrived before the next deadline) re-evaluates
+      // the predicate, sees the deadline hasn't elapsed, and goes back to sleep
+      // until next_deadline. A missed notify only delays the next tick to the
+      // deadline. This is the intended contract: offer() does not steer the
+      // worker's wake schedule; the per-subscription period does.
       cv_.notify_one();
     } catch (...) {
       // Swallow: a faulty observer must not raise into the producer hot path.
     }
-  }
-
-  /// True if ``start()`` failed for this observer.
-  bool is_dead() const noexcept {
-    return dead_.load(std::memory_order_acquire);
   }
 
   /// True if the worker thread is currently running.
@@ -428,7 +423,14 @@ private:
           return !running_.load(std::memory_order_acquire);
         });
       } else {
-        cv_.wait_until(lk, next_deadline);
+        // Predicate filters spurious wakeups and premature notify_one() from
+        // offer(): only break out of wait_until() if shutdown was requested or
+        // the deadline has actually elapsed. next_deadline is captured by value
+        // so the predicate sees a stable snapshot for this iteration.
+        cv_.wait_until(lk, next_deadline, [this, next_deadline] {
+          return !running_.load(std::memory_order_acquire) ||
+                 clock::now() >= next_deadline;
+        });
       }
     }
   }
@@ -453,9 +455,9 @@ private:
   std::unordered_map<std::string, std::unique_ptr<Subscription>> subscriptions_;
 
   std::atomic<bool> running_{false};
-  std::atomic<bool> dead_{false};
   // Write-once latch flipped by stop() or a failed start() so subsequent start() calls
-  // are refused.
+  // are refused. Also gates offer() so the producer hot path drops records once the
+  // observer is stopped.
   std::atomic<bool> stopped_{false};
   // Set on a fully-successful start() (on_start() returned true and worker_ was spawned),
   // consumed via exchange(false) by stop() to invoke on_stop() exactly once. Decoupled
