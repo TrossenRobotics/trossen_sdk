@@ -237,14 +237,16 @@ void RerunObserver::dispatch_(const std::string& record_id,
     }
   };
 
-  // Use the producer-side monotonic capture time so the timeline does not jump backwards
-  // on system-clock adjustments. Log as a wall-clock timestamp (epoch-anchored) rather
-  // than a duration so the viewer renders human-readable times ("22:29:04.512") instead
-  // of large day-based offsets - producer timestamps on this SDK happen to be epoch-
-  // anchored on Linux (steady_clock here resolves to CLOCK_MONOTONIC, which is itself
-  // epoch-anchored on many distros).
-  const double t_secs = static_cast<double>(rec->ts.monotonic.to_ns()) * 1e-9;
-  rec_->set_time_timestamp_secs_since_epoch("monotonic", t_secs);
+  // Log the producer-side wall-clock capture time (system_clock, anchored at the Unix
+  // epoch) so the viewer renders human-readable times ("18:25:04.512 local") on plot
+  // axes. We deliberately do NOT use ts.monotonic here - that field comes from
+  // steady_clock (CLOCK_MONOTONIC on Linux) which is anchored at boot, not at the Unix
+  // epoch, so feeding it to set_time_timestamp_secs_since_epoch produces nonsense
+  // wall-clock times offset by however long ago CLOCK_MONOTONIC started. The price of
+  // using realtime is that the timeline can jump backwards on a system-clock adjustment
+  // (NTP / manual set); for live monitoring during recording this is acceptable.
+  const double t_secs = static_cast<double>(rec->ts.realtime.to_ns()) * 1e-9;
+  rec_->set_time_timestamp_secs_since_epoch("wall_clock", t_secs);
 
   if (auto* img = dynamic_cast<data::ImageRecord*>(rec.get())) {
     if (img->image.empty() || img->width == 0 || img->height == 0) {
