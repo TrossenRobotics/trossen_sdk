@@ -90,6 +90,7 @@ RerunObserver::RerunObserver(const nlohmann::json& cfg)
   : ObserverBase(cfg.value("id", cfg.value("type", std::string("rerun")))) {
   rerun_url_ = cfg.value("rerun_url", std::string{kDefaultRerunUrl});
   app_id_ = cfg.value("app_id", std::string{kDefaultAppId});
+  spawn_viewer_ = cfg.value("spawn", false);
 
   if (!cfg.contains("subscriptions") || !cfg.at("subscriptions").is_array()) {
     throw std::runtime_error(
@@ -130,10 +131,14 @@ RerunObserver::~RerunObserver() {
 bool RerunObserver::on_start() {
   try {
     rec_ = std::make_unique<rerun::RecordingStream>(app_id_);
-    const auto err = rec_->connect_grpc(rerun_url_);
+    // spawn() launches a local viewer if none is listening, otherwise redirects to
+    // the running one - see rerun::RecordingStream::spawn docs. connect_grpc only
+    // attaches to an already-running viewer.
+    const auto err = spawn_viewer_ ? rec_->spawn() : rec_->connect_grpc(rerun_url_);
     if (err.is_err()) {
-      std::cerr << "RerunObserver '" << name()
-                << "' connect_grpc failed: " << err.description << std::endl;
+      std::cerr << "RerunObserver '" << name() << "' "
+                << (spawn_viewer_ ? "spawn" : "connect_grpc")
+                << " failed: " << err.description << std::endl;
       rec_.reset();
       return false;
     }

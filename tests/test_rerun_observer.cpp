@@ -59,6 +59,27 @@ TEST(RerunObserverTest, Construct_HonoursIdRerunUrlAndAppId) {
   EXPECT_EQ(obs.subscription_count(), 2u);
 }
 
+TEST(RerunObserverTest, Construct_SpawnDefaultsOffAndHonoursExplicitTrue) {
+  // spawn defaults to false (connect_grpc path).
+  auto cfg_default = json::parse(R"({
+    "type": "rerun",
+    "subscriptions": [{"record_id": "arm", "throttle_hz": 30.0}]
+  })");
+  RerunObserver obs_default(cfg_default);
+  EXPECT_FALSE(obs_default.spawn_enabled());
+
+  // spawn=true is parsed and stored. on_start() will branch to RecordingStream::spawn
+  // (verified by inspection; not invoked here to avoid actually launching a viewer
+  // process during the unit-test run).
+  auto cfg_spawn = json::parse(R"({
+    "type": "rerun",
+    "spawn": true,
+    "subscriptions": [{"record_id": "arm", "throttle_hz": 30.0}]
+  })");
+  RerunObserver obs_spawn(cfg_spawn);
+  EXPECT_TRUE(obs_spawn.spawn_enabled());
+}
+
 TEST(RerunObserverTest, Construct_RejectsMissingSubscriptions) {
   EXPECT_THROW(
     RerunObserver(json::parse(R"({"type": "rerun"})")),

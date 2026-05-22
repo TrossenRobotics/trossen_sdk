@@ -97,8 +97,13 @@ public:
    *  - ``type`` (string, required) - registry key ("rerun")
    *  - ``id`` (string, optional) - logging name; defaults to ``type``
    *  - ``rerun_url`` (string, optional) - gRPC URL of the ReRun viewer. Defaults to
-   *    ``"rerun+http://127.0.0.1:9876/proxy"`` (matches rerun-cpp).
+   *    ``"rerun+http://127.0.0.1:9876/proxy"`` (matches rerun-cpp). Ignored when
+   *    ``spawn`` is true.
    *  - ``app_id`` (string, optional) - ReRun application id; defaults to ``"trossen_sdk"``.
+   *  - ``spawn`` (bool, optional) - when true, ``on_start()`` launches a local
+   *    ReRun viewer process via ``RecordingStream::spawn()`` instead of connecting
+   *    over gRPC. If a viewer is already listening on the default port, the stream
+   *    is redirected to it (no duplicate processes). Defaults to false.
    *  - ``subscriptions`` (array, required) - each entry must have ``record_id`` (string)
    *    and ``throttle_hz`` (positive number).
    *
@@ -113,6 +118,10 @@ public:
 
   /// gRPC URL of the connected viewer.
   const std::string& rerun_url() const noexcept { return rerun_url_; }
+
+  /// True if ``on_start()`` will launch a local viewer via ``RecordingStream::spawn``
+  /// instead of connecting to a pre-launched one via ``connect_grpc``.
+  bool spawn_enabled() const noexcept { return spawn_viewer_; }
 
   /// Records the worker reached but did not log (unsupported encoding, record type,
   /// or depth scale). Lets operators detect a silently-empty viewer.
@@ -167,6 +176,7 @@ private:
 
   std::string rerun_url_;
   std::string app_id_;
+  bool spawn_viewer_{false};
 
   // Writes (on_start/on_stop) and reads (dispatch_ on the worker) never overlap in time
   // because ObserverBase::start joins-before-on_start and joins-before-on_stop; no
