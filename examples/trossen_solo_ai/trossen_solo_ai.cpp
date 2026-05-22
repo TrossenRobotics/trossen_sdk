@@ -255,19 +255,23 @@ int main(int argc, char** argv) {
         std::cout << "  [ok] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
                   << " subscriptions=" << obs_cfg.subscriptions.size() << "\n";
       } catch (const std::exception& e) {
-        std::cerr << "Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
+        // Observers are non-essential by design: a missing/misconfigured one logs and
+        // is skipped, so recording continues without the visual stream. The hint below
+        // points at the build flag for the common "type not registered" case.
+        std::cerr << "  [skip] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
                   << " failed to construct: " << e.what() << "\n";
         const auto types =
           trossen::observer::ObserverRegistry::get_registered_types();
-        std::cerr << "Registered observer types:";
+        std::cerr << "         Registered observer types:";
         for (const auto& t : types) std::cerr << " " << t;
         std::cerr << "\n";
         if (!trossen::observer::ObserverRegistry::is_registered(obs_cfg.type)) {
-          std::cerr << "Hint: type '" << obs_cfg.type
+          std::cerr << "         Hint: type '" << obs_cfg.type
                     << "' is not registered. Rebuild with the matching CMake option "
-                    << "(e.g. -DTROSSEN_ENABLE_RERUN_OBSERVER=ON for the 'rerun' type).\n";
+                    << "(e.g. -DTROSSEN_ENABLE_RERUN_OBSERVER=ON for the 'rerun' type) "
+                    << "or set 'enabled': false on this observer to silence the warning.\n";
         }
-        return 1;
+        continue;
       }
     }
   }
