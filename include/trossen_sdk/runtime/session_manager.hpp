@@ -258,10 +258,11 @@ public:
   /**
    * @brief Per-observer status snapshot.
    *
-   * (is_running, is_dead) interpretation:
-   *   - (false, false) - registered but not yet started, or stopped.
+   * (is_running, is_stopped) interpretation:
+   *   - (false, false) - registered but not yet started.
    *   - (true,  false) - worker active; accepting records.
-   *   - (false, true)  - start() failed; terminal. Excluded from fan-out.
+   *   - (false, true)  - latched stopped (clean stop or failed start); terminal
+   *                      and excluded from fan-out.
    */
   struct ObserverStatsEntry {
     /// Observer name (as passed to its constructor).
@@ -270,8 +271,8 @@ public:
     observer::ObserverBase::Stats stats;
     /// True if the observer's worker thread is currently running.
     bool is_running{false};
-    /// True if ``start()`` failed for this observer.
-    bool is_dead{false};
+    /// True if the observer is latched stopped (clean stop or failed start).
+    bool is_stopped{false};
   };
 
   /**
