@@ -131,6 +131,26 @@
     "chunk_size_bytes": 4194304
   },
 
+  "observers": [
+    {
+      "type":      "rerun",
+      "id":        "live_viewer",
+      "rerun_url": "rerun+http://127.0.0.1:9876/proxy",
+      "app_id":    "trossen_mobile_ai",
+      "enabled":   true,
+      "subscriptions": [
+        { "record_id": "leader_left",        "throttle_hz": 30.0 },
+        { "record_id": "leader_right",       "throttle_hz": 30.0 },
+        { "record_id": "follower_left",      "throttle_hz": 30.0 },
+        { "record_id": "follower_right",     "throttle_hz": 30.0 },
+        { "record_id": "slate_base",         "throttle_hz": 30.0 },
+        { "record_id": "camera_high",        "throttle_hz": 15.0 },
+        { "record_id": "camera_left_wrist",  "throttle_hz": 15.0 },
+        { "record_id": "camera_right_wrist", "throttle_hz": 15.0 }
+      ]
+    }
+  ],
+
   "session": {
     "max_duration":  20.0,
     "max_episodes":  5,
