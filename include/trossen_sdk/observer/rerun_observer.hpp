@@ -97,8 +97,13 @@ public:
    *  - ``type`` (string, required) - registry key ("rerun")
    *  - ``id`` (string, optional) - logging name; defaults to ``type``
    *  - ``rerun_url`` (string, optional) - gRPC URL of the ReRun viewer. Defaults to
-   *    ``"rerun+http://127.0.0.1:9876/proxy"`` (matches rerun-cpp).
+   *    ``"rerun+http://127.0.0.1:9876/proxy"`` (matches rerun-cpp). Ignored when
+   *    ``spawn`` is true.
    *  - ``app_id`` (string, optional) - ReRun application id; defaults to ``"trossen_sdk"``.
+   *  - ``spawn`` (bool, optional) - when true, ``on_start()`` launches a local
+   *    ReRun viewer process via ``RecordingStream::spawn()`` instead of connecting
+   *    over gRPC. If a viewer is already listening on the default port, the stream
+   *    is redirected to it (no duplicate processes). Defaults to false.
    *  - ``subscriptions`` (array, required) - each entry must have ``record_id`` (string)
    *    and ``throttle_hz`` (positive number).
    *
@@ -114,11 +119,37 @@ public:
   /// gRPC URL of the connected viewer.
   const std::string& rerun_url() const noexcept { return rerun_url_; }
 
+  /// True if ``on_start()`` will launch a local viewer via ``RecordingStream::spawn``
+  /// instead of connecting to a pre-launched one via ``connect_grpc``.
+  bool spawn_enabled() const noexcept { return spawn_viewer_; }
+
   /// Records the worker reached but did not log (unsupported encoding, record type,
   /// or depth scale). Lets operators detect a silently-empty viewer.
   uint64_t skipped_frames() const noexcept {
     return skipped_frames_.load(std::memory_order_relaxed);
   }
+
+  /**
+   * @brief Clear every subscribed entity tree at the start of a new episode.
+   *
+   * Logs a recursive ``rerun::archetypes::Clear`` to each ``record_id`` we have
+   * dispatched data into, so the viewer drops the previous episode's history before
+   * the new episode's first records arrive. Two problems this fixes:
+   *
+   *   - **Autoscale collapse on cross-episode pose jumps.** A new episode that starts
+   *     at a very different pose from where the last one ended forces rerun's auto-Y
+   *     to span both clusters, squashing the dense pre-jump data against the axis
+   *     edge (it looks like the plot vanished). Clearing keeps each episode's plot
+   *     on its own auto-Y range.
+   *   - **Cross-episode line interpolation.** Without a clear, scalar plots draw a
+   *     long segment connecting the last sample of episode N to the first sample of
+   *     episode N+1; that single steep line is visually misleading.
+   *
+   * Per-record on-disk capture (MCAP, etc.) is unaffected - this only clears what the
+   * live viewer renders. Dispatched outside ``episode_mutex_`` per the
+   * ``ObserverBase::on_episode_start`` contract.
+   */
+  void on_episode_start(uint32_t episode_index) noexcept override;
 
 protected:
   /// Open the ReRun gRPC connection. Returns ``false`` on transport failure.
@@ -163,10 +194,17 @@ private:
     std::optional<ImagePaths> image_paths;
     std::optional<JointPaths> joint_paths;
     std::optional<OdomPaths> odom_paths;
+
+    /// Optional per-subscription field filter. When set (non-empty), only the
+    /// listed field names are forwarded to ReRun for ``JointStateRecord`` (subset
+    /// of ``positions`` / ``velocities`` / ``efforts``). Empty / nullopt means
+    /// "log all available fields" (default, backward compatible).
+    std::optional<std::unordered_set<std::string>> joint_field_filter;
   };
 
   std::string rerun_url_;
   std::string app_id_;
+  bool spawn_viewer_{false};
 
   // Writes (on_start/on_stop) and reads (dispatch_ on the worker) never overlap in time
   // because ObserverBase::start joins-before-on_start and joins-before-on_stop; no
