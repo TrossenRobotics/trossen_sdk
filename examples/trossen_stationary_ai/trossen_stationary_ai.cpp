@@ -24,6 +24,7 @@
  */
 
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -42,6 +43,9 @@
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/hw/teleop/teleop_factory.hpp"
 #include "trossen_sdk/observer/observer_registry.hpp"
+#ifdef TROSSEN_ENABLE_ADAMO
+#include "trossen_sdk/observer/adamo_observer.hpp"
+#endif
 #include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
@@ -388,6 +392,23 @@ int main(int argc, char** argv) {
   };
   trossen::utils::print_final_summary(
     final_stats.total_episodes_completed, root, extra_info);
+
+  // If an Adamo camera pipeline was started, the libadamo Robot run-loop
+  // thread runs forever (no SDK stop hook) and is detached at observer
+  // teardown. Letting C++ global destructors run would then deadlock against
+  // that live pipeline thread. Everything that matters for data integrity
+  // (recording flush, backend close, arm parking) has already happened in
+  // mgr.shutdown() above, so hard-exit here to skip the hanging global
+  // teardown. Non-camera runs fall through to a normal return.
+#ifdef TROSSEN_ENABLE_ADAMO
+  if (trossen::observer::AdamoObserver::video_pipeline_active()) {
+    std::cout << "[adamo] camera pipeline cannot be stopped cleanly; "
+                 "hard-exiting to avoid teardown deadlock\n";
+    std::cout.flush();
+    std::fflush(nullptr);
+    std::_Exit(0);
+  }
+#endif
 
   return 0;
 }
