@@ -131,9 +131,16 @@ include(FetchContent)
 # RERUN_ARROW_LINK_SHARED=ON, so rerun_sdk does NOT pull in a second, conflicting Arrow.
 # Linking is PRIVATE: the rerun headers stay confined to rerun_observer.cpp.
 if(TROSSEN_ENABLE_RERUN_OBSERVER)
-  message(STATUS "RerunObserver enabled - fetching rerun-cpp SDK")
-
   set(RERUN_SDK_VERSION "0.32.0")
+
+  # rerun-cpp reuses the host Arrow via RERUN_ARROW_LINK_SHARED=ON; an ABI-incompatible
+  # Arrow links silently and crashes at runtime, not at build time.
+  if(NOT Arrow_VERSION VERSION_GREATER_EQUAL "14.0")
+    message(FATAL_ERROR
+      "TROSSEN_ENABLE_RERUN_OBSERVER requires Arrow >= 14.0 (found ${Arrow_VERSION}).")
+  endif()
+  message(STATUS "RerunObserver: linking against Arrow ${Arrow_VERSION}")
+  message(STATUS "RerunObserver enabled - fetching rerun-cpp SDK ${RERUN_SDK_VERSION}")
   set(RERUN_SDK_URL
     "https://github.com/rerun-io/rerun/releases/download/${RERUN_SDK_VERSION}/rerun_cpp_sdk.zip")
   set(RERUN_SDK_HASH
@@ -168,24 +175,13 @@ if(TROSSEN_ENABLE_RERUN_OBSERVER)
   target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_RERUN_OBSERVER)
   target_link_libraries(trossen_sdk PRIVATE rerun_sdk)
 
-  # Both librerun_c and libfoxglove bundle the Rust standard library; each archive carries
-  # its own copy of personality / panic handler symbols. --allow-multiple-definition lets
-  # the linker pick one duplicate-symbol copy without error - the documented workaround
-  # for combining multiple Rust static libs in a single C++ shared library.
-  # See: https://github.com/rust-lang/rust/issues/44322 (canonical rust-lang issue on
-  #   duplicate runtime symbols from multiple staticlibs)
-  # See: https://sourceware.org/binutils/docs/ld/Options.html (GNU ld --allow-multiple-definition)
+  # librerun_c and libfoxglove each bundle the Rust standard library, so the merged
+  # .so has duplicate Rust runtime symbols. --allow-multiple-definition lets the linker
+  # keep one copy. Symbol-collision audit (categorized breakdown showing no trossen
+  # public-API collisions) is in the PR #242 description. Ref: rust-lang/rust#44322.
   #
-  # TODO(observer-rerun): produce a symbol-collision audit (`nm libtrossen_sdk.so | sort
-  # | uniq -d`) and exercise the Rust panic path under ASan to validate this is safe.
-  # Tracked in the ADR-003 follow-up board. Gated behind TROSSEN_ENABLE_RERUN_OBSERVER
-  # (default OFF), so default builds are unaffected.
-  #
-  # NOTE: an earlier draft also passed `--exclude-libs=ALL` to hide the Rust runtime
-  # symbols. That flag is too broad - it hides every static archive trossen_sdk links
-  # (SCServo, trossen_slate, foxglove, protobuf) from the exported interface and would
-  # silently break downstream consumers that resolve symbols transitively. Reintroduce
-  # only with a narrow whitelist (e.g. --exclude-libs=librerun_c.a).
+  # Do not generalize to --exclude-libs=ALL: it also hides SCServo / trossen_slate /
+  # foxglove / protobuf and silently breaks transitive symbol resolution downstream.
   if(UNIX AND NOT APPLE)
     target_link_options(trossen_sdk PRIVATE
       "LINKER:--allow-multiple-definition")
