@@ -1,0 +1,74 @@
+{
+  "robot_name": "trossen_adamo_remote_follower",
+
+  "hardware": {
+    "arms": {
+      "follower": {
+        "ip_address":   "192.168.1.3",
+        "model":        "wxai_v0",
+        "end_effector": "wxai_v0_follower"
+      }
+    },
+    "cameras": []
+  },
+
+  "_remote_leader_hardware_NOTE": "The example binaries currently hard-code 'trossen_arm' as the arm type when constructing components from hardware.arms, so RemoteAdamoLeaderArm cannot live under that block until the loader learns to dispatch on a per-arm 'type' field. The intended config shape is preserved below for the eventual example binary.",
+  "remote_leader_hardware": {
+    "virtual_leader": {
+      "type":            "remote_adamo_leader",
+      "robot":           "wxai",
+      "protocol":        "quic",
+      "api_key_env":     "ADAMO_API_KEY",
+      "ready_timeout_s": 30.0
+    }
+  },
+
+  "producers": [
+    {
+      "type":            "trossen_arm",
+      "hardware_id":     "follower",
+      "stream_id":       "follower",
+      "poll_rate_hz":    100.0,
+      "use_device_time": false
+    }
+  ],
+
+  "teleop": {
+    "enabled": true,
+    "rate_hz": 100.0,
+    "pairs": [
+      { "leader": "virtual_leader", "follower": "follower" }
+    ]
+  },
+
+  "backend": {
+    "root":             "~/.trossen_sdk",
+    "dataset_id":       "adamo_follower_dataset",
+    "compression":      "",
+    "chunk_size_bytes": 4194304
+  },
+
+  "observers": [
+    {
+      "type":     "adamo",
+      "id":       "adamo_follower_publisher",
+      "robot":    "wxai",
+      "protocol": "quic",
+      "enabled":  true,
+      "subscriptions": [
+        {
+          "record_id":   "follower",
+          "throttle_hz": 100.0,
+          "topic":       "follower_effort"
+        }
+      ]
+    }
+  ],
+
+  "session": {
+    "max_duration":   86400.0,
+    "max_episodes":   1,
+    "backend_type":   "null",
+    "reset_duration": 0.0
+  }
+}

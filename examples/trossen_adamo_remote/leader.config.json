@@ -1,0 +1,61 @@
+{
+  "robot_name": "trossen_adamo_remote_leader",
+
+  "hardware": {
+    "arms": {
+      "leader": {
+        "ip_address":   "192.168.1.2",
+        "model":        "wxai_v0",
+        "end_effector": "wxai_v0_leader"
+      }
+    },
+    "cameras": []
+  },
+
+  "producers": [
+    {
+      "type":            "trossen_arm",
+      "hardware_id":     "leader",
+      "stream_id":       "leader",
+      "poll_rate_hz":    100.0,
+      "use_device_time": false
+    }
+  ],
+
+  "teleop": {
+    "enabled": false,
+    "rate_hz": 1000.0,
+    "pairs":   []
+  },
+
+  "backend": {
+    "root":             "~/.trossen_sdk",
+    "dataset_id":       "adamo_leader_dataset",
+    "compression":      "",
+    "chunk_size_bytes": 4194304
+  },
+
+  "observers": [
+    {
+      "type":    "adamo",
+      "id":      "adamo_leader_publisher",
+      "robot":   "wxai",
+      "protocol": "quic",
+      "enabled": true,
+      "subscriptions": [
+        {
+          "record_id":   "leader",
+          "throttle_hz": 100.0,
+          "topic":       "leader_state"
+        }
+      ]
+    }
+  ],
+
+  "session": {
+    "max_duration":   86400.0,
+    "max_episodes":   1,
+    "backend_type":   "null",
+    "reset_duration": 0.0
+  }
+}

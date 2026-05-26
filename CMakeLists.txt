@@ -17,6 +17,16 @@ option(TROSSEN_ENABLE_ZED "Enable StereoLabs ZED camera support" OFF)
 # that demo: cmake -DTROSSEN_ENABLE_RERUN_OBSERVER=ON ...
 option(TROSSEN_ENABLE_RERUN_OBSERVER "Build RerunObserver (depends on rerun-cpp SDK)" OFF)
 
+# EXPERIMENTAL. OFF by default: enabling FetchContent-downloads the Adamo C SDK tarball
+# (binary release from install.adamohq.com) plus the github.com/TrossenRobotics/trossen_adamo
+# repo. Enable for remote-teleop experiments via -DTROSSEN_ENABLE_ADAMO=ON. See
+# AdamoObserver + RemoteAdamoLeaderArm.
+option(TROSSEN_ENABLE_ADAMO "Build AdamoObserver + RemoteAdamoLeaderArm (depends on Adamo C SDK)" OFF)
+
+# When ON (default), the SDK tarball is downloaded by FetchContent. Set OFF to use
+# a manually extracted SDK pointed at by -DCMAKE_PREFIX_PATH= or -DAdamo_DIR=.
+option(TROSSEN_ADAMO_AUTOFETCH_SDK "Auto-download the Adamo C SDK tarball" ON)
+
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
@@ -189,6 +199,119 @@ if(TROSSEN_ENABLE_RERUN_OBSERVER)
   if(UNIX AND NOT APPLE)
     target_link_options(trossen_sdk PRIVATE
       "LINKER:--allow-multiple-definition")
+  endif()
+endif()
+
+# --- Adamo integration (AdamoObserver + RemoteAdamoLeaderArm) ---------------
+# EXPERIMENTAL. Adds two pieces gated together because they share the Adamo C
+# SDK dependency:
+#   - AdamoObserver        : publishes local JointStateRecord → Adamo pubsub.
+#   - RemoteAdamoLeaderArm : virtual joint-space leader fed by Adamo pubsub.
+#
+# The Adamo C SDK is fetched as a binary tarball from install.adamohq.com and
+# the trossen_adamo header-only common library is cloned via FetchContent. The
+# leader/follower binaries from trossen_adamo are intentionally NOT built — we
+# only consume ``trossen_adamo_common``.
+if(TROSSEN_ENABLE_ADAMO)
+  message(STATUS "Adamo integration enabled - resolving Adamo SDK + trossen_adamo")
+
+  # Bump these together when Adamo ships a new SDK. The "-latest" tarball is
+  # mutable upstream, so URL_HASH will fail loudly with a clear diagnostic
+  # the next time a new SDK is published — that is the intended behaviour:
+  # forces a deliberate version bump rather than silent ABI drift.
+  # Video variant is required for camera-frame publish (planned addition);
+  # the non-video tarball is otherwise functionally identical for joint state.
+  set(TROSSEN_ADAMO_SDK_URL
+    "https://install.adamohq.com/sdk/adamo-sdk-linux-x86_64-video-latest.tar.gz"
+    CACHE STRING "Adamo C SDK tarball URL (autofetch)")
+  set(TROSSEN_ADAMO_SDK_SHA256
+    "38d7bc24cdaef86299cf4b0fd5a230a0e439990b54b0f593050a7034f31cb784"
+    CACHE STRING "SHA256 of the Adamo C SDK tarball (autofetch)")
+
+  # Adamo_VIDEO=ON enables the video bindings in AdamoConfig.cmake. We
+  # request it because the planned camera-publish path in AdamoObserver
+  # depends on VideoTrack. The non-video tarball would still link the joint-
+  # state code, but mixing Adamo_VIDEO=ON with a non-video SDK is undefined,
+  # so keep these consistent if you override TROSSEN_ADAMO_SDK_URL.
+  set(Adamo_VIDEO ON CACHE BOOL
+    "Enable Adamo video bindings (required for camera-frame publish)" FORCE)
+
+  if(TROSSEN_ADAMO_AUTOFETCH_SDK AND NOT Adamo_DIR)
+    message(STATUS "Adamo SDK autofetch: downloading ${TROSSEN_ADAMO_SDK_URL}")
+    FetchContent_Declare(
+      adamo_sdk
+      URL      ${TROSSEN_ADAMO_SDK_URL}
+      URL_HASH SHA256=${TROSSEN_ADAMO_SDK_SHA256}
+      DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    )
+    FetchContent_MakeAvailable(adamo_sdk)
+
+    # FetchContent auto-strips a single top-level directory from URL archives,
+    # so the SDK contents land directly under ${adamo_sdk_SOURCE_DIR}.
+    set(Adamo_DIR
+      "${adamo_sdk_SOURCE_DIR}/lib/cmake/Adamo"
+      CACHE PATH "Resolved Adamo SDK CMake config directory" FORCE)
+    if(NOT EXISTS "${Adamo_DIR}/AdamoConfig.cmake")
+      message(FATAL_ERROR
+        "Adamo SDK autofetch: AdamoConfig.cmake not found at expected path "
+        "'${Adamo_DIR}/AdamoConfig.cmake'. The tarball layout may have changed; "
+        "set -DTROSSEN_ADAMO_AUTOFETCH_SDK=OFF and provide -DAdamo_DIR= manually.")
+    endif()
+  endif()
+
+  find_package(Adamo CONFIG REQUIRED)
+  if(NOT TARGET Adamo::adamo_cpp)
+    message(FATAL_ERROR
+      "Adamo::adamo_cpp target missing. Either let autofetch resolve the SDK "
+      "(-DTROSSEN_ENABLE_ADAMO=ON) or pass -DAdamo_DIR=/abs/path/to/lib/cmake/Adamo.")
+  endif()
+
+  # Pull trossen_adamo header-only common library. The repo's CMakeLists also
+  # builds trossen_leader / trossen_follower binaries by default; turn both off
+  # so we only consume the INTERFACE target.
+  set(ADAMO_TROSSEN_BUILD_LEADER OFF CACHE BOOL
+    "trossen_sdk does not build the standalone trossen_leader binary" FORCE)
+  set(ADAMO_TROSSEN_BUILD_FOLLOWER OFF CACHE BOOL
+    "trossen_sdk does not build the standalone trossen_follower binary" FORCE)
+
+  set(_TROSSEN_PREV_PIC ${CMAKE_POSITION_INDEPENDENT_CODE})
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+  # trossen_adamo is a private repo. SSH is the default because it works
+  # out of the box for anyone who has the standard `gh auth login` SSH flow
+  # (which is also how upstream TrossenRobotics provisions developer access).
+  # Override with -DTROSSEN_ADAMO_REPO_URL=https://github.com/... if you have
+  # a credential helper / PAT set up for HTTPS instead.
+  set(TROSSEN_ADAMO_REPO_URL "git@github.com:TrossenRobotics/trossen_adamo.git"
+    CACHE STRING "trossen_adamo git remote URL")
+  set(TROSSEN_ADAMO_GIT_TAG "main"
+    CACHE STRING "trossen_adamo git ref to fetch")
+
+  FetchContent_Declare(
+    trossen_adamo
+    GIT_REPOSITORY ${TROSSEN_ADAMO_REPO_URL}
+    GIT_TAG        ${TROSSEN_ADAMO_GIT_TAG}
+  )
+  FetchContent_MakeAvailable(trossen_adamo)
+
+  set(CMAKE_POSITION_INDEPENDENT_CODE ${_TROSSEN_PREV_PIC})
+
+  target_sources(trossen_sdk PRIVATE
+    src/observer/adamo_observer.cpp
+    src/hw/arm/remote_adamo_leader_arm.cpp
+  )
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_ADAMO)
+  # trossen_adamo_common publicly links Adamo::adamo_cpp + TrossenArm::TrossenArm,
+  # so this single PRIVATE link pulls in everything we need.
+  target_link_libraries(trossen_sdk PRIVATE trossen_adamo_common)
+
+  # libadamo.so lives in the SDK's lib/ — add it to BUILD_RPATH so the linker
+  # can resolve it at load time without LD_LIBRARY_PATH gymnastics. Matches
+  # the pattern upstream trossen_adamo applies to its leader/follower binaries.
+  get_target_property(_adamo_loc Adamo::adamo IMPORTED_LOCATION)
+  if(_adamo_loc)
+    get_filename_component(_adamo_dir "${_adamo_loc}" DIRECTORY)
+    set_property(TARGET trossen_sdk APPEND PROPERTY BUILD_RPATH "${_adamo_dir}")
   endif()
 endif()
 
