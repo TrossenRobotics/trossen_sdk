@@ -27,6 +27,13 @@ option(TROSSEN_ENABLE_ADAMO "Build AdamoObserver + RemoteAdamoLeaderArm (depends
 # a manually extracted SDK pointed at by -DCMAKE_PREFIX_PATH= or -DAdamo_DIR=.
 option(TROSSEN_ADAMO_AUTOFETCH_SDK "Auto-download the Adamo C SDK tarball" ON)
 
+# When ON, also build the upstream trossen_adamo leader/follower binaries
+# (alongside trossen_sdk's own AdamoObserver). Useful for cross-checking the
+# integration against the reference implementation. OFF by default to keep
+# the typical build small. Requires librealsense2-dev for the follower.
+option(TROSSEN_ADAMO_BUILD_UPSTREAM_BINARIES
+  "Also build upstream trossen_leader / trossen_follower binaries" OFF)
+
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
@@ -266,13 +273,21 @@ if(TROSSEN_ENABLE_ADAMO)
       "(-DTROSSEN_ENABLE_ADAMO=ON) or pass -DAdamo_DIR=/abs/path/to/lib/cmake/Adamo.")
   endif()
 
-  # Pull trossen_adamo header-only common library. The repo's CMakeLists also
-  # builds trossen_leader / trossen_follower binaries by default; turn both off
-  # so we only consume the INTERFACE target.
-  set(ADAMO_TROSSEN_BUILD_LEADER OFF CACHE BOOL
-    "trossen_sdk does not build the standalone trossen_leader binary" FORCE)
-  set(ADAMO_TROSSEN_BUILD_FOLLOWER OFF CACHE BOOL
-    "trossen_sdk does not build the standalone trossen_follower binary" FORCE)
+  # Pull trossen_adamo header-only common library. By default the upstream
+  # leader/follower binaries are NOT built (we only need the INTERFACE
+  # target), but TROSSEN_ADAMO_BUILD_UPSTREAM_BINARIES=ON re-enables them as
+  # a reference implementation to cross-check against.
+  if(TROSSEN_ADAMO_BUILD_UPSTREAM_BINARIES)
+    set(ADAMO_TROSSEN_BUILD_LEADER   ON  CACHE BOOL
+      "Build the upstream trossen_leader binary" FORCE)
+    set(ADAMO_TROSSEN_BUILD_FOLLOWER ON  CACHE BOOL
+      "Build the upstream trossen_follower binary" FORCE)
+  else()
+    set(ADAMO_TROSSEN_BUILD_LEADER   OFF CACHE BOOL
+      "trossen_sdk does not build the standalone trossen_leader binary" FORCE)
+    set(ADAMO_TROSSEN_BUILD_FOLLOWER OFF CACHE BOOL
+      "trossen_sdk does not build the standalone trossen_follower binary" FORCE)
+  endif()
 
   set(_TROSSEN_PREV_PIC ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)

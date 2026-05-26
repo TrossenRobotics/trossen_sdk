@@ -7,6 +7,11 @@ target_link_libraries(trossen_solo_ai trossen_sdk libtrossen_arm)
 # Trossen Stationary AI — bimanual (2 leader + 2 follower) + 4 cameras
 add_executable(trossen_stationary_ai trossen_stationary_ai/trossen_stationary_ai.cpp)
 target_link_libraries(trossen_stationary_ai trossen_sdk libtrossen_arm)
+# Expose the Adamo gate so the example can guard its AdamoObserver-specific
+# teardown path (the SDK target defines this PRIVATE, so it does not propagate).
+if(TROSSEN_ENABLE_ADAMO)
+  target_compile_definitions(trossen_stationary_ai PRIVATE TROSSEN_ENABLE_ADAMO)
+endif()
 
 # Trossen Mobile AI — bimanual + SLATE mobile base + 3 cameras
 add_executable(trossen_mobile_ai trossen_mobile_ai/trossen_mobile_ai.cpp)
@@ -25,3 +30,17 @@ target_link_libraries(producer_registry_demo trossen_sdk)
 # Lifecycle callback demo (no hardware required)
 add_executable(callback_demo callback_demo/callback_demo.cpp)
 target_link_libraries(callback_demo trossen_sdk)
+
+# Adamo smoke test — only built when the Adamo gate is on. Pure SDK probe:
+# opens adamo::Session against the configured backend and exits. Useful to
+# validate ADAMO_API_KEY / network reachability before running anything that
+# pulls in the full SessionManager + arm hardware.
+if(TROSSEN_ENABLE_ADAMO)
+  add_executable(adamo_smoke_test trossen_adamo_remote/adamo_smoke_test.cpp)
+  target_link_libraries(adamo_smoke_test PRIVATE trossen_adamo_common)
+
+  # Subscriber-side verification: decode + print frames published by an
+  # AdamoObserver (the dashboard only renders video, not pubsub teleop topics).
+  add_executable(adamo_sub_test trossen_adamo_remote/adamo_sub_test.cpp)
+  target_link_libraries(adamo_sub_test PRIVATE trossen_adamo_common)
+endif()
