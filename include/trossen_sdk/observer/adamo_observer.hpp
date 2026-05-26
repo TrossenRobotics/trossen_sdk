@@ -1,6 +1,6 @@
 /**
  * @file adamo_observer.hpp
- * @brief Observer that publishes local JointState records onto Adamo pubsub.
+ * @brief Observer that publishes local records onto Adamo pubsub.
  *
  * EXPERIMENTAL. Pairs with @ref RemoteAdamoLeaderArm on the peer host to
  * realise leader/follower teleop across two machines:
@@ -9,13 +9,15 @@
  *   Follower host:  bus (leader_state) → RemoteAdamoLeaderArm
  *                   real follower arm + AdamoObserver  →  bus (follower_effort)
  *
- * Subscribes to one or more local ``JointStateRecord`` streams and publishes
- * each into Adamo via ``trossen_adamo::wire`` codecs and ``LatestPublisher``.
+ * Subscribes to one or more local records and publishes each onto Adamo:
+ *  - ``JointStateRecord`` is encoded via the ``trossen_adamo::wire`` codecs
+ *    and pushed through a ``LatestPublisher`` per topic.
+ *  - ``ImageRecord`` is converted to BGRA and pushed onto an
+ *    ``adamo::VideoTrack`` opened against a per-observer ``adamo::Robot``.
  *
  * Scope of this experimental cut:
- *   - 7-DOF only (the wire codec hard-codes ``kNumJoints = 7``).
- *   - JointState publish only. Image / Odometry / inbound effort wiring is
- *     stubbed pending the Adamo video bindings + a separate
+ *   - Joint-state codec is 7-DOF only (``trossen_adamo::wire::kNumJoints``).
+ *   - Inbound effort wiring is stubbed pending a separate
  *     ``RemoteEffortReceiver`` design.
  */
 
@@ -26,7 +28,9 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <thread>
 #include <unordered_map>
+#include <vector>
 
 #include "nlohmann/json.hpp"
 
@@ -37,6 +41,8 @@
 // Defined in <adamo/adamo.hpp>, pulled in only by the .cpp.
 namespace adamo {
 class Session;
+class Robot;
+class VideoTrack;
 }  // namespace adamo
 namespace trossen_adamo {
 class LatestPublisher;
@@ -52,26 +58,32 @@ namespace trossen::observer {
  *                            encoded via ``wire::encode_state``.
  *  - ``kFollowerEffort``  -> ``<robot>/trossen/reference/follower_effort``,
  *                            encoded via ``wire::encode_efforts``.
+ *  - ``kCamera``          -> ``<robot>`` namespaced video track ``track_name``,
+ *                            opened on an ``adamo::Robot`` and fed BGRA frames.
  *
  * Resolved from the JSON ``topic`` string on each subscription entry.
  */
 enum class AdamoPublishTopic {
   kLeaderState,
   kFollowerEffort,
+  kCamera,
 };
 
 /**
- * @brief Observer that publishes local JointState records onto Adamo pubsub.
+ * @brief Observer that publishes local records onto Adamo pubsub.
  *
  * Lifecycle parallels @ref RerunObserver: ``on_start()`` opens the
- * ``adamo::Session`` and per-topic ``LatestPublisher`` workers, ``on_stop()``
- * drains them. Each subscription's handler runs on the shared observer
- * worker, casts the ``RecordBase`` to ``JointStateRecord``, encodes per the
- * resolved topic, and hands the bytes to the matching ``LatestPublisher``.
+ * ``adamo::Session`` (joint-state path) and/or ``adamo::Robot`` plus per-track
+ * ``adamo::VideoTrack`` (camera path), ``on_stop()`` drains them. Each
+ * subscription's handler runs on the shared observer worker, dispatches on the
+ * resolved ``PublishTarget`` topic, and ships the payload to the matching
+ * publisher / video track.
  *
- * Publish latency is decoupled from the observer worker via
+ * Joint-state publish latency is decoupled from the observer worker via
  * ``LatestPublisher``'s internal thread, so a slow network never stalls the
- * worker (and thus never stalls the producers feeding it).
+ * worker. Camera publish goes direct to ``VideoTrack::send`` — the Adamo
+ * pipeline does its own encoding off-thread, but a stalled send still blocks
+ * the worker. Treat camera as best-effort.
  */
 class AdamoObserver : public ObserverBase {
 public:
@@ -83,8 +95,10 @@ public:
    *  - ``robot`` (string) - robot identifier that becomes the topic prefix.
    *    Must match the peer's ``robot``.
    *  - ``subscriptions`` (array) - per-record subscription entries, each with
-   *    ``record_id``, ``throttle_hz``, and ``topic`` ("leader_state" or
-   *    "follower_effort").
+   *    ``record_id``, ``throttle_hz``, and ``topic`` (one of
+   *    ``"leader_state"``, ``"follower_effort"``, ``"camera"``).
+   *    Camera subscriptions additionally require ``track_name`` (string),
+   *    ``width`` / ``height`` / ``fps`` / ``bitrate_kbps`` (positive integers).
    *
    * Optional fields:
    *  - ``id`` (string) - logging name; defaults to ``type``.
@@ -106,13 +120,31 @@ public:
     return skipped_frames_.load(std::memory_order_relaxed);
   }
 
+  /// True once any AdamoObserver instance has started an ``adamo::Robot``
+  /// video pipeline in this process. The pipeline thread runs forever (the
+  /// SDK has no stop hook) and is detached at teardown, which makes the C++
+  /// global-destructor phase deadlock. Callers that own ``main()`` can query
+  /// this after their normal shutdown and ``std::_exit`` to bypass the hang.
+  /// Process-wide and latched: never cleared, since the pipeline never stops.
+  static bool video_pipeline_active() noexcept;
+
   /// Per-subscription state resolved at construction time. Public so the
   /// anonymous-namespace ``make_target`` helper in the .cpp can return it.
   struct PublishTarget {
     AdamoPublishTopic topic{AdamoPublishTopic::kLeaderState};
-    /// Resolved fully-qualified Adamo topic name (e.g.
-    /// ``"wxai/trossen/reference/leader_state"``).
+    /// For kLeaderState / kFollowerEffort: fully-qualified Adamo topic name
+    /// (e.g. ``"wxai/trossen/reference/leader_state"``). For kCamera: unused
+    /// (video tracks are keyed by track_name on the Robot, not on a pubsub key).
     std::string topic_name;
+
+    // ── Camera-only fields (kCamera) ────────────────────────────────────────
+    /// VideoTrack name passed to ``Robot::video``. Operator UI groups tracks
+    /// by this name ("main"/"front"/"rear"/etc.).
+    std::string track_name;
+    std::uint32_t width{0};
+    std::uint32_t height{0};
+    std::uint32_t fps{0};
+    std::uint32_t bitrate_kbps{0};
   };
 
 protected:
@@ -122,9 +154,16 @@ protected:
 private:
   /// Worker-thread dispatch entry point captured into each subscription's
   /// handler. Resolves the topic, encodes the record, and hands the bytes off
-  /// to the matching ``LatestPublisher``.
+  /// to the matching ``LatestPublisher`` or ``VideoTrack``.
   void dispatch_(const std::string& record_id,
                  const std::shared_ptr<data::RecordBase>& rec);
+
+  /// True if any subscription's resolved topic is ``kCamera``. Drives whether
+  /// on_start() opens an ``adamo::Robot`` + run-thread.
+  bool has_camera_subscription_() const noexcept;
+  /// True if any subscription is a joint-state pubsub topic. Drives whether
+  /// on_start() opens an ``adamo::Session``.
+  bool has_session_subscription_() const noexcept;
 
   // ── Configuration (set in ctor, read-only after) ──────────────────────────
   std::string robot_;
@@ -136,11 +175,31 @@ private:
   std::unordered_map<std::string, PublishTarget> targets_;
 
   // ── State opened in on_start / closed in on_stop ──────────────────────────
-  /// One Adamo session per observer instance; shared across topics.
+  /// One Adamo session per observer instance; shared across joint-state topics.
+  /// Null when no joint-state subscription is configured.
   std::unique_ptr<adamo::Session> session_;
   /// LatestPublisher per fully-qualified topic name. Several record_ids may
   /// share one publisher if they target the same topic.
   std::unordered_map<std::string, std::unique_ptr<trossen_adamo::LatestPublisher>> publishers_;
+
+  /// One Adamo Robot per observer; opened only when at least one camera
+  /// subscription exists. ``adamo::Robot::run()`` consumes the handle, so the
+  /// pointer is reset to null once the run-thread is spawned — kept here only
+  /// for setup-time ``video()`` calls before the move.
+  std::unique_ptr<adamo::Robot> adamo_robot_;
+  /// Background thread driving ``adamo::Robot::run()`` (a blocking call).
+  /// Detached at on_stop because the SDK exposes no graceful stop hook; the
+  /// thread therefore lives until process exit. This matches upstream
+  /// trossen_adamo's RealSenseStreamer.
+  std::thread adamo_robot_thread_;
+  /// VideoTrack per fully-qualified track key (``"<robot>/<track_name>"``).
+  /// Multiple record_ids may share a track when they all feed the same
+  /// camera stream; we deduplicate at on_start.
+  std::unordered_map<std::string, std::unique_ptr<adamo::VideoTrack>> video_tracks_;
+
+  /// Scratch buffer reused across BGRA conversions to avoid heap churn at the
+  /// frame rate. Owned by the worker thread (single-threaded dispatch).
+  std::vector<std::uint8_t> bgra_scratch_;
 
   std::atomic<uint64_t> skipped_frames_{0};
 };
