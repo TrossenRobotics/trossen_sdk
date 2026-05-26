@@ -40,6 +40,7 @@
 #include "trossen_sdk/hw/arm/trossen_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/observer/observer_registry.hpp"
 #include "trossen_sdk/hw/teleop/teleop_factory.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
@@ -228,6 +229,52 @@ int main(int argc, char** argv) {
   }
 
   std::cout << "\nProducers registered. Ready to record.\n";
+
+  // ──────────────────────────────────────────────────────────
+  // Observers: registered once, started lazily on first episode, persist across episodes.
+  // ──────────────────────────────────────────────────────────
+
+  if (!cfg.observers.empty()) {
+    std::cout << "Creating observers...\n";
+    // Fail loud on construction errors so a typo'd observer type or missing build flag
+    // does not silently leave the operator with an empty viewer. On failure we print a
+    // diagnostic hint (registered types + rerun build flag) and `return 1`. Returning
+    // (rather than rethrowing) keeps `mgr` in scope so its destructor runs ~SessionManager
+    // -> shutdown(), which joins producer threads cleanly; an exception escaping main()
+    // would invoke std::terminate before unwinding on most GCC builds.
+    for (const auto& obs_cfg : cfg.observers) {
+      if (!obs_cfg.enabled) {
+        std::cout << "  [disabled] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
+                  << " (skipped: enabled=false)\n";
+        continue;
+      }
+      try {
+        auto obs = trossen::observer::ObserverRegistry::create(
+          obs_cfg.type, obs_cfg.raw_json);
+        mgr.add_observer(obs);
+        std::cout << "  [ok] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
+                  << " subscriptions=" << obs_cfg.subscriptions.size() << "\n";
+      } catch (const std::exception& e) {
+        // Observers are non-essential by design: a missing/misconfigured one logs and
+        // is skipped, so recording continues without the visual stream. The hint below
+        // points at the build flag for the common "type not registered" case.
+        std::cerr << "  [skip] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
+                  << " failed to construct: " << e.what() << "\n";
+        const auto types =
+          trossen::observer::ObserverRegistry::get_registered_types();
+        std::cerr << "         Registered observer types:";
+        for (const auto& t : types) std::cerr << " " << t;
+        std::cerr << "\n";
+        if (!trossen::observer::ObserverRegistry::is_registered(obs_cfg.type)) {
+          std::cerr << "         Hint: type '" << obs_cfg.type
+                    << "' is not registered. Rebuild with the matching CMake option "
+                    << "(e.g. -DTROSSEN_ENABLE_RERUN_OBSERVER=ON for the 'rerun' type) "
+                    << "or set 'enabled': false on this observer to silence the warning.\n";
+        }
+        continue;
+      }
+    }
+  }
 
   // ──────────────────────────────────────────────────────────
   // Teleop controllers (constructor stages arms)
