@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -171,8 +172,14 @@ private:
    * lazily by ``dispatch_`` (encoding is unknown at construction; we don't pre-populate
    * here for that reason).
    *
-   * Worker-thread invariant: ``RerunObserver`` has a single worker, and ``dispatch_``
-   * is the sole reader/writer of ``subscription_state_``. No synchronisation required.
+   * Synchronisation: ``dispatch_`` (worker thread) inserts into ``subscription_state_``
+   * on first sight of each ``record_id``, and ``on_episode_start`` (caller thread)
+   * iterates the map to log a Clear per entity. Concurrent insert-vs-iterate would be
+   * a data race, so both code paths take ``subscription_state_mutex_`` only long
+   * enough to lookup-or-insert (``dispatch_``) or snapshot the keys (``on_episode_start``).
+   * ``std::unordered_map`` guarantees that references to existing elements stay valid
+   * across rehashes, so ``dispatch_`` releases the lock before touching the entry's
+   * fields - no contention on the hot path beyond the brief map lookup.
    */
   struct PerSubscriptionState {
     /// Resolved color encoding for ``ImageRecord`` payloads on this subscription.
@@ -218,9 +225,11 @@ private:
 
   // Lazy per-record_id cache. Keyed by the ``record_id`` argument passed to
   // ``dispatch_``; ``operator[]`` inserts a default-constructed entry on first sight.
-  // Only ``dispatch_`` (worker thread) touches this map, so no synchronisation is
-  // required.
+  // ``dispatch_`` (worker thread) inserts; ``on_episode_start`` (caller thread)
+  // iterates. ``subscription_state_mutex_`` serialises insert-vs-iterate; see the
+  // ``PerSubscriptionState`` docstring for the locking discipline.
   std::unordered_map<std::string, PerSubscriptionState> subscription_state_;
+  std::mutex subscription_state_mutex_;
 
   std::atomic<uint64_t> skipped_frames_{0};
 };

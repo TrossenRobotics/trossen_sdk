@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -206,8 +207,21 @@ void RerunObserver::on_episode_start(uint32_t episode_index) noexcept {
   // active time range. The cached path strings inside PerSubscriptionState stay
   // intact - re-stamping them on the next record is harmless and avoids a per-episode
   // rebuild on the hot path.
-  try {
+  //
+  // Snapshot the keys under the mutex before calling rec_->log. dispatch_ runs on the
+  // worker thread and may insert into subscription_state_ concurrently; holding the
+  // mutex through the rerun gRPC calls would needlessly block dispatch_ for the
+  // length of those calls.
+  std::vector<std::string> record_ids;
+  {
+    std::lock_guard<std::mutex> lk(subscription_state_mutex_);
+    record_ids.reserve(subscription_state_.size());
     for (const auto& [record_id, _] : subscription_state_) {
+      record_ids.push_back(record_id);
+    }
+  }
+  try {
+    for (const auto& record_id : record_ids) {
       rec_->log(record_id, rerun::archetypes::Clear(/*is_recursive=*/true));
     }
   } catch (...) {
@@ -266,7 +280,16 @@ void RerunObserver::dispatch_(const std::string& record_id,
     // first sight (encoding=kUnresolved). After resolution we never re-parse the string
     // on subsequent frames, and a kUnsupported result sticks so further string churn is
     // impossible for that subscription.
-    auto& state = subscription_state_[record_id];
+    //
+    // Lock briefly around the lookup-or-insert: on_episode_start may iterate the map
+    // concurrently on the caller thread. unordered_map keeps references valid through
+    // rehashes, so we can drop the lock and use ``state`` outside the critical section.
+    PerSubscriptionState* state_ptr;
+    {
+      std::lock_guard<std::mutex> lk(subscription_state_mutex_);
+      state_ptr = &subscription_state_[record_id];
+    }
+    auto& state = *state_ptr;
     if (state.encoding == detail::ColorEncoding::kUnresolved) {
       state.encoding = detail::resolve_encoding(img->encoding);
     }
@@ -336,7 +359,12 @@ void RerunObserver::dispatch_(const std::string& record_id,
   }
 
   if (auto* js = dynamic_cast<data::JointStateRecord*>(rec.get())) {
-    auto& state = subscription_state_[record_id];
+    PerSubscriptionState* state_ptr;
+    {
+      std::lock_guard<std::mutex> lk(subscription_state_mutex_);
+      state_ptr = &subscription_state_[record_id];
+    }
+    auto& state = *state_ptr;
     if (!state.joint_paths.has_value()) {
       state.joint_paths = PerSubscriptionState::JointPaths{
         record_id + "/positions",
@@ -367,7 +395,12 @@ void RerunObserver::dispatch_(const std::string& record_id,
   }
 
   if (auto* odom = dynamic_cast<data::Odometry2DRecord*>(rec.get())) {
-    auto& state = subscription_state_[record_id];
+    PerSubscriptionState* state_ptr;
+    {
+      std::lock_guard<std::mutex> lk(subscription_state_mutex_);
+      state_ptr = &subscription_state_[record_id];
+    }
+    auto& state = *state_ptr;
     if (!state.odom_paths.has_value()) {
       state.odom_paths = PerSubscriptionState::OdomPaths{
         record_id + "/pose/x",
