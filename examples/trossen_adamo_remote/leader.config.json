@@ -24,8 +24,8 @@
 
   "teleop": {
     "enabled": false,
-    "rate_hz": 1000.0,
-    "pairs":   []
+    "rate_hz": 100.0,
+    "pairs": []
   },
 
   "backend": {

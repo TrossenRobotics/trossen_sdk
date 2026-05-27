@@ -4,15 +4,19 @@
   "hardware": {
     "arms": {
       "follower": {
-        "ip_address":   "192.168.1.3",
+        "ip_address":   "192.168.1.4",
         "model":        "wxai_v0",
         "end_effector": "wxai_v0_follower"
       }
     },
-    "cameras": []
+    "cameras": [
+      { "id": "camera_high",        "type": "realsense_camera", "serial_number": "128422271347", "width": 640, "height": 480, "fps": 30, "use_depth": false },
+      { "id": "camera_low",         "type": "realsense_camera", "serial_number": "218622270304", "width": 640, "height": 480, "fps": 30, "use_depth": false },
+      { "id": "camera_left_wrist",  "type": "realsense_camera", "serial_number": "218622274938", "width": 640, "height": 480, "fps": 30, "use_depth": false },
+      { "id": "camera_right_wrist", "type": "realsense_camera", "serial_number": "130322272628", "width": 640, "height": 480, "fps": 30, "use_depth": false }
+    ]
   },
 
-  "_remote_leader_hardware_NOTE": "The example binaries currently hard-code 'trossen_arm' as the arm type when constructing components from hardware.arms, so RemoteAdamoLeaderArm cannot live under that block until the loader learns to dispatch on a per-arm 'type' field. The intended config shape is preserved below for the eventual example binary.",
   "remote_leader_hardware": {
     "virtual_leader": {
       "type":            "remote_adamo_leader",
@@ -31,7 +35,11 @@
       "stream_id":       "follower",
       "poll_rate_hz":    100.0,
       "use_device_time": false
-    }
+    },
+    { "type": "realsense_camera", "hardware_id": "camera_high",        "stream_id": "camera_high",        "poll_rate_hz": 30.0, "encoding": "bgr8", "use_device_time": true },
+    { "type": "realsense_camera", "hardware_id": "camera_low",         "stream_id": "camera_low",         "poll_rate_hz": 30.0, "encoding": "bgr8", "use_device_time": true },
+    { "type": "realsense_camera", "hardware_id": "camera_left_wrist",  "stream_id": "camera_left_wrist",  "poll_rate_hz": 30.0, "encoding": "bgr8", "use_device_time": true },
+    { "type": "realsense_camera", "hardware_id": "camera_right_wrist", "stream_id": "camera_right_wrist", "poll_rate_hz": 30.0, "encoding": "bgr8", "use_device_time": true }
   ],
 
   "teleop": {
@@ -61,7 +69,11 @@
           "record_id":   "follower",
           "throttle_hz": 100.0,
           "topic":       "effort"
-        }
+        },
+        { "record_id": "camera_high",        "throttle_hz": 15.0, "topic": "camera", "track_name": "high",        "width": 640, "height": 480, "fps": 15, "bitrate_kbps": 4000 },
+        { "record_id": "camera_low",         "throttle_hz": 15.0, "topic": "camera", "track_name": "low",         "width": 640, "height": 480, "fps": 15, "bitrate_kbps": 4000 },
+        { "record_id": "camera_left_wrist",  "throttle_hz": 15.0, "topic": "camera", "track_name": "left_wrist",  "width": 640, "height": 480, "fps": 15, "bitrate_kbps": 4000 },
+        { "record_id": "camera_right_wrist", "throttle_hz": 15.0, "topic": "camera", "track_name": "right_wrist", "width": 640, "height": 480, "fps": 15, "bitrate_kbps": 4000 }
       ]
     }
   ],
