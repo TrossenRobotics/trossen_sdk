@@ -299,8 +299,13 @@ if(TROSSEN_ENABLE_ADAMO)
   # a credential helper / PAT set up for HTTPS instead.
   set(TROSSEN_ADAMO_REPO_URL "git@github.com:TrossenRobotics/trossen_adamo.git"
     CACHE STRING "trossen_adamo git remote URL")
-  set(TROSSEN_ADAMO_GIT_TAG "main"
-    CACHE STRING "trossen_adamo git ref to fetch")
+  # Pinned to a commit SHA (not a moving branch) for reproducible builds. Bump
+  # deliberately when adopting upstream changes. NOTE: this gate is intentionally
+  # excluded from CI -- it requires SSH access to a private repo and downloads a
+  # binary Adamo SDK tarball whose URL (``-latest``) is mutable upstream, so the
+  # pinned SHA256 in the SDK block above will fail closed when Adamo republishes.
+  set(TROSSEN_ADAMO_GIT_TAG "8934a3bf3240b30ae6bbf835e54a1f26c4c9964c"
+    CACHE STRING "trossen_adamo git ref to fetch (commit SHA)")
 
   FetchContent_Declare(
     trossen_adamo
