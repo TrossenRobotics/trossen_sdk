@@ -52,8 +52,14 @@ constexpr const char* kUsage =
   "Example: adamo_sub_test --robot trossen_stationary_ai --arm leader_left\n";
 
 std::string arg_value(int argc, char** argv, const char* flag, std::string fallback) {
-  for (int i = 1; i < argc - 1; ++i) {
-    if (std::strcmp(argv[i], flag) == 0) return argv[i + 1];
+  for (int i = 1; i < argc; ++i) {
+    if (std::strcmp(argv[i], flag) == 0) {
+      if (i + 1 >= argc) {
+        std::fprintf(stderr, "adamo_sub_test: '%s' needs a value\n%s", flag, kUsage);
+        std::exit(1);
+      }
+      return argv[i + 1];
+    }
   }
   return fallback;
 }
