@@ -143,12 +143,14 @@
     {
       "type":     "adamo",
       "id":       "adamo_publisher",
-      "robot":    "wxai",
+      "robot":    "trossen_stationary_ai",
       "protocol": "quic",
       "enabled":  true,
       "subscriptions": [
-        { "record_id": "leader_left",        "throttle_hz": 30.0, "topic": "leader_state"     },
-        { "record_id": "follower_left",      "throttle_hz": 30.0, "topic": "follower_effort"  },
+        { "record_id": "leader_left",        "throttle_hz": 30.0, "topic": "state" },
+        { "record_id": "leader_right",       "throttle_hz": 30.0, "topic": "state" },
+        { "record_id": "follower_left",      "throttle_hz": 30.0, "topic": "state" },
+        { "record_id": "follower_right",     "throttle_hz": 30.0, "topic": "state" },
         { "record_id": "camera_high",        "throttle_hz": 15.0, "topic": "camera",
           "track_name": "main",        "width": 640, "height": 480, "fps": 15, "bitrate_kbps": 4000 },
         { "record_id": "camera_low",         "throttle_hz": 15.0, "topic": "camera",

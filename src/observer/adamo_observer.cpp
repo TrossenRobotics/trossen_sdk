@@ -27,7 +27,6 @@
 #include "adamo/adamo.hpp"
 #include "trossen_adamo/args.hpp"
 #include "trossen_adamo/publisher.hpp"
-#include "trossen_adamo/topics.hpp"
 #include "trossen_adamo/wire.hpp"
 
 #include "trossen_sdk/observer/observer_registry.hpp"
@@ -92,13 +91,16 @@ AdamoObserver::PublishTarget make_target(const nlohmann::json& sub_j,
                                         const std::string& robot,
                                         const std::string& observer_id,
                                         const std::string& record_id) {
+  // Joint topics use a uniform <robot>/<arm>/<leaf> scheme keyed by arm name
+  // (the record_id), so one observer streams every arm of a multi-arm robot
+  // under one robot prefix without a second observer or topic collisions.
   AdamoObserver::PublishTarget t;
-  if (topic_str == "leader_state") {
-    t.topic = AdamoPublishTopic::kLeaderState;
-    t.topic_name = trossen_adamo::topics::state_of(robot);
-  } else if (topic_str == "follower_effort") {
-    t.topic = AdamoPublishTopic::kFollowerEffort;
-    t.topic_name = trossen_adamo::topics::effort_of(robot);
+  if (topic_str == "state") {
+    t.topic = AdamoPublishTopic::kJointState;
+    t.topic_name = robot + "/" + record_id + "/state";
+  } else if (topic_str == "effort") {
+    t.topic = AdamoPublishTopic::kJointEffort;
+    t.topic_name = robot + "/" + record_id + "/effort";
   } else if (topic_str == "camera") {
     t.topic = AdamoPublishTopic::kCamera;
     t.track_name    = require_string(sub_j, "track_name", observer_id);
@@ -110,7 +112,7 @@ AdamoObserver::PublishTarget make_target(const nlohmann::json& sub_j,
     throw std::runtime_error(
       "AdamoObserver[" + observer_id + "]: subscription '" + record_id +
       "' has unknown topic '" + topic_str +
-      "' (expected 'leader_state', 'follower_effort', or 'camera')");
+      "' (expected 'state', 'effort', or 'camera')");
   }
   return t;
 }
@@ -321,7 +323,7 @@ void AdamoObserver::dispatch_(const std::string& record_id,
 
   try {
     switch (target.topic) {
-      case AdamoPublishTopic::kLeaderState: {
+      case AdamoPublishTopic::kJointState: {
         auto* joint = dynamic_cast<data::JointStateRecord*>(rec.get());
         if (joint == nullptr) {
           skipped_frames_.fetch_add(1, std::memory_order_relaxed);
@@ -346,7 +348,7 @@ void AdamoObserver::dispatch_(const std::string& record_id,
         pub_it->second->put(buf.data(), buf.size());
         break;
       }
-      case AdamoPublishTopic::kFollowerEffort: {
+      case AdamoPublishTopic::kJointEffort: {
         auto* joint = dynamic_cast<data::JointStateRecord*>(rec.get());
         if (joint == nullptr) {
           skipped_frames_.fetch_add(1, std::memory_order_relaxed);
@@ -397,7 +399,9 @@ void AdamoObserver::dispatch_(const std::string& record_id,
   } catch (const std::exception& e) {
     skipped_frames_.fetch_add(1, std::memory_order_relaxed);
     std::cerr << "[observer:" << name() << "] dispatch for '" << record_id
-              << "' threw: " << e.what() << "\n";
+
+
+    << "' threw: " << e.what() << "\n";
   }
 }
 

@@ -2,23 +2,19 @@
  * @file adamo_observer.hpp
  * @brief Observer that publishes local records onto Adamo pubsub.
  *
- * EXPERIMENTAL. Pairs with @ref RemoteAdamoLeaderArm on the peer host to
- * realise leader/follower teleop across two machines:
- *
- *   Leader host:    real leader arm + AdamoObserver  →  bus (leader_state)
- *   Follower host:  bus (leader_state) → RemoteAdamoLeaderArm
- *                   real follower arm + AdamoObserver  →  bus (follower_effort)
+ * EXPERIMENTAL. Streams a local robot onto Adamo so a remote Adamo client
+ * (e.g. the VR viewer at operate.adamohq.com) can watch it. One observer can
+ * serve every arm + camera of a multi-arm robot under a single robot prefix.
  *
  * Subscribes to one or more local records and publishes each onto Adamo:
  *  - ``JointStateRecord`` is encoded via the ``trossen_adamo::wire`` codecs
- *    and pushed through a ``LatestPublisher`` per topic.
+ *    and pushed through a ``LatestPublisher`` to ``<robot>/<arm>/state`` (or
+ *    ``/effort``), keyed by arm name (the subscription ``record_id``).
  *  - ``ImageRecord`` is converted to BGRA and pushed onto an
  *    ``adamo::VideoTrack`` opened against a per-observer ``adamo::Robot``.
  *
  * Scope of this experimental cut:
  *   - Joint-state codec is 7-DOF only (``trossen_adamo::wire::kNumJoints``).
- *   - Inbound effort wiring is stubbed pending a separate
- *     ``RemoteEffortReceiver`` design.
  */
 
 #ifndef TROSSEN_SDK__OBSERVER__ADAMO_OBSERVER_HPP_
@@ -53,19 +49,20 @@ namespace trossen::observer {
 /**
  * @brief Per-subscription publish target (what topic to write a record onto).
  *
- * Maps directly onto the trossen_adamo wire schema:
- *  - ``kLeaderState``     -> ``<robot>/trossen/reference/leader_state``,
- *                            encoded via ``wire::encode_state``.
- *  - ``kFollowerEffort``  -> ``<robot>/trossen/reference/follower_effort``,
- *                            encoded via ``wire::encode_efforts``.
- *  - ``kCamera``          -> ``<robot>`` namespaced video track ``track_name``,
- *                            opened on an ``adamo::Robot`` and fed BGRA frames.
+ * Joint topics use a uniform ``<robot>/<arm>/<leaf>`` scheme so a single
+ * observer can stream every arm of a multi-arm robot under one robot prefix,
+ * keyed by arm name (the subscription's ``record_id``):
+ *  - ``kJointState``  -> ``<robot>/<arm>/state``,  ``wire::encode_state``
+ *                        (positions + velocities).
+ *  - ``kJointEffort`` -> ``<robot>/<arm>/effort``, ``wire::encode_efforts``.
+ *  - ``kCamera``      -> ``<robot>`` namespaced video track ``track_name``,
+ *                        opened on an ``adamo::Robot`` and fed BGRA frames.
  *
  * Resolved from the JSON ``topic`` string on each subscription entry.
  */
 enum class AdamoPublishTopic {
-  kLeaderState,
-  kFollowerEffort,
+  kJointState,
+  kJointEffort,
   kCamera,
 };
 
@@ -95,9 +92,12 @@ public:
    *  - ``robot`` (string) - robot identifier that becomes the topic prefix.
    *    Must match the peer's ``robot``.
    *  - ``subscriptions`` (array) - per-record subscription entries, each with
-   *    ``record_id``, ``throttle_hz``, and ``topic`` (one of
-   *    ``"leader_state"``, ``"follower_effort"``, ``"camera"``).
-   *    Camera subscriptions additionally require ``track_name`` (string),
+   *    ``record_id``, ``throttle_hz``, and ``topic`` (one of ``"state"``,
+   *    ``"effort"``, ``"camera"``). Joint topics resolve to
+   *    ``<robot>/<record_id>/<state|effort>``, so one observer streams every
+   *    arm of a multi-arm robot under one robot prefix, keyed by arm name -
+   *    no second observer / second robot prefix needed. Camera subscriptions
+   *    additionally require ``track_name`` (string) and
    *    ``width`` / ``height`` / ``fps`` / ``bitrate_kbps`` (positive integers).
    *
    * Optional fields:
@@ -111,7 +111,7 @@ public:
   explicit AdamoObserver(const nlohmann::json& cfg);
   ~AdamoObserver() override;
 
-  /// Configured robot/topic prefix (e.g. ``"wxai"``).
+  /// Configured robot/topic prefix (e.g. ``"trossen_stationary_ai"``).
   const std::string& robot() const noexcept { return robot_; }
 
   /// Records the worker reached but did not publish (wrong record type, joint
@@ -131,10 +131,10 @@ public:
   /// Per-subscription state resolved at construction time. Public so the
   /// anonymous-namespace ``make_target`` helper in the .cpp can return it.
   struct PublishTarget {
-    AdamoPublishTopic topic{AdamoPublishTopic::kLeaderState};
-    /// For kLeaderState / kFollowerEffort: fully-qualified Adamo topic name
-    /// (e.g. ``"wxai/trossen/reference/leader_state"``). For kCamera: unused
-    /// (video tracks are keyed by track_name on the Robot, not on a pubsub key).
+    AdamoPublishTopic topic{AdamoPublishTopic::kJointState};
+    /// For kJointState / kJointEffort: fully-qualified Adamo topic name
+    /// (e.g. ``"trossen_stationary_ai/leader_left/state"``). For kCamera:
+    /// unused (video tracks are keyed by track_name on the Robot).
     std::string topic_name;
 
     // ── Camera-only fields (kCamera) ────────────────────────────────────────

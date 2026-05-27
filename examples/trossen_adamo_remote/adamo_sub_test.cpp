@@ -2,17 +2,19 @@
  * @file adamo_sub_test.cpp
  * @brief EXPERIMENTAL. Subscriber-side verification for AdamoObserver.
  *
- * Subscribes to a single Adamo pubsub topic (``leader_state`` or
- * ``follower_effort``) for a given robot prefix, decodes each payload with the
+ * Subscribes to a single joint topic ``<robot>/<arm>/<leaf>`` (leaf
+ * ``state`` or ``effort``), decodes each payload with the
  * ``trossen_adamo::wire`` codec, and prints a one-line summary plus a periodic
  * receive-rate report. Pair it with a publisher (the stationary demo's
- * AdamoObserver, or upstream ``trossen_leader``) on the same machine to confirm
- * joint data is actually reaching the bus -- the Adamo dashboard renders video
- * tracks but not raw teleop pubsub topics, so this is the way to "see" it.
+ * AdamoObserver) on the same machine to confirm joint data is actually
+ * reaching the bus -- the Adamo dashboard renders video tracks but not raw
+ * joint pubsub topics, so this is the way to "see" it.
  *
  * Usage:
- *   source .env && ./build_adamo/examples/adamo_sub_test            # robot=wxai, leader_state
- *   source .env && ./adamo_sub_test --robot wxai --topic follower_effort
+ *   source .env && ./build_adamo/examples/adamo_sub_test \
+ *       --robot trossen_stationary_ai --arm leader_left          # leaf=state
+ *   source .env && ./adamo_sub_test --robot trossen_stationary_ai \
+ *       --arm follower_left --leaf effort
  *
  * Runs until Ctrl-C.
  *
@@ -35,7 +37,6 @@
 #include "adamo/adamo.hpp"
 #include "trossen_adamo/args.hpp"
 #include "trossen_adamo/subscriber.hpp"
-#include "trossen_adamo/topics.hpp"
 #include "trossen_adamo/wire.hpp"
 
 namespace {
@@ -44,9 +45,11 @@ std::atomic<bool> g_stop{false};
 void on_sigint(int) { g_stop.store(true); }
 
 constexpr const char* kUsage =
-  "Usage: adamo_sub_test [--robot NAME] [--topic leader_state|follower_effort]\n"
+  "Usage: adamo_sub_test [--robot NAME] [--arm ARM] [--leaf state|effort]\n"
   "                      [--protocol quic|udp|tcp]\n"
-  "Reads ADAMO_API_KEY from the environment. Runs until Ctrl-C.\n";
+  "Subscribes to <robot>/<arm>/<leaf> (the AdamoObserver joint scheme) and\n"
+  "decodes each frame. Reads ADAMO_API_KEY from the environment. Ctrl-C to stop.\n"
+  "Example: adamo_sub_test --robot trossen_stationary_ai --arm leader_left\n";
 
 std::string arg_value(int argc, char** argv, const char* flag, std::string fallback) {
   for (int i = 1; i < argc - 1; ++i) {
@@ -68,13 +71,14 @@ int main(int argc, char** argv) {
       return 0;
     }
   }
-  const std::string robot    = arg_value(argc, argv, "--robot",    "wxai");
-  const std::string topic    = arg_value(argc, argv, "--topic",    "leader_state");
+  const std::string robot    = arg_value(argc, argv, "--robot", "trossen_stationary_ai");
+  const std::string arm      = arg_value(argc, argv, "--arm",   "leader_left");
+  const std::string leaf     = arg_value(argc, argv, "--leaf",  "state");
   const std::string proto_str = arg_value(argc, argv, "--protocol", "quic");
 
-  const bool is_state = (topic == "leader_state");
-  if (!is_state && topic != "follower_effort") {
-    std::fprintf(stderr, "adamo_sub_test: unknown --topic '%s'\n%s", topic.c_str(), kUsage);
+  const bool is_state = (leaf == "state");
+  if (!is_state && leaf != "effort") {
+    std::fprintf(stderr, "adamo_sub_test: unknown --leaf '%s'\n%s", leaf.c_str(), kUsage);
     return 1;
   }
 
@@ -92,9 +96,7 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  const std::string key = is_state
-    ? trossen_adamo::topics::state_of(robot)
-    : trossen_adamo::topics::effort_of(robot);
+  const std::string key = robot + "/" + arm + "/" + leaf;
 
   std::signal(SIGINT, on_sigint);
 
