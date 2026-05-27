@@ -12,12 +12,15 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
+#include <mutex>
 #include <optional>
 #include <string>
+#include <thread>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -32,6 +35,71 @@
 #include "trossen_sdk/observer/observer_registry.hpp"
 
 namespace trossen::observer {
+
+// Latest-frame video sender. Decouples VideoTrack::send from the observer
+// dispatch worker: dispatch_ does a cheap put() of the newest BGRA frame into a
+// single slot; this worker thread drains the slot and runs the (potentially
+// slow / blocking) send. A stalled video send therefore cannot backpressure
+// joint-state dispatch on the same observer. Mirrors trossen_adamo's
+// LatestPublisher. Producers always overwrite, so a slow send drops stale
+// frames rather than queuing them.
+class LatestVideoSender {
+public:
+  explicit LatestVideoSender(adamo::VideoTrack track)
+    : track_(std::move(track)) {
+    worker_ = std::thread([this] { run(); });
+  }
+  ~LatestVideoSender() { close(); }
+
+  LatestVideoSender(const LatestVideoSender&) = delete;
+  LatestVideoSender& operator=(const LatestVideoSender&) = delete;
+
+  void put(const std::uint8_t* data, std::size_t len) {
+    {
+      std::lock_guard<std::mutex> lk(mu_);
+      pending_.assign(data, data + len);
+      has_pending_ = true;
+    }
+    cv_.notify_one();
+  }
+
+  void close() noexcept {
+    {
+      std::lock_guard<std::mutex> lk(mu_);
+      stop_ = true;
+    }
+    cv_.notify_one();
+    if (worker_.joinable()) worker_.join();
+  }
+
+private:
+  void run() {
+    std::vector<std::uint8_t> buf;
+    while (true) {
+      {
+        std::unique_lock<std::mutex> lk(mu_);
+        cv_.wait(lk, [&] { return stop_ || has_pending_; });
+        if (stop_ && !has_pending_) return;
+        buf.swap(pending_);
+        has_pending_ = false;
+      }
+      try {
+        track_.send(buf.data(), buf.size());
+      } catch (const std::exception& e) {
+        std::cerr << "[observer:adamo] video send failed: " << e.what() << "\n";
+      }
+      buf.clear();
+    }
+  }
+
+  adamo::VideoTrack track_;
+  std::mutex mu_;
+  std::condition_variable cv_;
+  std::vector<std::uint8_t> pending_;
+  bool has_pending_ = false;
+  bool stop_ = false;
+  std::thread worker_;
+};
 
 namespace {
 
@@ -280,7 +348,7 @@ bool AdamoObserver::on_start() {
           target.fps, target.bitrate_kbps);
         video_tracks_.emplace(
           target.track_name,
-          std::make_unique<adamo::VideoTrack>(std::move(vt)));
+          std::make_unique<LatestVideoSender>(std::move(vt)));
       }
 
       // Robot::run() consumes the handle (rvalue-qualified). Move into the
@@ -412,7 +480,9 @@ void AdamoObserver::dispatch_(const std::string& record_id,
           note_skip_(record_id, "unsupported image encoding (need rgb8/bgr8/rgba8/bgra8/mono8)");
           return;
         }
-        track_it->second->send(bgra_scratch_.data(), bgra_scratch_.size());
+        // put() hands the frame to the sender's worker thread; the (possibly
+        // blocking) VideoTrack::send happens there, off the dispatch path.
+        track_it->second->put(bgra_scratch_.data(), bgra_scratch_.size());
         break;
       }
     }

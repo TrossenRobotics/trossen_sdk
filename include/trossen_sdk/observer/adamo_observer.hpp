@@ -47,6 +47,12 @@ class LatestPublisher;
 
 namespace trossen::observer {
 
+/// Latest-frame video sender: wraps an ``adamo::VideoTrack`` behind a worker
+/// thread so ``send`` never runs on the observer dispatch worker (a slow video
+/// send would otherwise backpressure joint streaming on the same observer).
+/// Defined in the .cpp; mirrors ``trossen_adamo::LatestPublisher``.
+class LatestVideoSender;
+
 /**
  * @brief Per-subscription publish target (what topic to write a record onto).
  *
@@ -205,10 +211,11 @@ private:
   /// thread therefore lives until process exit. This matches upstream
   /// trossen_adamo's RealSenseStreamer.
   std::thread adamo_robot_thread_;
-  /// VideoTrack per fully-qualified track key (``"<robot>/<track_name>"``).
-  /// Multiple record_ids may share a track when they all feed the same
-  /// camera stream; we deduplicate at on_start.
-  std::unordered_map<std::string, std::unique_ptr<adamo::VideoTrack>> video_tracks_;
+  /// LatestVideoSender per track_name. Each owns a VideoTrack + worker thread
+  /// so video encoding/sending is off the dispatch path. Multiple record_ids
+  /// may share a track when they feed the same camera stream; deduped at
+  /// on_start.
+  std::unordered_map<std::string, std::unique_ptr<LatestVideoSender>> video_tracks_;
 
   /// Scratch buffer reused across BGRA conversions to avoid heap churn at the
   /// frame rate. Owned by the worker thread (single-threaded dispatch).
