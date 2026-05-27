@@ -7,10 +7,12 @@ capabilities, gated together behind `-DTROSSEN_ENABLE_ADAMO=ON`:
    joint state and each camera's frames to Adamo, so an Adamo client (e.g. the
    VR viewer at operate.adamohq.com) can watch a live robot. This is what the
    `trossen_stationary_ai` example uses.
-2. **Remote teleop (experimental, incomplete).** `RemoteAdamoLeaderArm` is a
-   virtual leader fed by a remote operator's published arm state. The
-   publish side is migrated to the scheme below; the **consumer side has not
-   been migrated yet** — see [Known gaps](#known-gaps).
+2. **Remote teleop (experimental).** `RemoteAdamoLeaderArm` is a virtual leader
+   fed by a remote operator's published arm state. Both sides now use the
+   `<robot>/<arm>/state` scheme below: the leader host publishes via an
+   `AdamoObserver` and the follower host consumes via the
+   `trossen_adamo_remote_follower` example. See
+   [Remote teleop (full loop)](#remote-teleop-full-loop).
 
 ## Topic scheme
 
@@ -81,12 +83,69 @@ one per arm:
 ./build/examples/adamo_sub_test --robot trossen_stationary_ai --arm follower_right
 ```
 
+### Remote teleop (full loop)
+
+Drive a local follower arm from a physical leader arm whose joint state is
+routed through the Adamo cloud. Two processes (same machine or two hosts on the
+same network — the path is identical):
+
+```
+physical leader ─(trossen_adamo_remote_leader + AdamoObserver)─► Adamo  wxai/leader/state
+                                                                   │
+local follower ◄─(TeleopController)◄─ RemoteAdamoLeaderArm ◄───────┘
+```
+
+Two purpose-built binaries, one per role:
+
+- **`trossen_adamo_remote_leader`** (`leader.config.json`) owns the physical
+  leader arm, puts it into gravity-compensation (back-driveable), and an
+  `AdamoObserver` publishes its joint state to `wxai/leader/state`. There is no
+  teleoperation on this side — the leader is a pure source.
+- **`trossen_adamo_remote_follower`** (`follower.config.json`) reads the
+  `remote_leader_hardware` block, instantiates it as a `RemoteAdamoLeaderArm`
+  virtual leader, and pairs it with the real follower through a
+  `TeleopController`.
+
+**Start the leader publisher first** (its arm must be powered and reachable):
+
+```sh
+# Terminal 1 — leader host (publishes wxai/leader/state)
+./build/examples/trossen_adamo_remote_leader --config examples/trossen_adamo_remote/leader.config.json
+```
+
+Optionally confirm frames are flowing before bringing up the follower:
+
+```sh
+./build/examples/adamo_sub_test --robot wxai --arm leader     # decode + print rate
+```
+
+Then start the follower:
+
+```sh
+# Terminal 2 — follower host (subscribes + mirrors onto the follower arm)
+./build/examples/trossen_adamo_remote_follower --config examples/trossen_adamo_remote/follower.config.json
+```
+
+> **Safety — read before moving the arms:**
+> - **Run order matters.** The follower's `prepare_for_teleop()` blocks up to
+>   `ready_timeout_s` (30 s) waiting for the first `wxai/leader/state` frame and
+>   then *skips the pair* on timeout. If the follower printed a timeout, the
+>   publisher was not up — restart the follower.
+> - **First-motion jump.** When the follower episode starts it seeds the virtual
+>   leader from the follower's own staged pose (tick 1 = no motion), but the next
+>   frame is the *real* leader pose. Start the follower episode while the physical
+>   leader is still near the follower's home/staged pose, **then** move the
+>   leader — otherwise the follower snaps to the leader's current pose. (A
+>   max-delta clamp / ramp is not yet implemented.)
+
 ## Tools
 
 | Binary | Purpose |
 | ------ | ------- |
 | `adamo_smoke_test` | Open an `adamo::Session` and exit — validates API key + reachability. |
 | `adamo_sub_test`   | Subscribe to `<robot>/<arm>/<leaf>`, decode + print frames + rate. |
+| `trossen_adamo_remote_leader`   | Drive the local leader into gravity-comp and publish its joint state to `wxai/leader/state`. |
+| `trossen_adamo_remote_follower` | Drive a local follower from a `remote_adamo_leader` virtual leader fed by the leader host's `AdamoObserver`. |
 
 ## Config schema (observer)
 
@@ -112,11 +171,17 @@ one per arm:
 
 ## Known gaps
 
-- **Remote-teleop consumer not migrated.** `RemoteAdamoLeaderArm` (and the
-  `leader.config.json` / `follower.config.json` templates) predate the
-  `<robot>/<arm>/state` scheme; the virtual leader still subscribes to the
-  legacy topic shape, so the publish and consume sides do not yet line up. The
-  observation path does not depend on this.
+- **No first-motion ramp.** The follower mirrors the leader directly; there is
+  no max-delta clamp or velocity ramp, so a large leader/follower pose mismatch
+  at episode start produces a hard jump. See the safety note above.
+- **Virtual leader lives in its own config block.** `remote_adamo_leader` does
+  not fit the `hardware.arms` / `ArmConfig` schema, so it sits in a separate
+  top-level `remote_leader_hardware` block that only the
+  `trossen_adamo_remote_follower` example reads (not the shared SdkConfig
+  parser). Generalising `hardware.arms` with a per-arm `type` is future work.
+- **Effort feedback is published but unconsumed.** The follower config can
+  publish `wxai/follower/effort`, but nothing routes it back onto a real leader
+  yet.
 - **7-DOF only.** The joint wire codec is fixed at 7 joints.
 - **`_Exit` on shutdown.** When a camera pipeline is active, the example
   hard-exits after `mgr.shutdown()` because the Adamo Robot run-loop thread
