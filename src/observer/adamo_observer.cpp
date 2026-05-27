@@ -157,6 +157,16 @@ AdamoObserver::AdamoObserver(const nlohmann::json& cfg)
   protocol_    = optional_string(cfg, "protocol",    "quic",            observer_id);
   api_key_env_ = optional_string(cfg, "api_key_env", "ADAMO_API_KEY",   observer_id);
 
+  // Fail fast on a bad protocol at construction rather than deep in on_start()
+  // (which runs after hardware init). parse_protocol throws on anything other
+  // than quic/udp/tcp; discard the result, we only want the validation here.
+  try {
+    (void)trossen_adamo::args::parse_protocol(protocol_);
+  } catch (const std::exception& e) {
+    throw std::runtime_error(
+      "AdamoObserver[" + observer_id + "]: " + e.what());
+  }
+
   if (!cfg.contains("subscriptions") || !cfg.at("subscriptions").is_array() ||
       cfg.at("subscriptions").empty()) {
     throw std::runtime_error(
@@ -197,6 +207,14 @@ AdamoObserver::~AdamoObserver() {
 
 bool AdamoObserver::video_pipeline_active() noexcept {
   return g_video_pipeline_active.load(std::memory_order_relaxed);
+}
+
+void AdamoObserver::note_skip_(const std::string& record_id, const char* reason) {
+  skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+  if (warned_records_.insert(record_id).second) {
+    std::cerr << "[observer:" << name() << "] dropping frames for '" << record_id
+              << "': " << reason << " (logged once; see skipped_frames())\n";
+  }
 }
 
 bool AdamoObserver::has_camera_subscription_() const noexcept {
@@ -308,15 +326,17 @@ void AdamoObserver::on_stop() {
   // The Adamo SDK does not expose a graceful run-loop stop. Detach so the
   // thread lives until process exit -- it will drain when the underlying
   // connection closes. Matches upstream RealSenseStreamer.
+  // (adamo_robot_ is already null here: on_start consumes the handle into the
+  // run-thread via std::move and resets the wrapper, so there is nothing to
+  // free at this point -- freeing a Robot while run() executes is UB anyway.)
   if (adamo_robot_thread_.joinable()) adamo_robot_thread_.detach();
-  adamo_robot_.reset();
 }
 
 void AdamoObserver::dispatch_(const std::string& record_id,
                               const std::shared_ptr<data::RecordBase>& rec) {
   auto target_it = targets_.find(record_id);
   if (target_it == targets_.end()) {
-    skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+    note_skip_(record_id, "no publish target resolved for this record_id");
     return;
   }
   const auto& target = target_it->second;
@@ -326,19 +346,19 @@ void AdamoObserver::dispatch_(const std::string& record_id,
       case AdamoPublishTopic::kJointState: {
         auto* joint = dynamic_cast<data::JointStateRecord*>(rec.get());
         if (joint == nullptr) {
-          skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+          note_skip_(record_id, "topic 'state' but record is not a JointStateRecord");
           return;
         }
         auto pub_it = publishers_.find(target.topic_name);
         if (pub_it == publishers_.end()) {
-          skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+          note_skip_(record_id, "no publisher for resolved topic");
           return;
         }
         // The wire codec hard-codes kNumJoints == 7. Reject anything else so
         // we get a loud error rather than a silent on-wire size mismatch.
         if (joint->positions.size() != trossen_adamo::wire::kNumJoints ||
             joint->velocities.size() != trossen_adamo::wire::kNumJoints) {
-          skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+          note_skip_(record_id, "joint count != 7 (wire codec is 7-DOF only)");
           return;
         }
         const double timestamp = trossen_adamo::wire::now_seconds();
@@ -351,16 +371,16 @@ void AdamoObserver::dispatch_(const std::string& record_id,
       case AdamoPublishTopic::kJointEffort: {
         auto* joint = dynamic_cast<data::JointStateRecord*>(rec.get());
         if (joint == nullptr) {
-          skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+          note_skip_(record_id, "topic 'effort' but record is not a JointStateRecord");
           return;
         }
         auto pub_it = publishers_.find(target.topic_name);
         if (pub_it == publishers_.end()) {
-          skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+          note_skip_(record_id, "no publisher for resolved topic");
           return;
         }
         if (joint->efforts.size() != trossen_adamo::wire::kNumJoints) {
-          skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+          note_skip_(record_id, "effort count != 7 (wire codec is 7-DOF only)");
           return;
         }
         const double timestamp = trossen_adamo::wire::now_seconds();
@@ -372,12 +392,12 @@ void AdamoObserver::dispatch_(const std::string& record_id,
       case AdamoPublishTopic::kCamera: {
         auto* img = dynamic_cast<data::ImageRecord*>(rec.get());
         if (img == nullptr) {
-          skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+          note_skip_(record_id, "topic 'camera' but record is not an ImageRecord");
           return;
         }
         auto track_it = video_tracks_.find(target.track_name);
         if (track_it == video_tracks_.end()) {
-          skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+          note_skip_(record_id, "no video track for configured track_name");
           return;
         }
         // Adamo's track was created with config-declared width/height. If the
@@ -385,11 +405,11 @@ void AdamoObserver::dispatch_(const std::string& record_id,
         // send. Catch the obvious mismatch here so we get a clear log line
         // rather than an opaque adamo_video_track_send failure.
         if (img->width != target.width || img->height != target.height) {
-          skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+          note_skip_(record_id, "frame dimensions disagree with configured width/height");
           return;
         }
         if (!to_bgra(*img, bgra_scratch_)) {
-          skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+          note_skip_(record_id, "unsupported image encoding (need rgb8/bgr8/rgba8/bgra8/mono8)");
           return;
         }
         track_it->second->send(bgra_scratch_.data(), bgra_scratch_.size());
@@ -397,11 +417,9 @@ void AdamoObserver::dispatch_(const std::string& record_id,
       }
     }
   } catch (const std::exception& e) {
-    skipped_frames_.fetch_add(1, std::memory_order_relaxed);
+    note_skip_(record_id, "encode/publish threw");
     std::cerr << "[observer:" << name() << "] dispatch for '" << record_id
-
-
-    << "' threw: " << e.what() << "\n";
+              << "' threw: " << e.what() << "\n";
   }
 }
 

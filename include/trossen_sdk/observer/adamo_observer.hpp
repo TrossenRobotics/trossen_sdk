@@ -26,6 +26,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "nlohmann/json.hpp"
@@ -158,6 +159,14 @@ private:
   void dispatch_(const std::string& record_id,
                  const std::shared_ptr<data::RecordBase>& rec);
 
+  /// Count a dropped frame and, the first time a given record_id is dropped,
+  /// log the reason once. Distinguishes structural misconfiguration (wrong
+  /// record type for the topic, joint count != 7, camera dim mismatch) from a
+  /// silently-empty bus. Worker-thread only. ``skipped_frames_`` is never
+  /// expected to advance for healthy streams (throttling happens upstream in
+  /// ObserverBase), so any drop is worth surfacing.
+  void note_skip_(const std::string& record_id, const char* reason);
+
   /// True if any subscription's resolved topic is ``kCamera``. Drives whether
   /// on_start() opens an ``adamo::Robot`` + run-thread.
   bool has_camera_subscription_() const noexcept;
@@ -173,6 +182,10 @@ private:
   /// record_id → publish target. Built from the JSON ``subscriptions``
   /// array. Read-only after construction.
   std::unordered_map<std::string, PublishTarget> targets_;
+
+  /// record_ids already logged by note_skip_(), so each is warned only once.
+  /// Worker-thread only (single-threaded dispatch), no lock needed.
+  std::unordered_set<std::string> warned_records_;
 
   // ── State opened in on_start / closed in on_stop ──────────────────────────
   /// One Adamo session per observer instance; shared across joint-state topics.
