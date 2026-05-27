@@ -889,7 +889,10 @@ UserAction SessionManager::monitor_episode(
 
   auto last_update = std::chrono::steady_clock::now();
 
-  while (!are_final_stats_emitted()) {
+  // Also break on g_stop_requested (Ctrl+C) so a long max_duration episode does not
+  // ignore the shutdown signal; mirrors the guard in start_async_monitoring() below.
+  // The post-loop check returns kStop so callers run their normal stop_episode() path.
+  while (!are_final_stats_emitted() && !trossen::utils::g_stop_requested) {
     // Check for re-record request
     if (rerecord_requested_.load()) {
       return UserAction::kReRecord;
