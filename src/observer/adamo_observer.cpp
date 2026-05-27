@@ -185,10 +185,11 @@ AdamoObserver::PublishTarget make_target(const nlohmann::json& sub_j,
   return t;
 }
 
-/// Convert an ImageRecord's cv::Mat to BGRA8 in ``dst``, returning false if
-/// the source encoding is unsupported. ``dst`` is resized to width*height*4.
-bool to_bgra(const trossen::data::ImageRecord& img,
-             std::vector<std::uint8_t>& dst) {
+}  // namespace
+
+namespace detail {
+
+bool image_to_bgra(const data::ImageRecord& img, std::vector<std::uint8_t>& dst) {
   // Adamo's VideoTrack expects packed BGRA. The trossen_adamo follower
   // pipeline also feeds BGRA, so any change here will diverge from the
   // operator-UI expectations.
@@ -215,7 +216,7 @@ bool to_bgra(const trossen::data::ImageRecord& img,
   return true;
 }
 
-}  // namespace
+}  // namespace detail
 
 AdamoObserver::AdamoObserver(const nlohmann::json& cfg)
   : ObserverBase(cfg.value("id", std::string{"adamo"})) {
@@ -476,7 +477,7 @@ void AdamoObserver::dispatch_(const std::string& record_id,
           note_skip_(record_id, "frame dimensions disagree with configured width/height");
           return;
         }
-        if (!to_bgra(*img, bgra_scratch_)) {
+        if (!detail::image_to_bgra(*img, bgra_scratch_)) {
           note_skip_(record_id, "unsupported image encoding (need rgb8/bgr8/rgba8/bgra8/mono8)");
           return;
         }

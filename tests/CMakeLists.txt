@@ -97,6 +97,13 @@ if(TROSSEN_ENABLE_RERUN_OBSERVER)
   target_link_libraries(test_rerun_observer PRIVATE trossen_sdk rerun_sdk GTest::gtest_main)
 endif()
 
+if(TROSSEN_ENABLE_ADAMO)
+  # Host-independent: exercises image_to_bgra, topic resolution, and config
+  # validation without opening an Adamo session.
+  add_executable(test_adamo_observer test_adamo_observer.cpp)
+  target_link_libraries(test_adamo_observer PRIVATE trossen_sdk GTest::gtest_main)
+endif()
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -129,4 +136,7 @@ gtest_discover_tests(test_observer_registry)
 gtest_discover_tests(test_session_manager_observers)
 if(TROSSEN_ENABLE_RERUN_OBSERVER)
   gtest_discover_tests(test_rerun_observer)
+endif()
+if(TROSSEN_ENABLE_ADAMO)
+  gtest_discover_tests(test_adamo_observer)
 endif()

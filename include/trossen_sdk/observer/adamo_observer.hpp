@@ -73,6 +73,14 @@ enum class AdamoPublishTopic {
   kCamera,
 };
 
+namespace detail {
+/// Convert an ImageRecord's cv::Mat to packed BGRA8 in ``dst`` (resized to
+/// width*height*4). Returns false on an empty image or unsupported encoding
+/// (supported: rgb8/bgr8/rgba8/bgra8/mono8, case-insensitive). Exposed for
+/// unit testing; used internally by the camera dispatch path.
+bool image_to_bgra(const data::ImageRecord& img, std::vector<std::uint8_t>& dst);
+}  // namespace detail
+
 /**
  * @brief Observer that publishes local records onto Adamo pubsub.
  *
@@ -153,6 +161,12 @@ public:
     std::uint32_t fps{0};
     std::uint32_t bitrate_kbps{0};
   };
+
+  /// Resolved publish targets keyed by record_id (arm name). Read-only after
+  /// construction; exposed for tests/introspection of the resolved topics.
+  const std::unordered_map<std::string, PublishTarget>& targets() const noexcept {
+    return targets_;
+  }
 
 protected:
   bool on_start() override;
