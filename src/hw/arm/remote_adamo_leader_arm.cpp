@@ -11,19 +11,19 @@
 #include "trossen_sdk/hw/arm/remote_adamo_leader_arm.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 
 #include "adamo/adamo.hpp"
 #include "trossen_adamo/args.hpp"
-#include "trossen_adamo/handshake.hpp"
 #include "trossen_adamo/subscriber.hpp"
-#include "trossen_adamo/topics.hpp"
 #include "trossen_adamo/wire.hpp"
 
 #include "trossen_sdk/hw/hardware_registry.hpp"
@@ -74,8 +74,15 @@ RemoteAdamoLeaderArm::~RemoteAdamoLeaderArm() {
 void RemoteAdamoLeaderArm::configure(const nlohmann::json& config) {
   const std::string& hw_id = get_identifier();
   robot_       = require_string(config, "robot", hw_id);
+  arm_         = require_string(config, "arm",   hw_id);
   protocol_    = optional_string(config, "protocol",    "quic",          hw_id);
   api_key_env_ = optional_string(config, "api_key_env", "ADAMO_API_KEY", hw_id);
+  // Fail fast on a bad protocol at configure() rather than in prepare_for_teleop().
+  try {
+    (void)trossen_adamo::args::parse_protocol(protocol_);
+  } catch (const std::exception& e) {
+    throw std::runtime_error("RemoteAdamoLeaderArm[" + hw_id + "]: " + e.what());
+  }
   if (config.contains("ready_timeout_s")) {
     if (!config.at("ready_timeout_s").is_number()) {
       throw std::runtime_error(
@@ -98,6 +105,7 @@ nlohmann::json RemoteAdamoLeaderArm::get_info() const {
     {"type", get_type()},
     {"identifier", get_identifier()},
     {"robot", robot_},
+    {"arm", arm_},
     {"protocol", protocol_},
     {"num_joints", kNumJoints},
   };
@@ -116,39 +124,37 @@ void RemoteAdamoLeaderArm::prepare_for_teleop() {
   session_ = std::make_unique<adamo::Session>(
     adamo::Session::open(api_key, proto));
 
-  // This component sits on the FOLLOWER host. By upstream convention the
-  // follower publishes follower_ready and waits for leader_ready -- that's
-  // exactly the role we adopt here.
-  self_ready_pub_ = std::make_unique<adamo::Publisher>(
-    session_->publisher(trossen_adamo::topics::follower_ready_of(robot_)));
-  handshake_sub_ = std::make_unique<adamo::Subscriber>(
-    session_->subscribe(trossen_adamo::topics::leader_ready_of(robot_)));
+  // Subscribe to the leader arm's joint state on the per-arm scheme published
+  // by AdamoObserver: "<robot>/<arm>/state".
+  const std::string key = robot_ + "/" + arm_ + "/state";
+  state_sub_ = std::make_unique<trossen_adamo::LatestSubscriber>(*session_, key);
 
-  trossen_adamo::handshake::wait_for_peer_ready(
-    *self_ready_pub_,
-    *handshake_sub_,
-    ready_timeout_s_,
-    "leader");
-
-  // Handshake passed: now arm the hot-path latest-only subscriber for
-  // leader_state. The raw handshake subscriber stays parked for the rest of
-  // the session; teardown drops everything in end_teleop().
-  state_sub_ = std::make_unique<trossen_adamo::LatestSubscriber>(
-    *session_,
-    trossen_adamo::topics::state_of(robot_));
+  // Readiness: the AdamoObserver publisher does NOT participate in the upstream
+  // *_ready handshake, so we treat "first decoded state frame" as the readiness
+  // signal. Block until a frame arrives (seeding the cache with the real leader
+  // pose) or ready_timeout_s_ elapses -- throwing on timeout keeps
+  // TeleopController::prepare_teleop from entering the mirror loop pointed at a
+  // silent topic.
+  const auto deadline = std::chrono::steady_clock::now() +
+    std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::duration<double>(ready_timeout_s_));
+  while (!poll_latest_()) {
+    if (std::chrono::steady_clock::now() >= deadline) {
+      state_sub_.reset();
+      session_.reset();
+      throw std::runtime_error(
+        "RemoteAdamoLeaderArm[" + hw_id + "]: no '" + key + "' frame within " +
+        std::to_string(ready_timeout_s_) + "s; is the leader publishing?");
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
 }
 
 void RemoteAdamoLeaderArm::end_teleop() {
-  // Tear down in reverse order of construction so each layer's destructor
-  // sees a valid session_ until the very end.
+  // Tear down in reverse order of construction so the subscriber's callback
+  // (which holds the session) stops before the session itself is dropped.
   state_sub_.reset();
-  handshake_sub_.reset();
-  self_ready_pub_.reset();
   session_.reset();
-  {
-    std::lock_guard<std::mutex> lk(cache_mu_);
-    received_any_ = false;
-  }
 }
 
 void RemoteAdamoLeaderArm::sync_to_state(const std::vector<float>& state) {
@@ -199,7 +205,6 @@ bool RemoteAdamoLeaderArm::poll_latest_() {
     cached_positions_[i]  = static_cast<float>(decoded.positions[i]);
     cached_velocities_[i] = static_cast<float>(decoded.velocities[i]);
   }
-  received_any_ = true;
   return true;
 }
 

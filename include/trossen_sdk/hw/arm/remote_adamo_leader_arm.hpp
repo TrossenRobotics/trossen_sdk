@@ -4,27 +4,32 @@
  *
  * EXPERIMENTAL. Pairs with @ref AdamoObserver on the peer host to realise
  * leader/follower teleop across two machines without any local leader
- * hardware. The remote operator's real leader arm publishes ``leader_state``;
- * this component subscribes to that topic and presents itself to
- * ``TeleopController`` as a ``JointSpaceTeleop`` leader.
+ * hardware. The remote operator's real leader arm is published by an
+ * AdamoObserver as ``<robot>/<arm>/state``; this component subscribes to that
+ * topic and presents itself to ``TeleopController`` as a ``JointSpaceTeleop``
+ * leader.
  *
  * Role split:
- *   - ``read()``                : decode the latest ``leader_state`` payload.
+ *   - ``read()``                : return the latest decoded joint positions.
  *   - ``write()``               : no-op (leaders never receive commands).
  *   - ``sync_to_state(local)``  : seed the cache with the local follower's
- *                                  current pose so the first tick after
- *                                  ``prepare_for_teleop`` does not jolt the
- *                                  follower towards a stale wire value.
- *   - ``prepare_for_teleop()``  : open ``adamo::Session``, run the ready
- *                                  handshake; throws on timeout so
- *                                  ``TeleopController::prepare_teleop`` never
- *                                  enters the mirror loop without a peer.
+ *                                  current pose, the fallback returned by
+ *                                  ``read()`` until the first wire frame lands.
+ *   - ``prepare_for_teleop()``  : open ``adamo::Session``, subscribe to
+ *                                  ``<robot>/<arm>/state``, and block until the
+ *                                  first frame arrives (readiness signal) or
+ *                                  ``ready_timeout_s`` elapses; throws on
+ *                                  timeout so ``TeleopController::prepare_teleop``
+ *                                  never enters the mirror loop pointed at a
+ *                                  silent topic. (AdamoObserver does not publish
+ *                                  the upstream ``*_ready`` handshake, so the
+ *                                  first state frame is the readiness proxy.)
  *   - ``end_teleop()``          : drain subscriber + close session.
  *
  * Scope of this experimental cut: 7-DOF only (the wire codec hard-codes
  * ``kNumJoints = 7``). Effort feedback from the follower back to a real
- * leader is out of scope here — that lives in a sibling component that
- * subscribes to ``follower_effort``.
+ * leader is out of scope here — that would be a sibling component subscribing
+ * to ``<robot>/<arm>/effort``.
  */
 
 #ifndef TROSSEN_SDK__HW__ARM__REMOTE_ADAMO_LEADER_ARM_HPP_
@@ -44,8 +49,6 @@
 // public include surface. Concrete definitions are pulled in only by the .cpp.
 namespace adamo {
 class Session;
-class Publisher;
-class Subscriber;
 }  // namespace adamo
 namespace trossen_adamo {
 class LatestSubscriber;
@@ -76,13 +79,16 @@ public:
    * @brief Configure the virtual leader from JSON.
    *
    * Required fields:
-   *  - ``robot`` (string) - topic prefix; must match peer.
+   *  - ``robot`` (string) - topic prefix; must match the publishing peer.
+   *  - ``arm`` (string)   - leader arm name; the topic is ``<robot>/<arm>/state``
+   *                         and must match the peer's publishing ``record_id``.
    *
    * Optional fields:
    *  - ``protocol`` (string)            - ``"quic"`` (default) / ``"udp"`` / ``"tcp"``.
    *  - ``api_key_env`` (string)         - env var holding the API key,
    *                                       default ``"ADAMO_API_KEY"``.
-   *  - ``ready_timeout_s`` (number)     - handshake timeout, default 30.
+   *  - ``ready_timeout_s`` (number)     - first-frame readiness timeout (s),
+   *                                       default 30.
    */
   void configure(const nlohmann::json& config) override;
 
@@ -106,18 +112,13 @@ private:
 
   // ── Configuration (set in configure(), read-only after) ───────────────────
   std::string robot_;
+  std::string arm_;
   std::string protocol_{"quic"};
   std::string api_key_env_{"ADAMO_API_KEY"};
   double ready_timeout_s_{30.0};
 
   // ── Adamo runtime state (opened in prepare_for_teleop) ────────────────────
   std::unique_ptr<adamo::Session> session_;
-  /// Raw subscriber used only by the handshake (the handshake drains samples
-  /// synchronously; a callback-backed LatestSubscriber would race with that).
-  std::unique_ptr<adamo::Subscriber> handshake_sub_;
-  /// Self-side ready publisher (we publish follower_ready, peer publishes
-  /// leader_ready). Held so the publisher worker lives until end_teleop().
-  std::unique_ptr<adamo::Publisher> self_ready_pub_;
   /// Hot-path subscriber: callback-backed, single-slot latest payload.
   std::unique_ptr<trossen_adamo::LatestSubscriber> state_sub_;
   /// Scratch buffer reused across read() calls to avoid heap churn at the
@@ -131,9 +132,6 @@ private:
   std::vector<float> cached_positions_;
   /// Last decoded joint velocities; defaults to zero until first decode.
   std::vector<float> cached_velocities_;
-  /// True once at least one wire payload has been decoded. Until then,
-  /// read() returns the value seeded by sync_to_state().
-  bool received_any_{false};
 };
 
 }  // namespace trossen::hw::arm

@@ -17,6 +17,7 @@
     "virtual_leader": {
       "type":            "remote_adamo_leader",
       "robot":           "wxai",
+      "arm":             "leader",
       "protocol":        "quic",
       "api_key_env":     "ADAMO_API_KEY",
       "ready_timeout_s": 30.0
