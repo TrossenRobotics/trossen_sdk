@@ -46,7 +46,7 @@
         {
           "record_id":   "leader",
           "throttle_hz": 100.0,
-          "topic":       "leader_state"
+          "topic":       "state"
         }
       ]
     }

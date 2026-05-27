@@ -59,7 +59,7 @@
         {
           "record_id":   "follower",
           "throttle_hz": 100.0,
-          "topic":       "follower_effort"
+          "topic":       "effort"
         }
       ]
     }

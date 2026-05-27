@@ -1,103 +1,130 @@
-# trossen_adamo_remote (EXPERIMENTAL)
+# trossen_adamo (EXPERIMENTAL)
 
-Remote-teleop bridge built on Adamo's pubsub bus. Two hosts, one virtual link:
+Adamo integration for Trossen arms, built on Adamo's pubsub + video bus. Two
+capabilities, gated together behind `-DTROSSEN_ENABLE_ADAMO=ON`:
 
-- **Leader host** runs the real leader arm + an `AdamoObserver` that publishes
-  `leader_state` onto the bus.
-- **Follower host** runs the real follower arm + a `RemoteAdamoLeaderArm`
-  virtual leader (subscribes to `leader_state`) + an `AdamoObserver` that
-  publishes `follower_effort` back to the bus.
+1. **Observation / streaming (working).** `AdamoObserver` publishes each arm's
+   joint state and each camera's frames to Adamo, so an Adamo client (e.g. the
+   VR viewer at operate.adamohq.com) can watch a live robot. This is what the
+   `trossen_stationary_ai` example uses.
+2. **Remote teleop (experimental, incomplete).** `RemoteAdamoLeaderArm` is a
+   virtual leader fed by a remote operator's published arm state. The
+   publish side is migrated to the scheme below; the **consumer side has not
+   been migrated yet** — see [Known gaps](#known-gaps).
 
-This directory ships the two config files (`leader.config.json`,
-`follower.config.json`) that drive each side. A dedicated example binary is
-**not yet written** — see [Known gaps](#known-gaps).
+## Topic scheme
+
+Joint data uses a uniform per-arm key, so one observer streams every arm of a
+multi-arm robot under one robot prefix (no second observer / robot prefix):
+
+```
+<robot>/<arm>/state     CDR-free wire codec, positions + velocities (encode_state)
+<robot>/<arm>/effort     "                    efforts (encode_efforts)
+```
+
+`<arm>` is the subscription's `record_id` (e.g. `leader_left`, `follower_right`).
+Camera frames are published as Adamo **video tracks** (a separate channel from
+pubsub) named by `track_name`; the operator UI renders those, not the joint
+pubsub topics.
+
+> The joint wire codec is fixed at 7 joints (`trossen_adamo::wire::kNumJoints`,
+> WidowX AI). Arms with a different joint count are skipped.
 
 ## Build
 
-```
-cmake -S . -B build \
-  -DTROSSEN_ENABLE_ADAMO=ON \
-  -DCMAKE_PREFIX_PATH=/abs/path/to/extracted-adamo-sdk
+```sh
+cmake -S . -B build -DTROSSEN_ENABLE_ADAMO=ON
 cmake --build build -j $(nproc)
 ```
 
-The Adamo C SDK is a prebuilt tarball — grab it from
-<https://install.adamohq.com/sdk/v0.1.34/> (or newer), extract somewhere, and
-pass that directory via `-DCMAKE_PREFIX_PATH`. The CMake gate runs
-`find_package(Adamo CONFIG REQUIRED)`; without the SDK the configure step
-will fail with a clear error.
+`-DTROSSEN_ENABLE_ADAMO=ON` FetchContent-downloads the Adamo C SDK tarball
+(`install.adamohq.com`, hash-pinned in the top-level `CMakeLists.txt`) and
+clones `TrossenRobotics/trossen_adamo` over SSH. No manual SDK extract needed.
+
+Useful options:
+
+- `-DTROSSEN_ADAMO_AUTOFETCH_SDK=OFF -DAdamo_DIR=/abs/path/lib/cmake/Adamo` —
+  use a manually extracted SDK instead of the autofetch.
+- `-DTROSSEN_ADAMO_REPO_URL=https://github.com/...` — clone trossen_adamo over
+  HTTPS instead of SSH (needs a credential helper for the private repo).
+- `-DTROSSEN_ADAMO_BUILD_UPSTREAM_BINARIES=ON` — also build the reference
+  `trossen_leader` / `trossen_follower` binaries (follower needs librealsense2).
 
 ## Run
 
-`ADAMO_API_KEY` must be set in the environment on both hosts:
+`ADAMO_API_KEY` must be set in the environment (keep it in a gitignored `.env`):
 
+```sh
+source .env   # exports ADAMO_API_KEY
 ```
-export ADAMO_API_KEY=ak_...
+
+### Verify the SDK connection
+
+```sh
+./build/examples/adamo_smoke_test          # opens a session, prints org, exits
 ```
 
-**Order matters** — start the follower first so the `RemoteAdamoLeaderArm`
-is ready to receive `leader_state` the moment the leader publishes.
+### Observation (stationary demo)
 
-## Config schemas (experimental)
+The `trossen_stationary_ai` config publishes all four arms as
+`trossen_stationary_ai/<arm>/state` plus four camera video tracks:
 
-### `AdamoObserver`
+```sh
+./build/examples/trossen_stationary_ai --config examples/trossen_stationary_ai/config.json
+```
+
+Joint pubsub is not shown on the dashboard — watch it with the subscriber tool,
+one per arm:
+
+```sh
+./build/examples/adamo_sub_test --robot trossen_stationary_ai --arm leader_left
+./build/examples/adamo_sub_test --robot trossen_stationary_ai --arm follower_right
+```
+
+## Tools
+
+| Binary | Purpose |
+| ------ | ------- |
+| `adamo_smoke_test` | Open an `adamo::Session` and exit — validates API key + reachability. |
+| `adamo_sub_test`   | Subscribe to `<robot>/<arm>/<leaf>`, decode + print frames + rate. |
+
+## Config schema (observer)
 
 ```jsonc
 {
-  "type": "adamo",
-  "id":   "adamo_publisher",
-  "robot": "wxai",                  // topic prefix, must match peer
-  "protocol": "quic",               // "quic" | "udp" | "tcp"
-  "api_key_env": "ADAMO_API_KEY",   // optional env override
-  "peer_uri": "",                   // optional, SDK default if empty
+  "type":    "adamo",
+  "id":      "adamo_publisher",
+  "robot":   "trossen_stationary_ai",   // topic prefix
+  "protocol": "quic",                    // "quic" | "udp" | "tcp"
+  "enabled": true,
   "subscriptions": [
-    {
-      "record_id":   "leader",
-      "throttle_hz": 100.0,
-      "topic":       "leader_state" // "leader_state" | "follower_effort"
-    }
+    { "record_id": "leader_left",  "throttle_hz": 30.0, "topic": "state" },
+    { "record_id": "follower_left","throttle_hz": 30.0, "topic": "state" },
+    { "record_id": "camera_high",  "throttle_hz": 15.0, "topic": "camera",
+      "track_name": "main", "width": 640, "height": 480, "fps": 15, "bitrate_kbps": 4000 }
   ]
 }
 ```
 
-### `RemoteAdamoLeaderArm`
-
-```jsonc
-{
-  "type": "remote_adamo_leader",
-  "robot": "wxai",
-  "protocol": "quic",
-  "api_key_env": "ADAMO_API_KEY",
-  "peer_uri": "",
-  "ready_timeout_s": 30.0
-}
-```
+`topic` is one of `"state"` (positions+velocities), `"effort"` (efforts), or
+`"camera"`. Camera entries additionally require `track_name`, `width`,
+`height`, `fps`, `bitrate_kbps`.
 
 ## Known gaps
 
-- **No example binary yet.** The existing `trossen_solo_ai` /
-  `trossen_stationary_ai` example binaries hardcode `"trossen_arm"` as the
-  arm type when constructing components from `cfg.hardware.arms`, so
-  `RemoteAdamoLeaderArm` cannot be plumbed through that path without either
-  (a) extending `ArmConfig` with a `type` field that drives the registry key,
-  or (b) writing a dedicated `trossen_adamo_remote.cpp` that constructs the
-  virtual leader directly via `HardwareRegistry::create("remote_adamo_leader",
-  ...)`. The `_remote_leader_hardware_NOTE` block in `follower.config.json`
-  documents the intended shape pending that decision.
-- **7-DOF only.** Adamo's wire codec hard-codes `kNumJoints = 7`
-  (WidowX AI). Any other arm count will be skipped by `AdamoObserver` and
-  rejected by `RemoteAdamoLeaderArm::sync_to_state`.
-- **No image / odometry publish.** Adamo `VideoTrack` requires the SDK's
-  video bindings (`Adamo_VIDEO=ON`) and a separate `adamo::Robot` thread.
-  Out of scope for this checkpoint.
-- **No effort feedback receiver.** Publishing `follower_effort` is wired;
-  consuming it on the leader side (to drive the real leader's external-
-  effort mode) is a future sibling component, not part of
-  `RemoteAdamoLeaderArm`.
+- **Remote-teleop consumer not migrated.** `RemoteAdamoLeaderArm` (and the
+  `leader.config.json` / `follower.config.json` templates) predate the
+  `<robot>/<arm>/state` scheme; the virtual leader still subscribes to the
+  legacy topic shape, so the publish and consume sides do not yet line up. The
+  observation path does not depend on this.
+- **7-DOF only.** The joint wire codec is fixed at 7 joints.
+- **`_Exit` on shutdown.** When a camera pipeline is active, the example
+  hard-exits after `mgr.shutdown()` because the Adamo Robot run-loop thread
+  cannot be stopped (no SDK hook) and would otherwise deadlock C++ global
+  teardown.
 
 ## Why a separate gate?
 
-`-DTROSSEN_ENABLE_ADAMO=ON` is off by default because it forces both an
-Adamo C SDK install (binary tarball, not pip/apt) **and** a FetchContent
-clone of `TrossenRobotics/trossen_adamo`. Default `trossen_sdk` builds stay
+`-DTROSSEN_ENABLE_ADAMO=ON` is off by default because it pulls a binary SDK
+tarball **and** a private FetchContent clone. Default `trossen_sdk` builds stay
 hermetic.
