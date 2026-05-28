@@ -324,7 +324,15 @@ bool AdamoObserver::on_start() {
       for (const auto& [record_id, target] : targets_) {
         if (target.topic == AdamoPublishTopic::kCamera) continue;
         if (!seen_topics.insert(target.topic_name).second) continue;
-        auto pub = session_->publisher(target.topic_name);
+        // Real-time joint topics (state/effort) need fire-and-forget semantics:
+        // the SDK default (priority=4, express=false, reliable=true) forces
+        // retransmits + in-order delivery, which causes ~50 ms stalls on rare
+        // packet loss. Latest-wins state/effort is safe to drop.
+        // Mirrors upstream trossen_adamo/leader.cpp.
+        auto pub = session_->publisher(target.topic_name,
+                                       /*priority=*/250,
+                                       /*express=*/true,
+                                       /*reliable=*/false);
         publishers_.emplace(
           target.topic_name,
           std::make_unique<trossen_adamo::LatestPublisher>(std::move(pub)));

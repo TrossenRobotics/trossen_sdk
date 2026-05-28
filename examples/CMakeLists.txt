@@ -39,24 +39,24 @@ if(TROSSEN_ENABLE_ADAMO)
   add_executable(adamo_smoke_test trossen_adamo_remote/adamo_smoke_test.cpp)
   target_link_libraries(adamo_smoke_test PRIVATE trossen_adamo_common)
 
-  # Subscriber-side verification: decode + print frames published by an
-  # AdamoObserver (the dashboard only renders video, not pubsub teleop topics).
-  add_executable(adamo_sub_test trossen_adamo_remote/adamo_sub_test.cpp)
-  target_link_libraries(adamo_sub_test PRIVATE trossen_adamo_common)
-
-  # Remote-teleop leader/publisher: drives the local leader arm into gravity-comp
-  # and streams its joint state to Adamo via an AdamoObserver. The publish half of
-  # the remote-teleop loop (pairs with trossen_adamo_remote_follower).
+  # Remote-teleop leader/publisher: drives the local leader arm(s) into gravity-comp
+  # and streams joint state to Adamo directly (adamo::Session + trossen_adamo::wire,
+  # no SessionManager/observer). Links trossen_adamo_common for those headers plus
+  # trossen_sdk (TrossenArmComponent) and libtrossen_arm (the driver).
   add_executable(trossen_adamo_remote_leader
     trossen_adamo_remote/trossen_adamo_remote_leader.cpp)
-  target_link_libraries(trossen_adamo_remote_leader trossen_sdk libtrossen_arm)
+  target_link_libraries(trossen_adamo_remote_leader
+    trossen_sdk trossen_adamo_common libtrossen_arm)
 
   # Remote-teleop follower: drives a local follower arm from a RemoteAdamoLeaderArm
   # fed by the leader host's AdamoObserver. Gated on the Adamo flag because the
   # 'remote_adamo_leader' hardware type is only compiled into trossen_sdk here.
   add_executable(trossen_adamo_remote_follower
     trossen_adamo_remote/trossen_adamo_remote_follower.cpp)
-  target_link_libraries(trossen_adamo_remote_follower trossen_sdk libtrossen_arm)
+  # trossen_adamo_common: the follower opens its own adamo::Session for the
+  # lifecycle control channel (adamo_lifecycle.hpp) in addition to the observer path.
+  target_link_libraries(trossen_adamo_remote_follower
+    trossen_sdk trossen_adamo_common libtrossen_arm)
   # Expose the gate so the binary can guard its AdamoObserver camera-pipeline
   # teardown path (the SDK defines TROSSEN_ENABLE_ADAMO PRIVATE, so it does not propagate).
   target_compile_definitions(trossen_adamo_remote_follower PRIVATE TROSSEN_ENABLE_ADAMO)

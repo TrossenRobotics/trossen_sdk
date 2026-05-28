@@ -57,7 +57,11 @@
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/observer/observer_registry.hpp"
 #ifdef TROSSEN_ENABLE_ADAMO
+#include <atomic>
+#include <cstring>
 #include "trossen_sdk/observer/adamo_observer.hpp"
+#include "trossen_adamo/args.hpp"
+#include "adamo_lifecycle.hpp"
 #endif
 #include "trossen_sdk/hw/teleop/teleop_factory.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
@@ -411,6 +415,81 @@ int main(int argc, char** argv) {
   });
 
   // ──────────────────────────────────────────────────────────
+  // Lifecycle coordination (opt-in via top-level "lifecycle": {"enabled": true}).
+  // Opens its own Adamo session (the observer / virtual-leader sessions are not
+  // exposed here), reusing robot/protocol/api_key from the `adamo` observer block.
+  // Behaviour: wait until the leader is online before starting; while running,
+  // heartbeat our READY and watch for the leader's STOPPING (which trips the same
+  // g_stop_requested path Ctrl+C uses, so we shut down cleanly).
+  // ──────────────────────────────────────────────────────────
+  bool lifecycle_enabled = false;
+#ifdef TROSSEN_ENABLE_ADAMO
+  lifecycle_enabled = j.value("lifecycle", nlohmann::json::object()).value("enabled", false);
+
+  std::unique_ptr<adamo::Session> lifecycle_session;
+  std::unique_ptr<trossen_adamo_remote::LifecycleLink> life;
+  std::thread life_thread;
+  std::atomic<bool> life_thread_stop{false};
+
+  if (lifecycle_enabled) {
+    const nlohmann::json* adamo_obs = nullptr;
+    for (const auto& o : cfg.observers) {
+      if (o.type == "adamo") { adamo_obs = &o.raw_json; break; }
+    }
+    const std::string l_robot  = adamo_obs ? adamo_obs->value("robot", std::string{}) : std::string{};
+    const std::string l_proto  = adamo_obs ? adamo_obs->value("protocol", std::string{"quic"})
+                                           : std::string{"quic"};
+    const std::string l_keyenv = adamo_obs ? adamo_obs->value("api_key_env", std::string{"ADAMO_API_KEY"})
+                                           : std::string{"ADAMO_API_KEY"};
+    const char* l_key = std::getenv(l_keyenv.c_str());
+
+    if (adamo_obs == nullptr || l_robot.empty()) {
+      std::cerr << "[lifecycle] enabled but no usable 'adamo' observer block; skipping.\n";
+      lifecycle_enabled = false;
+    } else if (l_key == nullptr || std::strlen(l_key) == 0) {
+      std::cerr << "[lifecycle] " << l_keyenv << " unset; skipping lifecycle coordination.\n";
+      lifecycle_enabled = false;
+    } else {
+      try {
+        const adamo::Protocol proto = trossen_adamo::args::parse_protocol(l_proto);
+        lifecycle_session = std::make_unique<adamo::Session>(
+          adamo::Session::open(std::string(l_key), proto));
+        life = std::make_unique<trossen_adamo_remote::LifecycleLink>(
+          *lifecycle_session,
+          trossen_adamo_remote::follower_lifecycle_topic(l_robot),
+          trossen_adamo_remote::leader_lifecycle_topic(l_robot));
+
+        std::cout << "[lifecycle] waiting for the leader to come online (Ctrl+C to abort)...\n";
+        while (!trossen::utils::g_stop_requested &&
+               life->poll_peer() != trossen_adamo_remote::LifeState::kReady) {
+          std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+        if (!trossen::utils::g_stop_requested) {
+          std::cout << "[lifecycle] leader online; starting.\n";
+          life_thread = std::thread([&]() {
+            while (!life_thread_stop.load() && !trossen::utils::g_stop_requested) {
+              life->announce(trossen_adamo_remote::LifeState::kReady);
+              if (life->poll_peer() == trossen_adamo_remote::LifeState::kStopping) {
+                std::cout << "\n[lifecycle] leader stopped; ending follower session.\n";
+                trossen::utils::g_stop_requested = true;
+                break;
+              }
+              std::this_thread::sleep_for(std::chrono::milliseconds(200));
+            }
+          });
+        }
+      } catch (const std::exception& e) {
+        std::cerr << "[lifecycle] failed to open channel: " << e.what()
+                  << " (continuing without coordination)\n";
+        life.reset();
+        lifecycle_session.reset();
+        lifecycle_enabled = false;
+      }
+    }
+  }
+#endif
+
+  // ──────────────────────────────────────────────────────────
   // Episode loop
   // ──────────────────────────────────────────────────────────
 
@@ -452,8 +531,29 @@ int main(int argc, char** argv) {
     }
   }
 
+#ifdef TROSSEN_ENABLE_ADAMO
+  // Tell the leader our session is ending (so it terminates too), then stop the
+  // heartbeat thread. Done before mgr.shutdown() so the leader winds down in
+  // parallel with our arm parking.
+  if (lifecycle_enabled) {
+    life_thread_stop.store(true);
+    if (life_thread.joinable()) life_thread.join();
+    if (life) {
+      life->announce(trossen_adamo_remote::LifeState::kStopping);
+      std::this_thread::sleep_for(std::chrono::milliseconds(200));  // flush before close
+    }
+  }
+#endif
+
   // shutdown() calls stop_episode() (no-op if already stopped) then on_pre_shutdown
   mgr.shutdown();
+
+#ifdef TROSSEN_ENABLE_ADAMO
+  if (lifecycle_enabled) {
+    life.reset();
+    lifecycle_session.reset();
+  }
+#endif
 
   const auto final_stats = mgr.stats();
   std::vector<std::string> extra_info = {

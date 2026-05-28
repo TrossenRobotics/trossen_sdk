@@ -1,12 +1,21 @@
 {
   "robot_name": "trossen_adamo_remote_follower",
 
+  "lifecycle": { "enabled": true },
+
   "hardware": {
     "arms": {
-      "follower": {
-        "ip_address":   "192.168.1.4",
-        "model":        "wxai_v0",
-        "end_effector": "wxai_v0_follower"
+      "follower_left": {
+        "ip_address":          "192.168.1.5",
+        "model":               "wxai_v0",
+        "end_effector":        "wxai_v0_follower",
+        "command_goal_time_s": 0.02
+      },
+      "follower_right": {
+        "ip_address":          "192.168.1.4",
+        "model":               "wxai_v0",
+        "end_effector":        "wxai_v0_follower",
+        "command_goal_time_s": 0.02
       }
     },
     "cameras": [
@@ -18,10 +27,18 @@
   },
 
   "remote_leader_hardware": {
-    "virtual_leader": {
+    "virtual_leader_left": {
       "type":            "remote_adamo_leader",
       "robot":           "wxai",
-      "arm":             "leader",
+      "arm":             "leader_left",
+      "protocol":        "quic",
+      "api_key_env":     "ADAMO_API_KEY",
+      "ready_timeout_s": 30.0
+    },
+    "virtual_leader_right": {
+      "type":            "remote_adamo_leader",
+      "robot":           "wxai",
+      "arm":             "leader_right",
       "protocol":        "quic",
       "api_key_env":     "ADAMO_API_KEY",
       "ready_timeout_s": 30.0
@@ -31,8 +48,15 @@
   "producers": [
     {
       "type":            "trossen_arm",
-      "hardware_id":     "follower",
-      "stream_id":       "follower",
+      "hardware_id":     "follower_left",
+      "stream_id":       "follower_left",
+      "poll_rate_hz":    100.0,
+      "use_device_time": false
+    },
+    {
+      "type":            "trossen_arm",
+      "hardware_id":     "follower_right",
+      "stream_id":       "follower_right",
       "poll_rate_hz":    100.0,
       "use_device_time": false
     },
@@ -44,9 +68,10 @@
 
   "teleop": {
     "enabled": true,
-    "rate_hz": 100.0,
+    "rate_hz": 200.0,
     "pairs": [
-      { "leader": "virtual_leader", "follower": "follower" }
+      { "leader": "virtual_leader_left",  "follower": "follower_left"  },
+      { "leader": "virtual_leader_right", "follower": "follower_right" }
     ]
   },
 
@@ -65,15 +90,12 @@
       "protocol": "quic",
       "enabled":  true,
       "subscriptions": [
-        {
-          "record_id":   "follower",
-          "throttle_hz": 100.0,
-          "topic":       "effort"
-        },
-        { "record_id": "camera_high",        "throttle_hz": 15.0, "topic": "camera", "track_name": "high",        "width": 640, "height": 480, "fps": 15, "bitrate_kbps": 4000 },
-        { "record_id": "camera_low",         "throttle_hz": 15.0, "topic": "camera", "track_name": "low",         "width": 640, "height": 480, "fps": 15, "bitrate_kbps": 4000 },
-        { "record_id": "camera_left_wrist",  "throttle_hz": 15.0, "topic": "camera", "track_name": "left_wrist",  "width": 640, "height": 480, "fps": 15, "bitrate_kbps": 4000 },
-        { "record_id": "camera_right_wrist", "throttle_hz": 15.0, "topic": "camera", "track_name": "right_wrist", "width": 640, "height": 480, "fps": 15, "bitrate_kbps": 4000 }
+        { "record_id": "follower_left",      "throttle_hz": 100.0, "topic": "effort" },
+        { "record_id": "follower_right",     "throttle_hz": 100.0, "topic": "effort" },
+        { "record_id": "camera_high",        "throttle_hz": 10.0, "topic": "camera", "track_name": "high",        "width": 640, "height": 480, "fps": 10, "bitrate_kbps": 2000 },
+        { "record_id": "camera_low",         "throttle_hz": 10.0, "topic": "camera", "track_name": "low",         "width": 640, "height": 480, "fps": 10, "bitrate_kbps": 2000 },
+        { "record_id": "camera_left_wrist",  "throttle_hz": 10.0, "topic": "camera", "track_name": "left_wrist",  "width": 640, "height": 480, "fps": 10, "bitrate_kbps": 2000 },
+        { "record_id": "camera_right_wrist", "throttle_hz": 10.0, "topic": "camera", "track_name": "right_wrist", "width": 640, "height": 480, "fps": 10, "bitrate_kbps": 2000 }
       ]
     }
   ],

@@ -1,64 +1,62 @@
 /**
  * @file trossen_adamo_remote_leader.cpp
- * @brief Remote-teleop leader/publisher: drive a local leader arm in
- *        gravity-compensation and stream its joint state to Adamo. EXPERIMENTAL.
+ * @brief Remote-teleop leader (direct publish). EXPERIMENTAL.
  *
- * This is the publish half of the remote-teleop loop. It owns the physical
- * leader arm, puts it into gravity-compensation so the operator can back-drive
- * it, polls its joint state with a TrossenArmProducer, and an AdamoObserver
- * publishes each sample to `<robot>/<arm>/state`. The follower half
- * (`trossen_adamo_remote_follower`) subscribes to that topic and mirrors it onto
- * a local follower arm.
+ * A minimal leader publisher that talks to the Adamo server directly: no
+ * SessionManager, no observer, no producer registry. It owns the leader arm(s),
+ * drives them into gravity-compensation, and runs a tight
+ * read -> wire::encode_state -> publisher.put loop, mirroring upstream
+ * trossen_adamo's leader binary.
  *
- * There is NO teleoperation on this side: the leader is a pure source. Rather
- * than fabricate a leader-only teleop pair just to reach gravity-comp, this
- * binary calls the arm's lifecycle directly:
- *   - prepare_for_teleop()  -> external_effort gravity-comp (operator can move it)
- *   - end_teleop()          -> neutralize + return to rest at shutdown
- * (Both are part of the public TrossenArmComponent lifecycle; see
- *  src/hw/arm/trossen_arm_component.cpp.)
+ * Use this when you only need to stream leader state (no recording, no episode
+ * lifecycle). There is no episode gating: Ctrl+C stops the loop immediately.
  *
- * Requires `-DTROSSEN_ENABLE_ADAMO=ON` and `ADAMO_API_KEY` set. Start this
- * BEFORE the follower (the follower blocks waiting for the first frame).
+ * Config: uses leader.config.json. The arms come from `hardware.arms`; the Adamo
+ * connection params (robot / protocol / api_key_env) are read from the `adamo`
+ * observer block in that config. Every arm in `hardware.arms` is published to
+ * `<robot>/<arm>/state` at the trossen_arm producer's poll_rate_hz.
  *
- * Usage:
- *   ./trossen_adamo_remote_leader [OPTIONS]
- *
- *   --config PATH       Path to leader config JSON
- *                       [default: examples/trossen_adamo_remote/leader.config.json]
- *   --set KEY=VALUE     Override a config value using dot notation (repeatable)
- *   --dump-config       Print merged config as JSON and exit
- *   --help              Show this help and exit
+ * Requires -DTROSSEN_ENABLE_ADAMO=ON and ADAMO_API_KEY set.
  */
 
 #include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <memory>
 #include <string>
 #include <thread>
-#include <unordered_map>
 #include <vector>
 
 #include "libtrossen_arm/trossen_arm.hpp"
 #include "nlohmann/json.hpp"
+
+#include "adamo/adamo.hpp"
+#include "trossen_adamo/args.hpp"
+#include "trossen_adamo/publisher.hpp"
+#include "trossen_adamo/wire.hpp"
+
+#include "adamo_lifecycle.hpp"
+
 #include "trossen_sdk/configuration/cli_parser.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/configuration/sdk_config.hpp"
-#include "trossen_sdk/hw/arm/trossen_arm_producer.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
-#include "trossen_sdk/observer/observer_registry.hpp"
-#include "trossen_sdk/runtime/producer_registry.hpp"
-#include "trossen_sdk/runtime/session_manager.hpp"
-
 #include "trossen_sdk/utils/app_utils.hpp"
 
-static void print_usage(const char* program) {
+namespace {
+
+constexpr std::size_t kNumJoints = trossen_adamo::wire::kNumJoints;  // 7
+
+void print_usage(const char* program) {
   std::cout <<
     "Usage: " << program << " [OPTIONS]\n"
     "\n"
-    "Stream a local leader arm's joint state to Adamo for remote teleop.\n"
+    "Direct-publish remote-teleop leader: streams leader joint state straight to\n"
+    "Adamo (no SessionManager / observer). Reuses leader.config.json.\n"
     "\n"
     "Options:\n"
     "  --config PATH      Path to leader config JSON\n"
@@ -67,19 +65,13 @@ static void print_usage(const char* program) {
     "  --dump-config      Print merged config as JSON and exit\n"
     "  --help             Show this help and exit\n"
     "\n"
-    "Requires -DTROSSEN_ENABLE_ADAMO=ON and ADAMO_API_KEY in the environment.\n"
-    "Start this BEFORE the follower.\n"
-    "\n"
-    "Examples:\n"
-    "  " << program << "\n"
-    "  " << program << " --config examples/trossen_adamo_remote/leader.config.json\n"
-    "  " << program << " --set hardware.arms.leader.ip_address=192.168.1.2\n"
-    "  " << program << " --dump-config\n";
+    "Requires -DTROSSEN_ENABLE_ADAMO=ON and ADAMO_API_KEY in the environment.\n";
 }
+
+}  // namespace
 
 int main(int argc, char** argv) {
   trossen::configuration::CliParser cli(argc, argv);
-
   if (cli.has_flag("help")) {
     print_usage(argv[0]);
     return 0;
@@ -87,230 +79,235 @@ int main(int argc, char** argv) {
 
   const std::string config_path =
     cli.get_string("config", "examples/trossen_adamo_remote/leader.config.json");
-
   if (!std::filesystem::exists(config_path)) {
     std::cerr << "Error: config file not found: " << config_path << "\n";
     return 1;
   }
 
-  // Load JSON and apply CLI overrides
   auto j = trossen::configuration::JsonLoader::load(config_path);
   const auto overrides = cli.get_set_overrides();
   if (!overrides.empty()) {
     j = trossen::configuration::merge_overrides(j, overrides);
   }
-
   if (cli.has_flag("dump-config")) {
-    trossen::configuration::dump_config(j, "Trossen Adamo Remote Leader Config");
+    trossen::configuration::dump_config(j, "Trossen Adamo Remote Leader (direct) Config");
     return 0;
   }
 
-  // Parse unified robot config
   auto cfg = trossen::configuration::SdkConfig::from_json(j);
-
-  // Populate GlobalConfig so SessionManager picks up session + backend settings
   cfg.populate_global_config();
 
-  const std::string root = cfg.mcap_backend.root;
-
-  float joint_rate_hz = 30.0f;
-  for (const auto& p : cfg.producers) {
-    if (p.type == "trossen_arm") {
-      joint_rate_hz = p.poll_rate_hz;
+  // ── Adamo connection params, read from the `adamo` observer block so this
+  //    binary and the observer-based leader share one config file. ───────────
+  const nlohmann::json* adamo = nullptr;
+  for (const auto& o : cfg.observers) {
+    if (o.type == "adamo") {
+      adamo = &o.raw_json;
       break;
     }
   }
+  if (adamo == nullptr) {
+    std::cerr << "Error: leader config has no 'adamo' observer block; this binary "
+              << "reads robot/protocol/api_key_env from it.\n";
+    return 1;
+  }
+  if (!adamo->contains("robot") || !adamo->at("robot").is_string()) {
+    std::cerr << "Error: the 'adamo' block needs a string 'robot' (topic prefix).\n";
+    return 1;
+  }
+  const std::string robot       = adamo->at("robot").get<std::string>();
+  const std::string protocol    = adamo->value("protocol", std::string{"quic"});
+  const std::string api_key_env = adamo->value("api_key_env", std::string{"ADAMO_API_KEY"});
 
-  std::vector<std::string> config_lines = {
+  const char* api_key = std::getenv(api_key_env.c_str());
+  if (api_key == nullptr || std::strlen(api_key) == 0) {
+    std::cerr << "Error: " << api_key_env << " is unset; cannot open Adamo session.\n";
+    return 1;
+  }
+
+  adamo::Protocol proto;
+  try {
+    proto = trossen_adamo::args::parse_protocol(protocol);
+  } catch (const std::exception& e) {
+    std::cerr << "Error: " << e.what() << "\n";
+    return 1;
+  }
+
+  // Publish rate from the first trossen_arm producer (default 100 Hz).
+  double rate_hz = 100.0;
+  for (const auto& p : cfg.producers) {
+    if (p.type == "trossen_arm") {
+      rate_hz = p.poll_rate_hz;
+      break;
+    }
+  }
+  if (!(rate_hz > 0.0)) rate_hz = 100.0;
+
+  // Lifecycle coordination (opt-in): publish READY heartbeat so the follower can
+  // wait for us, and terminate when the follower signals STOPPING.
+  const bool lifecycle_enabled =
+    j.value("lifecycle", nlohmann::json::object()).value("enabled", false);
+
+  std::vector<std::string> lines = {
     "Config file:          " + config_path,
-    "Root directory:       " + root,
-    "Backend:              " + cfg.session.backend_type,
-    "Robot name:           " + cfg.robot_name
+    "Robot prefix:         " + robot,
+    "Protocol:             " + protocol,
+    "Publish rate:         " + std::to_string(rate_hz) + " Hz",
+    std::string("Lifecycle link:       ") + (lifecycle_enabled ? "on" : "off"),
   };
   for (const auto& [id, arm] : cfg.hardware.arms) {
-    config_lines.push_back(
-      "Arm [" + id + "]:  " + arm.ip_address + " (" + arm.end_effector + ")");
+    lines.push_back("Arm [" + id + "]:  " + arm.ip_address + " -> " + robot + "/" + id + "/state");
   }
-  config_lines.push_back("Joint rate:           " + std::to_string(joint_rate_hz) + " Hz");
-  config_lines.push_back(
-    "Observers:            " + std::to_string(cfg.observers.size()) +
-    " (publishing to Adamo)");
-
   trossen::utils::print_config_banner(
-    "Trossen Adamo Remote Leader / Publisher (EXPERIMENTAL)", config_lines);
+    "Trossen Adamo Remote Leader (direct publish, EXPERIMENTAL)", lines);
 
   trossen::utils::install_signal_handler();
-  std::filesystem::create_directories(root);
 
-  // ──────────────────────────────────────────────────────────
-  // Initialize the leader arm hardware from config
-  // ──────────────────────────────────────────────────────────
+  // ── Create + engage the leader arms ───────────────────────────────────────
+  struct Pub {
+    std::string id;
+    std::shared_ptr<trossen::hw::arm::TrossenArmComponent> comp;
+    std::shared_ptr<trossen_arm::TrossenArmDriver> driver;
+    std::unique_ptr<trossen_adamo::LatestPublisher> latest;
+  };
+  std::vector<Pub> pubs;
 
-  std::cout << "Initializing hardware...\n";
-
-  std::unordered_map<std::string,
-    std::shared_ptr<trossen::hw::arm::TrossenArmComponent>> arm_components;
-
+  std::cout << "Initializing leader arms...\n";
   for (const auto& [id, arm_cfg] : cfg.hardware.arms) {
+    // mark_active=false: no teleop factory / ActiveHardwareRegistry needed here.
     auto component = trossen::hw::HardwareRegistry::create(
-      "trossen_arm", id, arm_cfg.to_json(), true);
-    arm_components[id] =
-      std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(component);
+      "trossen_arm", id, arm_cfg.to_json(), /*mark_active=*/false);
+    auto comp = std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(component);
+    if (!comp) {
+      std::cerr << "  [skip] " << id << ": not a TrossenArmComponent\n";
+      continue;
+    }
+    auto driver = comp->get_hardware();
+    if (!driver) {
+      std::cerr << "  [skip] " << id << ": null driver\n";
+      continue;
+    }
+    if (static_cast<std::size_t>(driver->get_num_joints()) != kNumJoints) {
+      std::cerr << "  [skip] " << id << ": " << driver->get_num_joints()
+                << " joints (wire codec is " << kNumJoints << "-DOF only)\n";
+      continue;
+    }
+    pubs.push_back(Pub{id, comp, driver, nullptr});
     std::cout << "  [ok] Arm [" << id << "] configured (" << arm_cfg.ip_address << ")\n";
   }
+  if (pubs.empty()) {
+    std::cerr << "Error: no publishable 7-DOF leader arms; nothing to do.\n";
+    return 1;
+  }
 
-  // ──────────────────────────────────────────────────────────
-  // Session Manager + producers
-  // ──────────────────────────────────────────────────────────
+  // Gravity-comp so the operator can back-drive the leaders.
+  for (auto& p : pubs) p.comp->prepare_for_teleop();
+  std::cout << "Leader arms in gravity-comp — back-drive them.\n";
 
-  trossen::runtime::SessionManager mgr;
-  std::cout << "\nInitialized Session Manager\n\n";
+  // ── Open session + one publisher per arm ──────────────────────────────────
+  std::unique_ptr<adamo::Session> session;
+  try {
+    session = std::make_unique<adamo::Session>(
+      adamo::Session::open(std::string(api_key), proto));
+    for (auto& p : pubs) {
+      const std::string topic = robot + "/" + p.id + "/state";
+      // Real-time joint state: high priority, express path, fire-and-forget.
+      // Mirrors upstream trossen_adamo/leader.cpp; the default
+      // (priority=4, express=false, reliable=true) forces Adamo's reliable
+      // layer to retransmit + sequence, which produces ~50 ms wire stalls
+      // on packet loss. Latest-wins joint state is fine to drop.
+      p.latest = std::make_unique<trossen_adamo::LatestPublisher>(
+        session->publisher(topic, /*priority=*/250,
+                           /*express=*/true, /*reliable=*/false));
+    }
+  } catch (const std::exception& e) {
+    std::cerr << "Error: failed to open Adamo session/publishers: " << e.what() << "\n";
+    for (auto& p : pubs) {
+      try { p.comp->end_teleop(); } catch (...) {}
+    }
+    return 1;
+  }
 
-  std::cout << "Creating producers...\n";
-
-  for (const auto& prod_cfg : cfg.producers) {
-    const auto period =
-      std::chrono::milliseconds(static_cast<int>(1000.0f / prod_cfg.poll_rate_hz));
-
-    if (prod_cfg.type == "trossen_arm") {
-      auto prod = trossen::runtime::ProducerRegistry::create(
-        "trossen_arm",
-        arm_components.at(prod_cfg.hardware_id),
-        prod_cfg.to_registry_json());
-      mgr.add_producer(prod, period);
-      std::cout << "  [ok] Arm producer [" << prod_cfg.stream_id << "] ("
-                << prod_cfg.poll_rate_hz << " Hz)\n";
+  // Optional lifecycle channel on the same session.
+  std::unique_ptr<trossen_adamo_remote::LifecycleLink> life;
+  if (lifecycle_enabled) {
+    try {
+      life = std::make_unique<trossen_adamo_remote::LifecycleLink>(
+        *session,
+        trossen_adamo_remote::leader_lifecycle_topic(robot),
+        trossen_adamo_remote::follower_lifecycle_topic(robot));
+      life->announce(trossen_adamo_remote::LifeState::kReady);
+      std::cout << "[lifecycle] announcing READY; will terminate when the follower stops.\n";
+    } catch (const std::exception& e) {
+      std::cerr << "[lifecycle] failed to open channel: " << e.what()
+                << " (continuing without coordination)\n";
+      life.reset();
     }
   }
 
-  std::cout << "\nProducers registered. Ready to publish.\n";
+  std::cout << "Publishing leader state to Adamo. Move the leader arm(s). Ctrl+C to stop.\n";
 
-  // ──────────────────────────────────────────────────────────
-  // Observers: the AdamoObserver that publishes the leader's joint state.
-  // Registered once, started lazily on first episode, persists across episodes.
-  // ──────────────────────────────────────────────────────────
-
-  if (cfg.observers.empty()) {
-    std::cerr << "Warning: no observers configured; this binary would drive the leader "
-              << "into gravity-comp but publish nothing. Add an 'adamo' observer.\n";
-  } else {
-    std::cout << "Creating observers...\n";
-    for (const auto& obs_cfg : cfg.observers) {
-      if (!obs_cfg.enabled) {
-        std::cout << "  [disabled] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
-                  << " (skipped: enabled=false)\n";
+  // ── Direct publish loop (no episode lifecycle) ────────────────────────────
+  const auto period = std::chrono::nanoseconds(static_cast<std::int64_t>(1e9 / rate_hz));
+  auto last_heartbeat = std::chrono::steady_clock::now();
+  std::uint64_t ticks = 0;
+  std::uint64_t skipped = 0;
+  while (!trossen::utils::g_stop_requested) {
+    const auto deadline = std::chrono::steady_clock::now() + period;
+    const double ts = trossen_adamo::wire::now_seconds();
+    for (auto& p : pubs) {
+      // get_robot_output() returns the daemon's latest joint snapshot
+      // (positions + velocities in one read), so no second daemon round-trip.
+      auto out = p.driver->get_robot_output();
+      const auto& positions  = out.joint.all.positions;
+      const auto& velocities = out.joint.all.velocities;
+      if (positions.size() != kNumJoints || velocities.size() != kNumJoints) {
+        ++skipped;
         continue;
       }
       try {
-        auto obs = trossen::observer::ObserverRegistry::create(
-          obs_cfg.type, obs_cfg.raw_json);
-        mgr.add_observer(obs);
-        std::cout << "  [ok] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
-                  << " subscriptions=" << obs_cfg.subscriptions.size() << "\n";
+        const auto buf = trossen_adamo::wire::encode_state(ts, positions, velocities);
+        p.latest->put(buf.data(), buf.size());
       } catch (const std::exception& e) {
-        std::cerr << "  [skip] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
-                  << " failed to construct: " << e.what() << "\n";
-        const auto types =
-          trossen::observer::ObserverRegistry::get_registered_types();
-        std::cerr << "         Registered observer types:";
-        for (const auto& t : types) std::cerr << " " << t;
-        std::cerr << "\n";
-        if (!trossen::observer::ObserverRegistry::is_registered(obs_cfg.type)) {
-          std::cerr << "         Hint: type '" << obs_cfg.type
-                    << "' is not registered. Rebuild with -DTROSSEN_ENABLE_ADAMO=ON.\n";
-        }
-        continue;
+        ++skipped;
+        std::cerr << "[" << p.id << "] encode/publish failed: " << e.what() << "\n";
       }
     }
-  }
-
-  // ──────────────────────────────────────────────────────────
-  // Lifecycle: engage gravity-comp so the operator can back-drive the leader,
-  // then let the producer poll + observer publish. Released at shutdown.
-  // ──────────────────────────────────────────────────────────
-
-  bool leader_engaged = false;
-
-  // on_pre_episode runs before the scheduler begins polling, so the arm is
-  // back-driveable before we start reading it. Guarded so it engages once and
-  // persists across episodes (matches how TeleopController prepares arms).
-  mgr.on_pre_episode([&]() -> bool {
-    if (!leader_engaged) {
-      for (auto& [id, arm] : arm_components) {
-        arm->prepare_for_teleop();
-        std::cout << "  [leader] Arm [" << id << "] in gravity-comp — back-drive it.\n";
+    if (life) {
+      const auto now = std::chrono::steady_clock::now();
+      if (now - last_heartbeat >= std::chrono::milliseconds(500)) {
+        life->announce(trossen_adamo_remote::LifeState::kReady);
+        last_heartbeat = now;
       }
-      leader_engaged = true;
+      if (life->poll_peer() == trossen_adamo_remote::LifeState::kStopping) {
+        std::cout << "\n[lifecycle] follower ended its session; terminating leader.\n";
+        break;
+      }
     }
-    return true;
-  });
-
-  mgr.on_episode_started([&]() {
-    std::cout << "Publishing leader state to Adamo. Move the leader arm.\n";
-  });
-
-  mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
-    const std::string file_path =
-      trossen::utils::generate_episode_path(root, stats.current_episode_index);
-    trossen::utils::print_episode_summary(file_path, stats);
-  });
-
-  // Shutdown: neutralize + return the leader to rest.
-  mgr.on_pre_shutdown([&]() {
-    for (auto& [id, arm] : arm_components) arm->end_teleop();
-  });
-
-  // ──────────────────────────────────────────────────────────
-  // Episode loop (one long episode; Ctrl+C to stop)
-  // ──────────────────────────────────────────────────────────
-
-  while (true) {
-    if (trossen::utils::g_stop_requested) {
-      std::cout << "\n\nStopping at user request (Ctrl+C).\n";
-      break;
-    }
-
-    mgr.print_episode_header();
-
-    if (!mgr.start_episode()) {
-      break;
-    }
-
-    std::cout << "Publishing...\n";
-
-    auto action = mgr.monitor_episode();
-
-    if (action == trossen::runtime::UserAction::kReRecord) {
-      mgr.discard_current_episode();
-      continue;
-    }
-
-    if (mgr.is_episode_active()) {
-      mgr.stop_episode();
-    }
-
-    if (trossen::utils::g_stop_requested) {
-      std::cout << "\nStopping at user request (Ctrl+C).\n";
-      break;
-    }
-
-    action = mgr.wait_for_reset();
-    if (action == trossen::runtime::UserAction::kStop) break;
-    if (action == trossen::runtime::UserAction::kReRecord) {
-      mgr.discard_last_episode();
-      continue;
-    }
+    ++ticks;
+    std::this_thread::sleep_until(deadline);
   }
 
-  // shutdown() calls stop_episode() (no-op if already stopped) then on_pre_shutdown
-  mgr.shutdown();
+  std::cout << "\nStopping (Ctrl+C). Published " << ticks << " ticks";
+  if (skipped > 0) std::cout << " (" << skipped << " frames skipped)";
+  std::cout << ".\n";
 
-  const auto final_stats = mgr.stats();
-  std::vector<std::string> extra_info = {
-    "Published streams:    " + std::to_string(cfg.hardware.arms.size()) + " leader arm(s)"
-  };
-  trossen::utils::print_final_summary(
-    final_stats.total_episodes_completed, root, extra_info);
-
+  // ── Shutdown: tell the follower we're stopping, stop publishing (joins worker
+  //    threads) before closing the session, then return the arms to rest. ─────
+  if (life) {
+    life->announce(trossen_adamo_remote::LifeState::kStopping);
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));  // flush before close
+  }
+  for (auto& p : pubs) p.latest.reset();
+  life.reset();   // release the lifecycle pub/sub before the session it holds onto
+  session.reset();
+  for (auto& p : pubs) {
+    try {
+      p.comp->end_teleop();
+    } catch (const std::exception& e) {
+      std::cerr << "[" << p.id << "] end_teleop failed: " << e.what() << "\n";
+    }
+  }
+  std::cout << "Leader arms returned to rest. Done.\n";
   return 0;
 }

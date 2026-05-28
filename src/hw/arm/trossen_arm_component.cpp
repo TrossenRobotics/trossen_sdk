@@ -75,6 +75,13 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
         "TrossenArmComponent: 'teleop_moving_time_s' must be non-negative and finite");
     }
   }
+  if (config.contains("command_goal_time_s")) {
+    command_goal_time_s_ = config.at("command_goal_time_s").get<double>();
+    if (command_goal_time_s_ < 0.0 || !std::isfinite(command_goal_time_s_)) {
+      throw std::runtime_error(
+        "TrossenArmComponent: 'command_goal_time_s' must be non-negative and finite");
+    }
+  }
 
   // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
 }
@@ -107,7 +114,10 @@ void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
       std::to_string(cmd.size()));
   }
   std::vector<double> pos_d(cmd.begin(), cmd.end());
-  driver_->set_all_positions(pos_d, 0.0, false);
+  // command_goal_time_s_ > 0 lets the driver interpolate internally between
+  // successive write_joint() calls, smoothing the commanded trajectory on the
+  // hot loop. 0 (default) = immediate target (driver moves as fast as it can).
+  driver_->set_all_positions(pos_d, command_goal_time_s_, false);
 }
 
 std::vector<float> TrossenArmComponent::read_cartesian() {

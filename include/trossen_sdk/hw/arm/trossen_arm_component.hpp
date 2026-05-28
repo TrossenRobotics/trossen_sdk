@@ -53,8 +53,15 @@ public:
    *   "model": "wxai_v0",
    *   "end_effector": "wxai_v0_follower",
    *   "staged_position": [0, 1.0, 0.5, 0.6, 0, 0, 0],  // optional, joint-space
-   *   "teleop_moving_time_s": 2.0         // optional, default 2.0
+   *   "teleop_moving_time_s": 2.0,        // optional, default 2.0
+   *   "command_goal_time_s": 0.0          // optional, default 0.0
    * }
+   *
+   * `command_goal_time_s` is passed to driver->set_all_positions on the
+   * hot-loop write path. 0.0 (default) preserves immediate-target behavior;
+   * setting a small value (e.g. 0.02) adds driver-side interpolation each
+   * tick, which smooths the commanded trajectory when paired with an upstream
+   * EMA-smoothed source (matches upstream trossen_adamo's follower default).
    *
    * @param config JSON configuration object
    * @throws std::runtime_error if configuration fails
@@ -152,6 +159,15 @@ private:
 
   /// Trajectory time used by stage() and the end_teleop() rest move.
   float teleop_moving_time_s_{2.0f};
+
+  /// goal_time passed to driver->set_all_positions on the hot-loop write
+  /// path. 0.0 = immediate target (driver moves as fast as it can). A small
+  /// positive value (e.g. 0.02 s) lets the driver interpolate internally
+  /// between successive commands -- effectively a controller-side smoothing
+  /// layer that stacks with any upstream EMA. Configured per-arm via the
+  /// "command_goal_time_s" JSON field; defaults to 0.0 so existing configs
+  /// keep their current behaviour.
+  double command_goal_time_s_{0.0};
 };
 
 }  // namespace trossen::hw::arm

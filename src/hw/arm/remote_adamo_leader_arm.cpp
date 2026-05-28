@@ -94,10 +94,22 @@ void RemoteAdamoLeaderArm::configure(const nlohmann::json& config) {
         "RemoteAdamoLeaderArm[" + hw_id + "]: 'ready_timeout_s' must be > 0");
     }
   }
+  if (config.contains("smooth_alpha")) {
+    if (!config.at("smooth_alpha").is_number()) {
+      throw std::runtime_error(
+        "RemoteAdamoLeaderArm[" + hw_id + "]: 'smooth_alpha' must be a number");
+    }
+    smooth_alpha_ = config.at("smooth_alpha").get<double>();
+    if (!(smooth_alpha_ > 0.0 && smooth_alpha_ <= 1.0)) {
+      throw std::runtime_error(
+        "RemoteAdamoLeaderArm[" + hw_id + "]: 'smooth_alpha' must be in (0, 1]");
+    }
+  }
   // Pre-size caches so read() / sync_to_state() never reallocate on the hot
   // path.
   cached_positions_.assign(kNumJoints, 0.0f);
   cached_velocities_.assign(kNumJoints, 0.0f);
+  ema_command_.assign(kNumJoints, 0.0f);
 }
 
 nlohmann::json RemoteAdamoLeaderArm::get_info() const {
@@ -166,6 +178,10 @@ void RemoteAdamoLeaderArm::sync_to_state(const std::vector<float>& state) {
   }
   std::lock_guard<std::mutex> lk(cache_mu_);
   cached_positions_ = state;
+  // Seed the EMA output to the follower's current pose so the first read()
+  // returns where the follower already is. With smooth_alpha < 1.0, subsequent
+  // reads ease toward the leader's actual position rather than snapping.
+  ema_command_ = state;
   // Velocities default to zero; do NOT seed from the follower's velocity --
   // the first wire payload will replace this and we want the initial mirror
   // tick to behave like the leader is stationary.
@@ -177,7 +193,21 @@ std::vector<float> RemoteAdamoLeaderArm::read() {
   std::lock_guard<std::mutex> lk(cache_mu_);
   // TeleopController consumes positions only on the joint-space path.
   // ``cached_positions_`` is always kNumJoints-sized after configure().
-  return cached_positions_;
+  if (smooth_alpha_ >= 1.0 || ema_command_.size() != cached_positions_.size()) {
+    // Smoothing disabled (alpha == 1.0) or EMA not initialised yet:
+    // passthrough. Latter case shouldn't happen post-configure() but kept
+    // defensive.
+    return cached_positions_;
+  }
+  // EMA toward the latest cached leader position. Matches upstream
+  // trossen_adamo's follower smoothing pattern. Smooths the staircase between
+  // received frames and absorbs short wire stalls (during a stall, the EMA
+  // continues easing toward the most recent target rather than holding flat).
+  const float alpha = static_cast<float>(smooth_alpha_);
+  for (std::size_t i = 0; i < ema_command_.size(); ++i) {
+    ema_command_[i] += alpha * (cached_positions_[i] - ema_command_[i]);
+  }
+  return ema_command_;
 }
 
 void RemoteAdamoLeaderArm::write(const std::vector<float>& cmd) {

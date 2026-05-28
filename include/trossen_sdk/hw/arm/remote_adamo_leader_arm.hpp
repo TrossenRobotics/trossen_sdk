@@ -89,6 +89,12 @@ public:
    *                                       default ``"ADAMO_API_KEY"``.
    *  - ``ready_timeout_s`` (number)     - first-frame readiness timeout (s),
    *                                       default 30.
+   *  - ``smooth_alpha`` (number)        - EMA factor in (0, 1] applied to the
+   *                                       commanded positions on each read().
+   *                                       Lower = smoother / more lag.
+   *                                       1.0 disables (passthrough).
+   *                                       Default 0.35 (matches upstream
+   *                                       trossen_adamo's follower default).
    */
   void configure(const nlohmann::json& config) override;
 
@@ -116,6 +122,9 @@ private:
   std::string protocol_{"quic"};
   std::string api_key_env_{"ADAMO_API_KEY"};
   double ready_timeout_s_{30.0};
+  /// EMA factor applied in read(): ema = ema + smooth_alpha * (target - ema).
+  /// 1.0 = passthrough (no smoothing). Default matches upstream trossen_adamo.
+  double smooth_alpha_{0.35};
 
   // ── Adamo runtime state (opened in prepare_for_teleop) ────────────────────
   std::unique_ptr<adamo::Session> session_;
@@ -132,6 +141,11 @@ private:
   std::vector<float> cached_positions_;
   /// Last decoded joint velocities; defaults to zero until first decode.
   std::vector<float> cached_velocities_;
+  /// EMA-smoothed commanded positions returned by read(). Seeded by
+  /// sync_to_state() to the follower's current pose so the first commanded
+  /// trajectory eases out of the follower's pose rather than snapping to the
+  /// leader's. Empty until configure() runs; size matches cached_positions_.
+  std::vector<float> ema_command_;
 };
 
 }  // namespace trossen::hw::arm

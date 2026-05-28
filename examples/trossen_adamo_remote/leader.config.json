@@ -1,9 +1,16 @@
 {
   "robot_name": "trossen_adamo_remote_leader",
 
+  "lifecycle": { "enabled": true },
+
   "hardware": {
     "arms": {
-      "leader": {
+      "leader_left": {
+        "ip_address":   "192.168.1.3",
+        "model":        "wxai_v0",
+        "end_effector": "wxai_v0_leader"
+      },
+      "leader_right": {
         "ip_address":   "192.168.1.2",
         "model":        "wxai_v0",
         "end_effector": "wxai_v0_leader"
@@ -15,9 +22,16 @@
   "producers": [
     {
       "type":            "trossen_arm",
-      "hardware_id":     "leader",
-      "stream_id":       "leader",
-      "poll_rate_hz":    100.0,
+      "hardware_id":     "leader_left",
+      "stream_id":       "leader_left",
+      "poll_rate_hz":    200.0,
+      "use_device_time": false
+    },
+    {
+      "type":            "trossen_arm",
+      "hardware_id":     "leader_right",
+      "stream_id":       "leader_right",
+      "poll_rate_hz":    200.0,
       "use_device_time": false
     }
   ],
@@ -37,17 +51,14 @@
 
   "observers": [
     {
-      "type":    "adamo",
-      "id":      "adamo_leader_publisher",
-      "robot":   "wxai",
+      "type":     "adamo",
+      "id":       "adamo_leader_publisher",
+      "robot":    "wxai",
       "protocol": "quic",
-      "enabled": true,
+      "enabled":  true,
       "subscriptions": [
-        {
-          "record_id":   "leader",
-          "throttle_hz": 100.0,
-          "topic":       "state"
-        }
+        { "record_id": "leader_left",  "throttle_hz": 200.0, "topic": "state" },
+        { "record_id": "leader_right", "throttle_hz": 200.0, "topic": "state" }
       ]
     }
   ],
