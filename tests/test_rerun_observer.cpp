@@ -97,6 +97,21 @@ TEST(RerunObserverTest, Construct_RejectsNonArrayFields) {
   EXPECT_THROW(RerunObserver{cfg}, std::runtime_error);
 }
 
+TEST(RerunObserverTest, Construct_RejectsEmptyFieldsArray) {
+  // Empty 'fields': [] is rejected explicitly so it can't be confused with "omit to
+  // forward all" semantics - an empty filter would otherwise silently drop every
+  // joint-state channel.
+  auto cfg = json::parse(R"({
+    "type": "rerun",
+    "subscriptions": [{
+      "record_id":   "arm",
+      "throttle_hz": 30.0,
+      "fields":      []
+    }]
+  })");
+  EXPECT_THROW(RerunObserver{cfg}, std::runtime_error);
+}
+
 TEST(RerunObserverTest, Construct_SpawnDefaultsOffAndHonoursExplicitTrue) {
   // spawn defaults to false (connect_grpc path).
   auto cfg_default = json::parse(R"({

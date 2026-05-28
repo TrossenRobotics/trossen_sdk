@@ -123,6 +123,15 @@ RerunObserver::RerunObserver(const nlohmann::json& cfg)
           "RerunObserver: 'fields' must be an array of strings for record_id '" +
           record_id + "'");
       }
+      // Reject empty array explicitly. An empty filter would drop every joint-state
+      // channel, which is almost never what the operator wants and contradicts the
+      // "omit to forward all" default elsewhere in this config. Force them to omit
+      // the key instead.
+      if (sub_j.at("fields").empty()) {
+        throw std::runtime_error(
+          "RerunObserver: 'fields' must be non-empty for record_id '" + record_id +
+          "' (omit the 'fields' key entirely to forward all joint-state channels)");
+      }
       static const std::unordered_set<std::string> kJointFieldNames = {
         "positions", "velocities", "efforts"};
       std::unordered_set<std::string> filter;
@@ -192,7 +201,7 @@ void RerunObserver::on_stop() {
   rec_.reset();
 }
 
-void RerunObserver::on_episode_start(uint32_t episode_index) noexcept {
+void RerunObserver::on_episode_started(uint32_t episode_index) noexcept {
   (void)episode_index;
   // No-op if the transport is closed (failed connect, or hook ran before on_start) -
   // there is nothing to clear in the viewer until we have a recording stream.
@@ -281,7 +290,7 @@ void RerunObserver::dispatch_(const std::string& record_id,
     // on subsequent frames, and a kUnsupported result sticks so further string churn is
     // impossible for that subscription.
     //
-    // Lock briefly around the lookup-or-insert: on_episode_start may iterate the map
+    // Lock briefly around the lookup-or-insert: on_episode_started may iterate the map
     // concurrently on the caller thread. unordered_map keeps references valid through
     // rehashes, so we can drop the lock and use ``state`` outside the critical section.
     PerSubscriptionState* state_ptr;

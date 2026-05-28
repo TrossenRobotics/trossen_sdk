@@ -258,17 +258,21 @@ public:
   /**
    * @brief Episode-boundary hook: episode is about to start.
    *
-   * Invoked by ``SessionManager`` once per episode start, before user
-   * ``on_episode_started`` callbacks run. Only fired on observers that are currently
-   * running (``is_running() == true``). Dispatched outside ``episode_mutex_``, so a
-   * subclass implementation is free to call back into the SessionManager.
+   * Invoked by ``SessionManager`` once per episode start, *before* any producer
+   * (push or scheduled) starts emitting records and before user
+   * ``on_episode_started`` callbacks run. This ordering lets the hook reset
+   * per-episode state without racing the first record.
+   *
+   * Only fired on observers that are currently running (``is_running() == true``).
+   * Dispatched outside ``episode_mutex_``, so a subclass implementation is free to
+   * call back into the SessionManager.
    *
    * Default implementation is a no-op. Subclasses override to reset per-episode
    * state (rolling-window counters, plot timelines) or to log per-episode markers.
    *
    * @param episode_index the index of the episode that is starting.
    */
-  virtual void on_episode_start(uint32_t episode_index) noexcept {
+  virtual void on_episode_started(uint32_t episode_index) noexcept {
     (void)episode_index;
   }
 
@@ -277,13 +281,13 @@ public:
    *
    * Invoked by ``SessionManager`` once per episode end, after the sink has been
    * drained but before user ``on_episode_ended`` callbacks fire. Same locking and
-   * filtering contract as ``on_episode_start``. Subclasses override to flush
+   * filtering contract as ``on_episode_started``. Subclasses override to flush
    * per-episode state (telemetry snapshots, plot clears) before user-visible
    * callbacks observe the final stats.
    *
    * @param episode_index the index of the episode that just ended.
    */
-  virtual void on_episode_end(uint32_t episode_index) noexcept {
+  virtual void on_episode_ended(uint32_t episode_index) noexcept {
     (void)episode_index;
   }
 

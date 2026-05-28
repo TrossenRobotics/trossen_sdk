@@ -273,6 +273,24 @@ bool SessionManager::start_episode() {
     }
   }
 
+  // Fan out the episode-started hook to every running observer BEFORE any producer
+  // (push or scheduled) is started, so the hook can reset per-episode state (e.g.
+  // RerunObserver clearing entity trees) without racing the first record. Filters on
+  // is_running() rather than reusing observers_snapshot's !is_stopped() filter because
+  // the hook contract is "fired on observers that are currently running".
+  // start_episode() does not hold episode_mutex_, so this is naturally outside the
+  // lock - same contract as on_episode_ended below (see teardown_episode comment).
+  // Note: if push-producer startup below fails and triggers cleanup_and_abort(), this
+  // observer-side "started" hook will have fired without a matching "ended". Treated
+  // as acceptable: producer failures are rare and surface their own diagnostics, and
+  // observers' per-episode reset is idempotent against the next successful start.
+  const uint32_t started_episode_index = next_episode_index_;
+  for (const auto& obs : observers_) {
+    if (obs && obs->is_running()) {
+      obs->on_episode_started(started_episode_index);
+    }
+  }
+
   // Start push producers (own threads, emit into current sink)
   // Capture shared_ptr to ensure Sink lifetime outlives any in-flight emit callbacks
   std::shared_ptr<io::Sink> sink_shared = current_sink_;
@@ -354,24 +372,6 @@ bool SessionManager::start_episode() {
 
   trossen::utils::announce(
     "Episode " + std::to_string(next_episode_index_) + " started", false);
-
-  // Fan out the episode-start hook to every running observer before user callbacks
-  // run, so user code sees observers that have already reset any per-episode state.
-  // start_episode() does not hold episode_mutex_, so this is naturally outside the
-  // lock - same contract as on_episode_end below (see teardown_episode comment).
-  const uint32_t started_episode_index = next_episode_index_;
-  for (const auto& obs : observers_) {
-    if (obs && obs->is_running()) {
-      try {
-        obs->on_episode_start(started_episode_index);
-      } catch (const std::exception& e) {
-        // on_episode_start is declared noexcept, but a misbehaving subclass could
-        // still terminate via throw - guard belt-and-suspenders.
-        std::cerr << "Observer '" << obs->name()
-                  << "' on_episode_start error: " << e.what() << std::endl;
-      }
-    }
-  }
 
   // Invoke episode-started callbacks
   for (const auto& cb : episode_started_cbs_) {
@@ -511,17 +511,12 @@ void SessionManager::teardown_episode(bool discard) {
     // see the unique_lock comment at the top of this function.
     lock.unlock();
 
-    // Fan out the episode-end hook to every running observer before user callbacks
+    // Fan out the episode-ended hook to every running observer before user callbacks
     // run, so user code (telemetry sidecar, summary print, etc.) sees observers that
     // have already finalised their per-episode state.
     for (const auto& obs : observers_snapshot) {
       if (obs && obs->is_running()) {
-        try {
-          obs->on_episode_end(finished_episode_index);
-        } catch (const std::exception& e) {
-          std::cerr << "Observer '" << obs->name()
-                    << "' on_episode_end error: " << e.what() << std::endl;
-        }
+        obs->on_episode_ended(finished_episode_index);
       }
     }
 

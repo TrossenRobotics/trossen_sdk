@@ -148,9 +148,9 @@ public:
    *
    * Per-record on-disk capture (MCAP, etc.) is unaffected - this only clears what the
    * live viewer renders. Dispatched outside ``episode_mutex_`` per the
-   * ``ObserverBase::on_episode_start`` contract.
+   * ``ObserverBase::on_episode_started`` contract.
    */
-  void on_episode_start(uint32_t episode_index) noexcept override;
+  void on_episode_started(uint32_t episode_index) noexcept override;
 
 protected:
   /// Open the ReRun gRPC connection. Returns ``false`` on transport failure.
@@ -173,10 +173,10 @@ private:
    * here for that reason).
    *
    * Synchronisation: ``dispatch_`` (worker thread) inserts into ``subscription_state_``
-   * on first sight of each ``record_id``, and ``on_episode_start`` (caller thread)
+   * on first sight of each ``record_id``, and ``on_episode_started`` (caller thread)
    * iterates the map to log a Clear per entity. Concurrent insert-vs-iterate would be
    * a data race, so both code paths take ``subscription_state_mutex_`` only long
-   * enough to lookup-or-insert (``dispatch_``) or snapshot the keys (``on_episode_start``).
+   * enough to lookup-or-insert (``dispatch_``) or snapshot the keys (``on_episode_started``).
    * ``std::unordered_map`` guarantees that references to existing elements stay valid
    * across rehashes, so ``dispatch_`` releases the lock before touching the entry's
    * fields - no contention on the hot path beyond the brief map lookup.
@@ -225,7 +225,7 @@ private:
 
   // Lazy per-record_id cache. Keyed by the ``record_id`` argument passed to
   // ``dispatch_``; ``operator[]`` inserts a default-constructed entry on first sight.
-  // ``dispatch_`` (worker thread) inserts; ``on_episode_start`` (caller thread)
+  // ``dispatch_`` (worker thread) inserts; ``on_episode_started`` (caller thread)
   // iterates. ``subscription_state_mutex_`` serialises insert-vs-iterate; see the
   // ``PerSubscriptionState`` docstring for the locking discipline.
   std::unordered_map<std::string, PerSubscriptionState> subscription_state_;

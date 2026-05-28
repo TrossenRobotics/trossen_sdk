@@ -78,7 +78,7 @@ protected:
   bool on_start() override { return false; }
 };
 
-/// Observer that records every on_episode_start / on_episode_end invocation
+/// Observer that records every on_episode_started / on_episode_ended invocation
 /// (with the episode index argument) so tests can assert ordering and payload.
 class EpisodeBoundaryObserver : public ObserverBase {
 public:
@@ -91,10 +91,10 @@ public:
   std::vector<uint32_t> ended_indices;
 
 protected:
-  void on_episode_start(uint32_t episode_index) noexcept override {
+  void on_episode_started(uint32_t episode_index) noexcept override {
     started_indices.push_back(episode_index);
   }
-  void on_episode_end(uint32_t episode_index) noexcept override {
+  void on_episode_ended(uint32_t episode_index) noexcept override {
     ended_indices.push_back(episode_index);
   }
 };
@@ -445,9 +445,9 @@ TEST_F(SessionManagerObserversTest, OnEpisodeEndedCallback_CanCallObserverStats)
 }
 
 TEST_F(SessionManagerObserversTest, EpisodeBoundaryHooks_FireOncePerEpisode) {
-  // on_episode_start / on_episode_end fire exactly once per running observer per
-  // episode, and the index reported to on_episode_end matches the index reported to
-  // the matching on_episode_start. The test fixture uses the null backend, which
+  // on_episode_started / on_episode_ended fire exactly once per running observer per
+  // episode, and the index reported to on_episode_ended matches the index reported to
+  // the matching on_episode_started. The test fixture uses the null backend, which
   // resets next_episode_index_ to 0 via scan_existing_episodes() at every
   // start_episode() - so this test does not assume monotonically increasing indices
   // (that contract is enforced only by persistent backends).
@@ -493,7 +493,7 @@ TEST_F(SessionManagerObserversTest, EpisodeBoundaryHooks_SkipFailedStartObserver
 }
 
 TEST_F(SessionManagerObserversTest, EpisodeEndHook_CanCallObserverStats) {
-  // on_episode_end runs outside episode_mutex_ (same contract as on_episode_ended
+  // on_episode_ended runs outside episode_mutex_ (same contract as on_episode_ended
   // user callbacks). Subclasses are free to call back into the SessionManager from
   // inside the hook without deadlocking - pin that contract.
   class CallbackObserver : public ObserverBase {
@@ -504,7 +504,7 @@ TEST_F(SessionManagerObserversTest, EpisodeEndHook_CanCallObserverStats) {
                        [](const std::shared_ptr<RecordBase>&) {});
     }
     std::atomic<size_t> end_observer_count{0};
-    void on_episode_end(uint32_t episode_index) noexcept override {
+    void on_episode_ended(uint32_t episode_index) noexcept override {
       (void)episode_index;
       end_observer_count.store(sm_->observer_stats().size());
     }
