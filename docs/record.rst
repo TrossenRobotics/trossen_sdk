@@ -75,6 +75,7 @@ A recording session proceeds through the following phases:
 #.  **Recording.**
     The ``SessionManager`` opens a new ``.mcap`` file, starts all producers, and begins logging.
     The process runs for at most ``session.max_duration`` seconds.
+    If your config defines an ``observers`` block, each observer receives the same records in parallel — see :doc:`/visualize` for the ReRun live-viewer setup.
 #.  **Reset.**
     After each episode, the demo pauses for ``session.reset_duration`` seconds before starting the next episode.
 #.  **Shutdown.**
@@ -113,7 +114,7 @@ What's Next
 
 With ``.mcap`` episodes on disk:
 
--   Open them in Foxglove Studio.
+-   Open them in Foxglove Studio, or stream the next session live to a ReRun viewer.
     See :doc:`/visualize`.
 -   Replay an episode back on hardware.
     See :doc:`/replay`.
