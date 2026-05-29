@@ -45,6 +45,10 @@ SdkConfig SdkConfig::from_json(const nlohmann::json& j) {
 
   if (j.contains("robot_name")) j.at("robot_name").get_to(c.robot_name);
 
+  if (j.contains("stage_each_episode")) {
+    j.at("stage_each_episode").get_to(c.stage_each_episode);
+  }
+
   if (j.contains("hardware") && j.at("hardware").is_object()) {
     c.hardware = HardwareConfig::from_json(j.at("hardware"));
   }

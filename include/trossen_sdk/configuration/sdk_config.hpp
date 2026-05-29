@@ -111,6 +111,12 @@ struct SdkConfig {
   /// @brief Human-readable robot name (used in backend metadata)
   std::string robot_name{"trossen_robot"};
 
+  /// @brief Stage arms to their configured home pose at the start of every
+  /// episode. Opt-in; defaults to false (no staging). Only arms with a
+  /// non-empty staged_position move. With teleop active, the application is
+  /// expected to pause the mirror loop around staging (see the examples).
+  bool stage_each_episode{false};
+
   /// @brief Hardware component configurations
   HardwareConfig hardware;
 

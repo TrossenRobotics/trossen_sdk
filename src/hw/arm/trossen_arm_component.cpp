@@ -7,6 +7,7 @@
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -153,6 +154,9 @@ void TrossenArmComponent::prepare_for_teleop() {
 
 void TrossenArmComponent::end_teleop() {
   if (!driver_) return;
+  std::cout << "  [end_teleop] " << get_identifier()
+            << ": returning to rest over " << teleop_moving_time_s_ << "s..."
+            << std::endl;
   // Neutralize first (safe regardless of current mode), then gracefully
   // return to rest over the configured trajectory time, then release the
   // driver.
@@ -163,14 +167,23 @@ void TrossenArmComponent::end_teleop() {
     teleop_moving_time_s_, true);
   driver_->cleanup();
   driver_.reset();
+  std::cout << "  [end_teleop] " << get_identifier() << ": done" << std::endl;
 }
 
 void TrossenArmComponent::stage() {
-  if (!driver_ || staged_position_.empty()) return;
+  if (!driver_) return;
+  if (staged_position_.empty()) {
+    std::cout << "  [stage] " << get_identifier()
+              << ": no staged_position configured, skipping" << std::endl;
+    return;
+  }
+  std::cout << "  [stage] " << get_identifier() << ": moving to home over "
+            << teleop_moving_time_s_ << "s" << std::endl;
   driver_->set_all_modes(trossen_arm::Mode::position);
   std::vector<double> pos_d(staged_position_.begin(), staged_position_.end());
-  // Non-blocking so multiple arms can stage in parallel.
-  driver_->set_all_positions(pos_d, teleop_moving_time_s_, false);
+  // Blocking so the arm reaches home before the caller hands it to teleop
+  // (gravity-comp) or starts recording; this mirrors end_teleop()'s rest move.
+  driver_->set_all_positions(pos_d, teleop_moving_time_s_, true);
 }
 
 REGISTER_HARDWARE(TrossenArmComponent, "trossen_arm")

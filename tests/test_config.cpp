@@ -15,11 +15,15 @@
 #include "trossen_sdk/configuration/base_config.hpp"
 #include "trossen_sdk/configuration/config_registry.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/configuration/sdk_config.hpp"
+#include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
 #include "trossen_sdk/configuration/types/runtime/session_manager_config.hpp"
 
+using trossen::configuration::ArmConfig;
 using trossen::configuration::BaseConfig;
 using trossen::configuration::ConfigRegistry;
 using trossen::configuration::GlobalConfig;
+using trossen::configuration::SdkConfig;
 using trossen::configuration::SessionManagerConfig;
 
 // ============================================================================
@@ -179,4 +183,76 @@ TEST(ConfigRegistryTest, SessionManagerType_Registered) {
   auto sm_cfg = std::dynamic_pointer_cast<SessionManagerConfig>(cfg);
   ASSERT_NE(sm_cfg, nullptr);
   EXPECT_DOUBLE_EQ(sm_cfg->max_duration->count(), 5.0);
+}
+
+// ============================================================================
+// CFG-08: ArmConfig parses optional staging fields from JSON
+// ============================================================================
+
+TEST(ArmConfigTest, FromJson_ParsesStagingFields) {
+  nlohmann::json j = {
+    {"ip_address", "192.168.1.5"},
+    {"model", "wxai_v0"},
+    {"end_effector", "wxai_v0_leader"},
+    {"staged_position", {0.0f, 1.0f, 0.5f, 0.6f, 0.0f, 0.0f, 0.0f}},
+    {"teleop_moving_time_s", 3.5f}
+  };
+
+  ArmConfig cfg = ArmConfig::from_json(j);
+
+  EXPECT_EQ(cfg.ip_address, "192.168.1.5");
+  EXPECT_EQ(cfg.end_effector, "wxai_v0_leader");
+  ASSERT_EQ(cfg.staged_position.size(), 7u);
+  EXPECT_FLOAT_EQ(cfg.staged_position[1], 1.0f);
+  EXPECT_FLOAT_EQ(cfg.teleop_moving_time_s, 3.5f);
+}
+
+// ============================================================================
+// CFG-09: ArmConfig round-trips staging fields through to_json/from_json
+// ============================================================================
+
+TEST(ArmConfigTest, RoundTrip_PreservesStagingFields) {
+  ArmConfig original;
+  original.ip_address = "192.168.1.7";
+  original.staged_position = {0.1f, 0.2f, 0.3f};
+  original.teleop_moving_time_s = 1.25f;
+
+  ArmConfig restored = ArmConfig::from_json(original.to_json());
+
+  EXPECT_EQ(restored.ip_address, "192.168.1.7");
+  ASSERT_EQ(restored.staged_position.size(), 3u);
+  EXPECT_FLOAT_EQ(restored.staged_position[2], 0.3f);
+  EXPECT_FLOAT_EQ(restored.teleop_moving_time_s, 1.25f);
+}
+
+// ============================================================================
+// CFG-10: ArmConfig with no staging omits staged_position in JSON
+// ============================================================================
+
+TEST(ArmConfigTest, ToJson_OmitsEmptyStagedPosition) {
+  ArmConfig cfg;  // default: empty staged_position
+
+  nlohmann::json j = cfg.to_json();
+
+  // staged_position must be absent (a present-but-empty array would be
+  // rejected by TrossenArmComponent::configure()), while teleop_moving_time_s
+  // is always emitted.
+  EXPECT_FALSE(j.contains("staged_position"));
+  EXPECT_TRUE(j.contains("teleop_moving_time_s"));
+  EXPECT_FLOAT_EQ(j.at("teleop_moving_time_s").get<float>(), 2.0f);
+}
+
+// ============================================================================
+// CFG-11: SdkConfig.stage_each_episode defaults off and parses when present
+// ============================================================================
+
+TEST(SdkConfigTest, StageEachEpisode_DefaultsFalse) {
+  SdkConfig cfg = SdkConfig::from_json(nlohmann::json::object());
+  EXPECT_FALSE(cfg.stage_each_episode);
+}
+
+TEST(SdkConfigTest, StageEachEpisode_ParsedWhenPresent) {
+  nlohmann::json j = {{"stage_each_episode", true}};
+  SdkConfig cfg = SdkConfig::from_json(j);
+  EXPECT_TRUE(cfg.stage_each_episode);
 }

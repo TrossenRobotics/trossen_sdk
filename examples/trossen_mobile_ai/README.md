@@ -89,7 +89,7 @@ Override:
 ```
 
 The script will:
-1. Connect to all four arms and the SLATE base, then move arms to the staged starting position
+1. Connect to all four arms and the SLATE base
 2. Enable teleop — each follower mirrors its paired leader
 3. Start recording an episode (default: 20 seconds)
    - Arms and cameras are polled at 30 Hz
@@ -99,6 +99,15 @@ The script will:
 6. Return arms to the sleep position
 
 Episodes are saved to `~/.trossen_sdk/<dataset_id>/episode_NNNNNN.mcap`.
+
+### Optional: home staging
+
+Set `"stage_each_episode": true` (top-level in the config, or
+`--set stage_each_episode=true`) to move each arm to its `staged_position`
+at the start of **every** episode. Staging is **off by default**, and an arm
+only moves if it has a `staged_position` configured. When teleop is enabled,
+each mirror loop is paused while the arms move to home, then re-armed before
+recording resumes.
 
 ---
 

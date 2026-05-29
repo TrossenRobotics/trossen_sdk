@@ -68,6 +68,11 @@ static void print_usage(const char* program) {
 }
 
 int main(int argc, char** argv) {
+  // Flush every line immediately so progress (and the last line before any
+  // stall) is always visible — important for a long-running, hardware-driven
+  // recording loop.
+  std::cout << std::unitbuf;
+
   trossen::configuration::CliParser cli(argc, argv);
 
   if (cli.has_flag("help")) {
@@ -286,8 +291,20 @@ int main(int argc, char** argv) {
   // Register lifecycle callbacks
   // ──────────────────────────────────────────────────────────
 
-  // Before each episode: let controllers run their pre-episode lifecycle
+  // Before each episode: optionally re-stage arms to their configured home
+  // pose, then let controllers run their pre-episode lifecycle. Staging is
+  // opt-in (cfg.stage_each_episode, default false) and runs at the start of
+  // every episode. With teleop active the mirror loop runs across episodes, so
+  // we pause it first: stage() can then drive the arms to home without
+  // fighting the mirror, and the following prepare_teleop() re-arms teleop
+  // modes (e.g. leader gravity-compensation) before teleop() restarts the loop
+  // in on_episode_started. stage() blocks until the arm reaches home and is a
+  // no-op for arms without a configured staged_position.
   mgr.on_pre_episode([&]() -> bool {
+    if (cfg.stage_each_episode) {
+      for (auto& ctrl : controllers) ctrl->pause_mirror();
+      for (auto& [id, arm] : arm_components) arm->stage();
+    }
     for (auto& ctrl : controllers) ctrl->prepare_teleop();
     return true;
   });

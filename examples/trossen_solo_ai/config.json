@@ -1,6 +1,8 @@
 {
   "robot_name": "trossen_solo_ai",
 
+  "stage_each_episode": false,
+
   "hardware": {
     "arms": {
       "leader": {

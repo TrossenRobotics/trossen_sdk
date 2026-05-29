@@ -89,6 +89,41 @@ TEST(TeleopControllerTest, StartStopCycle) {
   EXPECT_FALSE(ctrl.is_running());
 }
 
+// pause_mirror() stops the loop without tearing down teleop, and the mirror
+// can be restarted afterwards (the per-episode re-staging path).
+TEST(TeleopControllerTest, PauseMirrorStopsAndRestarts) {
+  auto leader = std::make_shared<StubLeader>();
+  TeleopController::Config cfg{};
+  cfg.control_rate_hz = 100.0f;
+  TeleopController ctrl(leader, nullptr, cfg);
+
+  ctrl.prepare_teleop();
+  ctrl.teleop();
+  EXPECT_TRUE(ctrl.is_running());
+
+  ctrl.pause_mirror();
+  EXPECT_FALSE(ctrl.is_running());
+
+  // Restartable after a pause.
+  ctrl.prepare_teleop();
+  ctrl.teleop();
+  EXPECT_TRUE(ctrl.is_running());
+
+  ctrl.stop_teleop();
+  EXPECT_FALSE(ctrl.is_running());
+}
+
+// pause_mirror() on an idle controller is a harmless no-op.
+TEST(TeleopControllerTest, PauseMirrorWhenIdleIsSafe) {
+  auto leader = std::make_shared<StubLeader>();
+  TeleopController::Config cfg{};
+  cfg.control_rate_hz = 100.0f;
+  TeleopController ctrl(leader, nullptr, cfg);
+
+  ctrl.pause_mirror();  // never started
+  EXPECT_FALSE(ctrl.is_running());
+}
+
 // Calling stop_teleop() twice does not crash.
 TEST(TeleopControllerTest, DoubleStopIsSafe) {
   auto leader = std::make_shared<StubLeader>();
