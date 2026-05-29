@@ -131,11 +131,15 @@ public:
   }
 
   /**
-   * @brief Clear every subscribed entity tree at the start of a new episode.
+   * @brief Request a viewer clear at the start of a new episode.
    *
-   * Logs a recursive ``rerun::archetypes::Clear`` to each ``record_id`` we have
-   * dispatched data into, so the viewer drops the previous episode's history before
-   * the new episode's first records arrive. Two problems this fixes:
+   * Sets a flag consumed by the worker thread in ``dispatch_``; the actual recursive
+   * ``rerun::archetypes::Clear`` is logged to each subscribed ``record_id`` there,
+   * just before the new episode's first record. The work is deferred off this hook
+   * because it runs on the SessionManager's ``start_episode()`` thread, where a
+   * blocked/absent viewer (gRPC backpressure) would otherwise stall episode start.
+   * Clearing drops the previous episode's history from the viewer. Two problems it
+   * fixes:
    *
    *   - **Autoscale collapse on cross-episode pose jumps.** A new episode that starts
    *     at a very different pose from where the last one ended forces rerun's auto-Y
@@ -163,6 +167,11 @@ private:
   /// Worker-thread dispatch entry point. Captured into each subscription's handler.
   void dispatch_(const std::string& record_id,
                  const std::shared_ptr<data::RecordBase>& rec);
+
+  /// Log a recursive ``Clear`` to every subscribed entity tree. Runs on the worker
+  /// thread (deferred from ``on_episode_started`` via ``episode_clear_pending_``) so a
+  /// blocked or absent viewer cannot stall the caller's ``start_episode()``.
+  void clear_subscribed_entities_();
 
   /**
    * @brief Per-subscription cached state owned by ``dispatch_``.
@@ -230,6 +239,12 @@ private:
   // ``PerSubscriptionState`` docstring for the locking discipline.
   std::unordered_map<std::string, PerSubscriptionState> subscription_state_;
   std::mutex subscription_state_mutex_;
+
+  // Set by on_episode_started (caller thread), consumed once by dispatch_ (worker
+  // thread) before the new episode's first record is logged. Deferring the viewer
+  // Clear off the caller thread keeps gRPC backpressure (e.g. no viewer draining the
+  // stream) from stalling the SessionManager's start_episode().
+  std::atomic<bool> episode_clear_pending_{false};
 
   std::atomic<uint64_t> skipped_frames_{0};
 };

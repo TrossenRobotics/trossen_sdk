@@ -203,7 +203,17 @@ void RerunObserver::on_stop() {
 
 void RerunObserver::on_episode_started(uint32_t episode_index) noexcept {
   (void)episode_index;
-  // No-op if the transport is closed (failed connect, or hook ran before on_start) -
+  // Defer the viewer Clear to the worker thread (consumed in dispatch_). This hook
+  // runs on the SessionManager's start_episode() thread; issuing the rec_->log(Clear)
+  // calls here would block that thread under gRPC backpressure when no viewer is
+  // draining the stream, hanging episode start (the buffer fills after ~one episode,
+  // so the stall first appears on the episode-1->2 transition). Setting a flag is
+  // non-blocking; the worker performs the Clear before the new episode's first record.
+  episode_clear_pending_.store(true, std::memory_order_release);
+}
+
+void RerunObserver::clear_subscribed_entities_() {
+  // No-op if the transport is closed (failed connect, or called before on_start) -
   // there is nothing to clear in the viewer until we have a recording stream.
   if (!rec_) {
     return;
@@ -218,9 +228,8 @@ void RerunObserver::on_episode_started(uint32_t episode_index) noexcept {
   // rebuild on the hot path.
   //
   // Snapshot the keys under the mutex before calling rec_->log. dispatch_ runs on the
-  // worker thread and may insert into subscription_state_ concurrently; holding the
-  // mutex through the rerun gRPC calls would needlessly block dispatch_ for the
-  // length of those calls.
+  // same (worker) thread, so there is no insert-vs-iterate race here, but the lock is
+  // cheap and keeps the access discipline uniform with the rest of the class.
   std::vector<std::string> record_ids;
   {
     std::lock_guard<std::mutex> lk(subscription_state_mutex_);
@@ -234,8 +243,7 @@ void RerunObserver::on_episode_started(uint32_t episode_index) noexcept {
       rec_->log(record_id, rerun::archetypes::Clear(/*is_recursive=*/true));
     }
   } catch (...) {
-    // Swallow: a faulty rerun-cpp call must not raise into SessionManager's fan-out
-    // (the hook is declared noexcept and any throw would terminate the process).
+    // Swallow: a faulty rerun-cpp call must not escape the worker loop.
   }
 }
 
@@ -243,6 +251,13 @@ void RerunObserver::dispatch_(const std::string& record_id,
                               const std::shared_ptr<data::RecordBase>& rec) {
   if (!rec_ || !rec) {
     return;
+  }
+
+  // Consume a pending episode-start Clear on this (worker) thread, before logging the
+  // new episode's first record. exchange() ensures the Clear runs exactly once per
+  // episode even though dispatch_ is called per record.
+  if (episode_clear_pending_.exchange(false, std::memory_order_acq_rel)) {
+    clear_subscribed_entities_();
   }
 
   // Count every skip; log once per reason so a config mismatch surfaces a single line
