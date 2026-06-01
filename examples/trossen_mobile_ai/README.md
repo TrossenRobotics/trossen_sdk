@@ -144,6 +144,46 @@ Episodes are saved to `~/.trossen_sdk/<dataset_id>/episode_NNNNNN.mcap`.
 ./build/examples/trossen_mobile_ai --set teleop.enabled=false
 ```
 
+**Stream to a live ReRun viewer (optional):**
+
+Build with `-DTROSSEN_ENABLE_RERUN_OBSERVER=ON`, launch a ReRun viewer
+listening on the default gRPC port (`rerun` — the native viewer listens on
+`127.0.0.1:9876` by default), and add an `observers` array to your top-level
+`config.json` object (alongside `hardware`, `producers`, etc.):
+
+```jsonc
+{
+  // ...existing top-level keys...
+  "observers": [
+    {
+      "type":      "rerun",
+      "id":        "live_viewer",
+      "rerun_url": "rerun+http://127.0.0.1:9876/proxy",
+      "app_id":    "trossen_mobile_ai",
+      "enabled":   true,
+      "subscriptions": [
+        { "record_id": "leader_left",        "throttle_hz": 30.0 },
+        { "record_id": "leader_right",       "throttle_hz": 30.0 },
+        { "record_id": "follower_left",      "throttle_hz": 30.0 },
+        { "record_id": "follower_right",     "throttle_hz": 30.0 },
+        { "record_id": "slate_base",         "throttle_hz": 30.0 },
+        { "record_id": "camera_high",        "throttle_hz": 15.0 },
+        { "record_id": "camera_left_wrist",  "throttle_hz": 15.0 },
+        { "record_id": "camera_right_wrist", "throttle_hz": 15.0 }
+      ]
+    }
+  ]
+}
+```
+
+Each subscription's `record_id` must match a producer's `stream_id` exactly —
+note the `slate_base` subscription routes the mobile base's `Odometry2DRecord`
+through the rerun observer's odom dispatch arm (pose + body-frame twist as
+scalar timelines).
+`SdkConfig::from_json` prints a warning to stderr at config parse time for any
+subscription whose `record_id` does not match a producer in the same config.
+Set `"enabled": false` to silence an observer without deleting its block.
+
 ---
 
 ## Converting to LeRobot V2
