@@ -36,6 +36,9 @@
  *     { "type": "realsense_camera", "hardware_id": "<id>", "stream_id": "<id>", "poll_rate_hz": 30.0, "encoding": "bgr8", "use_device_time": true },
  *     { "type": "slate_base",       "hardware_id": "slate_base", "stream_id": "slate_base", "poll_rate_hz": 30.0, "use_device_time": false }
  *   ],
+ *   "observers": [
+ *     { "type": "rerun", "id": "live", "subscriptions": [ { "record_id": "<id>", "throttle_hz": 30.0 } ] }
+ *   ],
  *   "teleop": {
  *     "enabled": true,
  *     "rate_hz": 1000.0,
@@ -72,6 +75,7 @@
 #include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/camera_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/mobile_base_config.hpp"
+#include "trossen_sdk/configuration/types/observers/observer_config.hpp"
 #include "trossen_sdk/configuration/types/producers/producer_config.hpp"
 #include "trossen_sdk/configuration/types/teleop_config.hpp"
 #include "trossen_sdk/configuration/types/backends/trossen_mcap_backend_config.hpp"
@@ -112,6 +116,9 @@ struct SdkConfig {
 
   /// @brief Per-producer configurations (ordered list)
   std::vector<ProducerConfig> producers;
+
+  /// @brief Per-observer configurations (ordered list, optional)
+  std::vector<ObserverConfig> observers;
 
   /// @brief Teleoperation setup
   TeleoperationConfig teleop;
