@@ -129,6 +129,15 @@ listening on the default gRPC port (`rerun` — the native viewer listens on
 `127.0.0.1:9876` by default), and add an `observers` array to your top-level
 `config.json` object (alongside `hardware`, `producers`, etc.):
 
+> **Keep the viewer reasonably current.** This SDK builds against rerun-cpp
+> `0.32.0` (pinned as `RERUN_SDK_VERSION` in `CMakeLists.txt`); a viewer of
+> **0.32 or newer** is recommended. Slightly older viewers usually still render
+> but may log harmless schema-version warnings, while very old viewers fail to
+> render and log errors such as `transport error` or `dropping LogMsg ...
+> Missing row_id column`. Install with `uv tool install rerun-sdk` (or `pip
+> install rerun-sdk`, or `sudo snap install rerun`); if the viewer stays blank,
+> update it.
+
 ```jsonc
 {
   // ...existing top-level keys...

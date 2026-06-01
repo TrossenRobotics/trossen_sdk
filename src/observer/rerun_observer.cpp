@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
 #include <vector>
@@ -90,6 +91,7 @@ RerunObserver::RerunObserver(const nlohmann::json& cfg)
   : ObserverBase(cfg.value("id", cfg.value("type", std::string("rerun")))) {
   rerun_url_ = cfg.value("rerun_url", std::string{kDefaultRerunUrl});
   app_id_ = cfg.value("app_id", std::string{kDefaultAppId});
+  spawn_viewer_ = cfg.value("spawn", false);
 
   if (!cfg.contains("subscriptions") || !cfg.at("subscriptions").is_array()) {
     throw std::runtime_error(
@@ -111,6 +113,46 @@ RerunObserver::RerunObserver(const nlohmann::json& cfg)
     }
     const auto record_id = sub_j.at("record_id").get<std::string>();
     const auto throttle_hz = sub_j.at("throttle_hz").get<double>();
+
+    // Optional per-subscription field filter. When present, only the listed joint-state
+    // fields are forwarded; unknown field names are rejected at construction time so a
+    // typo surfaces immediately rather than silently dropping every frame.
+    if (sub_j.contains("fields")) {
+      if (!sub_j.at("fields").is_array()) {
+        throw std::runtime_error(
+          "RerunObserver: 'fields' must be an array of strings for record_id '" +
+          record_id + "'");
+      }
+      // Reject empty array explicitly. An empty filter would drop every joint-state
+      // channel, which is almost never what the operator wants and contradicts the
+      // "omit to forward all" default elsewhere in this config. Force them to omit
+      // the key instead.
+      if (sub_j.at("fields").empty()) {
+        throw std::runtime_error(
+          "RerunObserver: 'fields' must be non-empty for record_id '" + record_id +
+          "' (omit the 'fields' key entirely to forward all joint-state channels)");
+      }
+      static const std::unordered_set<std::string> kJointFieldNames = {
+        "positions", "velocities", "efforts"};
+      std::unordered_set<std::string> filter;
+      for (const auto& f : sub_j.at("fields")) {
+        if (!f.is_string() || f.get<std::string>().empty()) {
+          throw std::runtime_error(
+            "RerunObserver: 'fields' entries must be non-empty strings for "
+            "record_id '" + record_id + "'");
+        }
+        const auto name = f.get<std::string>();
+        if (kJointFieldNames.count(name) == 0) {
+          throw std::runtime_error(
+            "RerunObserver: unknown joint-state field '" + name + "' in 'fields' for "
+            "record_id '" + record_id + "' (allowed: positions, velocities, efforts)");
+        }
+        filter.insert(name);
+      }
+      // Pre-populate the slot so dispatch_ sees the filter on the very first record.
+      subscription_state_[record_id].joint_field_filter = std::move(filter);
+    }
+
     add_subscription(record_id, throttle_hz,
                      [this, record_id](const std::shared_ptr<data::RecordBase>& rec) {
                        dispatch_(record_id, rec);
@@ -130,10 +172,14 @@ RerunObserver::~RerunObserver() {
 bool RerunObserver::on_start() {
   try {
     rec_ = std::make_unique<rerun::RecordingStream>(app_id_);
-    const auto err = rec_->connect_grpc(rerun_url_);
+    // spawn() launches a local viewer if none is listening, otherwise redirects to
+    // the running one - see rerun::RecordingStream::spawn docs. connect_grpc only
+    // attaches to an already-running viewer.
+    const auto err = spawn_viewer_ ? rec_->spawn() : rec_->connect_grpc(rerun_url_);
     if (err.is_err()) {
-      std::cerr << "RerunObserver '" << name()
-                << "' connect_grpc failed: " << err.description << std::endl;
+      std::cerr << "RerunObserver '" << name() << "' "
+                << (spawn_viewer_ ? "spawn" : "connect_grpc")
+                << " failed: " << err.description << std::endl;
       rec_.reset();
       return false;
     }
@@ -155,10 +201,63 @@ void RerunObserver::on_stop() {
   rec_.reset();
 }
 
+void RerunObserver::on_episode_started(uint32_t episode_index) noexcept {
+  (void)episode_index;
+  // Defer the viewer Clear to the worker thread (consumed in dispatch_). This hook
+  // runs on the SessionManager's start_episode() thread; issuing the rec_->log(Clear)
+  // calls here would block that thread under gRPC backpressure when no viewer is
+  // draining the stream, hanging episode start (the buffer fills after ~one episode,
+  // so the stall first appears on the episode-1->2 transition). Setting a flag is
+  // non-blocking; the worker performs the Clear before the new episode's first record.
+  episode_clear_pending_.store(true, std::memory_order_release);
+}
+
+void RerunObserver::clear_subscribed_entities_() {
+  // No-op if the transport is closed (failed connect, or called before on_start) -
+  // there is nothing to clear in the viewer until we have a recording stream.
+  if (!rec_) {
+    return;
+  }
+  // Iterate every record_id we have dispatched into so far. subscription_state_ is
+  // populated lazily in dispatch_(), so on episode 0 this is typically empty (clears
+  // nothing - correct; nothing to clear). On episode 1+ each previously-seen
+  // record_id gets a recursive Clear, which drops every child entity under it
+  // (e.g. ``slate_base/pose/x``, ``slate_base/twist/linear_x`` etc.) from the viewer's
+  // active time range. The cached path strings inside PerSubscriptionState stay
+  // intact - re-stamping them on the next record is harmless and avoids a per-episode
+  // rebuild on the hot path.
+  //
+  // Snapshot the keys under the mutex before calling rec_->log. dispatch_ runs on the
+  // same (worker) thread, so there is no insert-vs-iterate race here, but the lock is
+  // cheap and keeps the access discipline uniform with the rest of the class.
+  std::vector<std::string> record_ids;
+  {
+    std::lock_guard<std::mutex> lk(subscription_state_mutex_);
+    record_ids.reserve(subscription_state_.size());
+    for (const auto& [record_id, _] : subscription_state_) {
+      record_ids.push_back(record_id);
+    }
+  }
+  try {
+    for (const auto& record_id : record_ids) {
+      rec_->log(record_id, rerun::archetypes::Clear(/*is_recursive=*/true));
+    }
+  } catch (...) {
+    // Swallow: a faulty rerun-cpp call must not escape the worker loop.
+  }
+}
+
 void RerunObserver::dispatch_(const std::string& record_id,
                               const std::shared_ptr<data::RecordBase>& rec) {
   if (!rec_ || !rec) {
     return;
+  }
+
+  // Consume a pending episode-start Clear on this (worker) thread, before logging the
+  // new episode's first record. exchange() ensures the Clear runs exactly once per
+  // episode even though dispatch_ is called per record.
+  if (episode_clear_pending_.exchange(false, std::memory_order_acq_rel)) {
+    clear_subscribed_entities_();
   }
 
   // Count every skip; log once per reason so a config mismatch surfaces a single line
@@ -176,10 +275,16 @@ void RerunObserver::dispatch_(const std::string& record_id,
     }
   };
 
-  // Use the producer-side monotonic capture time so the timeline does not jump backwards
-  // on system-clock adjustments.
-  const double t_secs = static_cast<double>(rec->ts.monotonic.to_ns()) * 1e-9;
-  rec_->set_time_duration_secs("monotonic", t_secs);
+  // Log the producer-side wall-clock capture time (system_clock, anchored at the Unix
+  // epoch) so the viewer renders human-readable times ("18:25:04.512 local") on plot
+  // axes. We deliberately do NOT use ts.monotonic here - that field comes from
+  // steady_clock (CLOCK_MONOTONIC on Linux) which is anchored at boot, not at the Unix
+  // epoch, so feeding it to set_time_timestamp_secs_since_epoch produces nonsense
+  // wall-clock times offset by however long ago CLOCK_MONOTONIC started. The price of
+  // using realtime is that the timeline can jump backwards on a system-clock adjustment
+  // (NTP / manual set); for live monitoring during recording this is acceptable.
+  const double t_secs = static_cast<double>(rec->ts.realtime.to_ns()) * 1e-9;
+  rec_->set_time_timestamp_secs_since_epoch("wall_clock", t_secs);
 
   if (auto* img = dynamic_cast<data::ImageRecord*>(rec.get())) {
     if (img->image.empty() || img->width == 0 || img->height == 0) {
@@ -199,7 +304,16 @@ void RerunObserver::dispatch_(const std::string& record_id,
     // first sight (encoding=kUnresolved). After resolution we never re-parse the string
     // on subsequent frames, and a kUnsupported result sticks so further string churn is
     // impossible for that subscription.
-    auto& state = subscription_state_[record_id];
+    //
+    // Lock briefly around the lookup-or-insert: on_episode_started may iterate the map
+    // concurrently on the caller thread. unordered_map keeps references valid through
+    // rehashes, so we can drop the lock and use ``state`` outside the critical section.
+    PerSubscriptionState* state_ptr;
+    {
+      std::lock_guard<std::mutex> lk(subscription_state_mutex_);
+      state_ptr = &subscription_state_[record_id];
+    }
+    auto& state = *state_ptr;
     if (state.encoding == detail::ColorEncoding::kUnresolved) {
       state.encoding = detail::resolve_encoding(img->encoding);
     }
@@ -269,7 +383,12 @@ void RerunObserver::dispatch_(const std::string& record_id,
   }
 
   if (auto* js = dynamic_cast<data::JointStateRecord*>(rec.get())) {
-    auto& state = subscription_state_[record_id];
+    PerSubscriptionState* state_ptr;
+    {
+      std::lock_guard<std::mutex> lk(subscription_state_mutex_);
+      state_ptr = &subscription_state_[record_id];
+    }
+    auto& state = *state_ptr;
     if (!state.joint_paths.has_value()) {
       state.joint_paths = PerSubscriptionState::JointPaths{
         record_id + "/positions",
@@ -277,15 +396,22 @@ void RerunObserver::dispatch_(const std::string& record_id,
         record_id + "/efforts"};
     }
     const auto& jp = *state.joint_paths;
-    if (!js->positions.empty()) {
+    // Honour the per-subscription field filter if one was configured. When unset, all
+    // populated fields are forwarded (legacy default). The filter is validated at
+    // construction time, so we trust its contents here.
+    const auto& filter = state.joint_field_filter;
+    auto wants = [&filter](const char* name) noexcept {
+      return !filter.has_value() || filter->count(name) > 0;
+    };
+    if (!js->positions.empty() && wants("positions")) {
       std::vector<double> pos(js->positions.begin(), js->positions.end());
       rec_->log(jp.positions, rerun::Scalars(std::move(pos)));
     }
-    if (!js->velocities.empty()) {
+    if (!js->velocities.empty() && wants("velocities")) {
       std::vector<double> vel(js->velocities.begin(), js->velocities.end());
       rec_->log(jp.velocities, rerun::Scalars(std::move(vel)));
     }
-    if (!js->efforts.empty()) {
+    if (!js->efforts.empty() && wants("efforts")) {
       std::vector<double> eff(js->efforts.begin(), js->efforts.end());
       rec_->log(jp.efforts, rerun::Scalars(std::move(eff)));
     }
@@ -293,7 +419,12 @@ void RerunObserver::dispatch_(const std::string& record_id,
   }
 
   if (auto* odom = dynamic_cast<data::Odometry2DRecord*>(rec.get())) {
-    auto& state = subscription_state_[record_id];
+    PerSubscriptionState* state_ptr;
+    {
+      std::lock_guard<std::mutex> lk(subscription_state_mutex_);
+      state_ptr = &subscription_state_[record_id];
+    }
+    auto& state = *state_ptr;
     if (!state.odom_paths.has_value()) {
       state.odom_paths = PerSubscriptionState::OdomPaths{
         record_id + "/pose/x",

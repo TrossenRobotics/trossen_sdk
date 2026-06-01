@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdint>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -97,8 +98,13 @@ public:
    *  - ``type`` (string, required) - registry key ("rerun")
    *  - ``id`` (string, optional) - logging name; defaults to ``type``
    *  - ``rerun_url`` (string, optional) - gRPC URL of the ReRun viewer. Defaults to
-   *    ``"rerun+http://127.0.0.1:9876/proxy"`` (matches rerun-cpp).
+   *    ``"rerun+http://127.0.0.1:9876/proxy"`` (matches rerun-cpp). Ignored when
+   *    ``spawn`` is true.
    *  - ``app_id`` (string, optional) - ReRun application id; defaults to ``"trossen_sdk"``.
+   *  - ``spawn`` (bool, optional) - when true, ``on_start()`` launches a local
+   *    ReRun viewer process via ``RecordingStream::spawn()`` instead of connecting
+   *    over gRPC. If a viewer is already listening on the default port, the stream
+   *    is redirected to it (no duplicate processes). Defaults to false.
    *  - ``subscriptions`` (array, required) - each entry must have ``record_id`` (string)
    *    and ``throttle_hz`` (positive number).
    *
@@ -114,11 +120,41 @@ public:
   /// gRPC URL of the connected viewer.
   const std::string& rerun_url() const noexcept { return rerun_url_; }
 
+  /// True if ``on_start()`` will launch a local viewer via ``RecordingStream::spawn``
+  /// instead of connecting to a pre-launched one via ``connect_grpc``.
+  bool spawn_enabled() const noexcept { return spawn_viewer_; }
+
   /// Records the worker reached but did not log (unsupported encoding, record type,
   /// or depth scale). Lets operators detect a silently-empty viewer.
   uint64_t skipped_frames() const noexcept {
     return skipped_frames_.load(std::memory_order_relaxed);
   }
+
+  /**
+   * @brief Request a viewer clear at the start of a new episode.
+   *
+   * Sets a flag consumed by the worker thread in ``dispatch_``; the actual recursive
+   * ``rerun::archetypes::Clear`` is logged to each subscribed ``record_id`` there,
+   * just before the new episode's first record. The work is deferred off this hook
+   * because it runs on the SessionManager's ``start_episode()`` thread, where a
+   * blocked/absent viewer (gRPC backpressure) would otherwise stall episode start.
+   * Clearing drops the previous episode's history from the viewer. Two problems it
+   * fixes:
+   *
+   *   - **Autoscale collapse on cross-episode pose jumps.** A new episode that starts
+   *     at a very different pose from where the last one ended forces rerun's auto-Y
+   *     to span both clusters, squashing the dense pre-jump data against the axis
+   *     edge (it looks like the plot vanished). Clearing keeps each episode's plot
+   *     on its own auto-Y range.
+   *   - **Cross-episode line interpolation.** Without a clear, scalar plots draw a
+   *     long segment connecting the last sample of episode N to the first sample of
+   *     episode N+1; that single steep line is visually misleading.
+   *
+   * Per-record on-disk capture (MCAP, etc.) is unaffected - this only clears what the
+   * live viewer renders. Dispatched outside ``episode_mutex_`` per the
+   * ``ObserverBase::on_episode_started`` contract.
+   */
+  void on_episode_started(uint32_t episode_index) noexcept override;
 
 protected:
   /// Open the ReRun gRPC connection. Returns ``false`` on transport failure.
@@ -132,6 +168,11 @@ private:
   void dispatch_(const std::string& record_id,
                  const std::shared_ptr<data::RecordBase>& rec);
 
+  /// Log a recursive ``Clear`` to every subscribed entity tree. Runs on the worker
+  /// thread (deferred from ``on_episode_started`` via ``episode_clear_pending_``) so a
+  /// blocked or absent viewer cannot stall the caller's ``start_episode()``.
+  void clear_subscribed_entities_();
+
   /**
    * @brief Per-subscription cached state owned by ``dispatch_``.
    *
@@ -140,8 +181,14 @@ private:
    * lazily by ``dispatch_`` (encoding is unknown at construction; we don't pre-populate
    * here for that reason).
    *
-   * Worker-thread invariant: ``RerunObserver`` has a single worker, and ``dispatch_``
-   * is the sole reader/writer of ``subscription_state_``. No synchronisation required.
+   * Synchronisation: ``dispatch_`` (worker thread) inserts into ``subscription_state_``
+   * on first sight of each ``record_id``, and ``on_episode_started`` (caller thread)
+   * iterates the map to log a Clear per entity. Concurrent insert-vs-iterate would be
+   * a data race, so both code paths take ``subscription_state_mutex_`` only long
+   * enough to lookup-or-insert (``dispatch_``) or snapshot the keys (``on_episode_started``).
+   * ``std::unordered_map`` guarantees that references to existing elements stay valid
+   * across rehashes, so ``dispatch_`` releases the lock before touching the entry's
+   * fields - no contention on the hot path beyond the brief map lookup.
    */
   struct PerSubscriptionState {
     /// Resolved color encoding for ``ImageRecord`` payloads on this subscription.
@@ -163,10 +210,17 @@ private:
     std::optional<ImagePaths> image_paths;
     std::optional<JointPaths> joint_paths;
     std::optional<OdomPaths> odom_paths;
+
+    /// Optional per-subscription field filter. When set (non-empty), only the
+    /// listed field names are forwarded to ReRun for ``JointStateRecord`` (subset
+    /// of ``positions`` / ``velocities`` / ``efforts``). Empty / nullopt means
+    /// "log all available fields" (default, backward compatible).
+    std::optional<std::unordered_set<std::string>> joint_field_filter;
   };
 
   std::string rerun_url_;
   std::string app_id_;
+  bool spawn_viewer_{false};
 
   // Writes (on_start/on_stop) and reads (dispatch_ on the worker) never overlap in time
   // because ObserverBase::start joins-before-on_start and joins-before-on_stop; no
@@ -180,9 +234,17 @@ private:
 
   // Lazy per-record_id cache. Keyed by the ``record_id`` argument passed to
   // ``dispatch_``; ``operator[]`` inserts a default-constructed entry on first sight.
-  // Only ``dispatch_`` (worker thread) touches this map, so no synchronisation is
-  // required.
+  // ``dispatch_`` (worker thread) inserts; ``on_episode_started`` (caller thread)
+  // iterates. ``subscription_state_mutex_`` serialises insert-vs-iterate; see the
+  // ``PerSubscriptionState`` docstring for the locking discipline.
   std::unordered_map<std::string, PerSubscriptionState> subscription_state_;
+  std::mutex subscription_state_mutex_;
+
+  // Set by on_episode_started (caller thread), consumed once by dispatch_ (worker
+  // thread) before the new episode's first record is logged. Deferring the viewer
+  // Clear off the caller thread keeps gRPC backpressure (e.g. no viewer draining the
+  // stream) from stalling the SessionManager's start_episode().
+  std::atomic<bool> episode_clear_pending_{false};
 
   std::atomic<uint64_t> skipped_frames_{0};
 };

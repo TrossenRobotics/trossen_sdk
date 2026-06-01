@@ -72,6 +72,42 @@ TEST(ObserverSubscriptionConfigTest, Rejects_NonPositiveThrottle) {
                std::runtime_error);
 }
 
+TEST(ObserverSubscriptionConfigTest, Fields_OptionalDefaultsEmpty) {
+  auto j = json::parse(R"({"record_id": "arm", "throttle_hz": 30.0})");
+  auto c = ObserverSubscriptionConfig::from_json(j);
+  EXPECT_TRUE(c.fields.empty());
+}
+
+TEST(ObserverSubscriptionConfigTest, Fields_ParsesStringArray) {
+  auto j = json::parse(R"({
+    "record_id":   "arm",
+    "throttle_hz": 30.0,
+    "fields":      ["positions", "efforts"]
+  })");
+  auto c = ObserverSubscriptionConfig::from_json(j);
+  ASSERT_EQ(c.fields.size(), 2u);
+  EXPECT_EQ(c.fields[0], "positions");
+  EXPECT_EQ(c.fields[1], "efforts");
+}
+
+TEST(ObserverSubscriptionConfigTest, Fields_RejectsNonArrayAndNonStrings) {
+  EXPECT_THROW(ObserverSubscriptionConfig::from_json(json::parse(R"({
+    "record_id":   "arm",
+    "throttle_hz": 30.0,
+    "fields":      "positions"
+  })")), std::runtime_error);
+  EXPECT_THROW(ObserverSubscriptionConfig::from_json(json::parse(R"({
+    "record_id":   "arm",
+    "throttle_hz": 30.0,
+    "fields":      [1, 2]
+  })")), std::runtime_error);
+  EXPECT_THROW(ObserverSubscriptionConfig::from_json(json::parse(R"({
+    "record_id":   "arm",
+    "throttle_hz": 30.0,
+    "fields":      [""]
+  })")), std::runtime_error);
+}
+
 // ----------------------------------------------------------------------------
 // ObserverConfig
 // ----------------------------------------------------------------------------

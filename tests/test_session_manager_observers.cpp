@@ -78,6 +78,27 @@ protected:
   bool on_start() override { return false; }
 };
 
+/// Observer that records every on_episode_started / on_episode_ended invocation
+/// (with the episode index argument) so tests can assert ordering and payload.
+class EpisodeBoundaryObserver : public ObserverBase {
+public:
+  EpisodeBoundaryObserver() : ObserverBase("episode_boundary") {
+    add_subscription("mock/joints", 100.0,
+                     [](const std::shared_ptr<RecordBase>&) {});
+  }
+
+  std::vector<uint32_t> started_indices;
+  std::vector<uint32_t> ended_indices;
+
+protected:
+  void on_episode_started(uint32_t episode_index) noexcept override {
+    started_indices.push_back(episode_index);
+  }
+  void on_episode_ended(uint32_t episode_index) noexcept override {
+    ended_indices.push_back(episode_index);
+  }
+};
+
 class SessionManagerObserversTest : public ::testing::Test {
 protected:
   static void SetUpTestSuite() {
@@ -384,4 +405,121 @@ TEST_F(SessionManagerObserversTest, DiscardEpisode_PreservesObservers) {
 
   EXPECT_GE(obs->stats().accepted, accepted_before);
   EXPECT_TRUE(obs->is_running());
+}
+
+TEST_F(SessionManagerObserversTest, OnEpisodeEndedCallback_CanCallObserverStats) {
+  // Regression: on_episode_ended callbacks used to be dispatched while episode_mutex_
+  // was held. observer_stats() / stats() re-acquire that same (non-recursive) mutex,
+  // so any callback that touched stats hung the SessionManager forever. The fix moves
+  // callback dispatch outside the locked region. This test pins that contract by
+  // calling both accessors from inside the callback and asserting we reach the
+  // post-callback assertion (i.e. did not deadlock).
+  SessionManager sm;
+  std::atomic<int> counter{0};
+  sm.add_observer(std::make_shared<CountingObserver>(
+    "obs", "mock/joints", 100.0, &counter));
+  sm.add_producer(std::make_shared<MockPolledProducer>(),
+                  std::chrono::milliseconds(5));
+
+  std::atomic<bool> callback_completed{false};
+  std::atomic<size_t> observer_stats_size{0};
+  std::atomic<uint32_t> seen_episode_index{0};
+  sm.on_episode_ended(
+    [&](const SessionManager::Stats& s) {
+      // Both of these used to deadlock. They must return without hanging.
+      const auto obs_stats = sm.observer_stats();
+      const auto sess_stats = sm.stats();
+      observer_stats_size.store(obs_stats.size());
+      seen_episode_index.store(s.current_episode_index);
+      (void)sess_stats;
+      callback_completed.store(true);
+    });
+
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  sm.stop_episode();
+
+  EXPECT_TRUE(callback_completed.load());
+  EXPECT_EQ(observer_stats_size.load(), 1u);
+  EXPECT_EQ(seen_episode_index.load(), 0u);
+}
+
+TEST_F(SessionManagerObserversTest, EpisodeBoundaryHooks_FireOncePerEpisode) {
+  // on_episode_started / on_episode_ended fire exactly once per running observer per
+  // episode, and the index reported to on_episode_ended matches the index reported to
+  // the matching on_episode_started. The test fixture uses the null backend, which
+  // resets next_episode_index_ to 0 via scan_existing_episodes() at every
+  // start_episode() - so this test does not assume monotonically increasing indices
+  // (that contract is enforced only by persistent backends).
+  SessionManager sm;
+  auto obs = std::make_shared<EpisodeBoundaryObserver>();
+  sm.add_observer(obs);
+  sm.add_producer(std::make_shared<MockPolledProducer>(),
+                  std::chrono::milliseconds(5));
+
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  sm.stop_episode();
+
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  sm.stop_episode();
+
+  ASSERT_EQ(obs->started_indices.size(), 2u);
+  ASSERT_EQ(obs->ended_indices.size(), 2u);
+  EXPECT_EQ(obs->started_indices[0], obs->ended_indices[0]);
+  EXPECT_EQ(obs->started_indices[1], obs->ended_indices[1]);
+}
+
+TEST_F(SessionManagerObserversTest, EpisodeBoundaryHooks_SkipFailedStartObservers) {
+  // Observers whose start() failed (is_running() == false, is_stopped() == true) must
+  // not receive episode-boundary hook calls - they are terminal.
+  SessionManager sm;
+  auto live = std::make_shared<EpisodeBoundaryObserver>();
+  auto dead = std::make_shared<DeadObserver>();
+  sm.add_observer(live);
+  sm.add_observer(dead);
+  sm.add_producer(std::make_shared<MockPolledProducer>(),
+                  std::chrono::milliseconds(5));
+
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  sm.stop_episode();
+
+  EXPECT_EQ(live->started_indices.size(), 1u);
+  EXPECT_EQ(live->ended_indices.size(), 1u);
+  EXPECT_TRUE(dead->is_stopped());
+  EXPECT_FALSE(dead->is_running());
+}
+
+TEST_F(SessionManagerObserversTest, EpisodeEndHook_CanCallObserverStats) {
+  // on_episode_ended runs outside episode_mutex_ (same contract as on_episode_ended
+  // user callbacks). Subclasses are free to call back into the SessionManager from
+  // inside the hook without deadlocking - pin that contract.
+  class CallbackObserver : public ObserverBase {
+   public:
+    explicit CallbackObserver(SessionManager* sm)
+      : ObserverBase("callback"), sm_(sm) {
+      add_subscription("mock/joints", 100.0,
+                       [](const std::shared_ptr<RecordBase>&) {});
+    }
+    std::atomic<size_t> end_observer_count{0};
+    void on_episode_ended(uint32_t episode_index) noexcept override {
+      (void)episode_index;
+      end_observer_count.store(sm_->observer_stats().size());
+    }
+   private:
+    SessionManager* sm_;
+  };
+  SessionManager sm;
+  auto obs = std::make_shared<CallbackObserver>(&sm);
+  sm.add_observer(obs);
+  sm.add_producer(std::make_shared<MockPolledProducer>(),
+                  std::chrono::milliseconds(5));
+
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  sm.stop_episode();
+
+  EXPECT_EQ(obs->end_observer_count.load(), 1u);
 }

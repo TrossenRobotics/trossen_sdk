@@ -41,6 +41,14 @@ struct ObserverSubscriptionConfig {
   /// Maximum handler dispatch rate (Hz); must lie within [1e-3, 1e4].
   double throttle_hz{0.0};
 
+  /// Optional per-subscription field filter. When non-empty, only the listed
+  /// record fields are forwarded to the observer's downstream (e.g. logged to
+  /// ReRun); other fields are silently dropped. Empty means "forward all fields"
+  /// (default, backward compatible). Field name semantics are observer-specific -
+  /// e.g. ``RerunObserver`` honours ``positions``/``velocities``/``efforts`` on
+  /// ``JointStateRecord``.
+  std::vector<std::string> fields;
+
   static ObserverSubscriptionConfig from_json(const nlohmann::json& j) {
     ObserverSubscriptionConfig c;
     if (!j.is_object()) {
@@ -61,6 +69,21 @@ struct ObserverSubscriptionConfig {
           c.record_id + "'");
       }
       j.at("throttle_hz").get_to(c.throttle_hz);
+    }
+    if (j.contains("fields")) {
+      if (!j.at("fields").is_array()) {
+        throw std::runtime_error(
+          "ObserverSubscriptionConfig: 'fields' must be an array of strings for "
+          "record_id '" + c.record_id + "'");
+      }
+      for (const auto& f : j.at("fields")) {
+        if (!f.is_string() || f.get<std::string>().empty()) {
+          throw std::runtime_error(
+            "ObserverSubscriptionConfig: 'fields' entries must be non-empty strings "
+            "for record_id '" + c.record_id + "'");
+        }
+        c.fields.push_back(f.get<std::string>());
+      }
     }
     if (c.record_id.empty()) {
       throw std::runtime_error(
