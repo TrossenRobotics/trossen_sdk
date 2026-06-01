@@ -12,6 +12,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # and opt-in dependencies?
 option(TROSSEN_ENABLE_REALSENSE "Enable RealSense camera support" ON)
 option(TROSSEN_ENABLE_ZED "Enable StereoLabs ZED camera support" OFF)
+# OFF by default: rerun-cpp adds ~50 MB of download and a multi-minute first build, and is
+# only needed by the stationary-demo ReRun viewer flow. Enable explicitly when building
+# that demo: cmake -DTROSSEN_ENABLE_RERUN_OBSERVER=ON ...
+option(TROSSEN_ENABLE_RERUN_OBSERVER "Build RerunObserver (depends on rerun-cpp SDK)" OFF)
 
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
@@ -78,6 +82,10 @@ if(TROSSEN_ENABLE_ZED)
   target_link_libraries(trossen_sdk PUBLIC ${ZED_LIBRARIES} ${CUDA_LIBRARIES})
 endif()
 
+# RerunObserver wiring is deferred until after Arrow is found below: rerun-cpp needs
+# Arrow::arrow_shared to satisfy its RERUN_ARROW_LINK_SHARED=ON build mode, and we reuse
+# the same Arrow trossen_sdk already links against to avoid pulling in a second build.
+
 # Add architecture-specific CMAKE_PREFIX_PATH
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64")
   set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} /usr/lib/x86_64-linux-gnu/cmake)
@@ -116,6 +124,69 @@ find_package(Parquet REQUIRED)
 find_package(libtrossen_arm REQUIRED)
 
 include(FetchContent)
+
+# --- ReRun C++ SDK (RerunObserver) ------------------------------------------
+# ReRun is fetched on demand via FetchContent. We reuse the system Arrow that
+# trossen_sdk already links against by passing RERUN_DOWNLOAD_AND_BUILD_ARROW=OFF +
+# RERUN_ARROW_LINK_SHARED=ON, so rerun_sdk does NOT pull in a second, conflicting Arrow.
+# Linking is PRIVATE: the rerun headers stay confined to rerun_observer.cpp.
+if(TROSSEN_ENABLE_RERUN_OBSERVER)
+  set(RERUN_SDK_VERSION "0.32.0")
+
+  # rerun-cpp reuses the host Arrow via RERUN_ARROW_LINK_SHARED=ON; an ABI-incompatible
+  # Arrow links silently and crashes at runtime, not at build time.
+  if(NOT Arrow_VERSION VERSION_GREATER_EQUAL "14.0")
+    message(FATAL_ERROR
+      "TROSSEN_ENABLE_RERUN_OBSERVER requires Arrow >= 14.0 (found ${Arrow_VERSION}).")
+  endif()
+  message(STATUS "RerunObserver: linking against Arrow ${Arrow_VERSION}")
+  message(STATUS "RerunObserver enabled - fetching rerun-cpp SDK ${RERUN_SDK_VERSION}")
+  set(RERUN_SDK_URL
+    "https://github.com/rerun-io/rerun/releases/download/${RERUN_SDK_VERSION}/rerun_cpp_sdk.zip")
+  set(RERUN_SDK_HASH
+    "cabd6619b8ec65636ec98767309829c9bdbae1be3069215bd7ad7b15525c8dda")
+
+  set(RERUN_DOWNLOAD_AND_BUILD_ARROW OFF CACHE BOOL
+    "Reuse system Arrow already found by trossen_sdk" FORCE)
+  set(RERUN_ARROW_LINK_SHARED ON CACHE BOOL
+    "Link rerun_sdk against shared Arrow (matches Arrow::arrow_shared)" FORCE)
+
+  # trossen_sdk is SHARED, so every static archive it consumes must be PIC. rerun_sdk's
+  # CMake does not set this on its own target, so we set the project-wide default before
+  # bringing it in.
+  set(_TROSSEN_PREV_PIC ${CMAKE_POSITION_INDEPENDENT_CODE})
+  set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+  FetchContent_Declare(
+    rerun_sdk
+    URL ${RERUN_SDK_URL}
+    URL_HASH SHA256=${RERUN_SDK_HASH}
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+  )
+  FetchContent_MakeAvailable(rerun_sdk)
+
+  if(TARGET rerun_sdk)
+    set_target_properties(rerun_sdk PROPERTIES POSITION_INDEPENDENT_CODE ON)
+  endif()
+
+  set(CMAKE_POSITION_INDEPENDENT_CODE ${_TROSSEN_PREV_PIC})
+
+  target_sources(trossen_sdk PRIVATE src/observer/rerun_observer.cpp)
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_RERUN_OBSERVER)
+  target_link_libraries(trossen_sdk PRIVATE rerun_sdk)
+
+  # librerun_c and libfoxglove each bundle the Rust standard library, so the merged
+  # .so has duplicate Rust runtime symbols. --allow-multiple-definition lets the linker
+  # keep one copy. Symbol-collision audit (categorized breakdown showing no trossen
+  # public-API collisions) is in the PR #242 description. Ref: rust-lang/rust#44322.
+  #
+  # Do not generalize to --exclude-libs=ALL: it also hides SCServo / trossen_slate /
+  # foxglove / protobuf and silently breaks transitive symbol resolution downstream.
+  if(UNIX AND NOT APPLE)
+    target_link_options(trossen_sdk PRIVATE
+      "LINKER:--allow-multiple-definition")
+  endif()
+endif()
 
 set(FOXGLOVE_VERSION "0.16.1")
 # Detect platform for Foxglove SDK download
