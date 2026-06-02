@@ -2078,7 +2078,7 @@ export function ConfigurationPage() {
               </div>
               <div className="flex justify-end gap-[12px] pt-[12px]">
                 <button type="button" onClick={() => setShowAddSystemModal(false)} className="bg-[#0b0b0b] border border-[#252525] text-[#b9b8ae] px-[20px] py-[10px] text-[14px] hover:border-white hover:text-white transition-colors">Cancel</button>
-                <button type="submit" className="bg-[#55bde3] text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">Create System</button>
+                <button type="submit" className="bg-[#55bde3] text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">{editingSystemId ? 'Save Changes' : 'Create System'}</button>
               </div>
             </form>
           </div>

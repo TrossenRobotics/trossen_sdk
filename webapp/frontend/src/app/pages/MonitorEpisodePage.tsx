@@ -35,17 +35,24 @@ interface LogEntry {
 // State machine matching the SDK demo flow
 type Phase = 'not_started' | 'recording' | 'resetting' | 'complete' | 'stopped';
 
-function ConnectionBadge({ status }: { status: WsStatus }) {
+function ConnectionBadge({ status, recording }: { status: WsStatus; recording: boolean }) {
+  // The green `live` state means recording is actively in flight. After a
+  // session stops or completes the socket stays `open` (keepalives, late
+  // events), so gate `live` on the recording phase as well as the socket —
+  // otherwise the badge keeps claiming live after Stop. A still-open socket
+  // outside of recording reads as the neutral `idle` state.
   const label =
     status === 'open'
-      ? 'live'
+      ? recording
+        ? 'live'
+        : 'idle'
       : status === 'connecting'
         ? 'connecting'
         : status === 'reconnecting'
           ? 'reconnecting…'
           : 'offline';
   const color =
-    status === 'open'
+    status === 'open' && recording
       ? 'bg-green-500/15 text-green-400 border-green-500/30'
       : status === 'reconnecting' || status === 'connecting'
         ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'
@@ -347,10 +354,19 @@ export function MonitorEpisodePage() {
           setPhase('stopped');
           const recorded = data.episodes_recorded ?? 0;
           const total = data.total_episodes ?? 0;
+          // Reconcile the counter to the backend's authoritative saved
+          // count (from the DB row) so the terminal banner can't show a
+          // number the SDK never actually recorded.
+          setCurrentEpisode(recorded);
           addLog('warning', `Session stopped — ${recorded} of ${total} episodes saved`);
           announce('Session stopped');
         } else {
           setPhase('complete');
+          // Same reconciliation on natural completion — prefer the backend
+          // count, falling back to the configured total when the event
+          // omits it.
+          if (data.episodes_recorded !== undefined) setCurrentEpisode(data.episodes_recorded);
+          else if (data.total_episodes !== undefined) setCurrentEpisode(data.total_episodes);
           addLog('success', 'All episodes recorded — session complete');
           announce('Session complete');
         }
@@ -416,7 +432,12 @@ export function MonitorEpisodePage() {
                 .then(data => {
                   if (data.status === 'paused') setPhase('stopped');
                   else if (data.status !== 'active') setPhase('complete');
-                  else { setPhase('resetting'); setCurrentEpisode(ep => ep + 1); }
+                  // Overrun safety: flip to the reset phase, but do NOT bump
+                  // the episode count here. The count is owned solely by the
+                  // SDK's `episode_ended` lifecycle event (and `stats`
+                  // `episode_index`); a local increment on this timer's clock
+                  // would run the counter ahead of what was actually saved.
+                  else setPhase('resetting');
                 })
                 .catch(() => {
                   // Server unreachable during overrun — fall through to local fallback path.
@@ -433,8 +454,11 @@ export function MonitorEpisodePage() {
       setElapsed(prev => {
         const next = prev + 1;
         if (dur > 0 && next > dur + 3) {
+          // Local fallback for a missed `episode_ended`: end the visual
+          // recording phase, but leave the episode count to the SDK
+          // lifecycle events. Incrementing here is what inflated the
+          // counter when `stats` frames were sparse (TDS-192).
           setPhase('resetting');
-          setCurrentEpisode(ep => ep + 1);
           clearInterval(interval);
           return 0;
         }
@@ -537,7 +561,7 @@ export function MonitorEpisodePage() {
             {phase !== 'not_started' && (
               <>
                 <div className="h-[16px] w-[1px] bg-[#252525]" />
-                <ConnectionBadge status={wsStatus} />
+                <ConnectionBadge status={wsStatus} recording={phase === 'recording'} />
               </>
             )}
           </div>
