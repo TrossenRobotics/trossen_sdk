@@ -57,6 +57,30 @@ TEST(TeleopControllerTest, ControlLoopExceptionDoesNotTerminate) {
   // Destruction here must complete without std::terminate.
 }
 
+// Regression: when the control loop exits via exception it clears running_ but
+// leaves the thread joinable, and the per-episode reaper (pause_mirror()) only
+// runs when staging is enabled. So with staging off, a subsequent teleop()
+// must itself join the stale thread before assigning a new one — otherwise the
+// assignment to a joinable std::thread calls std::terminate.
+TEST(TeleopControllerTest, RestartAfterControlLoopExceptionDoesNotTerminate) {
+  auto leader = std::make_shared<ThrowingLeader>();
+  TeleopController::Config cfg{};
+  cfg.control_rate_hz = 100.0f;
+  TeleopController ctrl(leader, nullptr, cfg);
+
+  // First start: read() throws, control_loop() catches and clears running_,
+  // but nothing joins the finished thread.
+  ctrl.teleop();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  EXPECT_FALSE(ctrl.is_running());
+
+  // Restart with no intervening pause_mirror()/stop_teleop(): must reap the
+  // stale joinable thread instead of terminating.
+  ctrl.teleop();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  EXPECT_FALSE(ctrl.is_running());
+}
+
 // A controller with a zero control_rate_hz must throw at construction.
 TEST(TeleopControllerTest, ZeroRateThrows) {
   auto leader = std::make_shared<StubLeader>();

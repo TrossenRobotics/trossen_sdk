@@ -157,13 +157,12 @@ void TrossenArmComponent::end_teleop() {
   std::cout << "  [end_teleop] " << get_identifier()
             << ": holding pose, then returning to rest over "
             << teleop_moving_time_s_ << "s..." << std::endl;
-  // Hold the current pose before resting. The previous sequence switched to
-  // idle mode first, which drops motor torque and lets the arm fall under
-  // gravity before position control re-engages. Instead, switch straight into
-  // position mode and command the current measured pose: entering position
-  // mode locks the arm where it is (matching the trossen_arm teleop demo's
-  // safe stop), so it holds on Ctrl+C instead of falling. Then drive it to
-  // rest over the configured trajectory time.
+  // Hold the current pose before resting, so the arm doesn't drop under
+  // gravity on Ctrl+C before position control engages. Switch into position
+  // mode and immediately command the measured pose (goal_time 0 = zero
+  // displacement, since the arm is already there) to seed the position
+  // setpoint to where the arm actually is, so it holds. Then drive it to rest
+  // over the configured trajectory time.
   const std::vector<float> current = read_joint();
   driver_->set_all_modes(trossen_arm::Mode::position);
   if (!current.empty()) {

@@ -109,6 +109,13 @@ void TeleopController::teleop() {
   if (running_.exchange(true)) {
     return;
   }
+  // Reap a previous loop that exited on its own: control_loop() catches and
+  // sets running_=false on exception but does not join, so the finished thread
+  // stays joinable. Assigning to a joinable std::thread calls std::terminate,
+  // so join any stale thread before starting a new one.
+  if (thread_.joinable()) {
+    thread_.join();
+  }
   thread_ = std::thread([this]() { control_loop(); });
 }
 
