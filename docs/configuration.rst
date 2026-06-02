@@ -46,7 +46,7 @@ The rest of the docs assume you are working from one of these.
 Schema Reference
 ================
 
-A config is a JSON object with six top-level keys, used by every example:
+A config is a JSON object with top-level keys, used by every example:
 
 .. code-block:: javascript
 
@@ -56,6 +56,7 @@ A config is a JSON object with six top-level keys, used by every example:
       "producers":   [ ... ],       // Data streams (one per device channel)
       "teleop":      { ... },       // Leader/follower pairing
       "backend":     { ... },       // TrossenMCAP output settings
+      "observers":   [ ... ],       // Optional live-stream consumers (e.g. ReRun viewer)
       "session":     { ... }        // Episode durations and limits
     }
 
@@ -199,6 +200,103 @@ Backend
 
 Episodes land at ``<root>/<dataset_id>/episode_NNNNNN.mcap``.
 Episode numbers are assigned automatically and resume from the highest existing index in the directory.
+
+Observers
+---------
+
+``observers`` is an **optional JSON array** of live, non-durable consumers that receive records as they are produced.
+Each observer runs alongside the backend and is independent of the on-disk ``.mcap`` capture — leave the key out entirely if you do not need live streaming.
+
+The only observer that ships with the SDK today is the ReRun viewer (``"type": "rerun"``).
+For background on what ReRun is and how to launch the viewer, see :doc:`/visualize`.
+
+.. code-block:: javascript
+
+    "observers": [
+      {
+        "type":      "rerun",                                // Observer type (table below)
+        "id":        "live_viewer",                          // Logging label; defaults to type
+        "enabled":   true,                                   // Set false to disable this observer
+        "rerun_url": "rerun+http://127.0.0.1:9876/proxy",    // gRPC endpoint of a running ReRun viewer
+        "app_id":    "trossen_solo_ai",                      // ReRun application id
+        "spawn":     false,                                  // true = SDK launches the viewer itself (ignores rerun_url)
+        "subscriptions": [
+          { "record_id": "leader",      "throttle_hz": 30.0 },
+          { "record_id": "follower",    "throttle_hz": 30.0 },
+          { "record_id": "camera_main", "throttle_hz": 15.0 }
+        ]
+      }
+    ]
+
+Fields common to every observer:
+
+.. list-table::
+    :align: center
+    :header-rows: 1
+    :class: centered-table
+
+    * - Field
+      - Type
+      - Description
+    * - ``type``
+      - string
+      - Observer type. Required. Only ``"rerun"`` ships today.
+    * - ``id``
+      - string
+      - Logging label for this instance. Defaults to ``type`` when omitted.
+    * - ``enabled``
+      - bool
+      - When ``false``, the observer is parsed and validated but not started. Defaults to ``true``.
+    * - ``subscriptions``
+      - array
+      - Per-stream subscriptions. At least one entry is required and ``record_id`` values must be unique within one observer.
+
+Each subscription entry accepts:
+
+.. list-table::
+    :align: center
+    :header-rows: 1
+    :class: centered-table
+
+    * - Field
+      - Type
+      - Description
+    * - ``record_id``
+      - string
+      - Exact match against a producer's ``stream_id`` (joint-state / odometry) or camera channel (e.g. ``camera_main``). Required.
+    * - ``throttle_hz``
+      - number
+      - Maximum dispatch rate to this observer for this stream. Range ``[1e-3, 1e4]``. Required.
+    * - ``fields``
+      - array of strings
+      - Optional per-subscription field filter. Observer-specific semantics — for ``rerun`` on a ``JointStateRecord`` subscription, accepted values are ``"positions"``, ``"velocities"``, ``"efforts"`` (drop the channels you don't want plotted). Omit the key entirely to forward all fields; ``"fields": []`` is rejected.
+
+ReRun-specific fields (used only when ``type`` is ``"rerun"``):
+
+.. list-table::
+    :align: center
+    :header-rows: 1
+    :class: centered-table
+
+    * - Field
+      - Type
+      - Description
+    * - ``rerun_url``
+      - string
+      - gRPC URL of an already-running ReRun viewer. Defaults to ``"rerun+http://127.0.0.1:9876/proxy"``.
+    * - ``app_id``
+      - string
+      - ReRun application id passed to the recording stream. Defaults to ``"trossen_sdk"``.
+    * - ``spawn``
+      - bool
+      - When ``true``, the SDK launches a local ReRun viewer at session start instead of connecting to an already-running one, and ``rerun_url`` is ignored. Requires the ``rerun`` binary on ``PATH`` (see :doc:`/visualize`); if its version differs from the SDK's, ReRun prints a one-time compatibility warning but still connects and renders. Defaults to ``false``.
+
+.. note::
+
+    ReRun support is a build-time option.
+    Configure with ``-DTROSSEN_ENABLE_RERUN_OBSERVER=ON`` to compile the observer in.
+    With the option off (default), any ``"type": "rerun"`` entry in your config fails to load with an "unknown observer type" error.
+    See :doc:`/visualize` for the full setup walkthrough.
 
 Session
 -------
