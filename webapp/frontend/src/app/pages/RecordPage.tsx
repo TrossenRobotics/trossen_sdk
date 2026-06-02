@@ -253,16 +253,13 @@ export function RecordPage() {
     }
   }
 
-  const handleResume = async (sessionId: string) => {
-    setBusySessionId(sessionId);
-    try {
-      await apiPost(`/api/sessions/${sessionId}/resume`);
-      navigate(`/monitor/${sessionId}`);
-    } catch (err) {
-      toast.error(`Couldn't resume: ${describeError(err)}`);
-    } finally {
-      setBusySessionId(null);
-    }
+  // Resume-from-list opens the Monitor page in a paused/ready state instead
+  // of starting recording immediately — the user explicitly presses Resume
+  // there once they're in position (TDS-158). The actual paused → active
+  // POST /resume now lives on the Monitor page, mirroring the in-session
+  // pause/resume flow.
+  const handleResume = (sessionId: string) => {
+    navigate(`/monitor/${sessionId}`);
   };
 
   const handleDelete = async (sessionId: string) => {

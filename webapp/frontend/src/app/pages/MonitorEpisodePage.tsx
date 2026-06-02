@@ -32,8 +32,11 @@ interface LogEntry {
   type: 'info' | 'success' | 'error' | 'warning';
 }
 
-// State machine matching the SDK demo flow
-type Phase = 'not_started' | 'recording' | 'resetting' | 'complete' | 'stopped';
+// State machine matching the SDK demo flow.
+// `paused` is the entry state when a paused session is opened from the
+// sessions list: the page shows a ready/prep view and an explicit Resume
+// button rather than recording on arrival (TDS-158).
+type Phase = 'not_started' | 'recording' | 'resetting' | 'complete' | 'stopped' | 'paused';
 
 function ConnectionBadge({ status, recording }: { status: WsStatus; recording: boolean }) {
   // The green `live` state means recording is actively in flight. After a
@@ -87,6 +90,14 @@ export function MonitorEpisodePage() {
   // Tracks when the last `stats` frame arrived. The local fallback timer
   // uses this to decide whether the WS or the local clock owns `elapsed`.
   const lastStatsTime = useRef<number>(0);
+  // Last episode index we fired the "started" cue for. Episode 0's
+  // `episode_started` WS event is usually dropped (the socket subscribes
+  // only after /start has already published it — see ws_bus.py), so the
+  // first episode got no log line and no audio cue (TDS-154). handleStart
+  // / handleDryRun fire the cue off the /start response (which *is* the
+  // signal episode 0 began); the WS handler fires it for every episode.
+  // This ref dedupes the one case where both fire for the same index.
+  const announcedEpisodeStartRef = useRef<number | null>(null);
 
   // Loading states — prevent double-clicks on slow operations
   const [starting, setStarting] = useState(false);
@@ -105,10 +116,14 @@ export function MonitorEpisodePage() {
     setStarting(true);
     try {
       addLog('info', 'Starting dry run — no data will be recorded...');
+      announcedEpisodeStartRef.current = null; // fresh run — allow the ep-0 cue
       const data = await apiPost<Session>(`${apiBase}/start`, { dry_run: true });
       setSession(data);
       setPhase('recording');
       addLog('success', 'Dry run started — beginning first episode');
+      // The WS bus typically drops episode 0's `episode_started`; fire its
+      // cue here since the successful /start means episode 0 has begun.
+      announceEpisodeStart(data.current_episode ?? 0);
     } catch (err) {
       const msg = describeError(err);
       addLog('error', `Failed to start dry run: ${msg}`);
@@ -131,6 +146,21 @@ export function MonitorEpisodePage() {
     setLogs(prev => [...prev, { timestamp, message, type }].slice(-200));
   }
 
+  // Announce (log + speak) the start of an episode exactly once per index.
+  // Routes both the /start response path and the WS `episode_started`
+  // event through one place so the first episode is no longer silent
+  // (TDS-154) without double-firing when the WS event isn't dropped.
+  function announceEpisodeStart(idx: number) {
+    if (announcedEpisodeStartRef.current === idx) return;
+    announcedEpisodeStartRef.current = idx;
+    setPhase('recording');
+    setElapsed(0);
+    addLog('success', `Episode ${idx} started — recording`);
+    // Phrasing mirrors the SDK's `announce()` in session_manager.cpp:281
+    // so terminal-mode demos and the webapp sound the same to an operator.
+    announce(`Episode ${idx} started`);
+  }
+
   // Fetch session on mount
   useEffect(() => {
     if (!sessionId) return;
@@ -141,6 +171,9 @@ export function MonitorEpisodePage() {
         systemIdRef.current = data.system_id ?? null;
         setCurrentEpisode(data.current_episode || 0);
         if (data.status === 'active') setPhase('recording');
+        // A paused session opens in the ready/prep state; the user presses
+        // Resume here to actually restart recording (TDS-158).
+        else if (data.status === 'paused') setPhase('paused');
       })
       .catch((err) => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
@@ -188,17 +221,48 @@ export function MonitorEpisodePage() {
     setStarting(true);
     try {
       addLog('info', 'Starting session...');
+      announcedEpisodeStartRef.current = null; // fresh run — allow the ep-0 cue
       // Backend's /start spawns the recorder and runs episode 0 inline,
       // emitting `episode_started` on the WebSocket; we just react to that.
       const data = await apiPost<Session>(`${apiBase}/start`, { dry_run: false });
       setSession(data);
       setPhase('recording');
       addLog('success', 'Session started — beginning first episode');
+      // Episode 0's `episode_started` WS frame is usually dropped (socket
+      // subscribes after /start fires it); fire the cue here so the first
+      // episode isn't silent (TDS-154). De-duped if the WS frame arrives.
+      announceEpisodeStart(data.current_episode ?? 0);
     } catch (err) {
       const msg = describeError(err);
       addLog('error', `Failed to start: ${msg}`);
       toast.error(`Failed to start session: ${msg}`);
       logError(`Start session failed: ${msg}`, { component: 'MonitorPage' });
+    } finally {
+      setStarting(false);
+    }
+  }
+
+  // Resume a paused session. Same backend path as Start (/resume ==
+  // _begin_recording), but reached from the paused entry state so the
+  // operator gets to prepare before recording restarts (TDS-158). The
+  // resumed episode's `episode_started` is fired here too, since the WS
+  // bus drops it the same way it drops episode 0 (TDS-154).
+  async function handleResume() {
+    if (phase !== 'paused' || starting) return;
+    setStarting(true);
+    try {
+      addLog('info', 'Resuming session...');
+      announcedEpisodeStartRef.current = null;
+      const data = await apiPost<Session>(`${apiBase}/resume`, { dry_run: false });
+      setSession(data);
+      setPhase('recording');
+      addLog('success', 'Session resumed');
+      announceEpisodeStart(data.current_episode ?? 0);
+    } catch (err) {
+      const msg = describeError(err);
+      addLog('error', `Failed to resume: ${msg}`);
+      toast.error(`Failed to resume session: ${msg}`);
+      logError(`Resume session failed: ${msg}`, { component: 'MonitorPage' });
     } finally {
       setStarting(false);
     }
@@ -313,13 +377,7 @@ export function MonitorEpisodePage() {
       };
       if (data.event === 'ready') addLog('success', 'Bridge ready');
       else if (data.event === 'episode_started') {
-        setPhase('recording');
-        setElapsed(0);
-        addLog('success', `Episode ${data.episode_index ?? ''} started — recording`);
-        // Phrasing mirrors the SDK's `announce()` in
-        // session_manager.cpp:281 so terminal-mode demos and the webapp
-        // sound the same to an operator.
-        announce(`Episode ${data.episode_index ?? ''} started`);
+        announceEpisodeStart(data.episode_index ?? 0);
       } else if (data.event === 'episode_ended') {
         const idx = (data.episode_index ?? 0) + 1;
         setCurrentEpisode(idx);
@@ -334,6 +392,9 @@ export function MonitorEpisodePage() {
         // don't touch it here.
         setElapsed(0);
         setPhase('resetting');
+        // The same index will be re-recorded; clear the dedupe guard so its
+        // restart fires the "started" cue again.
+        announcedEpisodeStartRef.current = null;
         addLog('warning', `Episode ${data.episode_index ?? ''} discarded — reset phase`);
         announce(`Episode ${data.episode_index ?? ''} discarded`);
       } else if (data.event === 'session_complete') {
@@ -527,6 +588,7 @@ export function MonitorEpisodePage() {
     resetting: resetCountdown > 0 ? `Reset (${resetCountdown}s)` : 'Reset — press Next',
     complete: 'Complete',
     stopped: 'Stopped',
+    paused: 'Paused',
   }[phase];
 
   const statusColor = {
@@ -535,6 +597,7 @@ export function MonitorEpisodePage() {
     resetting: 'text-yellow-500',
     complete: 'text-[#55bde3]',
     stopped: 'text-yellow-500',
+    paused: 'text-yellow-500',
   }[phase];
 
   return (
@@ -621,6 +684,7 @@ export function MonitorEpisodePage() {
           <div className="absolute inset-0 flex items-center justify-between px-[12px]">
             <div className="text-white text-[12px] relative z-10">
               {phase === 'not_started' && 'Press Start to begin recording'}
+              {phase === 'paused' && `Paused at ${currentEpisode} of ${totalEpisodes} — press Resume when ready`}
               {phase === 'recording' && `Recording episode ${currentEpisode} — ${elapsedMin}:${String(elapsedSec).padStart(2, '0')} / ${maxMin}:${String(maxSec).padStart(2, '0')}`}
               {phase === 'resetting' && (resetCountdown > 0
                 ? `Reset — next episode in ${resetCountdown}s (press Next to skip)`
@@ -758,6 +822,61 @@ export function MonitorEpisodePage() {
                   >
                     <Play className="w-[28px] h-[28px]" />
                     {starting ? 'Starting...' : 'Start'}
+                  </button>
+                </div>
+              </div>
+            );
+          })()
+        ) : phase === 'paused' ? (
+          /* Resume gate for a paused session opened from the list. Same
+             Hardware-Test gate as Start (recording engages real hardware),
+             but a single Resume button so the operator prepares first
+             instead of recording on arrival (TDS-158). */
+          (() => {
+            const systemId = session?.system_id;
+            const systemReady = !!systemId && hwStatus[systemId]?.status === 'ready';
+            const resumeDisabled = starting || !systemReady;
+            const gateTitle = !systemReady
+              ? 'Run a Hardware Test on this system in Configuration before resuming.'
+              : '';
+            return (
+              <div className="flex flex-col items-center gap-[12px]">
+                {!systemReady && (
+                  <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-400 px-[16px] py-[10px] text-[13px] flex items-center gap-[12px]">
+                    <AlertTriangle className="w-[16px] h-[16px] shrink-0" />
+                    <span className="flex-1">
+                      Run a Hardware Test on this system in Configuration before resuming.
+                    </span>
+                    {systemId && (
+                      <Link
+                        to={`/configuration?system=${encodeURIComponent(systemId)}`}
+                        className="bg-yellow-500/20 border border-yellow-500 text-yellow-300 hover:bg-yellow-500/30 px-[12px] py-[6px] text-[12px] flex items-center gap-[6px] shrink-0"
+                      >
+                        <Settings className="w-[14px] h-[14px]" />
+                        Test Hardware
+                      </Link>
+                    )}
+                  </div>
+                )}
+                <div className="flex justify-center gap-[16px]">
+                  <button
+                    onClick={() => navigate('/record')}
+                    className="bg-[#252525] text-white px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-[#353535] transition-colors"
+                  >
+                    Back to Record
+                  </button>
+                  <button
+                    onClick={handleResume}
+                    disabled={resumeDisabled}
+                    title={gateTitle}
+                    className={`px-[48px] py-[20px] text-[18px] font-bold uppercase flex items-center justify-center gap-[12px] shadow-lg transition-colors ${
+                      resumeDisabled
+                        ? 'bg-green-500/30 cursor-not-allowed'
+                        : 'bg-green-500 hover:bg-green-600 active:bg-green-700'
+                    } text-white`}
+                  >
+                    <Play className="w-[28px] h-[28px]" />
+                    {starting ? 'Resuming...' : 'Resume'}
                   </button>
                 </div>
               </div>

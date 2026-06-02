@@ -196,9 +196,13 @@ async function scenarioLive(page, sessionId, mode) {
   console.log('  ✓ hardware test passed (Solo ready)');
 
   // 2) Record (client-side nav) → expand the session → open its Monitor.
+  //    Look up the session's display name so the card click isn't pinned to
+  //    one hard-coded session.
+  const sessResp = await page.request.get(`${BASE_URL}/api/sessions/${sessionId}`);
+  const sessName = (await sessResp.json()).name;
   await page.getByRole('link', { name: 'Record' }).click();
-  await page.getByText('TDS-192 Verify').first().waitFor({ state: 'visible' });
-  await page.getByText('TDS-192 Verify').first().click(); // expand the card
+  await page.getByText(sessName).first().waitFor({ state: 'visible' });
+  await page.getByText(sessName).first().click(); // expand the card
   await page.getByRole('link', { name: 'Start Session' }).first().click();
 
   // 3) Monitor — Start (or Dry Run). Button is gated on the ready status we
@@ -283,6 +287,57 @@ async function scenarioLive(page, sessionId, mode) {
   );
 }
 
+// TDS-159 — opening /configuration?system=<id> must pre-select that system
+// (so "Test Hardware" after clearing an errored session lands on the right
+// robot, not a default one).
+async function scenarioConfig(page, systemId) {
+  if (!systemId) {
+    console.error('config scenario needs a <systemId>.');
+    process.exit(2);
+  }
+  console.log(`\n[tds-159] /configuration?system=${systemId}`);
+  const sysResp = await page.request.get(`${BASE_URL}/api/systems`);
+  const systems = await sysResp.json();
+  const expected = systems.find((s) => s.id === systemId)?.name ?? systemId;
+
+  await page.goto(`${BASE_URL}/configuration?system=${encodeURIComponent(systemId)}`, {
+    waitUntil: 'networkidle',
+  });
+  // The selected system's config section renders its name as an <h2>.
+  const heading = page.getByRole('heading', { name: expected, exact: true });
+  const selected = (await heading.count()) > 0;
+  assert(selected, `deep-link pre-selected "${expected}" (not a default system)`);
+
+  await page.screenshot({ path: join(OUT_DIR, `tds-159-config-${systemId}.png`) });
+  console.log(`  📸 ${join(OUT_DIR, `tds-159-config-${systemId}.png`)}`);
+}
+
+// TDS-131 — the dataset-location Copy button must actually write to the
+// clipboard and show feedback. Round-trips through the real clipboard.
+async function scenarioCopy(page, datasetId) {
+  if (!datasetId) {
+    console.error('copy scenario needs a <datasetId>.');
+    process.exit(2);
+  }
+  console.log(`\n[tds-131] dataset ${datasetId} — copy button`);
+  await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+  await page.evaluate(() => navigator.clipboard.writeText('__sentinel__')).catch(() => {});
+
+  await page.goto(`${BASE_URL}/datasets/${encodeURIComponent(datasetId)}`, {
+    waitUntil: 'networkidle',
+  });
+  const copyBtn = page.locator('button[title="Copy"]').first();
+  await copyBtn.waitFor({ state: 'visible' });
+  await copyBtn.click();
+  await page.waitForTimeout(300);
+
+  const clip = await page.evaluate(() => navigator.clipboard.readText()).catch(() => '');
+  assert(clip.length > 0 && clip !== '__sentinel__', `clipboard was written ("${clip.slice(0, 48)}…")`);
+
+  await page.screenshot({ path: join(OUT_DIR, `tds-131-copy-${datasetId}.png`) });
+  console.log(`  📸 ${join(OUT_DIR, `tds-131-copy-${datasetId}.png`)}`);
+}
+
 const scenario = process.argv[2];
 const arg = process.argv[3];
 const arg2 = process.argv[4];
@@ -297,6 +352,12 @@ await withPage(async (page) => {
       break;
     case 'live':
       await scenarioLive(page, arg, arg2 || 'real');
+      break;
+    case 'config':
+      await scenarioConfig(page, arg);
+      break;
+    case 'copy':
+      await scenarioCopy(page, arg);
       break;
     case 'all':
       await scenarioTds194(page);

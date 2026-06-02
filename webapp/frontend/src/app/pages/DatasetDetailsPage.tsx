@@ -26,10 +26,49 @@ interface LeRobotInfoView {
   features?: Record<string, { dtype?: string; shape?: number[] }>;
 }
 
+// Copy-to-clipboard that works off localhost too. `navigator.clipboard` is
+// only defined in a secure context (https or localhost); when the webapp is
+// opened over a LAN IP (e.g. http://192.168.1.x:5173) it's undefined, so the
+// old one-liner threw and silently did nothing (TDS-131). Fall back to a
+// hidden-textarea + execCommand copy there, and surface failures as a toast.
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fall through to the legacy path (permission denied, insecure context…)
+  }
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    // Keep it out of view and unfocusable-looking, but still selectable.
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    ta.style.pointerEvents = 'none';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const onCopy = async () => {
+    if (await copyText(text)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error('Could not copy to clipboard');
+    }
+  };
   return (
-    <button onClick={() => { navigator.clipboard.writeText(text); setCopied(true); setTimeout(() => setCopied(false), 2000); }}
+    <button onClick={onCopy}
       className="ml-2 text-[#b9b8ae] hover:text-white transition-colors shrink-0" title="Copy">
       {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
     </button>
