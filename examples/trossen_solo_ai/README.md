@@ -66,7 +66,7 @@ Update `config.json` or override on the command line:
 ```
 
 The script will:
-1. Connect to both arms and move them to the staged starting position
+1. Connect to both arms
 2. Enable teleop — the follower mirrors the leader
 3. Start recording an episode (default: 10 seconds)
 4. Stop, flush, and save the `.mcap` file
@@ -74,6 +74,15 @@ The script will:
 6. Return arms to the sleep position
 
 Episodes are saved to `~/.trossen_sdk/<dataset_id>/episode_NNNNNN.mcap`.
+
+### Optional: home staging
+
+Set `"episode_lifecycle_enabled": true` on an arm and give it a `staged_position`
+(a joint-space home pose); the SessionManager moves that arm to its home pose at
+the start of **every** episode. Staging is opt-in and off by default — an arm
+without the flag (or without a `staged_position`) is left untouched. When teleop
+is enabled, the SessionManager pauses the mirror loop while the arms move to home,
+then re-arms it before recording resumes.
 
 ---
 

@@ -1,6 +1,7 @@
 {
   "robot_name": "trossen_solo_ai",
 
+
   "hardware": {
     "arms": {
       "leader": {
@@ -8,14 +9,16 @@
         "model":               "wxai_v0",
         "end_effector":        "wxai_v0_leader",
         "staged_position":     [0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0],
-        "teleop_moving_time_s": 2.0
+        "slew_time_s": 2.0,
+        "episode_lifecycle_enabled": true
       },
       "follower": {
         "ip_address":          "192.168.1.4",
         "model":               "wxai_v0",
         "end_effector":        "wxai_v0_follower",
         "staged_position":     [0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0],
-        "teleop_moving_time_s": 2.0
+        "slew_time_s": 2.0,
+        "episode_lifecycle_enabled": true
       }
     },
     "cameras": [

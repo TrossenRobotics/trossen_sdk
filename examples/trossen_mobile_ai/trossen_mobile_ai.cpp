@@ -71,6 +71,11 @@ static void print_usage(const char* program) {
 }
 
 int main(int argc, char** argv) {
+  // Flush every line immediately so progress (and the last line before any
+  // stall) is always visible — important for a long-running, hardware-driven
+  // recording loop.
+  std::cout << std::unitbuf;
+
   trossen::configuration::CliParser cli(argc, argv);
 
   if (cli.has_flag("help")) {
@@ -311,28 +316,22 @@ int main(int argc, char** argv) {
   }
 
   // ──────────────────────────────────────────────────────────
-  // Teleop controllers (constructor stages arms)
+  // Teleop controllers
   // ──────────────────────────────────────────────────────────
 
   auto controllers = trossen::hw::teleop::create_controllers_from_global_config();
 
+  // Hand the controllers to the SessionManager, which owns their per-episode
+  // lifecycle: before each episode it pauses the mirror, re-homes any arm that
+  // opted into the episode lifecycle (episode_lifecycle_enabled in its config),
+  // and re-arms teleop; it starts mirroring when recording goes live, resets
+  // between episodes, and stops teleop at shutdown.
+  const bool has_teleop = !controllers.empty();
+  for (auto& ctrl : controllers) mgr.add_teleop(std::move(ctrl));
+
   // ──────────────────────────────────────────────────────────
   // Register lifecycle callbacks
   // ──────────────────────────────────────────────────────────
-
-  // Before each episode: let controllers run their pre-episode lifecycle
-  mgr.on_pre_episode([&]() -> bool {
-    for (auto& ctrl : controllers) ctrl->prepare_teleop();
-    return true;
-  });
-
-  // Episode started: begin mirroring (alongside recording)
-  mgr.on_episode_started([&]() {
-    for (auto& ctrl : controllers) ctrl->teleop();
-    std::cout << "Episode started - recording"
-              << (controllers.empty() ? "" : " and mirroring")
-              << " active.\n";
-  });
 
   // Count depth-capable cameras once for sanity checks
   int depth_cameras = 0;
@@ -340,10 +339,9 @@ int main(int argc, char** argv) {
     if (cam.use_depth) ++depth_cameras;
   }
 
-  // After each episode: reset mode (mirroring continues, no recording)
+  // After each episode: print a summary and run sanity checks. (Teleop reset and
+  // arm re-homing are owned by the SessionManager.)
   mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
-    for (auto& ctrl : controllers) ctrl->reset_teleop();
-
     const std::string file_path =
       trossen::utils::generate_episode_path(root, stats.current_episode_index);
     trossen::utils::print_episode_summary(file_path, stats);
@@ -360,10 +358,11 @@ int main(int argc, char** argv) {
     perform_sanity_check(stats.current_episode_index, stats.records_written_current, sanity_cfg);
   });
 
-  // Shutdown: stop mirror + return arms to rest
+  // Shutdown: the SessionManager stops teleop and returns those arms to rest.
+  // If teleop is disabled (no controllers), return each arm to rest directly so
+  // they don't stay in their last commanded pose.
   mgr.on_pre_shutdown([&]() {
-    for (auto& ctrl : controllers) ctrl->stop_teleop();
-    if (controllers.empty()) {
+    if (!has_teleop) {
       for (auto& [id, arm] : arm_components) arm->end_teleop();
     }
   });
