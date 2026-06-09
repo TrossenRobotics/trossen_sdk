@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <future>
 #include <iomanip>
 #include <iostream>
 #include <memory>
@@ -371,7 +372,18 @@ bool SessionManager::start_episode() {
   // (e.g. arms re-home to their staged pose), then re-arm teleop modes before the
   // mirror restarts at episode start.
   for (auto& ctrl : teleop_controllers_) ctrl->pause_teleop();
-  for (auto& comp : collect_lifecycle_components_()) comp->on_pre_episode();
+  // Run the components' pre-episode hooks in parallel. Each drives independent
+  // hardware (its own arm/driver), and staging is a blocking point-to-point move, so
+  // running them concurrently bounds the episode-boundary wait by the slowest component
+  // instead of the sum. Futures rethrow on get() and join on destruction, so a hook
+  // exception still propagates and no staging thread is left orphaned.
+  {
+    std::vector<std::future<void>> staging;
+    for (auto& comp : collect_lifecycle_components_()) {
+      staging.push_back(std::async(std::launch::async, [comp]() { comp->on_pre_episode(); }));
+    }
+    for (auto& f : staging) f.get();
+  }
   for (auto& ctrl : teleop_controllers_) ctrl->prepare_teleop();
 
   // Create and configure scheduler
