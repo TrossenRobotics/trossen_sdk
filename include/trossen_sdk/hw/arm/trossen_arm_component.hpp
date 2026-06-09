@@ -53,7 +53,7 @@ public:
    *   "model": "wxai_v0",
    *   "end_effector": "wxai_v0_follower",
    *   "staged_position": [0, 1.0, 0.5, 0.6, 0, 0, 0],  // optional, joint-space
-   *   "teleop_moving_time_s": 2.0         // optional, default 2.0
+   *   "slew_time_s": 2.0           // optional, default 2.0
    * }
    *
    * @param config JSON configuration object
@@ -74,6 +74,13 @@ public:
    * @return JSON object with component details
    */
   nlohmann::json get_info() const override;
+
+  // ── HardwareComponent: per-episode lifecycle ─────────────────────────────
+  // Opt-in via "episode_lifecycle_enabled" in config. When enabled, the
+  // SessionManager calls on_pre_episode() to re-home this arm before each
+  // episode (it pauses any teleop mirror around the call, so stage() is safe).
+  bool is_episode_lifecycle_enabled() const override { return episode_lifecycle_enabled_; }
+  void on_pre_episode() override;
 
   /**
    * @brief Get the underlying hardware driver instance
@@ -150,8 +157,14 @@ private:
   /// Empty = no staging.
   std::vector<float> staged_position_;
 
-  /// Trajectory time used by stage() and the end_teleop() rest move.
-  float teleop_moving_time_s_{2.0f};
+  /// Slew time: duration of the point-to-point moves in stage() and the
+  /// end_teleop() rest move. Sized to keep motion within joint velocity limits
+  /// (no violent moves when start and goal are far apart).
+  float slew_time_s_{2.0f};
+
+  /// Whether this arm participates in the per-episode lifecycle (staging before
+  /// each episode). Opt-in; parsed from "episode_lifecycle_enabled" in configure().
+  bool episode_lifecycle_enabled_{false};
 };
 
 }  // namespace trossen::hw::arm

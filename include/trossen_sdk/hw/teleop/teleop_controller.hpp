@@ -90,6 +90,20 @@ public:
   void reset_teleop();
 
   /**
+   * @brief Pause the mirror loop without releasing the hardware.
+   *
+   * Joins the control thread but, unlike stop_teleop(), does NOT call
+   * end_teleop() — the drivers stay configured and the robots hold their last
+   * commanded pose. After this, the robots can be re-staged, and a subsequent
+   * prepare_teleop() re-arms teleop modes (running_ is false again) followed
+   * by teleop() to restart the loop. Idempotent; no-op if not running.
+   *
+   * Used to re-stage robots to their home pose between episodes without tearing
+   * down teleop.
+   */
+  void pause_teleop();
+
+  /**
    * @brief Stop the mirror loop and return hardware to rest.
    *
    * Joins the control thread, then calls end_teleop() on both components

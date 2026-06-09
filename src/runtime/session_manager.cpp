@@ -10,9 +10,12 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
+#include "trossen_sdk/hw/hardware_component.hpp"
+#include "trossen_sdk/hw/teleop/teleop_controller.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 #include "trossen_sdk/utils/app_utils.hpp"
@@ -106,6 +109,11 @@ void SessionManager::shutdown() {
   // Useful for returning hardware to safe positions while post-processing runs.
   if (!shutdown_callbacks_fired_) {
     shutdown_callbacks_fired_ = true;
+
+    // SDK-driven shutdown safing: stop each teleop mirror and return its hardware to
+    // rest before user pre-shutdown callbacks run.
+    for (auto& ctrl : teleop_controllers_) ctrl->stop_teleop();
+
     for (const auto& cb : pre_shutdown_cbs_) {
       try {
         cb();
@@ -149,6 +157,44 @@ void SessionManager::add_push_producer(std::shared_ptr<hw::PushProducer> produce
   }
 
   push_producer_entries_.push_back(PushProducerEntry{.producer = std::move(producer)});
+}
+
+void SessionManager::add_teleop(std::shared_ptr<hw::teleop::TeleopController> controller) {
+  if (!controller) {
+    throw std::invalid_argument("Cannot add null teleop controller");
+  }
+
+  if (episode_active_) {
+    throw std::runtime_error(
+      "Cannot add teleop controllers while episode is active. Add before start_episode().");
+  }
+
+  teleop_controllers_.push_back(std::move(controller));
+}
+
+std::vector<std::shared_ptr<hw::HardwareComponent>>
+SessionManager::collect_lifecycle_components_() const {
+  // A component may back multiple producers, so deduplicate by identity to invoke
+  // each component's hooks exactly once. Skip nulls (hardware-less producers such as
+  // mocks) and components that did not opt in (is_episode_lifecycle_enabled()
+  // defaults to false).
+  std::vector<std::shared_ptr<hw::HardwareComponent>> components;
+  std::unordered_set<hw::HardwareComponent*> seen;
+
+  auto consider = [&](const std::shared_ptr<hw::HardwareComponent>& c) {
+    if (!c) return;                                    // hardware-less producer (e.g. mock)
+    if (!c->is_episode_lifecycle_enabled()) return;    // opted out (the default)
+    if (!seen.insert(c.get()).second) return;          // already collected (dedup by identity)
+    components.push_back(c);
+  };
+
+  for (const auto& pt : producer_tasks_) {
+    consider(pt.producer ? pt.producer->hardware() : nullptr);
+  }
+  for (const auto& ppe : push_producer_entries_) {
+    consider(ppe.producer ? ppe.producer->hardware() : nullptr);
+  }
+  return components;
 }
 
 void SessionManager::add_observer(std::shared_ptr<observer::ObserverBase> observer) {
@@ -319,6 +365,15 @@ bool SessionManager::start_episode() {
     }
   }
 
+  // SDK-driven per-episode preparation (runs after user pre-episode callbacks, so it
+  // is skipped if the episode was aborted above). Pause teleop mirrors so staging
+  // cannot fight the control loop, run each opted-in component's pre-episode hook
+  // (e.g. arms re-home to their staged pose), then re-arm teleop modes before the
+  // mirror restarts at episode start.
+  for (auto& ctrl : teleop_controllers_) ctrl->pause_teleop();
+  for (auto& comp : collect_lifecycle_components_()) comp->on_pre_episode();
+  for (auto& ctrl : teleop_controllers_) ctrl->prepare_teleop();
+
   // Create and configure scheduler
   scheduler_ = std::make_unique<Scheduler>();
   // TODO(lukeschmitt-tr): Expose Scheduler::Config in SessionConfig if needed
@@ -372,6 +427,11 @@ bool SessionManager::start_episode() {
 
   trossen::utils::announce(
     "Episode " + std::to_string(next_episode_index_) + " started", false);
+
+  // SDK-driven episode start: bring teleop mirrors up now that recording is live, and
+  // notify components that the episode has started.
+  for (auto& ctrl : teleop_controllers_) ctrl->teleop();
+  for (auto& comp : collect_lifecycle_components_()) comp->on_episode_started();
 
   // Invoke episode-started callbacks
   for (const auto& cb : episode_started_cbs_) {
@@ -519,6 +579,11 @@ void SessionManager::teardown_episode(bool discard) {
         obs->on_episode_ended(finished_episode_index);
       }
     }
+
+    // SDK-driven episode end: put teleop mirrors into their between-episode reset
+    // state and notify components that the episode has ended.
+    for (auto& ctrl : teleop_controllers_) ctrl->reset_teleop();
+    for (auto& comp : collect_lifecycle_components_()) comp->on_episode_ended();
 
     // Invoke episode-ended callbacks
     for (const auto& cb : callbacks_snapshot) {

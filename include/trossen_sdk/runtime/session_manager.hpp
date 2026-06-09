@@ -32,6 +32,11 @@
 #include "trossen_sdk/configuration/types/runtime/session_manager_config.hpp"
 
 
+// Forward declaration: the SessionManager holds teleop controllers as shared_ptrs
+// and drives their lifecycle primitives. The full definition is only needed in the
+// .cpp, so forward-declaring keeps the teleop header out of this one.
+namespace trossen::hw::teleop { class TeleopController; }
+
 namespace trossen::runtime {
 
 /// @brief User action returned by monitor_episode() and wait_for_reset()
@@ -101,6 +106,21 @@ public:
    * Must be called before start_episode().
    */
   void add_push_producer(std::shared_ptr<hw::PushProducer> producer);
+
+  /**
+   * @brief Register a teleop controller whose lifecycle the SessionManager drives.
+   *
+   * Once registered, the manager owns the controller's per-episode choreography: it
+   * pauses the mirror and re-arms around staging in the pre-episode phase, starts
+   * mirroring when recording goes live, resets between episodes, and stops teleop at
+   * shutdown. Applications no longer wire these steps by hand.
+   *
+   * Must be called before start_episode().
+   *
+   * @param controller Shared pointer to a teleop controller
+   * @throws std::runtime_error if called while an episode is active
+   */
+  void add_teleop(std::shared_ptr<hw::teleop::TeleopController> controller);
 
   /**
    * @brief Register a non-durable Observer.
@@ -545,6 +565,10 @@ private:
   /// @brief Registered push producers (persists across episodes)
   std::vector<PushProducerEntry> push_producer_entries_;
 
+  /// @brief Registered teleop controllers; the manager drives their per-episode
+  /// lifecycle (pause/stage bracket, mirror start, reset, shutdown stop).
+  std::vector<std::shared_ptr<hw::teleop::TeleopController>> teleop_controllers_;
+
   /// @brief Registered observers; persist across episodes
   std::vector<std::shared_ptr<observer::ObserverBase>> observers_;
 
@@ -584,6 +608,20 @@ private:
    * Checks elapsed time and calls stop_episode() when max_duration reached
    */
   void monitor_duration();
+
+  /**
+   * @brief Collect the unique hardware components that opt into the per-episode
+   * lifecycle.
+   *
+   * Walks the registered polled and push producers, takes each producer's backing
+   * component (producer->hardware()), drops nulls (e.g. mock producers) and
+   * duplicates, and keeps only those reporting is_episode_lifecycle_enabled(). The
+   * result is the set on which on_pre_episode()/on_episode_started()/on_episode_ended()
+   * are invoked.
+   *
+   * @return Deduplicated, lifecycle-enabled components backing the producers
+   */
+  std::vector<std::shared_ptr<hw::HardwareComponent>> collect_lifecycle_components_() const;
 };
 
 }  // namespace trossen::runtime

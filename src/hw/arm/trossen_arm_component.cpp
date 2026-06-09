@@ -7,6 +7,7 @@
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include <algorithm>
 #include <cmath>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 
@@ -68,12 +69,15 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     }
     staged_position_ = std::move(pos);
   }
-  if (config.contains("teleop_moving_time_s")) {
-    teleop_moving_time_s_ = config.at("teleop_moving_time_s").get<float>();
-    if (teleop_moving_time_s_ < 0.0f || !std::isfinite(teleop_moving_time_s_)) {
+  if (config.contains("slew_time_s")) {
+    slew_time_s_ = config.at("slew_time_s").get<float>();
+    if (slew_time_s_ < 0.0f || !std::isfinite(slew_time_s_)) {
       throw std::runtime_error(
-        "TrossenArmComponent: 'teleop_moving_time_s' must be non-negative and finite");
+        "TrossenArmComponent: 'slew_time_s' must be non-negative and finite");
     }
+  }
+  if (config.contains("episode_lifecycle_enabled")) {
+    episode_lifecycle_enabled_ = config.at("episode_lifecycle_enabled").get<bool>();
   }
 
   // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
@@ -153,24 +157,51 @@ void TrossenArmComponent::prepare_for_teleop() {
 
 void TrossenArmComponent::end_teleop() {
   if (!driver_) return;
-  // Neutralize first (safe regardless of current mode), then gracefully
-  // return to rest over the configured trajectory time, then release the
-  // driver.
-  driver_->set_all_modes(trossen_arm::Mode::idle);
+  std::cout << "  [end_teleop] " << get_identifier()
+            << ": holding pose, then returning to rest over "
+            << slew_time_s_ << "s..." << std::endl;
+  // Hold the current pose before resting, so the arm doesn't drop under
+  // gravity on Ctrl+C before position control engages. Switch into position
+  // mode and immediately command the measured pose (goal_time 0 = zero
+  // displacement, since the arm is already there) to seed the position
+  // setpoint to where the arm actually is, so it holds. Then drive it to rest
+  // over the configured trajectory time.
+  const std::vector<float> current = read_joint();
   driver_->set_all_modes(trossen_arm::Mode::position);
+  if (!current.empty()) {
+    driver_->set_all_positions(
+      std::vector<double>(current.begin(), current.end()), 0.0, true);
+  }
   driver_->set_all_positions(
     std::vector<double>(driver_->get_num_joints(), 0.0),
-    teleop_moving_time_s_, true);
+    slew_time_s_, true);
   driver_->cleanup();
   driver_.reset();
+  std::cout << "  [end_teleop] " << get_identifier() << ": done" << std::endl;
+}
+
+void TrossenArmComponent::on_pre_episode() {
+  // HardwareComponent per-episode hook: re-home this arm before each episode.
+  // The SessionManager calls this only when is_episode_lifecycle_enabled() is
+  // true, and pauses any teleop mirror around the call, so stage() can drive
+  // the arm safely. stage() itself is a no-op when no staged_position is set.
+  stage();
 }
 
 void TrossenArmComponent::stage() {
-  if (!driver_ || staged_position_.empty()) return;
+  if (!driver_) return;
+  if (staged_position_.empty()) {
+    std::cout << "  [stage] " << get_identifier()
+              << ": no staged_position configured, skipping" << std::endl;
+    return;
+  }
+  std::cout << "  [stage] " << get_identifier() << ": moving to home over "
+            << slew_time_s_ << "s" << std::endl;
   driver_->set_all_modes(trossen_arm::Mode::position);
   std::vector<double> pos_d(staged_position_.begin(), staged_position_.end());
-  // Non-blocking so multiple arms can stage in parallel.
-  driver_->set_all_positions(pos_d, teleop_moving_time_s_, false);
+  // Blocking so the arm reaches home before the caller hands it to teleop
+  // (gravity-comp) or starts recording; this mirrors end_teleop()'s rest move.
+  driver_->set_all_positions(pos_d, slew_time_s_, true);
 }
 
 REGISTER_HARDWARE(TrossenArmComponent, "trossen_arm")

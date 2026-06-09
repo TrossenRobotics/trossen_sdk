@@ -45,6 +45,11 @@ std::shared_ptr<hw::PushProducer> PushProducerRegistry::create(
     throw std::runtime_error("Failed to create push producer of type: " + type);
   }
 
+  // Retain the backing component so the SessionManager can reach its per-episode
+  // lifecycle hooks. nullptr for hardware-less producers (e.g. mocks), which the
+  // manager then simply skips.
+  producer->set_hardware(hardware);
+
   return producer;
 }
 
