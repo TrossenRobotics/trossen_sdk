@@ -18,3 +18,4 @@ webapp/**/.pytest_cache/
 webapp/.env
 webapp/.env.local
 webapp/.env.*.local
+.gstack/

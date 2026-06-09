@@ -65,7 +65,7 @@ export function Header() {
 
   return (
     <header className="border-b border-[#252525] bg-[#0d0d0d] shrink-0">
-      <div className="flex items-center h-16 sm:h-20 lg:h-[100px] px-4 sm:px-6 lg:px-[37px]">
+      <div className="flex items-center h-16 sm:h-20 lg:h-[100px] px-4 sm:px-6 lg:px-[37px] max-w-[1400px] mx-auto w-full">
         {/* Logo. Also locked while testing so the user can't escape via
             the home redirect. */}
         {navLocked ? (

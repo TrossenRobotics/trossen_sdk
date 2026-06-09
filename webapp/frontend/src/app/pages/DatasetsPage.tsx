@@ -190,7 +190,7 @@ export function DatasetsPage() {
   );
 
   return (
-    <div className="px-4 sm:px-8 lg:px-[103px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
+    <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
       <div className="mb-6">
         <div className="flex flex-col gap-[7px]">
           <h1 className="text-xl text-white capitalize">Datasets</h1>

@@ -318,13 +318,13 @@ export function DatasetDetailsPage() {
   }
 
   if (error) return (
-    <div className="px-4 sm:px-8 lg:px-[103px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
+    <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
       <Link to="/datasets" className="inline-flex items-center gap-2 text-[#55bde3] hover:text-white mb-5 text-sm"><ArrowLeft className="w-4 h-4" /> Back</Link>
       <div className="text-red-500">{error}</div>
     </div>
   );
   if (!dataset) return (
-    <div className="px-4 sm:px-8 lg:px-[103px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
+    <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
       <div className="text-[#b9b8ae] text-sm">Loading...</div>
     </div>
   );
@@ -338,7 +338,7 @@ export function DatasetDetailsPage() {
 
   return (
     <div className="h-full overflow-auto">
-      <div className="px-4 sm:px-8 lg:px-[103px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
+      <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
         <Link to="/datasets" className="inline-flex items-center gap-2 text-[#55bde3] hover:text-white mb-5 text-sm">
           <ArrowLeft className="w-4 h-4" /> Back to Datasets
         </Link>

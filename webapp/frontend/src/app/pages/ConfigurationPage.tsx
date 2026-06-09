@@ -1116,7 +1116,7 @@ export function ConfigurationPage() {
   };
 
   return (
-    <div className="px-4 sm:px-8 lg:px-[60px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif] h-full flex flex-col">
+    <div className="max-w-[1400px] mx-auto w-full px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif] h-full flex flex-col">
       {/* Page Title */}
       <div className="mb-[35px]">
         <div className="flex flex-col gap-[7px]">
