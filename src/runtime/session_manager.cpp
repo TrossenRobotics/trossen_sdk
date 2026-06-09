@@ -519,6 +519,12 @@ void SessionManager::teardown_episode(bool discard) {
 
   episode_active_ = false;
 
+  // Snapshot the per-episode lifecycle participants under the lock; their hooks run
+  // after the lock is released (below) on both the discard and clean-stop paths, so we
+  // never call into hardware while holding episode_mutex_.
+  auto lifecycle_controllers = teleop_controllers_;
+  auto lifecycle_components = collect_lifecycle_components_();
+
   if (discard) {
     // Signal stats emitted so monitor_episode() can exit
     stats_emitted_.store(true);
@@ -529,6 +535,13 @@ void SessionManager::teardown_episode(bool discard) {
 
     std::cout << "Episode " << next_episode_index_
               << " discarded. Will re-record at same index." << std::endl;
+
+    // Run the episode-end lifecycle on discard too, so teleop and components are left
+    // in the same between-episode state as a clean stop. No user episode-ended
+    // callbacks fire here -- a discarded episode produced no data to report.
+    lock.unlock();
+    for (auto& ctrl : lifecycle_controllers) ctrl->reset_teleop();
+    for (auto& comp : lifecycle_components) comp->on_episode_ended();
   } else {
     ++total_episodes_completed_;
 
@@ -582,8 +595,8 @@ void SessionManager::teardown_episode(bool discard) {
 
     // SDK-driven episode end: put teleop mirrors into their between-episode reset
     // state and notify components that the episode has ended.
-    for (auto& ctrl : teleop_controllers_) ctrl->reset_teleop();
-    for (auto& comp : collect_lifecycle_components_()) comp->on_episode_ended();
+    for (auto& ctrl : lifecycle_controllers) ctrl->reset_teleop();
+    for (auto& comp : lifecycle_components) comp->on_episode_ended();
 
     // Invoke episode-ended callbacks
     for (const auto& cb : callbacks_snapshot) {
