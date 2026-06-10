@@ -9,38 +9,32 @@ and three cameras, all driven from a single Meta Quest.
 - **Right buttons**       → session control
   - **A**    = start / advance to next episode / skip reset
   - **B**    = re-record current or last episode
-  - **grip** = end session (equivalent to Ctrl+C)
 
-All VR components share one `VrSession` (one WebSocket to the Quest) and
-claim non-overlapping inputs through `VrSession::claim_inputs()`, so
-conflicting configurations fail loudly at configure() time.
+All VR components share one `VrSession` and claim non-overlapping inputs
+through `VrSession::claim_inputs()`, so conflicting configurations fail
+loudly at configure() time.
 
 ## Flow
 
-1. **mDNS advertisement is built in.** The demo advertises itself via
-   Avahi (`_trossen-vr._tcp`) on startup, so the Quest's server picker
-   finds this host automatically. No second terminal needed. The old
-   `mdns_helper.py` remains as a fallback if Avahi is unavailable on
-   the host.
-2. **Launch the demo**. Hardware init runs in this order:
+1. **Launch the demo**. Hardware init runs in this order:
    - Both follower arms handshake over TCP.
    - SLATE base initializes (motor torque on, odometry ready).
    - Cameras enumerate.
    - VR arm controllers (left + right), base joystick, and session-control
-     component share the VR WebSocket port.
-3. **Put on the Quest**, open the VR app, and pick this machine. Both
-   controllers anchor to their respective arm follower when teleop starts.
-4. **Press A on the right controller** to begin the first episode.
-5. **Drive the robot**:
+     component share the network port (default `9000`).
+2. **Put on the Quest**, open the VR app, and connect to this host's IP address.
+   Both controllers anchor to their respective arm follower when teleop starts.
+3. **Press A on the right controller** to begin the first episode.
+4. **Drive the robot**:
    - Move the left controller → left arm tracks; squeeze trigger for gripper.
    - Move the right controller → right arm tracks; squeeze trigger for gripper.
    - Push the left thumbstick → base drives.
-6. **Between episodes**:
+5. **Between episodes**:
    - **A** starts the next episode (or stops the current one early if pressed
      during recording).
    - **B** re-records the current (while recording) or last (during reset)
      episode.
-   - **grip** ends the whole session.
+   - **Ctrl+C** ends the session.
 
 ## Run
 
@@ -48,10 +42,6 @@ conflicting configurations fail loudly at configure() time.
 cd ~/trossen_sdk
 ./build/examples/trossen_vr_mobile
 ```
-
-mDNS is advertised automatically. If Avahi isn't available on this
-host, the demo logs a warning and you can fall back to the Python
-helper as in the stationary demo.
 
 Override hardware addresses as needed:
 
@@ -66,8 +56,8 @@ Override hardware addresses as needed:
 
 Per hand, the components claim disjoint inputs — no conflicts possible:
 
-| Hand  | Pose | Trigger | Thumbstick | Buttons (A/B/grip) |
-|-------|------|---------|------------|--------------------|
+| Hand  | Pose | Trigger | Thumbstick | Buttons (A/B) |
+|-------|------|---------|------------|---------------|
 | Left  | `vr_left` arm | `vr_left` gripper | `vr_base` | *(unclaimed)* |
 | Right | `vr_right` arm | `vr_right` gripper | *(unclaimed)* | `vr_session_control` |
 
@@ -81,13 +71,12 @@ The default bindings live under `vr.session_control.bindings` in
 `config.json`. Override any of them via `--set`:
 
 ```bash
-# Remap the menu button instead of the grip to end the session:
+# Example override:
 ./build/examples/trossen_vr_mobile \
-  --set vr.session_control.bindings.grip=null \
-  --set vr.session_control.bindings.menu=stop_session
+  --set vr.session_control.bindings.button_a=stop_early
 ```
 
-Supported events: `start`, `stop_early`, `rerecord`, `stop_session`.
+Supported events: `start`, `stop_early`, `rerecord`.
 
 ## Tuning knobs
 
@@ -102,10 +91,8 @@ Supported events: `start`, `stop_early`, `rerecord`, `stop_session`.
 
 ## Troubleshooting
 
-- **Quest never connects**: Avahi not running on the host (check
-  `systemctl status avahi-daemon`) or a firewall is blocking port 5432.
-  If Avahi is unavailable, the Python `mdns_helper.py` can be used as a
-  fallback.
+- **Quest never connects**: Check that the Quest is on the same network,
+  the VR app is running, and no firewall blocks port `9000`.
 - **A press does nothing**: session-control claims the A button on the
   `controller` configured under `vr.session_control`. Confirm it matches
   the hand you're pressing.

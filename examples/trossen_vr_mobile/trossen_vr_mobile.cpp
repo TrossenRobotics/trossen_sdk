@@ -7,10 +7,9 @@
  *   - Left  VR controller → follower_left arm  (cartesian pose + gripper).
  *   - Right VR controller → follower_right arm (cartesian pose + gripper).
  *   - Left  VR thumbstick → SLATE base (linear forward, angular yaw).
- *   - Right VR buttons    → session control (A = start/advance, B = re-record,
- *                           grip = end session).
+ *   - Right VR buttons    → session control (A = start/advance, B = re-record).
  *
- * All VR components share one process-wide VrSession (one WebSocket to the
+ * All VR components share one process-wide VrSession (one network connection to the
  * Quest) and claim non-overlapping inputs via VrSession::claim_inputs(), so
  * conflicting configurations fail at configure() time with a clear error.
  *
@@ -48,7 +47,6 @@
 #include "trossen_sdk/hw/teleop/teleop_factory.hpp"
 #include "trossen_sdk/hw/vr/vr_arm_controller.hpp"
 #include "trossen_sdk/hw/vr/vr_base_joystick.hpp"
-#include "trossen_sdk/hw/vr/vr_mdns_advertiser.hpp"
 #include "trossen_sdk/hw/vr/vr_session.hpp"
 #include "trossen_sdk/hw/vr/vr_session_control.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
@@ -149,7 +147,7 @@ int main(int argc, char** argv) {
       config_lines.push_back(
         "VR arm [" + id + "]:  " +
         entry.value("controller", std::string{"right"}) + " hand, port " +
-        std::to_string(entry.value("vr_port", 5432)));
+        std::to_string(entry.value("vr_port", 9000)));
     }
   }
   if (vr_cfg.contains("base_joysticks")) {
@@ -157,7 +155,7 @@ int main(int argc, char** argv) {
       config_lines.push_back(
         "VR base [" + id + "]: " +
         entry.value("controller", std::string{"left"}) + " thumbstick, port " +
-        std::to_string(entry.value("vr_port", 5432)));
+        std::to_string(entry.value("vr_port", 9000)));
     }
   }
   config_lines.push_back(
@@ -207,9 +205,9 @@ int main(int argc, char** argv) {
     std::cout << "  [ok] SLATE mobile base configured\n";
   }
 
-  // ── Advertise the host over mDNS so the Quest app can discover it ──────
+  // ── Determine VR port for connection info ──────────────────────────────
 
-  std::uint16_t vr_port = 5432;
+  std::uint16_t vr_port = 9000;
   if (vr_cfg.contains("arm_controllers")) {
     for (const auto& [_, entry] : vr_cfg["arm_controllers"].items()) {
       if (entry.contains("vr_port")) {
@@ -219,17 +217,8 @@ int main(int argc, char** argv) {
     }
   }
 
-  trossen::hw::vr::VrMdnsAdvertiser mdns;
-  try {
-    mdns.start(vr_port, "TrossenVR");
-    std::cout << "  [ok] mDNS advertising TrossenVR on port " << vr_port
-              << " (_trossen-vr._tcp)\n";
-  } catch (const std::exception& e) {
-    std::cerr << "  [warn] mDNS advertisement failed: " << e.what() << "\n"
-              << "         The Quest may not auto-discover this host; "
-                 "connect manually by IP or run mdns_helper.py as a "
-                 "fallback.\n";
-  }
+  std::cout << "  [info] VR receiver listening on port " << vr_port << "\n"
+            << "         Connect your Quest app to this host's IP address.\n";
 
   // ── Initialize VR leaders (binds shared WebSocket port) ─────────────────
 
@@ -375,25 +364,9 @@ int main(int argc, char** argv) {
               << (controllers.empty() ? "" : " and mirroring") << " active.\n";
   });
   mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
-    // Order matters:
-    //   1. pause_teleop — stop the mirror thread so the VR controller
-    //      no longer drives the arms. Without this, operator
-    //      repositioning during the reset phase would still move the
-    //      follower.
-    //   2. reset_teleop — fire post_episode() hooks on both sides.
-    //   3. restage — move the arms to their configured staging poses.
-    //      The follower is now idle (mirror is paused) and can be
-    //      commanded directly to the staging pose.
-    //   4. Wait for staging to complete. restage() is non-blocking so
-    //      multiple arms move in parallel; this sleep covers the
-    //      trajectory time so the arm is actually settled when the
-    //      next prepare_teleop() fires sync_to_state. A mid-trajectory
-    //      sync captures a garbage `T_offset` and the next episode's
-    //      teleop extrapolates wildly from there.
-    for (auto& ctrl : controllers) ctrl->pause_teleop();
+    // reset_teleop fires post-episode hooks on both leader and follower,
+    // which handle restaging. Teleop stays active during the reset phase
     for (auto& ctrl : controllers) ctrl->reset_teleop();
-    for (auto& ctrl : controllers) ctrl->restage();
-    std::this_thread::sleep_for(std::chrono::milliseconds(2500));
     const std::string file_path =
       trossen::utils::generate_episode_path(root, stats.current_episode_index);
     trossen::utils::print_episode_summary(file_path, stats);
@@ -407,7 +380,7 @@ int main(int argc, char** argv) {
 
   // ── Attach session-control source ───────────────────────────────────────
   //
-  // With a VrSessionControlComponent attached, A/B/grip buttons drive the
+  // With a VrSessionControlComponent attached, A/B buttons drive the
   // SessionManager loops directly. The initial `wait_for_reset()` doubles
   // as the pre-session gate — operator puts on the headset, presses A,
   // recording begins.
@@ -416,9 +389,8 @@ int main(int argc, char** argv) {
     mgr.attach_session_control(session_control);
     std::cout << "\nPut on the Meta Quest and press A on the controller to "
                  "start recording.\n"
-                 "  A    = start / skip-reset / stop-current-and-advance\n"
-                 "  B    = re-record current or last episode\n"
-                 "  grip = end session\n\n";
+                 "  A = start / skip-reset / stop-current-and-advance\n"
+                 "  B = re-record current or last episode\n\n";
   } else {
     std::cout << "\n(No VR session-control configured — using keyboard: "
                  "-> continue, <- re-record, Ctrl+C to end.)\n\n";
