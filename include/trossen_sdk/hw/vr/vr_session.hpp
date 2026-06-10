@@ -17,7 +17,7 @@
 #include <string_view>
 #include <unordered_map>
 
-#include "trossen_vr/vr_manager.hpp"
+#include "trossen_vr/network_manager.hpp"
 #include "trossen_vr/vr_types.hpp"
 
 namespace trossen::hw::vr {
@@ -47,9 +47,9 @@ std::string_view vr_input_name(VrInput input);
 /**
  * @brief Process-global shared VR connection.
  *
- * The Meta Quest VR app opens a single WebSocket client connection per host,
+ * The Meta Quest VR app opens a single network connection per host,
  * so every VR hardware component in the same process must share one
- * trossen_vr::VRManager. VrSession is the owner.
+ * trossen_vr::NetworkManager. VrSession is the owner.
  *
  * Ownership model:
  *  - The first component to call `ensure_started(port)` binds the port and
@@ -62,7 +62,7 @@ std::string_view vr_input_name(VrInput input);
  *
  * Thread-safety: all public methods are safe to call from any thread. Reads
  * of the latest frame and connection state are short and take an internal
- * mutex; the underlying trossen_vr::VRManager has its own thread-safe API.
+ * mutex; the underlying trossen_vr::NetworkManager has its own thread-safe API.
  */
 class VrSession {
 public:
@@ -72,7 +72,7 @@ public:
   /**
    * @brief Idempotently start the VR connection on `port`.
    *
-   * The first caller constructs and starts the underlying VRManager. Each
+   * The first caller constructs and starts the underlying NetworkManager. Each
    * subsequent call increments the reference count, so `release()` must be
    * paired with every successful `ensure_started()` — typically from the
    * destructor of the owning hardware component.
@@ -82,19 +82,19 @@ public:
   void ensure_started(std::uint16_t port);
 
   /**
-   * @brief Decrement the reference count; stop VRManager when it hits zero.
+   * @brief Decrement the reference count; stop NetworkManager when it hits zero.
    *
    * Safe to call more times than `ensure_started()`; extra calls are no-ops
    * so teardown code does not need to track its own ownership flag.
    */
   void release();
 
-  /// True if the VR app has an active WebSocket connection to this process.
+  /// True if the VR app has an active network connection to this process.
   bool is_quest_connected() const;
 
-  /// Latest VRState frame received from the VR app, or nullopt if the
+  /// Latest VRFrame received from the VR app, or nullopt if the
   /// session is stopped or no frame has arrived yet.
-  std::optional<trossen_vr::VRState> latest_frame() const;
+  std::optional<trossen_vr::VRFrame> latest_frame() const;
 
   /**
    * @brief Block until the Quest connects or the timeout elapses.
@@ -146,10 +146,10 @@ private:
   VrSession() = default;
   ~VrSession();
 
-  mutable std::mutex                    mutex_;
-  std::unique_ptr<trossen_vr::VRManager> manager_;
-  std::uint16_t                         port_{0};
-  std::size_t                           ref_count_{0};
+  mutable std::mutex                          mutex_;
+  std::unique_ptr<trossen_vr::NetworkManager> manager_;
+  std::uint16_t                               port_{0};
+  std::size_t                                 ref_count_{0};
 
   /// `(hand, input) -> component_id` claim table. Populated by
   /// `claim_inputs()`, queried for conflicts, cleared by

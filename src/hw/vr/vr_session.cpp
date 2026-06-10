@@ -64,9 +64,9 @@ void VrSession::ensure_started(std::uint16_t port) {
     ++ref_count_;
     return;
   }
-  trossen_vr::VRManager::Config cfg;
-  cfg.server_port = port;
-  manager_ = std::make_unique<trossen_vr::VRManager>(cfg);
+  trossen_vr::ReceiverConfig cfg;
+  cfg.port = port;
+  manager_ = std::make_unique<trossen_vr::NetworkManager>(cfg);
   manager_->start();
   port_      = port;
   ref_count_ = 1;
@@ -83,20 +83,18 @@ void VrSession::release() {
 }
 
 bool VrSession::is_quest_connected() const {
-  // "Connected" here means "receiving frames," not just "WebSocket open." The
-  // trossen_vr library's own `is_connected()` flag is not reliably toggled on
-  // when the client connects, and — more importantly — a WebSocket that is
-  // open but idle is useless for teleop. Presence of a recent `VRState` is
-  // the signal the caller actually cares about.
+  // "Connected" here means "receiving frames," not just "socket open."
   std::lock_guard<std::mutex> lock(mutex_);
   if (!manager_) return false;
-  return manager_->get_current_state().has_value();
+  auto status = manager_->get_connection_status();
+  return status == trossen_vr::ConnectionStatus::Connected ||
+         status == trossen_vr::ConnectionStatus::Degraded;
 }
 
-std::optional<trossen_vr::VRState> VrSession::latest_frame() const {
+std::optional<trossen_vr::VRFrame> VrSession::latest_frame() const {
   std::lock_guard<std::mutex> lock(mutex_);
   if (!manager_) return std::nullopt;
-  return manager_->get_current_state();
+  return manager_->latest_frame();
 }
 
 bool VrSession::wait_for_connection(
