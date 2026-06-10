@@ -80,7 +80,7 @@ void VrArmControllerComponent::configure(const nlohmann::json& config) {
       controller_ + "\"");
   }
 
-  vr_port_       = config.value("vr_port",       static_cast<std::uint16_t>(5432));
+  vr_port_       = config.value("vr_port",       static_cast<std::uint16_t>(9000));
   gripper_min_m_ = config.value("gripper_min_m", 0.0);
   gripper_max_m_ = config.value("gripper_max_m", 0.04);
   if (gripper_max_m_ < gripper_min_m_) {
@@ -129,6 +129,10 @@ void VrArmControllerComponent::prepare_for_teleop() {
 }
 
 void VrArmControllerComponent::end_teleop() {
+  // Reset tracking state for next episode
+  prev_tracked_ = false;
+  initialized_ = false;
+  
   if (session_held_) {
     VrSession::instance().release();
     session_held_ = false;
@@ -139,55 +143,98 @@ std::optional<std::array<double, 6>>
 VrArmControllerComponent::read_vr_pose() const {
   const auto frame = VrSession::instance().latest_frame();
   if (!frame) return std::nullopt;
-  const auto& pose_opt = (controller_ == "right") ? frame->right_pose
-                                                  : frame->left_pose;
-  if (!pose_opt) return std::nullopt;
+  
+  const auto& controller = (controller_ == "right") 
+    ? frame->right_controller 
+    : frame->left_controller;
+  
+  if (!controller.is_tracked) return std::nullopt;
+  
+  const auto& pose = controller.pose6d;
   return std::array<double, 6>{
-    pose_opt->position[0], pose_opt->position[1], pose_opt->position[2],
-    pose_opt->rotation[0], pose_opt->rotation[1], pose_opt->rotation[2],
+    pose.x, pose.y, pose.z,
+    pose.ax, pose.ay, pose.az
   };
 }
 
 double VrArmControllerComponent::read_trigger() const {
   const auto frame = VrSession::instance().latest_frame();
   if (!frame) return 0.0;
-  const std::string key = (controller_ == "right") ? "right_trigger"
-                                                   : "left_trigger";
-  const auto it = frame->buttons.find(key);
-  if (it == frame->buttons.end()) return 0.0;
-  // Trigger is reported as an analog double; tolerate a boolean just in case
-  // the VR app sends a press/release for a digital trigger variant.
-  if (const double* d = std::get_if<double>(&it->second)) return *d;
-  if (const bool*   b = std::get_if<bool>(&it->second))   return *b ? 1.0 : 0.0;
-  return 0.0;
+  
+  const auto& controller = (controller_ == "right") 
+    ? frame->right_controller 
+    : frame->left_controller;
+  
+  return controller.triggers.index_trigger;
 }
 
 void VrArmControllerComponent::sync_to_state(
     const std::vector<float>& state) {
-  const auto vr_pose = read_vr_pose();
-  if (!vr_pose || state.size() < 6) {
-    // No VR sample yet or caller passed a truncated follower state: stay
-    // un-initialized so read() keeps emitting the follower's last pose via
-    // last_good_ until the next sync.
+  if (state.size() < 6) {
     initialized_ = false;
     return;
   }
-  const std::array<double, 6> robot_start{
-    state[0], state[1], state[2], state[3], state[4], state[5],
-  };
-  t_offset_    = vec6_to_T(robot_start) * vec6_to_T(*vr_pose).inverse();
-  initialized_ = true;
 
-  // Seed last_good_ with the follower's current pose + gripper so the first
-  // read() before a fresh VR frame does not teleport the command.
+  // Store follower's current position
   last_good_.assign(7, 0.0f);
   for (std::size_t i = 0; i < std::min<std::size_t>(state.size(), 7); ++i) {
     last_good_[i] = state[i];
   }
+
+  // Get current VR tracking state
+  const auto frame = VrSession::instance().latest_frame();
+  bool currently_tracked = false;
+  if (frame) {
+    const auto& controller = (controller_ == "right") 
+      ? frame->right_controller 
+      : frame->left_controller;
+    currently_tracked = (controller.is_tracked != 0);
+  }
+
+  // If grip is currently pressed, calculate offset
+  if (currently_tracked) {
+    const auto vr_pose = read_vr_pose();
+    if (vr_pose) {
+      const std::array<double, 6> robot_current{
+        state[0], state[1], state[2], state[3], state[4], state[5]
+      };
+      t_offset_ = vec6_to_T(robot_current) * vec6_to_T(*vr_pose).inverse();
+    }
+  }
+
+  prev_tracked_ = currently_tracked;
+  initialized_ = true;
 }
 
 std::vector<float> VrArmControllerComponent::read() {
   if (!initialized_) return last_good_;
+  
+  // Get current tracking state
+  const auto frame = VrSession::instance().latest_frame();
+  if (!frame) return last_good_;
+  
+  const auto& controller = (controller_ == "right") 
+    ? frame->right_controller 
+    : frame->left_controller;
+  
+  const bool is_tracked = controller.is_tracked != 0;
+  
+  // Detect grip deadman switch re-engagement (0→1 transition)
+  // When user releases grip and presses again, recalculate offset
+  if (is_tracked && !prev_tracked_) {
+    // Re-sync: anchor current VR pose to last robot position (last_good_)
+    const auto vr_pose = read_vr_pose();
+    if (vr_pose && last_good_.size() >= 6) {
+      const std::array<double, 6> robot_current{
+        last_good_[0], last_good_[1], last_good_[2],
+        last_good_[3], last_good_[4], last_good_[5]
+      };
+      t_offset_ = vec6_to_T(robot_current) * vec6_to_T(*vr_pose).inverse();
+    }
+  }
+  prev_tracked_ = is_tracked;
+  
+  // If not tracked, hold last position
   const auto vr_pose = read_vr_pose();
   if (!vr_pose) return last_good_;
 

@@ -105,7 +105,7 @@ private:
 
   /// Config
   std::string   controller_{"right"};
-  std::uint16_t vr_port_{5432};
+  std::uint16_t vr_port_{9000};
   double        gripper_min_m_{0.0};
   double        gripper_max_m_{0.04};
   std::chrono::milliseconds wait_for_quest_{std::chrono::seconds{10}};
@@ -117,6 +117,10 @@ private:
   /// `sync_to_state()` sets this; `read()` only transforms once initialized.
   bool              initialized_{false};
   Eigen::Matrix4d   t_offset_{Eigen::Matrix4d::Identity()};
+
+  /// Track previous is_tracked state to detect grip deadman transitions.
+  /// When is_tracked goes from 0→1, we recalculate offset.
+  bool              prev_tracked_{false};
 
   /// Last successfully produced 7-vec, used to ride through dropouts.
   std::vector<float> last_good_{std::vector<float>(7, 0.0f)};
