@@ -19,17 +19,18 @@ services:
     image: trossen-sdk-webapp-backend:dev
     container_name: trossen_webapp_backend
     network_mode: host                 # host Ethernet (arm subnet) + localhost wiring
-    # Bind-mounting /dev exposes device nodes, but Docker's cgroup device
-    # controller still blocks access at the kernel level (EPERM on open).
-    # device_cgroup_rules whitelists the relevant majors so root in the
-    # container can actually use the cameras:
-    #   c 81:* rmw   — V4L2 video devices (/dev/video*)
-    #   c 189:* rmw  — USB raw devices (/dev/bus/usb/*)
-    # If RealSense still fails (some firmwares poke sysfs paths beyond these
-    # majors), escalate to `privileged: true`.
-    device_cgroup_rules:
-      - 'c 81:* rmw'
-      - 'c 189:* rmw'
+    # Privileged gives the container unrestricted device access: cameras
+    # (/dev/video*, /dev/bus/usb/*) and the Slate base's serial port
+    # (/dev/ttyUSB* / /dev/ttyACM*) all work without per-major cgroup rules.
+    #
+    # TODO: replace `privileged: true` with narrow device_cgroup_rules once
+    # the Slate's exact device node is confirmed. Expected shape:
+    #   device_cgroup_rules:
+    #     - 'c 81:* rmw'    # V4L2 video devices (/dev/video*)
+    #     - 'c 189:* rmw'   # USB raw devices (/dev/bus/usb/*)
+    #     - 'c 188:* rmw'   # USB-serial adapters (/dev/ttyUSB*) — SLATE base
+    #     - 'c 166:* rmw'   # CDC-ACM serial (/dev/ttyACM*) — SLATE base, alt enumeration
+    privileged: true
     volumes:
       - /dev:/dev
       # Source bind-mount for hot reload. The whole repo is mounted so the
