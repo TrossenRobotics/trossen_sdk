@@ -39,7 +39,6 @@
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/hw/teleop/teleop_factory.hpp"
 #include "trossen_sdk/hw/vr/vr_arm_controller.hpp"
-#include "trossen_sdk/hw/vr/vr_mdns_advertiser.hpp"
 #include "trossen_sdk/hw/vr/vr_session.hpp"
 #include "trossen_sdk/hw/vr/vr_session_control.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
@@ -122,7 +121,7 @@ int main(int argc, char** argv) {
       config_lines.push_back(
         "VR arm [" + id + "]:  " +
         entry.value("controller", std::string{"right"}) + " hand, port " +
-        std::to_string(entry.value("vr_port", 5432)));
+        std::to_string(entry.value("vr_port", 9000)));
     }
   }
   config_lines.push_back("Joint rate:           " + std::to_string(joint_rate_hz) + " Hz");
@@ -152,13 +151,9 @@ int main(int argc, char** argv) {
               << arm_cfg.ip_address << ")\n";
   }
 
-  // ── Advertise the host over mDNS so the Quest app can discover it ──────
-  //
-  // Native C++ replacement for the old `mdns_helper.py` sidecar. Starts
-  // before any VR component so the Quest can see the server as soon as
-  // the WebSocket port opens.
+  // ── Determine VR port for connection info ──────────────────────────────
 
-  std::uint16_t vr_port = 5432;
+  std::uint16_t vr_port = 9000;
   if (vr_cfg.contains("arm_controllers")) {
     for (const auto& [_, entry] : vr_cfg["arm_controllers"].items()) {
       if (entry.contains("vr_port")) {
@@ -168,19 +163,10 @@ int main(int argc, char** argv) {
     }
   }
 
-  trossen::hw::vr::VrMdnsAdvertiser mdns;
-  try {
-    mdns.start(vr_port, "TrossenVR");
-    std::cout << "  [ok] mDNS advertising TrossenVR on port " << vr_port
-              << " (_trossen-vr._tcp)\n";
-  } catch (const std::exception& e) {
-    std::cerr << "  [warn] mDNS advertisement failed: " << e.what() << "\n"
-              << "         The Quest may not auto-discover this host; "
-                 "connect manually by IP or run mdns_helper.py as a "
-                 "fallback.\n";
-  }
+  std::cout << "  [info] VR receiver listening on port " << vr_port << "\n"
+            << "         Connect your Quest app to this host's IP address.\n";
 
-  // ── Initialize VR arm controller(s) — binds the WebSocket port ──────────
+  // ── Initialize VR arm controller(s) — binds the network port ───────────
 
   std::vector<std::shared_ptr<trossen::hw::vr::VrArmControllerComponent>>
     vr_components;
@@ -191,8 +177,9 @@ int main(int argc, char** argv) {
       vr_components.push_back(
         std::dynamic_pointer_cast<trossen::hw::vr::VrArmControllerComponent>(
           component));
-      std::cout << "  [ok] VR arm controller [" << id << "] configured ("
-                << entry.value("controller", std::string{"right"}) << " hand)\n";
+      std::cout << "  [ok] VR arm controller [" << id << "] ("
+                << entry.value("controller", std::string{"right"})
+                << " hand)\n";
     }
   }
 
@@ -265,7 +252,7 @@ int main(int argc, char** argv) {
 
   // ── Attach session-control source ───────────────────────────────────────
   //
-  // With a VR session-control component attached, A/B/grip buttons drive
+  // With a VR session-control component attached, A/B buttons drive
   // the SessionManager loops directly — no custom start-signal gate needed.
   // The initial `wait_for_reset()` doubles as the pre-session gate so the
   // operator puts on the headset, presses A, and recording begins.
@@ -275,8 +262,7 @@ int main(int argc, char** argv) {
     std::cout << "\nPut on the Meta Quest and press A on the controller to "
                  "start recording.\n"
                  "  A = start / skip-reset / stop-current-and-advance\n"
-                 "  B = re-record current or last episode\n"
-                 "  grip = end session\n\n";
+                 "  B = re-record current or last episode\n\n";
   } else {
     std::cout << "\n(No VR session-control configured — using keyboard: "
                  "-> continue, <- re-record, Ctrl+C to end.)\n\n";
@@ -287,6 +273,7 @@ int main(int argc, char** argv) {
     if (initial == trossen::runtime::UserAction::kStop ||
         trossen::utils::g_stop_requested) {
       std::cout << "\nAborted before first episode.\n";
+      mgr.detach_session_control();
       mgr.shutdown();
       return 0;
     }

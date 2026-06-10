@@ -26,7 +26,7 @@
     "arm_controllers": {
       "vr_right": {
         "controller":       "right",
-        "vr_port":          5432,
+        "vr_port":          9000,
         "gripper_min_m":    0.0,
         "gripper_max_m":    0.04,
         "wait_for_quest_s": 120.0
@@ -34,14 +34,13 @@
     },
     "session_control": {
       "controller":           "right",
-      "vr_port":              5432,
+      "vr_port":              9000,
       "wait_for_quest_s":     120.0,
       "poll_interval_ms":     50,
       "disconnect_timeout_s": 2.0,
       "bindings": {
         "button_a": "start",
-        "button_b": "rerecord",
-        "grip":     "stop_session"
+        "button_b": "rerecord"
       }
     }
   },
