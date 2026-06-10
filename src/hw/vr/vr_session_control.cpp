@@ -6,6 +6,7 @@
 #include "trossen_sdk/hw/vr/vr_session_control.hpp"
 
 #include <cmath>
+#include <iostream>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -23,16 +24,15 @@ using Event = session_control::SessionControlEvent;
 /// Parse a JSON input name into the VrInput enum. Only button-like
 /// inputs are valid here — pose / thumbstick don't map to discrete
 /// session events.
+///
+/// Valid inputs:
+///   - button_a, button_b: A/B on right controller, X/Y on left controller
 VrInput vr_input_from_name(const std::string& name) {
   if (name == "button_a") return VrInput::kButtonA;
   if (name == "button_b") return VrInput::kButtonB;
-  if (name == "menu")     return VrInput::kMenu;
-  if (name == "trigger")  return VrInput::kTrigger;
-  if (name == "grip")     return VrInput::kGrip;
   throw std::runtime_error(
     "VrSessionControlComponent: input '" + name +
-    "' is not bindable for session control (valid: button_a, button_b, "
-    "menu, trigger, grip)");
+    "' is not bindable for session control (valid: button_a, button_b)");
 }
 
 Event event_from_name(const std::string& name) {
@@ -48,7 +48,6 @@ std::vector<VrSessionControlComponent::Binding> default_bindings() {
   return {
     {VrInput::kButtonA, Event::kStart},
     {VrInput::kButtonB, Event::kRerecord},
-    {VrInput::kGrip,    Event::kStopSession},
   };
 }
 
@@ -78,7 +77,7 @@ void VrSessionControlComponent::configure(const nlohmann::json& config) {
       "\"right\", got \"" + controller_ + "\"");
   }
 
-  vr_port_ = config.value("vr_port", static_cast<std::uint16_t>(5432));
+  vr_port_ = config.value("vr_port", static_cast<std::uint16_t>(9000));
 
   const double wait_s = config.value("wait_for_quest_s", 10.0);
   if (!std::isfinite(wait_s) || wait_s < 0.0) {
@@ -95,13 +94,6 @@ void VrSessionControlComponent::configure(const nlohmann::json& config) {
       "VrSessionControlComponent: 'poll_interval_ms' must be positive");
   }
   poll_interval_ = std::chrono::milliseconds{poll_ms};
-
-  analog_threshold_ = config.value("analog_threshold", 0.5);
-  if (!std::isfinite(analog_threshold_) ||
-      analog_threshold_ <= 0.0 || analog_threshold_ >= 1.0) {
-    throw std::runtime_error(
-      "VrSessionControlComponent: 'analog_threshold' must be in (0, 1)");
-  }
 
   const double disconnect_s = config.value("disconnect_timeout_s", 2.0);
   if (!std::isfinite(disconnect_s) || disconnect_s <= 0.0) {
@@ -191,7 +183,7 @@ void VrSessionControlComponent::start() {
   if (running_.exchange(true)) return;  // Already running.
 
   // Block until the Quest app connects. Throws if the user forgot to
-  // launch the VR app / mDNS helper — fails loud, early, and clearly.
+  // launch the VR app — fails loud, early, and clearly.
   if (!VrSession::instance().wait_for_connection(wait_for_quest_)) {
     running_.store(false);
     throw std::runtime_error(
@@ -214,17 +206,11 @@ void VrSessionControlComponent::stop() {
 
 std::vector<std::string>
 VrSessionControlComponent::input_to_keys(VrInput input) const {
-  // The Meta Quest protocol is inconsistent: A/B/menu are often sent
-  // bare (only the right controller has A/B, so "a" is unambiguous),
-  // while grip/trigger are always per-hand (both controllers have
-  // them). Probe the suffixed form first to respect a caller who
-  // *does* advertise "right_a", then fall back to the bare form.
+  // button_a = A (right controller) or X (left controller)
+  // button_b = B (right controller) or Y (left controller)
   switch (input) {
     case VrInput::kButtonA: return {controller_ + "_a",       "a"};
     case VrInput::kButtonB: return {controller_ + "_b",       "b"};
-    case VrInput::kMenu:    return {controller_ + "_menu",    "menu"};
-    case VrInput::kTrigger: return {controller_ + "_trigger", "trigger"};
-    case VrInput::kGrip:    return {controller_ + "_grip",    "grip"};
     default:                return {};
   }
 }
@@ -233,11 +219,7 @@ bool VrSessionControlComponent::is_digital(VrInput input) {
   switch (input) {
     case VrInput::kButtonA:
     case VrInput::kButtonB:
-    case VrInput::kMenu:
       return true;
-    case VrInput::kTrigger:
-    case VrInput::kGrip:
-      return false;
     default:
       return false;
   }
@@ -246,15 +228,10 @@ bool VrSessionControlComponent::is_digital(VrInput input) {
 void VrSessionControlComponent::reader_loop() {
   auto& session = VrSession::instance();
 
-  // Sequence staleness tracking: once a frame is observed, a lack of
-  // sequence change for `disconnect_timeout_` is treated as a
-  // permanent disconnect. Wait until we see the first frame before
-  // arming the watchdog — the initial connection may still be warming
-  // up even though `wait_for_connection()` returned true.
-  std::uint64_t last_seq{0};
-  bool          has_first_seq{false};
-  auto          last_seq_change = std::chrono::steady_clock::now();
-  bool          disconnect_fired = false;
+  // Connection staleness tracking: monitor when we last saw a valid frame.
+  auto last_frame_time = std::chrono::steady_clock::now();
+  bool has_first_frame = false;
+  bool disconnect_fired = false;
 
   while (!stop_requested_.load()) {
     const auto frame_opt = session.latest_frame();
@@ -263,44 +240,37 @@ void VrSessionControlComponent::reader_loop() {
     if (frame_opt) {
       const auto& frame = *frame_opt;
 
-      // Disconnect watchdog — based on frame-sequence progress, not
-      // `is_quest_connected()` (which never goes false once set).
-      if (!has_first_seq || frame.sequence != last_seq) {
-        last_seq        = frame.sequence;
-        has_first_seq   = true;
-        last_seq_change = now;
-      } else if (has_first_seq &&
-                 (now - last_seq_change) > disconnect_timeout_ &&
-                 !disconnect_fired &&
-                 disconnect_cb_) {
-        disconnect_fired = true;
-        disconnect_cb_();
-        // Keep looping so stop() can still join cleanly; the callback
-        // ran once and must not fire again.
+      // Update last frame time
+      last_frame_time = now;
+      if (!has_first_frame) {
+        has_first_frame = true;
       }
+      
+      // Reset disconnect flag when we receive a frame
+      disconnect_fired = false;
 
-      // Rising-edge detection per bound input. Probe each candidate
-      // key in order; the first key that resolves to a value wins.
+      // Get the controller we're monitoring
+      const auto& controller = (controller_ == "right") 
+        ? frame.right_controller 
+        : frame.left_controller;
+
+      // Rising-edge detection per bound input
       for (const auto& b : bindings_) {
-        const auto keys = input_to_keys(b.input);
         bool pressed = false;
-        for (const auto& key : keys) {
-          const auto it = frame.buttons.find(key);
-          if (it == frame.buttons.end()) continue;
-          if (is_digital(b.input)) {
-            if (const bool* v = std::get_if<bool>(&it->second)) {
-              pressed = *v;
-              break;
-            }
-          } else {
-            if (const double* d = std::get_if<double>(&it->second)) {
-              pressed = (*d >= analog_threshold_);
-              break;
-            } else if (const bool* v = std::get_if<bool>(&it->second)) {
-              pressed = *v;
-              break;
-            }
-          }
+        
+        // Map VrInput to actual controller state
+        switch (b.input) {
+          case VrInput::kButtonA:
+            // A/X button (primary button on controller)
+            pressed = (controller.buttons.one != 0);
+            break;
+          case VrInput::kButtonB:
+            // B/Y button (secondary button on controller)
+            pressed = (controller.buttons.two != 0);
+            break;
+          default:
+            pressed = false;
+            break;
         }
 
         const bool was = prev_pressed_[b.input];
@@ -309,6 +279,13 @@ void VrSessionControlComponent::reader_loop() {
         }
         prev_pressed_[b.input] = pressed;
       }
+    } else if (has_first_frame &&
+               (now - last_frame_time) > disconnect_timeout_ &&
+               !disconnect_fired &&
+               disconnect_cb_) {
+      // No frame received for disconnect_timeout_ duration
+      disconnect_fired = true;
+      disconnect_cb_();
     }
 
     std::this_thread::sleep_for(poll_interval_);

@@ -5,8 +5,8 @@
  * Third VR hardware component in the stack. Where
  * `VrArmControllerComponent` claims pose + trigger and
  * `VrBaseJoystickComponent` claims the thumbstick,
- * `VrSessionControlComponent` claims the buttons (A, B, grip, menu)
- * and pushes session-level intents — kStart / kRerecord / kStopSession
+ * `VrSessionControlComponent` claims the buttons (A, B) on a configured
+ * hand and pushes session-level intents — kStart / kRerecord / kStopEarly
  * — to SessionManager via the `SessionControlCapable` mixin.
  *
  * The three components share one `VrSession` connection and each
@@ -67,17 +67,15 @@ public:
    *
    * Optional:
    *   - `bindings`: object mapping VR input name to event name. Defaults:
-   *     `{ "button_a": "start", "button_b": "rerecord",
-   *        "grip": "stop_session" }`. Recognized input names:
-   *     "button_a", "button_b", "menu", "trigger", "grip".
-   *     Recognized event names: "start", "stop_early", "rerecord",
-   *     "stop_session".
-   *   - `vr_port`: WebSocket port (default 5432).
+   *     `{ "button_a": "start", "button_b": "rerecord" }`.
+   *     Recognized input names:
+   *     "button_a", "button_b".
+   *     (button_a = A on right controller, X on left controller)
+   *     Recognized event names: "start", "stop_early", "rerecord".
+   *   - `vr_port`: network port (default 9000).
    *   - `wait_for_quest_s`: How long `start()` blocks for the Quest app
    *     to connect before throwing (default 10 s).
    *   - `poll_interval_ms`: Reader-thread poll cadence (default 50 ms).
-   *   - `analog_threshold`: Fraction in (0, 1) above which an analog
-   *     input (trigger, grip) is considered pressed (default 0.5).
    *   - `disconnect_timeout_s`: Consecutive seconds without a new
    *     frame sequence before disconnect fires (default 2 s).
    *
@@ -122,10 +120,9 @@ private:
 
   /// Config primitives.
   std::string               controller_{"right"};
-  std::uint16_t             vr_port_{5432};
+  std::uint16_t             vr_port_{9000};
   std::chrono::milliseconds wait_for_quest_{std::chrono::seconds{10}};
   std::chrono::milliseconds poll_interval_{std::chrono::milliseconds{50}};
-  double                    analog_threshold_{0.5};
   std::chrono::milliseconds disconnect_timeout_{std::chrono::seconds{2}};
 
   /// VR session refcount: acquired in configure(), released in dtor.
