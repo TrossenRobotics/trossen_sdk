@@ -102,7 +102,7 @@ private:
   /// split layout (e.g. right-stick linear, left-stick yaw).
   std::string   linear_controller_{"left"};
   std::string   angular_controller_{"left"};
-  std::uint16_t vr_port_{5432};
+  std::uint16_t vr_port_{9000};
   double        max_linear_mps_{0.5};
   double        max_angular_rps_{1.0};
   double        deadzone_{0.1};

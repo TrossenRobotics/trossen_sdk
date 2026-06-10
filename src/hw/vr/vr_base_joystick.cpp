@@ -17,15 +17,6 @@ namespace trossen::hw::vr {
 
 namespace {
 
-/// Extract an analog thumbstick axis from a VR frame. The protocol ships
-/// thumbstick axes as `{left,right}_thumbstick_{x,y}` doubles in `[-1, 1]`.
-double read_axis(
-    const trossen_vr::VRState& frame, const std::string& key) {
-  const auto it = frame.buttons.find(key);
-  if (it == frame.buttons.end()) return 0.0;
-  if (const double* d = std::get_if<double>(&it->second)) return *d;
-  return 0.0;
-}
 
 }  // namespace
 
@@ -152,10 +143,15 @@ std::vector<float> VrBaseJoystickComponent::read() {
   // Read Y from the linear controller's stick and X from the angular
   // controller's stick. They can be the same hand (single-stick mode)
   // or different hands (split mode).
-  const std::string y_key = linear_controller_  + "_thumbstick_y";
-  const std::string x_key = angular_controller_ + "_thumbstick_x";
-  const double y = apply_deadzone(read_axis(*frame, y_key), deadzone_);
-  const double x = apply_deadzone(read_axis(*frame, x_key), deadzone_);
+  const auto& linear_stick = (linear_controller_ == "right") 
+    ? frame->right_controller.thumbstick 
+    : frame->left_controller.thumbstick;
+  const auto& angular_stick = (angular_controller_ == "right") 
+    ? frame->right_controller.thumbstick 
+    : frame->left_controller.thumbstick;
+  
+  const double y = apply_deadzone(linear_stick.y_axis, deadzone_);
+  const double x = apply_deadzone(angular_stick.x_axis, deadzone_);
 
   // Forward stick → forward velocity; left stick → positive yaw (CCW
   // about the vertical axis), so we negate x. `max_*` caps are applied
