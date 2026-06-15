@@ -121,6 +121,9 @@ if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
   target_link_libraries(test_openpi_websocket_transport PRIVATE
     trossen_sdk GTest::gtest_main msgpack-cxx ixwebsocket::ixwebsocket)
 
+  add_executable(test_policy_client test_policy_client.cpp)
+  target_link_libraries(test_policy_client PRIVATE trossen_sdk GTest::gtest_main)
+
   # Drives LerobotGrpcTransport against an in-process AsyncInference server, so
   # it needs the generated proto headers + a direct gRPC/protobuf link (those
   # are PRIVATE on trossen_sdk).
@@ -175,4 +178,5 @@ if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
   gtest_discover_tests(test_lerobot_codec)
   gtest_discover_tests(test_openpi_websocket_transport)
   gtest_discover_tests(test_lerobot_grpc_transport)
+  gtest_discover_tests(test_policy_client)
 endif()
