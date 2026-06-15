@@ -102,6 +102,11 @@ endif()
 add_executable(test_policy_client_config test_policy_client_config.cpp)
 target_link_libraries(test_policy_client_config PRIVATE trossen_sdk GTest::gtest_main)
 
+# Neutral types (Observation / ActionChunk / ChunkSlot / TransportStatus) are
+# header-only, so the chunk-slot test is ungated too.
+add_executable(test_action_chunk test_action_chunk.cpp)
+target_link_libraries(test_action_chunk PRIVATE trossen_sdk GTest::gtest_main)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -136,3 +141,4 @@ if(TROSSEN_ENABLE_RERUN_OBSERVER)
   gtest_discover_tests(test_rerun_observer)
 endif()
 gtest_discover_tests(test_policy_client_config)
+gtest_discover_tests(test_action_chunk)
