@@ -39,6 +39,9 @@ namespace {
 #include "trossen_sdk/data/timestamp.hpp"
 #include "trossen_sdk/data/record.hpp"
 
+// Observer
+#include "trossen_sdk/observer/observer_base.hpp"
+
 // Hardware
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
@@ -320,6 +323,24 @@ PYBIND11_MODULE(trossen_sdk, m) {
         else { r.depth_scale = obj.cast<float>(); }
       })
     .def("has_depth", &ImageRecord::has_depth);
+
+  // ── Observer ────────────────────────────────────────────────────────────
+  {
+    using trossen::observer::ObserverBase;
+    py::class_<ObserverBase, std::shared_ptr<ObserverBase>>(m, "ObserverBase")
+      .def(py::init<std::string>(), py::arg("name") = "",
+           "Construct an observer with a human-readable logging name.")
+      .def("add_subscription", &ObserverBase::add_subscription,
+           py::arg("record_id"), py::arg("throttle_hz"), py::arg("handler"),
+           "Register a per-stream subscription. handler is a Python callable "
+           "invoked on the observer's worker thread with the freshest record "
+           "matching record_id, capped at throttle_hz invocations per second. "
+           "Must be called before the observer is added to a SessionManager.")
+      .def("name", &ObserverBase::name, "Logging name supplied at construction.")
+      .def("is_running", &ObserverBase::is_running)
+      .def("is_stopped", &ObserverBase::is_stopped)
+      .def("subscription_count", &ObserverBase::subscription_count);
+  }
 
   // ── 3. Hardware + producers ─────────────────────────────────────────────
   using namespace trossen::hw;
@@ -820,6 +841,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
            py::arg("opts") = Scheduler::TaskOptions{})
       .def("add_push_producer", &SessionManager::add_push_producer,
            py::arg("producer"))
+      .def("add_observer", &SessionManager::add_observer, py::arg("observer"))
       .def("start_episode", &SessionManager::start_episode)
       .def("stop_episode", &SessionManager::stop_episode)
       .def("discard_current_episode", &SessionManager::discard_current_episode)
@@ -830,7 +852,11 @@ PYBIND11_MODULE(trossen_sdk, m) {
       .def("wait_for_auto_stop", &SessionManager::wait_for_auto_stop,
            py::arg("timeout") = std::chrono::milliseconds::max(),
            py::call_guard<py::gil_scoped_release>())
-      .def("shutdown", &SessionManager::shutdown)
+      // Release the GIL: shutdown() joins the observer worker thread, which
+      // may be mid-flight in a Python record handler (e.g. logging to Rerun)
+      // and needs the GIL to finish. Holding it here would deadlock the join.
+      .def("shutdown", &SessionManager::shutdown,
+           py::call_guard<py::gil_scoped_release>())
       .def("stats", &SessionManager::stats)
       .def("on_pre_episode", &SessionManager::on_pre_episode, py::arg("callback"))
       .def("on_episode_started", &SessionManager::on_episode_started,

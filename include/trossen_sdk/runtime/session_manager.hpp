@@ -26,6 +26,7 @@
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/io/sink.hpp"
+#include "trossen_sdk/observer/observer_base.hpp"
 #include "trossen_sdk/runtime/scheduler.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/types/runtime/session_manager_config.hpp"
@@ -94,6 +95,20 @@ public:
    * Must be called before start_episode().
    */
   void add_push_producer(std::shared_ptr<hw::PushProducer> producer);
+
+  /**
+   * @brief Register a non-durable Observer.
+   *
+   * Observers fan out from each producer alongside the Sink without blocking the durable
+   * write path. They start lazily on the first ``start_episode()`` call, persist across
+   * episode boundaries, and stop at ``shutdown()``.
+   *
+   * @param observer Fully-configured observer (subscriptions already added).
+   *
+   * @throws std::invalid_argument if @p observer is null.
+   * @throws std::runtime_error if called after the first ``start_episode()``.
+   */
+  void add_observer(std::shared_ptr<observer::ObserverBase> observer);
 
   /**
    * @brief Start a new episode
@@ -497,6 +512,13 @@ private:
 
   /// @brief Registered push producers (persists across episodes)
   std::vector<PushProducerEntry> push_producer_entries_;
+
+  /// @brief Registered observers; persist across episodes
+  std::vector<std::shared_ptr<observer::ObserverBase>> observers_;
+
+  /// @brief Set after the first start_episode(); locks observer registration and gates
+  ///        the lazy-start path.
+  bool observers_started_{false};
 
   /**
    * @brief Create backend instance for the given episode
