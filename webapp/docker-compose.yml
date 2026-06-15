@@ -19,6 +19,11 @@ services:
     image: trossen-sdk-webapp-backend:dev
     container_name: trossen_webapp_backend
     network_mode: host                 # host Ethernet (arm subnet) + localhost wiring
+    # Host networking also exposes the recorder child's in-process Rerun gRPC
+    # server (app/recorder_runner.py, default port 9876) directly on the host,
+    # so the browser-embedded Rerun web viewer reaches it at
+    # rerun+http://localhost:9876/proxy with no port publishing. (A `ports:`
+    # mapping would be ignored under network_mode: host anyway.)
     # Privileged gives the container unrestricted device access: cameras
     # (/dev/video*, /dev/bus/usb/*) and the Slate base's serial port
     # (/dev/ttyUSB* / /dev/ttyACM*) all work without per-major cgroup rules.

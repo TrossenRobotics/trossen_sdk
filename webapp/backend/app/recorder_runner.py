@@ -41,12 +41,221 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import rerun as rr
+import rerun.blueprint as rrbp
 import trossen_sdk as ts
 
 
 _READY_PREFIX = "__READY__:"
 _SUCCESS_PREFIX = "__SUCCESS__:"
 _ERROR_PREFIX = "__ERROR__:"
+
+# Live-preview Rerun stream tuning.
+#   - subscribe at 30 Hz: the SDK throttles the per-record handler, so the
+#     log cost is bounded regardless of the producer's native poll rate.
+#     30 Hz is a smooth preview for both camera images and joint/odometry
+#     scalar plots; the durable recording is unaffected (observers are a
+#     non-durable fan-out off the same records).
+_RERUN_SUBSCRIBE_HZ = 30.0
+
+# Rerun application id shown in the web viewer's title.
+_RERUN_APP_ID = "trossen_sdk"
+
+# Port the in-process Rerun gRPC server listens on. The browser-embedded
+# Rerun web viewer connects to `rerun+http://<host>:<port>/proxy`. Because
+# both webapp containers run with `network_mode: host`, this is reachable
+# from the browser at `localhost:<port>` with no port publishing. MUST match
+# the port the frontend builds its viewer URL from (see RERUN_GRPC_PORT in
+# webapp/frontend/src/app/components/RerunViewer.tsx).
+_RERUN_GRPC_PORT = 9876
+
+# The dedicated RecordingStream that owns the gRPC server. Kept at module
+# scope for the process lifetime: rr.serve_grpc shuts its server down when
+# the associated RecordingStream is garbage-collected, so this reference is
+# what keeps the live preview alive for the whole session. None until
+# _start_rerun_server succeeds (or if it fails — preview simply disabled).
+_rr_stream: rr.RecordingStream | None = None
+
+# Kept alive for the process lifetime so the SDK's weak callback refs stay
+# valid (mirrors how _controllers is retained in main()).
+_rerun_observer: Any | None = None
+
+# Entity paths (one per subscribed record_id) logged into the viewer, so the
+# episode-boundary Clear can wipe each one. Populated by
+# _register_rerun_observer.
+_rerun_record_ids: list[str] = []
+
+
+def _start_rerun_server(grpc_port: int) -> bool:
+    """Start the in-process Rerun gRPC server for the live web viewer.
+
+    Creates a dedicated RecordingStream (stored in the module-level
+    `_rr_stream`) and serves it over gRPC. The browser-embedded Rerun web
+    viewer connects to the returned `rerun+http://...:<port>/proxy` URL.
+    `serve_grpc` buffers logged data in memory, so a viewer that connects
+    after recording has begun still receives the backlog.
+
+    Best-effort: any failure here just disables the live preview (the
+    observer is never registered) and must never abort recording. Returns
+    True on success.
+    """
+    global _rr_stream
+    try:
+        stream = rr.RecordingStream(_RERUN_APP_ID)
+        # cors_allow_origin=["*"]: the web viewer loads from a different
+        # origin (the frontend's Vite dev server / container) than this gRPC
+        # port, so the browser needs cross-origin access. Dev-wide allow;
+        # tighten to the real frontend origin for a hardened deployment.
+        url = rr.serve_grpc(
+            grpc_port=grpc_port,
+            recording=stream,
+            cors_allow_origin=["*"],
+        )
+        _rr_stream = stream
+        print(f"[recorder-runner] rerun gRPC server listening: {url}",
+              flush=True)
+        return True
+    except Exception as e:
+        _rr_stream = None
+        print(f"[recorder-runner] rerun server setup failed: {e}; "
+              f"live preview disabled", flush=True)
+        return False
+
+
+def _send_camera_blueprint(camera_stream_ids: list[str]) -> None:
+    """Push a camera-only viewer layout to the embedded web viewer.
+
+    Lays the camera feeds out in a 2-column grid and hides the blueprint,
+    selection, time, and top panels, so the viewer shows ONLY the live
+    camera images — no entity tree, no plots, no timeline chrome. Sent as
+    the active + default blueprint (serve_grpc buffers it), so a viewer
+    connecting at any point in the session picks it up. Best-effort: a
+    failure just leaves the viewer on its auto layout and never blocks
+    recording.
+    """
+    if _rr_stream is None or not camera_stream_ids:
+        return
+    try:
+        views = [rrbp.Spatial2DView(origin=cid, name=cid)
+                 for cid in camera_stream_ids]
+        blueprint = rrbp.Blueprint(
+            rrbp.Grid(
+                contents=views,
+                grid_columns=2 if len(views) > 1 else 1,
+            ),
+            rrbp.BlueprintPanel(state=rrbp.PanelState.Hidden),
+            rrbp.SelectionPanel(state=rrbp.PanelState.Hidden),
+            rrbp.TimePanel(state=rrbp.PanelState.Hidden),
+            rrbp.TopPanel(state=rrbp.PanelState.Hidden),
+            auto_views=False,
+        )
+        _rr_stream.send_blueprint(blueprint)
+    except Exception as e:
+        print(f"[recorder-runner] rerun blueprint send failed: {e}; "
+              f"viewer will use default layout", flush=True)
+
+
+def _log_image_record(record_id: str, rec: Any) -> None:
+    """Log one ImageRecord (and its depth map, if present) to the viewer.
+
+    The SDK's `encoding` string selects the Rerun color model so the viewer
+    renders colours correctly: rgb8 -> "RGB", bgr8 -> "BGR", mono8 -> a
+    plain 2-D grayscale image. Rerun accepts the numpy array directly — no
+    JPEG / OpenCV round-trip is needed (unlike the old tile preview).
+    """
+    img = rec.image
+    if img is None or getattr(img, "size", 0) == 0:
+        return
+    encoding = (rec.encoding or "").lower()
+    if encoding == "bgr8":
+        rr.log(record_id, rr.Image(img, "BGR"), recording=_rr_stream)
+    elif encoding in ("mono8", "mono", "gray", "grayscale"):
+        # Single channel: let Rerun infer grayscale from the 2-D array.
+        rr.log(record_id, rr.Image(img), recording=_rr_stream)
+    else:
+        # rgb8 and any unrecognised 3-channel encoding default to RGB.
+        rr.log(record_id, rr.Image(img, "RGB"), recording=_rr_stream)
+    if rec.has_depth():
+        depth = rec.depth_image
+        if depth is not None and getattr(depth, "size", 0) > 0:
+            rr.log(f"{record_id}/depth", rr.DepthImage(depth),
+                   recording=_rr_stream)
+
+
+def _log_joint_state_record(record_id: str, rec: Any) -> None:
+    """Log a JointStateRecord as scalar plots (positions / velocities / efforts).
+
+    Each Rerun `Scalars` archetype carries the full joint vector, so the
+    viewer shows one multi-series line plot per quantity under the record's
+    entity path.
+    """
+    if rec.positions:
+        rr.log(f"{record_id}/positions", rr.Scalars(list(rec.positions)),
+               recording=_rr_stream)
+    if rec.velocities:
+        rr.log(f"{record_id}/velocities", rr.Scalars(list(rec.velocities)),
+               recording=_rr_stream)
+    if rec.efforts:
+        rr.log(f"{record_id}/efforts", rr.Scalars(list(rec.efforts)),
+               recording=_rr_stream)
+
+
+def _log_odometry_record(record_id: str, rec: Any) -> None:
+    """Log an Odometry2DRecord as pose (x/y/theta) and twist scalar plots."""
+    pose = rec.pose
+    twist = rec.twist
+    rr.log(f"{record_id}/pose", rr.Scalars([pose.x, pose.y, pose.theta]),
+           recording=_rr_stream)
+    rr.log(f"{record_id}/twist",
+           rr.Scalars([twist.linear_x, twist.linear_y, twist.angular_z]),
+           recording=_rr_stream)
+
+
+def _make_rerun_handler(record_id: str) -> Any:
+    """Build the per-stream observer callback that logs `record_id` to Rerun.
+
+    The returned handler runs on the observer's worker thread with the GIL
+    held. It MUST NOT raise back into C++, so every failure path is
+    swallowed. Dispatch is by record type; unrecognised records are ignored.
+    A single wall-clock timeline (`time`) is shared across every entity so
+    the viewer aligns images and scalar plots on one common x-axis.
+    """
+    def _handler(rec: Any) -> None:
+        if _rr_stream is None:
+            return
+        try:
+            rr.set_time("time", timestamp=time.time(), recording=_rr_stream)
+            if isinstance(rec, ts.ImageRecord):
+                _log_image_record(record_id, rec)
+            elif isinstance(rec, ts.JointStateRecord):
+                _log_joint_state_record(record_id, rec)
+            elif isinstance(rec, ts.Odometry2DRecord):
+                _log_odometry_record(record_id, rec)
+        except Exception:
+            # Defensive catch-all: never let an exception unwind into the
+            # SDK's C++ producer tick.
+            pass
+
+    return _handler
+
+
+def _rerun_clear_entities() -> None:
+    """Recursively clear every subscribed entity in the live viewer.
+
+    Called at each episode boundary so the timeline resets per episode:
+    without it scalar plots autoscale across the whole session and the
+    viewer interpolates a line across the gap between episodes. Best-effort
+    and safe to call from the episode-loop thread; a failure never affects
+    recording, and the durable on-disk recording is untouched.
+    """
+    if _rr_stream is None:
+        return
+    try:
+        rr.set_time("time", timestamp=time.time(), recording=_rr_stream)
+        for record_id in _rerun_record_ids:
+            rr.log(record_id, rr.Clear(recursive=True), recording=_rr_stream)
+    except Exception:
+        pass
 
 
 _BLOCKABLE_SIGNALS = frozenset(range(1, signal.NSIG)) - {
@@ -184,6 +393,14 @@ def _build_session_manager(
 
     mgr = ts.SessionManager()
 
+    # Stream ids of the CAMERA producers only — the live Rerun viewer is
+    # camera-only (just the feeds, nothing else), so the observer subscribes
+    # to exactly these. Arm joint-state and mobile-base odometry are still
+    # written to the durable MCAP sink; they're simply not tapped for the
+    # preview. The record_id written by each producer is its `stream_id`
+    # (the SDK sets `rec->id = cfg_.stream_id`).
+    camera_stream_ids: list[str] = []
+
     for prod_cfg in cfg.producers:
         period_ms = int(1000.0 / prod_cfg.poll_rate_hz)
         if prod_cfg.type == "trossen_arm":
@@ -206,11 +423,50 @@ def _build_session_manager(
                     prod_cfg.type, camera_components[prod_cfg.hardware_id], rj
                 )
                 mgr.add_producer(prod, period_ms)
+            camera_stream_ids.append(prod_cfg.stream_id)
+
+    # Wire the live Rerun observer BEFORE returning (and therefore before
+    # the first start_episode() in main()): mgr.add_observer must be called
+    # before the first episode starts. No-op when the Rerun server failed to
+    # start or there are no cameras.
+    _register_rerun_observer(mgr, camera_stream_ids)
 
     mgr.on_pre_episode(lambda: (_start_controllers(controllers), True)[-1])
     mgr.on_pre_shutdown(lambda: _stop_controllers(controllers))
 
     return mgr, controllers, cfg.mcap_backend.root
+
+
+def _register_rerun_observer(
+    mgr: ts.SessionManager, camera_stream_ids: list[str]
+) -> None:
+    """Subscribe a camera-only live Rerun observer and push the grid blueprint.
+
+    Retains the observer in the module-level `_rerun_observer` so the SDK's
+    weak callback references stay valid for the process lifetime, and records
+    the subscribed entity paths in `_rerun_record_ids` for the per-episode
+    Clear. Skips entirely when the Rerun server is not running or there are
+    no cameras, so a missing live preview never affects recording.
+    """
+    global _rerun_observer, _rerun_record_ids
+    if _rr_stream is None or not camera_stream_ids:
+        return
+    try:
+        obs = ts.ObserverBase("webapp_rerun")
+        for record_id in camera_stream_ids:
+            obs.add_subscription(
+                record_id, _RERUN_SUBSCRIBE_HZ, _make_rerun_handler(record_id)
+            )
+        mgr.add_observer(obs)
+        _rerun_observer = obs
+        _rerun_record_ids = list(camera_stream_ids)
+        _send_camera_blueprint(camera_stream_ids)
+        print(f"[recorder-runner] rerun observer subscribed to cameras "
+              f"{camera_stream_ids} at {_RERUN_SUBSCRIBE_HZ} Hz", flush=True)
+    except Exception as e:
+        # Live preview is best-effort; never block bootstrap on it.
+        print(f"[recorder-runner] rerun observer setup failed: {e}; "
+              f"live preview disabled", flush=True)
 
 
 def _start_controllers(controllers: list) -> None:
@@ -345,6 +601,9 @@ def _run_episode_loop(
                     "event": "episode_started",
                     "episode_index": episode_index,
                 })
+                # Reset the live viewer's timeline for the new episode so
+                # scalar plots don't autoscale / interpolate across episodes.
+                _rerun_clear_entities()
             first_iteration_pending = False
 
             print(f"{tag} waiting for episode {episode_index} to end", flush=True)
@@ -572,6 +831,12 @@ def main() -> int:
     except (ValueError, KeyError, TypeError) as e:
         print(f"{_ERROR_PREFIX} {e}", flush=True)
         return 2
+
+    # Start the live Rerun gRPC server BEFORE building the session manager:
+    # _register_rerun_observer keys off the running server to decide whether
+    # to subscribe, and the observer must be added before the first
+    # start_episode(). Best-effort — a failure just disables live preview.
+    _start_rerun_server(_RERUN_GRPC_PORT)
 
     mgr: ts.SessionManager | None = None
     try:

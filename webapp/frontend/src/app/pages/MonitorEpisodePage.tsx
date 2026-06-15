@@ -1,4 +1,4 @@
-import { Camera, Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Settings } from 'lucide-react';
+import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Settings } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
@@ -8,6 +8,7 @@ import { useHwStatus } from '@/lib/HwStatusContext';
 import { apiGet, apiPost, describeError } from '@/lib/api';
 import { useReconnectingWebSocket } from '@/hooks/useReconnectingWebSocket';
 import type { WsStatus } from '@/hooks/useReconnectingWebSocket';
+import { RerunViewer } from '@/app/components/RerunViewer';
 import type { WsMessage } from '@/lib/types';
 
 // Local subset of the Session type used by this page. Wider Session lives
@@ -133,13 +134,6 @@ export function MonitorEpisodePage() {
       setStarting(false);
     }
   }
-
-  const cameraFeeds = [
-    { id: 1, name: "Front Camera" },
-    { id: 2, name: "Side Camera Left" },
-    { id: 3, name: "Top Camera" },
-    { id: 4, name: "Wrist Camera" },
-  ];
 
   function addLog(type: LogEntry['type'], message: string) {
     const timestamp = new Date().toLocaleTimeString();
@@ -702,33 +696,24 @@ export function MonitorEpisodePage() {
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden min-h-0">
-        {/* Camera Views — placeholder; live feeds are a planned feature.
-            Dimmed and tagged "Coming Soon" so it reads as intentionally
-            unimplemented rather than broken. */}
+        {/* Live viewer — embedded Rerun web (WASM) viewer streaming every
+            sensor the recorder publishes (camera images + depth, joint-state
+            and odometry plots) from the recorder child's in-process Rerun
+            gRPC server. Replaces the old per-camera JPEG tiles. */}
         <div
-          className="flex-1 p-[16px] flex items-center justify-center opacity-40 pointer-events-none select-none"
-          aria-label="Camera previews — feature coming soon"
+          className="flex-1 p-[16px] min-h-0"
+          aria-label="Live sensor viewer"
+          role="region"
         >
-          <div className="grid grid-cols-2 gap-[16px] h-full max-h-full w-full max-w-[1200px]">
-            {cameraFeeds.map((camera) => (
-              <div key={camera.id} className="bg-[#1a1a1a] border border-dashed border-[#3a3a3a] relative">
-                <div className="w-full h-full flex items-center justify-center">
-                  <div className="relative h-full" style={{ aspectRatio: '4/3' }}>
-                    <div className="absolute inset-0 flex items-center justify-center bg-[#1a1a1a]">
-                      <div className="text-center">
-                        <Camera className="w-[56px] h-[56px] text-[#5a5a5a] mx-auto mb-[12px]" />
-                        <p className="text-[#7a7a7a] text-[13px]">Live preview</p>
-                        <p className="text-[#5a5a5a] text-[10px] uppercase tracking-wider mt-[4px]">Coming soon</p>
-                      </div>
-                    </div>
-                    <div className="absolute top-[12px] right-[12px] bg-[#252525] px-[10px] py-[4px] rounded">
-                      <span className="text-[#7a7a7a] text-[11px]">{camera.name}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
+          {phase !== 'not_started' ? (
+            // Keyed by sessionId so navigating between sessions remounts the
+            // viewer onto the new recorder's gRPC server cleanly.
+            <RerunViewer key={sessionId} />
+          ) : (
+            <div className="w-full h-full flex items-center justify-center select-none">
+              <p className="text-[#7a7a7a] text-[13px]">Press Start to begin…</p>
+            </div>
+          )}
         </div>
 
         {/* Logs Panel */}

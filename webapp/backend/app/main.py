@@ -613,3 +613,9 @@ async def session_ws(ws: WebSocket, session_id: str) -> None:
         pass
     finally:
         bus.unsubscribe(session_id, queue)
+
+# Live camera / sensor preview is served out-of-band by the recorder child's
+# in-process Rerun gRPC server (see app/recorder_runner.py), which the
+# browser-embedded Rerun web viewer connects to directly at
+# rerun+http://<host>:9876/proxy. The webapp backend therefore no longer
+# relays preview frames over a WebSocket.

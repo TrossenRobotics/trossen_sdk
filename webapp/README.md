@@ -272,3 +272,58 @@ container does not delete data.
 
 Inside the container these appear under `/root/...` instead of
 `/home/<user>/...`, but it's the same files.
+
+---
+
+## 8. Troubleshooting
+
+### Hardware Test hangs or times out connecting to an arm
+
+Symptom: **Test** (or starting a recording) stalls on a line like
+`Connecting to the arm controller's TCP server at 192.168.1.2:50001`
+and then fails with a timeout / "did not respond to connect within 5s",
+even though the arms are powered on.
+
+Cause: the host has **no network interface on the arm subnet**
+(`192.168.1.x`). The most common case is that the wired Ethernet link to
+the robot is down and only Wi-Fi is up on a *different* subnet (e.g.
+`192.168.0.x`); packets to the arms then get routed out the Wi-Fi gateway
+and time out. Because both containers run on `network_mode: host`, the
+host's networking *is* the SDK's networking — if the host can't reach the
+arms, neither can the backend.
+
+Diagnose and fix on the host:
+
+```bash
+# Is there an interface on the arm subnet? (expect a 192.168.1.x address)
+ip -br addr show | grep '192\.168\.1\.'
+
+# Are the arms reachable? (expect replies)
+ping -c1 192.168.1.2
+
+# If there's no 192.168.1.x interface, bring up the wired link to the
+# robot (replace enp0s31f6 with your wired NIC from `ip -br addr show`):
+sudo ip link set enp0s31f6 up
+# …then ensure it has a 192.168.1.x address (DHCP from the robot switch
+# or a static address per your kit's network setup).
+```
+
+Re-run **Test** once `ping 192.168.1.2` succeeds. If a single arm is
+unreachable while others respond, check that arm's power and cabling.
+
+### A session ends in "Error" immediately after Start
+
+Open the session (or the backend logs: `docker compose logs backend`) for
+the captured message. The usual causes are an arm that dropped off the
+subnet mid-session, a camera that was unplugged, or a config mismatch
+(wrong arm IP / camera serial). Fix the hardware, click **Clear Error**,
+re-run **Test**, then **Resume** — see section 5.
+
+### The live viewer in the Monitor page is blank
+
+The Monitor page embeds the Rerun web viewer, which connects to the
+recorder's in-process Rerun server on port `9876`. It only has data while
+a session is **actively recording**, and the browser must be able to
+reach `localhost:9876` (host networking provides this by default). If the
+grid stays empty during an active session, confirm no other process is
+bound to `9876` and that the browser is on the same host as the backend.

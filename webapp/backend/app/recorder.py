@@ -162,6 +162,7 @@ def start_recording(session: Session) -> None:
         "stdbuf", "-oL", "-eL",
         sys.executable, "-m", "app.recorder_runner",
     ]
+
     try:
         proc = subprocess.Popen(
             cmd,
@@ -195,6 +196,7 @@ def start_recording(session: Session) -> None:
         ) from e
 
     last_lines: deque = deque(maxlen=_LAST_LINES_BUFFER)
+    # _wait_for_ready kills the child itself on failure before raising.
     _wait_for_ready(session.id, proc, last_lines)
 
     # Bootstrap succeeded — episode 0 is already running inside the child.
