@@ -42,7 +42,6 @@ from pathlib import Path
 from typing import Any
 
 import rerun as rr
-import rerun.blueprint as rrbp
 import trossen_sdk as ts
 
 
@@ -120,39 +119,6 @@ def _start_rerun_server(grpc_port: int) -> bool:
         print(f"[recorder-runner] rerun server setup failed: {e}; "
               f"live preview disabled", flush=True)
         return False
-
-
-def _send_camera_blueprint(camera_stream_ids: list[str]) -> None:
-    """Push a camera-only viewer layout to the embedded web viewer.
-
-    Lays the camera feeds out in a 2-column grid and hides the blueprint,
-    selection, time, and top panels, so the viewer shows ONLY the live
-    camera images — no entity tree, no plots, no timeline chrome. Sent as
-    the active + default blueprint (serve_grpc buffers it), so a viewer
-    connecting at any point in the session picks it up. Best-effort: a
-    failure just leaves the viewer on its auto layout and never blocks
-    recording.
-    """
-    if _rr_stream is None or not camera_stream_ids:
-        return
-    try:
-        views = [rrbp.Spatial2DView(origin=cid, name=cid)
-                 for cid in camera_stream_ids]
-        blueprint = rrbp.Blueprint(
-            rrbp.Grid(
-                contents=views,
-                grid_columns=2 if len(views) > 1 else 1,
-            ),
-            rrbp.BlueprintPanel(state=rrbp.PanelState.Hidden),
-            rrbp.SelectionPanel(state=rrbp.PanelState.Hidden),
-            rrbp.TimePanel(state=rrbp.PanelState.Hidden),
-            rrbp.TopPanel(state=rrbp.PanelState.Hidden),
-            auto_views=False,
-        )
-        _rr_stream.send_blueprint(blueprint)
-    except Exception as e:
-        print(f"[recorder-runner] rerun blueprint send failed: {e}; "
-              f"viewer will use default layout", flush=True)
 
 
 def _log_image_record(record_id: str, rec: Any) -> None:
@@ -440,7 +406,14 @@ def _build_session_manager(
 def _register_rerun_observer(
     mgr: ts.SessionManager, camera_stream_ids: list[str]
 ) -> None:
-    """Subscribe a camera-only live Rerun observer and push the grid blueprint.
+    """Subscribe a camera-only live Rerun observer.
+
+    Logs only the camera streams to the gRPC server; the viewer LAYOUT
+    (camera grid, panels hidden) is shipped separately as a `.rbl` blueprint
+    file served by the backend and loaded by the frontend viewer — see
+    `/api/sessions/{id}/rerun_blueprint.rbl` in app/main.py. (A blueprint
+    pushed over the data stream is applied non-deterministically by the web
+    viewer — browser-cached layout takes precedence — so it is NOT used.)
 
     Retains the observer in the module-level `_rerun_observer` so the SDK's
     weak callback references stay valid for the process lifetime, and records
@@ -460,7 +433,6 @@ def _register_rerun_observer(
         mgr.add_observer(obs)
         _rerun_observer = obs
         _rerun_record_ids = list(camera_stream_ids)
-        _send_camera_blueprint(camera_stream_ids)
         print(f"[recorder-runner] rerun observer subscribed to cameras "
               f"{camera_stream_ids} at {_RERUN_SUBSCRIBE_HZ} Hz", flush=True)
     except Exception as e:

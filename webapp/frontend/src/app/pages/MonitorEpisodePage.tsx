@@ -705,10 +705,10 @@ export function MonitorEpisodePage() {
           aria-label="Live sensor viewer"
           role="region"
         >
-          {phase !== 'not_started' ? (
+          {phase !== 'not_started' && sessionId ? (
             // Keyed by sessionId so navigating between sessions remounts the
             // viewer onto the new recorder's gRPC server cleanly.
-            <RerunViewer key={sessionId} />
+            <RerunViewer key={sessionId} sessionId={sessionId} />
           ) : (
             <div className="w-full h-full flex items-center justify-center select-none">
               <p className="text-[#7a7a7a] text-[13px]">Press Start to begin…</p>

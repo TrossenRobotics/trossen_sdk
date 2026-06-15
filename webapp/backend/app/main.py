@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 from app import hw_status
@@ -619,3 +619,85 @@ async def session_ws(ws: WebSocket, session_id: str) -> None:
 # browser-embedded Rerun web viewer connects to directly at
 # rerun+http://<host>:9876/proxy. The webapp backend therefore no longer
 # relays preview frames over a WebSocket.
+
+# Application id of the live Rerun data stream — kept in sync with
+# _RERUN_APP_ID in app/recorder_runner.py. The shipped blueprint .rbl must use
+# the same id so it binds to the live recording.
+_RERUN_APP_ID = "trossen_sdk"
+
+
+def _camera_stream_ids_from_config(config: dict[str, Any]) -> list[str]:
+    """Camera record_ids (producer stream_ids) declared by a system config.
+
+    Mirrors the camera branch of recorder_runner._build_session_manager: a
+    producer is a camera when its hardware_id names a configured camera, and
+    the record_id it writes is its stream_id.
+    """
+    hardware = config.get("hardware", {}) if isinstance(config, dict) else {}
+    camera_ids = {
+        c.get("id") for c in hardware.get("cameras", []) if isinstance(c, dict)
+    }
+    stream_ids: list[str] = []
+    for prod in config.get("producers", []):
+        if isinstance(prod, dict) and prod.get("hardware_id") in camera_ids:
+            stream_ids.append(prod.get("stream_id") or prod.get("hardware_id"))
+    return [s for s in stream_ids if s]
+
+
+def _build_camera_blueprint_rbl(camera_ids: list[str]) -> bytes:
+    """Generate a camera-only Rerun blueprint and return it as .rbl bytes.
+
+    A 2-column grid of the camera 2D views with the blueprint, selection,
+    time, and top panels hidden, so the embedded web viewer shows only the
+    live feeds. `rerun` is imported lazily: it is needed only for this
+    endpoint, and the parent process otherwise never loads the SDK in-process.
+    """
+    import os
+    import tempfile
+
+    import rerun.blueprint as rrbp
+
+    views = [rrbp.Spatial2DView(origin=cid, name=cid) for cid in camera_ids]
+    blueprint = rrbp.Blueprint(
+        rrbp.Grid(contents=views, grid_columns=2 if len(views) > 1 else 1),
+        rrbp.BlueprintPanel(state=rrbp.PanelState.Hidden),
+        rrbp.SelectionPanel(state=rrbp.PanelState.Hidden),
+        rrbp.TimePanel(state=rrbp.PanelState.Hidden),
+        rrbp.TopPanel(state=rrbp.PanelState.Hidden),
+        auto_views=False,
+    )
+    fd, path = tempfile.mkstemp(suffix=".rbl")
+    os.close(fd)
+    try:
+        blueprint.save(_RERUN_APP_ID, path)
+        with open(path, "rb") as fh:
+            return fh.read()
+    finally:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+
+
+@app.get("/api/sessions/{session_id}/rerun_blueprint.rbl")
+def session_rerun_blueprint(session_id: str) -> Response:
+    """Serve the camera-only Rerun blueprint (.rbl) for a session's viewer.
+
+    The frontend loads this alongside the live gRPC source so the embedded
+    Rerun web viewer applies the camera-grid layout deterministically on every
+    machine — independent of any blueprint cached in the browser's storage,
+    which is why pushing the blueprint over the data stream was unreliable.
+    """
+    sess = get_session(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail="Session not found")
+    system = get_system(sess.system_id)
+    if system is None or not isinstance(system.config, dict):
+        raise HTTPException(status_code=404, detail="System config not found")
+    camera_ids = _camera_stream_ids_from_config(system.config)
+    if not camera_ids:
+        raise HTTPException(status_code=404, detail="No cameras in system config")
+    return Response(
+        content=_build_camera_blueprint_rbl(camera_ids),
+        media_type="application/octet-stream",
+    )
