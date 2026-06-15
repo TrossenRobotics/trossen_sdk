@@ -76,6 +76,25 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     }
   }
 
+  // Optional episode-start pose — used by pre_episode().
+  if (config.contains("initial_position")) {
+    auto pos = config.at("initial_position").get<std::vector<float>>();
+    if (pos.size() != static_cast<size_t>(driver_->get_num_joints())) {
+      throw std::runtime_error(
+        "TrossenArmComponent: 'initial_position' length (" +
+        std::to_string(pos.size()) + ") must match joint count (" +
+        std::to_string(driver_->get_num_joints()) + ")");
+    }
+    initial_position_ = std::move(pos);
+  }
+  if (config.contains("initial_position_time_s")) {
+    initial_position_time_s_ = config.at("initial_position_time_s").get<float>();
+    if (initial_position_time_s_ < 0.0f || !std::isfinite(initial_position_time_s_)) {
+      throw std::runtime_error(
+        "TrossenArmComponent: 'initial_position_time_s' must be non-negative and finite");
+    }
+  }
+
   // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
 }
 
@@ -171,6 +190,21 @@ void TrossenArmComponent::stage() {
   std::vector<double> pos_d(staged_position_.begin(), staged_position_.end());
   // Non-blocking so multiple arms can stage in parallel.
   driver_->set_all_positions(pos_d, teleop_moving_time_s_, false);
+}
+
+void TrossenArmComponent::pre_episode() {
+  if (!driver_ || initial_position_.empty()) return;
+
+  // Only the follower physically performs the task, so only it is moved to
+  // a fixed starting pose before each episode. The leader stays in
+  // gravity-compensation mode under the operator's hand.
+  if (is_leader_) return;
+
+  driver_->set_all_modes(trossen_arm::Mode::position);
+  std::vector<double> pos_d(initial_position_.begin(), initial_position_.end());
+  // Blocking: the episode (and recording) should not start until the arm
+  // has physically reached the configured initial position.
+  driver_->set_all_positions(pos_d, initial_position_time_s_, true);
 }
 
 REGISTER_HARDWARE(TrossenArmComponent, "trossen_arm")

@@ -53,7 +53,9 @@ public:
    *   "model": "wxai_v0",
    *   "end_effector": "wxai_v0_follower",
    *   "staged_position": [0, 1.0, 0.5, 0.6, 0, 0, 0],  // optional, joint-space
-   *   "teleop_moving_time_s": 2.0         // optional, default 2.0
+   *   "teleop_moving_time_s": 2.0,        // optional, default 2.0
+   *   "initial_position": [0, 0.0, 0.0, 0.0, 0, 0, 0], // optional, joint-space
+   *   "initial_position_time_s": 2.0      // optional, default 2.0
    * }
    *
    * @param config JSON configuration object
@@ -99,6 +101,13 @@ public:
   void prepare_for_teleop() override;
   void end_teleop() override;
   void stage() override;
+
+  // ── TeleopCapable: episode lifecycle ─────────────────────────────────────
+
+  /// Move this arm to its configured `initial_position` before each episode
+  /// starts (blocking, so the episode does not begin until the move
+  /// completes). No-op for leader arms or if `initial_position` is unset.
+  void pre_episode() override;
 
 private:
   // Space-specific IO helpers. Called by the nested adapter views.
@@ -152,6 +161,13 @@ private:
 
   /// Trajectory time used by stage() and the end_teleop() rest move.
   float teleop_moving_time_s_{2.0f};
+
+  /// Joint-space pose this arm moves to before each episode starts (via
+  /// pre_episode()). Empty = no episode-start positioning.
+  std::vector<float> initial_position_;
+
+  /// Trajectory time used by pre_episode() to reach `initial_position_`.
+  float initial_position_time_s_{2.0f};
 };
 
 }  // namespace trossen::hw::arm

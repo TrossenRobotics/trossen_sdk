@@ -321,8 +321,12 @@ int main(int argc, char** argv) {
   // ──────────────────────────────────────────────────────────
 
   // Before each episode: let controllers run their pre-episode lifecycle
+  // (e.g. moving follower arms to their configured `initial_position`
+  // before recording starts).
   mgr.on_pre_episode([&]() -> bool {
+    std::cout << "Moving to initial position...\n";
     for (auto& ctrl : controllers) ctrl->prepare_teleop();
+    std::cout << "Ready.\n";
     return true;
   });
 
