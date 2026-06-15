@@ -97,6 +97,11 @@ if(TROSSEN_ENABLE_RERUN_OBSERVER)
   target_link_libraries(test_rerun_observer PRIVATE trossen_sdk rerun_sdk GTest::gtest_main)
 endif()
 
+# PolicyClient config parsing — header-only schema, no transport deps, so it
+# builds regardless of TROSSEN_SDK_ENABLE_POLICY_CLIENT.
+add_executable(test_policy_client_config test_policy_client_config.cpp)
+target_link_libraries(test_policy_client_config PRIVATE trossen_sdk GTest::gtest_main)
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -130,3 +135,4 @@ gtest_discover_tests(test_session_manager_observers)
 if(TROSSEN_ENABLE_RERUN_OBSERVER)
   gtest_discover_tests(test_rerun_observer)
 endif()
+gtest_discover_tests(test_policy_client_config)

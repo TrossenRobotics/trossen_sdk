@@ -35,6 +35,31 @@ HardwareConfig HardwareConfig::from_json(const nlohmann::json& j) {
     c.mobile_base = MobileBaseConfig::from_json(j.at("mobile_base"));
   }
 
+  if (j.contains("policy_clients")) {
+    if (!j.at("policy_clients").is_array()) {
+      throw std::runtime_error(
+        "HardwareConfig: 'policy_clients' must be an array");
+    }
+    size_t i = 0;
+    for (const auto& pc_j : j.at("policy_clients")) {
+      try {
+        c.policy_clients.push_back(PolicyClientConfig::from_json(pc_j));
+      } catch (const std::exception& e) {
+        throw std::runtime_error(
+          "HardwareConfig: failed to parse policy_clients[" + std::to_string(i) +
+          "]: " + e.what());
+      }
+      ++i;
+    }
+    std::unordered_set<std::string> seen_ids;
+    for (const auto& pc : c.policy_clients) {
+      if (!seen_ids.insert(pc.id).second) {
+        throw std::runtime_error(
+          "HardwareConfig: duplicate policy_client id '" + pc.id + "'");
+      }
+    }
+  }
+
   return c;
 }
 
