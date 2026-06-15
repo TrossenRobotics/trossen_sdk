@@ -384,7 +384,16 @@ int main(int argc, char** argv) {
       break;
     }
 
-    std::cout << "Recording...\n";
+    // --- INSERTED CODE (Replaces std::cout << "Recording...\n";) ---
+    std::cout << "\n==================================================\n";
+    std::cout << "▶ RECORDING ACTIVE\n";
+    std::cout << "  Waiting for timeout or operator input...\n\n";
+    std::cout << "CONTROLS:\n";
+    std::cout << "  [Left Arrow]  Interrupt & Discard current episode\n";
+    std::cout << "  [Right Arrow] Finish episode early\n";
+    std::cout << "  [Ctrl+C]      End session safely\n";
+    std::cout << "==================================================\n" << std::flush;
+    // --- END INSERTED CODE ---
 
     // Velocity polling thread keeps base_prod active during the episode
     std::thread velocity_thread([&]() {
@@ -400,12 +409,27 @@ int main(int argc, char** argv) {
     auto action = mgr.monitor_episode();
 
     if (action == trossen::runtime::UserAction::kReRecord) {
+
+      // --- INSERTED CODE 2 ---
+      std::cout << "\n[!] Re-record requested (Left Arrow).\n";
+      std::cout << "    Interrupting teleop and discarding current episode...\n" << std::flush;
+      // --- END INSERTED CODE 2 ---
+
+      
       mgr.discard_current_episode();
       if (velocity_thread.joinable()) {
         velocity_thread.join();
       }
       continue;
     }
+
+    // --- INSERTED CODE 3 ---
+    if (action != trossen::runtime::UserAction::kStop && !trossen::utils::g_stop_requested) {
+      std::cout << "\n[>] Recording phase ended.\n";
+      std::cout << "    Stopping teleop and finalizing episode data...\n" << std::flush;
+    }
+    // --- END INSERTED CODE 3 ---
+
 
     if (mgr.is_episode_active()) {
       mgr.stop_episode();
@@ -419,9 +443,28 @@ int main(int argc, char** argv) {
       break;
     }
 
+
+    // --- INSERTED CODE 4 ---
+    std::cout << "\n--------------------------------------------------\n";
+    std::cout << "⏸ RESET PHASE\n";
+    std::cout << "  Waiting for reset duration or operator input...\n\n";
+    std::cout << "CONTROLS:\n";
+    std::cout << "  [Left Arrow]  Retroactive Discard: Delete PREVIOUS episode\n";
+    std::cout << "  [Right Arrow] Skip wait: Start next episode immediately\n";
+    std::cout << "--------------------------------------------------\n" << std::flush;
+    // --- END INSERTED CODE 4 ---
+
+
     action = mgr.wait_for_reset();
     if (action == trossen::runtime::UserAction::kStop) break;
     if (action == trossen::runtime::UserAction::kReRecord) {
+
+      // --- INSERTED CODE 5 ---
+      std::cout << "\n[!] Retroactive discard requested (Left Arrow).\n";
+      std::cout << "    Deleting previous episode data...\n" << std::flush;
+      // --- END INSERTED CODE 5 ---
+
+      
       mgr.discard_last_episode();
       continue;
     }
