@@ -53,7 +53,8 @@ public:
    *   "model": "wxai_v0",
    *   "end_effector": "wxai_v0_follower",
    *   "staged_position": [0, 1.0, 0.5, 0.6, 0, 0, 0],  // optional, joint-space
-   *   "staging_time_s": 2.0           // optional, default 2.0
+   *   "staging_time_s": 2.0,       // optional, default 2.0 (stage / rest move)
+   *   "write_moving_time_s": 0.1   // optional, default 0.0 (per-tick smoothing)
    * }
    *
    * @param config JSON configuration object
@@ -165,6 +166,12 @@ private:
   /// Whether this arm participates in the per-episode lifecycle (staging before
   /// each episode). Opt-in; parsed from "episode_lifecycle_enabled" in configure().
   bool episode_lifecycle_enabled_{false};
+
+  /// Per-write trajectory time passed to set_all_positions in write_joint().
+  /// Zero means apply the goal immediately (libtrossen_arm interprets
+  /// goal_time < 0.001s as no-interpolation). Non-zero values smooth the
+  /// per-tick motion between successive write_joint() calls.
+  float write_moving_time_s_{0.0f};
 };
 
 }  // namespace trossen::hw::arm
