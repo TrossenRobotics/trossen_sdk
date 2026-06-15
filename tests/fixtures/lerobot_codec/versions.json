@@ -1,0 +1,8 @@
+{
+  "lerobot": "0.5.2",
+  "lerobot_commit": "e99c55af",
+  "torch": "2.10.0+cpu",
+  "numpy": "2.2.6",
+  "pickle_default_protocol": 4,
+  "observed_protocol": 4
+}
