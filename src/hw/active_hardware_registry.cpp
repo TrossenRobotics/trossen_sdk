@@ -57,6 +57,16 @@ bool ActiveHardwareRegistry::is_registered(const std::string& id) {
   return get_registry().find(id) != get_registry().end();
 }
 
+bool ActiveHardwareRegistry::unregister(const std::string& id) {
+  auto& registry = get_registry();
+  auto it = registry.find(id);
+  if (it == registry.end()) {
+    return false;
+  }
+  registry.erase(it);
+  return true;
+}
+
 void ActiveHardwareRegistry::clear() {
   get_registry().clear();
 }

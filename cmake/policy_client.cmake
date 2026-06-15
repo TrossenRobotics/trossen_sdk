@@ -80,6 +80,7 @@ target_sources(trossen_sdk PRIVATE
   src/hw/policy/msgpack_ndarray.cpp
   src/hw/policy/openpi_websocket_transport.cpp
   src/hw/policy/policy_client.cpp
+  src/hw/policy/policy_client_producer.cpp
   src/hw/policy/transport_registry.cpp
   ${_lerobot_proto_out}/lerobot_transport_services.pb.cc
   ${_lerobot_proto_out}/lerobot_transport_services.grpc.pb.cc

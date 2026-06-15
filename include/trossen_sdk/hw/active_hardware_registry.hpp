@@ -82,6 +82,14 @@ public:
   static bool is_registered(const std::string& id);
 
   /**
+   * @brief Remove a single hardware component from the registry.
+   *
+   * @param id Hardware component identifier
+   * @return true if @p id was registered and has been removed; false if no such id.
+   */
+  static bool unregister(const std::string& id);
+
+  /**
    * @brief Clear all active hardware components
    *
    * @note Should be called during application shutdown or when

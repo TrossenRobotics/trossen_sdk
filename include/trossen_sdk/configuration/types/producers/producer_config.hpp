@@ -37,6 +37,7 @@ namespace trossen::configuration {
  *  - "realsense_camera" - RealSense image producer
  *  - "opencv_camera"    - OpenCV/V4L2 image producer
  *  - "slate_base"       - SLATE mobile base velocity producer
+ *  - "policy_client"    - polls a PolicyClient hardware entry; emits JointStateRecord
  */
 struct ProducerConfig {
   /// @brief Producer/hardware registry key (e.g. "trossen_arm", "realsense_camera")
