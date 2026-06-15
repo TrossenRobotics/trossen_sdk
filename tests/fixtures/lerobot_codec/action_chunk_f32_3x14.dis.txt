@@ -1,0 +1,148 @@
+    0: \x80 PROTO      4
+    2: \x95 FRAME      1597
+   11: ]    EMPTY_LIST
+   12: \x94 MEMOIZE    (as 0)
+   13: (    MARK
+   14: \x8c     SHORT_BINUNICODE 'lerobot.async_inference.helpers'
+   47: \x94     MEMOIZE    (as 1)
+   48: \x8c     SHORT_BINUNICODE 'TimedAction'
+   61: \x94     MEMOIZE    (as 2)
+   62: \x93     STACK_GLOBAL
+   63: \x94     MEMOIZE    (as 3)
+   64: )        EMPTY_TUPLE
+   65: \x81     NEWOBJ
+   66: \x94     MEMOIZE    (as 4)
+   67: }        EMPTY_DICT
+   68: \x94     MEMOIZE    (as 5)
+   69: (        MARK
+   70: \x8c         SHORT_BINUNICODE 'timestamp'
+   81: \x94         MEMOIZE    (as 6)
+   82: G            BINFLOAT   123.5
+   91: \x8c         SHORT_BINUNICODE 'timestep'
+  101: \x94         MEMOIZE    (as 7)
+  102: K            BININT1    100
+  104: \x8c         SHORT_BINUNICODE 'action'
+  112: \x94         MEMOIZE    (as 8)
+  113: \x8c         SHORT_BINUNICODE 'torch._utils'
+  127: \x94         MEMOIZE    (as 9)
+  128: \x8c         SHORT_BINUNICODE '_rebuild_tensor_v2'
+  148: \x94         MEMOIZE    (as 10)
+  149: \x93         STACK_GLOBAL
+  150: \x94         MEMOIZE    (as 11)
+  151: (            MARK
+  152: \x8c             SHORT_BINUNICODE 'torch.storage'
+  167: \x94             MEMOIZE    (as 12)
+  168: \x8c             SHORT_BINUNICODE '_load_from_bytes'
+  186: \x94             MEMOIZE    (as 13)
+  187: \x93             STACK_GLOBAL
+  188: \x94             MEMOIZE    (as 14)
+  189: B                BINBYTES   b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9\x03.\x80\x02}q\x00(X\x10\x00\x00\x00protocol_versionq\x01M\xe9\x03X\r\x00\x00\x00little_endianq\x02\x88X\n\x00\x00\x00type_sizesq\x03}q\x04(X\x05\x00\x00\x00shortq\x05K\x02X\x03\x00\x00\x00intq\x06K\x04X\x04\x00\x00\x00longq\x07K\x04uu.\x80\x02(X\x07\x00\x00\x00storageq\x00ctorch\nFloatStorage\nq\x01X\n\x00\x00\x001073252416q\x02X\x03\x00\x00\x00cpuq\x03K*Ntq\x04Q.\x80\x02]q\x00X\n\x00\x00\x001073252416q\x01a.*\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80?\x00\x00\x00@\x00\x00@@\x00\x00\x80@\x00\x00\xa0@\x00\x00\xc0@\x00\x00\xe0@\x00\x00\x00A\x00\x00\x10A\x00\x00 A\x00\x000A\x00\x00@A\x00\x00PA\x00\x00`A\x00\x00pA\x00\x00\x80A\x00\x00\x88A\x00\x00\x90A\x00\x00\x98A\x00\x00\xa0A\x00\x00\xa8A\x00\x00\xb0A\x00\x00\xb8A\x00\x00\xc0A\x00\x00\xc8A\x00\x00\xd0A\x00\x00\xd8A\x00\x00\xe0A\x00\x00\xe8A\x00\x00\xf0A\x00\x00\xf8A\x00\x00\x00B\x00\x00\x04B\x00\x00\x08B\x00\x00\x0cB\x00\x00\x10B\x00\x00\x14B\x00\x00\x18B\x00\x00\x1cB\x00\x00 B\x00\x00$B'
+  605: \x94             MEMOIZE    (as 15)
+  606: \x85             TUPLE1
+  607: \x94             MEMOIZE    (as 16)
+  608: R                REDUCE
+  609: \x94             MEMOIZE    (as 17)
+  610: K                BININT1    0
+  612: K                BININT1    14
+  614: \x85             TUPLE1
+  615: \x94             MEMOIZE    (as 18)
+  616: K                BININT1    1
+  618: \x85             TUPLE1
+  619: \x94             MEMOIZE    (as 19)
+  620: \x89             NEWFALSE
+  621: \x8c             SHORT_BINUNICODE 'collections'
+  634: \x94             MEMOIZE    (as 20)
+  635: \x8c             SHORT_BINUNICODE 'OrderedDict'
+  648: \x94             MEMOIZE    (as 21)
+  649: \x93             STACK_GLOBAL
+  650: \x94             MEMOIZE    (as 22)
+  651: )                EMPTY_TUPLE
+  652: R                REDUCE
+  653: \x94             MEMOIZE    (as 23)
+  654: t                TUPLE      (MARK at 151)
+  655: \x94         MEMOIZE    (as 24)
+  656: R            REDUCE
+  657: \x94         MEMOIZE    (as 25)
+  658: u            SETITEMS   (MARK at 69)
+  659: b        BUILD
+  660: h        BINGET     3
+  662: )        EMPTY_TUPLE
+  663: \x81     NEWOBJ
+  664: \x94     MEMOIZE    (as 26)
+  665: }        EMPTY_DICT
+  666: \x94     MEMOIZE    (as 27)
+  667: (        MARK
+  668: h            BINGET     6
+  670: G            BINFLOAT   123.53333333333333
+  679: h            BINGET     7
+  681: K            BININT1    101
+  683: h            BINGET     8
+  685: h            BINGET     11
+  687: (            MARK
+  688: h                BINGET     14
+  690: B                BINBYTES   b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9\x03.\x80\x02}q\x00(X\x10\x00\x00\x00protocol_versionq\x01M\xe9\x03X\r\x00\x00\x00little_endianq\x02\x88X\n\x00\x00\x00type_sizesq\x03}q\x04(X\x05\x00\x00\x00shortq\x05K\x02X\x03\x00\x00\x00intq\x06K\x04X\x04\x00\x00\x00longq\x07K\x04uu.\x80\x02(X\x07\x00\x00\x00storageq\x00ctorch\nFloatStorage\nq\x01X\n\x00\x00\x001073252416q\x02X\x03\x00\x00\x00cpuq\x03K*Ntq\x04Q.\x80\x02]q\x00X\n\x00\x00\x001073252416q\x01a.*\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80?\x00\x00\x00@\x00\x00@@\x00\x00\x80@\x00\x00\xa0@\x00\x00\xc0@\x00\x00\xe0@\x00\x00\x00A\x00\x00\x10A\x00\x00 A\x00\x000A\x00\x00@A\x00\x00PA\x00\x00`A\x00\x00pA\x00\x00\x80A\x00\x00\x88A\x00\x00\x90A\x00\x00\x98A\x00\x00\xa0A\x00\x00\xa8A\x00\x00\xb0A\x00\x00\xb8A\x00\x00\xc0A\x00\x00\xc8A\x00\x00\xd0A\x00\x00\xd8A\x00\x00\xe0A\x00\x00\xe8A\x00\x00\xf0A\x00\x00\xf8A\x00\x00\x00B\x00\x00\x04B\x00\x00\x08B\x00\x00\x0cB\x00\x00\x10B\x00\x00\x14B\x00\x00\x18B\x00\x00\x1cB\x00\x00 B\x00\x00$B'
+ 1106: \x94             MEMOIZE    (as 28)
+ 1107: \x85             TUPLE1
+ 1108: \x94             MEMOIZE    (as 29)
+ 1109: R                REDUCE
+ 1110: \x94             MEMOIZE    (as 30)
+ 1111: K                BININT1    14
+ 1113: K                BININT1    14
+ 1115: \x85             TUPLE1
+ 1116: \x94             MEMOIZE    (as 31)
+ 1117: K                BININT1    1
+ 1119: \x85             TUPLE1
+ 1120: \x94             MEMOIZE    (as 32)
+ 1121: \x89             NEWFALSE
+ 1122: h                BINGET     22
+ 1124: )                EMPTY_TUPLE
+ 1125: R                REDUCE
+ 1126: \x94             MEMOIZE    (as 33)
+ 1127: t                TUPLE      (MARK at 687)
+ 1128: \x94         MEMOIZE    (as 34)
+ 1129: R            REDUCE
+ 1130: \x94         MEMOIZE    (as 35)
+ 1131: u            SETITEMS   (MARK at 667)
+ 1132: b        BUILD
+ 1133: h        BINGET     3
+ 1135: )        EMPTY_TUPLE
+ 1136: \x81     NEWOBJ
+ 1137: \x94     MEMOIZE    (as 36)
+ 1138: }        EMPTY_DICT
+ 1139: \x94     MEMOIZE    (as 37)
+ 1140: (        MARK
+ 1141: h            BINGET     6
+ 1143: G            BINFLOAT   123.56666666666666
+ 1152: h            BINGET     7
+ 1154: K            BININT1    102
+ 1156: h            BINGET     8
+ 1158: h            BINGET     11
+ 1160: (            MARK
+ 1161: h                BINGET     14
+ 1163: B                BINBYTES   b'\x80\x02\x8a\nl\xfc\x9cF\xf9 j\xa8P\x19.\x80\x02M\xe9\x03.\x80\x02}q\x00(X\x10\x00\x00\x00protocol_versionq\x01M\xe9\x03X\r\x00\x00\x00little_endianq\x02\x88X\n\x00\x00\x00type_sizesq\x03}q\x04(X\x05\x00\x00\x00shortq\x05K\x02X\x03\x00\x00\x00intq\x06K\x04X\x04\x00\x00\x00longq\x07K\x04uu.\x80\x02(X\x07\x00\x00\x00storageq\x00ctorch\nFloatStorage\nq\x01X\n\x00\x00\x001073252416q\x02X\x03\x00\x00\x00cpuq\x03K*Ntq\x04Q.\x80\x02]q\x00X\n\x00\x00\x001073252416q\x01a.*\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x80?\x00\x00\x00@\x00\x00@@\x00\x00\x80@\x00\x00\xa0@\x00\x00\xc0@\x00\x00\xe0@\x00\x00\x00A\x00\x00\x10A\x00\x00 A\x00\x000A\x00\x00@A\x00\x00PA\x00\x00`A\x00\x00pA\x00\x00\x80A\x00\x00\x88A\x00\x00\x90A\x00\x00\x98A\x00\x00\xa0A\x00\x00\xa8A\x00\x00\xb0A\x00\x00\xb8A\x00\x00\xc0A\x00\x00\xc8A\x00\x00\xd0A\x00\x00\xd8A\x00\x00\xe0A\x00\x00\xe8A\x00\x00\xf0A\x00\x00\xf8A\x00\x00\x00B\x00\x00\x04B\x00\x00\x08B\x00\x00\x0cB\x00\x00\x10B\x00\x00\x14B\x00\x00\x18B\x00\x00\x1cB\x00\x00 B\x00\x00$B'
+ 1579: \x94             MEMOIZE    (as 38)
+ 1580: \x85             TUPLE1
+ 1581: \x94             MEMOIZE    (as 39)
+ 1582: R                REDUCE
+ 1583: \x94             MEMOIZE    (as 40)
+ 1584: K                BININT1    28
+ 1586: K                BININT1    14
+ 1588: \x85             TUPLE1
+ 1589: \x94             MEMOIZE    (as 41)
+ 1590: K                BININT1    1
+ 1592: \x85             TUPLE1
+ 1593: \x94             MEMOIZE    (as 42)
+ 1594: \x89             NEWFALSE
+ 1595: h                BINGET     22
+ 1597: )                EMPTY_TUPLE
+ 1598: R                REDUCE
+ 1599: \x94             MEMOIZE    (as 43)
+ 1600: t                TUPLE      (MARK at 1160)
+ 1601: \x94         MEMOIZE    (as 44)
+ 1602: R            REDUCE
+ 1603: \x94         MEMOIZE    (as 45)
+ 1604: u            SETITEMS   (MARK at 1140)
+ 1605: b        BUILD
+ 1606: e        APPENDS    (MARK at 13)
+ 1607: .    STOP
+highest protocol among opcodes = 4

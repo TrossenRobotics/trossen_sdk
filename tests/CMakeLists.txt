@@ -110,6 +110,17 @@ target_link_libraries(test_policy_client_config PRIVATE trossen_sdk GTest::gtest
 add_executable(test_action_chunk test_action_chunk.cpp)
 target_link_libraries(test_action_chunk PRIVATE trossen_sdk GTest::gtest_main)
 
+if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
+  add_executable(test_msgpack_ndarray test_msgpack_ndarray.cpp)
+  target_link_libraries(test_msgpack_ndarray PRIVATE trossen_sdk GTest::gtest_main msgpack-cxx)
+
+  add_executable(test_lerobot_codec test_lerobot_codec.cpp)
+  target_link_libraries(test_lerobot_codec PRIVATE trossen_sdk GTest::gtest_main)
+  # Absolute fixture path baked in: the test must pass regardless of ctest's cwd.
+  target_compile_definitions(test_lerobot_codec PRIVATE
+    LEROBOT_CODEC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/lerobot_codec")
+endif()
+
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -146,3 +157,7 @@ if(TROSSEN_ENABLE_RERUN_OBSERVER)
 endif()
 gtest_discover_tests(test_policy_client_config)
 gtest_discover_tests(test_action_chunk)
+if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
+  gtest_discover_tests(test_msgpack_ndarray)
+  gtest_discover_tests(test_lerobot_codec)
+endif()

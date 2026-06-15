@@ -16,6 +16,10 @@ option(TROSSEN_ENABLE_ZED "Enable StereoLabs ZED camera support" OFF)
 # only needed by the stationary-demo ReRun viewer flow. Enable explicitly when building
 # that demo: cmake -DTROSSEN_ENABLE_RERUN_OBSERVER=ON ...
 option(TROSSEN_ENABLE_RERUN_OBSERVER "Build RerunObserver (depends on rerun-cpp SDK)" OFF)
+# OFF by default: pulls IXWebSocket + msgpack-cxx via FetchContent. Enable for the policy-
+# server bridge flow: cmake -DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON ...
+option(TROSSEN_SDK_ENABLE_POLICY_CLIENT
+  "Build PolicyClient (depends on IXWebSocket + msgpack-cxx)" OFF)
 
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
@@ -187,6 +191,9 @@ if(TROSSEN_ENABLE_RERUN_OBSERVER)
       "LINKER:--allow-multiple-definition")
   endif()
 endif()
+
+# --- PolicyClient (IXWebSocket + msgpack-cxx) -------------------------------
+include(cmake/policy_client.cmake)
 
 set(FOXGLOVE_VERSION "0.16.1")
 # Detect platform for Foxglove SDK download
