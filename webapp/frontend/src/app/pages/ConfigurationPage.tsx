@@ -1030,7 +1030,7 @@ export function ConfigurationPage() {
 
   const renderCameraFields = (camera: CameraHardware) => {
     return (
-      <div className="grid grid-cols-3 gap-[12px] text-[12px]">
+      <div className="grid grid-cols-3 portrait:grid-cols-2 gap-[12px] text-[12px]">
         <div>
           <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Resolution</div>
           <div className="text-white">{camera.width}x{camera.height} @ {camera.fps}fps</div>
@@ -1077,7 +1077,7 @@ export function ConfigurationPage() {
 
   const renderArmFields = (arm: ArmHardware) => {
     return (
-      <div className="grid grid-cols-4 gap-[12px] text-[12px]">
+      <div className="grid grid-cols-4 portrait:grid-cols-2 gap-[12px] text-[12px]">
         <div>
           <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">IP Address</div>
           <div className="text-white">{arm.ip_address}</div>
@@ -1190,7 +1190,7 @@ export function ConfigurationPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-4 gap-[12px]">
+        <div className="grid grid-cols-4 portrait:grid-cols-2 gap-[12px]">
           {[...systems].sort((a, b) => {
             const order: Record<string, number> = { solo: 0, stationary: 1, mobile: 2 };
             return (order[a.id] ?? 99) - (order[b.id] ?? 99);
@@ -1470,7 +1470,7 @@ export function ConfigurationPage() {
 
               {/* Hover Tooltip */}
               {hoveredSystem === selectedSystemData.id && (
-                <div className="absolute top-full left-0 mt-[8px] bg-[#252525] border-2 border-[#55bde3] p-[16px] w-[500px] z-[100] shadow-2xl">
+                <div className="absolute top-full left-0 mt-[8px] bg-[#252525] border-2 border-[#55bde3] p-[16px] w-[500px] max-w-[90vw] z-[100] shadow-2xl">
                   <div className="text-white text-[12px] font-bold mb-[8px]">{selectedSystemData.name}</div>
                   {selectedSystemData.description && (
                     <div className="text-[#b9b8ae] text-[11px] mb-[12px]">{selectedSystemData.description}</div>
@@ -1707,7 +1707,7 @@ export function ConfigurationPage() {
                           <div className="space-y-[8px]">
                             {hardware.producers.map(producer => (
                               <div key={producer.id} className="bg-[#252525] p-[12px] flex items-center justify-between">
-                                <div className="flex-1 grid grid-cols-4 gap-[12px] text-[12px]">
+                                <div className="flex-1 grid grid-cols-4 portrait:grid-cols-2 gap-[12px] text-[12px]">
                                   <div>
                                     <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Stream ID</div>
                                     <div className="text-white font-mono">{producer.stream_id}</div>
@@ -1771,8 +1771,8 @@ export function ConfigurationPage() {
 
       {/* Add Producer Modal */}
       {showAddProducerModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-[#0d0d0d] border border-[#252525] w-[500px] font-['JetBrains_Mono',sans-serif]">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[500px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
             <div className="flex items-center justify-between p-[20px] border-b border-[#252525]">
               <h2 className="text-[18px] text-white">{editingItem ? 'Edit Producer' : 'Add Producer'}</h2>
               <button onClick={() => setShowAddProducerModal(false)} className="text-[24px] text-[#b9b8ae] hover:text-white">×</button>
@@ -1892,8 +1892,8 @@ export function ConfigurationPage() {
 
       {/* Add Hardware Modal */}
       {showAddHardwareModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-[#0d0d0d] border border-[#252525] w-[600px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[600px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
             <div className="flex items-center justify-between p-[20px] border-b border-[#252525]">
               <h2 className="text-[18px] text-white">{editingHardwareId ? 'Edit' : 'Add'} {selectedHardwareType === 'camera' ? 'Camera' : selectedHardwareType === 'arm' ? 'Arm' : 'Base'}</h2>
               <button onClick={() => setShowAddHardwareModal(false)} className="text-[24px] text-[#b9b8ae] hover:text-white">×</button>
@@ -2048,8 +2048,8 @@ export function ConfigurationPage() {
 
       {/* Add System Modal */}
       {showAddSystemModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-[#0d0d0d] border border-[#252525] w-[500px] font-['JetBrains_Mono',sans-serif]">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[500px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
             <div className="flex items-center justify-between p-[20px] border-b border-[#252525]">
               <h2 className="text-[18px] text-white">{editingSystemId ? 'Edit' : 'Create'} Hardware System</h2>
               <button onClick={() => setShowAddSystemModal(false)} className="text-[24px] text-[#b9b8ae] hover:text-white">×</button>
@@ -2087,8 +2087,8 @@ export function ConfigurationPage() {
 
       {/* Hardware Type Selection Modal */}
       {showHardwareTypeModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
-          <div className="bg-[#0d0d0d] border border-[#252525] w-[400px] font-['JetBrains_Mono',sans-serif]">
+        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[400px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
             <div className="flex items-center justify-between p-[20px] border-b border-[#252525]">
               <h2 className="text-[18px] text-white">Select Hardware Type</h2>
               <button onClick={() => setShowHardwareTypeModal(false)} className="text-[24px] text-[#b9b8ae] hover:text-white">×</button>

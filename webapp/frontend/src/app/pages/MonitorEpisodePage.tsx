@@ -598,8 +598,8 @@ export function MonitorEpisodePage() {
     <div className="h-screen flex flex-col bg-[#0b0b0b] font-['JetBrains_Mono',sans-serif]">
       {/* Top Bar */}
       <div className="bg-[#0d0d0d] border-b border-[#252525] px-[20px] py-[12px]">
-        <div className="flex items-center justify-between mb-[12px]">
-          <div className="flex items-center gap-[16px]">
+        <div className="flex items-center justify-between gap-[12px] mb-[12px] portrait:flex-wrap">
+          <div className="flex items-center flex-wrap gap-x-[16px] gap-y-[6px] min-w-0">
             <h2 className="text-[16px] text-white leading-[22.4px]">
               {session?.name || 'Loading...'}
             </h2>
@@ -631,7 +631,7 @@ export function MonitorEpisodePage() {
           </button>
         </div>
 
-        <div className="grid grid-cols-5 gap-[12px] mb-[12px]">
+        <div className="grid grid-cols-5 portrait:grid-cols-2 gap-[12px] mb-[12px]">
           <div>
             <div className="text-[#b9b8ae] text-[9px] uppercase mb-[2px]">Status</div>
             <div className={`text-[13px] font-bold ${statusColor}`}>{statusText}</div>
@@ -694,8 +694,9 @@ export function MonitorEpisodePage() {
         </div>
       </div>
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden min-h-0">
+      {/* Main Content — viewer beside the logs in landscape; in portrait the
+          logs drop below the viewer so the feeds keep the full width. */}
+      <div className="flex-1 flex portrait:flex-col overflow-hidden min-h-0">
         {/* Live viewer — embedded Rerun web (WASM) viewer streaming every
             sensor the recorder publishes (camera images + depth, joint-state
             and odometry plots) from the recorder child's in-process Rerun
@@ -716,8 +717,9 @@ export function MonitorEpisodePage() {
           )}
         </div>
 
-        {/* Logs Panel */}
-        <div className="w-[300px] bg-[#0d0d0d] border-l border-[#252525] p-[20px] overflow-hidden flex flex-col">
+        {/* Logs Panel — fixed-width column on the right in landscape; in
+            portrait it becomes a capped-height strip below the viewer. */}
+        <div className="w-[300px] portrait:w-full portrait:h-[200px] portrait:shrink-0 bg-[#0d0d0d] border-l portrait:border-l-0 portrait:border-t border-[#252525] p-[20px] overflow-hidden flex flex-col">
           <h2 className="text-[16px] text-white mb-[12px] leading-[22.4px]">Logs</h2>
           <div className="flex-1 overflow-y-auto space-y-[10px]">
             {logs.length === 0 && (
@@ -906,7 +908,7 @@ export function MonitorEpisodePage() {
              only Stop is offered, centered on its own row. */
           <div
             className={`grid gap-[16px] max-w-[1000px] mx-auto ${
-              session?.dry_run ? 'grid-cols-1 max-w-[400px]' : 'grid-cols-3'
+              session?.dry_run ? 'grid-cols-1 max-w-[400px]' : 'grid-cols-3 portrait:grid-cols-1'
             }`}
           >
             {/* Stop — ends the session */}
