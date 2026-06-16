@@ -41,7 +41,19 @@ export function RerunViewer({ sessionId }: { sessionId: string }): React.ReactEl
 
   // Live data from the recorder's gRPC server (host networking → localhost),
   // plus the camera-only blueprint served by the backend for this session.
-  const dataUrl = `rerun+http://${window.location.hostname}:${RERUN_GRPC_PORT}/proxy`;
+  //
+  // Pin loopback to 127.0.0.1 instead of the literal "localhost". The Rerun
+  // gRPC server (rr.serve_grpc) listens on IPv4 only (0.0.0.0:9876). On hosts
+  // where "localhost" resolves to ::1 (IPv6) first, the browser connects to
+  // [::1]:9876, gets connection refused, and does NOT fall back to IPv4 the
+  // way curl does — surfacing as "Network Error" with empty camera panels.
+  // Forcing 127.0.0.1 sidesteps the resolution order; real hostnames/IPs
+  // (remote access) pass through unchanged.
+  const host =
+    window.location.hostname === 'localhost'
+      ? '127.0.0.1'
+      : window.location.hostname;
+  const dataUrl = `rerun+http://${host}:${RERUN_GRPC_PORT}/proxy`;
   const blueprintUrl = `${window.location.origin}/api/sessions/${sessionId}/rerun_blueprint.rbl`;
 
   // The viewer fills its parent; MonitorEpisodePage owns the sizing.
