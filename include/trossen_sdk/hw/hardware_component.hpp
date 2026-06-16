@@ -62,6 +62,67 @@ public:
    */
   virtual nlohmann::json get_info() const { return nlohmann::json::object(); }
 
+  /**
+   * @brief Per-episode lifecycle hook: prepare the hardware before recording starts.
+   *
+   * Invoked by the SessionManager during the pre-episode phase (the same point as
+   * on_pre_episode callbacks), before the recording scheduler runs. Override to do
+   * per-episode setup that should happen from a known state — e.g. an arm moves to its
+   * staged home pose, a mobile base resets its odometry, a camera recalibrates. Default
+   * is a no-op: a component that needs no per-episode preparation simply does not
+   * override it.
+   *
+   * Unlike the on_pre_episode callback (which returns bool to abort), this is the
+   * component's action and returns void.
+   *
+   * @note For arms driven by teleop, the SessionManager pauses the mirror loop around
+   *       the whole preparation pass, so this hook may move the hardware freely.
+   */
+  virtual void on_pre_episode() {}
+
+  /**
+   * @brief Per-episode lifecycle hook: the episode is now live and recording.
+   *
+   * Invoked by the SessionManager once the recording scheduler is running (the same
+   * point as on_episode_started callbacks). Override for work that must begin exactly
+   * when recording starts. Default is a no-op.
+   */
+  virtual void on_episode_started() {}
+
+  /**
+   * @brief Per-episode lifecycle hook: the episode has finished recording.
+   *
+   * Invoked by the SessionManager after the episode stops cleanly (the same point as
+   * on_episode_ended callbacks). Override for per-episode teardown or cleanup. Default
+   * is a no-op.
+   *
+   * @note Invoked on both a clean stop and a discard / re-record, so the component is
+   *       left in a consistent between-episode state either way. (User on_episode_ended
+   *       *callbacks* registered on the SessionManager, by contrast, fire only on a
+   *       clean stop — a discarded episode produced no data to report.)
+   */
+  virtual void on_episode_ended() {}
+
+  /**
+   * @brief Whether the SessionManager should invoke this component's per-episode
+   * lifecycle hooks (on_pre_episode / on_episode_started / on_episode_ended).
+   *
+   * Defaults to false (opt-in), so hardware is never moved or reset between episodes
+   * unless a component reports otherwise. Components that support episode work override
+   * this to return their own configured state — parsed from their own config block,
+   * alongside their other fields (e.g. an arm reads "episode_lifecycle_enabled" next to
+   * its ip_address / staged_position). The SessionManager checks this before calling
+   * the hooks.
+   *
+   * @note The SessionManager discovers lifecycle components through the producers
+   *       registered with it, so a component participates only if it also backs at
+   *       least one producer added via add_producer()/add_push_producer(). Enabling the
+   *       flag on a component that is never recorded has no effect.
+   *
+   * @return true if this component participates in the per-episode lifecycle
+   */
+  virtual bool is_episode_lifecycle_enabled() const { return false; }
+
 protected:
   /// @brief Component identifier
   std::string identifier_;

@@ -66,7 +66,7 @@ Update `config.json` or override on the command line:
 ```
 
 The script will:
-1. Connect to both arms and move them to the staged starting position
+1. Connect to both arms
 2. Enable teleop — the follower mirrors the leader
 3. Start recording an episode (default: 10 seconds)
 4. Stop, flush, and save the `.mcap` file
@@ -74,6 +74,52 @@ The script will:
 6. Return arms to the sleep position
 
 Episodes are saved to `~/.trossen_sdk/<dataset_id>/episode_NNNNNN.mcap`.
+
+### Optional: home staging
+
+Staging moves an arm to a fixed joint-space "home" pose at the start of **every**
+episode, so each recording begins from a known configuration. It is opt-in and off
+by default — an arm without the flag (or without a `staged_position`) is left
+untouched.
+
+**Where:** in `config.json`, inside the arm's own block under
+`hardware` → `arms` → `<arm_name>`.
+
+**What to add:** append these three keys to that arm's block (add a comma to its
+current last line — `end_effector` — first):
+
+```json
+"staged_position": [0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0],
+"staging_time_s": 2.0,
+"episode_lifecycle_enabled": true
+```
+
+In context, the `follower` arm block then looks like:
+
+```json
+"follower": {
+  "ip_address":   "192.168.1.4",
+  "model":        "wxai_v0",
+  "end_effector": "wxai_v0_follower",
+  "staged_position": [0.0, 1.04719755, 0.523598776, 0.628318531, 0.0, 0.0, 0.0],
+  "staging_time_s": 2.0,
+  "episode_lifecycle_enabled": true
+}
+```
+
+Field reference:
+
+- `staged_position` — joint-space home pose in radians, one value per joint (must
+  match the arm's joint count). The values above are a safe upright home for the
+  `wxai_v0`.
+- `staging_time_s` — duration of the move to home, in seconds (also used for the
+  return-to-rest move on teleop stop). Optional; defaults to `2.0`. Longer =
+  slower, gentler.
+- `episode_lifecycle_enabled` — must be `true` for staging to run on this arm.
+
+Repeat the three keys on any other arm you want staged (e.g. `leader`). When teleop
+is enabled, the SessionManager pauses the mirror loop while the arms move to home,
+then re-arms it before recording resumes.
 
 ---
 

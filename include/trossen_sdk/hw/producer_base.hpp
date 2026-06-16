@@ -19,6 +19,10 @@
 
 namespace trossen::hw {
 
+// Forward declaration: producers store and expose their backing component as a
+// shared_ptr but never dereference it here, so an incomplete type suffices.
+class HardwareComponent;
+
 /**
  * @brief Statistics for a producer
  */
@@ -111,6 +115,24 @@ public:
    */
   virtual std::shared_ptr<ProducerMetadata> metadata() const = 0;
 
+  /**
+   * @brief The hardware component this producer was built from.
+   *
+   * nullptr for producers with no backing component (e.g. mocks). Set by the
+   * ProducerRegistry at creation; the SessionManager uses it to reach the
+   * component's per-episode lifecycle hooks.
+   *
+   * @return Shared pointer to the backing component, or nullptr
+   */
+  std::shared_ptr<HardwareComponent> hardware() const { return component_; }
+
+  /**
+   * @brief Set the backing hardware component. Called by ProducerRegistry::create().
+   *
+   * @param hw Hardware component this producer was built from
+   */
+  void set_hardware(std::shared_ptr<HardwareComponent> hw) { component_ = std::move(hw); }
+
 protected:
   /// @brief Whether we've opened the device
   bool opened_{false};
@@ -138,6 +160,9 @@ protected:
 
   /// @brief Producer metadata
   PolledProducer::ProducerMetadata metadata_{};
+
+  /// @brief Backing hardware component (see hardware()).
+  std::shared_ptr<HardwareComponent> component_;
 };
 
 /**
@@ -177,6 +202,24 @@ public:
    */
   const ProducerStats& stats() const {return stats_; }
 
+  /**
+   * @brief The hardware component this producer was built from.
+   *
+   * nullptr for producers with no backing component. Set by the
+   * PushProducerRegistry at creation; the SessionManager uses it to reach the
+   * component's per-episode lifecycle hooks.
+   *
+   * @return Shared pointer to the backing component, or nullptr
+   */
+  std::shared_ptr<HardwareComponent> hardware() const { return component_; }
+
+  /**
+   * @brief Set the backing hardware component. Called by PushProducerRegistry::create().
+   *
+   * @param hw Hardware component this producer was built from
+   */
+  void set_hardware(std::shared_ptr<HardwareComponent> hw) { component_ = std::move(hw); }
+
 protected:
   /// @brief Whether we've opened the device
   bool opened_{false};
@@ -201,6 +244,9 @@ protected:
 
   /// @brief Monotonic sequence number for emitted records
   uint64_t seq_{0};
+
+  /// @brief Backing hardware component (see hardware()).
+  std::shared_ptr<HardwareComponent> component_;
 };
 
 }  // namespace trossen::hw

@@ -34,15 +34,10 @@ TeleopController::TeleopController(
   // not implement the required space child class.
   resolve_space_views();
 
-  // Each arm stages itself using its own configured staging pose and
-  // trajectory time. Arms that don't need staging override stage() with
-  // a no-op. Calls here are expected to be non-blocking so multi-arm
-  // setups stage in parallel.
-  leader_->stage();
-  if (follower_) {
-    follower_->stage();
-  }
-  std::cout << "  [teleop] Staging initiated\n";
+  // Staging to a home pose is not the controller's concern. The SessionManager
+  // drives it per episode by calling HardwareComponent::on_pre_episode() on each
+  // opted-in component (e.g. an arm moving to its staged pose) while the mirror
+  // loop is paused, so it happens from a known state before teleop restarts.
 }
 
 TeleopController::~TeleopController() {
@@ -114,6 +109,13 @@ void TeleopController::teleop() {
   if (running_.exchange(true)) {
     return;
   }
+  // Reap a previous loop that exited on its own: control_loop() catches and
+  // sets running_=false on exception but does not join, so the finished thread
+  // stays joinable. Assigning to a joinable std::thread calls std::terminate,
+  // so join any stale thread before starting a new one.
+  if (thread_.joinable()) {
+    thread_.join();
+  }
   thread_ = std::thread([this]() { control_loop(); });
 }
 
@@ -121,6 +123,16 @@ void TeleopController::reset_teleop() {
   leader_->post_episode();
   if (follower_) {
     follower_->post_episode();
+  }
+}
+
+void TeleopController::pause_teleop() {
+  // Stop the mirror thread but keep the drivers alive. running_ is left false
+  // so the next prepare_teleop() re-arms teleop modes and teleop() can restart
+  // the loop. Unlike stop_teleop(), end_teleop() is not called.
+  running_.store(false);
+  if (thread_.joinable()) {
+    thread_.join();
   }
 }
 
