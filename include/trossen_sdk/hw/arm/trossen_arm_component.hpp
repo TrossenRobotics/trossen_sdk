@@ -53,7 +53,7 @@ public:
    *   "model": "wxai_v0",
    *   "end_effector": "wxai_v0_follower",
    *   "staged_position": [0, 1.0, 0.5, 0.6, 0, 0, 0],  // optional, joint-space
-   *   "slew_time_s": 2.0           // optional, default 2.0
+   *   "staging_time_s": 2.0           // optional, default 2.0
    * }
    *
    * @param config JSON configuration object
@@ -157,10 +157,10 @@ private:
   /// Empty = no staging.
   std::vector<float> staged_position_;
 
-  /// Slew time: duration of the point-to-point moves in stage() and the
+  /// Staging time: duration of the point-to-point moves in stage() and the
   /// end_teleop() rest move. Sized to keep motion within joint velocity limits
   /// (no violent moves when start and goal are far apart).
-  float slew_time_s_{2.0f};
+  float staging_time_s_{2.0f};
 
   /// Whether this arm participates in the per-episode lifecycle (staging before
   /// each episode). Opt-in; parsed from "episode_lifecycle_enabled" in configure().

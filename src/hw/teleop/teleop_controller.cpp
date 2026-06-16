@@ -34,10 +34,10 @@ TeleopController::TeleopController(
   // not implement the required space child class.
   resolve_space_views();
 
-  // Staging to a home pose is driven by the application (see the examples'
-  // on_pre_episode hook), not the controller, so that it happens before the
-  // mirror loop becomes active and can be re-run per episode when teleop is
-  // disabled.
+  // Staging to a home pose is not the controller's concern. The SessionManager
+  // drives it per episode by calling HardwareComponent::on_pre_episode() on each
+  // opted-in component (e.g. an arm moving to its staged pose) while the mirror
+  // loop is paused, so it happens from a known state before teleop restarts.
 }
 
 TeleopController::~TeleopController() {

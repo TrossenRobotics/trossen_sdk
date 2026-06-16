@@ -43,6 +43,20 @@ public:
   TeleopTypeIO* as_space_io(Space) override { return &io_; }
 };
 
+// Wait (bounded) for the control loop to observe its own exit. A ThrowingLeader
+// makes control_loop() throw on the first read(), which clears running_; poll for
+// that transition rather than assuming a fixed delay, so the test is deterministic
+// on slow/loaded CI but still fails (instead of hanging) if the loop never stops.
+bool wait_until_stopped(const TeleopController& ctrl,
+                        std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (ctrl.is_running()) {
+    if (std::chrono::steady_clock::now() >= deadline) return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return true;
+}
+
 // If the control loop throws, the controller must not std::terminate on
 // destruction. The exception handler in control_loop() catches the error
 // and clears running_; the destructor then joins the (already-exited)
@@ -52,8 +66,7 @@ TEST(TeleopControllerTest, ControlLoopExceptionDoesNotTerminate) {
   TeleopController::Config cfg{};
   TeleopController ctrl(leader, nullptr, cfg);
   ctrl.teleop();
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  EXPECT_FALSE(ctrl.is_running());
+  EXPECT_TRUE(wait_until_stopped(ctrl));
   // Destruction here must complete without std::terminate.
 }
 
@@ -71,14 +84,12 @@ TEST(TeleopControllerTest, RestartAfterControlLoopExceptionDoesNotTerminate) {
   // First start: read() throws, control_loop() catches and clears running_,
   // but nothing joins the finished thread.
   ctrl.teleop();
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  EXPECT_FALSE(ctrl.is_running());
+  EXPECT_TRUE(wait_until_stopped(ctrl));
 
   // Restart with no intervening pause_teleop()/stop_teleop(): must reap the
   // stale joinable thread instead of terminating.
   ctrl.teleop();
-  std::this_thread::sleep_for(std::chrono::milliseconds(50));
-  EXPECT_FALSE(ctrl.is_running());
+  EXPECT_TRUE(wait_until_stopped(ctrl));
 }
 
 // A controller with a zero control_rate_hz must throw at construction.

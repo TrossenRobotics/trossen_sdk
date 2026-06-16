@@ -1,7 +1,6 @@
 {
   "robot_name": "trossen_mobile_ai",
 
-
   "hardware": {
     "arms": {
       "leader_left": {

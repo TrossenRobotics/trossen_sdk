@@ -69,11 +69,11 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     }
     staged_position_ = std::move(pos);
   }
-  if (config.contains("slew_time_s")) {
-    slew_time_s_ = config.at("slew_time_s").get<float>();
-    if (slew_time_s_ < 0.0f || !std::isfinite(slew_time_s_)) {
+  if (config.contains("staging_time_s")) {
+    staging_time_s_ = config.at("staging_time_s").get<float>();
+    if (staging_time_s_ < 0.0f || !std::isfinite(staging_time_s_)) {
       throw std::runtime_error(
-        "TrossenArmComponent: 'slew_time_s' must be non-negative and finite");
+        "TrossenArmComponent: 'staging_time_s' must be non-negative and finite");
     }
   }
   if (config.contains("episode_lifecycle_enabled")) {
@@ -159,7 +159,7 @@ void TrossenArmComponent::end_teleop() {
   if (!driver_) return;
   std::cout << "  [end_teleop] " << get_identifier()
             << ": holding pose, then returning to rest over "
-            << slew_time_s_ << "s..." << std::endl;
+            << staging_time_s_ << "s..." << std::endl;
   // Hold the current pose before resting, so the arm doesn't drop under
   // gravity on Ctrl+C before position control engages. Switch into position
   // mode and immediately command the measured pose (goal_time 0 = zero
@@ -174,7 +174,7 @@ void TrossenArmComponent::end_teleop() {
   }
   driver_->set_all_positions(
     std::vector<double>(driver_->get_num_joints(), 0.0),
-    slew_time_s_, true);
+    staging_time_s_, true);
   driver_->cleanup();
   driver_.reset();
   std::cout << "  [end_teleop] " << get_identifier() << ": done" << std::endl;
@@ -196,12 +196,12 @@ void TrossenArmComponent::stage() {
     return;
   }
   std::cout << "  [stage] " << get_identifier() << ": moving to home over "
-            << slew_time_s_ << "s" << std::endl;
+            << staging_time_s_ << "s" << std::endl;
   driver_->set_all_modes(trossen_arm::Mode::position);
   std::vector<double> pos_d(staged_position_.begin(), staged_position_.end());
   // Blocking so the arm reaches home before the caller hands it to teleop
   // (gravity-comp) or starts recording; this mirrors end_teleop()'s rest move.
-  driver_->set_all_positions(pos_d, slew_time_s_, true);
+  driver_->set_all_positions(pos_d, staging_time_s_, true);
 }
 
 REGISTER_HARDWARE(TrossenArmComponent, "trossen_arm")

@@ -375,14 +375,20 @@ bool SessionManager::start_episode() {
   // Run the components' pre-episode hooks in parallel. Each drives independent
   // hardware (its own arm/driver), and staging is a blocking point-to-point move, so
   // running them concurrently bounds the episode-boundary wait by the slowest component
-  // instead of the sum. Futures rethrow on get() and join on destruction, so a hook
-  // exception still propagates and no staging thread is left orphaned.
-  {
+  // instead of the sum. A hook can throw (e.g. an arm's stage() on a comms/limit fault);
+  // get() rethrows the first such failure, and the remaining async futures still join in
+  // the vector's destructor as the stack unwinds, so no staging thread is orphaned. Treat
+  // a staging failure like any other start_episode() failure: log and cleanly abort.
+  try {
     std::vector<std::future<void>> staging;
     for (auto& comp : collect_lifecycle_components_()) {
       staging.push_back(std::async(std::launch::async, [comp]() { comp->on_pre_episode(); }));
     }
     for (auto& f : staging) f.get();
+  } catch (const std::exception& e) {
+    std::cerr << "Per-episode staging hook threw: " << e.what()
+              << "; aborting episode." << std::endl;
+    return cleanup_and_abort();
   }
   for (auto& ctrl : teleop_controllers_) ctrl->prepare_teleop();
 

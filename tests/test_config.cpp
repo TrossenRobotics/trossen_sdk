@@ -195,7 +195,7 @@ TEST(ArmConfigTest, FromJson_ParsesStagingFields) {
     {"model", "wxai_v0"},
     {"end_effector", "wxai_v0_leader"},
     {"staged_position", {0.0f, 1.0f, 0.5f, 0.6f, 0.0f, 0.0f, 0.0f}},
-    {"slew_time_s", 3.5f}
+    {"staging_time_s", 3.5f}
   };
 
   ArmConfig cfg = ArmConfig::from_json(j);
@@ -204,7 +204,7 @@ TEST(ArmConfigTest, FromJson_ParsesStagingFields) {
   EXPECT_EQ(cfg.end_effector, "wxai_v0_leader");
   ASSERT_EQ(cfg.staged_position.size(), 7u);
   EXPECT_FLOAT_EQ(cfg.staged_position[1], 1.0f);
-  EXPECT_FLOAT_EQ(cfg.slew_time_s, 3.5f);
+  EXPECT_FLOAT_EQ(cfg.staging_time_s, 3.5f);
 }
 
 // ============================================================================
@@ -215,14 +215,14 @@ TEST(ArmConfigTest, RoundTrip_PreservesStagingFields) {
   ArmConfig original;
   original.ip_address = "192.168.1.7";
   original.staged_position = {0.1f, 0.2f, 0.3f};
-  original.slew_time_s = 1.25f;
+  original.staging_time_s = 1.25f;
 
   ArmConfig restored = ArmConfig::from_json(original.to_json());
 
   EXPECT_EQ(restored.ip_address, "192.168.1.7");
   ASSERT_EQ(restored.staged_position.size(), 3u);
   EXPECT_FLOAT_EQ(restored.staged_position[2], 0.3f);
-  EXPECT_FLOAT_EQ(restored.slew_time_s, 1.25f);
+  EXPECT_FLOAT_EQ(restored.staging_time_s, 1.25f);
 }
 
 // ============================================================================
@@ -235,9 +235,9 @@ TEST(ArmConfigTest, ToJson_OmitsEmptyStagedPosition) {
   nlohmann::json j = cfg.to_json();
 
   // staged_position must be absent (a present-but-empty array would be
-  // rejected by TrossenArmComponent::configure()), while slew_time_s
+  // rejected by TrossenArmComponent::configure()), while staging_time_s
   // is always emitted.
   EXPECT_FALSE(j.contains("staged_position"));
-  EXPECT_TRUE(j.contains("slew_time_s"));
-  EXPECT_FLOAT_EQ(j.at("slew_time_s").get<float>(), 2.0f);
+  EXPECT_TRUE(j.contains("staging_time_s"));
+  EXPECT_FLOAT_EQ(j.at("staging_time_s").get<float>(), 2.0f);
 }

@@ -22,7 +22,7 @@ namespace trossen::configuration {
  *   "model": "wxai_v0",
  *   "end_effector": "wxai_v0_leader",
  *   "staged_position": [0.0, 1.04, 0.52, 0.63, 0.0, 0.0, 0.0],  // optional
- *   "slew_time_s": 2.0,                                   // optional
+ *   "staging_time_s": 2.0,                                // optional
  *   "episode_lifecycle_enabled": true                     // optional, default false
  * }
  */
@@ -41,12 +41,12 @@ struct ArmConfig {
   /// TrossenArmComponent::configure()).
   std::vector<float> staged_position;
 
-  /// @brief Slew time (seconds): the duration over which an SDK-commanded
+  /// @brief Staging time (seconds): the duration over which an SDK-commanded
   /// point-to-point move runs (staging to home and the return-to-rest move).
   /// Longer = slower, gentler motion. Sized so that a large start-to-goal
   /// difference does not exceed joint velocity limits or produce violent
   /// motion. Optional; 2.0s is a safe default for the supported arms.
-  float slew_time_s{2.0f};
+  float staging_time_s{2.0f};
 
   /// @brief Whether this arm participates in the SessionManager's per-episode
   /// lifecycle (staging to its home pose before each episode). Opt-in; defaults to
@@ -61,8 +61,8 @@ struct ArmConfig {
     if (j.contains("staged_position")) {
       j.at("staged_position").get_to(c.staged_position);
     }
-    if (j.contains("slew_time_s")) {
-      j.at("slew_time_s").get_to(c.slew_time_s);
+    if (j.contains("staging_time_s")) {
+      j.at("staging_time_s").get_to(c.staging_time_s);
     }
     if (j.contains("episode_lifecycle_enabled")) {
       j.at("episode_lifecycle_enabled").get_to(c.episode_lifecycle_enabled);
@@ -75,7 +75,7 @@ struct ArmConfig {
       {"ip_address", ip_address},
       {"model", model},
       {"end_effector", end_effector},
-      {"slew_time_s", slew_time_s},
+      {"staging_time_s", staging_time_s},
       {"episode_lifecycle_enabled", episode_lifecycle_enabled}
     };
     // Emit staging only when configured. TrossenArmComponent::configure()
