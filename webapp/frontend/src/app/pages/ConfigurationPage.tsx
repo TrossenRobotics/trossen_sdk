@@ -1432,11 +1432,24 @@ export function ConfigurationPage() {
             return (
               <div
                 key={system.id}
+                role="button"
+                tabIndex={0}
+                aria-pressed={selectedSystem === system.id}
                 onClick={() => setSelectedSystem(system.id)}
-                className={`p-[16px] border transition-all text-left relative cursor-pointer ${
-                  selectedSystem === system.id
-                    ? 'bg-[#252525] border-[#55bde3] border-2'
-                    : 'bg-[#0d0d0d] border-[#252525] hover:border-[#b9b8ae]'
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedSystem(system.id); }
+                }}
+                className={`p-[16px] border transition-all text-left relative cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#55bde3] ${
+                  // Errored systems are tinted red across the whole card so they
+                  // can't be missed at a glance (TDS-160) — red is in addition to
+                  // the Error badge + text, never the only signal.
+                  sysHwStatus === 'error'
+                    ? selectedSystem === system.id
+                      ? 'bg-red-500/15 border-red-500 border-2'
+                      : 'bg-red-500/10 border-red-500 hover:border-red-400'
+                    : selectedSystem === system.id
+                      ? 'bg-[#252525] border-[#55bde3] border-2'
+                      : 'bg-[#0d0d0d] border-[#252525] hover:border-[#b9b8ae]'
                 }`}
               >
                 {badgeLabel && (
@@ -1474,6 +1487,7 @@ export function ConfigurationPage() {
                     <button
                       onClick={(e) => openEditSystemModal(system, e)}
                       disabled={mutationsLocked}
+                      aria-label={`Edit ${system.name}`}
                       title={mutationsLocked ? lockedTitle : 'Edit system'}
                       className="p-[4px] hover:bg-[#55bde3] bg-[#0b0b0b] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#0b0b0b] transition-colors rounded"
                     >
@@ -1752,6 +1766,7 @@ export function ConfigurationPage() {
                           <button
                             onClick={() => openEditHardwareModal(hardware)}
                             disabled={mutationsLocked}
+                            aria-label={`Edit ${hardware.id}`}
                             title={mutationsLocked ? lockedTitle : 'Edit'}
                             className="p-[5px] bg-[#0d0d0d] hover:bg-[#55bde3] text-[#b9b8ae] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#0d0d0d] disabled:hover:text-[#b9b8ae] transition-colors rounded"
                           >
@@ -1760,6 +1775,7 @@ export function ConfigurationPage() {
                           <button
                             onClick={() => handleDeleteHardware(hardware.id)}
                             disabled={mutationsLocked}
+                            aria-label={`Delete ${hardware.id}`}
                             title={mutationsLocked ? lockedTitle : 'Delete'}
                             className="p-[5px] bg-[#0d0d0d] hover:bg-red-600 text-[#b9b8ae] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#0d0d0d] disabled:hover:text-[#b9b8ae] transition-colors rounded"
                           >
@@ -1847,6 +1863,7 @@ export function ConfigurationPage() {
                                   <button
                                     onClick={() => openEditProducerModal(hardware.id, producer)}
                                     disabled={mutationsLocked}
+                                    aria-label={`Edit producer ${producer.id}`}
                                     title={mutationsLocked ? lockedTitle : 'Edit producer'}
                                     className="p-[6px] hover:bg-[#0d0d0d] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
                                   >
@@ -1855,6 +1872,7 @@ export function ConfigurationPage() {
                                   <button
                                     onClick={() => handleDeleteProducer(hardware.id, producer.id)}
                                     disabled={mutationsLocked}
+                                    aria-label={`Delete producer ${producer.id}`}
                                     title={mutationsLocked ? lockedTitle : 'Delete producer'}
                                     className="p-[6px] hover:bg-[#0d0d0d] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
                                   >

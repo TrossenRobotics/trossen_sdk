@@ -1,4 +1,4 @@
-import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Settings, Loader2 } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Settings, Loader2, X } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router';
 import { toast } from 'sonner';
@@ -40,6 +40,10 @@ export function RecordPage() {
   // them behind an "Advanced" toggle so the common New Session path is just
   // name / system / dataset / episodes.
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Guards the New Session / Edit form against double-submit (a second click
+  // before the first POST returns would create a duplicate session, then both
+  // navigate to the first).
+  const [formSubmitting, setFormSubmitting] = useState(false);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -170,19 +174,34 @@ export function RecordPage() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (formSubmitting) return; // ignore double-submit
     setFormError('');
+
+    // Validate the numeric fields beyond HTML required/min so a pasted 0 or
+    // blank can't create a nonsensical session.
+    const numEpisodes = parseInt(formData.numEpisodes);
+    const episodeDuration = parseFloat(formData.episodeDuration);
+    if (!Number.isFinite(numEpisodes) || numEpisodes < 1) {
+      setFormError('Episodes must be at least 1.');
+      return;
+    }
+    if (!Number.isFinite(episodeDuration) || episodeDuration <= 0) {
+      setFormError('Episode duration must be greater than 0 seconds.');
+      return;
+    }
 
     const body = {
       name: formData.sessionName,
       system_id: formData.hardwareSystem,
       dataset_id: formData.datasetId,
-      num_episodes: parseInt(formData.numEpisodes),
-      episode_duration: parseFloat(formData.episodeDuration),
+      num_episodes: numEpisodes,
+      episode_duration: episodeDuration,
       reset_duration: parseFloat(formData.resetDuration) || 0,
       compression: formData.compression,
       chunk_size_bytes: parseInt(formData.chunkSizeBytes) || 4194304,
     };
 
+    setFormSubmitting(true);
     try {
       const isEdit = editingSessionId !== null;
       const url = isEdit ? `/api/sessions/${editingSessionId}` : '/api/sessions';
@@ -200,11 +219,18 @@ export function RecordPage() {
       }
     } catch (err) {
       setFormError(describeError(err));
+    } finally {
+      setFormSubmitting(false);
     }
   };
 
   function resetForm() {
-    setFormData({ sessionName: '', hardwareSystem: '', datasetId: '', numEpisodes: '10', episodeDuration: '10', resetDuration: '2', compression: '', chunkSizeBytes: '4194304' });
+    // Pre-fill sensible, editable defaults so the operator isn't typing every
+    // field from scratch each run (TDS-153). Date-stamped names follow a
+    // predictable convention; episode/duration/reset already carried defaults.
+    const now = new Date();
+    const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    setFormData({ sessionName: `Session ${ymd}`, hardwareSystem: '', datasetId: `dataset_${ymd.replace(/-/g, '')}`, numEpisodes: '10', episodeDuration: '10', resetDuration: '2', compression: '', chunkSizeBytes: '4194304' });
   }
 
   function openEditModal(session: Session) {
@@ -250,7 +276,7 @@ export function RecordPage() {
   const handleStop = async (session: Session) => {
     const ok = await confirm({
       title: `Stop "${session.name}"?`,
-      message: `${session.current_episode} of ${session.num_episodes} episodes are saved. Stopping pauses the session so you can Resume it later from this page.`,
+      message: `${session.current_episode} of ${session.num_episodes} episodes are saved. Stopping discards the current episode and pauses the session — you can Resume it later.`,
       confirmLabel: 'Stop Session',
     });
     if (!ok) return;
@@ -269,6 +295,17 @@ export function RecordPage() {
   const [editEpisodesSession, setEditEpisodesSession] = useState<Session | null>(null);
   const [editEpisodesValue, setEditEpisodesValue] = useState('');
   const [editEpisodesError, setEditEpisodesError] = useState('');
+
+  // ESC closes whichever form modal is open — matches AppModal/confirm
+  // behaviour so the operator isn't forced to mouse to the small close icon.
+  useEffect(() => {
+    if (!showSessionModal && !editEpisodesSession) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') { setShowSessionModal(false); setEditEpisodesSession(null); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [showSessionModal, editEpisodesSession]);
 
   function openEditEpisodesModal(session: Session) {
     setEditEpisodesSession(session);
@@ -668,15 +705,19 @@ export function RecordPage() {
 
       {/* Session Setup Modal */}
       {showSessionModal && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setShowSessionModal(false); }}
+        >
           <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[650px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
             <div className="flex items-center justify-between p-5 border-b border-[#252525]">
               <h2 className="text-lg text-white">{editingSessionId ? 'Edit Session' : 'Create New Recording Session'}</h2>
               <button
                 onClick={() => setShowSessionModal(false)}
-                className="text-2xl text-[#b9b8ae] hover:text-white transition-colors leading-none"
+                aria-label="Close"
+                className="text-[#b9b8ae] hover:text-white transition-colors"
               >
-                x
+                <X className="w-5 h-5" />
               </button>
             </div>
 
@@ -834,9 +875,11 @@ export function RecordPage() {
                 </button>
                 <button
                   type="submit"
-                  className="bg-[#55bde3] text-white px-5 py-2.5 text-sm hover:bg-[#4aa8cc] transition-colors"
+                  disabled={formSubmitting}
+                  className="bg-[#55bde3] text-white px-5 py-2.5 text-sm hover:bg-[#4aa8cc] transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-2"
                 >
-                  {editingSessionId ? 'Save Changes' : 'Create Session'}
+                  {formSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
+                  {formSubmitting ? 'Saving…' : editingSessionId ? 'Save Changes' : 'Create Session'}
                 </button>
               </div>
             </form>
@@ -846,11 +889,14 @@ export function RecordPage() {
 
       {/* Edit Episodes Modal */}
       {editEpisodesSession && (
-        <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
+        <div
+          className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setEditEpisodesSession(null); }}
+        >
           <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[400px] font-['JetBrains_Mono',sans-serif]">
             <div className="flex items-center justify-between p-5 border-b border-[#252525]">
               <h2 className="text-lg text-white">Edit Episodes</h2>
-              <button onClick={() => setEditEpisodesSession(null)} className="text-2xl text-[#b9b8ae] hover:text-white transition-colors leading-none">x</button>
+              <button onClick={() => setEditEpisodesSession(null)} aria-label="Close" className="text-[#b9b8ae] hover:text-white transition-colors"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleEditEpisodesSubmit} className="p-5 space-y-4">
               {editEpisodesError && (
