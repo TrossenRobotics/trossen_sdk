@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { toast } from 'sonner';
 import { AppModal } from '@/app/components/AppModal';
 import { useHwStatus } from '@/lib/HwStatusContext';
+import { announce } from '@/lib/announce';
 import { apiGet, apiPost, apiPut, describeError } from '@/lib/api';
 
 // Level 3 - Producers (data recording channels)
@@ -1318,12 +1319,19 @@ export function ConfigurationPage() {
                                 } else if (data.type === 'complete') {
                                   setDryRunResult({ systemId: system.id, success: true, message: data.message, output: data.output || collected });
                                   setHwStatusEntry(system.id, { status: 'ready', message: data.message });
+                                  // The test is the gate for recording and the
+                                  // operator has often walked to the robot during
+                                  // the ~15s run — confirm the pass audibly and
+                                  // visibly, matching the failure feedback below.
+                                  toast.success('Hardware test passed');
+                                  announce('Hardware test passed');
                                   finalised = true;
                                   break;
                                 } else if (data.type === 'error') {
                                   setDryRunResult({ systemId: system.id, success: false, message: data.message, output: data.output || collected });
                                   setHwStatusEntry(system.id, { status: 'error', message: data.message });
                                   toast.error(`Hardware test failed: ${data.message}`);
+                                  announce('Hardware test failed');
                                   finalised = true;
                                   break;
                                 }
@@ -1339,6 +1347,7 @@ export function ConfigurationPage() {
                             setDryRunResult({ systemId: system.id, success: false, message: msg, output: collected });
                             setHwStatusEntry(system.id, { status: 'error', message: msg });
                             toast.error(`Hardware test failed: ${msg}`);
+                          announce('Hardware test failed');
                           }
                         } catch (err) {
                           const isTimeout = err instanceof DOMException && err.name === 'AbortError';
@@ -1348,6 +1357,7 @@ export function ConfigurationPage() {
                           setDryRunResult({ systemId: system.id, success: false, message: msg, output: collected });
                           setHwStatusEntry(system.id, { status: 'error', message: msg });
                           toast.error(`Hardware test failed: ${msg}`);
+                          announce('Hardware test failed');
                         } finally {
                           window.clearTimeout(safetyTimeoutId);
                           setTestingSystemId(null);

@@ -1,8 +1,9 @@
 import { Link, useLocation } from "react-router";
 import { Menu, X, Volume2, VolumeX } from "lucide-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import imgTrossen2025White2 from '@/assets/6ef806f936e829141b2fab202fa6f7601e3a5a7b.png';
 import { useHwStatus } from '@/lib/HwStatusContext';
+import { apiGet } from '@/lib/api';
 import { useAnnounceEnabled, setAnnounceEnabled, announce } from '@/lib/announce';
 
 const navLinks = [
@@ -16,6 +17,28 @@ export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { testingSystemId } = useHwStatus();
   const announceEnabled = useAnnounceEnabled();
+
+  // Best-effort poll for a live recording so a session stays reachable from
+  // anywhere. The Monitor view is full-screen and hides this header, so once
+  // the operator navigates away the live run would otherwise be invisible;
+  // this pill is a one-click route back to it.
+  const [activeSession, setActiveSession] = useState<{ id: string; name: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () => {
+      apiGet<Array<{ id: string; name: string; status: string }>>('/api/sessions')
+        .then(list => {
+          if (cancelled) return;
+          const live = list.find(s => s.status === 'active');
+          setActiveSession(live ? { id: live.id, name: live.name } : null);
+        })
+        .catch(() => { /* header indicator is best-effort; ignore poll errors */ });
+    };
+    poll();
+    const t = setInterval(poll, 5000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, []);
+
   // Block all in-app nav while a Hardware Test is mid-flight. Switching
   // pages would unmount ConfigurationPage and orphan the request, but
   // the backend would keep talking to hardware and the user would be
@@ -95,6 +118,31 @@ export function Header() {
             renderNavItem(link, "h-full flex items-center justify-center px-4 xl:px-[37px] text-sm xl:text-base")
           )}
         </nav>
+
+        {/* Live-recording pill — one-click return to the active session from
+            any page. `ml-auto` right-aligns it when the center nav is hidden
+            (small screens); on lg the nav's flex-1 already pushes it right. */}
+        {activeSession && (
+          navLocked ? (
+            <span
+              className="ml-auto mr-2 flex items-center gap-2 px-3 py-1.5 rounded bg-green-500/10 border border-green-500/20 text-green-400/50 text-xs cursor-not-allowed"
+              title="Hardware test in progress"
+            >
+              <span className="w-2 h-2 rounded-full bg-green-500/50" />
+              <span className="max-w-[160px] truncate">{activeSession.name}</span>
+            </span>
+          ) : (
+            <Link
+              to={`/monitor/${activeSession.id}`}
+              title="Return to the live recording"
+              className="ml-auto mr-2 flex items-center gap-2 px-3 py-1.5 rounded bg-green-500/15 border border-green-500/30 text-green-400 text-xs hover:bg-green-500/25 transition-colors"
+            >
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <span className="hidden sm:inline">Recording:&nbsp;</span>
+              <span className="max-w-[160px] truncate">{activeSession.name}</span>
+            </Link>
+          )
+        )}
 
         {/* Audio cue toggle. Mirrors the SDK's `announce()` (spd-say)
             but plays in the user's browser so it works in Docker and

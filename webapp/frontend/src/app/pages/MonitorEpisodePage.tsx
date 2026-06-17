@@ -9,6 +9,7 @@ import { apiGet, apiPost, describeError } from '@/lib/api';
 import { useReconnectingWebSocket } from '@/hooks/useReconnectingWebSocket';
 import type { WsStatus } from '@/hooks/useReconnectingWebSocket';
 import { RerunViewer } from '@/app/components/RerunViewer';
+import { useConfirm } from '@/app/hooks/useConfirm';
 import type { WsMessage } from '@/lib/types';
 
 // Local subset of the Session type used by this page. Wider Session lives
@@ -75,6 +76,10 @@ export function MonitorEpisodePage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   const { statuses: hwStatus, setStatus: setHwStatus } = useHwStatus();
+  const { confirm, modalElement } = useConfirm();
+  // True once we've shown a "connection lost" warning for the current drop,
+  // so the toast fires once per outage (not once per reconnect attempt).
+  const wsDroppedRef = useRef(false);
 
   const [session, setSession] = useState<Session | null>(null);
   const [phase, setPhase] = useState<Phase>('not_started');
@@ -124,7 +129,7 @@ export function MonitorEpisodePage() {
       addLog('success', 'Dry run started — beginning first episode');
       // The WS bus typically drops episode 0's `episode_started`; fire its
       // cue here since the successful /start means episode 0 has begun.
-      announceEpisodeStart(data.current_episode ?? 0);
+      announceEpisodeStart(data.current_episode ?? 0, 'Dry run started');
     } catch (err) {
       const msg = describeError(err);
       addLog('error', `Failed to start dry run: ${msg}`);
@@ -144,15 +149,20 @@ export function MonitorEpisodePage() {
   // Routes both the /start response path and the WS `episode_started`
   // event through one place so the first episode is no longer silent
   // (TDS-154) without double-firing when the WS event isn't dropped.
-  function announceEpisodeStart(idx: number) {
+  // `spoken` overrides the default utterance for the very first cue of a run
+  // (Start / Resume / Dry run) so the operator — who is usually looking at the
+  // robot, not the screen — hears *what just happened* ("Recording started")
+  // rather than a bare episode number. announce() cancels any pending
+  // utterance, so a single distinct phrase here is clearer than chaining two.
+  function announceEpisodeStart(idx: number, spoken?: string) {
     if (announcedEpisodeStartRef.current === idx) return;
     announcedEpisodeStartRef.current = idx;
     setPhase('recording');
     setElapsed(0);
     addLog('success', `Episode ${idx} started — recording`);
-    // Phrasing mirrors the SDK's `announce()` in session_manager.cpp:281
+    // Default phrasing mirrors the SDK's `announce()` in session_manager.cpp:281
     // so terminal-mode demos and the webapp sound the same to an operator.
-    announce(`Episode ${idx} started`);
+    announce(spoken ?? `Episode ${idx} started`);
   }
 
   // Fetch session on mount
@@ -225,7 +235,7 @@ export function MonitorEpisodePage() {
       // Episode 0's `episode_started` WS frame is usually dropped (socket
       // subscribes after /start fires it); fire the cue here so the first
       // episode isn't silent (TDS-154). De-duped if the WS frame arrives.
-      announceEpisodeStart(data.current_episode ?? 0);
+      announceEpisodeStart(data.current_episode ?? 0, 'Recording started');
     } catch (err) {
       const msg = describeError(err);
       addLog('error', `Failed to start: ${msg}`);
@@ -251,7 +261,7 @@ export function MonitorEpisodePage() {
       setSession(data);
       setPhase('recording');
       addLog('success', 'Session resumed');
-      announceEpisodeStart(data.current_episode ?? 0);
+      announceEpisodeStart(data.current_episode ?? 0, 'Recording resumed');
     } catch (err) {
       const msg = describeError(err);
       addLog('error', `Failed to resume: ${msg}`);
@@ -265,6 +275,14 @@ export function MonitorEpisodePage() {
   // Stop: ends the entire session
   async function handleStop() {
     if (stopping) return;
+    const ok = await confirm({
+      title: 'Stop recording session?',
+      message: session?.dry_run
+        ? 'This is a dry run — no data has been recorded. Stop the rehearsal?'
+        : `${currentEpisode} of ${totalEpisodes} episodes are saved. Stopping discards the current episode and pauses the session — you can Resume it later from the Record page.`,
+      confirmLabel: 'Stop Session',
+    });
+    if (!ok) return;
     setStopping(true);
     try {
       addLog('info', 'Stopping session...');
@@ -454,12 +472,27 @@ export function MonitorEpisodePage() {
     url: wsUrl,
     enabled: phase !== 'not_started',
     onMessage: handleWsMessage,
-    onOpen: () => addLog('info', 'Connected to session'),
+    onOpen: () => {
+      addLog('info', 'Connected to session');
+      // Recovered from an unexpected drop — confirm we're back so an
+      // operator who saw the warning knows recording telemetry resumed.
+      if (wsDroppedRef.current) {
+        wsDroppedRef.current = false;
+        toast.success('Reconnected');
+      }
+    },
     onClose: (ev) => {
       // 1000 = clean close (we issued it). Anything else is a drop; the hook
       // is already scheduling a retry.
       if (ev.code === 1000) return;
       addLog('warning', `Disconnected (code ${ev.code}) — reconnecting...`);
+      // Toast once per outage (not per retry) so a hands-on-robot operator
+      // notices the recording stream dropped even when the log panel is
+      // off-screen.
+      if (!wsDroppedRef.current) {
+        wsDroppedRef.current = true;
+        toast.warning('Connection lost — reconnecting…');
+      }
     },
   });
 
@@ -596,6 +629,7 @@ export function MonitorEpisodePage() {
 
   return (
     <div className="h-screen flex flex-col bg-[#0b0b0b] font-['JetBrains_Mono',sans-serif]">
+      {modalElement}
       {/* Top Bar */}
       <div className="bg-[#0d0d0d] border-b border-[#252525] px-[20px] py-[12px]">
         <div className="flex items-center justify-between gap-[12px] mb-[12px] portrait:flex-wrap">
@@ -894,12 +928,27 @@ export function MonitorEpisodePage() {
                 {starting ? 'Starting...' : 'Run Again'}
               </button>
             ) : (
-              <button
-                onClick={() => navigate(`/datasets/${session?.dataset_id}`)}
-                className="bg-[#55bde3] text-white px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-[#4aa8cc] transition-colors"
-              >
-                View Dataset
-              </button>
+              <>
+                {/* A stopped (vs naturally completed) session is paused on the
+                    backend and can be resumed. Re-enter the paused/ready state
+                    in place so the operator can prepare and press Resume —
+                    no need to hop back to the Record page (TDS-158 flow). */}
+                {phase === 'stopped' && (
+                  <button
+                    onClick={() => setPhase('paused')}
+                    className="bg-green-500 text-white px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-green-600 transition-colors flex items-center gap-[10px]"
+                  >
+                    <Play className="w-[24px] h-[24px]" />
+                    Resume Session
+                  </button>
+                )}
+                <button
+                  onClick={() => navigate(`/datasets/${session?.dataset_id}`)}
+                  className="bg-[#55bde3] text-white px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-[#4aa8cc] transition-colors"
+                >
+                  View Dataset
+                </button>
+              </>
             )}
           </div>
         ) : (
@@ -947,7 +996,7 @@ export function MonitorEpisodePage() {
                   }`}
                 >
                   <SkipForward className="w-[24px] h-[24px]" />
-                  {nexting ? 'Loading...' : 'Next'}
+                  {nexting ? 'Loading...' : phase === 'recording' ? 'End Episode' : 'Next Episode'}
                 </button>
               </>
             )}

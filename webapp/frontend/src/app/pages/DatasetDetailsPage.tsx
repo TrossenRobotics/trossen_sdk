@@ -1,5 +1,5 @@
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router';
-import { ArrowLeft, FolderOpen, FileText, Video, RefreshCw, Copy, Check, Film, Database, Trash2 } from 'lucide-react';
+import { ArrowLeft, FolderOpen, FileText, Video, RefreshCw, Copy, Check, Film, Database, Trash2, Loader2 } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { AppModal } from '@/app/components/AppModal';
@@ -325,7 +325,13 @@ export function DatasetDetailsPage() {
   );
   if (!dataset) return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
-      <div className="text-[#b9b8ae] text-sm">Loading...</div>
+      <Link to="/datasets" className="inline-flex items-center gap-2 text-[#55bde3] hover:text-white mb-5 text-sm">
+        <ArrowLeft className="w-4 h-4" /> Back to Datasets
+      </Link>
+      <div className="flex flex-col items-center justify-center gap-3 py-16">
+        <Loader2 className="w-7 h-7 text-[#55bde3] animate-spin" />
+        <div className="text-[#b9b8ae] text-sm">Loading dataset…</div>
+      </div>
     </div>
   );
 

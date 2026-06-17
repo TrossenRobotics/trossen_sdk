@@ -1,9 +1,10 @@
-import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Settings } from 'lucide-react';
+import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Settings, Loader2 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { apiDelete, apiGet, apiPost, apiPut, describeError } from '@/lib/api';
 import { useHwStatus } from '@/lib/HwStatusContext';
+import { useConfirm } from '@/app/hooks/useConfirm';
 import { formatDate } from '@/lib/format';
 
 type StatusFilter = 'all' | 'active' | 'pending' | 'paused' | 'completed' | 'error';
@@ -30,10 +31,17 @@ interface Session {
 export function RecordPage() {
   const navigate = useNavigate();
   const { statuses: hwStatus, setStatus: setHwStatus } = useHwStatus();
+  const { confirm, modalElement } = useConfirm();
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sessions, setSessions] = useState<Session[]>([]);
+  // First-load gate so a returning operator never sees a false "No sessions
+  // yet" flash before the first fetch resolves.
+  const [initialLoading, setInitialLoading] = useState(true);
+  // Consecutive session-poll failures; after >=2 we surface a single inline
+  // "backend unreachable" banner instead of silently showing a stale list.
+  const [pollFailures, setPollFailures] = useState(0);
   const [formError, setFormError] = useState('');
   const [busySessionId, setBusySessionId] = useState<string | null>(null);
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null);
@@ -79,13 +87,19 @@ export function RecordPage() {
 
   const fetchSessions = useCallback(() => {
     apiGet<Session[]>('/api/sessions')
-      .then(data => setSessions(data))
+      .then(data => {
+        setSessions(data);
+        setPollFailures(0);
+      })
       .catch(err => {
-        // Polling failure shouldn't toast on every tick; log once and let
-        // the next interval succeed silently. The session list will appear
-        // stale in the meantime.
+        // Polling failure shouldn't toast on every tick; instead count
+        // consecutive failures so the render can show one inline banner
+        // once the backend is clearly unreachable. The last good list
+        // stays on screen in the meantime.
         console.error('Failed to fetch sessions:', err);
-      });
+        setPollFailures(n => n + 1);
+      })
+      .finally(() => setInitialLoading(false));
   }, []);
 
   // Fetch on mount AND every time the page becomes visible (handles back navigation)
@@ -151,6 +165,8 @@ export function RecordPage() {
       fetchSessions();
       if (!isEdit) {
         navigate(`/monitor/${session.id}`);
+      } else {
+        toast.success('Session updated');
       }
     } catch (err) {
       setFormError(describeError(err));
@@ -201,10 +217,16 @@ export function RecordPage() {
     }
   };
 
-  const handleStop = async (sessionId: string) => {
-    setBusySessionId(sessionId);
+  const handleStop = async (session: Session) => {
+    const ok = await confirm({
+      title: `Stop "${session.name}"?`,
+      message: `${session.current_episode} of ${session.num_episodes} episodes are saved. Stopping pauses the session so you can Resume it later from this page.`,
+      confirmLabel: 'Stop Session',
+    });
+    if (!ok) return;
+    setBusySessionId(session.id);
     try {
-      await apiPost(`/api/sessions/${sessionId}/stop`);
+      await apiPost(`/api/sessions/${session.id}/stop`);
       fetchSessions();
     } catch (err) {
       toast.error(`Couldn't stop: ${describeError(err)}`);
@@ -248,6 +270,7 @@ export function RecordPage() {
       });
       setEditEpisodesSession(null);
       fetchSessions();
+      toast.success(`Updated to ${newTotal} episodes`);
     } catch (err) {
       setEditEpisodesError(describeError(err));
     }
@@ -262,10 +285,20 @@ export function RecordPage() {
     navigate(`/monitor/${sessionId}`);
   };
 
-  const handleDelete = async (sessionId: string) => {
-    setBusySessionId(sessionId);
+  const handleDelete = async (session: Session) => {
+    const recorded = session.current_episode > 0 && session.dataset_id;
+    const ok = await confirm({
+      title: `Delete "${session.name}"?`,
+      message: recorded
+        ? `This permanently deletes the recording session. The ${session.current_episode} episodes already written to dataset "${session.dataset_id}" are NOT deleted.`
+        : `This permanently deletes the recording session. This cannot be undone.`,
+      confirmLabel: 'Delete',
+    });
+    if (!ok) return;
+    setBusySessionId(session.id);
     try {
-      await apiDelete(`/api/sessions/${sessionId}`);
+      await apiDelete(`/api/sessions/${session.id}`);
+      toast.success(`Deleted "${session.name}"`);
       fetchSessions();
     } catch (err) {
       toast.error(`Couldn't delete: ${describeError(err)}`);
@@ -281,6 +314,7 @@ export function RecordPage() {
 
   return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
+      {modalElement}
       {/* Page Title */}
       <div className="mb-6 sm:mb-[35px]">
         <div className="flex flex-col gap-[7px]">
@@ -329,13 +363,28 @@ export function RecordPage() {
         </button>
       </div>
 
+      {/* Backend-unreachable banner — only after repeated poll failures so a
+          single transient blip doesn't flash a scary message. */}
+      {pollFailures >= 2 && (
+        <div className="mb-4 flex items-start gap-3 rounded border border-red-500/40 bg-red-500/5 p-3 text-sm">
+          <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+          <div className="flex-1 text-red-200">Can't reach the backend — showing the last known session list. Retrying…</div>
+          <button onClick={fetchSessions} className="text-red-300 hover:text-white underline underline-offset-2 text-xs">Retry</button>
+        </div>
+      )}
+
       {/* Sessions List */}
       <div className="bg-[#0d0d0d] border border-[#252525]">
-        {filteredSessions.length === 0 && (
+        {initialLoading ? (
+          <div className="py-10 flex flex-col items-center justify-center gap-3">
+            <Loader2 className="w-7 h-7 text-[#55bde3] animate-spin" />
+            <div className="text-[#b9b8ae] text-sm">Loading sessions…</div>
+          </div>
+        ) : filteredSessions.length === 0 ? (
           <div className="py-10 text-center text-[#b9b8ae] text-sm">
             {sessions.length === 0 ? 'No sessions yet. Click "New Session" to create one.' : 'No sessions match this filter.'}
           </div>
-        )}
+        ) : null}
         {filteredSessions.map((session, index) => {
           // Pending and paused sessions transition into a state that
           // engages real hardware on the next action. If the system
@@ -456,7 +505,7 @@ export function RecordPage() {
                         <button onClick={() => handlePause(session.id)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-yellow-500 text-yellow-500 px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,255,0,0.1)]'}`}>
                           {busySessionId === session.id ? 'Pausing...' : 'Pause'}
                         </button>
-                        <button onClick={() => handleStop(session.id)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
+                        <button onClick={() => handleStop(session)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
                           {busySessionId === session.id ? 'Stopping...' : 'Stop'}
                         </button>
                       </>
@@ -479,7 +528,7 @@ export function RecordPage() {
                         <button onClick={() => openEditModal(session)} className="bg-[#0d0d0d] border border-[#55bde3] text-[#55bde3] px-4 py-2.5 hover:bg-[rgba(85,189,227,0.1)] transition-colors text-sm capitalize">
                           Edit
                         </button>
-                        <button onClick={() => handleDelete(session.id)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize flex items-center ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
+                        <button onClick={() => handleDelete(session)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize flex items-center ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
                           <Trash2 className="w-4 h-4 mr-1.5" />{busySessionId === session.id ? 'Deleting...' : 'Delete'}
                         </button>
                       </>
@@ -503,7 +552,7 @@ export function RecordPage() {
                         <button onClick={() => openEditEpisodesModal(session)} className="bg-[#0d0d0d] border border-[#55bde3] text-[#55bde3] px-4 py-2.5 hover:bg-[rgba(85,189,227,0.1)] transition-colors text-sm capitalize">
                           Edit Episodes
                         </button>
-                        <button onClick={() => handleStop(session.id)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
+                        <button onClick={() => handleStop(session)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
                           {busySessionId === session.id ? 'Stopping...' : 'Stop'}
                         </button>
                       </>
@@ -516,7 +565,7 @@ export function RecordPage() {
                         <button onClick={() => openEditEpisodesModal(session)} className="bg-[#0d0d0d] border border-[#55bde3] text-[#55bde3] px-4 py-2.5 hover:bg-[rgba(85,189,227,0.1)] transition-colors text-sm capitalize">
                           Edit Episodes
                         </button>
-                        <button onClick={() => handleDelete(session.id)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize flex items-center ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
+                        <button onClick={() => handleDelete(session)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize flex items-center ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
                           <Trash2 className="w-4 h-4 mr-1.5" />{busySessionId === session.id ? 'Deleting...' : 'Delete'}
                         </button>
                       </>
@@ -529,7 +578,7 @@ export function RecordPage() {
                         <button onClick={() => openEditEpisodesModal(session)} className="bg-[#0d0d0d] border border-[#55bde3] text-[#55bde3] px-4 py-2.5 hover:bg-[rgba(85,189,227,0.1)] transition-colors text-sm capitalize">
                           Edit Episodes
                         </button>
-                        <button onClick={() => handleDelete(session.id)} className="bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 hover:bg-[rgba(255,0,0,0.1)] transition-colors text-sm capitalize flex items-center">
+                        <button onClick={() => handleDelete(session)} className="bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 hover:bg-[rgba(255,0,0,0.1)] transition-colors text-sm capitalize flex items-center">
                           <Trash2 className="w-4 h-4 mr-1.5" />Delete
                         </button>
                       </>
