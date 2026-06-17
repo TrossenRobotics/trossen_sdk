@@ -26,6 +26,9 @@ export function Header() {
   useEffect(() => {
     let cancelled = false;
     const poll = () => {
+      // Best-effort indicator; skip while the tab is hidden so a backgrounded
+      // page doesn't keep polling the backend on the embedded host.
+      if (document.hidden) return;
       apiGet<Array<{ id: string; name: string; status: string }>>('/api/sessions')
         .then(list => {
           if (cancelled) return;

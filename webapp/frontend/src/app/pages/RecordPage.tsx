@@ -122,8 +122,12 @@ export function RecordPage() {
       fetchSystems();
     };
     window.addEventListener('focus', onFocus);
-    // Also poll every 5 seconds while on this page to catch status changes
+    // Also poll every 5 seconds while on this page to catch status changes.
+    // Skip ticks while the tab is hidden so a backgrounded page doesn't keep
+    // hitting the backend on the embedded on-robot host (the `focus` listener
+    // above refreshes immediately when the operator returns).
     const interval = setInterval(() => {
+      if (document.hidden) return;
       fetchSessions();
       fetchSystems();
     }, 5000);

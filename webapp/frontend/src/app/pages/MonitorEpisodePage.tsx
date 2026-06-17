@@ -1,4 +1,4 @@
-import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Settings, Loader2 } from 'lucide-react';
+import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Settings, Loader2, Lock } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
@@ -118,6 +118,9 @@ export function MonitorEpisodePage() {
 
   // Loading states — prevent double-clicks on slow operations
   const [starting, setStarting] = useState(false);
+  // Which action is in flight, so only the pressed button shows "Starting…"
+  // instead of both Start and Dry Run flipping together.
+  const [startingMode, setStartingMode] = useState<'start' | 'dry' | null>(null);
   const [stopping, setStopping] = useState(false);
   const [rerecording, setRerecording] = useState(false);
   const [nexting, setNexting] = useState(false);
@@ -131,6 +134,7 @@ export function MonitorEpisodePage() {
   async function handleDryRun() {
     if ((phase !== 'not_started' && phase !== 'complete') || starting) return;
     setStarting(true);
+    setStartingMode('dry');
     try {
       addLog('info', 'Starting dry run — no data will be recorded...');
       announcedEpisodeStartRef.current = null; // fresh run — allow the ep-0 cue
@@ -148,6 +152,7 @@ export function MonitorEpisodePage() {
       logError(`Dry run failed: ${msg}`, { component: 'MonitorPage' });
     } finally {
       setStarting(false);
+      setStartingMode(null);
     }
   }
 
@@ -215,6 +220,26 @@ export function MonitorEpisodePage() {
     return () => controller.abort();
   }, [sessionId]);
 
+  // Seed the hardware-test status from the backend on mount. The Start/Resume
+  // gate reads hwStatus from context, which Record/Config pages normally seed
+  // by polling — but on a *direct* load of this page (reload, bookmarked URL,
+  // the header "Recording" pill after a refresh) the context is empty, so the
+  // gate would falsely show "needs Hardware Test" even for a ready system.
+  useEffect(() => {
+    const controller = new AbortController();
+    apiGet<Array<{ id: string; hw_status?: string | null; hw_message?: string | null }>>(
+      '/api/systems',
+      { signal: controller.signal },
+    )
+      .then(list => {
+        list.forEach(s => {
+          if (s.hw_status) setHwStatus(s.id, { status: s.hw_status, message: s.hw_message ?? '' });
+        });
+      })
+      .catch(() => { /* gate stays closed until a test runs — safe default */ });
+    return () => controller.abort();
+  }, [setHwStatus]);
+
   // --- API calls ---
   const apiBase = `/api/sessions/${sessionId}`;
 
@@ -250,6 +275,7 @@ export function MonitorEpisodePage() {
   async function handleStart() {
     if (phase !== 'not_started' || starting) return;
     setStarting(true);
+    setStartingMode('start');
     try {
       addLog('info', 'Starting session...');
       announcedEpisodeStartRef.current = null; // fresh run — allow the ep-0 cue
@@ -271,6 +297,7 @@ export function MonitorEpisodePage() {
       logError(`Start session failed: ${msg}`, { component: 'MonitorPage' });
     } finally {
       setStarting(false);
+      setStartingMode(null);
     }
   }
 
@@ -478,6 +505,9 @@ export function MonitorEpisodePage() {
         setElapsed(0);
         addLog('error', data.message || 'Bridge error');
         playCue('error');
+        // The operator is usually at the robot, not watching the side log —
+        // surface a recording failure as a toast so it can't be missed.
+        toast.error(`Recording error: ${data.message || 'the recorder reported a failure'}`);
         // Flip the system's hw_status red in context so a navigate-back
         // to RecordPage shows the gate banner immediately, without
         // waiting for the next /api/systems poll. Mirrors what the
@@ -909,7 +939,7 @@ export function MonitorEpisodePage() {
                         : 'bg-[#252525] border border-[#55bde3] text-[#55bde3] hover:bg-[#55bde3] hover:text-white'
                     }`}
                   >
-                    {starting ? 'Starting...' : 'Dry Run'}
+                    {starting && startingMode === 'dry' ? 'Starting...' : 'Dry Run'}
                   </button>
                   <button
                     onClick={handleStart}
@@ -921,8 +951,15 @@ export function MonitorEpisodePage() {
                         : 'bg-green-500 hover:bg-green-600 active:bg-green-700'
                     } text-white`}
                   >
-                    <Play className="w-[28px] h-[28px]" />
-                    {starting ? 'Starting...' : 'Start'}
+                    {/* Distinguish busy (spinner) from gated (lock) — on a
+                        touchscreen the title tooltip never shows, so the
+                        blocked state must be legible from the icon alone. */}
+                    {starting && startingMode === 'start'
+                      ? <Loader2 className="w-[28px] h-[28px] animate-spin" />
+                      : !systemReady
+                        ? <Lock className="w-[28px] h-[28px]" />
+                        : <Play className="w-[28px] h-[28px]" />}
+                    {starting && startingMode === 'start' ? 'Starting...' : 'Start'}
                   </button>
                 </div>
               </div>
