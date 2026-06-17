@@ -1,4 +1,4 @@
-import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Settings } from 'lucide-react';
+import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Settings, Loader2 } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
@@ -26,6 +26,7 @@ interface Session {
   episode_duration: number;
   reset_duration: number;
   dry_run?: boolean;
+  error_message?: string;
 }
 
 interface LogEntry {
@@ -83,6 +84,16 @@ export function MonitorEpisodePage() {
 
   const [session, setSession] = useState<Session | null>(null);
   const [phase, setPhase] = useState<Phase>('not_started');
+  // A non-null value replaces the whole monitor with an error screen instead
+  // of the interactive "Press Start" UI. Set when the session can't be loaded
+  // (deleted / bad id / backend down) or when it already ended in error —
+  // both cases must NOT show a live Start button (you'd be starting a session
+  // that doesn't exist or re-engaging a failed one).
+  const [fatalError, setFatalError] = useState<string | null>(null);
+  // False until the initial session fetch settles. Gates the interactive
+  // controls so we never flash the "Press Start" screen for a session that
+  // will resolve to completed/error/not-found a moment later.
+  const [loaded, setLoaded] = useState(false);
   const [currentEpisode, setCurrentEpisode] = useState(0);
   const [elapsed, setElapsed] = useState(0);
   const [resetCountdown, setResetCountdown] = useState(0);
@@ -178,13 +189,29 @@ export function MonitorEpisodePage() {
         // A paused session opens in the ready/prep state; the user presses
         // Resume here to actually restart recording (TDS-158).
         else if (data.status === 'paused') setPhase('paused');
+        // A completed session is done — show the terminal summary (View
+        // Dataset / Record Again), NOT the pristine "Press Start" screen
+        // which would invite re-recording into a finished session.
+        else if (data.status === 'completed') setPhase('complete');
+        // A session that ended in error can't be started or resumed from
+        // here; surface the failure instead of a live Start button.
+        else if (data.status === 'error') {
+          setFatalError(
+            data.error_message?.trim() ||
+              'This recording session ended with an error and can’t be resumed.',
+          );
+        }
       })
       .catch((err) => {
         if (err instanceof DOMException && err.name === 'AbortError') return;
         const msg = describeError(err);
         addLog('error', 'Failed to load session');
         logError(`Failed to load session ${sessionId}: ${msg}`, { component: 'MonitorPage' });
-      });
+        setFatalError(
+          'Couldn’t load this session — it may have been deleted, or the backend is unreachable.',
+        );
+      })
+      .finally(() => setLoaded(true));
     return () => controller.abort();
   }, [sessionId]);
 
@@ -641,6 +668,36 @@ export function MonitorEpisodePage() {
     stopped: 'text-yellow-500',
     paused: 'text-yellow-500',
   }[phase];
+
+  // Initial load: show a spinner rather than the interactive Start screen,
+  // which would otherwise flash for a completed/errored session.
+  if (!loaded && !fatalError) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center gap-[14px] bg-[#0b0b0b] font-['JetBrains_Mono',sans-serif]">
+        <Loader2 className="w-[28px] h-[28px] text-[#55bde3] animate-spin" />
+        <div className="text-[#b9b8ae] text-[13px]">Loading session…</div>
+      </div>
+    );
+  }
+
+  // Unloadable / errored session: a full-screen message with a way out,
+  // never the interactive recording controls.
+  if (fatalError) {
+    return (
+      <div className="h-screen flex flex-col items-center justify-center gap-[20px] bg-[#0b0b0b] font-['JetBrains_Mono',sans-serif] px-6 text-center">
+        <AlertTriangle className="w-[40px] h-[40px] text-red-400" />
+        <div className="text-white text-[18px]">Can’t open this session</div>
+        <p className="text-[#b9b8ae] text-[14px] max-w-[520px]">{fatalError}</p>
+        <button
+          onClick={() => navigate('/record')}
+          className="mt-[8px] bg-[#55bde3] text-[#0b0b0b] px-[24px] py-[12px] text-[14px] font-bold uppercase hover:bg-[#4aa8cc] transition-colors flex items-center gap-[8px]"
+        >
+          <X className="w-[16px] h-[16px]" />
+          Back to Record
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="h-screen flex flex-col bg-[#0b0b0b] font-['JetBrains_Mono',sans-serif]">

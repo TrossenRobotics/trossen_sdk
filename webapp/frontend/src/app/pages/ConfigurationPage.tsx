@@ -659,12 +659,20 @@ export function ConfigurationPage() {
   // progress into the banner; single-flight via the global testingSystemId.
   const runHardwareTest = useCallback(async (systemId: string) => {
     if (testingSystemId !== null) return;
+    // Select the system being tested so the highlighted card always matches
+    // the result banner below it. Without this, a card's TEST button (which
+    // stops propagation to avoid toggling selection) leaves a different card
+    // selected while the banner reports this system's verdict — e.g. the
+    // Stationary card highlighted while the banner reads "FAILED — Solo".
+    setSelectedSystem(systemId);
     setTestingSystemId(systemId);
     setDryRunResult({ systemId, success: null, message: 'Running hardware test…', output: [] });
     const controller = new AbortController();
-    // Safety net at 20s in case the backend hangs without a terminal event;
-    // its own budget is ~15s + grace, so a healthy run is well under this.
-    const safetyTimeoutId = window.setTimeout(() => controller.abort(), 20000);
+    // Last-resort net in case the backend hangs without ever sending a
+    // terminal event. The backend owns the real budget (it scales with
+    // device count, up to ~90s for a 4-arm rig, and emits its own timeout
+    // error), so this only needs to sit safely above that ceiling + grace.
+    const safetyTimeoutId = window.setTimeout(() => controller.abort(), 120000);
     const collected: string[] = [];
     try {
       const res = await fetch(`/api/systems/${systemId}/test`, { method: 'POST', signal: controller.signal });
@@ -723,7 +731,7 @@ export function ConfigurationPage() {
     } catch (err) {
       const isTimeout = err instanceof DOMException && err.name === 'AbortError';
       const msg = isTimeout
-        ? 'Hardware test timed out — the backend did not finish within 20 seconds. The SDK may be stuck on a hardware call. Last captured server output is below.'
+        ? 'Hardware test stopped responding — the backend never returned a result. It may have crashed or be stuck on a hardware call. Last captured server output is below; try running the test again.'
         : describeError(err);
       setDryRunResult({ systemId, success: false, message: msg, output: collected });
       setHwStatusEntry(systemId, { status: 'error', message: msg });
@@ -733,7 +741,7 @@ export function ConfigurationPage() {
       window.clearTimeout(safetyTimeoutId);
       setTestingSystemId(null);
     }
-  }, [testingSystemId, setTestingSystemId, setDryRunResult, setHwStatusEntry]);
+  }, [testingSystemId, setTestingSystemId, setDryRunResult, setHwStatusEntry, setSelectedSystem]);
 
   // Deep-link autotest: arriving at /configuration?system=<id>&autotest=1
   // (from the "Test Hardware" gate banners) auto-selects the system and starts
@@ -1370,6 +1378,15 @@ export function ConfigurationPage() {
           </div>
         </div>
 
+        {/* Status legend — the per-card badges use colour + a single word;
+            spell out what each means so "Error" vs "Untested" isn't guessed. */}
+        <div className="flex flex-wrap items-center gap-x-[16px] gap-y-[6px] mb-[12px] text-[10px] text-[#b9b8ae]">
+          <span className="flex items-center gap-[5px]"><span className="w-[6px] h-[6px] rounded-full bg-[#55bde3]" />Ready — test passed, can record</span>
+          <span className="flex items-center gap-[5px]"><span className="w-[6px] h-[6px] rounded-full bg-yellow-500" />Untested — run a Hardware Test first</span>
+          <span className="flex items-center gap-[5px]"><span className="w-[6px] h-[6px] rounded-full bg-red-500" />Error — last test failed</span>
+          <span className="flex items-center gap-[5px]"><span className="w-[6px] h-[6px] rounded-full bg-green-500" />Active — recording now</span>
+        </div>
+
         <div className="grid grid-cols-4 portrait:grid-cols-2 gap-[12px]">
           {[...systems].sort((a, b) => {
             const order: Record<string, number> = { solo: 0, stationary: 1, mobile: 2 };
@@ -1473,6 +1490,8 @@ export function ConfigurationPage() {
         {hwTestResult && (() => {
           const inProgress = hwTestResult.success === null;
           const passed = hwTestResult.success === true;
+          const resultSystemName =
+            systems.find(s => s.id === hwTestResult.systemId)?.name ?? hwTestResult.systemId;
           // Three-state styling: cyan while running, green on pass,
           // red on fail. Same colour family as the badges so the
           // banner matches the system card's verdict at a glance.
@@ -1491,13 +1510,27 @@ export function ConfigurationPage() {
               <div className="flex items-center justify-between mb-[6px]">
                 <span className={`text-[12px] font-bold uppercase flex items-center gap-[8px] ${palette.text}`}>
                   {inProgress && <Loader2 className="w-[14px] h-[14px] animate-spin" />}
-                  {heading} — {hwTestResult.systemId}
+                  {heading} — {resultSystemName}
                 </span>
-                {/* Close button hidden while the test is running so
-                    the user can't dismiss a banner that's still
-                    streaming — same lock policy as the nav bar. */}
+                {/* Action row hidden while the test is running so the user
+                    can't dismiss/retry a banner that's still streaming —
+                    same lock policy as the nav bar. On failure, offer a
+                    one-click Retry so the next step is obvious instead of
+                    hunting for the card's TEST button again. */}
                 {!inProgress && (
-                  <button onClick={() => setDryRunResult(null)} className="text-[#b9b8ae] hover:text-white text-[16px]">x</button>
+                  <div className="flex items-center gap-[10px]">
+                    {!passed && (
+                      <button
+                        onClick={() => runHardwareTest(hwTestResult.systemId)}
+                        disabled={testingSystemId !== null}
+                        className="flex items-center gap-[5px] border border-red-500 text-red-400 hover:bg-red-500 hover:text-white px-[10px] py-[4px] text-[11px] font-bold uppercase rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        <RotateCcw className="w-[12px] h-[12px]" />
+                        Retry test
+                      </button>
+                    )}
+                    <button onClick={() => setDryRunResult(null)} className="text-[#b9b8ae] hover:text-white text-[16px]">x</button>
+                  </div>
                 )}
               </div>
               <div className="text-white text-[11px] mb-[6px]">{hwTestResult.message}</div>

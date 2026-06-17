@@ -1,4 +1,4 @@
-import { Database, Film, ArrowUpDown, Settings, X, AlertTriangle, RefreshCw, Trash2 } from 'lucide-react';
+import { Database, Film, ArrowUpDown, Settings, X, AlertTriangle, RefreshCw, Trash2, ChevronRight } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
@@ -290,6 +290,7 @@ export function DatasetsPage() {
                       <span>{dataset.episode_count} eps</span>
                     </div>
                   </div>
+                  <ChevronRight className="w-5 h-5 text-[#55bde3] shrink-0" />
                 </Link>
                 <button
                   onClick={() => handleDeleteMcap(dataset)}
@@ -349,6 +350,7 @@ export function DatasetsPage() {
                         <span>{dataset.total_frames} frames</span>
                       </div>
                     </div>
+                    <ChevronRight className="w-5 h-5 text-[#55bde3] shrink-0" />
                   </Link>
                   <button
                     onClick={() => handleDeleteLerobot(dataset)}

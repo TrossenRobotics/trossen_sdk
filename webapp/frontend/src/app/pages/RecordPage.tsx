@@ -36,6 +36,10 @@ export function RecordPage() {
   const { mcap: mcapDatasets } = useDatasets();
   const { confirm, modalElement } = useConfirm();
   const [showSessionModal, setShowSessionModal] = useState(false);
+  // Compression + chunk size are rarely-touched backend tuning knobs; keep
+  // them behind an "Advanced" toggle so the common New Session path is just
+  // name / system / dataset / episodes.
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -451,7 +455,10 @@ export function RecordPage() {
               onClick={() => setExpandedSession(expandedSession === session.id ? null : session.id)}
               className="w-full flex items-center gap-3 sm:gap-4 py-4 px-4 sm:px-6 hover:bg-[#252525] transition-colors text-left"
             >
-              <div className={`w-2 h-2 rounded-full ${getStatusColor(session.status)} shrink-0`} />
+              <div
+                className={`w-2 h-2 rounded-full ${getStatusColor(session.status)} shrink-0`}
+                title={`Status: ${session.status}`}
+              />
               <span className="text-white text-sm flex-1 truncate">{session.name}</span>
               <div className="flex items-center gap-3 sm:gap-4 shrink-0">
                 {needsTest && (
@@ -778,6 +785,16 @@ export function RecordPage() {
                 </div>
               </div>
 
+              <button
+                type="button"
+                onClick={() => setShowAdvanced(v => !v)}
+                className="flex items-center gap-1.5 text-[#b9b8ae] hover:text-white text-xs transition-colors"
+              >
+                {showAdvanced ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                Advanced options
+              </button>
+
+              {showAdvanced && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-white text-xs mb-2">Compression</label>
@@ -805,6 +822,7 @@ export function RecordPage() {
                   </div>
                 </div>
               </div>
+              )}
 
               <div className="flex justify-end gap-3 pt-4">
                 <button
