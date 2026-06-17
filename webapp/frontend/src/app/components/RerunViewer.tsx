@@ -25,6 +25,7 @@
  */
 
 import { useEffect, useState } from 'react';
+import { Loader2 } from 'lucide-react';
 import WebViewer from '@rerun-io/web-viewer-react';
 
 // gRPC port the backend's `rr.serve_grpc` listens on. MUST match
@@ -84,20 +85,26 @@ export function RerunViewer({ sessionId }: { sessionId: string }): React.ReactEl
     };
   }, [httpBase, dataReady]);
 
-  // Adding dataUrl to the array opens the live source; until then the viewer
-  // shows the blueprint's (empty) camera panels. Changing this prop opens new
-  // URLs and closes absent ones, so the data source attaches without a remount.
-  const rrd = dataReady ? [dataUrl, blueprintUrl] : [blueprintUrl];
+  // Until the gRPC server answers, show a placeholder instead of the viewer.
+  // Mounting the viewer only once data is ready means the operator never sees
+  // Rerun's empty camera panels (or its examples splash) while waiting — just a
+  // clear "waiting" state — and the blueprint + feed come up together.
+  if (!dataReady) {
+    return (
+      <div className="w-full h-full flex flex-col items-center justify-center gap-[12px] bg-[#1a1a1a] select-none">
+        <Loader2 className="w-[28px] h-[28px] text-[#55bde3] animate-spin" />
+        <p className="text-[#7a7a7a] text-[13px]">Waiting for cameras…</p>
+      </div>
+    );
+  }
 
   // The viewer fills its parent; MonitorEpisodePage owns the sizing.
   // follow_if_http keeps the timeline pinned to the latest frame as new data
   // streams in — the right default for a live monitor.
-  // hide_welcome_screen suppresses Rerun's default examples/"Welcome" splash so
-  // the operator sees only the (initially empty) camera panels while waiting for
-  // the feed, instead of Rerun marketing content.
+  // hide_welcome_screen suppresses Rerun's default examples/"Welcome" splash.
   return (
     <WebViewer
-      rrd={rrd}
+      rrd={[dataUrl, blueprintUrl]}
       width="100%"
       height="100%"
       follow_if_http
