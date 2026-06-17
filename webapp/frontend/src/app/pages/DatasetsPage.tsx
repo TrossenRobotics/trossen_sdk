@@ -268,7 +268,13 @@ export function DatasetsPage() {
           {mcapLoading && <div className="py-10 text-center text-[#b9b8ae] text-sm">Loading MCAP datasets...</div>}
           {!mcapLoading && sortedMcap().length === 0 && (
             <div className="py-10 text-center text-[#b9b8ae] text-sm">
-              {filterText ? 'No datasets match filter.' : 'No MCAP datasets. Complete a recording session to see datasets here.'}
+              {filterText ? 'No datasets match filter.' : (
+                <>
+                  No MCAP datasets yet.{' '}
+                  <Link to="/record" className="text-[#55bde3] hover:underline">Record a session</Link>
+                  {' '}to create one.
+                </>
+              )}
             </div>
           )}
           {!mcapLoading && sortedMcap().map((dataset) => (
@@ -307,7 +313,19 @@ export function DatasetsPage() {
           {lerobotLoading && <div className="py-10 text-center text-[#b9b8ae] text-sm">Loading LeRobot datasets...</div>}
           {!lerobotLoading && sortedLerobot().length === 0 && (
             <div className="py-10 text-center text-[#b9b8ae] text-sm">
-              {filterText ? 'No datasets match filter.' : 'No LeRobot datasets. Convert an MCAP dataset from the dataset detail page.'}
+              {filterText ? 'No datasets match filter.' : (
+                <>
+                  No LeRobot datasets yet.{' '}
+                  <button
+                    type="button"
+                    onClick={() => setViewMode('mcap')}
+                    className="text-[#55bde3] hover:underline"
+                  >
+                    Pick an MCAP dataset
+                  </button>
+                  {' '}and convert it from its detail page.
+                </>
+              )}
             </div>
           )}
           {!lerobotLoading && sortedLerobot().map((dataset) => {

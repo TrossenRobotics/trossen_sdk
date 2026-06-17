@@ -4,6 +4,7 @@ import { Link, useNavigate, useLocation } from 'react-router';
 import { toast } from 'sonner';
 import { apiDelete, apiGet, apiPost, apiPut, describeError } from '@/lib/api';
 import { useHwStatus } from '@/lib/HwStatusContext';
+import { useDatasets } from '@/lib/DatasetsContext';
 import { useConfirm } from '@/app/hooks/useConfirm';
 import { formatDate } from '@/lib/format';
 
@@ -32,6 +33,7 @@ export function RecordPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { statuses: hwStatus, setStatus: setHwStatus } = useHwStatus();
+  const { mcap: mcapDatasets } = useDatasets();
   const { confirm, modalElement } = useConfirm();
   const [showSessionModal, setShowSessionModal] = useState(false);
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
@@ -336,6 +338,18 @@ export function RecordPage() {
     return Math.round((session.current_episode / session.num_episodes) * 100);
   };
 
+  // Existing dataset IDs offered as autocomplete in the New Session form, so
+  // an operator recording more episodes into an existing dataset reuses the
+  // exact folder name instead of retyping it (a typo creates a stray empty
+  // dataset). Union of on-disk MCAP datasets and dataset IDs referenced by
+  // current sessions, deduped and sorted.
+  const datasetSuggestions = Array.from(
+    new Set([
+      ...(mcapDatasets ?? []).map((d) => d.id),
+      ...sessions.map((s) => s.dataset_id),
+    ].filter(Boolean)),
+  ).sort();
+
   return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
       {modalElement}
@@ -406,7 +420,19 @@ export function RecordPage() {
           </div>
         ) : filteredSessions.length === 0 ? (
           <div className="py-10 text-center text-[#b9b8ae] text-sm">
-            {sessions.length === 0 ? 'No sessions yet. Click "New Session" to create one.' : 'No sessions match this filter.'}
+            {sessions.length === 0 ? (
+              <>
+                No sessions yet.{' '}
+                <button
+                  type="button"
+                  onClick={() => { setFormError(''); setEditingSessionId(null); resetForm(); setShowSessionModal(true); }}
+                  className="text-[#55bde3] hover:underline"
+                >
+                  Create your first session
+                </button>
+                {' '}to get started.
+              </>
+            ) : 'No sessions match this filter.'}
           </div>
         ) : null}
         {filteredSessions.map((session, index) => {
@@ -691,14 +717,20 @@ export function RecordPage() {
                 </label>
                 <input
                   type="text"
+                  list="dataset-id-suggestions"
                   value={formData.datasetId}
                   onChange={(e) => setFormData({ ...formData, datasetId: e.target.value })}
                   placeholder="e.g. solo_pick_dataset"
                   className="w-full bg-[#0b0b0b] border border-[#252525] text-white placeholder:text-[#b9b8ae] px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]"
                   required
                 />
+                <datalist id="dataset-id-suggestions">
+                  {datasetSuggestions.map((id) => (
+                    <option key={id} value={id} />
+                  ))}
+                </datalist>
                 <div className="text-[#b9b8ae] text-[10px] mt-1">
-                  Folder name under ~/.trossen_sdk/ where episodes are saved
+                  Folder name under ~/.trossen_sdk/ where episodes are saved — pick an existing one to add episodes to it
                 </div>
               </div>
 

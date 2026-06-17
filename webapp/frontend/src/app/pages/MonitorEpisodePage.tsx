@@ -589,14 +589,29 @@ export function MonitorEpisodePage() {
     return () => clearInterval(interval);
   }, [phase, resetDuration]);
 
-  // ESC key
+  // ESC leaves the monitor. While an episode is actively recording or
+  // resetting, confirm first — an accidental keypress shouldn't yank the
+  // operator off the live view mid-episode. The session keeps running on the
+  // backend regardless (the header "Recording" pill links back), so this is a
+  // navigation guard, not a destructive one.
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') navigate('/record');
+    const handleKeyDown = async (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      if (phase === 'recording' || phase === 'resetting') {
+        const ok = await confirm({
+          title: 'Leave the live monitor?',
+          message:
+            'Recording continues in the background — return any time from the "Recording" indicator in the header. Leave this view?',
+          confirmLabel: 'Leave',
+          variant: 'info',
+        });
+        if (!ok) return;
+      }
+      navigate('/record');
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [navigate]);
+  }, [navigate, phase, confirm]);
 
   // Computed values
   const totalEpisodes = session?.num_episodes || 0;
