@@ -44,11 +44,42 @@ from app.systems import SystemResponse
 # background reader logged a connection drop during the grace window.
 _FAILURE_MARKERS = ("[critical]", "[error]")
 
-# Total wall-clock budget for the test. On expiry we terminate the
-# subprocess and emit an error event with whatever progress lines
-# came through up to that moment, so the user always has SDK output
-# to debug from.
-_TEST_TIMEOUT_S = 15.0
+# Wall-clock budget for the test. On expiry we terminate the subprocess
+# and emit an error event with whatever progress lines came through up to
+# that moment, so the user always has SDK output to debug from.
+#
+# The budget scales with device count rather than being a flat constant:
+# arms connect serially over TCP/UDP at ~5-6s each on a healthy rig, so a
+# flat 15s falsely failed multi-arm systems that were connecting fine (a
+# 4-arm rig needs ~30s just for the arms). See `_compute_timeout`.
+_TEST_TIMEOUT_BASE_S = 10.0
+_TEST_TIMEOUT_PER_ARM_S = 7.0
+_TEST_TIMEOUT_PER_CAMERA_S = 2.0
+_TEST_TIMEOUT_PER_BASE_S = 3.0
+# Floor (no-/few-device configs still get a sane minimum) and hard ceiling
+# (backstop so a wedged test can't hang the budget indefinitely).
+_TEST_TIMEOUT_FLOOR_S = 15.0
+_TEST_TIMEOUT_CEILING_S = 90.0
+
+
+def _compute_timeout(config: dict[str, Any] | None) -> float:
+    """Wall-clock budget for a system's hardware test, scaled by how many
+    devices it has to bring up. Arms dominate (serial connect ~6s each);
+    cameras and a base add smaller increments. Clamped to a floor/ceiling."""
+    hardware = (config or {}).get("hardware") or {}
+    arms = hardware.get("arms") or {}
+    cameras = hardware.get("cameras") or []
+    base = hardware.get("base")
+    n_arms = len(arms) if isinstance(arms, (dict, list)) else 0
+    n_cameras = len(cameras) if isinstance(cameras, (dict, list)) else 0
+    n_base = 1 if base else 0
+    budget = (
+        _TEST_TIMEOUT_BASE_S
+        + _TEST_TIMEOUT_PER_ARM_S * n_arms
+        + _TEST_TIMEOUT_PER_CAMERA_S * n_cameras
+        + _TEST_TIMEOUT_PER_BASE_S * n_base
+    )
+    return max(_TEST_TIMEOUT_FLOOR_S, min(_TEST_TIMEOUT_CEILING_S, budget))
 
 # Sentinel prefixes the runner uses to communicate its terminal
 # verdict on stdout. Kept in sync with `app/hw_test_runner.py`.
@@ -116,7 +147,8 @@ async def stream_system_hardware_test(
         proc.stdin.close()
 
         assert proc.stdout is not None
-        deadline = asyncio.get_event_loop().time() + _TEST_TIMEOUT_S
+        timeout_s = _compute_timeout(system.config)
+        deadline = asyncio.get_event_loop().time() + timeout_s
         timed_out = False
 
         while True:
@@ -165,8 +197,11 @@ async def stream_system_hardware_test(
         yield _sse(
             "error",
             message=(
-                f"Hardware test timed out after {_TEST_TIMEOUT_S:.0f} seconds; "
-                "the SDK call did not return."
+                f"Hardware test didn't finish within {timeout_s:.0f} seconds. "
+                "Some devices may have connected (see the output below), but the "
+                "test didn't complete — a device is likely unreachable or slow to "
+                "respond. Check that every arm and camera is powered and connected, "
+                "then run the test again."
             ),
             output=captured,
         )
