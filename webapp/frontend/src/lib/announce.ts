@@ -64,7 +64,75 @@ export function setAnnounceEnabled(enabled: boolean): void {
 }
 
 /**
- * Speak `message` via the browser's SpeechSynthesis API.
+ * Distinct, intuitive earcons per event class (TDS-148). Speech alone was
+ * hard to tell apart at a glance — especially because `announce()` cancels
+ * the previous utterance, so rapid events truncate each other. A short tone
+ * played *before* the speech gives an instantly recognisable signal: rising
+ * = go, falling = halt, bright up = done, low buzz = problem.
+ *
+ * Each entry is a sequence of [frequencyHz, durationSeconds] notes.
+ */
+export type CueKind = 'start' | 'resume' | 'stop' | 'complete' | 'error';
+
+const CUE_NOTES: Record<CueKind, Array<[number, number]>> = {
+  start: [[660, 0.1], [990, 0.14]], // rising two-tone — recording begins
+  resume: [[784, 0.12]], // single mid note — picking back up
+  stop: [[660, 0.1], [440, 0.16]], // falling two-tone — halted
+  complete: [[880, 0.09], [1175, 0.13]], // bright up — finished cleanly
+  error: [[220, 0.32]], // low buzz — something failed
+};
+
+let audioCtx: AudioContext | null = null;
+function getAudioCtx(): AudioContext | null {
+  if (typeof window === 'undefined') return null;
+  const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+  if (!AC) return null;
+  if (!audioCtx) audioCtx = new AC();
+  return audioCtx;
+}
+
+/**
+ * Play the earcon for `kind`. No-ops when cues are muted or Web Audio is
+ * unavailable. Safe to call alongside `announce()`.
+ */
+export function playCue(kind: CueKind): void {
+  if (!getAnnounceEnabled()) return;
+  const ctx = getAudioCtx();
+  if (!ctx) return;
+  // Browsers start the context suspended until a user gesture; resume() is a
+  // no-op once running. A test/start click is a gesture, so this unlocks it.
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  let t = ctx.currentTime;
+  for (const [freq, dur] of CUE_NOTES[kind]) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = kind === 'error' ? 'square' : 'sine';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(0.22, t + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(t);
+    osc.stop(t + dur);
+    t += dur;
+  }
+}
+
+// Map a spoken phrase to its earcon so existing announce() call sites get a
+// distinct tone for free, without threading a `kind` through every caller.
+function inferCue(message: string): CueKind | null {
+  const m = message.toLowerCase();
+  if (m.includes('complete') || m.includes('saved')) return 'complete';
+  if (m.includes('stopped') || m.includes('discarded')) return 'stop';
+  if (m.includes('resumed')) return 'resume';
+  if (m.includes('started')) return 'start';
+  return null;
+}
+
+/**
+ * Speak `message` via the browser's SpeechSynthesis API, preceded by a short
+ * earcon (TDS-148). Pass `kind` to force a specific tone, otherwise it's
+ * inferred from the message text.
  *
  * No-ops when the user has muted cues, when the browser doesn't expose
  * speechSynthesis (older mobile, some embedded webviews), or when the
@@ -72,11 +140,14 @@ export function setAnnounceEnabled(enabled: boolean): void {
  * first so a rapid sequence of events (start → discard → start) doesn't
  * queue up a backlog the operator has to wait through.
  */
-export function announce(message: string): void {
+export function announce(message: string, kind?: CueKind): void {
   if (!message) return;
   if (!getAnnounceEnabled()) return;
-  if (typeof window === 'undefined' || !window.speechSynthesis) return;
 
+  const cue = kind ?? inferCue(message);
+  if (cue) playCue(cue);
+
+  if (typeof window === 'undefined' || !window.speechSynthesis) return;
   const synth = window.speechSynthesis;
   synth.cancel();
   const utter = new SpeechSynthesisUtterance(message);

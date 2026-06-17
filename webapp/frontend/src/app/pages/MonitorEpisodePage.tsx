@@ -2,7 +2,7 @@ import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Settings, Loade
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
-import { announce } from '@/lib/announce';
+import { announce, playCue } from '@/lib/announce';
 import { logError } from '@/lib/logger';
 import { useHwStatus } from '@/lib/HwStatusContext';
 import { apiGet, apiPost, describeError } from '@/lib/api';
@@ -266,6 +266,7 @@ export function MonitorEpisodePage() {
     } catch (err) {
       const msg = describeError(err);
       addLog('error', `Failed to start: ${msg}`);
+      playCue('error');
       toast.error(`Failed to start session: ${msg}`);
       logError(`Start session failed: ${msg}`, { component: 'MonitorPage' });
     } finally {
@@ -292,6 +293,7 @@ export function MonitorEpisodePage() {
     } catch (err) {
       const msg = describeError(err);
       addLog('error', `Failed to resume: ${msg}`);
+      playCue('error');
       toast.error(`Failed to resume session: ${msg}`);
       logError(`Resume session failed: ${msg}`, { component: 'MonitorPage' });
     } finally {
@@ -322,6 +324,7 @@ export function MonitorEpisodePage() {
     } catch (err) {
       const msg = describeError(err);
       addLog('error', `Failed to stop: ${msg}`);
+      playCue('error');
       toast.error(`Failed to stop session: ${msg}`);
     } finally {
       setStopping(false);
@@ -474,6 +477,7 @@ export function MonitorEpisodePage() {
         setPhase('complete');
         setElapsed(0);
         addLog('error', data.message || 'Bridge error');
+        playCue('error');
         // Flip the system's hw_status red in context so a navigate-back
         // to RecordPage shows the gate banner immediately, without
         // waiting for the next /api/systems poll. Mirrors what the
