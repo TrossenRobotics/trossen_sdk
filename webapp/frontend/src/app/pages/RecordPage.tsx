@@ -427,6 +427,7 @@ export function RecordPage() {
               <button
                 key={filter}
                 onClick={() => setStatusFilter(filter)}
+                aria-pressed={isActive}
                 className={`px-3 py-2 text-xs uppercase transition-colors ${isActive
                     ? activeColors[filter]
                     : 'bg-[rgba(13,13,13,0.85)] border border-[#252525] text-[#b9b8ae] hover:border-white hover:text-white'

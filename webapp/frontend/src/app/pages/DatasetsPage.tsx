@@ -182,6 +182,8 @@ export function DatasetsPage() {
 
   const sortBtn = (key: SortKey, label: string) => (
     <button onClick={() => handleSort(key)}
+      aria-pressed={sortKey === key}
+      aria-label={`Sort by ${label}${sortKey === key ? (sortAsc ? ', ascending' : ', descending') : ''}`}
       className={`px-2 py-1 text-[10px] uppercase transition-colors rounded ${
         sortKey === key ? 'text-white bg-[#252525]' : 'text-[#b9b8ae] hover:text-white'
       }`}>
@@ -236,6 +238,7 @@ export function DatasetsPage() {
             value={filterText}
             onChange={e => setFilterText(e.target.value)}
             placeholder="Filter by name..."
+            aria-label="Filter datasets by name"
             className="bg-[#0b0b0b] border border-[#252525] text-white placeholder:text-[#b9b8ae]/50 px-3 py-1.5 text-xs w-48 focus:outline-none focus:border-[#55bde3]"
           />
           {/* Sort */}
