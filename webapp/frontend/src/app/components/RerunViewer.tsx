@@ -102,16 +102,16 @@ export function RerunViewer({
   // and the operator needs to start recording.
   if (!dataReady) {
     return (
-      <div className="w-full h-full flex flex-col items-center justify-center gap-[12px] bg-[#1a1a1a] select-none">
+      <div className="w-full h-full flex flex-col items-center justify-center gap-[12px] bg-edge select-none">
         {recording ? (
           <>
-            <Loader2 className="w-[28px] h-[28px] text-[#55bde3] animate-spin" />
-            <p className="text-[#7a7a7a] text-[13px]">Connecting to cameras…</p>
+            <Loader2 className="w-[28px] h-[28px] text-brand animate-spin" />
+            <p className="text-dim text-[13px]">Connecting to cameras…</p>
           </>
         ) : (
           <>
-            <Video className="w-[28px] h-[28px] text-[#4a4a4a]" />
-            <p className="text-[#7a7a7a] text-[13px]">Start recording to see the camera feed</p>
+            <Video className="w-[28px] h-[28px] text-dim" />
+            <p className="text-dim text-[13px]">Start recording to see the camera feed</p>
           </>
         )}
       </div>

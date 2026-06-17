@@ -69,7 +69,7 @@ function CopyButton({ text }: { text: string }) {
   };
   return (
     <button onClick={onCopy}
-      className="ml-2 text-[#b9b8ae] hover:text-white transition-colors shrink-0" title="Copy">
+      className="ml-2 text-dim hover:text-ink transition-colors shrink-0" title="Copy">
       {copied ? <Check className="w-3.5 h-3.5 text-green-500" /> : <Copy className="w-3.5 h-3.5" />}
     </button>
   );
@@ -320,18 +320,18 @@ export function DatasetDetailsPage() {
 
   if (error) return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
-      <Link to="/datasets" className="inline-flex items-center gap-2 text-[#55bde3] hover:text-white mb-5 text-sm"><ArrowLeft className="w-4 h-4" /> Back</Link>
+      <Link to="/datasets" className="inline-flex items-center gap-2 text-brand hover:text-ink mb-5 text-sm"><ArrowLeft className="w-4 h-4" /> Back</Link>
       <div className="text-red-500">{error}</div>
     </div>
   );
   if (!dataset) return (
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
-      <Link to="/datasets" className="inline-flex items-center gap-2 text-[#55bde3] hover:text-white mb-5 text-sm">
+      <Link to="/datasets" className="inline-flex items-center gap-2 text-brand hover:text-ink mb-5 text-sm">
         <ArrowLeft className="w-4 h-4" /> Back to Datasets
       </Link>
       <div className="flex flex-col items-center justify-center gap-3 py-16">
-        <Loader2 className="w-7 h-7 text-[#55bde3] animate-spin" />
-        <div className="text-[#b9b8ae] text-sm">Loading dataset…</div>
+        <Loader2 className="w-7 h-7 text-brand animate-spin" />
+        <div className="text-dim text-sm">Loading dataset…</div>
       </div>
     </div>
   );
@@ -346,7 +346,7 @@ export function DatasetDetailsPage() {
   return (
     <div className="h-full overflow-auto">
       <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
-        <Link to="/datasets" className="inline-flex items-center gap-2 text-[#55bde3] hover:text-white mb-5 text-sm">
+        <Link to="/datasets" className="inline-flex items-center gap-2 text-brand hover:text-ink mb-5 text-sm">
           <ArrowLeft className="w-4 h-4" /> Back to Datasets
         </Link>
 
@@ -354,7 +354,7 @@ export function DatasetDetailsPage() {
         <div className="mb-6">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center">
-              <h1 className="text-xl text-white">{dataset.id}</h1>
+              <h1 className="text-xl text-ink">{dataset.id}</h1>
               <CopyButton text={dataset.id} />
             </div>
             <div className="flex items-center gap-3">
@@ -363,7 +363,7 @@ export function DatasetDetailsPage() {
                   <button
                     onClick={() => setShowConvertModal(true)}
                     title="Convert this MCAP dataset to LeRobot V2"
-                    className="bg-[#55bde3] text-white hover:bg-[#4aa8cc] px-4 py-2 text-sm transition-colors flex items-center gap-2">
+                    className="bg-brand text-white hover:bg-[#4aa8cc] px-4 py-2 text-sm transition-colors flex items-center gap-2">
                     <RefreshCw className="w-4 h-4" /> Convert to LeRobot
                   </button>
                   <button
@@ -387,17 +387,17 @@ export function DatasetDetailsPage() {
 
           {/* View toggle. Each side is disabled when its variant doesn't
               exist on disk, so the user can't switch into an empty pane. */}
-          <div className="flex items-center gap-1 bg-[#252525] p-1 rounded w-fit">
+          <div className="flex items-center gap-1 bg-edge p-1 rounded w-fit">
             <button onClick={() => setViewMode('mcap')} disabled={mcapMissing}
-              className={`px-4 py-1.5 text-xs uppercase transition-colors rounded ${viewMode === 'mcap' ? 'bg-[#55bde3] text-white' : !mcapMissing ? 'text-[#b9b8ae] hover:text-white' : 'text-[#b9b8ae]/40 cursor-not-allowed'}`}>
+              className={`px-4 py-1.5 text-xs uppercase transition-colors rounded ${viewMode === 'mcap' ? 'bg-brand text-white' : !mcapMissing ? 'text-dim hover:text-white' : 'text-dim/40 cursor-not-allowed'}`}>
               <Database className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />MCAP {mcapMissing && '(not available)'}
             </button>
             <button onClick={() => setViewMode('lerobot')} disabled={!hasLerobot}
-              className={`px-4 py-1.5 text-xs uppercase transition-colors rounded ${viewMode === 'lerobot' ? 'bg-[#55bde3] text-white' : hasLerobot ? 'text-[#b9b8ae] hover:text-white' : 'text-[#b9b8ae]/40 cursor-not-allowed'}`}>
+              className={`px-4 py-1.5 text-xs uppercase transition-colors rounded ${viewMode === 'lerobot' ? 'bg-brand text-white' : hasLerobot ? 'text-dim hover:text-white' : 'text-dim/40 cursor-not-allowed'}`}>
               <Film className="w-3.5 h-3.5 inline mr-1.5 -mt-0.5" />LeRobot {!hasLerobot && '(not available)'}
             </button>
           </div>
-          <div className="h-[1px] bg-[#252525] w-full mt-3" />
+          <div className="h-[1px] bg-edge w-full mt-3" />
         </div>
 
         {/* MCAP View */}
@@ -406,31 +406,31 @@ export function DatasetDetailsPage() {
             <div className="flex flex-col gap-6">
               {dataset.disk_path && (
                 <div>
-                  <div className="flex items-center gap-2 mb-3"><FolderOpen className="w-4 h-4 text-[#55bde3]" /><h3 className="text-sm text-white uppercase">Storage Location</h3></div>
-                  <div className="bg-[#0d0d0d] border border-[#252525] p-4 rounded flex items-center justify-between">
-                    <p className="text-sm text-[#b9b8ae] break-all">{dataset.disk_path}</p><CopyButton text={dataset.disk_path} />
+                  <div className="flex items-center gap-2 mb-3"><FolderOpen className="w-4 h-4 text-brand" /><h3 className="text-sm text-ink uppercase">Storage Location</h3></div>
+                  <div className="bg-surface border border-edge p-4 rounded flex items-center justify-between">
+                    <p className="text-sm text-dim break-all">{dataset.disk_path}</p><CopyButton text={dataset.disk_path} />
                   </div>
                 </div>
               )}
               <div>
-                <div className="flex items-center gap-2 mb-3"><Video className="w-4 h-4 text-[#55bde3]" /><h3 className="text-sm text-white uppercase">Dataset Info</h3></div>
-                <div className="bg-[#0d0d0d] border border-[#252525] rounded overflow-hidden">
+                <div className="flex items-center gap-2 mb-3"><Video className="w-4 h-4 text-brand" /><h3 className="text-sm text-ink uppercase">Dataset Info</h3></div>
+                <div className="bg-surface border border-edge rounded overflow-hidden">
                   {[['Episodes', dataset.episode_count], ['Total Size', formatBytes(dataset.total_size_bytes)], ['Created', formatDate(dataset.created_at)], ['Updated', formatDate(dataset.updated_at)]].map(([label, val], i) => (
-                    <div key={i} className={`flex justify-between items-center p-4 ${i < 3 ? 'border-b border-[#252525]' : ''}`}>
-                      <span className="text-sm text-[#b9b8ae]">{label}</span><span className="text-sm text-white">{val}</span>
+                    <div key={i} className={`flex justify-between items-center p-4 ${i < 3 ? 'border-b border-edge' : ''}`}>
+                      <span className="text-sm text-dim">{label}</span><span className="text-sm text-ink">{val}</span>
                     </div>
                   ))}
                 </div>
               </div>
             </div>
             <div>
-              <div className="flex items-center gap-2 mb-3"><FileText className="w-4 h-4 text-[#55bde3]" /><h3 className="text-sm text-white uppercase">Episode Files ({dataset.episodes.length})</h3></div>
-              <div className="bg-[#0d0d0d] border border-[#252525] rounded overflow-hidden max-h-[600px] overflow-y-auto">
-                {dataset.episodes.length === 0 && <div className="p-4 text-[#b9b8ae] text-sm">No files.</div>}
+              <div className="flex items-center gap-2 mb-3"><FileText className="w-4 h-4 text-brand" /><h3 className="text-sm text-ink uppercase">Episode Files ({dataset.episodes.length})</h3></div>
+              <div className="bg-surface border border-edge rounded overflow-hidden max-h-[600px] overflow-y-auto">
+                {dataset.episodes.length === 0 && <div className="p-4 text-dim text-sm">No files.</div>}
                 {dataset.episodes.map((ep, i) => (
-                  <div key={i} className={`flex items-center justify-between p-4 ${i < dataset.episodes.length - 1 ? 'border-b border-[#252525]' : ''}`}>
-                    <div><div className="text-white text-sm">{ep.filename}</div><div className="text-[#b9b8ae] text-[11px] mt-0.5">{formatDate(ep.created_at || ep.modified)}</div></div>
-                    <div className="text-[#b9b8ae] text-sm">{formatBytes(ep.size_bytes)}</div>
+                  <div key={i} className={`flex items-center justify-between p-4 ${i < dataset.episodes.length - 1 ? 'border-b border-edge' : ''}`}>
+                    <div><div className="text-ink text-sm">{ep.filename}</div><div className="text-dim text-[11px] mt-0.5">{formatDate(ep.created_at || ep.modified)}</div></div>
+                    <div className="text-dim text-sm">{formatBytes(ep.size_bytes)}</div>
                   </div>
                 ))}
               </div>
@@ -452,14 +452,14 @@ export function DatasetDetailsPage() {
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <div className="flex flex-col gap-6">
               <div>
-                <div className="flex items-center gap-2 mb-3"><FolderOpen className="w-4 h-4 text-[#55bde3]" /><h3 className="text-sm text-white uppercase">LeRobot Location</h3></div>
-                <div className="bg-[#0d0d0d] border border-[#252525] p-4 rounded flex items-center justify-between">
-                  <p className="text-sm text-[#b9b8ae] break-all">{lerobotData.path}</p><CopyButton text={lerobotData.path} />
+                <div className="flex items-center gap-2 mb-3"><FolderOpen className="w-4 h-4 text-brand" /><h3 className="text-sm text-ink uppercase">LeRobot Location</h3></div>
+                <div className="bg-surface border border-edge p-4 rounded flex items-center justify-between">
+                  <p className="text-sm text-dim break-all">{lerobotData.path}</p><CopyButton text={lerobotData.path} />
                 </div>
               </div>
               <div>
-                <div className="flex items-center gap-2 mb-3"><Video className="w-4 h-4 text-[#55bde3]" /><h3 className="text-sm text-white uppercase">LeRobot Info</h3></div>
-                <div className="bg-[#0d0d0d] border border-[#252525] rounded overflow-hidden">
+                <div className="flex items-center gap-2 mb-3"><Video className="w-4 h-4 text-brand" /><h3 className="text-sm text-ink uppercase">LeRobot Info</h3></div>
+                <div className="bg-surface border border-edge rounded overflow-hidden">
                   {[
                     ['Robot Type', lerobotInfo.robot_type || '-'],
                     ['Total Episodes', lerobotInfo.total_episodes],
@@ -470,8 +470,8 @@ export function DatasetDetailsPage() {
                     ['Total Size', formatBytes(lerobotData.total_size_bytes)],
                     ['Version', lerobotInfo.codebase_version || '-'],
                   ].map(([label, val], i, arr) => (
-                    <div key={i} className={`flex justify-between items-center p-4 ${i < arr.length - 1 ? 'border-b border-[#252525]' : ''}`}>
-                      <span className="text-sm text-[#b9b8ae]">{label}</span><span className="text-sm text-white">{val}</span>
+                    <div key={i} className={`flex justify-between items-center p-4 ${i < arr.length - 1 ? 'border-b border-edge' : ''}`}>
+                      <span className="text-sm text-dim">{label}</span><span className="text-sm text-ink">{val}</span>
                     </div>
                   ))}
                 </div>
@@ -479,12 +479,12 @@ export function DatasetDetailsPage() {
               {/* Features */}
               {lerobotInfo.features && (
                 <div>
-                  <div className="flex items-center gap-2 mb-3"><FileText className="w-4 h-4 text-[#55bde3]" /><h3 className="text-sm text-white uppercase">Features</h3></div>
-                  <div className="bg-[#0d0d0d] border border-[#252525] rounded overflow-hidden">
+                  <div className="flex items-center gap-2 mb-3"><FileText className="w-4 h-4 text-brand" /><h3 className="text-sm text-ink uppercase">Features</h3></div>
+                  <div className="bg-surface border border-edge rounded overflow-hidden">
                     {Object.entries(lerobotInfo.features).map(([name, feat], i, arr) => (
-                      <div key={name} className={`flex justify-between items-center p-4 ${i < arr.length - 1 ? 'border-b border-[#252525]' : ''}`}>
-                        <span className="text-sm text-white">{name}</span>
-                        <span className="text-sm text-[#b9b8ae]">{feat.dtype} [{(feat.shape || []).join(', ')}]</span>
+                      <div key={name} className={`flex justify-between items-center p-4 ${i < arr.length - 1 ? 'border-b border-edge' : ''}`}>
+                        <span className="text-sm text-ink">{name}</span>
+                        <span className="text-sm text-dim">{feat.dtype} [{(feat.shape || []).join(', ')}]</span>
                       </div>
                     ))}
                   </div>
@@ -497,8 +497,8 @@ export function DatasetDetailsPage() {
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <div className="flex items-center gap-2">
-                      <Film className="w-4 h-4 text-[#55bde3]" />
-                      <h3 className="text-sm text-white uppercase">Sample Frames</h3>
+                      <Film className="w-4 h-4 text-brand" />
+                      <h3 className="text-sm text-ink uppercase">Sample Frames</h3>
                     </div>
                     <button
                       onClick={() => {
@@ -507,7 +507,7 @@ export function DatasetDetailsPage() {
                       }}
                       disabled={framesLoading}
                       className={`flex items-center gap-1.5 px-2.5 py-1 text-[10px] uppercase transition-colors rounded ${
-                        framesLoading ? 'text-[#b9b8ae]/50 cursor-wait' : 'text-[#b9b8ae] hover:text-white hover:bg-[#252525]'
+                        framesLoading ? 'text-dim/50 cursor-wait' : 'text-dim hover:text-ink hover:bg-edge'
                       }`}
                     >
                       <RefreshCw className={`w-3 h-3 ${framesLoading ? 'animate-spin' : ''}`} />
@@ -517,10 +517,10 @@ export function DatasetDetailsPage() {
                   <div className="grid grid-cols-2 gap-2">
                     {Object.entries(sampleFrames).map(([camName, frames]) => (
                       <div key={camName} className="relative">
-                        <div className="aspect-[4/3] overflow-hidden rounded border border-[#252525] bg-[#0b0b0b]">
+                        <div className="aspect-[4/3] overflow-hidden rounded border border-edge bg-app">
                           <img src={`data:image/jpeg;base64,${frames[0]}`} className="w-full h-full object-cover" alt={camName} />
                         </div>
-                        <div className="absolute bottom-1.5 left-1.5 bg-black/70 px-2 py-0.5 rounded text-[9px] text-[#55bde3] uppercase truncate max-w-[90%]">
+                        <div className="absolute bottom-1.5 left-1.5 bg-black/70 px-2 py-0.5 rounded text-[9px] text-brand uppercase truncate max-w-[90%]">
                           {camName.replace('observation.images.', '')}
                         </div>
                       </div>
@@ -530,26 +530,26 @@ export function DatasetDetailsPage() {
               )}
               {/* Data files */}
               <div>
-                <div className="flex items-center gap-2 mb-3"><FileText className="w-4 h-4 text-[#55bde3]" /><h3 className="text-sm text-white uppercase">Data Files ({lerobotData.data_files.length})</h3></div>
-                <div className="bg-[#0d0d0d] border border-[#252525] rounded overflow-hidden max-h-[300px] overflow-y-auto">
-                  {lerobotData.data_files.length === 0 && <div className="p-4 text-[#b9b8ae] text-sm">No data files.</div>}
+                <div className="flex items-center gap-2 mb-3"><FileText className="w-4 h-4 text-brand" /><h3 className="text-sm text-ink uppercase">Data Files ({lerobotData.data_files.length})</h3></div>
+                <div className="bg-surface border border-edge rounded overflow-hidden max-h-[300px] overflow-y-auto">
+                  {lerobotData.data_files.length === 0 && <div className="p-4 text-dim text-sm">No data files.</div>}
                   {lerobotData.data_files.map((f, i) => (
-                    <div key={i} className={`flex items-center justify-between p-3 ${i < lerobotData.data_files.length - 1 ? 'border-b border-[#252525]' : ''}`}>
-                      <span className="text-white text-xs">{f.filename}</span>
-                      <span className="text-[#b9b8ae] text-xs">{formatBytes(f.size_bytes)}</span>
+                    <div key={i} className={`flex items-center justify-between p-3 ${i < lerobotData.data_files.length - 1 ? 'border-b border-edge' : ''}`}>
+                      <span className="text-ink text-xs">{f.filename}</span>
+                      <span className="text-dim text-xs">{formatBytes(f.size_bytes)}</span>
                     </div>
                   ))}
                 </div>
               </div>
               {/* Video files */}
               <div>
-                <div className="flex items-center gap-2 mb-3"><Film className="w-4 h-4 text-[#55bde3]" /><h3 className="text-sm text-white uppercase">Video Files ({lerobotData.video_files.length})</h3></div>
-                <div className="bg-[#0d0d0d] border border-[#252525] rounded overflow-hidden max-h-[300px] overflow-y-auto">
-                  {lerobotData.video_files.length === 0 && <div className="p-4 text-[#b9b8ae] text-sm">No video files.</div>}
+                <div className="flex items-center gap-2 mb-3"><Film className="w-4 h-4 text-brand" /><h3 className="text-sm text-ink uppercase">Video Files ({lerobotData.video_files.length})</h3></div>
+                <div className="bg-surface border border-edge rounded overflow-hidden max-h-[300px] overflow-y-auto">
+                  {lerobotData.video_files.length === 0 && <div className="p-4 text-dim text-sm">No video files.</div>}
                   {lerobotData.video_files.map((f, i) => (
-                    <div key={i} className={`flex items-center justify-between p-3 ${i < lerobotData.video_files.length - 1 ? 'border-b border-[#252525]' : ''}`}>
-                      <span className="text-white text-xs">{f.filename}</span>
-                      <span className="text-[#b9b8ae] text-xs">{formatBytes(f.size_bytes)}</span>
+                    <div key={i} className={`flex items-center justify-between p-3 ${i < lerobotData.video_files.length - 1 ? 'border-b border-edge' : ''}`}>
+                      <span className="text-ink text-xs">{f.filename}</span>
+                      <span className="text-dim text-xs">{formatBytes(f.size_bytes)}</span>
                     </div>
                   ))}
                 </div>
@@ -562,14 +562,14 @@ export function DatasetDetailsPage() {
       {/* Convert Modal */}
       {showConvertModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[750px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
-            <div className="flex items-center justify-between p-5 border-b border-[#252525]">
-              <h2 className="text-lg text-white">Convert to LeRobot V2</h2>
+          <div className="bg-surface border border-edge w-full max-w-[750px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
+            <div className="flex items-center justify-between p-5 border-b border-edge">
+              <h2 className="text-lg text-ink">Convert to LeRobot V2</h2>
               {/* Close hidden during conversion: there is no way to halt
                   a running conversion from the UI by design, so the only
                   exits are completion or failure. */}
               {!(converting && !convertResult) && (
-                <button onClick={() => setShowConvertModal(false)} className="text-2xl text-[#b9b8ae] hover:text-white leading-none">x</button>
+                <button onClick={() => setShowConvertModal(false)} className="text-2xl text-dim hover:text-ink leading-none">x</button>
               )}
             </div>
 
@@ -586,53 +586,53 @@ export function DatasetDetailsPage() {
                     </div>
                   </div>
                 )}
-                <div className={`${convertResult.partial ? 'bg-[#0b0b0b] border-[#252525]' : 'bg-green-500/10 border-green-500'} border p-4 rounded`}>
-                  <div className={`${convertResult.partial ? 'text-white' : 'text-green-400'} text-sm font-bold mb-3`}>
+                <div className={`${convertResult.partial ? 'bg-app border-edge' : 'bg-green-500/10 border-green-500'} border p-4 rounded`}>
+                  <div className={`${convertResult.partial ? 'text-ink' : 'text-green-400'} text-sm font-bold mb-3`}>
                     {convertResult.partial ? 'Output Dataset' : 'Conversion Complete'}
                   </div>
                   <div className="space-y-3">
                     <div>
-                      <span className="text-[#b9b8ae] text-xs uppercase block mb-1">Output Path</span>
+                      <span className="text-dim text-xs uppercase block mb-1">Output Path</span>
                       <div className="flex items-start gap-2">
-                        <span className="text-white text-sm break-all">{convertResult.output_path}</span>
+                        <span className="text-ink text-sm break-all">{convertResult.output_path}</span>
                         <CopyButton text={convertResult.output_path} />
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
                       <div>
-                        <span className="text-[#b9b8ae] text-xs uppercase block mb-1">Dataset ID</span>
-                        <div className="flex items-center gap-1"><span className="text-white text-sm">{convertResult.dataset_id}</span><CopyButton text={convertResult.dataset_id} /></div>
+                        <span className="text-dim text-xs uppercase block mb-1">Dataset ID</span>
+                        <div className="flex items-center gap-1"><span className="text-ink text-sm">{convertResult.dataset_id}</span><CopyButton text={convertResult.dataset_id} /></div>
                       </div>
                       <div>
-                        <span className="text-[#b9b8ae] text-xs uppercase block mb-1">Repository</span>
-                        <span className="text-white text-sm">{convertResult.repository_id}</span>
+                        <span className="text-dim text-xs uppercase block mb-1">Repository</span>
+                        <span className="text-ink text-sm">{convertResult.repository_id}</span>
                       </div>
                       <div>
-                        <span className="text-[#b9b8ae] text-xs uppercase block mb-1">Size</span>
-                        <span className="text-white text-sm">{formatBytes(convertResult.output_size_bytes)}</span>
+                        <span className="text-dim text-xs uppercase block mb-1">Size</span>
+                        <span className="text-ink text-sm">{formatBytes(convertResult.output_size_bytes)}</span>
                       </div>
                       <div>
-                        <span className="text-[#b9b8ae] text-xs uppercase block mb-1">Files</span>
-                        <span className="text-white text-sm">{convertResult.output_files}</span>
+                        <span className="text-dim text-xs uppercase block mb-1">Files</span>
+                        <span className="text-ink text-sm">{convertResult.output_files}</span>
                       </div>
                     </div>
                   </div>
                 </div>
                 {convertLogs.length > 0 && (
-                  <details><summary className="text-[#b9b8ae] text-xs uppercase cursor-pointer">Conversion Log</summary>
-                    <div className="bg-[#0b0b0b] border border-[#252525] rounded p-3 mt-2 max-h-[200px] overflow-y-auto font-mono text-[11px] text-[#b9b8ae]">
+                  <details><summary className="text-dim text-xs uppercase cursor-pointer">Conversion Log</summary>
+                    <div className="bg-app border border-edge rounded p-3 mt-2 max-h-[200px] overflow-y-auto font-mono text-[11px] text-dim">
                       {convertLogs.map((l, i) => <div key={i}>{l}</div>)}
                     </div>
                   </details>
                 )}
-                <button onClick={() => { setShowConvertModal(false); setViewMode('lerobot'); }} className="bg-[#55bde3] text-white px-5 py-2 text-sm hover:bg-[#4aa8cc] w-full">
+                <button onClick={() => { setShowConvertModal(false); setViewMode('lerobot'); }} className="bg-brand text-white px-5 py-2 text-sm hover:bg-[#4aa8cc] w-full">
                   View LeRobot Dataset
                 </button>
               </div>
             ) : converting ? (
               <div className="p-5 space-y-4">
-                <div className="flex items-center gap-3 mb-2"><RefreshCw className="w-5 h-5 text-[#55bde3] animate-spin" /><span className="text-white text-sm">Converting...</span></div>
-                <div className="bg-[#0b0b0b] border border-[#252525] rounded p-3 h-[300px] overflow-y-auto font-mono text-[11px] text-[#b9b8ae]">
+                <div className="flex items-center gap-3 mb-2"><RefreshCw className="w-5 h-5 text-brand animate-spin" /><span className="text-ink text-sm">Converting...</span></div>
+                <div className="bg-app border border-edge rounded p-3 h-[300px] overflow-y-auto font-mono text-[11px] text-dim">
                   {convertLogs.length === 0 && <div>Starting converter...</div>}
                   {convertLogs.map((l, i) => <div key={i} className={l.toLowerCase().includes('error') ? 'text-red-400' : ''}>{l}</div>)}
                   <div ref={logsEndRef} />
@@ -643,29 +643,29 @@ export function DatasetDetailsPage() {
               <form onSubmit={handleConvert} className="p-5 space-y-4">
                 {convertError && <div className="bg-red-500/10 border border-red-500 text-red-400 text-sm p-3 rounded whitespace-pre-wrap max-h-[200px] overflow-y-auto">{convertError}</div>}
                 <div>
-                  <label className="block text-white text-xs mb-1">Output Root</label>
-                  <input type="text" value={convertForm.root} onChange={e => setConvertForm({...convertForm, root: e.target.value})} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]" />
+                  <label className="block text-ink text-xs mb-1">Output Root</label>
+                  <input type="text" value={convertForm.root} onChange={e => setConvertForm({...convertForm, root: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-white text-xs mb-1">Repository ID</label><input type="text" value={convertForm.repository_id} onChange={e => setConvertForm({...convertForm, repository_id: e.target.value})} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]" /></div>
-                  <div><label className="block text-white text-xs mb-1">Dataset ID</label><input type="text" value={convertForm.dataset_id} onChange={e => setConvertForm({...convertForm, dataset_id: e.target.value})} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]" /></div>
+                  <div><label className="block text-ink text-xs mb-1">Repository ID</label><input type="text" value={convertForm.repository_id} onChange={e => setConvertForm({...convertForm, repository_id: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
+                  <div><label className="block text-ink text-xs mb-1">Dataset ID</label><input type="text" value={convertForm.dataset_id} onChange={e => setConvertForm({...convertForm, dataset_id: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
                 </div>
-                <div><label className="block text-white text-xs mb-1">Task Name</label><input type="text" value={convertForm.task_name} onChange={e => setConvertForm({...convertForm, task_name: e.target.value})} placeholder="e.g. pick up the red block" className="w-full bg-[#0b0b0b] border border-[#252525] text-white placeholder:text-[#b9b8ae] px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]" /><div className="text-[#b9b8ae] text-[10px] mt-1">Used as the task prompt during training — leaving it blank makes the dataset hard to use downstream.</div></div>
+                <div><label className="block text-ink text-xs mb-1">Task Name</label><input type="text" value={convertForm.task_name} onChange={e => setConvertForm({...convertForm, task_name: e.target.value})} placeholder="e.g. pick up the red block" className="w-full bg-app border border-edge text-ink placeholder:text-dim px-3 py-2 text-sm focus:outline-none focus:border-brand" /><div className="text-dim text-[10px] mt-1">Used as the task prompt during training — leaving it blank makes the dataset hard to use downstream.</div></div>
                 <div className="grid grid-cols-3 gap-4">
-                  <div><label className="block text-white text-xs mb-1">Robot Name</label><input type="text" value={convertForm.robot_name} onChange={e => setConvertForm({...convertForm, robot_name: e.target.value})} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]" /></div>
-                  <div><label className="block text-white text-xs mb-1">FPS</label><input type="number" value={convertForm.fps} onChange={e => setConvertForm({...convertForm, fps: e.target.value})} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]" /></div>
-                  <div><label className="block text-white text-xs mb-1">Chunk Size</label><input type="number" value={convertForm.chunk_size} onChange={e => setConvertForm({...convertForm, chunk_size: e.target.value})} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]" /></div>
+                  <div><label className="block text-ink text-xs mb-1">Robot Name</label><input type="text" value={convertForm.robot_name} onChange={e => setConvertForm({...convertForm, robot_name: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
+                  <div><label className="block text-ink text-xs mb-1">FPS</label><input type="number" value={convertForm.fps} onChange={e => setConvertForm({...convertForm, fps: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
+                  <div><label className="block text-ink text-xs mb-1">Chunk Size</label><input type="number" value={convertForm.chunk_size} onChange={e => setConvertForm({...convertForm, chunk_size: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
                 </div>
                 <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-white text-xs mb-1">Encoder Threads</label><input type="number" value={convertForm.encoder_threads} onChange={e => setConvertForm({...convertForm, encoder_threads: e.target.value})} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]" /></div>
+                  <div><label className="block text-ink text-xs mb-1">Encoder Threads</label><input type="number" value={convertForm.encoder_threads} onChange={e => setConvertForm({...convertForm, encoder_threads: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
                   <div className="flex items-end gap-6 pb-1">
-                    <label className="flex items-center gap-2 text-sm text-white cursor-pointer"><input type="checkbox" checked={convertForm.encode_videos} onChange={e => setConvertForm({...convertForm, encode_videos: e.target.checked})} className="accent-[#55bde3]" />Videos</label>
-                    <label className="flex items-center gap-2 text-sm text-white cursor-pointer"><input type="checkbox" checked={convertForm.overwrite_existing} onChange={e => setConvertForm({...convertForm, overwrite_existing: e.target.checked})} className="accent-[#55bde3]" />Overwrite</label>
+                    <label className="flex items-center gap-2 text-sm text-ink cursor-pointer"><input type="checkbox" checked={convertForm.encode_videos} onChange={e => setConvertForm({...convertForm, encode_videos: e.target.checked})} className="accent-brand" />Videos</label>
+                    <label className="flex items-center gap-2 text-sm text-ink cursor-pointer"><input type="checkbox" checked={convertForm.overwrite_existing} onChange={e => setConvertForm({...convertForm, overwrite_existing: e.target.checked})} className="accent-brand" />Overwrite</label>
                   </div>
                 </div>
                 <div className="flex justify-end gap-3 pt-3">
-                  <button type="button" onClick={() => setShowConvertModal(false)} className="bg-[#0b0b0b] border border-[#252525] text-[#b9b8ae] px-5 py-2 text-sm hover:border-white hover:text-white transition-colors">Cancel</button>
-                  <button type="submit" className="bg-[#55bde3] text-white px-5 py-2 text-sm hover:bg-[#4aa8cc] transition-colors">Convert</button>
+                  <button type="button" onClick={() => setShowConvertModal(false)} className="bg-app border border-edge text-dim px-5 py-2 text-sm hover:border-white hover:text-ink transition-colors">Cancel</button>
+                  <button type="submit" className="bg-brand text-white px-5 py-2 text-sm hover:bg-[#4aa8cc] transition-colors">Convert</button>
                 </div>
               </form>
             )}

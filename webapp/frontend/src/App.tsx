@@ -8,6 +8,7 @@ import { DatasetDetailsPage } from "@/app/pages/DatasetDetailsPage";
 import { MonitorEpisodePage } from '@/app/pages/MonitorEpisodePage';
 import { DatasetsProvider } from '@/lib/DatasetsContext';
 import { HwStatusProvider } from '@/lib/HwStatusContext';
+import { ThemeProvider } from '@/lib/ThemeContext';
 
 
 const router = createBrowserRouter([
@@ -27,11 +28,13 @@ const router = createBrowserRouter([
 
 export function App() {
   return (
-    <DatasetsProvider>
-      <HwStatusProvider>
-        <RouterProvider router={router} />
-        <Toaster position="bottom-right" richColors />
-      </HwStatusProvider>
-    </DatasetsProvider>
+    <ThemeProvider>
+      <DatasetsProvider>
+        <HwStatusProvider>
+          <RouterProvider router={router} />
+          <Toaster position="bottom-right" richColors />
+        </HwStatusProvider>
+      </DatasetsProvider>
+    </ThemeProvider>
   );
 }

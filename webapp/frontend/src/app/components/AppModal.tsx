@@ -48,12 +48,12 @@ const VARIANTS = {
   warning: {
     Icon: AlertTriangle,
     iconColor: 'text-yellow-500',
-    confirmButton: 'bg-yellow-500 text-[#0d0d0d] hover:bg-yellow-600',
+    confirmButton: 'bg-yellow-500 text-app hover:bg-yellow-600',
   },
   info: {
     Icon: Info,
-    iconColor: 'text-[#55bde3]',
-    confirmButton: 'bg-white text-[#0d0d0d] hover:bg-[#e5e5e5]',
+    iconColor: 'text-brand',
+    confirmButton: 'bg-ink text-app hover:bg-dim',
   },
 } as const;
 
@@ -104,7 +104,7 @@ export function AppModal({
       {/* Stop propagation so clicks on the card don't bubble to the
           backdrop and dismiss the modal. */}
       <div
-        className="bg-[#0d0d0d] border border-[#252525] max-w-md w-full p-6"
+        className="bg-surface border border-edge max-w-md w-full p-6"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-4 mb-4">
@@ -115,11 +115,11 @@ export function AppModal({
           <div className="flex-1 min-w-0">
             <h2
               id="app-modal-title"
-              className="text-white text-base font-medium mb-1 break-words"
+              className="text-ink text-base font-medium mb-1 break-words"
             >
               {title}
             </h2>
-            <p className="text-[#b9b8ae] text-sm whitespace-pre-wrap break-words">
+            <p className="text-dim text-sm whitespace-pre-wrap break-words">
               {message}
             </p>
           </div>
@@ -129,7 +129,7 @@ export function AppModal({
             <button
               type="button"
               onClick={onCancel}
-              className="px-4 py-2 text-sm border border-[#252525] text-[#b9b8ae] hover:text-white hover:border-white transition-colors"
+              className="px-4 py-2 text-sm border border-edge text-dim hover:text-ink hover:border-white transition-colors"
             >
               Cancel
             </button>

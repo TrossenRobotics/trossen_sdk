@@ -185,7 +185,7 @@ export function DatasetsPage() {
       aria-pressed={sortKey === key}
       aria-label={`Sort by ${label}${sortKey === key ? (sortAsc ? ', ascending' : ', descending') : ''}`}
       className={`px-2 py-1 text-[10px] uppercase transition-colors rounded ${
-        sortKey === key ? 'text-white bg-[#252525]' : 'text-[#b9b8ae] hover:text-white'
+        sortKey === key ? 'text-ink bg-edge' : 'text-dim hover:text-ink'
       }`}>
       {label} {sortKey === key && (sortAsc ? '\u2191' : '\u2193')}
     </button>
@@ -195,8 +195,8 @@ export function DatasetsPage() {
     <div className="max-w-[1400px] mx-auto px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif]">
       <div className="mb-6">
         <div className="flex flex-col gap-[7px]">
-          <h1 className="text-xl text-white capitalize">Datasets</h1>
-          <div className="h-[1px] bg-[#252525] w-full" />
+          <h1 className="text-xl text-ink capitalize">Datasets</h1>
+          <div className="h-[1px] bg-edge w-full" />
         </div>
       </div>
 
@@ -206,7 +206,7 @@ export function DatasetsPage() {
           <div className="flex-1 text-red-200">{loadErrorMessage}</div>
           <button
             onClick={refreshDatasets}
-            className="text-red-300 hover:text-white underline underline-offset-2 text-xs"
+            className="text-red-300 hover:text-ink underline underline-offset-2 text-xs"
           >
             Retry
           </button>
@@ -216,16 +216,16 @@ export function DatasetsPage() {
       {/* Controls row */}
       <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
         {/* Toggle */}
-        <div className="flex items-center gap-1 bg-[#252525] p-1 rounded">
+        <div className="flex items-center gap-1 bg-edge p-1 rounded">
           <button onClick={() => setViewMode('mcap')}
             className={`px-4 py-1.5 text-xs uppercase transition-colors rounded flex items-center gap-1.5 ${
-              viewMode === 'mcap' ? 'bg-[#55bde3] text-white' : 'text-[#b9b8ae] hover:text-white'
+              viewMode === 'mcap' ? 'bg-brand text-white' : 'text-dim hover:text-white'
             }`}>
             <Database className="w-3.5 h-3.5" />MCAP ({mcapList.length})
           </button>
           <button onClick={() => setViewMode('lerobot')}
             className={`px-4 py-1.5 text-xs uppercase transition-colors rounded flex items-center gap-1.5 ${
-              viewMode === 'lerobot' ? 'bg-[#55bde3] text-white' : 'text-[#b9b8ae] hover:text-white'
+              viewMode === 'lerobot' ? 'bg-brand text-white' : 'text-dim hover:text-white'
             }`}>
             <Film className="w-3.5 h-3.5" />LeRobot ({lerobotList.length})
           </button>
@@ -239,11 +239,11 @@ export function DatasetsPage() {
             onChange={e => setFilterText(e.target.value)}
             placeholder="Filter by name..."
             aria-label="Filter datasets by name"
-            className="bg-[#0b0b0b] border border-[#252525] text-white placeholder:text-[#b9b8ae]/50 px-3 py-1.5 text-xs w-48 focus:outline-none focus:border-[#55bde3]"
+            className="bg-app border border-edge text-ink placeholder:text-dim/50 px-3 py-1.5 text-xs w-48 focus:outline-none focus:border-brand"
           />
           {/* Sort */}
           <div className="flex items-center gap-1">
-            <ArrowUpDown className="w-3.5 h-3.5 text-[#b9b8ae]" />
+            <ArrowUpDown className="w-3.5 h-3.5 text-dim" />
             {sortBtn('name', 'Name')}
             {sortBtn('date', 'Date')}
             {sortBtn('episodes', 'Eps')}
@@ -252,14 +252,14 @@ export function DatasetsPage() {
           <button
             onClick={refreshDatasets}
             disabled={datasetsLoading}
-            className="text-[#b9b8ae] hover:text-white transition-colors p-1 disabled:opacity-40 disabled:cursor-wait"
+            className="text-dim hover:text-ink transition-colors p-1 disabled:opacity-40 disabled:cursor-wait"
             title="Refresh dataset list"
             aria-label="Refresh dataset list"
           >
             <RefreshCw className={`w-4 h-4 ${datasetsLoading ? 'animate-spin' : ''}`} />
           </button>
           {/* Settings */}
-          <button onClick={() => setShowSettings(true)} className="text-[#b9b8ae] hover:text-white transition-colors p-1" title="Dataset directory settings">
+          <button onClick={() => setShowSettings(true)} className="text-dim hover:text-ink transition-colors p-1" title="Dataset directory settings">
             <Settings className="w-4 h-4" />
           </button>
         </div>
@@ -267,14 +267,14 @@ export function DatasetsPage() {
 
       {/* MCAP list */}
       {viewMode === 'mcap' && (
-        <div className="bg-[#0d0d0d] border-t border-[#252525]">
-          {mcapLoading && <div className="py-10 text-center text-[#b9b8ae] text-sm">Loading MCAP datasets...</div>}
+        <div className="bg-surface border-t border-edge">
+          {mcapLoading && <div className="py-10 text-center text-dim text-sm">Loading MCAP datasets...</div>}
           {!mcapLoading && sortedMcap().length === 0 && (
-            <div className="py-10 text-center text-[#b9b8ae] text-sm">
+            <div className="py-10 text-center text-dim text-sm">
               {filterText ? 'No datasets match filter.' : (
                 <>
                   No MCAP datasets yet.{' '}
-                  <Link to="/record" className="text-[#55bde3] hover:underline">Record a session</Link>
+                  <Link to="/record" className="text-brand hover:underline">Record a session</Link>
                   {' '}to create one.
                 </>
               )}
@@ -282,30 +282,30 @@ export function DatasetsPage() {
           )}
           {!mcapLoading && sortedMcap().map((dataset) => (
             <div key={dataset.id}>
-              <div className="flex items-center hover:bg-[#252525]/30 transition-colors">
+              <div className="flex items-center hover:bg-edge/30 transition-colors">
                 <Link to={`/datasets/${dataset.id}`} className="flex items-center gap-5 py-5 px-4 flex-1 min-w-0">
                   <div className="w-12 h-12 flex items-center justify-center shrink-0">
-                    <Database className="w-8 h-8 text-[#d9d9d9]" />
+                    <Database className="w-8 h-8 text-dim" />
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="text-base text-white truncate">{dataset.id}</h3>
-                    <div className="flex items-center gap-3 text-xs text-[#b9b8ae] mt-1">
+                    <h3 className="text-base text-ink truncate">{dataset.id}</h3>
+                    <div className="flex items-center gap-3 text-xs text-dim mt-1">
                       <span>{dataset.episode_count} eps</span>
                     </div>
                   </div>
-                  <ChevronRight className="w-5 h-5 text-[#55bde3] shrink-0" />
+                  <ChevronRight className="w-5 h-5 text-brand shrink-0" />
                 </Link>
                 <button
                   onClick={() => handleDeleteMcap(dataset)}
                   disabled={deletingId === dataset.id}
-                  className="text-[#b9b8ae] hover:text-red-400 disabled:opacity-40 disabled:cursor-wait transition-colors p-3 mr-2"
+                  className="text-dim hover:text-red-400 disabled:opacity-40 disabled:cursor-wait transition-colors p-3 mr-2"
                   title={`Delete ${dataset.id}`}
                   aria-label={`Delete ${dataset.id}`}
                 >
                   <Trash2 className="w-4 h-4" />
                 </button>
               </div>
-              <div className="h-[1px] bg-[#252525] w-full" />
+              <div className="h-[1px] bg-edge w-full" />
             </div>
           ))}
         </div>
@@ -313,17 +313,17 @@ export function DatasetsPage() {
 
       {/* LeRobot list */}
       {viewMode === 'lerobot' && (
-        <div className="bg-[#0d0d0d] border-t border-[#252525]">
-          {lerobotLoading && <div className="py-10 text-center text-[#b9b8ae] text-sm">Loading LeRobot datasets...</div>}
+        <div className="bg-surface border-t border-edge">
+          {lerobotLoading && <div className="py-10 text-center text-dim text-sm">Loading LeRobot datasets...</div>}
           {!lerobotLoading && sortedLerobot().length === 0 && (
-            <div className="py-10 text-center text-[#b9b8ae] text-sm">
+            <div className="py-10 text-center text-dim text-sm">
               {filterText ? 'No datasets match filter.' : (
                 <>
                   No LeRobot datasets yet.{' '}
                   <button
                     type="button"
                     onClick={() => setViewMode('mcap')}
-                    className="text-[#55bde3] hover:underline"
+                    className="text-brand hover:underline"
                   >
                     Pick an MCAP dataset
                   </button>
@@ -336,36 +336,36 @@ export function DatasetsPage() {
             const fullId = `${dataset.repository_id}/${dataset.id}`;
             return (
               <div key={fullId}>
-                <div className="flex items-center hover:bg-[#252525]/30 transition-colors">
+                <div className="flex items-center hover:bg-edge/30 transition-colors">
                   <Link to={`/datasets/${dataset.id}?view=lerobot`} className="flex items-center gap-5 py-5 px-4 flex-1 min-w-0">
                     <div className="w-12 h-12 flex items-center justify-center shrink-0">
-                      <Film className="w-8 h-8 text-[#55bde3]" />
+                      <Film className="w-8 h-8 text-brand" />
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-1.5">
-                        <span className="text-[#b9b8ae] text-xs">{dataset.repository_id}/</span>
-                        <h3 className="text-base text-white truncate">{dataset.id}</h3>
+                        <span className="text-dim text-xs">{dataset.repository_id}/</span>
+                        <h3 className="text-base text-ink truncate">{dataset.id}</h3>
                       </div>
-                      <div className="flex items-center gap-3 text-xs text-[#b9b8ae] mt-1">
-                        {dataset.robot_type && <><span>{dataset.robot_type}</span><div className="w-1 h-1 bg-[#b9b8ae] rounded-full" /></>}
+                      <div className="flex items-center gap-3 text-xs text-dim mt-1">
+                        {dataset.robot_type && <><span>{dataset.robot_type}</span><div className="w-1 h-1 bg-dim rounded-full" /></>}
                         <span>{dataset.total_episodes} eps</span>
-                        <div className="w-1 h-1 bg-[#b9b8ae] rounded-full" />
+                        <div className="w-1 h-1 bg-dim rounded-full" />
                         <span>{dataset.total_frames} frames</span>
                       </div>
                     </div>
-                    <ChevronRight className="w-5 h-5 text-[#55bde3] shrink-0" />
+                    <ChevronRight className="w-5 h-5 text-brand shrink-0" />
                   </Link>
                   <button
                     onClick={() => handleDeleteLerobot(dataset)}
                     disabled={deletingId === fullId}
-                    className="text-[#b9b8ae] hover:text-red-400 disabled:opacity-40 disabled:cursor-wait transition-colors p-3 mr-2"
+                    className="text-dim hover:text-red-400 disabled:opacity-40 disabled:cursor-wait transition-colors p-3 mr-2"
                     title={`Delete ${fullId}`}
                     aria-label={`Delete ${fullId}`}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
                 </div>
-                <div className="h-[1px] bg-[#252525] w-full" />
+                <div className="h-[1px] bg-edge w-full" />
               </div>
             );
           })}
@@ -375,17 +375,17 @@ export function DatasetsPage() {
       {/* Stats */}
       <div className="mt-10">
         <div className="flex flex-col gap-[7px] mb-4">
-          <h2 className="text-base text-white capitalize">Stats</h2>
-          <div className="h-[1px] bg-[#252525] w-full" />
+          <h2 className="text-base text-ink capitalize">Stats</h2>
+          <div className="h-[1px] bg-edge w-full" />
         </div>
         <div className="flex flex-col gap-2">
           {[['Total Datasets', totalCount], ['Total Episodes', totalEpisodes]].map(([label, val], i) => (
             <div key={i}>
               <div className="flex justify-between items-center text-sm">
-                <span className="text-[#b9b8ae]">{label}</span>
-                <span className="text-white">{val}</span>
+                <span className="text-dim">{label}</span>
+                <span className="text-ink">{val}</span>
               </div>
-              <div className="h-[1px] bg-[#252525] w-full mt-2" />
+              <div className="h-[1px] bg-edge w-full mt-2" />
             </div>
           ))}
         </div>
@@ -394,27 +394,27 @@ export function DatasetsPage() {
       {/* Settings modal */}
       {showSettings && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[500px] font-['JetBrains_Mono',sans-serif]">
-            <div className="flex items-center justify-between p-5 border-b border-[#252525]">
-              <h2 className="text-lg text-white">Dataset Directories</h2>
-              <button onClick={() => setShowSettings(false)} className="text-[#b9b8ae] hover:text-white"><X className="w-5 h-5" /></button>
+          <div className="bg-surface border border-edge w-full max-w-[500px] font-['JetBrains_Mono',sans-serif]">
+            <div className="flex items-center justify-between p-5 border-b border-edge">
+              <h2 className="text-lg text-ink">Dataset Directories</h2>
+              <button onClick={() => setShowSettings(false)} className="text-dim hover:text-ink"><X className="w-5 h-5" /></button>
             </div>
             <div className="p-5 space-y-4">
               <div>
-                <label className="block text-white text-xs mb-2">MCAP Dataset Root</label>
+                <label className="block text-ink text-xs mb-2">MCAP Dataset Root</label>
                 <input type="text" value={mcapRoot} onChange={e => setMcapRoot(e.target.value)}
-                  className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]" />
-                <div className="text-[#b9b8ae] text-[10px] mt-1">Directory scanned for .mcap episode folders</div>
+                  className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+                <div className="text-dim text-[10px] mt-1">Directory scanned for .mcap episode folders</div>
               </div>
               <div>
-                <label className="block text-white text-xs mb-2">LeRobot Dataset Root</label>
+                <label className="block text-ink text-xs mb-2">LeRobot Dataset Root</label>
                 <input type="text" value={lerobotRoot} onChange={e => setLerobotRoot(e.target.value)}
-                  className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]" />
-                <div className="text-[#b9b8ae] text-[10px] mt-1">Directory scanned for LeRobot V2 datasets</div>
+                  className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" />
+                <div className="text-dim text-[10px] mt-1">Directory scanned for LeRobot V2 datasets</div>
               </div>
               <div className="flex justify-end gap-3 pt-2">
-                <button onClick={() => setShowSettings(false)} className="text-[#b9b8ae] px-4 py-2 text-sm hover:text-white transition-colors">Cancel</button>
-                <button onClick={saveSettings} className="bg-[#55bde3] text-white px-4 py-2 text-sm hover:bg-[#4aa8cc] transition-colors">Apply & Save</button>
+                <button onClick={() => setShowSettings(false)} className="text-dim px-4 py-2 text-sm hover:text-ink transition-colors">Cancel</button>
+                <button onClick={saveSettings} className="bg-brand text-white px-4 py-2 text-sm hover:bg-[#4aa8cc] transition-colors">Apply & Save</button>
               </div>
             </div>
           </div>

@@ -1189,42 +1189,42 @@ export function ConfigurationPage() {
     return (
       <div className="grid grid-cols-3 portrait:grid-cols-2 gap-[12px] text-[12px]">
         <div>
-          <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Resolution</div>
-          <div className="text-white">{camera.width}x{camera.height} @ {camera.fps}fps</div>
+          <div className="text-dim text-[9px] uppercase mb-[4px]">Resolution</div>
+          <div className="text-ink">{camera.width}x{camera.height} @ {camera.fps}fps</div>
         </div>
         {camera.type === 'realsense_camera' && (
           <>
             <div>
-              <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Serial Number</div>
-              <div className="text-white">{camera.serial_number}</div>
+              <div className="text-dim text-[9px] uppercase mb-[4px]">Serial Number</div>
+              <div className="text-ink">{camera.serial_number}</div>
             </div>
             <div>
-              <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Depth Enabled</div>
-              <div className="text-white">{camera.use_depth ? 'Yes' : 'No'}</div>
+              <div className="text-dim text-[9px] uppercase mb-[4px]">Depth Enabled</div>
+              <div className="text-ink">{camera.use_depth ? 'Yes' : 'No'}</div>
             </div>
           </>
         )}
         {camera.type === 'opencv_camera' && (
           <>
             <div>
-              <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Device Index</div>
-              <div className="text-white">{camera.device_index}</div>
+              <div className="text-dim text-[9px] uppercase mb-[4px]">Device Index</div>
+              <div className="text-ink">{camera.device_index}</div>
             </div>
             <div>
-              <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Backend / Warmup</div>
-              <div className="text-white">{camera.backend} / {camera.warmup_frames}f</div>
+              <div className="text-dim text-[9px] uppercase mb-[4px]">Backend / Warmup</div>
+              <div className="text-ink">{camera.backend} / {camera.warmup_frames}f</div>
             </div>
           </>
         )}
         {camera.type === 'zed_camera' && (
           <>
             <div>
-              <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Serial Number</div>
-              <div className="text-white">{camera.serial_number}</div>
+              <div className="text-dim text-[9px] uppercase mb-[4px]">Serial Number</div>
+              <div className="text-ink">{camera.serial_number}</div>
             </div>
             <div>
-              <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Depth Mode</div>
-              <div className="text-white capitalize">{camera.depth_mode}</div>
+              <div className="text-dim text-[9px] uppercase mb-[4px]">Depth Mode</div>
+              <div className="text-ink capitalize">{camera.depth_mode}</div>
             </div>
           </>
         )}
@@ -1236,20 +1236,20 @@ export function ConfigurationPage() {
     return (
       <div className="grid grid-cols-4 portrait:grid-cols-2 gap-[12px] text-[12px]">
         <div>
-          <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">IP Address</div>
-          <div className="text-white">{arm.ip_address}</div>
+          <div className="text-dim text-[9px] uppercase mb-[4px]">IP Address</div>
+          <div className="text-ink">{arm.ip_address}</div>
         </div>
         <div>
-          <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Model</div>
-          <div className="text-white">{arm.model}</div>
+          <div className="text-dim text-[9px] uppercase mb-[4px]">Model</div>
+          <div className="text-ink">{arm.model}</div>
         </div>
         <div>
-          <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">End Effector</div>
-          <div className="text-white">{arm.end_effector}</div>
+          <div className="text-dim text-[9px] uppercase mb-[4px]">End Effector</div>
+          <div className="text-ink">{arm.end_effector}</div>
         </div>
         <div>
-          <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Role</div>
-          <div className={`capitalize ${arm.role === 'leader' ? 'text-[#55bde3]' : 'text-white'}`}>
+          <div className="text-dim text-[9px] uppercase mb-[4px]">Role</div>
+          <div className={`capitalize ${arm.role === 'leader' ? 'text-brand' : 'text-ink'}`}>
             {arm.role}
           </div>
         </div>
@@ -1261,12 +1261,12 @@ export function ConfigurationPage() {
     return (
       <div className="grid grid-cols-2 gap-[12px] text-[12px]">
         <div>
-          <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Reset Odometry</div>
-          <div className="text-white">{base.reset_odometry ? 'Enabled' : 'Disabled'}</div>
+          <div className="text-dim text-[9px] uppercase mb-[4px]">Reset Odometry</div>
+          <div className="text-ink">{base.reset_odometry ? 'Enabled' : 'Disabled'}</div>
         </div>
         <div>
-          <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Enable Torque</div>
-          <div className="text-white">{base.enable_torque ? 'Enabled' : 'Disabled'}</div>
+          <div className="text-dim text-[9px] uppercase mb-[4px]">Enable Torque</div>
+          <div className="text-ink">{base.enable_torque ? 'Enabled' : 'Disabled'}</div>
         </div>
       </div>
     );
@@ -1278,16 +1278,16 @@ export function ConfigurationPage() {
       {/* Page Title */}
       <div className="mb-[35px]">
         <div className="flex flex-col gap-[7px]">
-          <h1 className="text-[22px] text-white capitalize leading-[22.4px]">Configuration</h1>
-          <div className="h-[1px] bg-[#252525] w-full" />
+          <h1 className="text-[22px] text-ink capitalize leading-[22.4px]">Configuration</h1>
+          <div className="h-[1px] bg-edge w-full" />
         </div>
       </div>
 
       {/* Unsaved-changes banner — sticky so it stays visible while the operator
           scrolls the hardware list, making "you must save" unmissable. */}
       {!isLoading && !loadError && hasUnsavedChanges && (
-        <div className="sticky top-0 z-40 mb-[20px] flex items-center justify-between gap-3 border border-[#55bde3] bg-[#55bde3]/10 px-[16px] py-[10px]">
-          <div className="flex items-center gap-[8px] text-[#55bde3] text-[13px]">
+        <div className="sticky top-0 z-40 mb-[20px] flex items-center justify-between gap-3 border border-brand bg-brand/10 px-[16px] py-[10px]">
+          <div className="flex items-center gap-[8px] text-brand text-[13px]">
             <AlertTriangle className="w-[16px] h-[16px] shrink-0" />
             <span>You have unsaved configuration changes — don't forget to save.</span>
           </div>
@@ -1296,7 +1296,7 @@ export function ConfigurationPage() {
               onClick={handleDiscardChanges}
               disabled={isSaving || mutationsLocked}
               title={mutationsLocked ? lockedTitle : ''}
-              className="border border-[#252525] text-[#b9b8ae] hover:border-white hover:text-white px-[14px] py-[6px] text-[12px] uppercase disabled:opacity-50 disabled:cursor-not-allowed"
+              className="border border-edge text-dim hover:border-white hover:text-ink px-[14px] py-[6px] text-[12px] uppercase disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Discard
             </button>
@@ -1304,7 +1304,7 @@ export function ConfigurationPage() {
               onClick={handleSave}
               disabled={isSaving || mutationsLocked}
               title={mutationsLocked ? lockedTitle : ''}
-              className="bg-[#55bde3] text-white hover:bg-[#4aa8cc] px-[14px] py-[6px] text-[12px] uppercase flex items-center gap-[6px] disabled:opacity-50 disabled:cursor-not-allowed"
+              className="bg-brand text-white hover:bg-[#4aa8cc] px-[14px] py-[6px] text-[12px] uppercase flex items-center gap-[6px] disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSaving ? <Loader2 className="w-[14px] h-[14px] animate-spin" /> : <Save className="w-[14px] h-[14px]" />}
               {isSaving ? 'Saving…' : 'Save Changes'}
@@ -1317,8 +1317,8 @@ export function ConfigurationPage() {
       {isLoading && (
         <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
-            <Loader2 className="w-[32px] h-[32px] text-[#55bde3] mx-auto mb-[16px] animate-spin" />
-            <div className="text-[#b9b8ae] text-[14px]">Loading hardware systems...</div>
+            <Loader2 className="w-[32px] h-[32px] text-brand mx-auto mb-[16px] animate-spin" />
+            <div className="text-dim text-[14px]">Loading hardware systems...</div>
           </div>
         </div>
       )}
@@ -1330,7 +1330,7 @@ export function ConfigurationPage() {
             <div className="text-red-500 text-[14px] mb-[8px]">{loadError}</div>
             <button
               onClick={() => window.location.reload()}
-              className="text-[#55bde3] text-[12px] underline hover:text-white transition-colors"
+              className="text-brand text-[12px] underline hover:text-ink transition-colors"
             >
               Retry
             </button>
@@ -1343,8 +1343,8 @@ export function ConfigurationPage() {
       <div className="mb-[30px]">
         <div className="flex items-center justify-between mb-[16px]">
           <div className="flex items-center gap-[8px]">
-            <Server className="w-[18px] h-[18px] text-[#55bde3]" />
-            <h2 className="text-[18px] text-white uppercase">Hardware System</h2>
+            <Server className="w-[18px] h-[18px] text-brand" />
+            <h2 className="text-[18px] text-ink uppercase">Hardware System</h2>
           </div>
           <div className="flex items-center gap-[8px]">
             {/* Save button — visible when there are unsaved changes */}
@@ -1353,7 +1353,7 @@ export function ConfigurationPage() {
                 onClick={handleSave}
                 disabled={isSaving || mutationsLocked}
                 title={mutationsLocked ? lockedTitle : ''}
-                className="bg-[#55bde3] text-white px-[14px] py-[8px] flex items-center justify-center hover:bg-[#4aa8cc] disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-[12px] uppercase"
+                className="bg-brand text-white px-[14px] py-[8px] flex items-center justify-center hover:bg-[#4aa8cc] disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-[12px] uppercase"
               >
                 {isSaving ? (
                   <Loader2 className="w-[14px] h-[14px] mr-[6px] animate-spin" />
@@ -1369,7 +1369,7 @@ export function ConfigurationPage() {
                 onClick={handleResetToDefault}
                 disabled={mutationsLocked}
                 title={mutationsLocked ? lockedTitle : ''}
-                className="bg-[#0b0b0b] border border-[#252525] text-[#b9b8ae] px-[14px] py-[8px] flex items-center justify-center hover:border-yellow-500 hover:text-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-[#252525] disabled:hover:text-[#b9b8ae] transition-colors text-[12px] uppercase"
+                className="bg-app border border-edge text-dim px-[14px] py-[8px] flex items-center justify-center hover:border-yellow-500 hover:text-yellow-500 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-edge disabled:hover:text-dim transition-colors text-[12px] uppercase"
               >
                 <RotateCcw className="w-[14px] h-[14px] mr-[6px]" />
                 Reset to Default
@@ -1380,8 +1380,8 @@ export function ConfigurationPage() {
 
         {/* Status legend — the per-card badges use colour + a single word;
             spell out what each means so "Error" vs "Untested" isn't guessed. */}
-        <div className="flex flex-wrap items-center gap-x-[16px] gap-y-[6px] mb-[12px] text-[10px] text-[#b9b8ae]">
-          <span className="flex items-center gap-[5px]"><span className="w-[6px] h-[6px] rounded-full bg-[#55bde3]" />Ready — test passed, can record</span>
+        <div className="flex flex-wrap items-center gap-x-[16px] gap-y-[6px] mb-[12px] text-[10px] text-dim">
+          <span className="flex items-center gap-[5px]"><span className="w-[6px] h-[6px] rounded-full bg-brand" />Ready — test passed, can record</span>
           <span className="flex items-center gap-[5px]"><span className="w-[6px] h-[6px] rounded-full bg-yellow-500" />Untested — run a Hardware Test first</span>
           <span className="flex items-center gap-[5px]"><span className="w-[6px] h-[6px] rounded-full bg-red-500" />Error — last test failed</span>
           <span className="flex items-center gap-[5px]"><span className="w-[6px] h-[6px] rounded-full bg-green-500" />Active — recording now</span>
@@ -1417,8 +1417,8 @@ export function ConfigurationPage() {
               dotColor = 'bg-green-500';
             } else if (sysHwStatus === 'ready') {
               badgeLabel = 'Ready';
-              badgeColor = 'bg-[#55bde3]/20 border-[#55bde3] text-[#55bde3]';
-              dotColor = 'bg-[#55bde3]';
+              badgeColor = 'bg-brand/20 border-brand text-brand';
+              dotColor = 'bg-brand';
             } else if (sysHwStatus === 'error') {
               badgeLabel = 'Error';
               badgeColor = 'bg-red-500/20 border-red-500 text-red-500';
@@ -1439,7 +1439,7 @@ export function ConfigurationPage() {
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelectedSystem(system.id); }
                 }}
-                className={`p-[16px] border transition-all text-left relative cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-[#55bde3] ${
+                className={`p-[16px] border transition-all text-left relative cursor-pointer focus:outline-none focus-visible:ring-2 focus-visible:ring-brand ${
                   // Errored systems are tinted red across the whole card so they
                   // can't be missed at a glance (TDS-160) — red is in addition to
                   // the Error badge + text, never the only signal.
@@ -1448,8 +1448,8 @@ export function ConfigurationPage() {
                       ? 'bg-red-500/15 border-red-500 border-2'
                       : 'bg-red-500/10 border-red-500 hover:border-red-400'
                     : selectedSystem === system.id
-                      ? 'bg-[#252525] border-[#55bde3] border-2'
-                      : 'bg-[#0d0d0d] border-[#252525] hover:border-[#b9b8ae]'
+                      ? 'bg-edge border-brand border-2'
+                      : 'bg-surface border-edge hover:border-dim'
                 }`}
               >
                 {badgeLabel && (
@@ -1459,25 +1459,25 @@ export function ConfigurationPage() {
                   </div>
                 )}
 
-                <div className="text-white text-[14px] font-bold mb-[6px] truncate pr-[50px]">{system.name}</div>
-                <div className="text-[#b9b8ae] text-[11px] mb-[8px] line-clamp-2 min-h-[32px]">{system.description}</div>
+                <div className="text-ink text-[14px] font-bold mb-[6px] truncate pr-[50px]">{system.name}</div>
+                <div className="text-dim text-[11px] mb-[8px] line-clamp-2 min-h-[32px]">{system.description}</div>
                 <div className="flex items-center justify-between mt-[8px]">
-                  <div className="text-[#55bde3] text-[10px]">{system.hardware.length} devices</div>
+                  <div className="text-brand text-[10px]">{system.hardware.length} devices</div>
                   <div className="flex items-center gap-[4px]">
                     <button
                       onClick={(e) => { e.stopPropagation(); runHardwareTest(system.id); }}
                       disabled={hwTesting !== null}
                       className={`px-[12px] py-[6px] text-[11px] font-bold uppercase transition-colors rounded flex items-center gap-[5px] ${
                         hwTesting === system.id
-                          ? 'bg-[#55bde3]/30 text-[#55bde3] cursor-wait'
+                          ? 'bg-brand/30 text-brand cursor-wait'
                           : hwTesting !== null
-                            ? 'bg-[#55bde3]/40 text-white/60 cursor-not-allowed'
+                            ? 'bg-brand/40 text-ink/60 cursor-not-allowed'
                             : sysHwStatus === 'ready'
                               // Already passing — quieter style so the
                               // button doesn't compete with the Ready
                               // badge, but still clickable for re-tests.
-                              ? 'bg-transparent border border-[#252525] text-[#b9b8ae] hover:border-[#55bde3] hover:text-white'
-                              : 'bg-[#55bde3] hover:bg-[#4aa8cc] text-white'
+                              ? 'bg-transparent border border-edge text-dim hover:border-brand hover:text-ink'
+                              : 'bg-brand hover:bg-[#4aa8cc] text-white'
                       }`}
                       title={sysHwStatus === 'ready' ? 'Re-test hardware connectivity' : 'Test hardware connectivity'}
                     >
@@ -1489,9 +1489,9 @@ export function ConfigurationPage() {
                       disabled={mutationsLocked}
                       aria-label={`Edit ${system.name}`}
                       title={mutationsLocked ? lockedTitle : 'Edit system'}
-                      className="p-[4px] hover:bg-[#55bde3] bg-[#0b0b0b] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#0b0b0b] transition-colors rounded"
+                      className="p-[4px] hover:bg-brand bg-app disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-app transition-colors rounded"
                     >
-                      <Edit className="w-[12px] h-[12px] text-[#b9b8ae] hover:text-white" />
+                      <Edit className="w-[12px] h-[12px] text-dim hover:text-ink" />
                     </button>
                   </div>
                 </div>
@@ -1510,7 +1510,7 @@ export function ConfigurationPage() {
           // red on fail. Same colour family as the badges so the
           // banner matches the system card's verdict at a glance.
           const palette = inProgress
-            ? { bg: 'bg-[#55bde3]/10', border: 'border-[#55bde3]', text: 'text-[#55bde3]' }
+            ? { bg: 'bg-brand/10', border: 'border-brand', text: 'text-brand' }
             : passed
               ? { bg: 'bg-green-500/10', border: 'border-green-500', text: 'text-green-500' }
               : { bg: 'bg-red-500/10', border: 'border-red-500', text: 'text-red-500' };
@@ -1543,26 +1543,26 @@ export function ConfigurationPage() {
                         Retry test
                       </button>
                     )}
-                    <button onClick={() => setDryRunResult(null)} className="text-[#b9b8ae] hover:text-white text-[16px]">x</button>
+                    <button onClick={() => setDryRunResult(null)} className="text-dim hover:text-ink text-[16px]">x</button>
                   </div>
                 )}
               </div>
-              <div className="text-white text-[11px] mb-[6px]">{hwTestResult.message}</div>
+              <div className="text-ink text-[11px] mb-[6px]">{hwTestResult.message}</div>
               {/* Output panel only after the test finishes — during
                   the run the user just sees the spinner + status. We
                   still accumulate progress events live so the panel
                   has the full log to render on completion. */}
               {!inProgress && (
                 <>
-                  <div className="text-[#b9b8ae] text-[10px] uppercase mb-[6px]">
+                  <div className="text-dim text-[10px] uppercase mb-[6px]">
                     Output ({hwTestResult.output.length} {hwTestResult.output.length === 1 ? 'line' : 'lines'})
                   </div>
                   <div
                     ref={outputPanelRef}
-                    className="bg-[#0b0b0b] border border-[#252525] p-[8px] rounded h-[400px] overflow-y-auto font-mono text-[10px] text-[#b9b8ae] whitespace-pre-wrap"
+                    className="bg-app border border-edge p-[8px] rounded h-[400px] overflow-y-auto font-mono text-[10px] text-dim whitespace-pre-wrap"
                   >
                     {hwTestResult.output.length === 0 ? (
-                      <div className="text-[#666]">No output captured.</div>
+                      <div className="text-dim">No output captured.</div>
                     ) : (
                       hwTestResult.output.map((line, i) => (
                         <div
@@ -1595,39 +1595,39 @@ export function ConfigurationPage() {
               onMouseEnter={() => setHoveredSystem(selectedSystemData.id)}
               onMouseLeave={() => setHoveredSystem(null)}
             >
-              <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Hardware System</div>
-              <h2 className="text-[16px] text-white cursor-help border-b border-dashed border-[#55bde3]/50 inline-block">{selectedSystemData.name}</h2>
+              <div className="text-dim text-[9px] uppercase mb-[4px]">Hardware System</div>
+              <h2 className="text-[16px] text-ink cursor-help border-b border-dashed border-brand/50 inline-block">{selectedSystemData.name}</h2>
 
               {/* Hover Tooltip */}
               {hoveredSystem === selectedSystemData.id && (
-                <div className="absolute top-full left-0 mt-[8px] bg-[#252525] border-2 border-[#55bde3] p-[16px] w-[500px] max-w-[90vw] z-[100] shadow-2xl">
-                  <div className="text-white text-[12px] font-bold mb-[8px]">{selectedSystemData.name}</div>
+                <div className="absolute top-full left-0 mt-[8px] bg-edge border-2 border-brand p-[16px] w-[500px] max-w-[90vw] z-[100] shadow-2xl">
+                  <div className="text-ink text-[12px] font-bold mb-[8px]">{selectedSystemData.name}</div>
                   {selectedSystemData.description && (
-                    <div className="text-[#b9b8ae] text-[11px] mb-[12px]">{selectedSystemData.description}</div>
+                    <div className="text-dim text-[11px] mb-[12px]">{selectedSystemData.description}</div>
                   )}
 
-                  <div className="border-t border-[#0d0d0d] pt-[12px] space-y-[8px]">
-                    <div className="text-[#55bde3] text-[10px] uppercase font-bold mb-[8px]">Hardware Overview</div>
+                  <div className="border-t border-surface pt-[12px] space-y-[8px]">
+                    <div className="text-brand text-[10px] uppercase font-bold mb-[8px]">Hardware Overview</div>
 
                     {selectedSystemData.hardware.length === 0 ? (
-                      <div className="text-[#b9b8ae] text-[11px]">No hardware configured</div>
+                      <div className="text-dim text-[11px]">No hardware configured</div>
                     ) : (
                       <div className="space-y-[6px]">
                         {selectedSystemData.hardware.map(hw => (
-                          <div key={hw.id} className="flex items-center justify-between text-[11px] bg-[#0d0d0d] p-[8px]">
+                          <div key={hw.id} className="flex items-center justify-between text-[11px] bg-surface p-[8px]">
                             <div className="flex items-center gap-[8px]">
-                              <div className="text-white font-mono">{hw.name}</div>
-                              <div className="text-[#b9b8ae]">({hw.type.replace('_', ' ')})</div>
+                              <div className="text-ink font-mono">{hw.name}</div>
+                              <div className="text-dim">({hw.type.replace('_', ' ')})</div>
                             </div>
-                            <div className="text-[#55bde3]">{hw.producers.length} producer{hw.producers.length !== 1 ? 's' : ''}</div>
+                            <div className="text-brand">{hw.producers.length} producer{hw.producers.length !== 1 ? 's' : ''}</div>
                           </div>
                         ))}
                       </div>
                     )}
 
-                    <div className="border-t border-[#0d0d0d] pt-[8px] mt-[8px] flex items-center justify-between text-[10px]">
-                      <div className="text-[#b9b8ae]">Total</div>
-                      <div className="text-white">
+                    <div className="border-t border-surface pt-[8px] mt-[8px] flex items-center justify-between text-[10px]">
+                      <div className="text-dim">Total</div>
+                      <div className="text-ink">
                         {selectedSystemData.hardware.length} device{selectedSystemData.hardware.length !== 1 ? 's' : ''}, {' '}
                         {selectedSystemData.hardware.reduce((sum, hw) => sum + hw.producers.length, 0)} producer{selectedSystemData.hardware.reduce((sum, hw) => sum + hw.producers.length, 0) !== 1 ? 's' : ''}
                       </div>
@@ -1685,9 +1685,9 @@ export function ConfigurationPage() {
             return (
               <div className="mb-[16px] p-[12px] border border-yellow-500/40 bg-yellow-500/5 flex items-start gap-[10px]">
                 <AlertTriangle className="w-[16px] h-[16px] text-yellow-500 shrink-0 mt-[2px]" />
-                <div className="text-[11px] text-[#b9b8ae] leading-[1.5]">
+                <div className="text-[11px] text-dim leading-[1.5]">
                   <span className="text-yellow-500 font-bold uppercase">Warning:</span>{' '}
-                  The <span className="text-white">{spec.label}</span> layout expects:
+                  The <span className="text-ink">{spec.label}</span> layout expects:
                   <ul className="mt-[4px] ml-[12px] list-disc space-y-[2px]">
                     {issues.map((issue, i) => (
                       <li key={i} className="text-yellow-500">{issue}</li>
@@ -1704,12 +1704,12 @@ export function ConfigurationPage() {
 
           <div className="flex items-center justify-between mb-[16px]">
             <div className="flex items-center gap-[12px]">
-              <h2 className="text-[16px] text-white uppercase">Hardware Devices</h2>
-              <div className="flex items-center gap-[4px] bg-[#252525] p-[3px] rounded">
+              <h2 className="text-[16px] text-ink uppercase">Hardware Devices</h2>
+              <div className="flex items-center gap-[4px] bg-edge p-[3px] rounded">
                 {(['all', 'camera', 'arm', 'base'] as const).map(f => (
                   <button key={f} onClick={() => setHwFilter(f)}
                     className={`px-[8px] py-[3px] text-[9px] uppercase rounded transition-colors ${
-                      hwFilter === f ? 'bg-[#55bde3] text-white' : 'text-[#b9b8ae] hover:text-white'
+                      hwFilter === f ? 'bg-brand text-white' : 'text-dim hover:text-white'
                     }`}>
                     {f === 'all' ? 'All' : f === 'camera' ? 'Cameras' : f === 'arm' ? 'Arms' : 'Base'}
                   </button>
@@ -1720,14 +1720,14 @@ export function ConfigurationPage() {
               onClick={() => setShowHardwareTypeModal(true)}
               disabled={mutationsLocked}
               title={mutationsLocked ? lockedTitle : ''}
-              className="bg-[#55bde3] text-white px-[12px] py-[6px] text-[11px] uppercase hover:bg-[#4aa8cc] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#55bde3] transition-colors flex items-center gap-[6px]"
+              className="bg-brand text-white px-[12px] py-[6px] text-[11px] uppercase hover:bg-[#4aa8cc] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-brand transition-colors flex items-center gap-[6px]"
             >
               <Plus className="w-[12px] h-[12px]" />
               Add Hardware
             </button>
           </div>
 
-          <div className="flex-1 bg-[#0d0d0d] border border-[#252525] overflow-auto">
+          <div className="flex-1 bg-surface border border-edge overflow-auto">
             <div className="p-[12px] space-y-[6px]">
               {selectedSystemData.hardware.filter(hw => {
                 if (hwFilter === 'all') return true;
@@ -1742,20 +1742,20 @@ export function ConfigurationPage() {
 
                 // Color tints per hardware type
                 const tintClass = hardware.type.includes('camera')
-                  ? 'border-l-[#55bde3]/40 bg-[#55bde3]/[0.02]'
+                  ? 'border-l-brand/40 bg-brand/[0.02]'
                   : hardware.type === 'trossen_arm'
                     ? 'border-l-green-500/40 bg-green-500/[0.02]'
                     : 'border-l-orange-500/40 bg-orange-500/[0.02]';
 
                 return (
-                  <div key={hardware.id} className={`border border-l-[3px] ${tintClass} ${hasProducers ? 'border-[#252525]' : 'border-yellow-600/50'}`}>
+                  <div key={hardware.id} className={`border border-l-[3px] ${tintClass} ${hasProducers ? 'border-edge' : 'border-yellow-600/50'}`}>
                     {/* Hardware Header — name + actions on one line */}
                     <div className="px-[12px] py-[10px]">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-[10px]">
-                          <HardwareIcon className="w-[16px] h-[16px] text-[#55bde3]" />
-                          <span className="text-white text-[13px] font-bold">{hardware.name}</span>
-                          <span className="text-[#b9b8ae] text-[10px] uppercase">{hardware.type.replace('_', ' ')}</span>
+                          <HardwareIcon className="w-[16px] h-[16px] text-brand" />
+                          <span className="text-ink text-[13px] font-bold">{hardware.name}</span>
+                          <span className="text-dim text-[10px] uppercase">{hardware.type.replace('_', ' ')}</span>
                           {!hasProducers && (
                             <span className="bg-yellow-600/20 border border-yellow-600/50 text-yellow-500 px-[5px] py-[1px] text-[9px] uppercase font-bold leading-none">
                               0 Producers
@@ -1768,7 +1768,7 @@ export function ConfigurationPage() {
                             disabled={mutationsLocked}
                             aria-label={`Edit ${hardware.id}`}
                             title={mutationsLocked ? lockedTitle : 'Edit'}
-                            className="p-[5px] bg-[#0d0d0d] hover:bg-[#55bde3] text-[#b9b8ae] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#0d0d0d] disabled:hover:text-[#b9b8ae] transition-colors rounded"
+                            className="p-[5px] bg-surface hover:bg-brand text-dim hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-surface disabled:hover:text-dim transition-colors rounded"
                           >
                             <Edit className="w-[13px] h-[13px]" />
                           </button>
@@ -1777,14 +1777,14 @@ export function ConfigurationPage() {
                             disabled={mutationsLocked}
                             aria-label={`Delete ${hardware.id}`}
                             title={mutationsLocked ? lockedTitle : 'Delete'}
-                            className="p-[5px] bg-[#0d0d0d] hover:bg-red-600 text-[#b9b8ae] hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#0d0d0d] disabled:hover:text-[#b9b8ae] transition-colors rounded"
+                            className="p-[5px] bg-surface hover:bg-red-600 text-dim hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-surface disabled:hover:text-dim transition-colors rounded"
                           >
                             <Trash2 className="w-[13px] h-[13px]" />
                           </button>
                           {hasProducers ? (
                             <button
                               onClick={() => toggleHardwareExpand(hardware.id)}
-                              className="flex items-center gap-[4px] px-[8px] py-[4px] bg-[#0d0d0d] hover:bg-[#b9b8ae] text-[#b9b8ae] hover:text-[#0b0b0b] transition-colors text-[10px] uppercase rounded"
+                              className="flex items-center gap-[4px] px-[8px] py-[4px] bg-surface hover:bg-dim text-dim hover:text-app transition-colors text-[10px] uppercase rounded"
                             >
                               {isExpanded ? <ChevronUp className="w-[12px] h-[12px]" /> : <ChevronDown className="w-[12px] h-[12px]" />}
                               Producers ({hardware.producers.length})
@@ -1794,7 +1794,7 @@ export function ConfigurationPage() {
                               onClick={() => openAddProducerModal(hardware.id, hardware)}
                               disabled={mutationsLocked}
                               title={mutationsLocked ? lockedTitle : ''}
-                              className="flex items-center gap-[4px] px-[8px] py-[4px] bg-[#0d0d0d] hover:bg-[#b9b8ae] text-[#b9b8ae] hover:text-[#0b0b0b] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#0d0d0d] disabled:hover:text-[#b9b8ae] transition-colors text-[10px] uppercase rounded"
+                              className="flex items-center gap-[4px] px-[8px] py-[4px] bg-surface hover:bg-dim text-dim hover:text-app disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-surface disabled:hover:text-dim transition-colors text-[10px] uppercase rounded"
                             >
                               <Plus className="w-[12px] h-[12px]" />
                               Add Producer
@@ -1813,18 +1813,18 @@ export function ConfigurationPage() {
 
                     {/* Level 3: Producers (nested inside hardware) */}
                     {isExpanded && (
-                      <div className="border-t border-[#0d0d0d] bg-[#0b0b0b] p-[16px]">
+                      <div className="border-t border-surface bg-app p-[16px]">
                         <div className="flex items-center justify-between mb-[12px]">
                           <div className="flex items-center gap-[8px]">
-                            <Radio className="w-[14px] h-[14px] text-[#b9b8ae]" />
-                            <h3 className="text-[12px] text-white uppercase">Producers</h3>
-                            <span className="text-[#b9b8ae] text-[10px]">({hardware.producers.length})</span>
+                            <Radio className="w-[14px] h-[14px] text-dim" />
+                            <h3 className="text-[12px] text-ink uppercase">Producers</h3>
+                            <span className="text-dim text-[10px]">({hardware.producers.length})</span>
                           </div>
                           <button
                             onClick={() => openAddProducerModal(hardware.id, hardware)}
                             disabled={mutationsLocked}
                             title={mutationsLocked ? lockedTitle : ''}
-                            className="bg-[#55bde3] text-white px-[10px] py-[5px] text-[10px] uppercase hover:bg-[#4aa8cc] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-[#55bde3] transition-colors"
+                            className="bg-brand text-white px-[10px] py-[5px] text-[10px] uppercase hover:bg-[#4aa8cc] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-brand transition-colors"
                           >
                             <Plus className="w-[10px] h-[10px] inline mr-[4px]" />
                             Add Producer
@@ -1832,31 +1832,31 @@ export function ConfigurationPage() {
                         </div>
 
                         {hardware.producers.length === 0 ? (
-                          <div className="text-[#b9b8ae] text-[11px] text-center py-[20px]">
+                          <div className="text-dim text-[11px] text-center py-[20px]">
                             No producers configured. Add one to create a data stream.
                           </div>
                         ) : (
                           <div className="space-y-[8px]">
                             {hardware.producers.map(producer => (
-                              <div key={producer.id} className="bg-[#252525] p-[12px] flex items-center justify-between">
+                              <div key={producer.id} className="bg-edge p-[12px] flex items-center justify-between">
                                 <div className="flex-1 grid grid-cols-4 portrait:grid-cols-2 gap-[12px] text-[12px]">
                                   <div>
-                                    <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Stream ID</div>
-                                    <div className="text-white font-mono">{producer.stream_id}</div>
+                                    <div className="text-dim text-[9px] uppercase mb-[4px]">Stream ID</div>
+                                    <div className="text-ink font-mono">{producer.stream_id}</div>
                                   </div>
                                   <div>
-                                    <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Poll Rate</div>
-                                    <div className="text-white">{producer.poll_rate_hz} Hz</div>
+                                    <div className="text-dim text-[9px] uppercase mb-[4px]">Poll Rate</div>
+                                    <div className="text-ink">{producer.poll_rate_hz} Hz</div>
                                   </div>
                                   {producer.encoding && (
                                     <div>
-                                      <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Encoding</div>
-                                      <div className="text-white">{producer.encoding}</div>
+                                      <div className="text-dim text-[9px] uppercase mb-[4px]">Encoding</div>
+                                      <div className="text-ink">{producer.encoding}</div>
                                     </div>
                                   )}
                                   <div>
-                                    <div className="text-[#b9b8ae] text-[9px] uppercase mb-[4px]">Device Time</div>
-                                    <div className="text-white">{producer.use_device_time ? 'Yes' : 'No'}</div>
+                                    <div className="text-dim text-[9px] uppercase mb-[4px]">Device Time</div>
+                                    <div className="text-ink">{producer.use_device_time ? 'Yes' : 'No'}</div>
                                   </div>
                                 </div>
                                 <div className="flex items-center gap-[4px]">
@@ -1865,16 +1865,16 @@ export function ConfigurationPage() {
                                     disabled={mutationsLocked}
                                     aria-label={`Edit producer ${producer.id}`}
                                     title={mutationsLocked ? lockedTitle : 'Edit producer'}
-                                    className="p-[6px] hover:bg-[#0d0d0d] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+                                    className="p-[6px] hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
                                   >
-                                    <Edit className="w-[14px] h-[14px] text-[#55bde3]" />
+                                    <Edit className="w-[14px] h-[14px] text-brand" />
                                   </button>
                                   <button
                                     onClick={() => handleDeleteProducer(hardware.id, producer.id)}
                                     disabled={mutationsLocked}
                                     aria-label={`Delete producer ${producer.id}`}
                                     title={mutationsLocked ? lockedTitle : 'Delete producer'}
-                                    className="p-[6px] hover:bg-[#0d0d0d] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
+                                    className="p-[6px] hover:bg-surface disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-transparent transition-colors"
                                   >
                                     <Trash2 className="w-[14px] h-[14px] text-red-500" />
                                   </button>
@@ -1890,7 +1890,7 @@ export function ConfigurationPage() {
               })}
 
               {selectedSystemData.hardware.length === 0 && (
-                <div className="text-center py-[40px] text-[#b9b8ae]">
+                <div className="text-center py-[40px] text-dim">
                   <Server className="w-[48px] h-[48px] mx-auto mb-[16px] opacity-50" />
                   <p className="text-[14px] mb-[8px]">No hardware configured</p>
                   <p className="text-[12px]">Add cameras, arms, or bases to this system</p>
@@ -1906,10 +1906,10 @@ export function ConfigurationPage() {
       {/* Add Producer Modal */}
       {showAddProducerModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[500px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
-            <div className="flex items-center justify-between p-[20px] border-b border-[#252525]">
-              <h2 className="text-[18px] text-white">{editingItem ? 'Edit Producer' : 'Add Producer'}</h2>
-              <button onClick={() => setShowAddProducerModal(false)} className="text-[24px] text-[#b9b8ae] hover:text-white">×</button>
+          <div className="bg-surface border border-edge w-full max-w-[500px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
+            <div className="flex items-center justify-between p-[20px] border-b border-edge">
+              <h2 className="text-[18px] text-ink">{editingItem ? 'Edit Producer' : 'Add Producer'}</h2>
+              <button onClick={() => setShowAddProducerModal(false)} className="text-[24px] text-dim hover:text-ink">×</button>
             </div>
             <form onSubmit={handleAddProducer} className="p-[20px] space-y-[16px]">
               {(() => {
@@ -1921,13 +1921,13 @@ export function ConfigurationPage() {
                 return (
                   <>
                     <div>
-                      <label className="block text-white text-[12px] mb-[8px]">Stream ID <span className="text-red-500">*</span></label>
+                      <label className="block text-ink text-[12px] mb-[8px]">Stream ID <span className="text-red-500">*</span></label>
                       <input
                         type="text"
                         value={producerForm.stream_id}
                         onChange={e => setProducerForm({ ...producerForm, stream_id: e.target.value })}
                         placeholder="e.g., camera_main_30fps"
-                        className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]"
+                        className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand"
                         required
                       />
                     </div>
@@ -1935,14 +1935,14 @@ export function ConfigurationPage() {
                     {/* Poll Mode - Show poll_rate_hz slider */}
                     {isPoll && (
                       <div>
-                        <label className="block text-white text-[12px] mb-[8px]">Poll Rate (Hz) <span className="text-red-500">*</span></label>
+                        <label className="block text-ink text-[12px] mb-[8px]">Poll Rate (Hz) <span className="text-red-500">*</span></label>
                         <input
                           type="number"
                           min="1"
                           max="120"
                           value={producerForm.poll_rate_hz}
                           onChange={e => setProducerForm({ ...producerForm, poll_rate_hz: parseInt(e.target.value) })}
-                          className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]"
+                          className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand"
                           required
                         />
                         <div className="flex gap-[8px] mt-[8px]">
@@ -1953,8 +1953,8 @@ export function ConfigurationPage() {
                               onClick={() => setProducerForm({ ...producerForm, poll_rate_hz: preset })}
                               className={`px-[12px] py-[4px] text-[11px] transition-colors ${
                                 producerForm.poll_rate_hz === preset
-                                  ? 'bg-[#55bde3] text-white'
-                                  : 'bg-[#252525] text-[#b9b8ae] hover:bg-[#0d0d0d]'
+                                  ? 'bg-brand text-white'
+                                  : 'bg-edge text-dim hover:bg-surface'
                               }`}
                             >
                               {preset} Hz
@@ -1967,32 +1967,32 @@ export function ConfigurationPage() {
                     {/* Push Mode - Show timeout_ms and info text */}
                     {isPush && (
                       <div>
-                        <div className="bg-[#252525] border border-[#55bde3]/30 p-[12px] mb-[12px]">
-                          <div className="text-[#55bde3] text-[11px] font-bold uppercase mb-[4px]">Push Mode</div>
-                          <div className="text-[#b9b8ae] text-[11px]">Rate set by camera FPS on hardware card. Device delivers data on its own thread.</div>
+                        <div className="bg-edge border border-brand/30 p-[12px] mb-[12px]">
+                          <div className="text-brand text-[11px] font-bold uppercase mb-[4px]">Push Mode</div>
+                          <div className="text-dim text-[11px]">Rate set by camera FPS on hardware card. Device delivers data on its own thread.</div>
                         </div>
                         <div>
-                          <label className="block text-white text-[12px] mb-[8px]">Timeout (ms)</label>
+                          <label className="block text-ink text-[12px] mb-[8px]">Timeout (ms)</label>
                           <input
                             type="number"
                             min="100"
                             max="10000"
                             value={producerForm.timeout_ms}
                             onChange={e => setProducerForm({ ...producerForm, timeout_ms: parseInt(e.target.value) })}
-                            className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]"
+                            className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand"
                           />
-                          <div className="text-[#b9b8ae] text-[10px] mt-[4px]">Default: 3000ms</div>
+                          <div className="text-dim text-[10px] mt-[4px]">Default: 3000ms</div>
                         </div>
                       </div>
                     )}
 
                     {currentParentHardwareId && hardware && typeof hardware !== 'string' && hardware.type.includes('camera') && (
                       <div>
-                        <label className="block text-white text-[12px] mb-[8px]">Encoding</label>
+                        <label className="block text-ink text-[12px] mb-[8px]">Encoding</label>
                         <select
                           value={producerForm.encoding}
                           onChange={e => setProducerForm({ ...producerForm, encoding: e.target.value as 'bgr8' | 'rgb8' | 'mono8' })}
-                          className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]"
+                          className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand"
                         >
                           <option value="bgr8">bgr8</option>
                           <option value="rgb8">rgb8</option>
@@ -2009,15 +2009,15 @@ export function ConfigurationPage() {
                         onChange={e => setProducerForm({ ...producerForm, use_device_time: e.target.checked })}
                         className="w-[16px] h-[16px]"
                       />
-                      <label htmlFor="use_device_time" className="text-white text-[12px]">Use device time</label>
+                      <label htmlFor="use_device_time" className="text-ink text-[12px]">Use device time</label>
                     </div>
                   </>
                 );
               })()}
 
               <div className="flex justify-end gap-[12px] pt-[12px]">
-                <button type="button" onClick={() => setShowAddProducerModal(false)} className="bg-[#0b0b0b] border border-[#252525] text-[#b9b8ae] px-[20px] py-[10px] text-[14px] hover:border-white hover:text-white transition-colors">Cancel</button>
-                <button type="submit" className="bg-[#55bde3] text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">{editingItem ? 'Save Producer' : 'Add Producer'}</button>
+                <button type="button" onClick={() => setShowAddProducerModal(false)} className="bg-app border border-edge text-dim px-[20px] py-[10px] text-[14px] hover:border-white hover:text-ink transition-colors">Cancel</button>
+                <button type="submit" className="bg-brand text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">{editingItem ? 'Save Producer' : 'Add Producer'}</button>
               </div>
             </form>
           </div>
@@ -2027,20 +2027,20 @@ export function ConfigurationPage() {
       {/* Add Hardware Modal */}
       {showAddHardwareModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[600px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
-            <div className="flex items-center justify-between p-[20px] border-b border-[#252525]">
-              <h2 className="text-[18px] text-white">{editingHardwareId ? 'Edit' : 'Add'} {selectedHardwareType === 'camera' ? 'Camera' : selectedHardwareType === 'arm' ? 'Arm' : 'Base'}</h2>
-              <button onClick={() => setShowAddHardwareModal(false)} className="text-[24px] text-[#b9b8ae] hover:text-white">×</button>
+          <div className="bg-surface border border-edge w-full max-w-[600px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
+            <div className="flex items-center justify-between p-[20px] border-b border-edge">
+              <h2 className="text-[18px] text-ink">{editingHardwareId ? 'Edit' : 'Add'} {selectedHardwareType === 'camera' ? 'Camera' : selectedHardwareType === 'arm' ? 'Arm' : 'Base'}</h2>
+              <button onClick={() => setShowAddHardwareModal(false)} className="text-[24px] text-dim hover:text-ink">×</button>
             </div>
 
             {selectedHardwareType === 'camera' && (
               <form onSubmit={handleAddCamera} className="p-[20px] space-y-[16px]">
                 <div>
-                  <label className="block text-white text-[12px] mb-[8px]">Camera Type</label>
+                  <label className="block text-ink text-[12px] mb-[8px]">Camera Type</label>
                   <select
                     value={selectedCameraType}
                     onChange={e => setSelectedCameraType(e.target.value as 'realsense_camera' | 'opencv_camera' | 'zed_camera')}
-                    className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]"
+                    className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand"
                   >
                     <option value="realsense_camera">RealSense</option>
                     <option value="opencv_camera">OpenCV</option>
@@ -2048,33 +2048,33 @@ export function ConfigurationPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="block text-white text-[12px] mb-[8px]">Name <span className="text-red-500">*</span></label>
-                  <input type="text" value={cameraForm.name} onChange={e => setCameraForm({ ...cameraForm, name: e.target.value })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" required />
+                  <label className="block text-ink text-[12px] mb-[8px]">Name <span className="text-red-500">*</span></label>
+                  <input type="text" value={cameraForm.name} onChange={e => setCameraForm({ ...cameraForm, name: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
                 </div>
                 <div className="grid grid-cols-3 gap-[12px]">
                   <div>
-                    <label className="block text-white text-[12px] mb-[8px]">Width</label>
-                    <input type="number" value={cameraForm.width} onChange={e => setCameraForm({ ...cameraForm, width: parseInt(e.target.value) })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" required />
+                    <label className="block text-ink text-[12px] mb-[8px]">Width</label>
+                    <input type="number" value={cameraForm.width} onChange={e => setCameraForm({ ...cameraForm, width: parseInt(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
                   </div>
                   <div>
-                    <label className="block text-white text-[12px] mb-[8px]">Height</label>
-                    <input type="number" value={cameraForm.height} onChange={e => setCameraForm({ ...cameraForm, height: parseInt(e.target.value) })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" required />
+                    <label className="block text-ink text-[12px] mb-[8px]">Height</label>
+                    <input type="number" value={cameraForm.height} onChange={e => setCameraForm({ ...cameraForm, height: parseInt(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
                   </div>
                   <div>
-                    <label className="block text-white text-[12px] mb-[8px]">FPS</label>
-                    <input type="number" value={cameraForm.fps} onChange={e => setCameraForm({ ...cameraForm, fps: parseInt(e.target.value) })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" required />
+                    <label className="block text-ink text-[12px] mb-[8px]">FPS</label>
+                    <input type="number" value={cameraForm.fps} onChange={e => setCameraForm({ ...cameraForm, fps: parseInt(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
                   </div>
                 </div>
 
                 {selectedCameraType === 'realsense_camera' && (
                   <>
                     <div>
-                      <label className="block text-white text-[12px] mb-[8px]">Serial Number</label>
-                      <input type="text" value={cameraForm.serial_number} onChange={e => setCameraForm({ ...cameraForm, serial_number: e.target.value })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" />
+                      <label className="block text-ink text-[12px] mb-[8px]">Serial Number</label>
+                      <input type="text" value={cameraForm.serial_number} onChange={e => setCameraForm({ ...cameraForm, serial_number: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
                     </div>
                     <div className="flex items-center gap-[8px]">
                       <input type="checkbox" id="use_depth" checked={cameraForm.use_depth} onChange={e => setCameraForm({ ...cameraForm, use_depth: e.target.checked })} className="w-[16px] h-[16px]" />
-                      <label htmlFor="use_depth" className="text-white text-[12px]">Enable depth</label>
+                      <label htmlFor="use_depth" className="text-ink text-[12px]">Enable depth</label>
                     </div>
                   </>
                 )}
@@ -2082,17 +2082,17 @@ export function ConfigurationPage() {
                 {selectedCameraType === 'opencv_camera' && (
                   <>
                     <div>
-                      <label className="block text-white text-[12px] mb-[8px]">Device Index</label>
-                      <input type="text" value={cameraForm.device_index} onChange={e => setCameraForm({ ...cameraForm, device_index: e.target.value })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" />
+                      <label className="block text-ink text-[12px] mb-[8px]">Device Index</label>
+                      <input type="text" value={cameraForm.device_index} onChange={e => setCameraForm({ ...cameraForm, device_index: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
                     </div>
                     <div className="grid grid-cols-2 gap-[12px]">
                       <div>
-                        <label className="block text-white text-[12px] mb-[8px]">Backend</label>
-                        <input type="text" value={cameraForm.backend} onChange={e => setCameraForm({ ...cameraForm, backend: e.target.value })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" />
+                        <label className="block text-ink text-[12px] mb-[8px]">Backend</label>
+                        <input type="text" value={cameraForm.backend} onChange={e => setCameraForm({ ...cameraForm, backend: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
                       </div>
                       <div>
-                        <label className="block text-white text-[12px] mb-[8px]">Warmup Frames</label>
-                        <input type="number" value={cameraForm.warmup_frames} onChange={e => setCameraForm({ ...cameraForm, warmup_frames: parseInt(e.target.value) })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" />
+                        <label className="block text-ink text-[12px] mb-[8px]">Warmup Frames</label>
+                        <input type="number" value={cameraForm.warmup_frames} onChange={e => setCameraForm({ ...cameraForm, warmup_frames: parseInt(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
                       </div>
                     </div>
                   </>
@@ -2101,12 +2101,12 @@ export function ConfigurationPage() {
                 {selectedCameraType === 'zed_camera' && (
                   <>
                     <div>
-                      <label className="block text-white text-[12px] mb-[8px]">Serial Number</label>
-                      <input type="text" value={cameraForm.serial_number} onChange={e => setCameraForm({ ...cameraForm, serial_number: e.target.value })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" />
+                      <label className="block text-ink text-[12px] mb-[8px]">Serial Number</label>
+                      <input type="text" value={cameraForm.serial_number} onChange={e => setCameraForm({ ...cameraForm, serial_number: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
                     </div>
                     <div>
-                      <label className="block text-white text-[12px] mb-[8px]">Depth Mode</label>
-                      <select value={cameraForm.depth_mode} onChange={e => setCameraForm({ ...cameraForm, depth_mode: e.target.value as 'performance' | 'quality' | 'ultra' })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]">
+                      <label className="block text-ink text-[12px] mb-[8px]">Depth Mode</label>
+                      <select value={cameraForm.depth_mode} onChange={e => setCameraForm({ ...cameraForm, depth_mode: e.target.value as 'performance' | 'quality' | 'ultra' })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand">
                         <option value="performance">Performance</option>
                         <option value="quality">Quality</option>
                         <option value="ultra">Ultra</option>
@@ -2116,8 +2116,8 @@ export function ConfigurationPage() {
                 )}
 
                 <div className="flex justify-end gap-[12px] pt-[12px]">
-                  <button type="button" onClick={() => setShowAddHardwareModal(false)} className="bg-[#0b0b0b] border border-[#252525] text-[#b9b8ae] px-[20px] py-[10px] text-[14px] hover:border-white hover:text-white transition-colors">Cancel</button>
-                  <button type="submit" className="bg-[#55bde3] text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">Add Camera</button>
+                  <button type="button" onClick={() => setShowAddHardwareModal(false)} className="bg-app border border-edge text-dim px-[20px] py-[10px] text-[14px] hover:border-white hover:text-ink transition-colors">Cancel</button>
+                  <button type="submit" className="bg-brand text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">Add Camera</button>
                 </div>
               </form>
             )}
@@ -2125,33 +2125,33 @@ export function ConfigurationPage() {
             {selectedHardwareType === 'arm' && (
               <form onSubmit={handleAddArm} className="p-[20px] space-y-[16px]">
                 <div>
-                  <label className="block text-white text-[12px] mb-[8px]">Name <span className="text-red-500">*</span></label>
-                  <input type="text" value={armForm.name} onChange={e => setArmForm({ ...armForm, name: e.target.value })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" required />
+                  <label className="block text-ink text-[12px] mb-[8px]">Name <span className="text-red-500">*</span></label>
+                  <input type="text" value={armForm.name} onChange={e => setArmForm({ ...armForm, name: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
                 </div>
                 <div>
-                  <label className="block text-white text-[12px] mb-[8px]">IP Address</label>
-                  <input type="text" value={armForm.ip_address} onChange={e => setArmForm({ ...armForm, ip_address: e.target.value })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" />
+                  <label className="block text-ink text-[12px] mb-[8px]">IP Address</label>
+                  <input type="text" value={armForm.ip_address} onChange={e => setArmForm({ ...armForm, ip_address: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
                 </div>
                 <div className="grid grid-cols-2 gap-[12px]">
                   <div>
-                    <label className="block text-white text-[12px] mb-[8px]">Model</label>
-                    <input type="text" value={armForm.model} onChange={e => setArmForm({ ...armForm, model: e.target.value })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" />
+                    <label className="block text-ink text-[12px] mb-[8px]">Model</label>
+                    <input type="text" value={armForm.model} onChange={e => setArmForm({ ...armForm, model: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
                   </div>
                   <div>
-                    <label className="block text-white text-[12px] mb-[8px]">End Effector</label>
-                    <input type="text" value={armForm.end_effector} onChange={e => setArmForm({ ...armForm, end_effector: e.target.value })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" />
+                    <label className="block text-ink text-[12px] mb-[8px]">End Effector</label>
+                    <input type="text" value={armForm.end_effector} onChange={e => setArmForm({ ...armForm, end_effector: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-white text-[12px] mb-[8px]">Role</label>
-                  <select value={armForm.role} onChange={e => setArmForm({ ...armForm, role: e.target.value as 'leader' | 'follower' })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]">
+                  <label className="block text-ink text-[12px] mb-[8px]">Role</label>
+                  <select value={armForm.role} onChange={e => setArmForm({ ...armForm, role: e.target.value as 'leader' | 'follower' })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand">
                     <option value="leader">Leader</option>
                     <option value="follower">Follower</option>
                   </select>
                 </div>
                 <div className="flex justify-end gap-[12px] pt-[12px]">
-                  <button type="button" onClick={() => setShowAddHardwareModal(false)} className="bg-[#0b0b0b] border border-[#252525] text-[#b9b8ae] px-[20px] py-[10px] text-[14px] hover:border-white hover:text-white transition-colors">Cancel</button>
-                  <button type="submit" className="bg-[#55bde3] text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">Add Arm</button>
+                  <button type="button" onClick={() => setShowAddHardwareModal(false)} className="bg-app border border-edge text-dim px-[20px] py-[10px] text-[14px] hover:border-white hover:text-ink transition-colors">Cancel</button>
+                  <button type="submit" className="bg-brand text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">Add Arm</button>
                 </div>
               </form>
             )}
@@ -2159,20 +2159,20 @@ export function ConfigurationPage() {
             {selectedHardwareType === 'base' && (
               <form onSubmit={handleAddBase} className="p-[20px] space-y-[16px]">
                 <div>
-                  <label className="block text-white text-[12px] mb-[8px]">Name <span className="text-red-500">*</span></label>
-                  <input type="text" value={baseForm.name} onChange={e => setBaseForm({ ...baseForm, name: e.target.value })} className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]" required />
+                  <label className="block text-ink text-[12px] mb-[8px]">Name <span className="text-red-500">*</span></label>
+                  <input type="text" value={baseForm.name} onChange={e => setBaseForm({ ...baseForm, name: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
                 </div>
                 <div className="flex items-center gap-[8px]">
                   <input type="checkbox" id="reset_odometry" checked={baseForm.reset_odometry} onChange={e => setBaseForm({ ...baseForm, reset_odometry: e.target.checked })} className="w-[16px] h-[16px]" />
-                  <label htmlFor="reset_odometry" className="text-white text-[12px]">Reset odometry</label>
+                  <label htmlFor="reset_odometry" className="text-ink text-[12px]">Reset odometry</label>
                 </div>
                 <div className="flex items-center gap-[8px]">
                   <input type="checkbox" id="enable_torque" checked={baseForm.enable_torque} onChange={e => setBaseForm({ ...baseForm, enable_torque: e.target.checked })} className="w-[16px] h-[16px]" />
-                  <label htmlFor="enable_torque" className="text-white text-[12px]">Enable torque</label>
+                  <label htmlFor="enable_torque" className="text-ink text-[12px]">Enable torque</label>
                 </div>
                 <div className="flex justify-end gap-[12px] pt-[12px]">
-                  <button type="button" onClick={() => setShowAddHardwareModal(false)} className="bg-[#0b0b0b] border border-[#252525] text-[#b9b8ae] px-[20px] py-[10px] text-[14px] hover:border-white hover:text-white transition-colors">Cancel</button>
-                  <button type="submit" className="bg-[#55bde3] text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">Add Base</button>
+                  <button type="button" onClick={() => setShowAddHardwareModal(false)} className="bg-app border border-edge text-dim px-[20px] py-[10px] text-[14px] hover:border-white hover:text-ink transition-colors">Cancel</button>
+                  <button type="submit" className="bg-brand text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">Add Base</button>
                 </div>
               </form>
             )}
@@ -2183,36 +2183,36 @@ export function ConfigurationPage() {
       {/* Add System Modal */}
       {showAddSystemModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[500px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
-            <div className="flex items-center justify-between p-[20px] border-b border-[#252525]">
-              <h2 className="text-[18px] text-white">{editingSystemId ? 'Edit' : 'Create'} Hardware System</h2>
-              <button onClick={() => setShowAddSystemModal(false)} className="text-[24px] text-[#b9b8ae] hover:text-white">×</button>
+          <div className="bg-surface border border-edge w-full max-w-[500px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
+            <div className="flex items-center justify-between p-[20px] border-b border-edge">
+              <h2 className="text-[18px] text-ink">{editingSystemId ? 'Edit' : 'Create'} Hardware System</h2>
+              <button onClick={() => setShowAddSystemModal(false)} className="text-[24px] text-dim hover:text-ink">×</button>
             </div>
             <form onSubmit={handleAddSystem} className="p-[20px] space-y-[16px]">
               <div>
-                <label className="block text-white text-[12px] mb-[8px]">System Name <span className="text-red-500">*</span></label>
+                <label className="block text-ink text-[12px] mb-[8px]">System Name <span className="text-red-500">*</span></label>
                 <input
                   type="text"
                   value={systemForm.name}
                   onChange={e => setSystemForm({ ...systemForm, name: e.target.value })}
                   placeholder="e.g., Custom System, VR Rig, UMI Setup"
-                  className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3]"
+                  className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand"
                   required
                 />
               </div>
               <div>
-                <label className="block text-white text-[12px] mb-[8px]">Description</label>
+                <label className="block text-ink text-[12px] mb-[8px]">Description</label>
                 <textarea
                   value={systemForm.description}
                   onChange={e => setSystemForm({ ...systemForm, description: e.target.value })}
                   placeholder="Brief description of this hardware system"
                   rows={3}
-                  className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-[#55bde3] resize-none"
+                  className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand resize-none"
                 />
               </div>
               <div className="flex justify-end gap-[12px] pt-[12px]">
-                <button type="button" onClick={() => setShowAddSystemModal(false)} className="bg-[#0b0b0b] border border-[#252525] text-[#b9b8ae] px-[20px] py-[10px] text-[14px] hover:border-white hover:text-white transition-colors">Cancel</button>
-                <button type="submit" className="bg-[#55bde3] text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">{editingSystemId ? 'Save Changes' : 'Create System'}</button>
+                <button type="button" onClick={() => setShowAddSystemModal(false)} className="bg-app border border-edge text-dim px-[20px] py-[10px] text-[14px] hover:border-white hover:text-ink transition-colors">Cancel</button>
+                <button type="submit" className="bg-brand text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">{editingSystemId ? 'Save Changes' : 'Create System'}</button>
               </div>
             </form>
           </div>
@@ -2222,10 +2222,10 @@ export function ConfigurationPage() {
       {/* Hardware Type Selection Modal */}
       {showHardwareTypeModal && (
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[400px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
-            <div className="flex items-center justify-between p-[20px] border-b border-[#252525]">
-              <h2 className="text-[18px] text-white">Select Hardware Type</h2>
-              <button onClick={() => setShowHardwareTypeModal(false)} className="text-[24px] text-[#b9b8ae] hover:text-white">×</button>
+          <div className="bg-surface border border-edge w-full max-w-[400px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
+            <div className="flex items-center justify-between p-[20px] border-b border-edge">
+              <h2 className="text-[18px] text-ink">Select Hardware Type</h2>
+              <button onClick={() => setShowHardwareTypeModal(false)} className="text-[24px] text-dim hover:text-ink">×</button>
             </div>
             <div className="p-[20px] space-y-[12px]">
               <button
@@ -2233,12 +2233,12 @@ export function ConfigurationPage() {
                   setShowHardwareTypeModal(false);
                   openAddHardwareModal('camera');
                 }}
-                className="w-full bg-[#252525] border border-[#252525] hover:border-[#55bde3] p-[16px] flex items-center gap-[12px] transition-colors group"
+                className="w-full bg-edge border border-edge hover:border-brand p-[16px] flex items-center gap-[12px] transition-colors group"
               >
-                <Camera className="w-[20px] h-[20px] text-[#55bde3]" />
+                <Camera className="w-[20px] h-[20px] text-brand" />
                 <div className="text-left">
-                  <div className="text-white text-[14px] font-bold">Camera</div>
-                  <div className="text-[#b9b8ae] text-[11px]">RealSense, OpenCV, ZED</div>
+                  <div className="text-ink text-[14px] font-bold">Camera</div>
+                  <div className="text-dim text-[11px]">RealSense, OpenCV, ZED</div>
                 </div>
               </button>
               <button
@@ -2246,12 +2246,12 @@ export function ConfigurationPage() {
                   setShowHardwareTypeModal(false);
                   openAddHardwareModal('arm');
                 }}
-                className="w-full bg-[#252525] border border-[#252525] hover:border-[#55bde3] p-[16px] flex items-center gap-[12px] transition-colors group"
+                className="w-full bg-edge border border-edge hover:border-brand p-[16px] flex items-center gap-[12px] transition-colors group"
               >
-                <Bot className="w-[20px] h-[20px] text-[#55bde3]" />
+                <Bot className="w-[20px] h-[20px] text-brand" />
                 <div className="text-left">
-                  <div className="text-white text-[14px] font-bold">Arm</div>
-                  <div className="text-[#b9b8ae] text-[11px]">Trossen robotics arms</div>
+                  <div className="text-ink text-[14px] font-bold">Arm</div>
+                  <div className="text-dim text-[11px]">Trossen robotics arms</div>
                 </div>
               </button>
               <button
@@ -2259,12 +2259,12 @@ export function ConfigurationPage() {
                   setShowHardwareTypeModal(false);
                   openAddHardwareModal('base');
                 }}
-                className="w-full bg-[#252525] border border-[#252525] hover:border-[#55bde3] p-[16px] flex items-center gap-[12px] transition-colors group"
+                className="w-full bg-edge border border-edge hover:border-brand p-[16px] flex items-center gap-[12px] transition-colors group"
               >
-                <Smartphone className="w-[20px] h-[20px] text-[#55bde3]" />
+                <Smartphone className="w-[20px] h-[20px] text-brand" />
                 <div className="text-left">
-                  <div className="text-white text-[14px] font-bold">Mobile Base</div>
-                  <div className="text-[#b9b8ae] text-[11px]">SLATE mobile base</div>
+                  <div className="text-ink text-[14px] font-bold">Mobile Base</div>
+                  <div className="text-dim text-[11px]">SLATE mobile base</div>
                 </div>
               </button>
             </div>

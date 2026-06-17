@@ -1,10 +1,11 @@
 import { Link, useLocation } from "react-router";
-import { Menu, X, Volume2, VolumeX } from "lucide-react";
+import { Menu, X, Volume2, VolumeX, Sun, Moon } from "lucide-react";
 import { useState, useEffect } from "react";
 import imgTrossen2025White2 from '@/assets/6ef806f936e829141b2fab202fa6f7601e3a5a7b.png';
 import { useHwStatus } from '@/lib/HwStatusContext';
 import { apiGet } from '@/lib/api';
 import { useAnnounceEnabled, setAnnounceEnabled, announce } from '@/lib/announce';
+import { useTheme } from '@/lib/ThemeContext';
 
 const navLinks = [
   { to: "/record", label: "Record", match: ["/", "/record"] },
@@ -17,6 +18,7 @@ export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const { testingSystemId } = useHwStatus();
   const announceEnabled = useAnnounceEnabled();
+  const { theme, toggleTheme } = useTheme();
 
   // Best-effort poll for a live recording so a session stays reachable from
   // anywhere. The Monitor view is full-screen and hides this header, so once
@@ -64,7 +66,7 @@ export function Header() {
   // `<span>` (while a test is running). Tooltip explains why.
   const renderNavItem = (link: typeof navLinks[number], extraClass: string, onClick?: () => void) => {
     const baseClass = `${extraClass} transition-colors capitalize ${
-      isActive(link.match) ? "text-white" : "text-[#b9b8ae]"
+      isActive(link.match) ? "text-ink" : "text-dim"
     }`;
     if (navLocked) {
       return (
@@ -82,7 +84,7 @@ export function Header() {
         key={link.to}
         to={link.to}
         onClick={onClick}
-        className={`${baseClass} hover:bg-[#252525]`}
+        className={`${baseClass} hover:bg-edge`}
       >
         {link.label}
       </Link>
@@ -90,7 +92,7 @@ export function Header() {
   };
 
   return (
-    <header className="border-b border-[#252525] bg-[#0d0d0d] shrink-0">
+    <header className="border-b border-edge bg-surface shrink-0">
       <div className="flex items-center h-16 sm:h-20 lg:h-[100px] px-4 sm:px-6 lg:px-[37px] max-w-[1400px] mx-auto w-full">
         {/* Logo. Also locked while testing so the user can't escape via
             the home redirect. */}
@@ -101,7 +103,7 @@ export function Header() {
           >
             <img
               alt="Trossen"
-              className="h-5 sm:h-[26px] w-auto object-contain"
+              className="h-5 sm:h-[26px] w-auto object-contain light:brightness-0"
               src={imgTrossen2025White2}
             />
           </span>
@@ -109,7 +111,7 @@ export function Header() {
           <Link to="/" className="flex items-center shrink-0">
             <img
               alt="Trossen"
-              className="h-5 sm:h-[26px] w-auto object-contain"
+              className="h-5 sm:h-[26px] w-auto object-contain light:brightness-0"
               src={imgTrossen2025White2}
             />
           </Link>
@@ -147,11 +149,21 @@ export function Header() {
           )
         )}
 
+        {/* Light/dark theme toggle (TDS-152). */}
+        <button
+          className="text-dim hover:text-ink p-2 mr-1"
+          onClick={toggleTheme}
+          title={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+          aria-label={theme === 'light' ? 'Switch to dark mode' : 'Switch to light mode'}
+        >
+          {theme === 'light' ? <Moon className="w-5 h-5" /> : <Sun className="w-5 h-5" />}
+        </button>
+
         {/* Audio cue toggle. Mirrors the SDK's `announce()` (spd-say)
             but plays in the user's browser so it works in Docker and
             for remote operators. */}
         <button
-          className="text-[#b9b8ae] hover:text-white p-2 mr-1"
+          className="text-dim hover:text-ink p-2 mr-1"
           onClick={toggleAnnounce}
           title={announceEnabled ? 'Mute audio cues' : 'Unmute audio cues'}
           aria-pressed={announceEnabled}
@@ -163,7 +175,7 @@ export function Header() {
 
         {/* Mobile hamburger */}
         <button
-          className="lg:hidden text-[#b9b8ae] hover:text-white p-2"
+          className="lg:hidden text-dim hover:text-ink p-2"
           onClick={() => setMobileOpen(!mobileOpen)}
         >
           {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
@@ -172,7 +184,7 @@ export function Header() {
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <nav className="lg:hidden border-t border-[#252525] bg-[#0d0d0d] font-['JetBrains_Mono',sans-serif]">
+        <nav className="lg:hidden border-t border-edge bg-surface font-['JetBrains_Mono',sans-serif]">
           {navLinks.map(link =>
             renderNavItem(link, "block px-6 py-3 text-sm", () => setMobileOpen(false))
           )}

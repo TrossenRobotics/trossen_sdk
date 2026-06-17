@@ -31,9 +31,9 @@ export function StatusBadge({ variant }: StatusBadgeProps) {
   const config = badgeConfig[variant];
 
   return (
-    <div className="inline-flex items-center gap-[6px] px-[8px] py-[4px] bg-[#0d0d0d] border border-[#252525]">
+    <div className="inline-flex items-center gap-[6px] px-[8px] py-[4px] bg-surface border border-edge">
       <div className={`w-[6px] h-[6px] rounded-full ${config.dotColor}`} />
-      <span className="text-[12px] text-[#b9b8ae] uppercase font-['JetBrains_Mono',sans-serif]">
+      <span className="text-[12px] text-dim uppercase font-['JetBrains_Mono',sans-serif]">
         {config.label}
       </span>
     </div>

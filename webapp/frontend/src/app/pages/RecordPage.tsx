@@ -163,7 +163,7 @@ export function RecordPage() {
   const getStatusColor = (status: string) => {
     switch (status) {
       case 'active': return 'bg-green-500';
-      case 'pending': return 'bg-[#55bde3]';
+      case 'pending': return 'bg-brand';
       case 'paused': return 'bg-yellow-500';
       case 'completed': return 'bg-gray-500';
       case 'error': return 'bg-red-500';
@@ -401,12 +401,12 @@ export function RecordPage() {
       {/* Page Title */}
       <div className="mb-6 sm:mb-[35px]">
         <div className="flex flex-col gap-[7px]">
-          <h1 className="text-lg sm:text-[22px] text-white capitalize leading-[22.4px]">Record</h1>
-          <div className="h-[1px] bg-[#252525] w-full" />
+          <h1 className="text-lg sm:text-[22px] text-ink capitalize leading-[22.4px]">Record</h1>
+          <div className="h-[1px] bg-edge w-full" />
         </div>
       </div>
 
-      <p className="text-[#b9b8ae] text-sm mb-5 sm:mb-[30px]">
+      <p className="text-dim text-sm mb-5 sm:mb-[30px]">
         Manage recording sessions. Create a session, start it, and control episodes from the monitor.
       </p>
 
@@ -416,11 +416,11 @@ export function RecordPage() {
           {(['all', 'active', 'pending', 'paused', 'completed', 'error'] as StatusFilter[]).map(filter => {
             const isActive = statusFilter === filter;
             const activeColors: Record<string, string> = {
-              all: 'bg-white text-[#0d0d0d]',
+              all: 'bg-ink text-app',
               active: 'bg-green-500 text-white',
-              pending: 'bg-[#55bde3] text-white',
+              pending: 'bg-brand text-white',
               paused: 'bg-yellow-500 text-white',
-              completed: 'bg-gray-500 text-white',
+              completed: 'bg-gray-500 text-ink',
               error: 'bg-red-500 text-white',
             };
             return (
@@ -430,7 +430,7 @@ export function RecordPage() {
                 aria-pressed={isActive}
                 className={`px-3 py-2 text-xs uppercase transition-colors ${isActive
                     ? activeColors[filter]
-                    : 'bg-[rgba(13,13,13,0.85)] border border-[#252525] text-[#b9b8ae] hover:border-white hover:text-white'
+                    : 'bg-surface/85 border border-edge text-dim hover:border-white hover:text-ink'
                   }`}
               >
                 {filter.charAt(0).toUpperCase() + filter.slice(1)}
@@ -440,7 +440,7 @@ export function RecordPage() {
         </div>
         <button
           onClick={() => { setFormError(''); setEditingSessionId(null); resetForm(); setShowSessionModal(true); }}
-          className="bg-white text-[#0d0d0d] px-4 py-2.5 flex items-center justify-center hover:bg-[#e5e5e5] transition-colors text-sm capitalize shrink-0"
+          className="bg-ink text-app px-4 py-2.5 flex items-center justify-center hover:bg-dim transition-colors text-sm capitalize shrink-0"
         >
           <Plus className="w-4 h-4 mr-1.5" />
           New Session
@@ -453,26 +453,26 @@ export function RecordPage() {
         <div className="mb-4 flex items-start gap-3 rounded border border-red-500/40 bg-red-500/5 p-3 text-sm">
           <AlertTriangle className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
           <div className="flex-1 text-red-200">Can't reach the backend — showing the last known session list. Retrying…</div>
-          <button onClick={fetchSessions} className="text-red-300 hover:text-white underline underline-offset-2 text-xs">Retry</button>
+          <button onClick={fetchSessions} className="text-red-300 hover:text-ink underline underline-offset-2 text-xs">Retry</button>
         </div>
       )}
 
       {/* Sessions List */}
-      <div className="bg-[#0d0d0d] border border-[#252525]">
+      <div className="bg-surface border border-edge">
         {initialLoading ? (
           <div className="py-10 flex flex-col items-center justify-center gap-3">
-            <Loader2 className="w-7 h-7 text-[#55bde3] animate-spin" />
-            <div className="text-[#b9b8ae] text-sm">Loading sessions…</div>
+            <Loader2 className="w-7 h-7 text-brand animate-spin" />
+            <div className="text-dim text-sm">Loading sessions…</div>
           </div>
         ) : filteredSessions.length === 0 ? (
-          <div className="py-10 text-center text-[#b9b8ae] text-sm">
+          <div className="py-10 text-center text-dim text-sm">
             {sessions.length === 0 ? (
               <>
                 No sessions yet.{' '}
                 <button
                   type="button"
                   onClick={() => { setFormError(''); setEditingSessionId(null); resetForm(); setShowSessionModal(true); }}
-                  className="text-[#55bde3] hover:underline"
+                  className="text-brand hover:underline"
                 >
                   Create your first session
                 </button>
@@ -495,13 +495,13 @@ export function RecordPage() {
           <div key={session.id}>
             <button
               onClick={() => setExpandedSession(expandedSession === session.id ? null : session.id)}
-              className="w-full flex items-center gap-3 sm:gap-4 py-4 px-4 sm:px-6 hover:bg-[#252525] transition-colors text-left"
+              className="w-full flex items-center gap-3 sm:gap-4 py-4 px-4 sm:px-6 hover:bg-edge transition-colors text-left"
             >
               <div
                 className={`w-2 h-2 rounded-full ${getStatusColor(session.status)} shrink-0`}
                 title={`Status: ${session.status}`}
               />
-              <span className="text-white text-sm flex-1 truncate">{session.name}</span>
+              <span className="text-ink text-sm flex-1 truncate">{session.name}</span>
               <div className="flex items-center gap-3 sm:gap-4 shrink-0">
                 {needsTest && (
                   // Clickable shortcut: jump straight to the auto-starting
@@ -518,52 +518,52 @@ export function RecordPage() {
                     <span className="text-[10px] uppercase hidden sm:inline underline underline-offset-2">Test Now</span>
                   </span>
                 )}
-                <span className="text-[#b9b8ae] text-xs uppercase hidden sm:inline">{session.status}</span>
-                <span className="text-[#b9b8ae] text-xs">
+                <span className="text-dim text-xs uppercase hidden sm:inline">{session.status}</span>
+                <span className="text-dim text-xs">
                   {session.current_episode}/{session.num_episodes}
                 </span>
                 {expandedSession === session.id ? (
-                  <ChevronUp className="w-4 h-4 text-[#b9b8ae]" />
+                  <ChevronUp className="w-4 h-4 text-dim" />
                 ) : (
-                  <ChevronDown className="w-4 h-4 text-[#b9b8ae]" />
+                  <ChevronDown className="w-4 h-4 text-dim" />
                 )}
               </div>
             </button>
 
             {expandedSession === session.id && (
-              <div className="px-4 sm:px-6 pb-6 border-t border-[#252525]">
+              <div className="px-4 sm:px-6 pb-6 border-t border-edge">
                 <div className="pt-5 space-y-4">
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
                     <div>
-                      <div className="text-[#b9b8ae] text-[10px] uppercase mb-1">Dataset ID</div>
-                      <div className="text-white text-sm">{session.dataset_id}</div>
+                      <div className="text-dim text-[10px] uppercase mb-1">Dataset ID</div>
+                      <div className="text-ink text-sm">{session.dataset_id}</div>
                     </div>
                     <div>
-                      <div className="text-[#b9b8ae] text-[10px] uppercase mb-1">Hardware System</div>
-                      <div className="text-white text-sm">{session.system_name}</div>
+                      <div className="text-dim text-[10px] uppercase mb-1">Hardware System</div>
+                      <div className="text-ink text-sm">{session.system_name}</div>
                     </div>
                     <div>
-                      <div className="text-[#b9b8ae] text-[10px] uppercase mb-1">Backend</div>
-                      <div className="text-white text-sm">{session.backend_type}</div>
+                      <div className="text-dim text-[10px] uppercase mb-1">Backend</div>
+                      <div className="text-ink text-sm">{session.backend_type}</div>
                     </div>
                     <div>
-                      <div className="text-[#b9b8ae] text-[10px] uppercase mb-1">Created</div>
-                      <div className="text-white text-sm">{formatDate(session.created_at)}</div>
+                      <div className="text-dim text-[10px] uppercase mb-1">Created</div>
+                      <div className="text-ink text-sm">{formatDate(session.created_at)}</div>
                     </div>
                   </div>
 
                   {session.status !== 'pending' && (
                     <div className="space-y-2">
                       <div className="flex items-center justify-between">
-                        <div className="text-[#b9b8ae] text-xs">Progress</div>
-                        <div className="text-white text-xs">{getProgress(session)}%</div>
+                        <div className="text-dim text-xs">Progress</div>
+                        <div className="text-ink text-xs">{getProgress(session)}%</div>
                       </div>
-                      <div className="h-6 bg-[#252525] border border-[#252525] relative overflow-hidden">
+                      <div className="h-6 bg-edge border border-edge relative overflow-hidden">
                         <div
                           className={`absolute inset-y-0 left-0 transition-all duration-300 ${getStatusColor(session.status)}`}
                           style={{ width: `${getProgress(session)}%` }}
                         />
-                        <div className="absolute inset-0 flex items-center justify-center text-white text-xs">
+                        <div className="absolute inset-0 flex items-center justify-center text-ink text-xs">
                           {session.current_episode} / {session.num_episodes} episodes
                         </div>
                       </div>
@@ -571,9 +571,9 @@ export function RecordPage() {
                   )}
 
                   {session.status === 'error' && session.error_message && (
-                    <div className="bg-[#252525] border border-red-500 p-4">
+                    <div className="bg-edge border border-red-500 p-4">
                       <div className="text-red-500 text-xs uppercase mb-1">Error</div>
-                      <div className="text-white text-sm">{session.error_message}</div>
+                      <div className="text-ink text-sm">{session.error_message}</div>
                     </div>
                   )}
 
@@ -607,13 +607,13 @@ export function RecordPage() {
                   <div className="flex flex-wrap gap-3 pt-2">
                     {session.status === 'active' && (
                       <>
-                        <Link to={`/monitor/${session.id}`} className="bg-[rgba(85,189,227,0.25)] border border-[#55bde3] text-white px-4 py-2.5 flex items-center hover:bg-[rgba(85,189,227,0.35)] transition-colors text-sm capitalize">
+                        <Link to={`/monitor/${session.id}`} className="bg-brand/25 border border-brand text-ink px-4 py-2.5 flex items-center hover:bg-brand/35 transition-colors text-sm capitalize">
                           Monitor Episodes
                         </Link>
-                        <button onClick={() => handlePause(session.id)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-yellow-500 text-yellow-500 px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,255,0,0.1)]'}`}>
+                        <button onClick={() => handlePause(session.id)} disabled={busySessionId === session.id} className={`bg-surface border border-yellow-500 text-yellow-500 px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-yellow-500/10'}`}>
                           {busySessionId === session.id ? 'Pausing...' : 'Pause'}
                         </button>
-                        <button onClick={() => handleStop(session)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
+                        <button onClick={() => handleStop(session)} disabled={busySessionId === session.id} className={`bg-surface border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-red-500/10'}`}>
                           {busySessionId === session.id ? 'Stopping...' : 'Stop'}
                         </button>
                       </>
@@ -624,19 +624,19 @@ export function RecordPage() {
                           <button
                             disabled
                             title="Run a Hardware Test on this system first"
-                            className="bg-white/40 text-[#0d0d0d]/60 px-4 py-2.5 text-sm capitalize cursor-not-allowed"
+                            className="bg-ink/40 text-app/60 px-4 py-2.5 text-sm capitalize cursor-not-allowed"
                           >
                             Start Session
                           </button>
                         ) : (
-                          <Link to={`/monitor/${session.id}`} className="bg-white text-[#0d0d0d] px-4 py-2.5 hover:bg-[#e5e5e5] transition-colors text-sm capitalize">
+                          <Link to={`/monitor/${session.id}`} className="bg-ink text-app px-4 py-2.5 hover:bg-dim transition-colors text-sm capitalize">
                             Start Session
                           </Link>
                         )}
-                        <button onClick={() => openEditModal(session)} className="bg-[#0d0d0d] border border-[#55bde3] text-[#55bde3] px-4 py-2.5 hover:bg-[rgba(85,189,227,0.1)] transition-colors text-sm capitalize">
+                        <button onClick={() => openEditModal(session)} className="bg-surface border border-brand text-brand px-4 py-2.5 hover:bg-brand/10 transition-colors text-sm capitalize">
                           Edit
                         </button>
-                        <button onClick={() => handleDelete(session)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize flex items-center ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
+                        <button onClick={() => handleDelete(session)} disabled={busySessionId === session.id} className={`bg-surface border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize flex items-center ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-red-500/10'}`}>
                           <Trash2 className="w-4 h-4 mr-1.5" />{busySessionId === session.id ? 'Deleting...' : 'Delete'}
                         </button>
                       </>
@@ -649,48 +649,48 @@ export function RecordPage() {
                           title={needsTest ? 'Run a Hardware Test on this system first' : ''}
                           className={`border px-4 py-2.5 transition-colors text-sm capitalize ${
                             needsTest
-                              ? 'bg-[rgba(85,189,227,0.1)] border-[#55bde3]/40 text-white/40 cursor-not-allowed'
+                              ? 'bg-brand/10 border-brand/40 text-ink/40 cursor-not-allowed'
                               : busySessionId === session.id
-                                ? 'bg-[rgba(85,189,227,0.25)] border-[#55bde3] text-white opacity-50 cursor-wait'
-                                : 'bg-[rgba(85,189,227,0.25)] border-[#55bde3] text-white hover:bg-[rgba(85,189,227,0.35)]'
+                                ? 'bg-brand/25 border-brand text-ink opacity-50 cursor-wait'
+                                : 'bg-brand/25 border-brand text-ink hover:bg-brand/35'
                           }`}
                         >
                           {busySessionId === session.id ? 'Resuming...' : 'Resume'}
                         </button>
-                        <button onClick={() => openEditEpisodesModal(session)} className="bg-[#0d0d0d] border border-[#55bde3] text-[#55bde3] px-4 py-2.5 hover:bg-[rgba(85,189,227,0.1)] transition-colors text-sm capitalize">
+                        <button onClick={() => openEditEpisodesModal(session)} className="bg-surface border border-brand text-brand px-4 py-2.5 hover:bg-brand/10 transition-colors text-sm capitalize">
                           Edit Episodes
                         </button>
                         {/* A paused session is already stopped (the SDK shut down
                             cleanly on pause/stop), so the backend rejects another
                             Stop. Offer Delete instead — Resume continues it, Delete
                             discards it. */}
-                        <button onClick={() => handleDelete(session)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize flex items-center ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
+                        <button onClick={() => handleDelete(session)} disabled={busySessionId === session.id} className={`bg-surface border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize flex items-center ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-red-500/10'}`}>
                           <Trash2 className="w-4 h-4 mr-1.5" />{busySessionId === session.id ? 'Deleting...' : 'Delete'}
                         </button>
                       </>
                     )}
                     {session.status === 'error' && (
                       <>
-                        <button onClick={() => handleClearError(session.id)} disabled={busySessionId === session.id} className={`bg-[rgba(85,189,227,0.25)] border border-[#55bde3] text-white px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(85,189,227,0.35)]'}`}>
+                        <button onClick={() => handleClearError(session.id)} disabled={busySessionId === session.id} className={`bg-brand/25 border border-brand text-ink px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-brand/35'}`}>
                           {busySessionId === session.id ? 'Clearing...' : 'Clear Error'}
                         </button>
-                        <button onClick={() => openEditEpisodesModal(session)} className="bg-[#0d0d0d] border border-[#55bde3] text-[#55bde3] px-4 py-2.5 hover:bg-[rgba(85,189,227,0.1)] transition-colors text-sm capitalize">
+                        <button onClick={() => openEditEpisodesModal(session)} className="bg-surface border border-brand text-brand px-4 py-2.5 hover:bg-brand/10 transition-colors text-sm capitalize">
                           Edit Episodes
                         </button>
-                        <button onClick={() => handleDelete(session)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize flex items-center ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
+                        <button onClick={() => handleDelete(session)} disabled={busySessionId === session.id} className={`bg-surface border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize flex items-center ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-red-500/10'}`}>
                           <Trash2 className="w-4 h-4 mr-1.5" />{busySessionId === session.id ? 'Deleting...' : 'Delete'}
                         </button>
                       </>
                     )}
                     {session.status === 'completed' && (
                       <>
-                        <Link to={`/datasets/${session.dataset_id}`} className="bg-white text-[#0d0d0d] px-4 py-2.5 hover:bg-[#e5e5e5] transition-colors text-sm capitalize">
+                        <Link to={`/datasets/${session.dataset_id}`} className="bg-ink text-app px-4 py-2.5 hover:bg-dim transition-colors text-sm capitalize">
                           View Dataset
                         </Link>
-                        <button onClick={() => openEditEpisodesModal(session)} className="bg-[#0d0d0d] border border-[#55bde3] text-[#55bde3] px-4 py-2.5 hover:bg-[rgba(85,189,227,0.1)] transition-colors text-sm capitalize">
+                        <button onClick={() => openEditEpisodesModal(session)} className="bg-surface border border-brand text-brand px-4 py-2.5 hover:bg-brand/10 transition-colors text-sm capitalize">
                           Edit Episodes
                         </button>
-                        <button onClick={() => handleDelete(session)} className="bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 hover:bg-[rgba(255,0,0,0.1)] transition-colors text-sm capitalize flex items-center">
+                        <button onClick={() => handleDelete(session)} className="bg-surface border border-red-500 text-red-500 px-4 py-2.5 hover:bg-red-500/10 transition-colors text-sm capitalize flex items-center">
                           <Trash2 className="w-4 h-4 mr-1.5" />Delete
                         </button>
                       </>
@@ -701,7 +701,7 @@ export function RecordPage() {
             )}
 
             {index < filteredSessions.length - 1 && (
-              <div className="h-[1px] bg-[#252525] w-full" />
+              <div className="h-[1px] bg-edge w-full" />
             )}
           </div>
           );
@@ -714,13 +714,13 @@ export function RecordPage() {
           className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setShowSessionModal(false); }}
         >
-          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[650px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
-            <div className="flex items-center justify-between p-5 border-b border-[#252525]">
-              <h2 className="text-lg text-white">{editingSessionId ? 'Edit Session' : 'Create New Recording Session'}</h2>
+          <div className="bg-surface border border-edge w-full max-w-[650px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
+            <div className="flex items-center justify-between p-5 border-b border-edge">
+              <h2 className="text-lg text-ink">{editingSessionId ? 'Edit Session' : 'Create New Recording Session'}</h2>
               <button
                 onClick={() => setShowSessionModal(false)}
                 aria-label="Close"
-                className="text-[#b9b8ae] hover:text-white transition-colors"
+                className="text-dim hover:text-ink transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -734,7 +734,7 @@ export function RecordPage() {
               )}
 
               <div>
-                <label className="block text-white text-xs mb-2">
+                <label className="block text-ink text-xs mb-2">
                   Session Name <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -742,19 +742,19 @@ export function RecordPage() {
                   value={formData.sessionName}
                   onChange={(e) => setFormData({ ...formData, sessionName: e.target.value })}
                   placeholder="Enter session name"
-                  className="w-full bg-[#0b0b0b] border border-[#252525] text-white placeholder:text-[#b9b8ae] px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]"
+                  className="w-full bg-app border border-edge text-ink placeholder:text-dim px-3 py-2 text-sm focus:outline-none focus:border-brand"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-white text-xs mb-2">
+                <label className="block text-ink text-xs mb-2">
                   Hardware System <span className="text-red-500">*</span>
                 </label>
                 <select
                   value={formData.hardwareSystem}
                   onChange={(e) => setFormData({ ...formData, hardwareSystem: e.target.value })}
-                  className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]"
+                  className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand"
                   required
                 >
                   <option value="">-- Select --</option>
@@ -765,7 +765,7 @@ export function RecordPage() {
               </div>
 
               <div>
-                <label className="block text-white text-xs mb-2">
+                <label className="block text-ink text-xs mb-2">
                   Dataset ID <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -774,7 +774,7 @@ export function RecordPage() {
                   value={formData.datasetId}
                   onChange={(e) => setFormData({ ...formData, datasetId: e.target.value })}
                   placeholder="e.g. solo_pick_dataset"
-                  className="w-full bg-[#0b0b0b] border border-[#252525] text-white placeholder:text-[#b9b8ae] px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]"
+                  className="w-full bg-app border border-edge text-ink placeholder:text-dim px-3 py-2 text-sm focus:outline-none focus:border-brand"
                   required
                 />
                 <datalist id="dataset-id-suggestions">
@@ -782,14 +782,14 @@ export function RecordPage() {
                     <option key={id} value={id} />
                   ))}
                 </datalist>
-                <div className="text-[#b9b8ae] text-[10px] mt-1">
+                <div className="text-dim text-[10px] mt-1">
                   Folder name under ~/.trossen_sdk/ where episodes are saved — pick an existing one to add episodes to it
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-white text-xs mb-2">
+                  <label className="block text-ink text-xs mb-2">
                     Episodes <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -797,12 +797,12 @@ export function RecordPage() {
                     min="1"
                     value={formData.numEpisodes}
                     onChange={(e) => setFormData({ ...formData, numEpisodes: e.target.value })}
-                    className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]"
+                    className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-white text-xs mb-2">
+                  <label className="block text-ink text-xs mb-2">
                     Episode Duration (s) <span className="text-red-500">*</span>
                   </label>
                   <input
@@ -810,12 +810,12 @@ export function RecordPage() {
                     min="1"
                     value={formData.episodeDuration}
                     onChange={(e) => setFormData({ ...formData, episodeDuration: e.target.value })}
-                    className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]"
+                    className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-white text-xs mb-2">
+                  <label className="block text-ink text-xs mb-2">
                     Reset Time (s)
                   </label>
                   <input
@@ -823,9 +823,9 @@ export function RecordPage() {
                     min="0"
                     value={formData.resetDuration}
                     onChange={(e) => setFormData({ ...formData, resetDuration: e.target.value })}
-                    className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]"
+                    className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand"
                   />
-                  <div className="text-[#b9b8ae] text-[10px] mt-1">
+                  <div className="text-dim text-[10px] mt-1">
                     0 = wait for Next button
                   </div>
                 </div>
@@ -834,7 +834,7 @@ export function RecordPage() {
               <button
                 type="button"
                 onClick={() => setShowAdvanced(v => !v)}
-                className="flex items-center gap-1.5 text-[#b9b8ae] hover:text-white text-xs transition-colors"
+                className="flex items-center gap-1.5 text-dim hover:text-ink text-xs transition-colors"
               >
                 {showAdvanced ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
                 Advanced options
@@ -843,27 +843,27 @@ export function RecordPage() {
               {showAdvanced && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-white text-xs mb-2">Compression</label>
+                  <label className="block text-ink text-xs mb-2">Compression</label>
                   <input
                     type="text"
                     value={formData.compression}
                     onChange={(e) => setFormData({ ...formData, compression: e.target.value })}
                     placeholder="empty = none"
-                    className="w-full bg-[#0b0b0b] border border-[#252525] text-white placeholder:text-[#b9b8ae] px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]"
+                    className="w-full bg-app border border-edge text-ink placeholder:text-dim px-3 py-2 text-sm focus:outline-none focus:border-brand"
                   />
-                  <div className="text-[#b9b8ae] text-[10px] mt-1">
+                  <div className="text-dim text-[10px] mt-1">
                     e.g. zstd, lz4, or empty for none
                   </div>
                 </div>
                 <div>
-                  <label className="block text-white text-xs mb-2">Chunk Size (bytes)</label>
+                  <label className="block text-ink text-xs mb-2">Chunk Size (bytes)</label>
                   <input
                     type="number"
                     value={formData.chunkSizeBytes}
                     onChange={(e) => setFormData({ ...formData, chunkSizeBytes: e.target.value })}
-                    className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]"
+                    className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand"
                   />
-                  <div className="text-[#b9b8ae] text-[10px] mt-1">
+                  <div className="text-dim text-[10px] mt-1">
                     Default: 4194304 (4 MB)
                   </div>
                 </div>
@@ -874,14 +874,14 @@ export function RecordPage() {
                 <button
                   type="button"
                   onClick={() => setShowSessionModal(false)}
-                  className="bg-[#0b0b0b] border border-[#252525] text-[#b9b8ae] px-5 py-2.5 text-sm hover:border-white hover:text-white transition-colors"
+                  className="bg-app border border-edge text-dim px-5 py-2.5 text-sm hover:border-white hover:text-ink transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
                   disabled={formSubmitting}
-                  className="bg-[#55bde3] text-white px-5 py-2.5 text-sm hover:bg-[#4aa8cc] transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-2"
+                  className="bg-brand text-white px-5 py-2.5 text-sm hover:bg-[#4aa8cc] transition-colors disabled:opacity-50 disabled:cursor-wait flex items-center gap-2"
                 >
                   {formSubmitting && <Loader2 className="w-4 h-4 animate-spin" />}
                   {formSubmitting ? 'Saving…' : editingSessionId ? 'Save Changes' : 'Create Session'}
@@ -898,30 +898,30 @@ export function RecordPage() {
           className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4"
           onClick={(e) => { if (e.target === e.currentTarget) setEditEpisodesSession(null); }}
         >
-          <div className="bg-[#0d0d0d] border border-[#252525] w-full max-w-[400px] font-['JetBrains_Mono',sans-serif]">
-            <div className="flex items-center justify-between p-5 border-b border-[#252525]">
-              <h2 className="text-lg text-white">Edit Episodes</h2>
-              <button onClick={() => setEditEpisodesSession(null)} aria-label="Close" className="text-[#b9b8ae] hover:text-white transition-colors"><X className="w-5 h-5" /></button>
+          <div className="bg-surface border border-edge w-full max-w-[400px] font-['JetBrains_Mono',sans-serif]">
+            <div className="flex items-center justify-between p-5 border-b border-edge">
+              <h2 className="text-lg text-ink">Edit Episodes</h2>
+              <button onClick={() => setEditEpisodesSession(null)} aria-label="Close" className="text-dim hover:text-ink transition-colors"><X className="w-5 h-5" /></button>
             </div>
             <form onSubmit={handleEditEpisodesSubmit} className="p-5 space-y-4">
               {editEpisodesError && (
                 <div className="bg-red-500/10 border border-red-500 text-red-400 text-sm p-3">{editEpisodesError}</div>
               )}
-              <div className="text-[#b9b8ae] text-sm">
-                <span className="text-white">{editEpisodesSession.name}</span> — {editEpisodesSession.current_episode} of {editEpisodesSession.num_episodes} episodes recorded
+              <div className="text-dim text-sm">
+                <span className="text-ink">{editEpisodesSession.name}</span> — {editEpisodesSession.current_episode} of {editEpisodesSession.num_episodes} episodes recorded
               </div>
               <div>
-                <label className="block text-white text-xs mb-2">Total Episodes</label>
+                <label className="block text-ink text-xs mb-2">Total Episodes</label>
                 <input
                   type="number"
                   min="1"
                   value={editEpisodesValue}
                   onChange={e => setEditEpisodesValue(e.target.value)}
-                  className="w-full bg-[#0b0b0b] border border-[#252525] text-white px-3 py-2 text-sm focus:outline-none focus:border-[#55bde3]"
+                  className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand"
                   autoFocus
                 />
                 {editEpisodesSession.current_episode > 0 && (
-                  <div className="text-[#b9b8ae] text-[10px] mt-1">
+                  <div className="text-dim text-[10px] mt-1">
                     {parseInt(editEpisodesValue) > editEpisodesSession.current_episode
                       ? `${parseInt(editEpisodesValue) - editEpisodesSession.current_episode} more episodes to record`
                       : parseInt(editEpisodesValue) === editEpisodesSession.current_episode
@@ -931,18 +931,18 @@ export function RecordPage() {
                   </div>
                 )}
                 {editEpisodesSession.status === 'completed' && parseInt(editEpisodesValue) > editEpisodesSession.num_episodes && (
-                  <div className="text-[#55bde3] text-[10px] mt-1">
+                  <div className="text-brand text-[10px] mt-1">
                     Session will move to paused — click Resume to continue recording
                   </div>
                 )}
               </div>
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setEditEpisodesSession(null)}
-                  className="bg-[#0b0b0b] border border-[#252525] text-[#b9b8ae] px-5 py-2 text-sm hover:border-white hover:text-white transition-colors">
+                  className="bg-app border border-edge text-dim px-5 py-2 text-sm hover:border-white hover:text-ink transition-colors">
                   Cancel
                 </button>
                 <button type="submit"
-                  className="bg-[#55bde3] text-white px-5 py-2 text-sm hover:bg-[#4aa8cc] transition-colors">
+                  className="bg-brand text-white px-5 py-2 text-sm hover:bg-[#4aa8cc] transition-colors">
                   Save
                 </button>
               </div>

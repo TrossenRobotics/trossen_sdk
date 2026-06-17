@@ -1,4 +1,40 @@
 @custom-variant dark (&:is(.dark *));
+@custom-variant light (&:is(.light *));
+
+/*
+ * App colour palette as semantic tokens (TDS-152 light mode).
+ * Dark is the default (:root); `html.light` overrides for light mode. The
+ * codebase's hardcoded hex values were swept to these utilities:
+ *   #0b0b0b -> app, #0d0d0d -> surface, #252525 -> edge,
+ *   #b9b8ae -> dim (muted text), #55bde3 -> brand (accent),
+ *   text-white -> ink (primary text; white-on-colour buttons keep text-white).
+ */
+:root {
+  --app: #0b0b0b;       /* page background */
+  --surface: #0d0d0d;   /* cards / panels */
+  --edge: #252525;      /* borders, dividers, subtle hover fills */
+  --ink: #ffffff;       /* primary text */
+  --dim: #b9b8ae;       /* muted / secondary text */
+  --brand: #55bde3;     /* accent (cyan) */
+}
+
+html.light {
+  --app: #f4f4f2;
+  --surface: #ffffff;
+  --edge: #dcdbd5;
+  --ink: #1a1a1a;
+  --dim: #5c5b54;
+  --brand: #1f8fb8;     /* darker cyan for contrast on light surfaces */
+}
+
+@theme inline {
+  --color-app: var(--app);
+  --color-surface: var(--surface);
+  --color-edge: var(--edge);
+  --color-ink: var(--ink);
+  --color-dim: var(--dim);
+  --color-brand: var(--brand);
+}
 
 :root {
   --font-size: 16px;

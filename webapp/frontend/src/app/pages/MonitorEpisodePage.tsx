@@ -62,7 +62,7 @@ function ConnectionBadge({ status, recording }: { status: WsStatus; recording: b
       ? 'bg-green-500/15 text-green-400 border-green-500/30'
       : status === 'reconnecting' || status === 'connecting'
         ? 'bg-yellow-500/15 text-yellow-400 border-yellow-500/30'
-        : 'bg-[#252525] text-[#b9b8ae] border-[#3a3a3a]';
+        : 'bg-edge text-dim border-[#3a3a3a]';
   return (
     <span
       className={`text-[10px] uppercase tracking-wide px-2 py-0.5 border rounded ${color}`}
@@ -695,10 +695,10 @@ export function MonitorEpisodePage() {
   }[phase];
 
   const statusColor = {
-    not_started: 'text-[#b9b8ae]',
+    not_started: 'text-dim',
     recording: 'text-green-500',
     resetting: 'text-yellow-500',
-    complete: 'text-[#55bde3]',
+    complete: 'text-brand',
     stopped: 'text-yellow-500',
     paused: 'text-yellow-500',
   }[phase];
@@ -707,9 +707,9 @@ export function MonitorEpisodePage() {
   // which would otherwise flash for a completed/errored session.
   if (!loaded && !fatalError) {
     return (
-      <div className="h-screen flex flex-col items-center justify-center gap-[14px] bg-[#0b0b0b] font-['JetBrains_Mono',sans-serif]">
-        <Loader2 className="w-[28px] h-[28px] text-[#55bde3] animate-spin" />
-        <div className="text-[#b9b8ae] text-[13px]">Loading session…</div>
+      <div className="h-screen flex flex-col items-center justify-center gap-[14px] bg-app font-['JetBrains_Mono',sans-serif]">
+        <Loader2 className="w-[28px] h-[28px] text-brand animate-spin" />
+        <div className="text-dim text-[13px]">Loading session…</div>
       </div>
     );
   }
@@ -718,13 +718,13 @@ export function MonitorEpisodePage() {
   // never the interactive recording controls.
   if (fatalError) {
     return (
-      <div className="h-screen flex flex-col items-center justify-center gap-[20px] bg-[#0b0b0b] font-['JetBrains_Mono',sans-serif] px-6 text-center">
+      <div className="h-screen flex flex-col items-center justify-center gap-[20px] bg-app font-['JetBrains_Mono',sans-serif] px-6 text-center">
         <AlertTriangle className="w-[40px] h-[40px] text-red-400" />
-        <div className="text-white text-[18px]">Can’t open this session</div>
-        <p className="text-[#b9b8ae] text-[14px] max-w-[520px]">{fatalError}</p>
+        <div className="text-ink text-[18px]">Can’t open this session</div>
+        <p className="text-dim text-[14px] max-w-[520px]">{fatalError}</p>
         <button
           onClick={() => navigate('/record')}
-          className="mt-[8px] bg-[#55bde3] text-[#0b0b0b] px-[24px] py-[12px] text-[14px] font-bold uppercase hover:bg-[#4aa8cc] transition-colors flex items-center gap-[8px]"
+          className="mt-[8px] bg-brand text-app px-[24px] py-[12px] text-[14px] font-bold uppercase hover:bg-[#4aa8cc] transition-colors flex items-center gap-[8px]"
         >
           <X className="w-[16px] h-[16px]" />
           Back to Record
@@ -734,13 +734,13 @@ export function MonitorEpisodePage() {
   }
 
   return (
-    <div className="h-screen flex flex-col bg-[#0b0b0b] font-['JetBrains_Mono',sans-serif]">
+    <div className="h-screen flex flex-col bg-app font-['JetBrains_Mono',sans-serif]">
       {modalElement}
       {/* Top Bar */}
-      <div className="bg-[#0d0d0d] border-b border-[#252525] px-[20px] py-[12px]">
+      <div className="bg-surface border-b border-edge px-[20px] py-[12px]">
         <div className="flex items-center justify-between gap-[12px] mb-[12px] portrait:flex-wrap">
           <div className="flex items-center flex-wrap gap-x-[16px] gap-y-[6px] min-w-0">
-            <h2 className="text-[16px] text-white leading-[22.4px]">
+            <h2 className="text-[16px] text-ink leading-[22.4px]">
               {session?.name || 'Loading...'}
             </h2>
             {session?.dry_run && (
@@ -751,20 +751,20 @@ export function MonitorEpisodePage() {
                 Dry Run
               </span>
             )}
-            <div className="h-[16px] w-[1px] bg-[#252525]" />
-            <span className="text-[#b9b8ae] text-[12px]">{session?.dataset_id || ''}</span>
-            <div className="h-[16px] w-[1px] bg-[#252525]" />
-            <span className="text-[#b9b8ae] text-[12px]">{session?.system_name || ''}</span>
+            <div className="h-[16px] w-[1px] bg-edge" />
+            <span className="text-dim text-[12px]">{session?.dataset_id || ''}</span>
+            <div className="h-[16px] w-[1px] bg-edge" />
+            <span className="text-dim text-[12px]">{session?.system_name || ''}</span>
             {phase !== 'not_started' && (
               <>
-                <div className="h-[16px] w-[1px] bg-[#252525]" />
+                <div className="h-[16px] w-[1px] bg-edge" />
                 <ConnectionBadge status={wsStatus} recording={phase === 'recording'} />
               </>
             )}
           </div>
           <button
             onClick={() => navigate('/record')}
-            className="flex items-center gap-[6px] bg-[#252525] hover:bg-[#353535] text-[#b9b8ae] hover:text-white px-[12px] py-[8px] transition-colors text-[12px] uppercase"
+            className="flex items-center gap-[6px] bg-edge hover:bg-edge text-dim hover:text-ink px-[12px] py-[8px] transition-colors text-[12px] uppercase"
           >
             <X className="w-[14px] h-[14px]" />
             Exit (ESC)
@@ -773,16 +773,16 @@ export function MonitorEpisodePage() {
 
         <div className="grid grid-cols-5 portrait:grid-cols-2 gap-[12px] mb-[12px]">
           <div>
-            <div className="text-[#b9b8ae] text-[9px] uppercase mb-[2px]">Status</div>
+            <div className="text-dim text-[9px] uppercase mb-[2px]">Status</div>
             <div className={`text-[13px] font-bold ${statusColor}`}>{statusText}</div>
           </div>
           <div>
-            <div className="text-[#b9b8ae] text-[9px] uppercase mb-[2px]">Episode</div>
-            <div className="text-white text-[13px]">{currentEpisode} / {totalEpisodes}</div>
+            <div className="text-dim text-[9px] uppercase mb-[2px]">Episode</div>
+            <div className="text-ink text-[13px]">{currentEpisode} / {totalEpisodes}</div>
           </div>
           <div>
-            <div className="text-[#b9b8ae] text-[9px] uppercase mb-[2px]">Episode Time</div>
-            <div className="text-white text-[13px] font-mono">
+            <div className="text-dim text-[9px] uppercase mb-[2px]">Episode Time</div>
+            <div className="text-ink text-[13px] font-mono">
               {phase === 'recording'
                 ? `${elapsedMin}:${String(elapsedSec).padStart(2, '0')} / ${maxMin}:${String(maxSec).padStart(2, '0')}`
                 : `-- / ${maxMin}:${String(maxSec).padStart(2, '0')}`
@@ -790,19 +790,19 @@ export function MonitorEpisodePage() {
             </div>
           </div>
           <div>
-            <div className="text-[#b9b8ae] text-[9px] uppercase mb-[2px]">Episode %</div>
-            <div className="text-white text-[13px]">{phase === 'recording' ? episodeProgress + '%' : '--'}</div>
+            <div className="text-dim text-[9px] uppercase mb-[2px]">Episode %</div>
+            <div className="text-ink text-[13px]">{phase === 'recording' ? episodeProgress + '%' : '--'}</div>
           </div>
           <div>
-            <div className="text-[#b9b8ae] text-[9px] uppercase mb-[2px]">Reset Time</div>
-            <div className="text-white text-[13px]">
+            <div className="text-dim text-[9px] uppercase mb-[2px]">Reset Time</div>
+            <div className="text-ink text-[13px]">
               {resetDuration > 0 ? `${resetDuration}s` : 'Manual'}
             </div>
           </div>
         </div>
 
         {/* Progress bar */}
-        <div className="h-[32px] bg-[#252525] border border-[#252525] relative overflow-hidden">
+        <div className="h-[32px] bg-edge border border-edge relative overflow-hidden">
           {phase === 'recording' && (
             <div
               className="absolute inset-y-0 left-0 bg-green-500 transition-all duration-500"
@@ -816,7 +816,7 @@ export function MonitorEpisodePage() {
             />
           )}
           <div className="absolute inset-0 flex items-center justify-between px-[12px]">
-            <div className="text-white text-[12px] relative z-10">
+            <div className="text-ink text-[12px] relative z-10">
               {phase === 'not_started' && 'Press Start to begin recording'}
               {phase === 'paused' && `Paused at ${currentEpisode} of ${totalEpisodes} — press Resume when ready`}
               {phase === 'recording' && `Recording episode ${currentEpisode} — ${elapsedMin}:${String(elapsedSec).padStart(2, '0')} / ${maxMin}:${String(maxSec).padStart(2, '0')}`}
@@ -828,7 +828,7 @@ export function MonitorEpisodePage() {
               {phase === 'stopped' && `Stopped — ${currentEpisode} of ${totalEpisodes} episodes saved (press Resume Session below to continue)`}
             </div>
             {phase === 'recording' && (
-              <div className="text-white text-[12px] relative z-10 font-mono">{episodeProgress}%</div>
+              <div className="text-ink text-[12px] relative z-10 font-mono">{episodeProgress}%</div>
             )}
           </div>
         </div>
@@ -856,18 +856,18 @@ export function MonitorEpisodePage() {
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center select-none">
-              <p className="text-[#7a7a7a] text-[13px]">Press Start to begin…</p>
+              <p className="text-dim text-[13px]">Press Start to begin…</p>
             </div>
           )}
         </div>
 
         {/* Logs Panel — fixed-width column on the right in landscape; in
             portrait it becomes a capped-height strip below the viewer. */}
-        <div className="w-[300px] portrait:w-full portrait:h-[200px] portrait:shrink-0 bg-[#0d0d0d] border-l portrait:border-l-0 portrait:border-t border-[#252525] p-[20px] overflow-hidden flex flex-col">
-          <h2 className="text-[16px] text-white mb-[12px] leading-[22.4px]">Logs</h2>
+        <div className="w-[300px] portrait:w-full portrait:h-[200px] portrait:shrink-0 bg-surface border-l portrait:border-l-0 portrait:border-t border-edge p-[20px] overflow-hidden flex flex-col">
+          <h2 className="text-[16px] text-ink mb-[12px] leading-[22.4px]">Logs</h2>
           <div className="flex-1 overflow-y-auto space-y-[10px]">
             {logs.length === 0 && (
-              <div className="text-[#b9b8ae] text-[12px]">Press Start to begin...</div>
+              <div className="text-dim text-[12px]">Press Start to begin...</div>
             )}
             {logs.map((log, index) => (
               <div
@@ -876,14 +876,14 @@ export function MonitorEpisodePage() {
                   log.type === 'error' ? 'border-red-500' :
                   log.type === 'warning' ? 'border-yellow-500' :
                   log.type === 'success' ? 'border-green-500' :
-                  'border-[#55bde3]'
+                  'border-brand'
                 }`}
               >
-                <div className="text-[#b9b8ae] text-[9px] mb-[2px]">{log.timestamp}</div>
+                <div className="text-dim text-[9px] mb-[2px]">{log.timestamp}</div>
                 <div className={`text-[12px] ${
                   log.type === 'error' ? 'text-red-400' :
                   log.type === 'warning' ? 'text-yellow-400' :
-                  'text-white'
+                  'text-ink'
                 }`}>{log.message}</div>
               </div>
             ))}
@@ -893,7 +893,7 @@ export function MonitorEpisodePage() {
       </div>
 
       {/* Bottom Control Panel */}
-      <div className="bg-[#0d0d0d] border-t-2 border-[#252525] p-[16px]">
+      <div className="bg-surface border-t-2 border-edge p-[16px]">
         {phase === 'not_started' ? (
           /* Dry Run + Start buttons. Both transition into the regular
              recording UI; Dry Run flips the backend to NullBackend so
@@ -935,8 +935,8 @@ export function MonitorEpisodePage() {
                     title={gateTitle}
                     className={`px-[32px] py-[20px] text-[16px] font-bold uppercase flex items-center justify-center gap-[10px] shadow-lg transition-colors ${
                       startDisabled
-                        ? 'bg-[#55bde3]/30 text-[#55bde3] cursor-not-allowed'
-                        : 'bg-[#252525] border border-[#55bde3] text-[#55bde3] hover:bg-[#55bde3] hover:text-white'
+                        ? 'bg-brand/30 text-brand cursor-not-allowed'
+                        : 'bg-edge border border-brand text-brand hover:bg-brand hover:text-white'
                     }`}
                   >
                     {starting && startingMode === 'dry' ? 'Starting...' : 'Dry Run'}
@@ -949,7 +949,7 @@ export function MonitorEpisodePage() {
                       startDisabled
                         ? 'bg-green-500/30 cursor-not-allowed'
                         : 'bg-green-500 hover:bg-green-600 active:bg-green-700'
-                    } text-white`}
+                    } text-ink`}
                   >
                     {/* Distinguish busy (spinner) from gated (lock) — on a
                         touchscreen the title tooltip never shows, so the
@@ -999,7 +999,7 @@ export function MonitorEpisodePage() {
                 <div className="flex justify-center gap-[16px]">
                   <button
                     onClick={() => navigate('/record')}
-                    className="bg-[#252525] text-white px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-[#353535] transition-colors"
+                    className="bg-edge text-ink px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-edge transition-colors"
                   >
                     Back to Record
                   </button>
@@ -1011,7 +1011,7 @@ export function MonitorEpisodePage() {
                       resumeDisabled
                         ? 'bg-green-500/30 cursor-not-allowed'
                         : 'bg-green-500 hover:bg-green-600 active:bg-green-700'
-                    } text-white`}
+                    } text-ink`}
                   >
                     <Play className="w-[28px] h-[28px]" />
                     {starting ? 'Resuming...' : 'Resume'}
@@ -1030,7 +1030,7 @@ export function MonitorEpisodePage() {
           <div className="flex justify-center gap-[16px]">
             <button
               onClick={() => navigate('/record')}
-              className="bg-[#252525] text-white px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-[#353535] transition-colors"
+              className="bg-edge text-ink px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-edge transition-colors"
             >
               Back to Record
             </button>
@@ -1038,8 +1038,8 @@ export function MonitorEpisodePage() {
               <button
                 onClick={handleDryRun}
                 disabled={starting}
-                className={`text-white px-[24px] py-[16px] text-[16px] font-bold uppercase transition-colors ${
-                  starting ? 'bg-[#55bde3]/50 cursor-wait' : 'bg-[#55bde3] hover:bg-[#4aa8cc]'
+                className={`text-ink px-[24px] py-[16px] text-[16px] font-bold uppercase transition-colors ${
+                  starting ? 'bg-brand/50 cursor-wait' : 'bg-brand hover:bg-[#4aa8cc]'
                 }`}
               >
                 {starting ? 'Starting...' : 'Run Again'}
@@ -1061,7 +1061,7 @@ export function MonitorEpisodePage() {
                 )}
                 <button
                   onClick={() => navigate(`/datasets/${session?.dataset_id}`)}
-                  className="bg-[#55bde3] text-white px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-[#4aa8cc] transition-colors"
+                  className="bg-brand text-white px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-[#4aa8cc] transition-colors"
                 >
                   View Dataset
                 </button>
@@ -1079,7 +1079,7 @@ export function MonitorEpisodePage() {
                       episode_duration: session?.episode_duration,
                       reset_duration: session?.reset_duration,
                     } } })}
-                    className="bg-[#0d0d0d] border border-[#55bde3] text-[#55bde3] px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-[rgba(85,189,227,0.1)] transition-colors"
+                    className="bg-surface border border-brand text-brand px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-brand/10 transition-colors"
                   >
                     Record Again
                   </button>
@@ -1100,7 +1100,7 @@ export function MonitorEpisodePage() {
             <button
               onClick={handleStop}
               disabled={anyBusy}
-              className={`text-white px-[24px] py-[16px] text-[16px] font-bold uppercase flex items-center justify-center gap-[10px] shadow-lg transition-colors ${
+              className={`text-ink px-[24px] py-[16px] text-[16px] font-bold uppercase flex items-center justify-center gap-[10px] shadow-lg transition-colors ${
                 stopping ? 'bg-red-500/50 cursor-wait' : anyBusy ? 'bg-red-500/30 cursor-not-allowed' : 'bg-red-500 hover:bg-red-600 active:bg-red-700'
               }`}
             >
@@ -1113,7 +1113,7 @@ export function MonitorEpisodePage() {
                 <button
                   onClick={handleRerecord}
                   disabled={anyBusy}
-                  className={`text-white px-[24px] py-[16px] text-[16px] font-bold uppercase flex items-center justify-center gap-[10px] shadow-lg transition-colors ${
+                  className={`text-ink px-[24px] py-[16px] text-[16px] font-bold uppercase flex items-center justify-center gap-[10px] shadow-lg transition-colors ${
                     rerecording ? 'bg-orange-500/50 cursor-wait' : anyBusy ? 'bg-orange-500/30 cursor-not-allowed' : 'bg-orange-500 hover:bg-orange-600 active:bg-orange-700'
                   }`}
                 >
@@ -1127,8 +1127,8 @@ export function MonitorEpisodePage() {
                 <button
                   onClick={handleNext}
                   disabled={anyBusy}
-                  className={`text-white px-[24px] py-[16px] text-[16px] font-bold uppercase flex items-center justify-center gap-[10px] shadow-lg transition-colors ${
-                    nexting ? 'bg-[#55bde3]/50 cursor-wait' : anyBusy ? 'bg-[#55bde3]/30 cursor-not-allowed' : 'bg-[#55bde3] hover:bg-[#4aa8cc] active:bg-[#3997b8]'
+                  className={`text-ink px-[24px] py-[16px] text-[16px] font-bold uppercase flex items-center justify-center gap-[10px] shadow-lg transition-colors ${
+                    nexting ? 'bg-brand/50 cursor-wait' : anyBusy ? 'bg-brand/30 cursor-not-allowed' : 'bg-brand hover:bg-[#4aa8cc] active:bg-[#3997b8]'
                   }`}
                 >
                   <SkipForward className="w-[24px] h-[24px]" />

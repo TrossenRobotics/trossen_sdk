@@ -6,7 +6,7 @@ export function Layout() {
   const isMonitorPage = location.pathname.startsWith('/monitor');
 
   return (
-    <div className="w-full h-screen flex flex-col bg-[#0b0b0b] overflow-hidden">
+    <div className="w-full h-screen flex flex-col bg-app overflow-hidden">
       {!isMonitorPage && <Header />}
       <main className={isMonitorPage ? "flex-1 overflow-hidden" : "flex-1 overflow-auto"}>
         <Outlet />
