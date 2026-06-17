@@ -1,6 +1,6 @@
 import { Plus, Trash2, ChevronDown, ChevronUp, AlertTriangle, Settings, Loader2 } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
-import { Link, useNavigate } from 'react-router';
+import { Link, useNavigate, useLocation } from 'react-router';
 import { toast } from 'sonner';
 import { apiDelete, apiGet, apiPost, apiPut, describeError } from '@/lib/api';
 import { useHwStatus } from '@/lib/HwStatusContext';
@@ -30,6 +30,7 @@ interface Session {
 
 export function RecordPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { statuses: hwStatus, setStatus: setHwStatus } = useHwStatus();
   const { confirm, modalElement } = useConfirm();
   const [showSessionModal, setShowSessionModal] = useState(false);
@@ -121,6 +122,29 @@ export function RecordPage() {
       clearInterval(interval);
     };
   }, [fetchSessions, fetchSystems]);
+
+  // "Record Again" from the Monitor complete screen lands here with a
+  // cloneFrom payload — open the New Session modal pre-filled from the
+  // finished session so the operator doesn't retype the whole form.
+  useEffect(() => {
+    const clone = (location.state as { cloneFrom?: Partial<Session> } | null)?.cloneFrom;
+    if (!clone) return;
+    setFormError('');
+    setEditingSessionId(null);
+    setFormData({
+      sessionName: clone.name ?? '',
+      hardwareSystem: clone.system_id ?? '',
+      datasetId: clone.dataset_id ?? '',
+      numEpisodes: String(clone.num_episodes ?? 10),
+      episodeDuration: String(clone.episode_duration ?? 10),
+      resetDuration: String(clone.reset_duration ?? 2),
+      compression: '',
+      chunkSizeBytes: '4194304',
+    });
+    setShowSessionModal(true);
+    // Clear the router state so a refresh / back doesn't re-open the modal.
+    window.history.replaceState({}, '');
+  }, [location.state]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -394,7 +418,7 @@ export function RecordPage() {
           // matching system pre-selected.
           const sessionGated = session.status === 'pending' || session.status === 'paused';
           const needsTest = sessionGated && hwStatus[session.system_id]?.status !== 'ready';
-          const configHref = `/configuration?system=${encodeURIComponent(session.system_id)}`;
+          const configHref = `/configuration?system=${encodeURIComponent(session.system_id)}&autotest=1`;
           return (
           <div key={session.id}>
             <button
@@ -405,9 +429,18 @@ export function RecordPage() {
               <span className="text-white text-sm flex-1 truncate">{session.name}</span>
               <div className="flex items-center gap-3 sm:gap-4 shrink-0">
                 {needsTest && (
-                  <span className="flex items-center gap-1 text-yellow-400" title="Hardware test required before starting">
+                  // Clickable shortcut: jump straight to the auto-starting
+                  // hardware test instead of expanding the row to find the
+                  // Test Hardware button. stopPropagation so the row doesn't
+                  // also toggle open.
+                  <span
+                    role="button"
+                    onClick={(e) => { e.stopPropagation(); navigate(configHref); }}
+                    className="flex items-center gap-1 text-yellow-400 hover:text-yellow-300 cursor-pointer"
+                    title="Run the hardware test now"
+                  >
                     <AlertTriangle className="w-4 h-4" />
-                    <span className="text-[10px] uppercase hidden sm:inline">Needs Test</span>
+                    <span className="text-[10px] uppercase hidden sm:inline underline underline-offset-2">Test Now</span>
                   </span>
                 )}
                 <span className="text-[#b9b8ae] text-xs uppercase hidden sm:inline">{session.status}</span>
@@ -552,8 +585,12 @@ export function RecordPage() {
                         <button onClick={() => openEditEpisodesModal(session)} className="bg-[#0d0d0d] border border-[#55bde3] text-[#55bde3] px-4 py-2.5 hover:bg-[rgba(85,189,227,0.1)] transition-colors text-sm capitalize">
                           Edit Episodes
                         </button>
-                        <button onClick={() => handleStop(session)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
-                          {busySessionId === session.id ? 'Stopping...' : 'Stop'}
+                        {/* A paused session is already stopped (the SDK shut down
+                            cleanly on pause/stop), so the backend rejects another
+                            Stop. Offer Delete instead — Resume continues it, Delete
+                            discards it. */}
+                        <button onClick={() => handleDelete(session)} disabled={busySessionId === session.id} className={`bg-[#0d0d0d] border border-red-500 text-red-500 px-4 py-2.5 transition-colors text-sm capitalize flex items-center ${busySessionId === session.id ? 'opacity-50 cursor-wait' : 'hover:bg-[rgba(255,0,0,0.1)]'}`}>
+                          <Trash2 className="w-4 h-4 mr-1.5" />{busySessionId === session.id ? 'Deleting...' : 'Delete'}
                         </button>
                       </>
                     )}

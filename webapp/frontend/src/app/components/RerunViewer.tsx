@@ -25,7 +25,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, Video } from 'lucide-react';
 import WebViewer from '@rerun-io/web-viewer-react';
 
 // gRPC port the backend's `rr.serve_grpc` listens on. MUST match
@@ -36,7 +36,15 @@ const RERUN_GRPC_PORT = 9876;
 // its URL to the viewer (see the readiness effect below).
 const READINESS_POLL_MS = 1500;
 
-export function RerunViewer({ sessionId }: { sessionId: string }): React.ReactElement {
+export function RerunViewer({
+  sessionId,
+  recording = false,
+}: {
+  sessionId: string;
+  /** True while an episode is actively recording, so the placeholder can
+   *  distinguish "feed is connecting" from "nothing is recording yet". */
+  recording?: boolean;
+}): React.ReactElement {
   // The recorder's in-process Rerun gRPC server only exists while a recording
   // child is running, and it takes ~1s to bind after the episode starts. The
   // web viewer connects to whatever URLs it's handed exactly once — if the
@@ -87,13 +95,25 @@ export function RerunViewer({ sessionId }: { sessionId: string }): React.ReactEl
 
   // Until the gRPC server answers, show a placeholder instead of the viewer.
   // Mounting the viewer only once data is ready means the operator never sees
-  // Rerun's empty camera panels (or its examples splash) while waiting — just a
-  // clear "waiting" state — and the blueprint + feed come up together.
+  // Rerun's empty camera panels (or its examples splash) while waiting — and
+  // the blueprint + feed come up together. The message depends on whether a
+  // recording is actually in flight: a spinner ("connecting") only makes sense
+  // when the recorder is running; otherwise the feed simply doesn't exist yet
+  // and the operator needs to start recording.
   if (!dataReady) {
     return (
       <div className="w-full h-full flex flex-col items-center justify-center gap-[12px] bg-[#1a1a1a] select-none">
-        <Loader2 className="w-[28px] h-[28px] text-[#55bde3] animate-spin" />
-        <p className="text-[#7a7a7a] text-[13px]">Waiting for cameras…</p>
+        {recording ? (
+          <>
+            <Loader2 className="w-[28px] h-[28px] text-[#55bde3] animate-spin" />
+            <p className="text-[#7a7a7a] text-[13px]">Connecting to cameras…</p>
+          </>
+        ) : (
+          <>
+            <Video className="w-[28px] h-[28px] text-[#4a4a4a]" />
+            <p className="text-[#7a7a7a] text-[13px]">Start recording to see the camera feed</p>
+          </>
+        )}
       </div>
     );
   }

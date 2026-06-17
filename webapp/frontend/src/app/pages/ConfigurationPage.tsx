@@ -1,7 +1,9 @@
 import { Server, Camera, Bot, Plus, Trash2, Edit, ChevronDown, ChevronUp, Radio, Smartphone, Save, Loader2, AlertTriangle, RotateCcw } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { useBlocker } from 'react-router';
 import { toast } from 'sonner';
 import { AppModal } from '@/app/components/AppModal';
+import { useConfirm } from '@/app/hooks/useConfirm';
 import { useHwStatus } from '@/lib/HwStatusContext';
 import { announce } from '@/lib/announce';
 import { apiGet, apiPost, apiPut, describeError } from '@/lib/api';
@@ -432,6 +434,14 @@ export function ConfigurationPage() {
   } = useHwStatus();
   // Dirty flag: true when local edits have not yet been persisted
   const [hasUnsavedChanges, setHasUnsavedChanges] = useState(false);
+  // Promise-based confirm for the discard action and the nav guard below.
+  const { confirm, modalElement: confirmModalElement } = useConfirm();
+  // In-app navigation guard: block client-side route changes while there are
+  // unsaved edits (the data router in App.tsx makes useBlocker available).
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      hasUnsavedChanges && currentLocation.pathname !== nextLocation.pathname,
+  );
   // Loading / saving indicators
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -545,14 +555,28 @@ export function ConfigurationPage() {
   // the tab or reload the page; the browser shows its generic
   // "Leave site?" prompt when preventDefault + returnValue are set.
   useEffect(() => {
-    if (testingSystemId === null) return;
+    // Warn on tab-close / hard-reload either while a test is running OR while
+    // there are unsaved config edits (useBlocker only catches in-app nav).
+    if (testingSystemId === null && !hasUnsavedChanges) return;
     const handler = (e: BeforeUnloadEvent) => {
       e.preventDefault();
       e.returnValue = '';
     };
     window.addEventListener('beforeunload', handler);
     return () => window.removeEventListener('beforeunload', handler);
-  }, [testingSystemId]);
+  }, [testingSystemId, hasUnsavedChanges]);
+
+  // When the nav guard blocks a route change, ask the operator and either
+  // proceed (discard) or reset (stay). Reuses the promise-based confirm.
+  useEffect(() => {
+    if (blocker.state !== 'blocked') return;
+    confirm({
+      title: 'Unsaved changes',
+      message: 'You have unsaved configuration changes. Leave without saving?',
+      confirmLabel: 'Leave',
+      variant: 'warning',
+    }).then(ok => (ok ? blocker.proceed() : blocker.reset()));
+  }, [blocker, confirm]);
 
   // -------------------------------------------------------------------------
   // Save current system config to backend
@@ -605,6 +629,130 @@ export function ConfigurationPage() {
       'warning',
     );
   }, [selectedSystem, showConfirm, showAlert]);
+
+  // Discard unsaved edits by re-fetching the saved config from the backend —
+  // a clean revert (names, hardware, producers) without tracking per-field
+  // baselines. There is otherwise no way to abandon edits short of a reload.
+  const handleDiscardChanges = useCallback(async () => {
+    const ok = await confirm({
+      title: 'Discard changes?',
+      message: 'Discard all unsaved changes to this configuration?',
+      confirmLabel: 'Discard',
+      variant: 'warning',
+    });
+    if (!ok) return;
+    try {
+      const data = await apiGet<RawSystemResponse[]>('/api/systems');
+      setSystems(data.map(s => sdkConfigToSystem(s.id, s)));
+      const configs: Record<string, RawSdkConfig> = {};
+      data.forEach(s => { configs[s.id] = s.config ?? {}; });
+      setRawConfigs(configs);
+      setHasUnsavedChanges(false);
+      toast.success('Changes discarded');
+    } catch (err) {
+      showAlert(`Failed to reload configuration: ${describeError(err)}`);
+    }
+  }, [confirm, showAlert]);
+
+  // Run the hardware test for a system. Extracted from the card button so it
+  // can also be triggered by the `?autotest=1` deep link below. Streams SSE
+  // progress into the banner; single-flight via the global testingSystemId.
+  const runHardwareTest = useCallback(async (systemId: string) => {
+    if (testingSystemId !== null) return;
+    setTestingSystemId(systemId);
+    setDryRunResult({ systemId, success: null, message: 'Running hardware test…', output: [] });
+    const controller = new AbortController();
+    // Safety net at 20s in case the backend hangs without a terminal event;
+    // its own budget is ~15s + grace, so a healthy run is well under this.
+    const safetyTimeoutId = window.setTimeout(() => controller.abort(), 20000);
+    const collected: string[] = [];
+    try {
+      const res = await fetch(`/api/systems/${systemId}/test`, { method: 'POST', signal: controller.signal });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `Server returned ${res.status} ${res.statusText}` }));
+        const detail = typeof err.detail === 'string' ? err.detail : `Server error ${res.status}`;
+        throw new Error(detail);
+      }
+      const reader = res.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error('No stream from server');
+      let buffer = '';
+      let finalised = false;
+      while (!finalised) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === 'progress' && typeof data.message === 'string') {
+              collected.push(data.message);
+              setDryRunResult(prev => prev && prev.systemId === systemId ? { ...prev, output: [...collected] } : prev);
+            } else if (data.type === 'complete') {
+              setDryRunResult({ systemId, success: true, message: data.message, output: data.output || collected });
+              setHwStatusEntry(systemId, { status: 'ready', message: data.message });
+              // The test gates recording and the operator has often walked to
+              // the robot during the ~15s run — confirm the pass audibly too.
+              toast.success('Hardware test passed');
+              announce('Hardware test passed');
+              finalised = true;
+              break;
+            } else if (data.type === 'error') {
+              setDryRunResult({ systemId, success: false, message: data.message, output: data.output || collected });
+              setHwStatusEntry(systemId, { status: 'error', message: data.message });
+              toast.error(`Hardware test failed: ${data.message}`);
+              announce('Hardware test failed');
+              finalised = true;
+              break;
+            }
+          } catch {
+            // Non-JSON SSE comment / keepalive — ignore.
+          }
+        }
+      }
+      if (!finalised) {
+        const msg = 'Hardware test ended unexpectedly — the backend closed the connection before sending a result.';
+        setDryRunResult({ systemId, success: false, message: msg, output: collected });
+        setHwStatusEntry(systemId, { status: 'error', message: msg });
+        toast.error(`Hardware test failed: ${msg}`);
+        announce('Hardware test failed');
+      }
+    } catch (err) {
+      const isTimeout = err instanceof DOMException && err.name === 'AbortError';
+      const msg = isTimeout
+        ? 'Hardware test timed out — the backend did not finish within 20 seconds. The SDK may be stuck on a hardware call. Last captured server output is below.'
+        : describeError(err);
+      setDryRunResult({ systemId, success: false, message: msg, output: collected });
+      setHwStatusEntry(systemId, { status: 'error', message: msg });
+      toast.error(`Hardware test failed: ${msg}`);
+      announce('Hardware test failed');
+    } finally {
+      window.clearTimeout(safetyTimeoutId);
+      setTestingSystemId(null);
+    }
+  }, [testingSystemId, setTestingSystemId, setDryRunResult, setHwStatusEntry]);
+
+  // Deep-link autotest: arriving at /configuration?system=<id>&autotest=1
+  // (from the "Test Hardware" gate banners) auto-selects the system and starts
+  // its test — turning a multi-click hunt into a single click. Latched so a
+  // re-render can't re-fire; skipped if the system is already passing.
+  const autotestFiredRef = useRef(false);
+  useEffect(() => {
+    if (autotestFiredRef.current) return;
+    if (isLoading || loadError) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('autotest') !== '1') return;
+    const sysId = params.get('system');
+    if (!sysId || !systems.some(s => s.id === sysId)) return;
+    if (hwStatus[sysId]?.status === 'ready') return; // already green — don't re-engage arms
+    if (testingSystemId !== null) return;
+    autotestFiredRef.current = true; // latch before the async call
+    announce('Auto-starting hardware test — arms will engage');
+    runHardwareTest(sysId);
+  }, [isLoading, loadError, systems, hwStatus, testingSystemId, runHardwareTest]);
 
   const [systemForm, setSystemForm] = useState({
     name: '',
@@ -1118,6 +1266,7 @@ export function ConfigurationPage() {
 
   return (
     <div className="max-w-[1400px] mx-auto w-full px-4 sm:px-6 lg:px-[37px] py-6 sm:py-[40px] font-['JetBrains_Mono',sans-serif] h-full flex flex-col">
+      {confirmModalElement}
       {/* Page Title */}
       <div className="mb-[35px]">
         <div className="flex flex-col gap-[7px]">
@@ -1125,6 +1274,36 @@ export function ConfigurationPage() {
           <div className="h-[1px] bg-[#252525] w-full" />
         </div>
       </div>
+
+      {/* Unsaved-changes banner — sticky so it stays visible while the operator
+          scrolls the hardware list, making "you must save" unmissable. */}
+      {!isLoading && !loadError && hasUnsavedChanges && (
+        <div className="sticky top-0 z-40 mb-[20px] flex items-center justify-between gap-3 border border-[#55bde3] bg-[#55bde3]/10 px-[16px] py-[10px]">
+          <div className="flex items-center gap-[8px] text-[#55bde3] text-[13px]">
+            <AlertTriangle className="w-[16px] h-[16px] shrink-0" />
+            <span>You have unsaved configuration changes — don't forget to save.</span>
+          </div>
+          <div className="flex items-center gap-[8px] shrink-0">
+            <button
+              onClick={handleDiscardChanges}
+              disabled={isSaving || mutationsLocked}
+              title={mutationsLocked ? lockedTitle : ''}
+              className="border border-[#252525] text-[#b9b8ae] hover:border-white hover:text-white px-[14px] py-[6px] text-[12px] uppercase disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              Discard
+            </button>
+            <button
+              onClick={handleSave}
+              disabled={isSaving || mutationsLocked}
+              title={mutationsLocked ? lockedTitle : ''}
+              className="bg-[#55bde3] text-white hover:bg-[#4aa8cc] px-[14px] py-[6px] text-[12px] uppercase flex items-center gap-[6px] disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isSaving ? <Loader2 className="w-[14px] h-[14px] animate-spin" /> : <Save className="w-[14px] h-[14px]" />}
+              {isSaving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Loading state */}
       {isLoading && (
@@ -1256,113 +1435,7 @@ export function ConfigurationPage() {
                   <div className="text-[#55bde3] text-[10px]">{system.hardware.length} devices</div>
                   <div className="flex items-center gap-[4px]">
                     <button
-                      onClick={async (e) => {
-                        e.stopPropagation();
-                        setTestingSystemId(system.id);
-                        // Initialise the banner immediately in
-                        // "in-progress" state so the user sees a panel
-                        // that streams lines as the test runs, not
-                        // just a final dump at the end.
-                        setDryRunResult({
-                          systemId: system.id,
-                          success: null,
-                          message: 'Running hardware test…',
-                          output: [],
-                        });
-                        // The endpoint streams SSE so we get SDK lines
-                        // as they're emitted. Same parsing pattern as
-                        // the converter handler in DatasetDetailsPage.
-                        const controller = new AbortController();
-                        // Safety net at 20s in case the backend itself
-                        // hangs without emitting a final event — the
-                        // backend's own budget is 15s with a small
-                        // grace, so a healthy run is well under this.
-                        const safetyTimeoutId = window.setTimeout(() => controller.abort(), 20000);
-                        const collected: string[] = [];
-                        try {
-                          const res = await fetch(`/api/systems/${system.id}/test`, {
-                            method: 'POST',
-                            signal: controller.signal,
-                          });
-                          if (!res.ok) {
-                            const err = await res.json().catch(() => ({ detail: `Server returned ${res.status} ${res.statusText}` }));
-                            const detail = typeof err.detail === 'string' ? err.detail : `Server error ${res.status}`;
-                            throw new Error(detail);
-                          }
-                          const reader = res.body?.getReader();
-                          const decoder = new TextDecoder();
-                          if (!reader) throw new Error('No stream from server');
-                          let buffer = '';
-                          let finalised = false;
-                          while (!finalised) {
-                            const { done, value } = await reader.read();
-                            if (done) break;
-                            buffer += decoder.decode(value, { stream: true });
-                            const lines = buffer.split('\n');
-                            buffer = lines.pop() || '';
-                            for (const line of lines) {
-                              if (!line.startsWith('data: ')) continue;
-                              try {
-                                const data = JSON.parse(line.slice(6));
-                                if (data.type === 'progress' && typeof data.message === 'string') {
-                                  collected.push(data.message);
-                                  // Push the new line into the live
-                                  // banner so the output panel grows
-                                  // and auto-scrolls as it streams.
-                                  // Spread into a fresh array so React
-                                  // sees the reference change.
-                                  setDryRunResult(prev =>
-                                    prev && prev.systemId === system.id
-                                      ? { ...prev, output: [...collected] }
-                                      : prev
-                                  );
-                                } else if (data.type === 'complete') {
-                                  setDryRunResult({ systemId: system.id, success: true, message: data.message, output: data.output || collected });
-                                  setHwStatusEntry(system.id, { status: 'ready', message: data.message });
-                                  // The test is the gate for recording and the
-                                  // operator has often walked to the robot during
-                                  // the ~15s run — confirm the pass audibly and
-                                  // visibly, matching the failure feedback below.
-                                  toast.success('Hardware test passed');
-                                  announce('Hardware test passed');
-                                  finalised = true;
-                                  break;
-                                } else if (data.type === 'error') {
-                                  setDryRunResult({ systemId: system.id, success: false, message: data.message, output: data.output || collected });
-                                  setHwStatusEntry(system.id, { status: 'error', message: data.message });
-                                  toast.error(`Hardware test failed: ${data.message}`);
-                                  announce('Hardware test failed');
-                                  finalised = true;
-                                  break;
-                                }
-                              } catch {
-                                // Non-JSON SSE comment / keepalive — ignore.
-                              }
-                            }
-                          }
-                          if (!finalised) {
-                            // Stream closed without a terminal event;
-                            // treat as failure and show what we collected.
-                            const msg = 'Hardware test ended unexpectedly — the backend closed the connection before sending a result.';
-                            setDryRunResult({ systemId: system.id, success: false, message: msg, output: collected });
-                            setHwStatusEntry(system.id, { status: 'error', message: msg });
-                            toast.error(`Hardware test failed: ${msg}`);
-                          announce('Hardware test failed');
-                          }
-                        } catch (err) {
-                          const isTimeout = err instanceof DOMException && err.name === 'AbortError';
-                          const msg = isTimeout
-                            ? 'Hardware test timed out — the backend did not finish within 20 seconds. The SDK may be stuck on a hardware call. Last captured server output is below.'
-                            : describeError(err);
-                          setDryRunResult({ systemId: system.id, success: false, message: msg, output: collected });
-                          setHwStatusEntry(system.id, { status: 'error', message: msg });
-                          toast.error(`Hardware test failed: ${msg}`);
-                          announce('Hardware test failed');
-                        } finally {
-                          window.clearTimeout(safetyTimeoutId);
-                          setTestingSystemId(null);
-                        }
-                      }}
+                      onClick={(e) => { e.stopPropagation(); runHardwareTest(system.id); }}
                       disabled={hwTesting !== null}
                       className={`px-[12px] py-[6px] text-[11px] font-bold uppercase transition-colors rounded flex items-center gap-[5px] ${
                         hwTesting === system.id

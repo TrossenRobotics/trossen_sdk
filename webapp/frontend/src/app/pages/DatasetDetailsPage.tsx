@@ -259,7 +259,8 @@ export function DatasetDetailsPage() {
     return () => window.removeEventListener('beforeunload', handler);
   }, [converting]);
 
-  // TODO(shantanuparab-tr): currently unreachable — Convert button is disabled until backend implements POST /api/datasets/:id/convert-to-lerobot
+  // Streams SSE progress from POST /api/datasets/:id/convert-to-lerobot
+  // (implemented in backend app/main.py) into the conversion modal.
   async function handleConvert(e: React.FormEvent) {
     e.preventDefault();
     setConverting(true); setConvertError(''); setConvertResult(null); setConvertLogs([]);

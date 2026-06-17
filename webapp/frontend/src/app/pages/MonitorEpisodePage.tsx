@@ -719,7 +719,7 @@ export function MonitorEpisodePage() {
                 : `Reset — press Next to start episode ${currentEpisode}`
               )}
               {phase === 'complete' && `Complete — ${currentEpisode} of ${totalEpisodes} episodes recorded`}
-              {phase === 'stopped' && `Stopped — ${currentEpisode} of ${totalEpisodes} episodes saved (Resume from Record page)`}
+              {phase === 'stopped' && `Stopped — ${currentEpisode} of ${totalEpisodes} episodes saved (press Resume Session below to continue)`}
             </div>
             {phase === 'recording' && (
               <div className="text-white text-[12px] relative z-10 font-mono">{episodeProgress}%</div>
@@ -743,7 +743,11 @@ export function MonitorEpisodePage() {
           {phase !== 'not_started' && sessionId ? (
             // Keyed by sessionId so navigating between sessions remounts the
             // viewer onto the new recorder's gRPC server cleanly.
-            <RerunViewer key={sessionId} sessionId={sessionId} />
+            <RerunViewer
+              key={sessionId}
+              sessionId={sessionId}
+              recording={phase === 'recording' || phase === 'resetting'}
+            />
           ) : (
             <div className="w-full h-full flex items-center justify-center select-none">
               <p className="text-[#7a7a7a] text-[13px]">Press Start to begin…</p>
@@ -809,7 +813,7 @@ export function MonitorEpisodePage() {
                     </span>
                     {systemId && (
                       <Link
-                        to={`/configuration?system=${encodeURIComponent(systemId)}`}
+                        to={`/configuration?system=${encodeURIComponent(systemId)}&autotest=1`}
                         className="bg-yellow-500/20 border border-yellow-500 text-yellow-300 hover:bg-yellow-500/30 px-[12px] py-[6px] text-[12px] flex items-center gap-[6px] shrink-0"
                       >
                         <Settings className="w-[14px] h-[14px]" />
@@ -870,7 +874,7 @@ export function MonitorEpisodePage() {
                     </span>
                     {systemId && (
                       <Link
-                        to={`/configuration?system=${encodeURIComponent(systemId)}`}
+                        to={`/configuration?system=${encodeURIComponent(systemId)}&autotest=1`}
                         className="bg-yellow-500/20 border border-yellow-500 text-yellow-300 hover:bg-yellow-500/30 px-[12px] py-[6px] text-[12px] flex items-center gap-[6px] shrink-0"
                       >
                         <Settings className="w-[14px] h-[14px]" />
@@ -948,6 +952,25 @@ export function MonitorEpisodePage() {
                 >
                   View Dataset
                 </button>
+                {/* After a natural completion the common next intent is to
+                    record another run with the same setup — jump to Record
+                    with the New Session modal pre-filled from this session,
+                    instead of refilling the whole form by hand. */}
+                {phase === 'complete' && (
+                  <button
+                    onClick={() => navigate('/record', { state: { cloneFrom: {
+                      name: session?.name,
+                      system_id: session?.system_id,
+                      dataset_id: session?.dataset_id,
+                      num_episodes: session?.num_episodes,
+                      episode_duration: session?.episode_duration,
+                      reset_duration: session?.reset_duration,
+                    } } })}
+                    className="bg-[#0d0d0d] border border-[#55bde3] text-[#55bde3] px-[24px] py-[16px] text-[16px] font-bold uppercase hover:bg-[rgba(85,189,227,0.1)] transition-colors"
+                  >
+                    Record Again
+                  </button>
+                )}
               </>
             )}
           </div>
