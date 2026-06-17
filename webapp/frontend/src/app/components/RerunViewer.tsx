@@ -92,12 +92,16 @@ export function RerunViewer({ sessionId }: { sessionId: string }): React.ReactEl
   // The viewer fills its parent; MonitorEpisodePage owns the sizing.
   // follow_if_http keeps the timeline pinned to the latest frame as new data
   // streams in — the right default for a live monitor.
+  // hide_welcome_screen suppresses Rerun's default examples/"Welcome" splash so
+  // the operator sees only the (initially empty) camera panels while waiting for
+  // the feed, instead of Rerun marketing content.
   return (
     <WebViewer
       rrd={rrd}
       width="100%"
       height="100%"
       follow_if_http
+      hide_welcome_screen
     />
   );
 }
