@@ -85,6 +85,15 @@ public:
   /// Apply a teleop command in this space (follower role).
   virtual void write(const std::vector<float>& cmd) = 0;
 
+  /// Optional. Smoothly move to `target` over the follower's configured
+  /// trajectory time, blocking until it arrives. The controller calls this
+  /// once before the mirror loop so the follower is gently "summoned" to the
+  /// leader's current pose instead of snapping to it on the first tick — which
+  /// matters especially for a passive leader that may start anywhere. The
+  /// default falls back to an immediate write (the legacy snap) for hardware
+  /// without a timed move.
+  virtual void summon(const std::vector<float>& target) { write(target); }
+
   /// Optional. Called once by the controller before the mirror loop starts,
   /// with the follower's current state in this space. Real-hardware leaders
   /// have no internal state to sync, so the default is a no-op. Virtual

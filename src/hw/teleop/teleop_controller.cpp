@@ -107,6 +107,19 @@ void TeleopController::prepare_teleop() {
   if (follower_io_) {
     leader_io_->sync_to_state(follower_io_->read());
   }
+
+  // Summon the follower onto the leader's current pose with a smooth, blocking
+  // move so it eases into position instead of snapping there on the first
+  // mirror tick. Essential for a passive leader, which can be anywhere at the
+  // start of teleop. summon() falls back to an instant write on hardware that
+  // doesn't implement a timed move, so this is safe for every follower.
+  if (follower_io_) {
+    const auto leader_pose = leader_io_->read();
+    if (!leader_pose.empty()) {
+      std::cout << "  [teleop] Summoning follower to leader pose...\n";
+      follower_io_->summon(leader_pose);
+    }
+  }
   std::cout << "  [teleop] Arms ready for teleop\n";
 }
 

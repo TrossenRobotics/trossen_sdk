@@ -76,6 +76,37 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     }
   }
 
+  // Passive leader (no actuators, e.g. the lightweight Trossen leader): only
+  // streams joint positions. prepare_for_teleop()/stage()/end_teleop() skip
+  // every motion command when this is false.
+  if (config.contains("actuated")) {
+    actuated_ = config.at("actuated").get<bool>();
+  }
+
+  // Optional affine joint remap applied in read_joint(): out[j] = signs[j] *
+  // raw[j] + offsets[j]. Used when the leader's joint frame doesn't map 1:1
+  // onto the follower (the lightweight leader inverts J3/J4 and offsets J5).
+  // Empty = identity; when provided each array must cover every joint.
+  const auto njoints = static_cast<size_t>(driver_->get_num_joints());
+  if (config.contains("joint_signs")) {
+    joint_signs_ = config.at("joint_signs").get<std::vector<float>>();
+    if (!joint_signs_.empty() && joint_signs_.size() != njoints) {
+      throw std::runtime_error(
+        "TrossenArmComponent: 'joint_signs' length (" +
+        std::to_string(joint_signs_.size()) + ") must match joint count (" +
+        std::to_string(njoints) + ")");
+    }
+  }
+  if (config.contains("joint_offsets")) {
+    joint_offsets_ = config.at("joint_offsets").get<std::vector<float>>();
+    if (!joint_offsets_.empty() && joint_offsets_.size() != njoints) {
+      throw std::runtime_error(
+        "TrossenArmComponent: 'joint_offsets' length (" +
+        std::to_string(joint_offsets_.size()) + ") must match joint count (" +
+        std::to_string(njoints) + ")");
+    }
+  }
+
   // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
 }
 
@@ -95,7 +126,15 @@ nlohmann::json TrossenArmComponent::get_info() const {
 std::vector<float> TrossenArmComponent::read_joint() {
   if (!driver_) return {};
   const auto& positions = driver_->get_robot_output().joint.all.positions;
-  return std::vector<float>(positions.begin(), positions.end());
+  std::vector<float> out(positions.begin(), positions.end());
+  // Apply the optional affine remap so a mismatched leader publishes commands
+  // already in the follower's joint frame. Empty arrays = identity.
+  for (size_t i = 0; i < out.size(); ++i) {
+    const float sign = (i < joint_signs_.size()) ? joint_signs_[i] : 1.0f;
+    const float offset = (i < joint_offsets_.size()) ? joint_offsets_[i] : 0.0f;
+    out[i] = sign * out[i] + offset;
+  }
+  return out;
 }
 
 void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
@@ -108,6 +147,22 @@ void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
   }
   std::vector<double> pos_d(cmd.begin(), cmd.end());
   driver_->set_all_positions(pos_d, 0.0, false);
+}
+
+void TrossenArmComponent::summon_joint(const std::vector<float>& cmd) {
+  if (!driver_) return;
+  if (cmd.size() != static_cast<size_t>(driver_->get_num_joints())) {
+    throw std::runtime_error(
+      "TrossenArmComponent::summon_joint: expected " +
+      std::to_string(driver_->get_num_joints()) + " joints, got " +
+      std::to_string(cmd.size()));
+  }
+  // Blocking, time-parameterised move so the follower eases onto the target
+  // (the leader's current pose) over teleop_moving_time_s_ before the high-rate
+  // mirror loop takes over with instant writes.
+  driver_->set_all_modes(trossen_arm::Mode::position);
+  std::vector<double> pos_d(cmd.begin(), cmd.end());
+  driver_->set_all_positions(pos_d, teleop_moving_time_s_, true);
 }
 
 std::vector<float> TrossenArmComponent::read_cartesian() {
@@ -139,6 +194,15 @@ void TrossenArmComponent::write_cartesian(const std::vector<float>& cmd) {
 
 void TrossenArmComponent::prepare_for_teleop() {
   if (!driver_) return;
+  if (!actuated_) {
+    // Passive leader: stream joint positions in position mode only. No
+    // gravity-comp / external-effort setup — there are no motors to drive.
+    // set_all_modes covers the gripper, but set it explicitly so the gripper
+    // position is reported cleanly for the mirror loop's passthrough.
+    driver_->set_all_modes(trossen_arm::Mode::position);
+    driver_->set_gripper_mode(trossen_arm::Mode::position);
+    return;
+  }
   if (is_leader_) {
     // Leader: enable gravity compensation.
     driver_->set_all_modes(trossen_arm::Mode::external_effort);
@@ -147,12 +211,23 @@ void TrossenArmComponent::prepare_for_teleop() {
     return;
   }
   // Follower: enter position mode. The mirror loop drives the follower's
-  // joints from here.
+  // joints (and gripper, the last element of set_all_positions) from here.
+  // set_gripper_mode is called explicitly: the gripper only tracks the leader
+  // when it is in position mode, and relying on set_all_modes alone left the
+  // gripper inert.
   driver_->set_all_modes(trossen_arm::Mode::position);
+  driver_->set_gripper_mode(trossen_arm::Mode::position);
 }
 
 void TrossenArmComponent::end_teleop() {
   if (!driver_) return;
+  if (!actuated_) {
+    // Passive leader: nothing to neutralize or traject (no actuators); just
+    // release the driver.
+    driver_->cleanup();
+    driver_.reset();
+    return;
+  }
   // Neutralize first (safe regardless of current mode), then gracefully
   // return to rest over the configured trajectory time, then release the
   // driver.
@@ -167,6 +242,7 @@ void TrossenArmComponent::end_teleop() {
 
 void TrossenArmComponent::stage() {
   if (!driver_ || staged_position_.empty()) return;
+  if (!actuated_) return;  // passive leader cannot move to a staging pose
   driver_->set_all_modes(trossen_arm::Mode::position);
   std::vector<double> pos_d(staged_position_.begin(), staged_position_.end());
   // Non-blocking so multiple arms can stage in parallel.

@@ -104,6 +104,7 @@ private:
   // Space-specific IO helpers. Called by the nested adapter views.
   std::vector<float> read_joint();
   void               write_joint(const std::vector<float>& cmd);
+  void               summon_joint(const std::vector<float>& cmd);
 
   std::vector<float> read_cartesian();
   void               write_cartesian(const std::vector<float>& cmd);
@@ -119,6 +120,9 @@ private:
     }
     void write(const std::vector<float>& cmd) override {
       self->write_joint(cmd);
+    }
+    void summon(const std::vector<float>& cmd) override {
+      self->summon_joint(cmd);
     }
   };
 
@@ -145,6 +149,17 @@ private:
   /// whether prepare_for_teleop() enters gravity-compensation mode (leader)
   /// or position-mode alignment (follower).
   bool is_leader_{false};
+
+  /// False for a passive leader (no actuators, e.g. the lightweight Trossen
+  /// leader). A passive arm only streams joint positions in position mode, so
+  /// prepare_for_teleop()/stage()/end_teleop() skip every motion command.
+  bool actuated_{true};
+
+  /// Optional affine remap applied in read_joint(): out[j] = joint_signs_[j] *
+  /// raw[j] + joint_offsets_[j]. Empty = identity. Used when a leader's joint
+  /// frame doesn't map 1:1 onto the follower (e.g. inverted/offset joints).
+  std::vector<float> joint_signs_;
+  std::vector<float> joint_offsets_;
 
   /// Joint-space pose this arm moves to at session start (via stage()).
   /// Empty = no staging.

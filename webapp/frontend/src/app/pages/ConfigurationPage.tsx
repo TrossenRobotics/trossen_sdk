@@ -50,6 +50,12 @@ interface ArmHardware {
   end_effector: string;
   role: 'leader' | 'follower';
   paired_with?: string; // ID of paired arm
+  // Passive leader (lightweight, no actuators). undefined/true = a normal
+  // actuated arm. When false, the SDK skips teleop motion commands and applies
+  // the joint remap below.
+  actuated?: boolean;
+  joint_signs?: number[];
+  joint_offsets?: number[];
   producers: Producer[];
 }
 
@@ -75,7 +81,31 @@ interface HardwareSystem {
 // Systems that ship with a factory-default config the user can revert to.
 // Hoisted out of the component so the reset useCallback's dependency array
 // stays stable across renders.
-const RESETTABLE_SYSTEMS: readonly string[] = ['solo', 'stationary', 'mobile'];
+const RESETTABLE_SYSTEMS: readonly string[] = ['solo', 'solo_portable', 'stationary', 'mobile'];
+
+// The lightweight (passive) Trossen leader has no actuators and its joints
+// don't map 1:1 onto the follower: J3/J4 are inverted and the wrist (J5)
+// carries a ∓π/4 offset whose sign mirrors between the left and right arms.
+// The gripper (last element) passes through 1:1. The SDK applies this as an
+// affine remap on the leader's read positions; we just carry the constants.
+const LIGHTWEIGHT_LEADER_JOINT_SIGNS: readonly number[] = [1, 1, 1, -1, -1, 1, 1];
+const LIGHTWEIGHT_LEADER_WRIST_OFFSET = Math.PI / 4;
+
+function lightweightLeaderRemap(armName: string): {
+  joint_signs: number[];
+  joint_offsets: number[];
+} {
+  // Right arm offsets +π/4 on the wrist, left (the default) −π/4, matching the
+  // mirror-mounted hardware. Side is inferred from the arm name, the same way
+  // leader/follower role is inferred elsewhere on this page.
+  const wrist = armName.toLowerCase().includes('right')
+    ? LIGHTWEIGHT_LEADER_WRIST_OFFSET
+    : -LIGHTWEIGHT_LEADER_WRIST_OFFSET;
+  return {
+    joint_signs: [...LIGHTWEIGHT_LEADER_JOINT_SIGNS],
+    joint_offsets: [0, 0, 0, 0, 0, wrist, 0],
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Raw wire shapes for the SDK config blob.
@@ -99,6 +129,9 @@ interface RawArmConfig {
   ip_address?: string;
   model?: string;
   end_effector?: string;
+  actuated?: boolean;
+  joint_signs?: number[];
+  joint_offsets?: number[];
   [key: string]: unknown;
 }
 
@@ -193,6 +226,9 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
       model: armCfg.model ?? '',
       end_effector: armCfg.end_effector ?? '',
       role,
+      actuated: typeof armCfg.actuated === 'boolean' ? armCfg.actuated : undefined,
+      joint_signs: Array.isArray(armCfg.joint_signs) ? armCfg.joint_signs : undefined,
+      joint_offsets: Array.isArray(armCfg.joint_offsets) ? armCfg.joint_offsets : undefined,
       producers: armProducers,
     } as ArmHardware);
   }
@@ -314,11 +350,17 @@ function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig 
   for (const hw of system.hardware) {
     if (hw.type === 'trossen_arm') {
       const arm = hw as ArmHardware;
-      armsObj[arm.name] = {
+      const armEntry: RawArmConfig = {
         ip_address: arm.ip_address,
         model: arm.model,
         end_effector: arm.end_effector,
       };
+      // Only emit passive-leader fields when set, so ordinary arms stay clean
+      // (the SDK defaults actuated=true and identity remap).
+      if (arm.actuated === false) armEntry.actuated = false;
+      if (arm.joint_signs && arm.joint_signs.length) armEntry.joint_signs = arm.joint_signs;
+      if (arm.joint_offsets && arm.joint_offsets.length) armEntry.joint_offsets = arm.joint_offsets;
+      armsObj[arm.name] = armEntry;
 
       for (const p of arm.producers) {
         allProducers.push({
@@ -797,7 +839,8 @@ export function ConfigurationPage() {
     model: 'ViperX-300',
     end_effector: 'Gripper',
     role: 'leader' as 'leader' | 'follower',
-    paired_with: ''
+    paired_with: '',
+    passive: false
   });
 
   const [baseForm, setBaseForm] = useState({
@@ -941,7 +984,8 @@ export function ConfigurationPage() {
       model: 'ViperX-300',
       end_effector: 'Gripper',
       role: 'leader',
-      paired_with: ''
+      paired_with: '',
+      passive: false
     });
     setBaseForm({
       name: '',
@@ -979,7 +1023,8 @@ export function ConfigurationPage() {
         model: arm.model,
         end_effector: arm.end_effector,
         role: arm.role,
-        paired_with: arm.paired_with || ''
+        paired_with: arm.paired_with || '',
+        passive: arm.actuated === false
       });
     } else if (hardware.type === 'slate_base') {
       const base = hardware as BaseHardware;
@@ -1094,6 +1139,11 @@ export function ConfigurationPage() {
     e.preventDefault();
     if (!selectedSystem) return;
 
+    // A passive (lightweight) leader carries actuated=false plus the affine
+    // joint remap; only meaningful for a leader. Anything else is a normal arm.
+    const isPassive = armForm.role === 'leader' && armForm.passive;
+    const remap = isPassive ? lightweightLeaderRemap(armForm.name) : undefined;
+
     const armData: ArmHardware = {
       id: editingHardwareId || `arm-${Date.now()}`,
       name: armForm.name,
@@ -1103,6 +1153,9 @@ export function ConfigurationPage() {
       end_effector: armForm.end_effector,
       role: armForm.role,
       paired_with: armForm.paired_with || undefined,
+      actuated: isPassive ? false : undefined,
+      joint_signs: remap?.joint_signs,
+      joint_offsets: remap?.joint_offsets,
       producers: []
     };
 
@@ -1389,7 +1442,7 @@ export function ConfigurationPage() {
 
         <div className="grid grid-cols-4 portrait:grid-cols-2 gap-[12px]">
           {[...systems].sort((a, b) => {
-            const order: Record<string, number> = { solo: 0, stationary: 1, mobile: 2 };
+            const order: Record<string, number> = { solo: 0, solo_portable: 1, stationary: 2, mobile: 3 };
             return (order[a.id] ?? 99) - (order[b.id] ?? 99);
           }).map(system => {
             const isConfigured = system.hardware.length > 0;
@@ -1641,9 +1694,10 @@ export function ConfigurationPage() {
           {/* Layout Warning Banner — only shown when counts deviate from the expected layout */}
           {(() => {
             const layoutSpecs: Record<string, { label: string; leaders: number; followers: number; cameras: number; bases: number }> = {
-              solo:       { label: 'Solo',        leaders: 1, followers: 1, cameras: 2, bases: 0 },
-              stationary: { label: 'Stationary',  leaders: 2, followers: 2, cameras: 4, bases: 0 },
-              mobile:     { label: 'Mobile',      leaders: 2, followers: 2, cameras: 3, bases: 1 },
+              solo:                { label: 'Solo',                leaders: 1, followers: 1, cameras: 2, bases: 0 },
+              stationary:          { label: 'Stationary',          leaders: 2, followers: 2, cameras: 4, bases: 0 },
+              solo_portable:       { label: 'Solo Portable',       leaders: 1, followers: 1, cameras: 2, bases: 0 },
+              mobile:              { label: 'Mobile',              leaders: 2, followers: 2, cameras: 3, bases: 1 },
             };
             const spec = layoutSpecs[selectedSystemData.id];
             if (!spec) return null;
@@ -2149,6 +2203,15 @@ export function ConfigurationPage() {
                     <option value="follower">Follower</option>
                   </select>
                 </div>
+                {armForm.role === 'leader' && (
+                  <div className="flex items-start gap-[8px]">
+                    <input type="checkbox" id="arm_passive" checked={armForm.passive} onChange={e => setArmForm({ ...armForm, passive: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
+                    <label htmlFor="arm_passive" className="text-ink text-[12px]">
+                      Passive leader (lightweight — no actuators)
+                      <span className="block text-dim text-[11px] mt-[2px]">Streams joint positions only; the SDK applies the lightweight-leader joint remap (wrist offset side is taken from the arm name).</span>
+                    </label>
+                  </div>
+                )}
                 <div className="flex justify-end gap-[12px] pt-[12px]">
                   <button type="button" onClick={() => setShowAddHardwareModal(false)} className="bg-app border border-edge text-dim px-[20px] py-[10px] text-[14px] hover:border-white hover:text-ink transition-colors">Cancel</button>
                   <button type="submit" className="bg-brand text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">Add Arm</button>

@@ -526,6 +526,9 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("ip_address", &ArmConfig::ip_address)
     .def_readwrite("model", &ArmConfig::model)
     .def_readwrite("end_effector", &ArmConfig::end_effector)
+    .def_readwrite("actuated", &ArmConfig::actuated)
+    .def_readwrite("joint_signs", &ArmConfig::joint_signs)
+    .def_readwrite("joint_offsets", &ArmConfig::joint_offsets)
     .def_static("from_json", &ArmConfig::from_json, py::arg("json"))
     .def("to_json", &ArmConfig::to_json);
 
