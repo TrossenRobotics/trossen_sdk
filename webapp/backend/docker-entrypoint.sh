@@ -29,6 +29,18 @@ CONVERTER_BIN="${TROSSEN_CONVERTER_BIN:-${BUILD_DIR}/scripts/trossen_mcap_to_ler
 # `docker exec trossen_webapp_backend uv sync --group dev && uv run pytest`.
 uv sync --no-dev
 
+# Self-heal a stale editable trossen_sdk extension. A backend_venv volume
+# reused from an older checkout can carry a compiled pybind extension that
+# predates the observer subsystem (no ObserverBase) — which silently breaks the
+# live Rerun camera feeds (empty viewer) even though the rest of the app runs.
+# `uv sync` treats the editable install as up-to-date and won't recompile the
+# C++ on its own, so detect the stale state via a canary symbol and force a
+# rebuild of just that package when it's missing. No-op on a current build.
+if ! uv run --no-dev python -c "import trossen_sdk as ts; raise SystemExit(0 if hasattr(ts, 'ObserverBase') else 1)" >/dev/null 2>&1; then
+    echo "[entrypoint] trossen_sdk extension is stale (no ObserverBase) — rebuilding it"
+    uv sync --no-dev --reinstall-package trossen-sdk
+fi
+
 if [[ ! -x "${CONVERTER_BIN}" ]]; then
     echo "[entrypoint] Converter binary missing at ${CONVERTER_BIN}; building..."
     mkdir -p "${BUILD_DIR}"
