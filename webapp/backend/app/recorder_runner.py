@@ -313,6 +313,38 @@ def _episode_file_is_empty(mcap_root: str, episode_index: int) -> bool:
     return not _episode_has_joint_state(path)
 
 
+def _reconcile_empty_episodes(dataset_dir: str) -> int:
+    """Delete ghost / header-only episode files before the SDK scans.
+
+    scan_existing_episodes() counts episode_NNNNNN.mcap files by filename
+    (max index + 1), so a file the SDK opened at start_episode() but that never
+    received joint-state data — the recorder crashed / was SIGKILLed, or an
+    episode ended before the arm producer ticked — inflates the count. On resume
+    that wedges a dataset at "N/N complete" even though fewer real episodes were
+    saved, surfacing as start_episode() returning False. Removing the empties
+    here (they carry no recorded data) keeps the scan honest. Returns the count
+    removed.
+    """
+    base = Path(dataset_dir)
+    if not base.is_dir():
+        return 0
+    removed = 0
+    for path in sorted(base.glob("episode_*.mcap")):
+        # _episode_has_joint_state treats unreadable/corrupt files as "no joint
+        # state", so a parse failure here also gets cleaned up.
+        if _episode_has_joint_state(path):
+            continue
+        try:
+            path.unlink()
+            removed += 1
+            print(f"[recorder-runner] removed ghost episode {path.name} "
+                  f"(no joint-state data) before scan", flush=True)
+        except OSError as e:
+            print(f"[recorder-runner] failed to remove ghost episode "
+                  f"{path.name}: {e}", flush=True)
+    return removed
+
+
 # An arm controller is single-client. If a prior run's connection wasn't
 # released yet — most commonly because a fault SIGKILLs the recorder child
 # before its arm driver can disconnect (see recorder.py's fatal-fault kill) —
@@ -439,7 +471,14 @@ def _build_session_manager(
     mgr.on_pre_episode(lambda: (_start_controllers(controllers), True)[-1])
     mgr.on_pre_shutdown(lambda: _stop_controllers(controllers))
 
-    return mgr, controllers, cfg.mcap_backend.root
+    # Return the DATASET directory (root/dataset_id), not the bare root. Episode
+    # files live at <root>/<dataset_id>/episode_NNNNNN.mcap (matching the SDK's
+    # scan_existing_episodes), so callers that locate episode files for the
+    # empty-episode cleanup must use this path — passing the bare root made
+    # _episode_file_is_empty() look in the wrong directory and silently never
+    # fire, letting ghost episodes accumulate and inflate the scan count.
+    return mgr, controllers, os.path.join(
+        cfg.mcap_backend.root, cfg.mcap_backend.dataset_id)
 
 
 def _register_rerun_observer(
@@ -857,6 +896,11 @@ def main() -> int:
         # _block_signals_on_this_thread for the EINTR-abort rationale.
         with _block_signals_on_this_thread():
             mgr, _controllers, mcap_root = _build_session_manager(config)
+            # Clear ghost/header-only episode files from a prior aborted run
+            # before start_episode() scans the dataset, so they don't inflate
+            # the SDK's filename-based episode count and wedge resume at
+            # "complete" (start_episode would then return False).
+            _reconcile_empty_episodes(mcap_root)
             started = mgr.start_episode()
         if not started:
             mgr.shutdown()
