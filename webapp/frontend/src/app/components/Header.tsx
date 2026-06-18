@@ -7,6 +7,7 @@ import { apiGet } from '@/lib/api';
 import { useAnnounceEnabled, setAnnounceEnabled, announce } from '@/lib/announce';
 import { useTheme } from '@/lib/ThemeContext';
 import { useTour } from '@/lib/TourContext';
+import { UpdateButton } from '@/app/components/UpdateButton';
 
 const navLinks = [
   { to: "/record", label: "Record", match: ["/", "/record"] },
@@ -150,6 +151,9 @@ export function Header() {
             </Link>
           )
         )}
+
+        {/* Pull the latest app version from GitHub + reload. */}
+        <UpdateButton />
 
         {/* Guided walkthrough launcher (TDS-150). */}
         <button

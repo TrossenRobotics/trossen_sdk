@@ -59,10 +59,12 @@ services:
       - video        # /dev/video* for OpenCV / V4L2 cameras
       - plugdev      # USB hot-plug
     environment:
-      # Set UVICORN_RELOAD=1 in the host shell (or a .env file) to turn on
-      # uvicorn --reload for dev. Off by default to keep the arm UDP loop
-      # from being starved by inotify wakeups during teleop.
-      UVICORN_RELOAD: ${UVICORN_RELOAD:-}
+      # uvicorn --reload is ON by default so the in-app "Update" button's
+      # git pull takes effect without a manual restart (it watches only
+      # /app/webapp/backend/app, so the inotify overhead is small). Set
+      # UVICORN_RELOAD= (empty) in the host shell or a .env file to turn it
+      # off — e.g. if the file-watcher ever competes with the arm UDP loop.
+      UVICORN_RELOAD: ${UVICORN_RELOAD:-1}
     restart: unless-stopped
 
   frontend:

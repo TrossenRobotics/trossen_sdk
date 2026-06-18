@@ -1,6 +1,7 @@
 import json
 import shutil
 from contextlib import asynccontextmanager
+from dataclasses import asdict
 from pathlib import Path
 from typing import Any, Literal
 
@@ -52,6 +53,7 @@ from app.sessions import (
     transition_session,
     update_session,
 )
+from app.updater import perform_update
 from app.systems import (
     CreateSystemBody,
     SystemResponse,
@@ -255,6 +257,18 @@ def get_settings() -> DatasetSettings:
 def update_settings(new_settings: DatasetSettings) -> DatasetSettings:
     """Update the dataset directory settings, persisted to disk."""
     return save_dataset_settings(new_settings)
+
+
+@app.post("/api/system/update")
+def update_application() -> dict[str, Any]:
+    """Pull the latest commits for the running branch (fast-forward only).
+
+    Safe by construction: refuses on a dirty tree or a diverged branch rather
+    than discarding work. With uvicorn --reload + Vite HMR the pulled source is
+    applied automatically; the frontend reloads the page to finish. Returns the
+    UpdateResult as a plain dict so the UI can show status + git output.
+    """
+    return asdict(perform_update())
 
 
 @app.get("/api/systems")
