@@ -72,6 +72,20 @@ _READY_PREFIX = "__READY__:"
 _SUCCESS_PREFIX = "__SUCCESS__:"
 _ERROR_PREFIX = "__ERROR__:"
 
+# Substrings in the child's free-form SDK output that mean "this run is
+# doomed" — an unrecoverable hardware fault (`[CRITICAL]`) or a C++
+# `std::terminate` in progress (`terminate called`). The SDK logs these to
+# stdout *before* the abort actually freezes the process (libstdc++ holds the
+# stderr lock for seconds at the abort boundary). Detecting them lets us kill
+# the child immediately so the crash registers — and the monitor UI stops its
+# local progress/reset animation — right away instead of after that freeze.
+_FATAL_SDK_MARKERS = ("[critical]", "terminate called")
+
+
+def _is_fatal_sdk_line(line: str) -> bool:
+    low = line.lower()
+    return any(marker in low for marker in _FATAL_SDK_MARKERS)
+
 
 class RecorderError(RuntimeError):
     """Raised when the recorder subprocess fails to start or stop.
@@ -415,6 +429,7 @@ def _run_reader(session_id: str, runner: _Runner) -> None:
     success_seen = False
     error_message: str | None = None
     session_complete_payload: dict[str, Any] | None = None
+    fault_killed = False
     tag = f"[recorder {session_id[:8]}]"
 
     try:
@@ -447,6 +462,24 @@ def _run_reader(session_id: str, runner: _Runner) -> None:
             if payload is None:
                 # Free-form log / SDK output — forward for ops visibility.
                 print(f"{tag} {line}", flush=True)
+                # An unrecoverable SDK fault (e.g. a joint velocity-limit trip)
+                # is about to std::terminate the child, which can freeze it at
+                # the abort boundary for seconds before stdout hits EOF. During
+                # that window the monitor keeps animating its local progress /
+                # reset timers because no events arrive. Kill the child the
+                # moment we see the fatal marker so EOF + _finalize_crash (and
+                # the WS `error` event the monitor reacts to) fire immediately.
+                if not fault_killed and _is_fatal_sdk_line(line):
+                    fault_killed = True
+                    if error_message is None:
+                        error_message = line.strip()
+                    print(f"{tag} fatal SDK fault detected — killing child to "
+                          f"surface the error now", flush=True)
+                    try:
+                        runner.proc.kill()
+                    except Exception as e:
+                        print(f"{tag} kill after fatal fault failed: {e}",
+                              flush=True)
                 continue
 
             ptype = payload.get("type")
