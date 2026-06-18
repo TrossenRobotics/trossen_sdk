@@ -200,6 +200,9 @@ export function MonitorEpisodePage() {
       playCue('error');
       toast.error(`Failed to start dry run: ${msg}`);
       logError(`Dry run failed: ${msg}`, { component: 'MonitorPage' });
+      // Keep in-memory status in sync with the backend's forced 'error' so a
+      // follow-up Clear Error & Recover re-clears it (see handleStart).
+      setSession(prev => (prev ? { ...prev, status: 'error', error_message: msg } : prev));
       setFatalError({ title: 'Dry run couldn’t start', message: msg });
     } finally {
       setStarting(false);
@@ -353,6 +356,10 @@ export function MonitorEpisodePage() {
       // The backend forced the session to 'error' and red-flagged the system,
       // so don't drop back to the pristine Start button — surface the failure
       // here immediately (previously it only showed after a back-and-return).
+      // Mirror that 'error' status into our in-memory session too, so the next
+      // Clear Error & Recover actually re-clears it instead of reading a stale
+      // 'pending'/'paused' and skipping the clear (the 409 recover loop).
+      setSession(prev => (prev ? { ...prev, status: 'error', error_message: msg } : prev));
       setFatalError({ title: 'Recording couldn’t start', message: msg });
     } finally {
       setStarting(false);
@@ -383,6 +390,9 @@ export function MonitorEpisodePage() {
       playCue('error');
       toast.error(`Failed to resume session: ${msg}`);
       logError(`Resume session failed: ${msg}`, { component: 'MonitorPage' });
+      // Keep in-memory status in sync with the backend's forced 'error' so a
+      // follow-up Clear Error & Recover re-clears it (see handleStart).
+      setSession(prev => (prev ? { ...prev, status: 'error', error_message: msg } : prev));
       setFatalError({ title: 'Recording couldn’t resume', message: msg });
     } finally {
       setStarting(false);
@@ -397,15 +407,23 @@ export function MonitorEpisodePage() {
   async function handleRecover() {
     if (recoverStage === 'clearing' || recoverStage === 'testing') return;
     try {
-      // 1. Clear the fault (unless a prior attempt already did).
-      let current = session;
-      if (current?.status === 'error') {
-        setRecoverStage('clearing');
+      // 1. Clear the fault. Reconcile against the *backend's* status first
+      //    rather than our in-memory `session`: a failed Start/Resume forces
+      //    the row to 'error' on the server, but the failed-call catch leaves
+      //    our local `session.status` reading whatever it was before (e.g.
+      //    'paused' from a prior clear). Gating the clear on that stale value
+      //    skipped the clear entirely, so the row stayed 'error' and the next
+      //    Resume 409'd ("Cannot start a session in status 'error'") — the
+      //    recover→start→error loop. Re-fetching makes recovery idempotent and
+      //    correct no matter how many times the operator has cycled it.
+      setRecoverStage('clearing');
+      let current = await apiGet<Session>(apiBase);
+      if (current.status === 'error') {
         current = await apiPost<Session>(`${apiBase}/clear-error`);
-        setSession(current);
-        systemIdRef.current = current.system_id ?? null;
-        setCurrentEpisode(current.current_episode || 0);
       }
+      setSession(current);
+      systemIdRef.current = current.system_id ?? null;
+      setCurrentEpisode(current.current_episode || 0);
       const sysId = current?.system_id;
       // 2. No system to test (shouldn't happen for a real session) — just exit
       //    the error screen and let the gate decide.

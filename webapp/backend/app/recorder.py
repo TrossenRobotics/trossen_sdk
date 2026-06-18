@@ -51,7 +51,19 @@ from app.ws_bus import bus
 # Larger than the hardware-test timeout because recording bootstrap also
 # primes camera streams (and on some setups the realsense pipeline can
 # take 10–20s to settle) and runs the first start_episode().
-_BOOTSTRAP_TIMEOUT_S = 60.0
+#
+# The dominant worst case is *recovering after a crash*: the arm controllers
+# are single-client and don't release a dead client immediately, so a recorder
+# SIGKILLed on a fault (recorder.py fatal-fault kill) leaves a stale client on
+# every arm it held. The next bootstrap then has each arm's connect stall its
+# full ~20s TCP timeout before the controller-side release lets a retry through
+# — and the connects run serially (one arm at a time, GIL-held in
+# HardwareRegistry.create), so a 2-arm rig can burn ~40s of stalls plus retry
+# backoffs before cameras/session/episode-0 even begin. 60s was too tight for
+# that path (the start failed → session errored → the operator was stuck in a
+# recover→start→error loop). 120s lets the connect retries grind through the
+# stale clients so recovery reliably succeeds on the first try.
+_BOOTSTRAP_TIMEOUT_S = 120.0
 
 # How long we wait for the child to exit after we signal stop. Mirrors
 # the 30s thread-join timeout from the previous in-process implementation

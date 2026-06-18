@@ -39,7 +39,11 @@ export function App() {
         <DatasetsProvider>
           <HwStatusProvider>
             <RouterProvider router={router} />
-            <Toaster position="bottom-right" richColors />
+            {/* top-center keeps toasts clear of the action controls — in
+                portrait the Stop/Next buttons fill the bottom edge, where
+                bottom-right toasts used to land right on top of them. Shorter
+                auto-dismiss + an explicit close button so they never linger. */}
+            <Toaster position="top-center" richColors closeButton duration={3500} />
           </HwStatusProvider>
         </DatasetsProvider>
       </TourProvider>

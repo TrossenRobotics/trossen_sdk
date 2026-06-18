@@ -53,9 +53,9 @@ _PARK_AT_ZEROS_S = 2.0
 # An arm controller is single-client: a connection left by a prior run (e.g. a
 # recorder SIGKILLed on a fault before it could disconnect) makes the next TCP
 # connect stall its full ~20s timeout and throw. The stale client clears
-# controller-side shortly after, so one retry lets the test pass first try
+# controller-side shortly after, so retrying lets the test pass first try
 # instead of needing a second attempt. Mirrors recorder_runner._create_arm_component.
-_ARM_CONNECT_RETRIES = 1
+_ARM_CONNECT_RETRIES = 2
 _ARM_RETRY_BACKOFF_S = 1.0
 
 

@@ -317,9 +317,13 @@ def _episode_file_is_empty(mcap_root: str, episode_index: int) -> bool:
 # released yet — most commonly because a fault SIGKILLs the recorder child
 # before its arm driver can disconnect (see recorder.py's fatal-fault kill) —
 # the next TCP connect stalls its full ~20s timeout and throws. The stale
-# client clears controller-side shortly after, so retrying once turns the old
+# client clears controller-side shortly after, so retrying turns the old
 # "start fails → recover → try again" dance into a single successful start.
-_ARM_CONNECT_RETRIES = 1
+# Two retries (three attempts) covers a controller that needs more than one
+# ~20s timeout cycle to release — e.g. recovering immediately after a crash
+# AND a just-finished hardware test both held the same arm. The bootstrap
+# wall-clock budget (recorder._BOOTSTRAP_TIMEOUT_S) is sized to allow this.
+_ARM_CONNECT_RETRIES = 2
 _ARM_RETRY_BACKOFF_S = 1.0
 
 
