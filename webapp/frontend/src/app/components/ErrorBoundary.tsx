@@ -21,6 +21,14 @@ interface Props {
   fallback?: ReactNode;
   /** Label included in the logged message, to tell boundaries apart. */
   label?: string;
+  /**
+   * When this value changes, the boundary clears a previously-caught error and
+   * retries rendering its children. Used to recover after an intentional
+   * remount (e.g. reconnecting the Rerun viewer on a resume): the old child's
+   * teardown can throw, which would otherwise leave the fallback latched even
+   * though a fresh child is ready to mount.
+   */
+  resetKey?: unknown;
 }
 
 interface State {
@@ -39,6 +47,12 @@ export class ErrorBoundary extends Component<Props, State> {
       component: 'ErrorBoundary',
       stack: info.componentStack ?? undefined,
     });
+  }
+
+  componentDidUpdate(prev: Props): void {
+    if (this.state.hasError && prev.resetKey !== this.props.resetKey) {
+      this.setState({ hasError: false });
+    }
   }
 
   render(): ReactNode {

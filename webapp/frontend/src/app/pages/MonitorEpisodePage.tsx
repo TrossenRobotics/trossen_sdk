@@ -166,6 +166,12 @@ export function MonitorEpisodePage() {
   //   failed   → clear or test failed; offer Try Again
   // On a passing test we drop fatalError and land on the paused/Resume screen.
   const [recoverStage, setRecoverStage] = useState<'idle' | 'clearing' | 'testing' | 'failed'>('idle');
+  // Bumped on every (re)start of recording. Each start spins up a fresh recorder
+  // child with a brand-new Rerun gRPC server, so the embedded viewer — which
+  // connects to its URLs exactly once at mount — must be remounted to reconnect.
+  // Without this, resuming after a stop left the viewer bound to the dead server
+  // and the feeds froze until you navigated away and back. Keyed into the viewer.
+  const [viewerEpoch, setViewerEpoch] = useState(0);
 
   // Dry Run runs the full session lifecycle (Staging → Recording →
   // Resetting × N → Sleeping) but the backend swaps in NullBackend, so
@@ -183,6 +189,7 @@ export function MonitorEpisodePage() {
       const data = await apiPost<Session>(`${apiBase}/start`, { dry_run: true });
       setSession(data);
       setPhase('recording');
+      setViewerEpoch(e => e + 1); // reconnect the viewer to the fresh recorder
       addLog('success', 'Dry run started — beginning first episode');
       // The WS bus typically drops episode 0's `episode_started`; fire its
       // cue here since the successful /start means episode 0 has begun.
@@ -331,6 +338,7 @@ export function MonitorEpisodePage() {
       const data = await apiPost<Session>(`${apiBase}/start`, { dry_run: false });
       setSession(data);
       setPhase('recording');
+      setViewerEpoch(e => e + 1); // reconnect the viewer to the fresh recorder
       addLog('success', 'Session started — beginning first episode');
       // Episode 0's `episode_started` WS frame is usually dropped (socket
       // subscribes after /start fires it); fire the cue here so the first
@@ -366,6 +374,7 @@ export function MonitorEpisodePage() {
       const data = await apiPost<Session>(`${apiBase}/resume`, { dry_run: false });
       setSession(data);
       setPhase('recording');
+      setViewerEpoch(e => e + 1); // reconnect the viewer to the fresh recorder
       addLog('success', 'Session resumed');
       announceEpisodeStart(data.current_episode ?? 0, 'Recording resumed');
     } catch (err) {
@@ -1105,6 +1114,7 @@ export function MonitorEpisodePage() {
             // crashing the whole monitor.
             <ErrorBoundary
               label="RerunViewer"
+              resetKey={viewerEpoch}
               fallback={
                 <div className="w-full h-full flex items-center justify-center select-none bg-edge">
                   <p className="text-dim text-[13px]">Live viewer unavailable</p>
@@ -1112,7 +1122,7 @@ export function MonitorEpisodePage() {
               }
             >
               <RerunViewer
-                key={sessionId}
+                key={`${sessionId}:${viewerEpoch}`}
                 sessionId={sessionId}
                 recording={phase === 'recording' || phase === 'resetting'}
               />

@@ -50,6 +50,40 @@ _ASYNC_FAILURE_GRACE_S = 1.5
 # budget.
 _PARK_AT_ZEROS_S = 2.0
 
+# An arm controller is single-client: a connection left by a prior run (e.g. a
+# recorder SIGKILLed on a fault before it could disconnect) makes the next TCP
+# connect stall its full ~20s timeout and throw. The stale client clears
+# controller-side shortly after, so one retry lets the test pass first try
+# instead of needing a second attempt. Mirrors recorder_runner._create_arm_component.
+_ARM_CONNECT_RETRIES = 1
+_ARM_RETRY_BACKOFF_S = 1.0
+
+
+def _create_arm_component(arm_id: str, arm_json: dict) -> object:
+    last_exc: Exception | None = None
+    for attempt in range(_ARM_CONNECT_RETRIES + 1):
+        try:
+            return ts.HardwareRegistry.create("trossen_arm", arm_id, arm_json, True)
+        except Exception as exc:
+            last_exc = exc
+            low = str(exc).lower()
+            transient = (
+                "connect to the arm controller" in low
+                or "temporarily unavailable" in low
+                or ("within" in low and "second" in low)
+            )
+            if attempt >= _ARM_CONNECT_RETRIES or not transient:
+                raise
+            print(
+                f"arm '{arm_id}' connect failed (attempt {attempt + 1} of "
+                f"{_ARM_CONNECT_RETRIES + 1}) — controller may still hold a prior "
+                f"client; retrying in {_ARM_RETRY_BACKOFF_S}s: {exc}",
+                flush=True,
+            )
+            time.sleep(_ARM_RETRY_BACKOFF_S)
+    assert last_exc is not None
+    raise last_exc
+
 
 def main() -> int:
     config_json = sys.stdin.read()
@@ -73,9 +107,7 @@ def main() -> int:
             # clock budget regardless of the operator-facing config.
             arm_json = arm_cfg.to_json()
             arm_json["teleop_moving_time_s"] = _PARK_AT_ZEROS_S
-            arm_components[arm_id] = ts.HardwareRegistry.create(
-                "trossen_arm", arm_id, arm_json, True
-            )
+            arm_components[arm_id] = _create_arm_component(arm_id, arm_json)
 
         n_cameras = 0
         for cam_cfg in cfg.hardware.cameras:

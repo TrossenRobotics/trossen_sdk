@@ -127,13 +127,16 @@ export function Header() {
           )}
         </nav>
 
-        {/* Live-recording pill — one-click return to the active session from
-            any page. `ml-auto` right-aligns it when the center nav is hidden
-            (small screens); on lg the nav's flex-1 already pushes it right. */}
+        {/* Right-side controls, always pinned to the corner. `ml-auto` keeps
+            them — and the hamburger — at the top-right even in portrait, where
+            the centered desktop nav (which otherwise pushes them over with its
+            flex-1) is hidden. */}
+        <div className="ml-auto flex items-center">
+        {/* Live-recording pill — one-click return to the active session. */}
         {activeSession && (
           navLocked ? (
             <span
-              className="ml-auto mr-2 flex items-center gap-2 px-3 py-1.5 rounded bg-green-500/10 border border-green-500/20 text-green-400/50 text-xs cursor-not-allowed"
+              className="mr-2 flex items-center gap-2 px-3 py-1.5 rounded bg-green-500/10 border border-green-500/20 text-green-400/50 text-xs cursor-not-allowed"
               title="Hardware test in progress"
             >
               <span className="w-2 h-2 rounded-full bg-green-500/50" />
@@ -143,7 +146,7 @@ export function Header() {
             <Link
               to={`/monitor/${activeSession.id}`}
               title="Return to the live recording"
-              className="ml-auto mr-2 flex items-center gap-2 px-3 py-1.5 rounded bg-green-500/15 border border-green-500/30 text-green-400 text-xs hover:bg-green-500/25 transition-colors"
+              className="mr-2 flex items-center gap-2 px-3 py-1.5 rounded bg-green-500/15 border border-green-500/30 text-green-400 text-xs hover:bg-green-500/25 transition-colors"
             >
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
               <span className="hidden sm:inline">Recording:&nbsp;</span>
@@ -189,13 +192,15 @@ export function Header() {
             : <VolumeX className="w-5 h-5" />}
         </button>
 
-        {/* Mobile hamburger */}
+        {/* Mobile hamburger — last in the row, so it sits in the top-right
+            corner; in portrait the menu it opens holds the nav links. */}
         <button
           className="lg:hidden text-dim hover:text-ink p-2"
           onClick={() => setMobileOpen(!mobileOpen)}
         >
           {mobileOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
         </button>
+        </div>
       </div>
 
       {/* Mobile menu */}

@@ -313,6 +313,44 @@ def _episode_file_is_empty(mcap_root: str, episode_index: int) -> bool:
     return not _episode_has_joint_state(path)
 
 
+# An arm controller is single-client. If a prior run's connection wasn't
+# released yet — most commonly because a fault SIGKILLs the recorder child
+# before its arm driver can disconnect (see recorder.py's fatal-fault kill) —
+# the next TCP connect stalls its full ~20s timeout and throws. The stale
+# client clears controller-side shortly after, so retrying once turns the old
+# "start fails → recover → try again" dance into a single successful start.
+_ARM_CONNECT_RETRIES = 1
+_ARM_RETRY_BACKOFF_S = 1.0
+
+
+def _create_arm_component(arm_id: str, arm_json: dict[str, Any]) -> Any:
+    """Create a trossen_arm component, retrying once on a transient connect
+    failure (a controller still holding a prior single-client connection)."""
+    last_exc: Exception | None = None
+    for attempt in range(_ARM_CONNECT_RETRIES + 1):
+        try:
+            return ts.HardwareRegistry.create("trossen_arm", arm_id, arm_json, True)
+        except Exception as exc:  # pybind11 surfaces the C++ throw here
+            last_exc = exc
+            low = str(exc).lower()
+            transient = (
+                "connect to the arm controller" in low
+                or "temporarily unavailable" in low
+                or ("within" in low and "second" in low)
+            )
+            if attempt >= _ARM_CONNECT_RETRIES or not transient:
+                raise
+            print(
+                f"arm '{arm_id}' connect failed (attempt {attempt + 1} of "
+                f"{_ARM_CONNECT_RETRIES + 1}) — the controller may still hold a "
+                f"prior client; retrying in {_ARM_RETRY_BACKOFF_S}s: {exc}",
+                flush=True,
+            )
+            time.sleep(_ARM_RETRY_BACKOFF_S)
+    assert last_exc is not None  # loop either returned or re-raised
+    raise last_exc
+
+
 def _build_session_manager(
     config: dict[str, Any],
 ) -> tuple[ts.SessionManager, list, str]:
@@ -342,9 +380,7 @@ def _build_session_manager(
 
     arm_components = {}
     for arm_id, arm_cfg in cfg.hardware.arms.items():
-        arm_components[arm_id] = ts.HardwareRegistry.create(
-            "trossen_arm", arm_id, arm_cfg.to_json(), True
-        )
+        arm_components[arm_id] = _create_arm_component(arm_id, arm_cfg.to_json())
 
     camera_components = {}
     camera_cfg_map = {}
