@@ -20,3 +20,28 @@ dependencies = [
 
 [tool.uv.sources]
 trossen-sdk = { path = "../..", editable = true }
+
+# Dev tooling for the backend (TDS-109). Installed by `uv sync` (the `dev`
+# group is included by default). Run with `uv run ruff check .` and
+# `uv run pytest`.
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# pycodestyle (E/W), pyflakes (F), isort (I). Conservative on purpose so the
+# linter stays signal, not noise; expand as the team wants.
+select = ["E", "F", "W", "I"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+# Put the backend root on sys.path so tests can `import app.*` without an
+# editable install of the backend itself.
+pythonpath = ["."]

@@ -27,15 +27,14 @@ from __future__ import annotations
 from collections.abc import Iterator
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import Session
 
+from alembic import command
 from app.paths import DB_PATH, STATE_ROOT
-
 
 # `STATE_ROOT` may not exist yet on a fresh install; the engine would
 # happily create the `.db` file but only if the parent directory is

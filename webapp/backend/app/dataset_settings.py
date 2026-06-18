@@ -19,7 +19,6 @@ from sqlmodel import Session
 from app.db import SessionLocal
 from app.models import AppSetting
 
-
 _DEFAULT_MCAP_ROOT = "~/.trossen_sdk"
 _DEFAULT_LEROBOT_ROOT = "~/.cache/huggingface/lerobot"
 

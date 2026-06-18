@@ -44,7 +44,6 @@ from typing import Any
 import rerun as rr
 import trossen_sdk as ts
 
-
 _READY_PREFIX = "__READY__:"
 _SUCCESS_PREFIX = "__SUCCESS__:"
 _ERROR_PREFIX = "__ERROR__:"

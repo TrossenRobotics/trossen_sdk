@@ -33,7 +33,6 @@ from pydantic import BaseModel
 
 from app.io_utils import is_safe_id
 
-
 # Repo root resolved from this file's location: webapp/backend/app/converter.py
 # → parents[3] is the SDK repo root. Works on host (parent dir of webapp/) and
 # in Docker (/app, where the repo is bind-mounted by docker-compose).

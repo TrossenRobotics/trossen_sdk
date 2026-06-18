@@ -11,8 +11,9 @@ in sync with `app.paths.DB_PATH`.
 
 from logging.config import fileConfig
 
-from alembic import context
 from sqlmodel import SQLModel
+
+from alembic import context
 
 # Importing app.models registers every SQLModel class on
 # SQLModel.metadata, which is what autogenerate diffs against.

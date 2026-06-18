@@ -35,7 +35,6 @@ import time
 
 import trossen_sdk as ts
 
-
 # Pause after creating hardware so background reader threads (notably
 # the trossen_arm TCP reader) have time to log a delayed failure into
 # our stdout before we exit. Mirrors the same constant used in the

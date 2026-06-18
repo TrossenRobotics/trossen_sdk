@@ -12,7 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-
 # XDG-compliant roots
 CONFIG_ROOT = Path("~/.config/trossen_sdk_webapp").expanduser()
 STATE_ROOT = Path("~/.local/state/trossen_sdk_webapp").expanduser()

@@ -46,7 +46,6 @@ from app.sessions import (
 from app.systems import get_system
 from app.ws_bus import bus
 
-
 # Wall-clock budget for the child to print __READY__ after bootstrap.
 # Larger than the hardware-test timeout because recording bootstrap also
 # primes camera streams (and on some setups the realsense pipeline can

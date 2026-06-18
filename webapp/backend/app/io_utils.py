@@ -16,7 +16,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-
 _SAFE_ID = re.compile(r"^[A-Za-z0-9_.\-]+$")
 
 

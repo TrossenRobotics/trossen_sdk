@@ -10,10 +10,24 @@ from pydantic import BaseModel
 
 from app import hw_status
 from app.converter import ConvertBody, stream_conversion, validate_body
+from app.dataset_settings import (
+    DatasetSettings,
+    load_dataset_settings,
+    save_dataset_settings,
+)
+from app.datasets import (
+    LeRobotDataset,
+    LeRobotDatasetSummary,
+    McapDataset,
+    McapDatasetSummary,
+    scan_lerobot,
+    scan_lerobot_detail,
+    scan_mcap,
+    scan_mcap_detail,
+)
 from app.db import apply_migrations
 from app.hw_test import stream_system_hardware_test
 from app.io_utils import is_safe_id
-
 from app.recorder import (
     RecorderError,
     signal_next,
@@ -21,30 +35,22 @@ from app.recorder import (
     start_recording,
     stop_recording,
 )
-from app.ws_bus import bus
-
 from app.sessions import (
     CreateSessionBody,
     Session,
     UpdateSessionBody,
+    clear_error,
     create_session,
     delete_session,
+    force_session_to_error,
     get_session,
     list_sessions,
     reset_to_pending,
     robot_name_for_dataset,
     sessions_for_dataset,
-    update_session,
-    force_session_to_error,
     set_dry_run,
     transition_session,
-    clear_error,
-)
-
-from app.dataset_settings import (
-    DatasetSettings,
-    load_dataset_settings,
-    save_dataset_settings,
+    update_session,
 )
 from app.systems import (
     CreateSystemBody,
@@ -56,17 +62,8 @@ from app.systems import (
     seed_factory_systems_if_empty,
     update_system_config,
 )
+from app.ws_bus import bus
 
-from app.datasets import (
-    LeRobotDataset,
-    LeRobotDatasetSummary,
-    McapDataset,
-    McapDatasetSummary,
-    scan_lerobot,
-    scan_lerobot_detail,
-    scan_mcap,
-    scan_mcap_detail,
-)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
