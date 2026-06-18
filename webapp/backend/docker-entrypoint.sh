@@ -21,6 +21,17 @@ REPO_ROOT="${REPO_ROOT:-/app}"
 BUILD_DIR="${TROSSEN_DOCKER_BUILD_DIR:-/var/cache/trossen_sdk/build}"
 CONVERTER_BIN="${TROSSEN_CONVERTER_BIN:-${BUILD_DIR}/scripts/trossen_mcap_to_lerobot_v2}"
 
+# ZED support is opt-in at image-build time (Dockerfile ENABLE_ZED=1 sets
+# TROSSEN_ENABLE_ZED=1 and installs the ZED SDK on a CUDA base). When on, hand
+# the CMake flags to scikit-build-core so the editable trossen_sdk extension is
+# compiled with ZED in. scikit-build-core reads SKBUILD_CMAKE_DEFINE (a ';'-
+# separated list of -D defines) at build time, so both the initial `uv sync`
+# and the stale-extension self-heal rebuild below pick it up.
+if [[ "${TROSSEN_ENABLE_ZED:-0}" == "1" ]]; then
+    export SKBUILD_CMAKE_DEFINE="TROSSEN_ENABLE_ZED=ON;ZED_DIR=${ZED_DIR:-/usr/local/zed}"
+    echo "[entrypoint] ZED enabled — building trossen_sdk with ${SKBUILD_CMAKE_DEFINE}"
+fi
+
 # --no-dev: install runtime deps only. The `dev` group (pytest, ruff) is
 # test/lint tooling the running webapp never imports, and pulling it in here
 # made startup depend on fetching pluggy et al. — a cold/recreated venv volume

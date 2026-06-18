@@ -5,8 +5,26 @@
 # triggers a cmake/pybind compile) is materialised at container start time
 # via `uv sync` so the source bind-mount in docker-compose can hot-reload
 # changes without rebuilding the image.
+#
+# ZED cameras are opt-in. StereoLabs' SDK requires CUDA, so a default build
+# (ENABLE_ZED=0) stays on the lean ubuntu:24.04 base, while `--build-arg
+# ENABLE_ZED=1` swaps to an NVIDIA CUDA devel base and installs the ZED SDK.
+# The base is picked with a multi-stage selector: the global ENABLE_ZED arg
+# indexes into `base-0` (CPU) / `base-1` (CUDA). See docker-compose.zed.yml
+# for the override that turns this on and reserves the GPU at runtime.
+ARG ENABLE_ZED=0
+ARG CPU_BASE=ubuntu:24.04
+# CUDA 12.6 to match the ZED SDK 4.2 run-file (ZED_SDK_Ubuntu24_cuda12.6_*),
+# and the lowest CUDA the nvidia/cuda images ship for ubuntu24.04. The host
+# driver (>=560) is backward compatible with this.
+ARG CUDA_BASE=nvidia/cuda:12.6.3-devel-ubuntu24.04
 
-FROM ubuntu:24.04
+FROM ${CPU_BASE} AS base-0
+FROM ${CUDA_BASE} AS base-1
+FROM base-${ENABLE_ZED} AS runtime
+
+# Re-declare inside the stage so the conditional ZED step below can read it.
+ARG ENABLE_ZED=0
 
 ARG DEBIAN_FRONTEND=noninteractive
 # libtrossen_arm is pinned to the released tag matching the controller
@@ -88,6 +106,31 @@ RUN mkdir -p /etc/apt/keyrings \
         librealsense2-dev \
         librealsense2-utils \
     && rm -rf /var/lib/apt/lists/*
+
+# StereoLabs ZED SDK (opt-in via --build-arg ENABLE_ZED=1; requires the CUDA
+# base selected above). Installed from the official run-file in silent mode,
+# skipping the GUI tools and the NVIDIA driver install (the driver lives on the
+# host and reaches the container through nvidia-container-toolkit at runtime).
+# ZED_DIR is the install root the SDK's find_package(ZED ...) expects.
+# Pinned to ZED SDK 4.2 for Ubuntu 24.04 / CUDA 12.6 (matches CUDA_BASE).
+ENV ZED_DIR=/usr/local/zed
+RUN if [ "$ENABLE_ZED" = "1" ]; then \
+        set -eux; \
+        apt-get update && apt-get install -yqq --no-install-recommends \
+            zstd libgomp1 libusb-1.0-0 udev && \
+        wget -q -O /tmp/zed_sdk.run \
+            https://download.stereolabs.com/zedsdk/4.2/cu12/ubuntu24 && \
+        chmod +x /tmp/zed_sdk.run && \
+        /tmp/zed_sdk.run -- silent skip_tools skip_drivers skip_python && \
+        rm -f /tmp/zed_sdk.run && \
+        rm -rf /var/lib/apt/lists/* ; \
+    else \
+        echo "ENABLE_ZED=$ENABLE_ZED — skipping ZED SDK install" ; \
+    fi
+
+# Tell the entrypoint's `uv sync` compile to build ZED support in. Empty/0 on a
+# default build, so the editable trossen_sdk extension stays ZED-free.
+ENV TROSSEN_ENABLE_ZED=${ENABLE_ZED}
 
 # uv for fast Python dependency management.
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh

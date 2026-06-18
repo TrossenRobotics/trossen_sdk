@@ -16,6 +16,11 @@ services:
     build:
       context: ..                      # repo root, so the SDK source is in build context
       dockerfile: webapp/backend/Dockerfile
+      args:
+        # ZED is off by default (lean ubuntu base). Opt in either by exporting
+        # ENABLE_ZED=1 or by layering docker-compose.zed.yml, which also
+        # reserves the GPU at runtime. See that file for the full ZED workflow.
+        ENABLE_ZED: ${ENABLE_ZED:-0}
     image: trossen-sdk-webapp-backend:dev
     container_name: trossen_webapp_backend
     network_mode: host                 # host Ethernet (arm subnet) + localhost wiring
