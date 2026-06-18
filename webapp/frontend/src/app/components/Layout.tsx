@@ -1,6 +1,7 @@
 import { Outlet, useLocation } from 'react-router';
 import { Header } from '@/app/components/Header';
 import { KeyboardShortcuts } from '@/app/components/KeyboardShortcuts';
+import { HelpTour } from '@/app/components/HelpTour';
 
 export function Layout() {
   const location = useLocation();
@@ -13,6 +14,7 @@ export function Layout() {
         <Outlet />
       </main>
       <KeyboardShortcuts />
+      <HelpTour />
     </div>
   );
 }

@@ -9,6 +9,7 @@ import { MonitorEpisodePage } from '@/app/pages/MonitorEpisodePage';
 import { DatasetsProvider } from '@/lib/DatasetsContext';
 import { HwStatusProvider } from '@/lib/HwStatusContext';
 import { ThemeProvider } from '@/lib/ThemeContext';
+import { TourProvider } from '@/lib/TourContext';
 
 
 const router = createBrowserRouter([
@@ -29,12 +30,14 @@ const router = createBrowserRouter([
 export function App() {
   return (
     <ThemeProvider>
-      <DatasetsProvider>
-        <HwStatusProvider>
-          <RouterProvider router={router} />
-          <Toaster position="bottom-right" richColors />
-        </HwStatusProvider>
-      </DatasetsProvider>
+      <TourProvider>
+        <DatasetsProvider>
+          <HwStatusProvider>
+            <RouterProvider router={router} />
+            <Toaster position="bottom-right" richColors />
+          </HwStatusProvider>
+        </DatasetsProvider>
+      </TourProvider>
     </ThemeProvider>
   );
 }

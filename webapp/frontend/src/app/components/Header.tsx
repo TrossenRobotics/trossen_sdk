@@ -1,11 +1,12 @@
 import { Link, useLocation } from "react-router";
-import { Menu, X, Volume2, VolumeX, Sun, Moon } from "lucide-react";
+import { Menu, X, Volume2, VolumeX, Sun, Moon, HelpCircle } from "lucide-react";
 import { useState, useEffect } from "react";
 import imgTrossen2025White2 from '@/assets/6ef806f936e829141b2fab202fa6f7601e3a5a7b.png';
 import { useHwStatus } from '@/lib/HwStatusContext';
 import { apiGet } from '@/lib/api';
 import { useAnnounceEnabled, setAnnounceEnabled, announce } from '@/lib/announce';
 import { useTheme } from '@/lib/ThemeContext';
+import { useTour } from '@/lib/TourContext';
 
 const navLinks = [
   { to: "/record", label: "Record", match: ["/", "/record"] },
@@ -19,6 +20,7 @@ export function Header() {
   const { testingSystemId } = useHwStatus();
   const announceEnabled = useAnnounceEnabled();
   const { theme, toggleTheme } = useTheme();
+  const { openTour } = useTour();
 
   // Best-effort poll for a live recording so a session stays reachable from
   // anywhere. The Monitor view is full-screen and hides this header, so once
@@ -148,6 +150,16 @@ export function Header() {
             </Link>
           )
         )}
+
+        {/* Guided walkthrough launcher (TDS-150). */}
+        <button
+          className="text-dim hover:text-ink p-2 mr-1"
+          onClick={openTour}
+          title="Show the guided tour"
+          aria-label="Show the guided tour"
+        >
+          <HelpCircle className="w-5 h-5" />
+        </button>
 
         {/* Light/dark theme toggle (TDS-152). */}
         <button
