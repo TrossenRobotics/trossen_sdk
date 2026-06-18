@@ -27,6 +27,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -81,10 +82,44 @@ _ERROR_PREFIX = "__ERROR__:"
 # local progress/reset animation — right away instead of after that freeze.
 _FATAL_SDK_MARKERS = ("[critical]", "terminate called")
 
+# Lines worth surfacing verbatim on a crash so the operator sees the SDK's own
+# diagnostics — the motor-interface detail (which joint, the offending value),
+# the critical summary, and the SDK's troubleshooting-guide pointer — instead of
+# a one-line interpretation. Matched case-insensitively against buffered output.
+_DIAG_MARKERS = ("[error]", "[critical]", "troubleshooting guide")
+
+# The arm SDK colourises its error lines (e.g. the "[ERROR] [Motor Interface]
+# Joint N velocity limit exceeded…" line arrives as "\x1b[31m…\x1b[0m"). Strip
+# the escape sequences so the captured message is clean text, not terminal codes.
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
 
 def _is_fatal_sdk_line(line: str) -> bool:
     low = line.lower()
     return any(marker in low for marker in _FATAL_SDK_MARKERS)
+
+
+def _extract_fault_detail(last_lines: deque) -> str:
+    """Pull the SDK's own fault diagnostics out of the recent-output buffer.
+
+    On a hardware fault the SDK prints the real detail across a few lines (e.g.
+    `[ERROR] [Motor Interface] Joint 5 velocity limit exceeded: ...`, then a
+    `[CRITICAL]` summary, then a troubleshooting URL). We keep those verbatim and
+    in order so the error screen can show exactly what the SDK reported rather
+    than a paraphrase. Returns a newline-joined block, or "" if nothing matched.
+    """
+    out: list[str] = []
+    for raw in last_lines:
+        line = _ANSI_RE.sub("", raw).strip()
+        if not line:
+            continue
+        low = line.lower()
+        if any(marker in low for marker in _DIAG_MARKERS):
+            # Skip consecutive duplicates (the SDK repeats the controller's
+            # "latest log since powered on" line on each retry before it aborts).
+            if not out or out[-1] != line:
+                out.append(line)
+    return "\n".join(out)
 
 
 class RecorderError(RuntimeError):
@@ -635,14 +670,22 @@ def _finalize_crash(
       - flip hw_status → red badge so the gate banner forces a re-test
       - emit a lifecycle error event on the WS bus
     """
-    msg = error_message
-    if not msg:
+    # Prefer the SDK's own multi-line diagnostics (motor detail + critical
+    # summary + troubleshooting URL) so the operator sees the full, verbatim
+    # fault rather than a single interpreted line. Fall back to the sentinel
+    # message, then to the raw tail.
+    detail = _extract_fault_detail(runner.last_lines)
+    if detail:
+        msg = detail
+    elif error_message:
+        msg = error_message
+    else:
         tail = " | ".join(list(runner.last_lines)[-5:])
         msg = (
             f"Recorder subprocess exited with code {return_code}; "
             f"last lines: {tail}"
         ) if tail else f"Recorder subprocess exited with code {return_code}"
-    full_msg = f"Recording crashed: {msg}"
+    full_msg = msg
     _discard_partial_episode(runner)
     force_session_to_error(runner.session_id, full_msg)
     hw_status.set_status(runner.system_id, "error", full_msg)
