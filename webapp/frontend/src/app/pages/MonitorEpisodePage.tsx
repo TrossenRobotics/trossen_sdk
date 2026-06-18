@@ -1,6 +1,6 @@
-import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Settings, Loader2, Lock } from 'lucide-react';
+import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Loader2, Lock, CheckCircle } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { Link, useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
 import { announce, playCue } from '@/lib/announce';
 import { isTypingTarget } from '@/app/components/KeyboardShortcuts';
@@ -10,8 +10,36 @@ import { apiGet, apiPost, describeError } from '@/lib/api';
 import { useReconnectingWebSocket } from '@/hooks/useReconnectingWebSocket';
 import type { WsStatus } from '@/hooks/useReconnectingWebSocket';
 import { RerunViewer } from '@/app/components/RerunViewer';
+import { ErrorBoundary } from '@/app/components/ErrorBoundary';
+import { HwTestButton } from '@/app/components/HwTestButton';
 import { useConfirm } from '@/app/hooks/useConfirm';
+import { useHardwareTest } from '@/app/hooks/useHardwareTest';
 import type { WsMessage } from '@/lib/types';
+
+// Render text with any http(s) URLs turned into clickable links. Used to make
+// the SDK's troubleshooting-guide pointer in a crash report tappable. Trailing
+// punctuation (e.g. the period after "...troubleshooting.html.") is peeled back
+// into plain text so the link target stays clean.
+function linkify(text: string): React.ReactNode[] {
+  return text.split(/(https?:\/\/[^\s]+)/g).map((part, i) => {
+    if (!/^https?:\/\//.test(part)) return part;
+    const trail = part.match(/[).,;:!?\]]+$/)?.[0] ?? '';
+    const url = trail ? part.slice(0, -trail.length) : part;
+    return (
+      <span key={i}>
+        <a
+          href={url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-brand underline break-all hover:opacity-80"
+        >
+          {url}
+        </a>
+        {trail}
+      </span>
+    );
+  });
+}
 
 // Local subset of the Session type used by this page. Wider Session lives
 // in lib/types; we only need these fields here.
@@ -79,6 +107,9 @@ export function MonitorEpisodePage() {
   const navigate = useNavigate();
   const { statuses: hwStatus, setStatus: setHwStatus } = useHwStatus();
   const { confirm, modalElement } = useConfirm();
+  // Inline hardware test — lets the Start/Resume gates and the error-recovery
+  // flow run the test in place instead of deep-linking to Configuration.
+  const { runTest, testingSystemId, result: hwTestResult } = useHardwareTest();
   // True once we've shown a "connection lost" warning for the current drop,
   // so the toast fires once per outage (not once per reconnect attempt).
   const wsDroppedRef = useRef(false);
@@ -126,6 +157,15 @@ export function MonitorEpisodePage() {
   const [stopping, setStopping] = useState(false);
   const [rerecording, setRerecording] = useState(false);
   const [nexting, setNexting] = useState(false);
+  // In-place recovery from the error screen. The whole loop (clear the SDK
+  // fault → re-test the hardware → resume) runs here without leaving the page:
+  //   idle     → showing the error + "Clear Error & Recover"
+  //   clearing → POST /clear-error in flight
+  //   testing  → hardware test streaming (a crash red-flags the system, so a
+  //              fresh pass is required before Resume unlocks)
+  //   failed   → clear or test failed; offer Try Again
+  // On a passing test we drop fatalError and land on the paused/Resume screen.
+  const [recoverStage, setRecoverStage] = useState<'idle' | 'clearing' | 'testing' | 'failed'>('idle');
 
   // Dry Run runs the full session lifecycle (Staging → Recording →
   // Resetting × N → Sleeping) but the backend swaps in NullBackend, so
@@ -340,6 +380,53 @@ export function MonitorEpisodePage() {
     }
   }
 
+  // Guided in-place recovery: clear the SDK fault, then re-test the hardware,
+  // then hand off to the paused/Resume screen — all on this page, no trip to
+  // Configuration. A crash red-flags the system, so the fresh test is the part
+  // that actually re-enables Resume. Idempotent on retry: if the error was
+  // already cleared (session now paused), skip straight to the test.
+  async function handleRecover() {
+    if (recoverStage === 'clearing' || recoverStage === 'testing') return;
+    try {
+      // 1. Clear the fault (unless a prior attempt already did).
+      let current = session;
+      if (current?.status === 'error') {
+        setRecoverStage('clearing');
+        current = await apiPost<Session>(`${apiBase}/clear-error`);
+        setSession(current);
+        systemIdRef.current = current.system_id ?? null;
+        setCurrentEpisode(current.current_episode || 0);
+      }
+      const sysId = current?.system_id;
+      // 2. No system to test (shouldn't happen for a real session) — just exit
+      //    the error screen and let the gate decide.
+      if (!sysId) {
+        setFatalError(null);
+        setPhase(current?.status === 'paused' ? 'paused' : 'not_started');
+        return;
+      }
+      // 3. Re-test the hardware inline. runTest flips hwStatus → 'ready' on a
+      //    pass, which is what unlocks Resume on the screen we land on next.
+      setRecoverStage('testing');
+      const passed = await runTest(sysId);
+      if (passed) {
+        setFatalError(null);
+        setRecoverStage('idle');
+        setPhase(current?.status === 'paused' ? 'paused' : 'not_started');
+        announce('Ready to resume');
+      } else {
+        // Test failed — stay on the error screen with a Try Again path. The
+        // session is already cleared (paused) at this point.
+        setRecoverStage('failed');
+      }
+    } catch (err) {
+      const msg = describeError(err);
+      toast.error(`Couldn’t clear the error: ${msg}`);
+      logError(`Recover failed for ${sessionId}: ${msg}`, { component: 'MonitorPage' });
+      setRecoverStage('failed');
+    }
+  }
+
   // Stop: ends the entire session
   async function handleStop() {
     if (stopping) return;
@@ -513,8 +600,18 @@ export function MonitorEpisodePage() {
           announce('Session complete');
         }
       } else if (data.event === 'error') {
-        setPhase('complete');
+        // A mid-session crash must surface the recoverable error screen — NOT
+        // the 'complete' success terminal, which falsely implies the run
+        // finished cleanly. Mirrors the initial-load error path in the fetch
+        // effect above so a crash looks the same whether it arrives live or on
+        // a later reload of the same errored session.
         setElapsed(0);
+        setFatalError({
+          title: 'This session ended in an error',
+          message:
+            data.message?.trim() ||
+            'The recorder reported a failure and the session stopped.',
+        });
         addLog('error', data.message || 'Bridge error');
         playCue('error');
         // The operator is usually at the robot, not watching the side log —
@@ -754,30 +851,133 @@ export function MonitorEpisodePage() {
   // message with a way out, never the interactive recording controls.
   if (fatalError) {
     const sysId = session?.system_id;
+    // A loaded session that hit a fault can be cleared and recovered in place.
+    // A *failed load* (deleted id / backend down) has no session to recover —
+    // that case only gets a way back out.
+    const recoverable = !!session;
+    const savedCount = currentEpisode;
     return (
-      <div className="h-screen flex flex-col items-center justify-center gap-[20px] bg-app font-['JetBrains_Mono',sans-serif] px-6 text-center">
-        <AlertTriangle className="w-[40px] h-[40px] text-red-400" />
-        <div className="text-ink text-[18px]">{fatalError.title}</div>
-        <p className="text-dim text-[14px] max-w-[560px] leading-relaxed">{fatalError.message}</p>
-        <div className="mt-[8px] flex items-center gap-[12px]">
-          {/* A recorder failure red-flags the system, so re-testing hardware is
-              the real next step — offer it directly when we know the system. */}
-          {sysId && (
-            <Link
-              to={`/configuration?system=${encodeURIComponent(sysId)}&autotest=1`}
-              className="bg-surface border border-edge text-ink px-[20px] py-[12px] text-[14px] font-bold uppercase hover:border-dim transition-colors flex items-center gap-[8px]"
-            >
-              <Settings className="w-[16px] h-[16px]" />
-              Test Hardware
-            </Link>
-          )}
-          <button
-            onClick={() => navigate('/record')}
-            className="bg-brand text-app px-[24px] py-[12px] text-[14px] font-bold uppercase hover:opacity-90 transition-opacity flex items-center gap-[8px]"
-          >
-            <X className="w-[16px] h-[16px]" />
-            Back to Record
-          </button>
+      <div className="h-screen flex flex-col items-center justify-center bg-app font-['JetBrains_Mono',sans-serif] px-6 py-8 overflow-y-auto">
+        <div className="w-full max-w-[680px] bg-surface border border-edge">
+          {/* Red fault header — neutral title; the SDK's own words go in the
+              verbatim block below, not a paraphrase. */}
+          <div className="bg-red-500/10 border-b border-red-500 px-[20px] py-[16px] flex items-start gap-[12px]">
+            <AlertTriangle className="w-[20px] h-[20px] text-red-400 mt-[2px] shrink-0" />
+            <div className="text-ink text-[16px] leading-snug">{fatalError.title}</div>
+          </div>
+
+          <div className="px-[20px] py-[18px] flex flex-col gap-[16px]">
+            {/* Reassurance — the green counterweight to the red header. */}
+            {recoverable && (
+              <div className="flex items-start gap-[8px]">
+                <CheckCircle className="w-[16px] h-[16px] text-green-500 mt-[1px] shrink-0" />
+                <div className="text-ink text-[13px] leading-relaxed">
+                  {savedCount > 0 ? (
+                    <>
+                      <span className="text-green-400 font-bold">
+                        {savedCount} of {totalEpisodes} episodes are saved.
+                      </span>{' '}
+                      Nothing recorded so far has been lost.
+                    </>
+                  ) : (
+                    'No episodes were recorded yet. You can clear the error and start fresh.'
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* The SDK's own report, verbatim — what the hardware actually said,
+                with any troubleshooting URL clickable. No interpretation. */}
+            {fatalError.message && (
+              <div>
+                <div className="text-dim text-[11px] uppercase tracking-wide mb-[6px]">
+                  What the hardware reported
+                </div>
+                <div className="bg-edge border border-edge text-ink/90 text-[12px] font-mono leading-relaxed px-[12px] py-[10px] whitespace-pre-wrap break-words max-h-[40vh] overflow-y-auto">
+                  {linkify(fatalError.message)}
+                </div>
+              </div>
+            )}
+
+            {/* Recovery happens entirely here — Clear Error & Recover runs the
+                whole loop (clear the fault → re-test the hardware → hand off to
+                Resume) in place; no trip to Configuration. */}
+            {!recoverable ? (
+              <div className="flex flex-wrap items-center gap-[12px] pt-[2px]">
+                <button
+                  onClick={() => navigate('/record')}
+                  className="bg-brand text-app px-[24px] py-[12px] text-[14px] font-bold uppercase hover:opacity-90 transition-opacity flex items-center gap-[8px]"
+                >
+                  <X className="w-[16px] h-[16px]" />
+                  Back to Record
+                </button>
+              </div>
+            ) : recoverStage === 'clearing' || recoverStage === 'testing' ? (
+              /* In-flight: show what's happening, with the live test output. */
+              <div className="flex flex-col gap-[8px] pt-[2px]">
+                <div className="flex items-center gap-[10px] text-ink text-[14px]">
+                  <Loader2 className="w-[16px] h-[16px] text-brand animate-spin shrink-0" />
+                  {recoverStage === 'clearing' ? 'Clearing the error…' : 'Re-testing the hardware…'}
+                </div>
+                {recoverStage === 'testing' && hwTestResult?.output?.length ? (
+                  <div className="text-dim text-[12px] font-mono truncate">
+                    {hwTestResult.output[hwTestResult.output.length - 1]}
+                  </div>
+                ) : null}
+              </div>
+            ) : recoverStage === 'failed' ? (
+              /* Clear or test failed — surface why and offer Try Again. The
+                 fault is already cleared (session paused), so a retry re-runs
+                 just the hardware test. */
+              <div className="flex flex-col gap-[12px] pt-[2px]">
+                <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-300 px-[14px] py-[10px] text-[12px] leading-relaxed">
+                  {hwTestResult?.success === false
+                    ? `Hardware test failed: ${hwTestResult.message}`
+                    : 'Recovery couldn’t finish. Check the hardware and try again.'}
+                </div>
+                <div className="flex flex-wrap items-center gap-[12px]">
+                  <button
+                    onClick={handleRecover}
+                    className="bg-brand text-app px-[24px] py-[12px] text-[14px] font-bold uppercase hover:opacity-90 transition-opacity flex items-center gap-[8px]"
+                  >
+                    <RotateCcw className="w-[16px] h-[16px]" />
+                    Try Again
+                  </button>
+                  <button
+                    onClick={() => navigate('/record')}
+                    className="bg-transparent border border-edge text-dim px-[20px] py-[12px] text-[14px] font-bold uppercase hover:text-ink hover:border-dim transition-colors flex items-center gap-[8px]"
+                  >
+                    <X className="w-[16px] h-[16px]" />
+                    Back to Record
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* idle */
+              <>
+                <div className="flex flex-wrap items-center gap-[12px] pt-[2px]">
+                  <button
+                    onClick={handleRecover}
+                    className="bg-brand text-app px-[24px] py-[12px] text-[14px] font-bold uppercase hover:opacity-90 transition-opacity flex items-center gap-[8px]"
+                  >
+                    <RotateCcw className="w-[16px] h-[16px]" />
+                    Clear Error &amp; Recover
+                  </button>
+                  <button
+                    onClick={() => navigate('/record')}
+                    className="bg-transparent border border-edge text-dim px-[20px] py-[12px] text-[14px] font-bold uppercase hover:text-ink hover:border-dim transition-colors flex items-center gap-[8px]"
+                  >
+                    <X className="w-[16px] h-[16px]" />
+                    Back to Record
+                  </button>
+                </div>
+                <p className="text-dim text-[12px] leading-relaxed">
+                  This clears the fault and re-tests the hardware automatically
+                  {savedCount > 0 ? `, then lets you resume from episode ${savedCount}.` : ', then lets you start recording.'}
+                </p>
+              </>
+            )}
+          </div>
         </div>
       </div>
     );
@@ -898,12 +1098,25 @@ export function MonitorEpisodePage() {
         >
           {phase !== 'not_started' && sessionId ? (
             // Keyed by sessionId so navigating between sessions remounts the
-            // viewer onto the new recorder's gRPC server cleanly.
-            <RerunViewer
-              key={sessionId}
-              sessionId={sessionId}
-              recording={phase === 'recording' || phase === 'resetting'}
-            />
+            // viewer onto the new recorder's gRPC server cleanly. Wrapped in an
+            // ErrorBoundary because the Rerun WASM viewer's teardown can throw
+            // when the recorder's gRPC server dies (mid-session crash) — the
+            // boundary keeps that contained to the viewer pane instead of
+            // crashing the whole monitor.
+            <ErrorBoundary
+              label="RerunViewer"
+              fallback={
+                <div className="w-full h-full flex items-center justify-center select-none bg-edge">
+                  <p className="text-dim text-[13px]">Live viewer unavailable</p>
+                </div>
+              }
+            >
+              <RerunViewer
+                key={sessionId}
+                sessionId={sessionId}
+                recording={phase === 'recording' || phase === 'resetting'}
+              />
+            </ErrorBoundary>
           ) : (
             <div className="w-full h-full flex items-center justify-center select-none">
               <p className="text-dim text-[13px]">Press Start to begin…</p>
@@ -957,7 +1170,7 @@ export function MonitorEpisodePage() {
             const systemReady = !!systemId && hwStatus[systemId]?.status === 'ready';
             const startDisabled = starting || !systemReady;
             const gateTitle = !systemReady
-              ? 'Run a Hardware Test on this system in Configuration before starting a session.'
+              ? 'Run a Hardware Test on this system before starting a session.'
               : '';
             return (
               <div className="flex flex-col items-center gap-[12px]">
@@ -965,16 +1178,17 @@ export function MonitorEpisodePage() {
                   <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-400 px-[16px] py-[10px] text-[13px] flex items-center gap-[12px]">
                     <AlertTriangle className="w-[16px] h-[16px] shrink-0" />
                     <span className="flex-1">
-                      Run a Hardware Test on this system in Configuration before starting a session.
+                      {testingSystemId === systemId
+                        ? 'Testing hardware…'
+                        : 'Run a Hardware Test on this system before starting a session.'}
                     </span>
                     {systemId && (
-                      <Link
-                        to={`/configuration?system=${encodeURIComponent(systemId)}&autotest=1`}
-                        className="bg-yellow-500/20 border border-yellow-500 text-yellow-300 hover:bg-yellow-500/30 px-[12px] py-[6px] text-[12px] flex items-center gap-[6px] shrink-0"
-                      >
-                        <Settings className="w-[14px] h-[14px]" />
-                        Test Hardware
-                      </Link>
+                      <HwTestButton
+                        systemId={systemId}
+                        runTest={runTest}
+                        testingSystemId={testingSystemId}
+                        result={hwTestResult}
+                      />
                     )}
                   </div>
                 )}
@@ -1025,7 +1239,7 @@ export function MonitorEpisodePage() {
             const systemReady = !!systemId && hwStatus[systemId]?.status === 'ready';
             const resumeDisabled = starting || !systemReady;
             const gateTitle = !systemReady
-              ? 'Run a Hardware Test on this system in Configuration before resuming.'
+              ? 'Run a Hardware Test on this system before resuming.'
               : '';
             return (
               <div className="flex flex-col items-center gap-[12px]">
@@ -1033,16 +1247,17 @@ export function MonitorEpisodePage() {
                   <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-400 px-[16px] py-[10px] text-[13px] flex items-center gap-[12px]">
                     <AlertTriangle className="w-[16px] h-[16px] shrink-0" />
                     <span className="flex-1">
-                      Run a Hardware Test on this system in Configuration before resuming.
+                      {testingSystemId === systemId
+                        ? 'Testing hardware…'
+                        : 'Run a Hardware Test on this system before resuming.'}
                     </span>
                     {systemId && (
-                      <Link
-                        to={`/configuration?system=${encodeURIComponent(systemId)}&autotest=1`}
-                        className="bg-yellow-500/20 border border-yellow-500 text-yellow-300 hover:bg-yellow-500/30 px-[12px] py-[6px] text-[12px] flex items-center gap-[6px] shrink-0"
-                      >
-                        <Settings className="w-[14px] h-[14px]" />
-                        Test Hardware
-                      </Link>
+                      <HwTestButton
+                        systemId={systemId}
+                        runTest={runTest}
+                        testingSystemId={testingSystemId}
+                        result={hwTestResult}
+                      />
                     )}
                   </div>
                 )}
