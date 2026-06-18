@@ -1,5 +1,6 @@
 import { Outlet, useLocation } from 'react-router';
 import { Header } from '@/app/components/Header';
+import { KeyboardShortcuts } from '@/app/components/KeyboardShortcuts';
 
 export function Layout() {
   const location = useLocation();
@@ -11,6 +12,7 @@ export function Layout() {
       <main className={isMonitorPage ? "flex-1 overflow-hidden" : "flex-1 overflow-auto"}>
         <Outlet />
       </main>
+      <KeyboardShortcuts />
     </div>
   );
 }

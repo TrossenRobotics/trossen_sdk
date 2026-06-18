@@ -3,6 +3,7 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
 import { announce, playCue } from '@/lib/announce';
+import { isTypingTarget } from '@/app/components/KeyboardShortcuts';
 import { logError } from '@/lib/logger';
 import { useHwStatus } from '@/lib/HwStatusContext';
 import { apiGet, apiPost, describeError } from '@/lib/api';
@@ -673,6 +674,30 @@ export function MonitorEpisodePage() {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [navigate, phase, confirm]);
+
+  // Recording action shortcuts (TDS-151): drive the session from the keyboard
+  // so the operator's hands can stay on the robot. Space = the primary action
+  // for the current phase; S = stop, R = re-record, D = dry run. Never fires
+  // while typing. The cheatsheet (?) lists these.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (isTypingTarget(e) || e.ctrlKey || e.metaKey || e.altKey) return;
+      if (e.key === ' ') {
+        e.preventDefault();
+        if (phase === 'not_started') handleStart();
+        else if (phase === 'paused') handleResume();
+        else if (phase === 'recording' || phase === 'resetting') handleNext();
+      } else if (e.key === 's' || e.key === 'S') {
+        if (phase === 'recording' || phase === 'resetting') handleStop();
+      } else if (e.key === 'd' || e.key === 'D') {
+        if (phase === 'not_started' || phase === 'complete') handleDryRun();
+      } else if (e.key === 'r' || e.key === 'R') {
+        if (phase === 'recording' || phase === 'resetting') handleRerecord();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [phase, handleStart, handleResume, handleStop, handleRerecord, handleNext, handleDryRun]);
 
   // Computed values
   const totalEpisodes = session?.num_episodes || 0;
