@@ -518,7 +518,7 @@ export function RecordPage() {
                     <span className="text-[10px] uppercase hidden sm:inline underline underline-offset-2">Test Now</span>
                   </span>
                 )}
-                <span className="text-dim text-xs uppercase hidden sm:inline">{session.status}</span>
+                <span className="text-dim text-[10px] sm:text-xs uppercase">{session.status}</span>
                 <span className="text-dim text-xs">
                   {session.current_episode}/{session.num_episodes}
                 </span>
@@ -787,7 +787,7 @@ export function RecordPage() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
                   <label className="block text-ink text-xs mb-2">
                     Episodes <span className="text-red-500">*</span>
