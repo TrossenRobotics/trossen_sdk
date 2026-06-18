@@ -87,10 +87,11 @@ export function MonitorEpisodePage() {
   const [phase, setPhase] = useState<Phase>('not_started');
   // A non-null value replaces the whole monitor with an error screen instead
   // of the interactive "Press Start" UI. Set when the session can't be loaded
-  // (deleted / bad id / backend down) or when it already ended in error —
-  // both cases must NOT show a live Start button (you'd be starting a session
-  // that doesn't exist or re-engaging a failed one).
-  const [fatalError, setFatalError] = useState<string | null>(null);
+  // (deleted / bad id / backend down), when it already ended in error, or when
+  // a Start/Resume/Dry-run attempt fails (the backend forces the session to
+  // 'error' and red-flags the system, so the Start button must not linger as
+  // if nothing happened). Carries a context-appropriate title + message.
+  const [fatalError, setFatalError] = useState<{ title: string; message: string } | null>(null);
   // False until the initial session fetch settles. Gates the interactive
   // controls so we never flash the "Press Start" screen for a session that
   // will resolve to completed/error/not-found a moment later.
@@ -149,8 +150,10 @@ export function MonitorEpisodePage() {
     } catch (err) {
       const msg = describeError(err);
       addLog('error', `Failed to start dry run: ${msg}`);
+      playCue('error');
       toast.error(`Failed to start dry run: ${msg}`);
       logError(`Dry run failed: ${msg}`, { component: 'MonitorPage' });
+      setFatalError({ title: 'Dry run couldn’t start', message: msg });
     } finally {
       setStarting(false);
       setStartingMode(null);
@@ -202,10 +205,12 @@ export function MonitorEpisodePage() {
         // A session that ended in error can't be started or resumed from
         // here; surface the failure instead of a live Start button.
         else if (data.status === 'error') {
-          setFatalError(
-            data.error_message?.trim() ||
+          setFatalError({
+            title: 'This session ended in an error',
+            message:
+              data.error_message?.trim() ||
               'This recording session ended with an error and can’t be resumed.',
-          );
+          });
         }
       })
       .catch((err) => {
@@ -213,9 +218,10 @@ export function MonitorEpisodePage() {
         const msg = describeError(err);
         addLog('error', 'Failed to load session');
         logError(`Failed to load session ${sessionId}: ${msg}`, { component: 'MonitorPage' });
-        setFatalError(
-          'Couldn’t load this session — it may have been deleted, or the backend is unreachable.',
-        );
+        setFatalError({
+          title: 'Can’t open this session',
+          message: 'Couldn’t load this session — it may have been deleted, or the backend is unreachable.',
+        });
       })
       .finally(() => setLoaded(true));
     return () => controller.abort();
@@ -296,6 +302,10 @@ export function MonitorEpisodePage() {
       playCue('error');
       toast.error(`Failed to start session: ${msg}`);
       logError(`Start session failed: ${msg}`, { component: 'MonitorPage' });
+      // The backend forced the session to 'error' and red-flagged the system,
+      // so don't drop back to the pristine Start button — surface the failure
+      // here immediately (previously it only showed after a back-and-return).
+      setFatalError({ title: 'Recording couldn’t start', message: msg });
     } finally {
       setStarting(false);
       setStartingMode(null);
@@ -324,6 +334,7 @@ export function MonitorEpisodePage() {
       playCue('error');
       toast.error(`Failed to resume session: ${msg}`);
       logError(`Resume session failed: ${msg}`, { component: 'MonitorPage' });
+      setFatalError({ title: 'Recording couldn’t resume', message: msg });
     } finally {
       setStarting(false);
     }
@@ -739,21 +750,35 @@ export function MonitorEpisodePage() {
     );
   }
 
-  // Unloadable / errored session: a full-screen message with a way out,
-  // never the interactive recording controls.
+  // Unloadable / errored session, or a failed Start/Resume: a full-screen
+  // message with a way out, never the interactive recording controls.
   if (fatalError) {
+    const sysId = session?.system_id;
     return (
       <div className="h-screen flex flex-col items-center justify-center gap-[20px] bg-app font-['JetBrains_Mono',sans-serif] px-6 text-center">
         <AlertTriangle className="w-[40px] h-[40px] text-red-400" />
-        <div className="text-ink text-[18px]">Can’t open this session</div>
-        <p className="text-dim text-[14px] max-w-[520px]">{fatalError}</p>
-        <button
-          onClick={() => navigate('/record')}
-          className="mt-[8px] bg-brand text-app px-[24px] py-[12px] text-[14px] font-bold uppercase hover:bg-[#4aa8cc] transition-colors flex items-center gap-[8px]"
-        >
-          <X className="w-[16px] h-[16px]" />
-          Back to Record
-        </button>
+        <div className="text-ink text-[18px]">{fatalError.title}</div>
+        <p className="text-dim text-[14px] max-w-[560px] leading-relaxed">{fatalError.message}</p>
+        <div className="mt-[8px] flex items-center gap-[12px]">
+          {/* A recorder failure red-flags the system, so re-testing hardware is
+              the real next step — offer it directly when we know the system. */}
+          {sysId && (
+            <Link
+              to={`/configuration?system=${encodeURIComponent(sysId)}&autotest=1`}
+              className="bg-surface border border-edge text-ink px-[20px] py-[12px] text-[14px] font-bold uppercase hover:border-dim transition-colors flex items-center gap-[8px]"
+            >
+              <Settings className="w-[16px] h-[16px]" />
+              Test Hardware
+            </Link>
+          )}
+          <button
+            onClick={() => navigate('/record')}
+            className="bg-brand text-app px-[24px] py-[12px] text-[14px] font-bold uppercase hover:opacity-90 transition-opacity flex items-center gap-[8px]"
+          >
+            <X className="w-[16px] h-[16px]" />
+            Back to Record
+          </button>
+        </div>
       </div>
     );
   }
