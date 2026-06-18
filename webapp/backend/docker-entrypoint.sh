@@ -21,7 +21,13 @@ REPO_ROOT="${REPO_ROOT:-/app}"
 BUILD_DIR="${TROSSEN_DOCKER_BUILD_DIR:-/var/cache/trossen_sdk/build}"
 CONVERTER_BIN="${TROSSEN_CONVERTER_BIN:-${BUILD_DIR}/scripts/trossen_mcap_to_lerobot_v2}"
 
-uv sync
+# --no-dev: install runtime deps only. The `dev` group (pytest, ruff) is
+# test/lint tooling the running webapp never imports, and pulling it in here
+# made startup depend on fetching pluggy et al. — a cold/recreated venv volume
+# or a flaky PyPI then aborted the whole entrypoint (set -e) and the backend
+# wouldn't boot. To run the test suite, sync the group on demand:
+# `docker exec trossen_webapp_backend uv sync --group dev && uv run pytest`.
+uv sync --no-dev
 
 if [[ ! -x "${CONVERTER_BIN}" ]]; then
     echo "[entrypoint] Converter binary missing at ${CONVERTER_BIN}; building..."
@@ -39,4 +45,6 @@ if [[ -n "${UVICORN_RELOAD:-}" ]]; then
     RELOAD_FLAGS=(--reload --reload-dir /app/webapp/backend/app)
 fi
 
-exec uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 "${RELOAD_FLAGS[@]}"
+# --no-dev here too: `uv run` re-syncs the environment before exec'ing, and
+# without this it would re-add the dev group we deliberately skipped above.
+exec uv run --no-dev uvicorn app.main:app --host 0.0.0.0 --port 8000 "${RELOAD_FLAGS[@]}"
