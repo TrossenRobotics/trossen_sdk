@@ -61,7 +61,7 @@ from app.systems import (
     get_system,
     list_systems,
     reset_system,
-    seed_factory_systems_if_empty,
+    seed_missing_factory_systems,
     update_system_config,
 )
 from app.ws_bus import bus
@@ -74,14 +74,15 @@ async def lifespan(_app: FastAPI):
     1. `apply_migrations()` runs pending Alembic migrations so a fresh
        install creates the SQLite schema and existing installs pick up
        new migrations on deploy.
-    2. `seed_factory_systems_if_empty()` populates the `system` table
-       from `factory_defaults/*.json` only when the table is empty, so
-       users start with the canonical solo / stationary / mobile presets.
+    2. `seed_missing_factory_systems()` inserts any `factory_defaults/*.json`
+       preset that has no row yet, so a fresh install gets the canonical
+       presets and an existing install picks up newly shipped presets on the
+       next restart (without clobbering user edits).
 
     Yields once — there is no shutdown work to do.
     """
     apply_migrations()
-    seed_factory_systems_if_empty()
+    seed_missing_factory_systems()
     yield
 
 

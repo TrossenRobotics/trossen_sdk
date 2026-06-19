@@ -79,21 +79,27 @@ def _to_response(row: System) -> SystemResponse:
     )
 
 
-def seed_factory_systems_if_empty() -> None:
-    """Insert factory_defaults/*.json into `system` if the table is empty.
+def seed_missing_factory_systems() -> None:
+    """Insert any shipped factory_defaults/*.json that has no row yet.
 
-    Called once from FastAPI's lifespan after Alembic migrations. Once
-    any row exists (the user has saved at least one system, or seeding
-    has already happened) this is a no-op — we never clobber edits,
-    even if a factory default has been updated since.
+    Called once from FastAPI's lifespan after Alembic migrations. Inserts only
+    presets whose id (the filename stem) isn't already in the `system` table, so:
+      - a newly shipped preset appears automatically after a `git pull` +
+        restart (the previous "only when the table is empty" rule meant new
+        presets never showed up on an already-seeded machine), and
+      - existing rows are never touched, so user edits and prior seeds are
+        preserved.
+    Safe against resurrecting deleted presets too: there is no system-delete
+    endpoint, so a row's absence always means "never seeded", not "removed".
     """
     if not FACTORY_DEFAULTS_DIR.is_dir():
         return
     with SessionLocal() as db:
-        # Cheap "table empty?" probe — returns the first row or None.
-        if db.exec(select(System).limit(1)).first() is not None:
-            return
+        existing_ids = set(db.exec(select(System.id)).all())
+        inserted = 0
         for src in sorted(FACTORY_DEFAULTS_DIR.glob("*.json")):
+            if src.stem in existing_ids:
+                continue
             try:
                 data = json.loads(src.read_text())
             except (OSError, json.JSONDecodeError):
@@ -107,7 +113,9 @@ def seed_factory_systems_if_empty() -> None:
                     config=data.get("config") or {},
                 )
             )
-        db.commit()
+            inserted += 1
+        if inserted:
+            db.commit()
 
 
 def list_systems() -> list[SystemResponse]:
