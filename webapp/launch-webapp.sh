@@ -58,15 +58,18 @@ if frontend_up; then
 fi
 
 # --- bring the stack up ------------------------------------------------------
-# Run the (possibly slow, first-time) build+up under a pulsating zenity dialog
-# so the operator gets feedback instead of a dead click. The build streams to
-# $LOG; on failure we surface its tail.
+# Start the pre-built images under a pulsating zenity dialog so the operator
+# gets feedback instead of a dead click. We deliberately do NOT pass --build:
+# building the images is install.sh's one-time, online job. Starting an already
+# built stack needs no network, so a launch works even on an offline machine.
+# (If the images were never built, `up` will try to build them and fail with a
+# clear registry error — the fix in that case is to run ./install.sh online.)
 : > "$LOG"
 notify "Starting up…"
 
-build_and_wait() {
-  echo "[launch] docker compose up -d --build" >>"$LOG"
-  if ! "${COMPOSE[@]}" up -d --build >>"$LOG" 2>&1; then
+start_and_wait() {
+  echo "[launch] docker compose up -d" >>"$LOG"
+  if ! "${COMPOSE[@]}" up -d >>"$LOG" 2>&1; then
     echo "__COMPOSE_FAILED__" >>"$LOG"
     return 1
   fi
@@ -82,16 +85,16 @@ build_and_wait() {
 
 if command -v zenity >/dev/null; then
   # Drive a pulsating progress dialog; close it when the work finishes.
-  ( build_and_wait; echo $? > "${LOG}.rc" ) &
+  ( start_and_wait; echo $? > "${LOG}.rc" ) &
   WORK_PID=$!
-  ( while kill -0 "$WORK_PID" 2>/dev/null; do echo "# Building / starting containers…"; sleep 1; done ) \
+  ( while kill -0 "$WORK_PID" 2>/dev/null; do echo "# Starting containers…"; sleep 1; done ) \
     | zenity --progress --pulsate --auto-close --no-cancel \
         --width=420 --title="Trossen Webapp" \
-        --text="Building / starting containers…" || true
+        --text="Starting containers…" || true
   wait "$WORK_PID" 2>/dev/null || true
   [ "$(cat "${LOG}.rc" 2>/dev/null || echo 1)" = "0" ] || fail
 else
-  build_and_wait || fail
+  start_and_wait || fail
 fi
 
 notify "Ready"
