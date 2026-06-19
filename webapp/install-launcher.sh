@@ -14,22 +14,27 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LAUNCHER="$SCRIPT_DIR/launch-webapp.sh"
 APPS_DIR="$HOME/.local/share/applications"
+ICONS_DIR="$HOME/.local/share/icons"
 DESKTOP_DIR="$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")"
 DESKTOP_FILE="trossen-webapp.desktop"
-
-# Pick an icon: the SDK's installed one if present, else the frontend PWA icon.
-ICON="$HOME/.local/share/icons/trossen_ai.svg"
-[ -f "$ICON" ] || ICON="$SCRIPT_DIR/frontend/public/icon-512.png"
+# The icon we install and own. The .desktop references this absolute path, so
+# it must be a file we put here ourselves — never a path from another app or
+# inside the repo (those don't exist, or move, on other machines).
+ICON="$ICONS_DIR/trossen-webapp.png"
 
 if [ "${1:-}" = "--uninstall" ]; then
-  rm -f "$APPS_DIR/$DESKTOP_FILE" "$DESKTOP_DIR/$DESKTOP_FILE"
+  rm -f "$APPS_DIR/$DESKTOP_FILE" "$DESKTOP_DIR/$DESKTOP_FILE" "$ICON"
   update-desktop-database "$APPS_DIR" 2>/dev/null || true
   echo "Removed launcher."
   exit 0
 fi
 
 chmod +x "$LAUNCHER"
-mkdir -p "$APPS_DIR"
+mkdir -p "$APPS_DIR" "$ICONS_DIR"
+
+# Copy the repo-bundled icon into our own location so the launcher shows the
+# same icon on every machine, independent of where the repo lives.
+cp -f "$SCRIPT_DIR/frontend/public/icon-512.png" "$ICON"
 
 write_desktop() {
   cat >"$1" <<EOF
@@ -46,7 +51,7 @@ Actions=Stop;
 
 [Desktop Action Stop]
 Name=Stop webapp
-Exec=/bin/bash -c "cd '$SCRIPT_DIR' && docker compose down && notify-send -i trossen_ai 'Trossen Webapp' 'Stopped'"
+Exec=/bin/bash -c "cd '$SCRIPT_DIR' && docker compose down && notify-send -i '$ICON' 'Trossen Webapp' 'Stopped'"
 EOF
   chmod +x "$1"
 }

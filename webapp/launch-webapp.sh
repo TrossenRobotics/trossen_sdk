@@ -21,7 +21,8 @@ LOG="${TMPDIR:-/tmp}/trossen-webapp-launch.log"
 COMPOSE=(docker compose)
 
 # --- helpers -----------------------------------------------------------------
-notify() { command -v notify-send >/dev/null && notify-send -i trossen_ai "Trossen Webapp" "$1" || true; }
+ICON="$HOME/.local/share/icons/trossen-webapp.png"   # installed by install-launcher.sh
+notify() { command -v notify-send >/dev/null && notify-send -i "$ICON" "Trossen Webapp" "$1" || true; }
 
 frontend_up() { curl -fsS -o /dev/null --max-time 2 "$URL" 2>/dev/null; }
 
