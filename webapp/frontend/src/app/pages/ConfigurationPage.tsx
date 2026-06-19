@@ -81,7 +81,7 @@ interface HardwareSystem {
 // Systems that ship with a factory-default config the user can revert to.
 // Hoisted out of the component so the reset useCallback's dependency array
 // stays stable across renders.
-const RESETTABLE_SYSTEMS: readonly string[] = ['solo', 'solo_portable', 'stationary', 'mobile'];
+const RESETTABLE_SYSTEMS: readonly string[] = ['solo', 'solo_portable', 'stationary', 'stationary_portable', 'mobile'];
 
 // The lightweight (passive) Trossen leader has no actuators and its joints
 // don't map 1:1 onto the follower: J3/J4 are inverted and the wrist (J5)
@@ -1442,7 +1442,7 @@ export function ConfigurationPage() {
 
         <div className="grid grid-cols-4 portrait:grid-cols-2 gap-[12px]">
           {[...systems].sort((a, b) => {
-            const order: Record<string, number> = { solo: 0, solo_portable: 1, stationary: 2, mobile: 3 };
+            const order: Record<string, number> = { solo: 0, solo_portable: 1, stationary: 2, stationary_portable: 3, mobile: 4 };
             return (order[a.id] ?? 99) - (order[b.id] ?? 99);
           }).map(system => {
             const isConfigured = system.hardware.length > 0;
@@ -1697,6 +1697,7 @@ export function ConfigurationPage() {
               solo:                { label: 'Solo',                leaders: 1, followers: 1, cameras: 2, bases: 0 },
               stationary:          { label: 'Stationary',          leaders: 2, followers: 2, cameras: 4, bases: 0 },
               solo_portable:       { label: 'Solo Portable',       leaders: 1, followers: 1, cameras: 2, bases: 0 },
+              stationary_portable: { label: 'Stationary Portable', leaders: 2, followers: 2, cameras: 4, bases: 0 },
               mobile:              { label: 'Mobile',              leaders: 2, followers: 2, cameras: 3, bases: 1 },
             };
             const spec = layoutSpecs[selectedSystemData.id];
