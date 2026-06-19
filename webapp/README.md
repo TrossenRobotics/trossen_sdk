@@ -59,6 +59,26 @@ the host; the backend container does that internally.
 
 ## 2. Build and run
 
+### Quick install (recommended)
+
+Once Docker is in place (§1a), a single script pre-builds the images and
+installs a desktop launcher, so the machine ends with a clickable
+**Trossen Webapp** icon in the app grid:
+
+```bash
+cd webapp
+./install.sh
+```
+
+It verifies Docker, runs the (first-time ~10–15 min) build, and wires up the
+launcher. After that, start the app by clicking **Trossen Webapp** — or run
+`./launch-webapp.sh`. The launcher brings the stack up and opens it in its own
+window; right-click the icon for **Stop webapp**. To install just the icon
+against an already-built stack, use `./install-launcher.sh`
+(`--uninstall` to remove it).
+
+### Manual
+
 From the repo root:
 
 ```bash
