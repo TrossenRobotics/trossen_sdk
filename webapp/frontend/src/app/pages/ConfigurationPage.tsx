@@ -56,6 +56,14 @@ interface ArmHardware {
   actuated?: boolean;
   joint_signs?: number[];
   joint_offsets?: number[];
+  // Leader-only gripper force feedback. When enabled, the leader's (actuated)
+  // gripper renders a reflected force from the follower's measured gripper
+  // effort, so the operator feels the grasp. The follower gripper stays plain
+  // position passthrough. undefined/false = no feedback.
+  gripper_force_feedback?: boolean;
+  gripper_feedback_leader_max?: number;
+  gripper_feedback_follower_max?: number;
+  gripper_feedback_offset?: number;
   producers: Producer[];
 }
 
@@ -132,6 +140,10 @@ interface RawArmConfig {
   actuated?: boolean;
   joint_signs?: number[];
   joint_offsets?: number[];
+  gripper_force_feedback?: boolean;
+  gripper_feedback_leader_max?: number;
+  gripper_feedback_follower_max?: number;
+  gripper_feedback_offset?: number;
   [key: string]: unknown;
 }
 
@@ -229,6 +241,10 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
       actuated: typeof armCfg.actuated === 'boolean' ? armCfg.actuated : undefined,
       joint_signs: Array.isArray(armCfg.joint_signs) ? armCfg.joint_signs : undefined,
       joint_offsets: Array.isArray(armCfg.joint_offsets) ? armCfg.joint_offsets : undefined,
+      gripper_force_feedback: typeof armCfg.gripper_force_feedback === 'boolean' ? armCfg.gripper_force_feedback : undefined,
+      gripper_feedback_leader_max: typeof armCfg.gripper_feedback_leader_max === 'number' ? armCfg.gripper_feedback_leader_max : undefined,
+      gripper_feedback_follower_max: typeof armCfg.gripper_feedback_follower_max === 'number' ? armCfg.gripper_feedback_follower_max : undefined,
+      gripper_feedback_offset: typeof armCfg.gripper_feedback_offset === 'number' ? armCfg.gripper_feedback_offset : undefined,
       producers: armProducers,
     } as ArmHardware);
   }
@@ -360,6 +376,14 @@ function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig 
       if (arm.actuated === false) armEntry.actuated = false;
       if (arm.joint_signs && arm.joint_signs.length) armEntry.joint_signs = arm.joint_signs;
       if (arm.joint_offsets && arm.joint_offsets.length) armEntry.joint_offsets = arm.joint_offsets;
+      // Only emit gripper feedback tuning when enabled, so ordinary leaders
+      // (no feedback) stay clean.
+      if (arm.gripper_force_feedback) {
+        armEntry.gripper_force_feedback = true;
+        if (typeof arm.gripper_feedback_leader_max === 'number') armEntry.gripper_feedback_leader_max = arm.gripper_feedback_leader_max;
+        if (typeof arm.gripper_feedback_follower_max === 'number') armEntry.gripper_feedback_follower_max = arm.gripper_feedback_follower_max;
+        if (typeof arm.gripper_feedback_offset === 'number') armEntry.gripper_feedback_offset = arm.gripper_feedback_offset;
+      }
       armsObj[arm.name] = armEntry;
 
       for (const p of arm.producers) {
@@ -840,7 +864,13 @@ export function ConfigurationPage() {
     end_effector: 'Gripper',
     role: 'leader' as 'leader' | 'follower',
     paired_with: '',
-    passive: false
+    passive: false,
+    // Leader gripper force feedback (off by default). Cubic constants from the
+    // bilateral reference: leader N at full grip, follower N normalizer, offset.
+    gripperFeedback: false,
+    gripperFeedbackLeaderMax: 27,
+    gripperFeedbackFollowerMax: 87.5,
+    gripperFeedbackOffset: 8,
   });
 
   const [baseForm, setBaseForm] = useState({
@@ -985,7 +1015,11 @@ export function ConfigurationPage() {
       end_effector: 'Gripper',
       role: 'leader',
       paired_with: '',
-      passive: false
+      passive: false,
+      gripperFeedback: false,
+      gripperFeedbackLeaderMax: 27,
+      gripperFeedbackFollowerMax: 87.5,
+      gripperFeedbackOffset: 8,
     });
     setBaseForm({
       name: '',
@@ -1024,7 +1058,11 @@ export function ConfigurationPage() {
         end_effector: arm.end_effector,
         role: arm.role,
         paired_with: arm.paired_with || '',
-        passive: arm.actuated === false
+        passive: arm.actuated === false,
+        gripperFeedback: arm.gripper_force_feedback === true,
+        gripperFeedbackLeaderMax: typeof arm.gripper_feedback_leader_max === 'number' ? arm.gripper_feedback_leader_max : 27,
+        gripperFeedbackFollowerMax: typeof arm.gripper_feedback_follower_max === 'number' ? arm.gripper_feedback_follower_max : 87.5,
+        gripperFeedbackOffset: typeof arm.gripper_feedback_offset === 'number' ? arm.gripper_feedback_offset : 8,
       });
     } else if (hardware.type === 'slate_base') {
       const base = hardware as BaseHardware;
@@ -1144,6 +1182,10 @@ export function ConfigurationPage() {
     const isPassive = armForm.role === 'leader' && armForm.passive;
     const remap = isPassive ? lightweightLeaderRemap(armForm.name) : undefined;
 
+    // Gripper force feedback is a leader-only behavior (the leader's actuated
+    // gripper renders the reflected force from the follower's grip effort).
+    const isGripperFeedback = armForm.role === 'leader' && armForm.gripperFeedback;
+
     const armData: ArmHardware = {
       id: editingHardwareId || `arm-${Date.now()}`,
       name: armForm.name,
@@ -1156,6 +1198,10 @@ export function ConfigurationPage() {
       actuated: isPassive ? false : undefined,
       joint_signs: remap?.joint_signs,
       joint_offsets: remap?.joint_offsets,
+      gripper_force_feedback: isGripperFeedback ? true : undefined,
+      gripper_feedback_leader_max: isGripperFeedback ? armForm.gripperFeedbackLeaderMax : undefined,
+      gripper_feedback_follower_max: isGripperFeedback ? armForm.gripperFeedbackFollowerMax : undefined,
+      gripper_feedback_offset: isGripperFeedback ? armForm.gripperFeedbackOffset : undefined,
       producers: []
     };
 
@@ -2211,6 +2257,36 @@ export function ConfigurationPage() {
                       Passive leader (lightweight — no actuators)
                       <span className="block text-dim text-[11px] mt-[2px]">Streams joint positions only; the SDK applies the lightweight-leader joint remap (wrist offset side is taken from the arm name).</span>
                     </label>
+                  </div>
+                )}
+                {armForm.role === 'leader' && (
+                  <div className="space-y-[12px]">
+                    <div className="flex items-start gap-[8px]">
+                      <input type="checkbox" id="arm_gripper_feedback" checked={armForm.gripperFeedback} onChange={e => setArmForm({ ...armForm, gripperFeedback: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
+                      <label htmlFor="arm_gripper_feedback" className="text-ink text-[12px]">
+                        Gripper force feedback
+                        <span className="block text-dim text-[11px] mt-[2px]">Render the follower's grip force on this leader's gripper so the operator feels the grasp (cubic curve). Requires an actuated gripper — fine on a passive-arm lightweight leader. The follower gripper stays position passthrough.</span>
+                      </label>
+                    </div>
+                    {armForm.gripperFeedback && (
+                      <div className="pl-[24px] grid grid-cols-2 gap-[12px]">
+                        <div>
+                          <label className="block text-ink text-[12px] mb-[6px]">Leader max (N)</label>
+                          <input type="number" step="any" value={armForm.gripperFeedbackLeaderMax} onChange={e => setArmForm({ ...armForm, gripperFeedbackLeaderMax: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
+                          <span className="block text-dim text-[11px] mt-[2px]">Effort rendered on the leader gripper at full grip (reference: 27).</span>
+                        </div>
+                        <div>
+                          <label className="block text-ink text-[12px] mb-[6px]">Follower max (N)</label>
+                          <input type="number" step="any" value={armForm.gripperFeedbackFollowerMax} onChange={e => setArmForm({ ...armForm, gripperFeedbackFollowerMax: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
+                          <span className="block text-dim text-[11px] mt-[2px]">Follower grip effort treated as full grip — normalizes the curve (reference: 87.5).</span>
+                        </div>
+                        <div>
+                          <label className="block text-ink text-[12px] mb-[6px]">Offset (N)</label>
+                          <input type="number" step="any" value={armForm.gripperFeedbackOffset} onChange={e => setArmForm({ ...armForm, gripperFeedbackOffset: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
+                          <span className="block text-dim text-[11px] mt-[2px]">Baseline effort that keeps the leader gripper open when nothing is grasped (reference: 8).</span>
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="flex justify-end gap-[12px] pt-[12px]">
