@@ -47,6 +47,22 @@ struct ArmConfig {
   std::vector<float> joint_signs{};
   std::vector<float> joint_offsets{};
 
+  /// @brief Leader-only: render gripper force feedback. When true, the teleop
+  /// loop reflects the FOLLOWER's measured gripper effort back onto this
+  /// (actuated) gripper via a cubic curve, so the operator feels the grasp.
+  /// The leader's arm joints may still be passive — only the gripper needs a
+  /// motor. The follower gripper stays plain position passthrough.
+  bool gripper_force_feedback{false};
+
+  /// @brief Cubic feedback constants (N), from the bilateral reference:
+  /// leader effort at full grip, follower effort treated as full grip (the
+  /// normalizer), and a baseline opening offset that keeps the leader gripper
+  /// open when nothing is grasped. leader = leader_max·norm^3 + offset, where
+  /// norm = clamp(|follower_effort| / follower_max, 0, 1).
+  float gripper_feedback_leader_max{27.0f};
+  float gripper_feedback_follower_max{87.5f};
+  float gripper_feedback_offset{8.0f};
+
   static ArmConfig from_json(const nlohmann::json& j) {
     ArmConfig c;
     if (j.contains("ip_address")) j.at("ip_address").get_to(c.ip_address);
@@ -55,6 +71,14 @@ struct ArmConfig {
     if (j.contains("actuated")) j.at("actuated").get_to(c.actuated);
     if (j.contains("joint_signs")) j.at("joint_signs").get_to(c.joint_signs);
     if (j.contains("joint_offsets")) j.at("joint_offsets").get_to(c.joint_offsets);
+    if (j.contains("gripper_force_feedback"))
+      j.at("gripper_force_feedback").get_to(c.gripper_force_feedback);
+    if (j.contains("gripper_feedback_leader_max"))
+      j.at("gripper_feedback_leader_max").get_to(c.gripper_feedback_leader_max);
+    if (j.contains("gripper_feedback_follower_max"))
+      j.at("gripper_feedback_follower_max").get_to(c.gripper_feedback_follower_max);
+    if (j.contains("gripper_feedback_offset"))
+      j.at("gripper_feedback_offset").get_to(c.gripper_feedback_offset);
     return c;
   }
 
@@ -68,6 +92,13 @@ struct ArmConfig {
     // Emit the remap only when set, to keep ordinary arm configs clean.
     if (!joint_signs.empty()) j["joint_signs"] = joint_signs;
     if (!joint_offsets.empty()) j["joint_offsets"] = joint_offsets;
+    // Emit gripper feedback tuning only when enabled, same reasoning.
+    if (gripper_force_feedback) {
+      j["gripper_force_feedback"] = gripper_force_feedback;
+      j["gripper_feedback_leader_max"] = gripper_feedback_leader_max;
+      j["gripper_feedback_follower_max"] = gripper_feedback_follower_max;
+      j["gripper_feedback_offset"] = gripper_feedback_offset;
+    }
     return j;
   }
 };

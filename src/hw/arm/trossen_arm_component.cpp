@@ -107,6 +107,22 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     }
   }
 
+  // Leader-only gripper force feedback: reflect the follower's measured gripper
+  // effort back onto this (actuated) gripper via a cubic curve. Off by default;
+  // the cubic constants only matter when enabled.
+  if (config.contains("gripper_force_feedback")) {
+    gripper_force_feedback_ = config.at("gripper_force_feedback").get<bool>();
+  }
+  if (config.contains("gripper_feedback_leader_max")) {
+    gripper_feedback_leader_max_ = config.at("gripper_feedback_leader_max").get<float>();
+  }
+  if (config.contains("gripper_feedback_follower_max")) {
+    gripper_feedback_follower_max_ = config.at("gripper_feedback_follower_max").get<float>();
+  }
+  if (config.contains("gripper_feedback_offset")) {
+    gripper_feedback_offset_ = config.at("gripper_feedback_offset").get<float>();
+  }
+
   // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
 }
 
@@ -147,6 +163,27 @@ void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
   }
   std::vector<double> pos_d(cmd.begin(), cmd.end());
   driver_->set_all_positions(pos_d, 0.0, false);
+}
+
+std::optional<float> TrossenArmComponent::read_gripper_effort() {
+  if (!driver_) return std::nullopt;
+  return static_cast<float>(driver_->get_gripper_effort());
+}
+
+void TrossenArmComponent::apply_gripper_feedback(float follower_gripper_effort) {
+  if (!driver_) return;
+  // Cubic curve (from the bilateral reference): more resistance at higher grip
+  // efforts, with an offset that keeps the leader gripper open when nothing is
+  // grasped. leader = leader_max·norm^3 + offset.
+  float norm = 0.0f;
+  if (gripper_feedback_follower_max_ != 0.0f) {
+    norm = std::abs(follower_gripper_effort) / gripper_feedback_follower_max_;
+    // std::abs already guarantees norm >= 0, so only the upper bound can fire.
+    norm = std::min(norm, 1.0f);
+  }
+  const double leader_effort =
+    gripper_feedback_leader_max_ * std::pow(norm, 3) + gripper_feedback_offset_;
+  driver_->set_gripper_external_effort(leader_effort, 0.0, false);
 }
 
 void TrossenArmComponent::summon_joint(const std::vector<float>& cmd) {
@@ -195,12 +232,19 @@ void TrossenArmComponent::write_cartesian(const std::vector<float>& cmd) {
 void TrossenArmComponent::prepare_for_teleop() {
   if (!driver_) return;
   if (!actuated_) {
-    // Passive leader: stream joint positions in position mode only. No
-    // gravity-comp / external-effort setup — there are no motors to drive.
-    // set_all_modes covers the gripper, but set it explicitly so the gripper
-    // position is reported cleanly for the mirror loop's passthrough.
+    // Passive leader: arm joints stream positions in position mode (harmless —
+    // they have no motors). The gripper, however, may be actuated for force
+    // feedback: put it in external-effort mode so the mirror loop's reverse
+    // channel can render the reflected grip force; otherwise position mode so
+    // its opening is reported cleanly for the follower's passthrough.
     driver_->set_all_modes(trossen_arm::Mode::position);
-    driver_->set_gripper_mode(trossen_arm::Mode::position);
+    if (gripper_force_feedback_) {
+      driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
+      // Seed the resting offset so the gripper holds open before the first tick.
+      driver_->set_gripper_external_effort(gripper_feedback_offset_, 0.0, false);
+    } else {
+      driver_->set_gripper_mode(trossen_arm::Mode::position);
+    }
     return;
   }
   if (is_leader_) {
@@ -210,11 +254,10 @@ void TrossenArmComponent::prepare_for_teleop() {
     driver_->set_all_external_efforts(zeros, 0.0, false);
     return;
   }
-  // Follower: enter position mode. The mirror loop drives the follower's
-  // joints (and gripper, the last element of set_all_positions) from here.
-  // set_gripper_mode is called explicitly: the gripper only tracks the leader
-  // when it is in position mode, and relying on set_all_modes alone left the
-  // gripper inert.
+  // Follower: arm joints and gripper in position mode (the mirror loop drives
+  // them). set_gripper_mode is called explicitly because relying on
+  // set_all_modes alone left the gripper inert — it only tracks the leader's
+  // opening when explicitly placed in position mode.
   driver_->set_all_modes(trossen_arm::Mode::position);
   driver_->set_gripper_mode(trossen_arm::Mode::position);
 }
@@ -222,8 +265,13 @@ void TrossenArmComponent::prepare_for_teleop() {
 void TrossenArmComponent::end_teleop() {
   if (!driver_) return;
   if (!actuated_) {
-    // Passive leader: nothing to neutralize or traject (no actuators); just
-    // release the driver.
+    // Passive leader: arm joints have no actuators to neutralize. If the
+    // gripper was rendering force feedback, release it (0 N, then idle) so it
+    // stops pushing on the operator's hand before the driver is freed.
+    if (gripper_force_feedback_) {
+      driver_->set_gripper_external_effort(0.0, 0.0, false);
+      driver_->set_gripper_mode(trossen_arm::Mode::idle);
+    }
     driver_->cleanup();
     driver_.reset();
     return;

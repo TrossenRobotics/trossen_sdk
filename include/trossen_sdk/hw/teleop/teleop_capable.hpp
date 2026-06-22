@@ -102,6 +102,28 @@ public:
   virtual void sync_to_state(const std::vector<float>& state) {
     (void)state;
   }
+
+  // ── Optional gripper force-feedback channel (follower → leader) ──────────
+  //
+  // A second, reverse channel the controller runs each tick alongside the
+  // forward position mirror: the follower reports its measured gripper effort
+  // and the leader renders a reflected force so the operator feels the grasp.
+  // Both ends are no-ops by default, so hardware that can't sense or render
+  // gripper force simply opts out.
+
+  /// Leader role: true if this hardware renders gripper force feedback. Gates
+  /// whether the controller runs the reverse channel at all.
+  virtual bool renders_gripper_feedback() const { return false; }
+
+  /// Follower role: this hardware's measured gripper effort (N), or nullopt if
+  /// it can't report one. A sensor read — independent of the gripper's mode.
+  virtual std::optional<float> read_gripper_effort() { return std::nullopt; }
+
+  /// Leader role: render gripper force feedback from the follower's measured
+  /// gripper effort (N). Default no-op for hardware without an actuated gripper.
+  virtual void apply_gripper_feedback(float follower_gripper_effort) {
+    (void)follower_gripper_effort;
+  }
 };
 
 /**

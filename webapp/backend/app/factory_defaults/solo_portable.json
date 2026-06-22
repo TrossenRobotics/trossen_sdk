@@ -11,7 +11,11 @@
           "end_effector":  "wxai_v0_leader",
           "actuated":      false,
           "joint_signs":   [1, 1, 1, -1, -1, 1, 1],
-          "joint_offsets": [0, 0, 0, 0, 0, -0.7853981633974483, 0]
+          "joint_offsets": [0, 0, 0, 0, 0, -0.7853981633974483, 0],
+          "gripper_force_feedback":        true,
+          "gripper_feedback_leader_max":   27.0,
+          "gripper_feedback_follower_max": 87.5,
+          "gripper_feedback_offset":       8.0
         },
         "follower": {
           "ip_address":     "192.168.1.5",

@@ -169,6 +169,16 @@ void TeleopController::control_loop() {
         follower_io_->write(cmd);
       }
 
+      // Reverse channel: reflect the follower's measured gripper effort back
+      // onto the leader so the operator feels the grasp. Only runs when the
+      // leader renders feedback (e.g. a passive-arm leader with an actuated
+      // gripper); otherwise both calls are skipped.
+      if (follower_io_ && leader_io_->renders_gripper_feedback()) {
+        if (const auto effort = follower_io_->read_gripper_effort()) {
+          leader_io_->apply_gripper_feedback(*effort);
+        }
+      }
+
       std::this_thread::sleep_until(deadline);
     }
   } catch (const std::exception& e) {

@@ -8,6 +8,7 @@
 
 #include <memory>
 #include <string>
+#include <optional>
 #include <vector>
 
 #include "libtrossen_arm/trossen_arm.hpp"
@@ -106,6 +107,15 @@ private:
   void               write_joint(const std::vector<float>& cmd);
   void               summon_joint(const std::vector<float>& cmd);
 
+  /// Follower role: current measured gripper effort (N), or nullopt without a
+  /// driver. A sensor read, valid regardless of the gripper's control mode.
+  std::optional<float> read_gripper_effort();
+
+  /// Leader role: render gripper force feedback from the follower's measured
+  /// gripper effort (N) via the cubic curve, written as an external effort.
+  /// Only meaningful when gripper_force_feedback_ is set.
+  void apply_gripper_feedback(float follower_gripper_effort);
+
   std::vector<float> read_cartesian();
   void               write_cartesian(const std::vector<float>& cmd);
 
@@ -123,6 +133,15 @@ private:
     }
     void summon(const std::vector<float>& cmd) override {
       self->summon_joint(cmd);
+    }
+    bool renders_gripper_feedback() const override {
+      return self->gripper_force_feedback_;
+    }
+    std::optional<float> read_gripper_effort() override {
+      return self->read_gripper_effort();
+    }
+    void apply_gripper_feedback(float follower_gripper_effort) override {
+      self->apply_gripper_feedback(follower_gripper_effort);
     }
   };
 
@@ -160,6 +179,15 @@ private:
   /// frame doesn't map 1:1 onto the follower (e.g. inverted/offset joints).
   std::vector<float> joint_signs_;
   std::vector<float> joint_offsets_;
+
+  /// Leader-only gripper force feedback. When gripper_force_feedback_ is set,
+  /// the leader's gripper runs in external-effort mode and the teleop loop
+  /// renders a reflected force from the follower's measured gripper effort via
+  /// the cubic curve. The leader's arm joints can still be passive.
+  bool  gripper_force_feedback_{false};
+  float gripper_feedback_leader_max_{27.0f};
+  float gripper_feedback_follower_max_{87.5f};
+  float gripper_feedback_offset_{8.0f};
 
   /// Joint-space pose this arm moves to at session start (via stage()).
   /// Empty = no staging.
