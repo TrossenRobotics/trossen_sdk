@@ -165,6 +165,7 @@ export function DatasetDetailsPage() {
     root: '~/.cache/huggingface/lerobot', task_name: '', repository_id: 'TrossenRoboticsCommunity',
     dataset_id: '', robot_name: '', fps: '30', encoder_threads: '2', chunk_size: '1000',
     encode_videos: true, overwrite_existing: false,
+    lerobot_version: 'v3', data_files_size_in_mb: '100', video_files_size_in_mb: '200',
   });
 
   // Seed convertForm from whichever variant arrives first. `robot_name`
@@ -273,6 +274,9 @@ export function DatasetDetailsPage() {
           fps: parseFloat(convertForm.fps), encoder_threads: parseInt(convertForm.encoder_threads),
           chunk_size: parseInt(convertForm.chunk_size), encode_videos: convertForm.encode_videos,
           overwrite_existing: convertForm.overwrite_existing,
+          lerobot_version: convertForm.lerobot_version,
+          data_files_size_in_mb: parseInt(convertForm.data_files_size_in_mb),
+          video_files_size_in_mb: parseInt(convertForm.video_files_size_in_mb),
         }),
       });
       if (!res.ok) {
@@ -564,7 +568,7 @@ export function DatasetDetailsPage() {
         <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
           <div className="bg-surface border border-edge w-full max-w-[750px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
             <div className="flex items-center justify-between p-5 border-b border-edge">
-              <h2 className="text-lg text-ink">Convert to LeRobot V2</h2>
+              <h2 className="text-lg text-ink">Convert to LeRobot {convertForm.lerobot_version.toUpperCase()}</h2>
               {/* Close hidden during conversion: there is no way to halt
                   a running conversion from the UI by design, so the only
                   exits are completion or failure. */}
@@ -642,6 +646,20 @@ export function DatasetDetailsPage() {
             ) : (
               <form onSubmit={handleConvert} className="p-5 space-y-4">
                 {convertError && <div className="bg-red-500/10 border border-red-500 text-red-400 text-sm p-3 rounded whitespace-pre-wrap max-h-[200px] overflow-y-auto">{convertError}</div>}
+                <div className="grid grid-cols-2 gap-4 items-start">
+                  <div>
+                    <label className="block text-ink text-xs mb-1">LeRobot Format</label>
+                    <select value={convertForm.lerobot_version} onChange={e => setConvertForm({...convertForm, lerobot_version: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand">
+                      <option value="v3">v3.0 (aggregated, recommended)</option>
+                      <option value="v2">v2.1 (one file per episode)</option>
+                    </select>
+                  </div>
+                  <div className="text-dim text-[10px] pt-6">
+                    {convertForm.lerobot_version === 'v3'
+                      ? 'Episodes aggregated into shared, size-rolled parquet + concatenated video files.'
+                      : 'One parquet + one mp4 per episode.'}
+                  </div>
+                </div>
                 <div>
                   <label className="block text-ink text-xs mb-1">Output Root</label>
                   <input type="text" value={convertForm.root} onChange={e => setConvertForm({...convertForm, root: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" />
@@ -654,8 +672,14 @@ export function DatasetDetailsPage() {
                 <div className="grid grid-cols-3 gap-4">
                   <div><label className="block text-ink text-xs mb-1">Robot Name</label><input type="text" value={convertForm.robot_name} onChange={e => setConvertForm({...convertForm, robot_name: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
                   <div><label className="block text-ink text-xs mb-1">FPS</label><input type="number" value={convertForm.fps} onChange={e => setConvertForm({...convertForm, fps: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
-                  <div><label className="block text-ink text-xs mb-1">Chunk Size</label><input type="number" value={convertForm.chunk_size} onChange={e => setConvertForm({...convertForm, chunk_size: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
+                  <div><label className="block text-ink text-xs mb-1">Chunk Size ({convertForm.lerobot_version === 'v3' ? 'files' : 'episodes'})</label><input type="number" value={convertForm.chunk_size} onChange={e => setConvertForm({...convertForm, chunk_size: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
                 </div>
+                {convertForm.lerobot_version === 'v3' && (
+                  <div className="grid grid-cols-2 gap-4">
+                    <div><label className="block text-ink text-xs mb-1">Data File Size (MB)</label><input type="number" value={convertForm.data_files_size_in_mb} onChange={e => setConvertForm({...convertForm, data_files_size_in_mb: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
+                    <div><label className="block text-ink text-xs mb-1">Video File Size (MB)</label><input type="number" value={convertForm.video_files_size_in_mb} onChange={e => setConvertForm({...convertForm, video_files_size_in_mb: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div><label className="block text-ink text-xs mb-1">Encoder Threads</label><input type="number" value={convertForm.encoder_threads} onChange={e => setConvertForm({...convertForm, encoder_threads: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
                   <div className="flex items-end gap-6 pb-1">

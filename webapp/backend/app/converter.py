@@ -54,12 +54,36 @@ DEFAULT_CONFIG = Path(
     )
 )
 
+# The v3.0 converter is a separate binary that emits the aggregated LeRobot v3.0
+# layout (many episodes per shared, size-rolled parquet/mp4). Same override
+# mechanism, different config namespace ("lerobot_v3_backend").
+CONVERTER_BIN_V3 = Path(
+    os.environ.get(
+        "TROSSEN_CONVERTER_BIN_V3",
+        str(_REPO_ROOT / "build" / "scripts" / "trossen_mcap_to_lerobot_v3"),
+    )
+)
+DEFAULT_CONFIG_V3 = Path(
+    os.environ.get(
+        "TROSSEN_CONVERTER_CONFIG_V3",
+        str(_REPO_ROOT / "scripts" / "trossen_mcap_to_lerobot_v3" / "config.json"),
+    )
+)
+
+
+def _backend_for(version: str) -> tuple[Path, Path, str]:
+    """Map a requested output format to (binary, default config, config namespace)."""
+    if version == "v3":
+        return CONVERTER_BIN_V3, DEFAULT_CONFIG_V3, "lerobot_v3_backend"
+    return CONVERTER_BIN, DEFAULT_CONFIG, "lerobot_v2_backend"
+
 
 class ConvertBody(BaseModel):
     """Body shape for POST /api/datasets/{id}/convert-to-lerobot.
 
-    Every field maps 1:1 to a `lerobot_v2_backend.<key>` entry the C++
-    binary expects via `--set`. Mirrors `convertForm` state in
+    Most fields map 1:1 to a `lerobot_v{2,3}_backend.<key>` entry the C++ binary
+    expects via `--set`. `lerobot_version` selects the output format (and thus
+    the binary + config namespace). Mirrors `convertForm` state in
     DatasetDetailsPage.tsx; keep them in sync.
     """
 
@@ -73,6 +97,13 @@ class ConvertBody(BaseModel):
     chunk_size: int
     encode_videos: bool
     overwrite_existing: bool
+    # "v2" = one parquet+mp4 per episode (LeRobot v2.1); "v3" = episodes
+    # aggregated into shared, size-rolled files (LeRobot v3.0). Defaults to v2
+    # so older clients that omit the field keep their behavior.
+    lerobot_version: str = "v2"
+    # v3-only aggregation thresholds; ignored for v2.
+    data_files_size_in_mb: int = 100
+    video_files_size_in_mb: int = 200
 
 
 # Encoder log lines that the converter can't suppress at source but
@@ -106,11 +137,13 @@ def _sse(event_type: str, **fields: object) -> str:
 
 
 def _build_args(body: ConvertBody, mcap_path: Path, output_root: Path) -> list[str]:
-    """Translate the request body into `trossen_mcap_to_lerobot_v2` argv.
+    """Translate the request body into the selected converter's argv.
 
     `output_root` is already user-expanded so the subprocess and the
     Python cleanup path agree on the exact directory.
     """
+    binary, config, namespace = _backend_for(body.lerobot_version)
+
     overrides = {
         "root": str(output_root),
         "task_name": body.task_name,
@@ -119,17 +152,26 @@ def _build_args(body: ConvertBody, mcap_path: Path, output_root: Path) -> list[s
         "robot_name": body.robot_name,
         "fps": str(body.fps),
         "encoder_threads": str(body.encoder_threads),
-        "chunk_size": str(body.chunk_size),
         "encode_videos": "true" if body.encode_videos else "false",
         "overwrite_existing": "true" if body.overwrite_existing else "false",
     }
+    if body.lerobot_version == "v3":
+        # v3 groups files into chunks (chunks_size files per chunk) and rolls a
+        # new data/video file once it crosses the size threshold.
+        overrides["chunks_size"] = str(body.chunk_size)
+        overrides["data_files_size_in_mb"] = str(body.data_files_size_in_mb)
+        overrides["video_files_size_in_mb"] = str(body.video_files_size_in_mb)
+    else:
+        # v2 chunk_size is episodes-per-chunk-directory.
+        overrides["chunk_size"] = str(body.chunk_size)
+
     args = [
         "stdbuf", "-oL", "-eL",
-        str(CONVERTER_BIN), str(mcap_path),
-        "--config", str(DEFAULT_CONFIG),
+        str(binary), str(mcap_path),
+        "--config", str(config),
     ]
     for key, value in overrides.items():
-        args += ["--set", f"lerobot_v2_backend.{key}={value}"]
+        args += ["--set", f"{namespace}.{key}={value}"]
     return args
 
 
@@ -203,13 +245,14 @@ async def stream_conversion(body: ConvertBody, mcap_path: Path) -> AsyncIterator
     # Pre-flight: surface a clear, actionable error if the C++ binary isn't
     # present, instead of letting the user see "Converter exited with code 127"
     # (the bash exit status for "command not found").
-    if not CONVERTER_BIN.is_file() or not os.access(CONVERTER_BIN, os.X_OK):
+    binary, _, _ = _backend_for(body.lerobot_version)
+    if not binary.is_file() or not os.access(binary, os.X_OK):
         yield _sse(
             "error",
             message=(
-                f"Converter binary not found or not executable at {CONVERTER_BIN}. "
+                f"Converter binary not found or not executable at {binary}. "
                 "Build the SDK first: run `make build` from the repo root "
-                "(or set TROSSEN_CONVERTER_BIN to point at an existing binary)."
+                "(or set the TROSSEN_CONVERTER_BIN[_V3] env var to an existing binary)."
             ),
         )
         return
