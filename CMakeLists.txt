@@ -90,6 +90,7 @@ if(TROSSEN_ENABLE_VR)
   target_sources(trossen_sdk PRIVATE
     src/hw/vr/vr_session.cpp
     src/hw/vr/vr_arm_component.cpp
+    src/hw/vr/vr_base_component.cpp
   )
   target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_VR)
 
