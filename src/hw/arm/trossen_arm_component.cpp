@@ -248,6 +248,10 @@ void TrossenArmComponent::prepare_for_teleop() {
       driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
       // Seed the resting offset so the gripper holds open before the first tick.
       driver_->set_gripper_external_effort(gripper_feedback_offset_, 0.0, false);
+      // Record that the gripper is now in external-effort mode so end_teleop()
+      // only releases it when it was actually engaged (the hardware-test path
+      // calls end_teleop() without ever calling prepare_for_teleop()).
+      gripper_feedback_engaged_ = true;
     } else {
       driver_->set_gripper_mode(trossen_arm::Mode::position);
     }
@@ -272,11 +276,16 @@ void TrossenArmComponent::end_teleop() {
   if (!driver_) return;
   if (!actuated_) {
     // Passive leader: arm joints have no actuators to neutralize. If the
-    // gripper was rendering force feedback, release it (0 N, then idle) so it
-    // stops pushing on the operator's hand before the driver is freed.
-    if (gripper_force_feedback_) {
+    // gripper was actively rendering force feedback, release it (0 N, then
+    // idle) so it stops pushing on the operator's hand before the driver is
+    // freed. Guard on gripper_feedback_engaged_: end_teleop() can be called
+    // without a preceding prepare_for_teleop() (e.g. the hardware-test park
+    // step), and commanding external effort on a gripper still in idle mode is
+    // a controller error.
+    if (gripper_force_feedback_ && gripper_feedback_engaged_) {
       driver_->set_gripper_external_effort(0.0, 0.0, false);
       driver_->set_gripper_mode(trossen_arm::Mode::idle);
+      gripper_feedback_engaged_ = false;
     }
     driver_->cleanup();
     driver_.reset();

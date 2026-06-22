@@ -189,6 +189,13 @@ private:
   float gripper_feedback_follower_max_{87.5f};
   float gripper_feedback_offset_{8.0f};
 
+  /// True while the gripper is actually in external-effort mode for feedback
+  /// (set by prepare_for_teleop, cleared by end_teleop). Guards end_teleop's
+  /// effort release so it never commands external effort on an idle gripper —
+  /// e.g. when end_teleop() runs without a preceding prepare_for_teleop()
+  /// (the hardware-test park step does exactly that).
+  bool  gripper_feedback_engaged_{false};
+
   /// Joint-space pose this arm moves to at session start (via stage()).
   /// Empty = no staging.
   std::vector<float> staged_position_;
