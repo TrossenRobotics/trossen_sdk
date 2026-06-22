@@ -1,0 +1,176 @@
+/**
+ * @file vr_session.hpp
+ * @brief Process-wide shared VR connection for trossen_sdk hardware.
+ */
+
+#ifndef TROSSEN_SDK__HW__VR__VR_SESSION_HPP_
+#define TROSSEN_SDK__HW__VR__VR_SESSION_HPP_
+
+#include <chrono>
+#include <cstdint>
+#include <initializer_list>
+#include <memory>
+#include <mutex>
+#include <optional>
+#include <string>
+#include <string_view>
+#include <unordered_map>
+
+#include "trossen_vr/network_manager.hpp"
+#include "trossen_vr/vr_types.hpp"
+
+namespace trossen::hw::vr {
+
+/**
+ * @brief Logical inputs a VR component can consume from the shared
+ * frame stream.
+ *
+ * Each VR hardware component (`VrArmComponent`, `VrBaseComponent`,
+ * `VrSessionControlComponent`, …) claims a non-overlapping subset of these on its
+ * configured controller. `VrSession::claim_inputs()` enforces this so
+ * conflicts (e.g. two components fighting for the trigger) are caught
+ * at configure() time, not as silently-wrong teleop behavior.
+ */
+enum class VrInput {
+  kPose,        ///< 6-DOF hand pose (position + orientation).
+  kTrigger,     ///< Index trigger (analog).
+  kThumbstick,  ///< 2-axis thumbstick.
+  kButtonOne,     ///< A button (right) or X button (left).
+  kButtonTwo,     ///< B button (right) or Y button (left).
+};
+
+std::string_view vr_input_name(VrInput input);
+
+/**
+ * @brief Process-global shared VR connection.
+ *
+ * A VR headset app opens a single network connection per host, so every
+ * VR hardware component in the same process must share one
+ * trossen_vr::NetworkManager. VrSession is the owner.
+ *
+ * Ownership model:
+ *  - The first component to call `ensure_started(port)` binds the port and
+ *    starts the I/O thread. Subsequent calls on the same port increment a
+ *    reference count and return immediately.
+ *  - Calls on a *different* port while the session is already running throw,
+ *    because a single process cannot bind two VR connections at once.
+ *  - Each `ensure_started` pairs with exactly one `release`. When the last
+ *    reference goes away the manager is stopped and the port is freed.
+ *
+ * Thread-safety: all public methods are safe to call from any thread. Reads
+ * of the latest frame and connection state are short and take an internal
+ * mutex; the underlying trossen_vr::NetworkManager has its own thread-safe API.
+ */
+class VrSession {
+public:
+  /// Access the process-global session instance.
+  static VrSession& instance();
+
+  /**
+   * @brief Idempotently start the VR connection on `port`.
+   *
+   * The first caller constructs and starts the underlying NetworkManager. Each
+   * subsequent call increments the reference count, so `release()` must be
+   * paired with every successful `ensure_started()` — typically from the
+   * destructor of the owning hardware component.
+   *
+   * @throws std::runtime_error if already running on a different port.
+   */
+  void ensure_started(std::uint16_t port);
+
+  /**
+   * @brief Decrement the reference count; stop NetworkManager when it hits zero.
+   *
+   * Safe to call more times than `ensure_started()`; extra calls are no-ops
+   * so teardown code does not need to track its own ownership flag.
+   */
+  void release();
+
+  /// True if the VR headset has an active network connection to this process.
+  bool is_vr_connected() const;
+
+  /// Latest VRFrame received from the VR app, or nullopt if the
+  /// session is stopped or no frame has arrived yet.
+  std::optional<trossen_vr::VRFrame> latest_frame() const;
+
+  /**
+   * @brief Block until the headset connects or the timeout elapses.
+   *
+   * Intended for use in `prepare_for_teleop()` to fail fast when the VR
+   * headset app is not running. Polls `is_vr_connected()` at 20 Hz.
+   *
+   * @return true if a connection was observed before the deadline.
+   */
+  bool wait_for_connection(std::chrono::milliseconds timeout) const;
+
+  /**
+   * @brief Reserve a set of logical inputs on one controller type for a component.
+   *
+   * Each VR hardware component calls this in `configure()` to declare
+   * what it consumes from the shared frame stream. The session maintains
+   * a `(controller_type, input) -> component_id` map and throws if any
+   * requested input is already claimed by a *different* component.
+   *
+   * Calling `claim_inputs()` a second time with the same `(controller_type,
+   * component_id, inputs)` is idempotent — useful for components that
+   * can be reconfigured.
+   *
+   * @param controller_type  "left" or "right".
+   * @param component_id  Stable identifier of the claiming component
+   *                      (typically `HardwareComponent::get_identifier()`).
+   * @param inputs        Inputs to claim on that controller type.
+   *
+   * @throws std::invalid_argument if controller_type is not "left"/"right"
+   *         or component_id is empty.
+   * @throws std::runtime_error if an input is already claimed by a different
+   *         component.
+   */
+  void claim_inputs(const std::string& controller_type,
+                    const std::string& component_id,
+                    std::initializer_list<VrInput> inputs);
+
+  /**
+   * @brief Release all claims held by `component_id`.
+   *
+   * Safe to call with no outstanding claims. Typically invoked from a
+   * VR component's destructor or `end_teleop()`.
+   */
+  void release_claims(const std::string& component_id);
+
+  VrSession(const VrSession&)            = delete;
+  VrSession& operator=(const VrSession&) = delete;
+  VrSession(VrSession&&)                 = delete;
+  VrSession& operator=(VrSession&&)      = delete;
+
+private:
+  VrSession() = default;
+  ~VrSession();
+
+  mutable std::mutex                          mutex_;
+  std::unique_ptr<trossen_vr::NetworkManager> manager_;
+  std::uint16_t                               port_{0};
+  std::size_t                                 ref_count_{0};
+
+  /// `(controller_type, input) -> component_id` claim table. Populated by
+  /// `claim_inputs()`, queried for conflicts, cleared by
+  /// `release_claims()` when a component tears down.
+  struct ClaimKey {
+    std::string controller_type;
+    VrInput     input;
+    bool operator==(const ClaimKey& other) const {
+      return controller_type == other.controller_type && input == other.input;
+    }
+  };
+  struct ClaimKeyHash {
+    std::size_t operator()(const ClaimKey& k) const noexcept {
+      // Combine cheaply; table stays small (≤ 2 controller types × ~5 inputs).
+      return std::hash<std::string>{}(k.controller_type) ^
+             (std::hash<int>{}(static_cast<int>(k.input)) << 1);
+    }
+  };
+  std::unordered_map<ClaimKey, std::string, ClaimKeyHash> claims_;
+};
+
+}  // namespace trossen::hw::vr
+
+#endif  // TROSSEN_SDK__HW__VR__VR_SESSION_HPP_
