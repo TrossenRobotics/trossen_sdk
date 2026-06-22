@@ -8,8 +8,10 @@
 
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "trossen_sdk/hw/hardware_component.hpp"
+#include "trossen_sdk/hw/teleop/teleop_capable.hpp"
 #include "trossen_slate/trossen_slate.hpp"
 
 namespace trossen::hw::base {
@@ -17,9 +19,13 @@ namespace trossen::hw::base {
 /**
  * @brief Hardware component for SLATE mobile base
  *
- * Wraps TrossenSlate driver and provides JSON configuration.
+ * Wraps the TrossenSlate driver and provides JSON configuration. Implements
+ * `teleop::BaseSpaceTeleop` so the base can act as a teleop follower: any
+ * base-space leader sends `[linear_mps, angular_rps]` velocity commands that
+ * are forwarded to the wheels.
  */
-class SlateBaseComponent : public HardwareComponent {
+class SlateBaseComponent : public HardwareComponent,
+                           public teleop::BaseSpaceTeleop {
 public:
   /**
    * @brief Constructor
@@ -63,6 +69,21 @@ public:
    * @return Shared pointer to driver
    */
   std::shared_ptr<trossen_slate::TrossenSlate> get_driver() const { return driver_; }
+
+  // ── teleop::BaseSpaceTeleop: IO contract ─────────────────────────────────
+
+  /// Return the base's current body-frame velocity as `[linear_mps,
+  /// angular_rps]`. Used by the teleop controller to seed leader alignment.
+  std::vector<float> read() override;
+
+  /// Apply a `[linear_mps, angular_rps]` velocity command to the base
+  /// (follower role). Forwards the two velocity scalars to the SLATE driver,
+  /// which applies its own velocity limits. Commands with fewer than two
+  /// elements are ignored.
+  void write(const std::vector<float>& cmd) override;
+
+  /// Stop the base by commanding zero velocity. Idempotent.
+  void end_teleop() override;
 
 private:
   std::shared_ptr<trossen_slate::TrossenSlate> driver_;
