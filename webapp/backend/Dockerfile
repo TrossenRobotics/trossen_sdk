@@ -145,6 +145,7 @@ EXPOSE 8000
 # docker-compose.yml, so the build is incremental across container restarts.
 ENV TROSSEN_DOCKER_BUILD_DIR=/var/cache/trossen_sdk/build
 ENV TROSSEN_CONVERTER_BIN=${TROSSEN_DOCKER_BUILD_DIR}/scripts/trossen_mcap_to_lerobot_v2
+ENV TROSSEN_CONVERTER_BIN_V3=${TROSSEN_DOCKER_BUILD_DIR}/scripts/trossen_mcap_to_lerobot_v3
 
 # Entrypoint runs `uv sync`, builds the converter binary if missing, and then
 # launches uvicorn. See docker-entrypoint.sh for details on the steps and the

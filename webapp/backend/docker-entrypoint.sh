@@ -20,6 +20,7 @@ set -euo pipefail
 REPO_ROOT="${REPO_ROOT:-/app}"
 BUILD_DIR="${TROSSEN_DOCKER_BUILD_DIR:-/var/cache/trossen_sdk/build}"
 CONVERTER_BIN="${TROSSEN_CONVERTER_BIN:-${BUILD_DIR}/scripts/trossen_mcap_to_lerobot_v2}"
+CONVERTER_BIN_V3="${TROSSEN_CONVERTER_BIN_V3:-${BUILD_DIR}/scripts/trossen_mcap_to_lerobot_v3}"
 
 # ZED support is opt-in at image-build time (Dockerfile ENABLE_ZED=1 sets
 # TROSSEN_ENABLE_ZED=1 and installs the ZED SDK on a CUDA base). When on, hand
@@ -52,12 +53,13 @@ if ! uv run --no-dev python -c "import trossen_sdk as ts; raise SystemExit(0 if 
     uv sync --no-dev --reinstall-package trossen-sdk
 fi
 
-if [[ ! -x "${CONVERTER_BIN}" ]]; then
-    echo "[entrypoint] Converter binary missing at ${CONVERTER_BIN}; building..."
+if [[ ! -x "${CONVERTER_BIN}" || ! -x "${CONVERTER_BIN_V3}" ]]; then
+    echo "[entrypoint] Converter binary missing; building v2 + v3 converters..."
     mkdir -p "${BUILD_DIR}"
     if cmake -S "${REPO_ROOT}" -B "${BUILD_DIR}" -DCMAKE_BUILD_TYPE=Release \
-        && cmake --build "${BUILD_DIR}" --target trossen_mcap_to_lerobot_v2 -j"$(nproc)"; then
-        echo "[entrypoint] Converter build complete: ${CONVERTER_BIN}"
+        && cmake --build "${BUILD_DIR}" \
+            --target trossen_mcap_to_lerobot_v2 trossen_mcap_to_lerobot_v3 -j"$(nproc)"; then
+        echo "[entrypoint] Converter build complete: ${CONVERTER_BIN}, ${CONVERTER_BIN_V3}"
     else
         echo "[entrypoint] WARNING: converter build failed; conversion endpoint will return an error until this is fixed." >&2
     fi
