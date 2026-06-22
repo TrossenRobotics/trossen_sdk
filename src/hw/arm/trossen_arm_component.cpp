@@ -183,7 +183,13 @@ void TrossenArmComponent::apply_gripper_feedback(float follower_gripper_effort) 
   }
   const double leader_effort =
     gripper_feedback_leader_max_ * std::pow(norm, 3) + gripper_feedback_offset_;
-  driver_->set_gripper_external_effort(leader_effort, 0.0, false);
+  // Ramp the rendered effort over 0.2s (linear interpolation) rather than
+  // applying it instantly. At the contact boundary the follower's measured
+  // effort flips rapidly between no-contact and contact; applying that to the
+  // leader instantly (goal_time 0) sets up a limit-cycle oscillation. The 0.2s
+  // ramp acts as a rate limiter that damps the chatter — matching the bilateral
+  // reference, which uses the same goal_time on this command.
+  driver_->set_gripper_external_effort(leader_effort, 0.2, false);
 }
 
 void TrossenArmComponent::summon_joint(const std::vector<float>& cmd) {
