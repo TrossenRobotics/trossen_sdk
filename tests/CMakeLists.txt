@@ -59,6 +59,9 @@ target_link_libraries(test_sink PRIVATE trossen_sdk GTest::gtest_main)
 add_executable(test_scheduler test_scheduler.cpp)
 target_link_libraries(test_scheduler PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_lerobot_v3_layout test_lerobot_v3_layout.cpp)
+target_link_libraries(test_lerobot_v3_layout PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_session_manager test_session_manager.cpp)
 target_link_libraries(test_session_manager PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -100,6 +103,7 @@ gtest_discover_tests(test_queue_adapter)
 gtest_discover_tests(test_producer_registry)
 gtest_discover_tests(test_sink)
 gtest_discover_tests(test_scheduler)
+gtest_discover_tests(test_lerobot_v3_layout)
 gtest_discover_tests(test_session_manager)
 gtest_discover_tests(test_session_manager_discard)
 gtest_discover_tests(test_keyboard_input_utils)

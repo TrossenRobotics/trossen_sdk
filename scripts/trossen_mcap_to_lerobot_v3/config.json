@@ -1,0 +1,20 @@
+{
+  "lerobot_v3_backend": {
+    "type": "lerobot_v3_backend",
+    "root": "~/.cache/huggingface/lerobot",
+    "encoder_threads": 2,
+    "max_image_queue": 10,
+    "png_compression_level": 5,
+    "overwrite_existing": false,
+    "encode_videos": true,
+    "task_name": "perform a generic task",
+    "repository_id": "TrossenRoboticsCommunity",
+    "dataset_id": "mcap_converted_dataset_v3",
+    "robot_name": "trossen_solo_ai",
+    "fps": 30.0,
+    "license": "apache-2.0",
+    "chunks_size": 1000,
+    "data_files_size_in_mb": 100,
+    "video_files_size_in_mb": 200
+  }
+}
