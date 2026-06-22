@@ -99,20 +99,30 @@ const RESETTABLE_SYSTEMS: readonly string[] = ['solo', 'solo_portable', 'station
 const LIGHTWEIGHT_LEADER_JOINT_SIGNS: readonly number[] = [1, 1, 1, -1, -1, 1, 1];
 const LIGHTWEIGHT_LEADER_WRIST_OFFSET = Math.PI / 4;
 
-function lightweightLeaderRemap(armName: string): {
+type WristSide = 'left' | 'right';
+
+function lightweightLeaderRemap(wristSide: WristSide): {
   joint_signs: number[];
   joint_offsets: number[];
 } {
-  // Right arm offsets +π/4 on the wrist, left (the default) −π/4, matching the
-  // mirror-mounted hardware. Side is inferred from the arm name, the same way
-  // leader/follower role is inferred elsewhere on this page.
-  const wrist = armName.toLowerCase().includes('right')
+  // Right arm offsets +π/4 on the wrist, left −π/4, matching the mirror-mounted
+  // hardware. The side is an explicit per-arm choice (set in the UI) rather than
+  // inferred from the name, because which physical arm is left vs right depends
+  // on the operator's setup, not the label.
+  const wrist = wristSide === 'right'
     ? LIGHTWEIGHT_LEADER_WRIST_OFFSET
     : -LIGHTWEIGHT_LEADER_WRIST_OFFSET;
   return {
     joint_signs: [...LIGHTWEIGHT_LEADER_JOINT_SIGNS],
     joint_offsets: [0, 0, 0, 0, 0, wrist, 0],
   };
+}
+
+// Recover the wrist side from a stored joint_offsets array so the edit form
+// shows the side that's actually persisted. A positive J5 offset (+π/4) is the
+// right side; anything else (incl. absent) defaults to left.
+function wristSideFromOffsets(offsets?: number[]): WristSide {
+  return offsets && offsets.length > 5 && offsets[5] > 0 ? 'right' : 'left';
 }
 
 // ---------------------------------------------------------------------------
@@ -865,6 +875,9 @@ export function ConfigurationPage() {
     role: 'leader' as 'leader' | 'follower',
     paired_with: '',
     passive: false,
+    // Wrist-roll offset side for a passive leader (±π/4 on J5). Mirror-mounted
+    // left/right arms need opposite signs; chosen explicitly per arm.
+    wristSide: 'left' as WristSide,
     // Leader gripper force feedback (off by default). Cubic constants from the
     // bilateral reference: leader N at full grip, follower N normalizer, offset.
     gripperFeedback: false,
@@ -1016,6 +1029,7 @@ export function ConfigurationPage() {
       role: 'leader',
       paired_with: '',
       passive: false,
+      wristSide: 'left',
       gripperFeedback: false,
       gripperFeedbackLeaderMax: 27,
       gripperFeedbackFollowerMax: 87.5,
@@ -1059,6 +1073,7 @@ export function ConfigurationPage() {
         role: arm.role,
         paired_with: arm.paired_with || '',
         passive: arm.actuated === false,
+        wristSide: wristSideFromOffsets(arm.joint_offsets),
         gripperFeedback: arm.gripper_force_feedback === true,
         gripperFeedbackLeaderMax: typeof arm.gripper_feedback_leader_max === 'number' ? arm.gripper_feedback_leader_max : 27,
         gripperFeedbackFollowerMax: typeof arm.gripper_feedback_follower_max === 'number' ? arm.gripper_feedback_follower_max : 87.5,
@@ -1180,7 +1195,7 @@ export function ConfigurationPage() {
     // A passive (lightweight) leader carries actuated=false plus the affine
     // joint remap; only meaningful for a leader. Anything else is a normal arm.
     const isPassive = armForm.role === 'leader' && armForm.passive;
-    const remap = isPassive ? lightweightLeaderRemap(armForm.name) : undefined;
+    const remap = isPassive ? lightweightLeaderRemap(armForm.wristSide) : undefined;
 
     // Gripper force feedback is a leader-only behavior (the leader's actuated
     // gripper renders the reflected force from the follower's grip effort).
@@ -2251,12 +2266,24 @@ export function ConfigurationPage() {
                   </select>
                 </div>
                 {armForm.role === 'leader' && (
-                  <div className="flex items-start gap-[8px]">
-                    <input type="checkbox" id="arm_passive" checked={armForm.passive} onChange={e => setArmForm({ ...armForm, passive: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
-                    <label htmlFor="arm_passive" className="text-ink text-[12px]">
-                      Passive leader (lightweight — no actuators)
-                      <span className="block text-dim text-[11px] mt-[2px]">Streams joint positions only; the SDK applies the lightweight-leader joint remap (wrist offset side is taken from the arm name).</span>
-                    </label>
+                  <div className="space-y-[12px]">
+                    <div className="flex items-start gap-[8px]">
+                      <input type="checkbox" id="arm_passive" checked={armForm.passive} onChange={e => setArmForm({ ...armForm, passive: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
+                      <label htmlFor="arm_passive" className="text-ink text-[12px]">
+                        Passive leader (lightweight — no actuators)
+                        <span className="block text-dim text-[11px] mt-[2px]">Streams joint positions only; the SDK applies the lightweight-leader joint remap (J3/J4 inverted, wrist ±π/4).</span>
+                      </label>
+                    </div>
+                    {armForm.passive && (
+                      <div className="pl-[24px]">
+                        <label className="block text-ink text-[12px] mb-[6px]">Wrist offset side</label>
+                        <select value={armForm.wristSide} onChange={e => setArmForm({ ...armForm, wristSide: e.target.value as WristSide })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand">
+                          <option value="left">Left (−π/4)</option>
+                          <option value="right">Right (+π/4)</option>
+                        </select>
+                        <span className="block text-dim text-[11px] mt-[2px]">Sign of the J5 wrist-roll offset. Mirror-mounted left/right arms need opposite signs — flip this if the follower's wrist tracks rotated the wrong way.</span>
+                      </div>
+                    )}
                   </div>
                 )}
                 {armForm.role === 'leader' && (
