@@ -197,14 +197,18 @@ bool perform_sanity_check(
   const SanityCheckConfig& config)
 {
   // Expected sink records: each producer enqueues 1 record per poll/frame.
+  // TrossenArmProducer emits both a JointStateRecord and an EndEffectorPoseRecord
+  // per poll, so joint and end-effector pose counts are tracked separately.
   // Depth cameras embed color + depth in a single ImageRecord, so they count
   // as 1 sink record per frame (same as color-only cameras). The backend then
   // writes the depth as a separate channel in the output file.
   int expected_joint = static_cast<int>(
     config.joint_rate_hz * config.actual_duration_s * config.joint_producers);
+  int expected_end_effector_pose = static_cast<int>(
+    config.joint_rate_hz * config.actual_duration_s * config.end_effector_pose_producers);
   int expected_camera = static_cast<int>(
     config.camera_fps * config.actual_duration_s * config.camera_producers);
-  int expected_total = expected_joint + expected_camera;
+  int expected_total = expected_joint + expected_end_effector_pose + expected_camera;
 
   // Backend output writes: depth cameras produce 2 channel writes per frame
   int color_only = config.camera_producers - config.depth_camera_producers;
@@ -228,6 +232,7 @@ bool perform_sanity_check(
             << config.actual_duration_s << "s\n";
   std::cout << "  Expected:        ~" << expected_total << " sink records ("
             << expected_joint << " joints + "
+            << expected_end_effector_pose << " end-effector poses + "
             << expected_camera << " camera frames)\n";
   std::cout << "  Actual:          " << actual_records << " sink records\n";
   std::cout << "  Tolerance:       " << min_expected << " - " << max_expected
