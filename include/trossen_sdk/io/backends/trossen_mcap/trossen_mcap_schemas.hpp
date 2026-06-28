@@ -55,6 +55,16 @@ inline std::string odometry_2d_topic(const std::string& stream_id) {
   return stream_id + "/odom/state";
 }
 
+/**
+ * @brief Get topic name for the end-effector pose stream of a given arm
+ *
+ * @param stream_id Stream identifier (e.g., "leader", "follower")
+ * @return Topic name for the end-effector pose stream
+ */
+inline std::string end_effector_pose_topic(const std::string& stream_id) {
+  return stream_id + "/end_effector/pose";
+}
+
 }  // namespace trossen::trossen_mcap_defs
 
 #endif  // TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__TROSSEN_MCAP_SCHEMAS_HPP_
