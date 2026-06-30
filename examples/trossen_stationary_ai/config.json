@@ -133,10 +133,12 @@
   },
 
   "backend": {
-    "root":             "~/.trossen_sdk",
-    "dataset_id":       "stationary_dataset",
-    "compression":      "",
-    "chunk_size_bytes": 4194304
+    "root":                     "~/.trossen_sdk",
+    "robot_name":               "trossen_stationary_ai",
+    "dataset_id":               "stationary_dataset",
+    "compression":              "",
+    "chunk_size_bytes":         4194304,
+    "include_robot_description": true
   },
 
   "observers": [

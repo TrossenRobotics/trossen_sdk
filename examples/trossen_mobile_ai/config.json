@@ -125,10 +125,12 @@
   },
 
   "backend": {
-    "root":             "~/.trossen_sdk",
-    "dataset_id":       "mobile_dataset",
-    "compression":      "",
-    "chunk_size_bytes": 4194304
+    "root":                     "~/.trossen_sdk",
+    "robot_name":               "trossen_mobile_ai",
+    "dataset_id":               "mobile_dataset",
+    "compression":              "",
+    "chunk_size_bytes":         4194304,
+    "include_robot_description": true
   },
 
   "observers": [

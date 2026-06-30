@@ -74,10 +74,12 @@
   },
 
   "backend": {
-    "root":             "~/.trossen_sdk",
-    "dataset_id":       "solo_dataset",
-    "compression":      "",
-    "chunk_size_bytes": 4194304
+    "root":                     "~/.trossen_sdk",
+    "robot_name":               "trossen_solo_ai",
+    "dataset_id":               "solo_dataset",
+    "compression":              "",
+    "chunk_size_bytes":         4194304,
+    "include_robot_description": true
   },
 
   "observers": [

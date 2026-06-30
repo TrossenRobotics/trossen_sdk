@@ -29,7 +29,8 @@ jobs:
           pkg-config \
           libbz2-dev \
           zlib1g-dev \
-          nlohmann-json3-dev
+          nlohmann-json3-dev \
+          libcurl4-openssl-dev
 
     - name: Install Parquet dependencies
       run: |

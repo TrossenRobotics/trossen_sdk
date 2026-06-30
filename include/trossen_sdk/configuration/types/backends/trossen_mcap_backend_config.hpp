@@ -26,6 +26,16 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
   // TODO(shantanuparab-tr): Remove episode index if not being used
   int episode_index{0};
 
+  /// Write a /robot_description message to each MCAP file at recording start.
+  bool include_robot_description{false};
+  /// Embed mesh files as base64 data URIs inside the URDF (requires include_robot_description).
+  bool include_meshes{false};
+  /// Git ref (branch or tag) on TrossenRobotics/trossen_arm_description to download from.
+  std::string robot_description_ref{"main"};
+  /// URDF path within the description repo (e.g. "urdf/generated/stationary_ai.urdf").
+  /// Leave empty to auto-resolve from robot_name.
+  std::string urdf_variant{""};
+
   std::string type() const override { return "trossen_mcap_backend"; }
 
   static TrossenMCAPBackendConfig from_json(const nlohmann::json& j) {
@@ -42,6 +52,14 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
     if (j.contains("compression")) j.at("compression").get_to(c.compression);
     if (j.contains("dataset_id")) j.at("dataset_id").get_to(c.dataset_id);
     if (j.contains("episode_index")) j.at("episode_index").get_to(c.episode_index);
+    if (j.contains("include_robot_description")) {
+      j.at("include_robot_description").get_to(c.include_robot_description);
+    }
+    if (j.contains("include_meshes")) j.at("include_meshes").get_to(c.include_meshes);
+    if (j.contains("robot_description_ref")) {
+      j.at("robot_description_ref").get_to(c.robot_description_ref);
+    }
+    if (j.contains("urdf_variant")) j.at("urdf_variant").get_to(c.urdf_variant);
 
     return c;
   }
