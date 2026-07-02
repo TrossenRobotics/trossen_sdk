@@ -139,17 +139,23 @@ nlohmann::json TrossenArmComponent::get_info() const {
 
 // ── Space-specific IO ────────────────────────────────────────────────────
 
+void TrossenArmComponent::apply_joint_remap(std::vector<float>& v, bool derivative) const {
+  for (size_t i = 0; i < v.size(); ++i) {
+    const float sign = (i < joint_signs_.size()) ? joint_signs_[i] : 1.0f;
+    const float offset = (i < joint_offsets_.size()) ? joint_offsets_[i] : 0.0f;
+    // Positions are a full affine map; velocities/efforts flip sign with a
+    // joint reversal but carry no positional offset.
+    v[i] = derivative ? sign * v[i] : sign * v[i] + offset;
+  }
+}
+
 std::vector<float> TrossenArmComponent::read_joint() {
   if (!driver_) return {};
   const auto& positions = driver_->get_robot_output().joint.all.positions;
   std::vector<float> out(positions.begin(), positions.end());
   // Apply the optional affine remap so a mismatched leader publishes commands
   // already in the follower's joint frame. Empty arrays = identity.
-  for (size_t i = 0; i < out.size(); ++i) {
-    const float sign = (i < joint_signs_.size()) ? joint_signs_[i] : 1.0f;
-    const float offset = (i < joint_offsets_.size()) ? joint_offsets_[i] : 0.0f;
-    out[i] = sign * out[i] + offset;
-  }
+  apply_joint_remap(out);
   return out;
 }
 

@@ -101,6 +101,25 @@ public:
   void end_teleop() override;
   void stage() override;
 
+  /**
+   * @brief Apply this arm's affine joint remap in place.
+   *
+   * Transforms a joint-space vector into the follower's frame using the same
+   * signs/offsets as read_joint(): v[j] = joint_signs_[j]*v[j] + joint_offsets_[j].
+   * Empty arrays (the follower, or any 1:1 leader) leave the vector unchanged.
+   *
+   * Exposed publicly so the recording producer can store the *processed*
+   * leader stream (the value actually commanded to the follower) rather than
+   * raw driver positions — keeping one source of truth for the formula.
+   *
+   * @param v         Joint-space vector, modified in place.
+   * @param derivative When true, the constant offset is dropped and only the
+   *                   sign is applied. Correct for velocities and efforts,
+   *                   whose frame flips with a joint reversal but which carry
+   *                   no positional offset.
+   */
+  void apply_joint_remap(std::vector<float>& v, bool derivative = false) const;
+
 private:
   // Space-specific IO helpers. Called by the nested adapter views.
   std::vector<float> read_joint();
