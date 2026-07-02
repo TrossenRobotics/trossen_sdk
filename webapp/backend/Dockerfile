@@ -147,6 +147,16 @@ ENV TROSSEN_DOCKER_BUILD_DIR=/var/cache/trossen_sdk/build
 ENV TROSSEN_CONVERTER_BIN=${TROSSEN_DOCKER_BUILD_DIR}/scripts/trossen_mcap_to_lerobot_v2
 ENV TROSSEN_CONVERTER_BIN_V3=${TROSSEN_DOCKER_BUILD_DIR}/scripts/trossen_mcap_to_lerobot_v3
 
+# Version provenance for GET /api/version. In the dev compose the source is
+# bind-mounted and these stay empty — version.py reads git live from /app. They
+# matter for a future baked image where /app is copied in (no .git): pass
+# `--build-arg GIT_SHA=$(git rev-parse --short=12 HEAD) --build-arg BUILD_TIME=...`
+# and version.py falls back to these, reporting source="baked".
+ARG GIT_SHA=
+ARG BUILD_TIME=
+ENV TROSSEN_WEBAPP_GIT_SHA=${GIT_SHA}
+ENV TROSSEN_WEBAPP_BUILD_TIME=${BUILD_TIME}
+
 # Entrypoint runs `uv sync`, builds the converter binary if missing, and then
 # launches uvicorn. See docker-entrypoint.sh for details on the steps and the
 # UVICORN_RELOAD opt-in for dev hot-reload.

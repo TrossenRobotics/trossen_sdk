@@ -64,6 +64,7 @@ from app.systems import (
     seed_missing_factory_systems,
     update_system_config,
 )
+from app.version import get_version_info
 from app.ws_bus import bus
 
 
@@ -246,6 +247,17 @@ def convert_to_lerobot(dataset_id: str, body: ConvertBody) -> StreamingResponse:
         stream_conversion(body, mcap_path),
         media_type="text/event-stream",
     )
+
+
+@app.get("/api/version")
+def get_version() -> dict[str, Any]:
+    """Report running backend git provenance + SDK/converter health.
+
+    Lets the UI show what code is actually running (and flag a stale SDK
+    extension or missing converter) without dropping to a shell — the quick
+    debugging signal for "did the deploy/update really take?".
+    """
+    return asdict(get_version_info())
 
 
 @app.get("/api/settings")

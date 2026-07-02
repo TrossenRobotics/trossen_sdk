@@ -94,6 +94,30 @@ export interface LeRobotDataset {
 
 
 /**
+ * Payload of GET /api/version — what code is actually running, for the
+ * About panel. Mirrors backend/app/version.py's VersionInfo dataclass.
+ */
+export interface VersionInfo {
+    /** Canonical internal version from webapp/VERSION; always present (git-independent). */
+    app_version: string | null;
+    backend: {
+        branch: string | null;
+        commit: string | null;
+        dirty: boolean;
+        build_time: string | null;
+        /** "git" = read live from the checkout, "baked" = from build env, "unknown". */
+        source: 'git' | 'baked' | 'unknown';
+    };
+    sdk: {
+        version: string | null;
+        /** False = compiled extension predates ObserverBase → empty camera feeds. */
+        observer_ok: boolean;
+    };
+    converter_available: boolean;
+}
+
+
+/**
    * Discriminated wire message from /api/ws/{sessionId}.
    *
    * The shape is intentionally loose because the protocol will evolve.
