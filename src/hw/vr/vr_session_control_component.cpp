@@ -57,14 +57,9 @@ std::vector<VrSessionControlComponent::Binding> default_bindings() {
 }  // namespace
 
 VrSessionControlComponent::~VrSessionControlComponent() {
-  // Stop the reader thread before anything else so callbacks stop
-  // firing into a half-destructed object.
+  // Stop the reader thread first so callbacks stop firing into a
+  // half-destructed object; the session lease releases on destruction.
   stop();
-  if (session_held_) {
-    VrSession::instance().release_claims(get_identifier());
-    VrSession::instance().release();
-    session_held_ = false;
-  }
 }
 
 void VrSessionControlComponent::configure(const nlohmann::json& config) {
@@ -97,15 +92,6 @@ void VrSessionControlComponent::configure(const nlohmann::json& config) {
       "VrSessionControlComponent: 'poll_interval_ms' must be positive");
   }
   poll_interval_ = std::chrono::milliseconds{poll_ms};
-
-  const double disconnect_s = config.value("disconnect_timeout_s", 2.0);
-  if (!std::isfinite(disconnect_s) || disconnect_s <= 0.0) {
-    throw std::runtime_error(
-      "VrSessionControlComponent: 'disconnect_timeout_s' must be "
-      "positive and finite");
-  }
-  disconnect_timeout_ = std::chrono::milliseconds(
-    static_cast<std::int64_t>(disconnect_s * 1000.0));
 
   // Parse bindings. A user-provided `bindings` block fully replaces
   // the defaults — otherwise unbinding a default entry is impossible.
@@ -151,8 +137,7 @@ void VrSessionControlComponent::configure(const nlohmann::json& config) {
   // Acquire the shared VR session and claim the bound inputs on the
   // configured controller type. Conflicts with arm/base/other session-control
   // components surface here as readable errors.
-  VrSession::instance().ensure_started(vr_port_);
-  session_held_ = true;
+  session_lease_.acquire(vr_port_, get_identifier());
 
   // Claim one input at a time so a conflict error names the specific button
   // that clashed rather than the whole set.
@@ -216,22 +201,25 @@ void VrSessionControlComponent::stop() {
 
 void VrSessionControlComponent::reader_loop() {
   auto& session = VrSession::instance();
-
-  // Connection staleness tracking: monitor when we last saw a valid frame.
-  auto last_frame_time = std::chrono::steady_clock::now();
-  bool has_first_frame = false;
   bool disconnect_fired = false;
 
   while (!stop_requested_.load()) {
-    const auto frame_opt = session.latest_frame();
-    const auto now       = std::chrono::steady_clock::now();
+    // Use the session's connection state to detect drops: latest_frame()
+    // keeps returning the last frame after a disconnect, so it can never
+    // signal one on its own.
+    if (!session.is_vr_connected()) {
+      if (!disconnect_fired && disconnect_cb_) {
+        disconnect_fired = true;
+        disconnect_cb_();
+      }
+      std::this_thread::sleep_for(poll_interval_);
+      continue;
+    }
+    disconnect_fired = false;
 
+    const auto frame_opt = session.latest_frame();
     if (frame_opt) {
       const auto& frame = *frame_opt;
-
-      last_frame_time  = now;
-      has_first_frame  = true;
-      disconnect_fired = false;
 
       const auto& controller = (controller_type_ == "right")
         ? frame.right_controller
@@ -261,13 +249,6 @@ void VrSessionControlComponent::reader_loop() {
         }
         prev_pressed_[b.input] = pressed;
       }
-    } else if (has_first_frame &&
-               (now - last_frame_time) > disconnect_timeout_ &&
-               !disconnect_fired &&
-               disconnect_cb_) {
-      // Frames stopped arriving for longer than the disconnect threshold.
-      disconnect_fired = true;
-      disconnect_cb_();
     }
 
     std::this_thread::sleep_for(poll_interval_);
