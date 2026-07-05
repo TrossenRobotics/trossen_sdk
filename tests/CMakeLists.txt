@@ -41,6 +41,9 @@ if(TROSSEN_ENABLE_VR)
 
   add_executable(test_vr_arm_component test_vr_arm_component.cpp)
   target_link_libraries(test_vr_arm_component PRIVATE trossen_sdk GTest::gtest_main)
+
+  add_executable(test_vr_base_component test_vr_base_component.cpp)
+  target_link_libraries(test_vr_base_component PRIVATE trossen_sdk GTest::gtest_main)
 endif()
 
 add_executable(test_lerobot_depth_utils test_lerobot_depth_utils.cpp)
@@ -123,6 +126,7 @@ endif()
 if(TROSSEN_ENABLE_VR)
   gtest_discover_tests(test_vr_session)
   gtest_discover_tests(test_vr_arm_component)
+  gtest_discover_tests(test_vr_base_component)
 endif()
 gtest_discover_tests(test_lerobot_depth_utils)
 gtest_discover_tests(test_record_types)
