@@ -26,8 +26,8 @@ namespace trossen::hw::vr {
  *
  * Polls the shared VR frame stream on a background thread, detects rising
  * edges on bound buttons, and fires `SessionControlCapable` event callbacks.
- * Disconnection is detected when frames stop arriving for longer than the
- * configured threshold. Input conflicts (e.g. two components claiming the
+ * Disconnection is detected from the shared `VrSession` connection state.
+ * Input conflicts (e.g. two components claiming the
  * same button on the same controller side) are caught at `configure()` time.
  */
 class VrSessionControlComponent
@@ -61,8 +61,6 @@ public:
    *   - `connection_timeout_s`: How long `start()` blocks for the headset
    *     app to connect before throwing (default 10 s).
    *   - `poll_interval_ms`: reader-thread poll cadence (default 50 ms).
-   *   - `disconnect_timeout_s`: consecutive seconds without a new
-   *     frame before disconnect fires (default 2 s).
    *
    * Claims the inputs referenced by `bindings` on the configured controller
    * type so overlapping VR configurations fail loudly at configure() time.
@@ -74,6 +72,11 @@ public:
 
   // ── SessionControlCapable ────────────────────────────────────────────
 
+  /// Install the event/disconnect callbacks. Call before `start()`; the
+  /// reader thread reads them without locking, so do not swap them while
+  /// running. Callbacks run on the reader thread and must not call this
+  /// component's own `stop()` (that self-joins the reader thread — deadlock);
+  /// hand the intent to the main loop instead.
   void set_callbacks(EventCallback on_event,
                      DisconnectCallback on_disconnect) override;
   void start() override;
@@ -97,10 +100,10 @@ private:
   std::uint16_t             vr_port_{9000};
   std::chrono::milliseconds connection_timeout_{std::chrono::seconds{10}};
   std::chrono::milliseconds poll_interval_{std::chrono::milliseconds{50}};
-  std::chrono::milliseconds disconnect_timeout_{std::chrono::seconds{2}};
 
-  /// VR session refcount: acquired in configure(), released in dtor.
-  bool session_held_{false};
+  /// Holds this component's reference on the shared VrSession; releases the
+  /// reference and input claims automatically on teardown.
+  VrSessionLease session_lease_;
 
   /// Callbacks installed by SessionManager via `set_callbacks()`.
   EventCallback      event_cb_;
