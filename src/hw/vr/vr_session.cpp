@@ -54,6 +54,19 @@ VrSession::~VrSession() {
 
 void VrSession::ensure_started(std::uint16_t port) {
   std::lock_guard<std::mutex> lock(mutex_);
+  // Test mode: skip the real network manager but still ref-count so the lease
+  // and release() bookkeeping behaves exactly as in production.
+  if (test_override_) {
+    if (ref_count_ > 0 && port_ != port) {
+      throw std::runtime_error(
+        "VrSession: already started on port " + std::to_string(port_) +
+        "; cannot also bind port " + std::to_string(port) +
+        " in the same process");
+    }
+    port_ = port;
+    ++ref_count_;
+    return;
+  }
   if (manager_) {
     if (port_ != port) {
       throw std::runtime_error(
@@ -85,6 +98,7 @@ void VrSession::release() {
 bool VrSession::is_vr_connected() const {
   // "Connected" here means "receiving frames," not just "socket open."
   std::lock_guard<std::mutex> lock(mutex_);
+  if (test_override_) return test_connected_;
   if (!manager_) return false;
   auto status = manager_->get_connection_status();
   return status == trossen_vr::ConnectionStatus::Connected ||
@@ -93,6 +107,7 @@ bool VrSession::is_vr_connected() const {
 
 std::optional<trossen_vr::VRFrame> VrSession::latest_frame() const {
   std::lock_guard<std::mutex> lock(mutex_);
+  if (test_override_) return test_frame_;
   if (!manager_) return std::nullopt;
   return manager_->latest_frame();
 }
@@ -150,6 +165,26 @@ void VrSession::release_claims(const std::string& component_id) {
       ++it;
     }
   }
+}
+
+void VrSession::set_test_frame(const trossen_vr::VRFrame& frame) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  test_override_  = true;
+  test_connected_ = true;
+  test_frame_     = frame;
+}
+
+void VrSession::set_test_connected(bool connected) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  test_override_  = true;
+  test_connected_ = connected;
+}
+
+void VrSession::clear_test_frame() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  test_override_  = false;
+  test_connected_ = false;
+  test_frame_.reset();
 }
 
 }  // namespace trossen::hw::vr

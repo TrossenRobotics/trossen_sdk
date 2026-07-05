@@ -141,6 +141,23 @@ public:
    */
   void release_claims(const std::string& component_id);
 
+  /**
+   * @brief Testing seam: drive VR components with synthetic frames.
+   *
+   * Puts the session into a test mode where `ensure_started()` does not open a
+   * real network connection and `latest_frame()` / `is_vr_connected()` return
+   * the injected values instead of the network manager's. This lets the VR
+   * hardware components be exercised without a live headset.
+   *
+   * Call `set_test_frame()` before configuring the components under test.
+   * `set_test_connected()` forces just the connection flag (e.g. to simulate a
+   * mid-session drop), and `clear_test_frame()` leaves test mode. For tests
+   * only — no effect on production code paths, which never call these.
+   */
+  void set_test_frame(const trossen_vr::VRFrame& frame);
+  void set_test_connected(bool connected);
+  void clear_test_frame();
+
   VrSession(const VrSession&)            = delete;
   VrSession& operator=(const VrSession&) = delete;
   VrSession(VrSession&&)                 = delete;
@@ -154,6 +171,12 @@ private:
   std::unique_ptr<trossen_vr::NetworkManager> manager_;
   std::uint16_t                               port_{0};
   std::size_t                                 ref_count_{0};
+
+  /// Test-mode override (see `set_test_frame()`). When active, the network
+  /// manager is bypassed for connection state and frame reads.
+  bool                               test_override_{false};
+  bool                               test_connected_{false};
+  std::optional<trossen_vr::VRFrame> test_frame_;
 
   /// `(controller_type, input) -> component_id` claim table. Populated by
   /// `claim_inputs()`, queried for conflicts, cleared by
