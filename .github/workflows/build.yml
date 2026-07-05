@@ -54,18 +54,6 @@ jobs:
         sudo make install
         sudo ldconfig
 
-    - name: Install trossen_vr
-      run: |
-        # Clone and install trossen_vr dependency (VR teleop support).
-        # Requires nlohmann_json (installed in the system dependencies step).
-        git clone https://github.com/TrossenRobotics/trossen_vr.git /tmp/trossen_vr
-        cd /tmp/trossen_vr
-        mkdir -p build && cd build
-        cmake .. -DCMAKE_BUILD_TYPE=Release
-        make -j$(nproc)
-        sudo make install
-        sudo ldconfig
-
     - name: Install RealSense
       run: |
         sudo mkdir -p /etc/apt/keyrings

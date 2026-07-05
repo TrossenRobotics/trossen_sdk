@@ -40,9 +40,11 @@ VrSession& VrSession::instance() {
 }
 
 VrSession::~VrSession() {
-  // The singleton outlives normal shutdown, but a test runner or a process
-  // with explicit teardown may reach this path. Stopping the manager here
-  // avoids leaking the I/O thread if ref counting was ever skipped.
+  // Normally ref-counting has already stopped the manager well before the
+  // singleton is destroyed at process exit, so this is a fallback for tests /
+  // explicit teardown. Stopping the network worker here (rather than leaving it
+  // for static destruction) avoids the classic exit-time hang from tearing a
+  // running I/O thread down in an undefined order.
   std::lock_guard<std::mutex> lock(mutex_);
   if (manager_) {
     manager_->stop();
