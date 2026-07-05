@@ -50,6 +50,10 @@ enum class SessionControlEvent {
  * `on_disconnect` once if the source becomes permanently unusable.
  * Both callbacks fire from the source's own thread; implementations
  * must make them cheap and non-blocking.
+ *
+ * @warning Callbacks run on the source's thread. The host must not call
+ * single-threaded `SessionManager` episode methods (start/stop/discard)
+ * directly from them; hand the intent to the main loop instead.
  */
 class SessionControlCapable {
 public:
