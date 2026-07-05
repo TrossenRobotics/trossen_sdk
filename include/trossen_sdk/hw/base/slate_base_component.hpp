@@ -72,17 +72,16 @@ public:
 
   // ── teleop::BaseSpaceTeleop: IO contract ─────────────────────────────────
 
-  /// Return the base's current body-frame velocity as `[linear_mps,
-  /// angular_rps]`. Used by the teleop controller to seed leader alignment.
+  /// Refresh state and return the base's current velocity `[linear_mps,
+  /// angular_rps]`. Returns an empty vector (and logs) if the driver is unset.
   std::vector<float> read() override;
 
-  /// Apply a `[linear_mps, angular_rps]` velocity command to the base
-  /// (follower role). Forwards the two velocity scalars to the SLATE driver,
-  /// which applies its own velocity limits. Commands with fewer than two
-  /// elements are ignored.
+  /// Apply a `[linear_mps, angular_rps]` velocity command (follower role).
+  /// No-op that logs if the driver is unset, `cmd` has < 2 elements, or the
+  /// driver rejects the command.
   void write(const std::vector<float>& cmd) override;
 
-  /// Stop the base by commanding zero velocity. Idempotent.
+  /// Stop the base by commanding zero velocity. Idempotent; logs on failure.
   void end_teleop() override;
 
 private:
