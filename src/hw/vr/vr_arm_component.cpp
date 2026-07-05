@@ -26,14 +26,6 @@ double scale_to_range(double t, double lo, double hi) {
 
 }  // namespace
 
-VrArmComponent::~VrArmComponent() {
-  if (session_held_) {
-    VrSession::instance().release_claims(get_identifier());
-    VrSession::instance().release();
-    session_held_ = false;
-  }
-}
-
 void VrArmComponent::configure(const nlohmann::json& config) {
   if (!config.contains("controller_type")) {
     throw std::runtime_error(
@@ -62,8 +54,7 @@ void VrArmComponent::configure(const nlohmann::json& config) {
   connection_timeout_ = std::chrono::milliseconds(
     static_cast<std::int64_t>(wait_s * 1000.0));
 
-  VrSession::instance().ensure_started(vr_port_);
-  session_held_ = true;
+  session_lease_.acquire(vr_port_, get_identifier());
 
   // Declare which inputs this component consumes on its controller type. Any
   // other component trying to claim the same (controller_type, input) pair will
@@ -97,12 +88,7 @@ void VrArmComponent::prepare_for_teleop() {
 void VrArmComponent::end_teleop() {
   prev_tracked_ = false;
   initialized_  = false;
-
-  if (session_held_) {
-    VrSession::instance().release_claims(get_identifier());
-    VrSession::instance().release();
-    session_held_ = false;
-  }
+  session_lease_.reset();
 }
 
 std::vector<float> VrArmComponent::read() {
@@ -146,6 +132,12 @@ std::vector<float> VrArmComponent::read() {
   out[2] = static_cast<float>(cart.z);  out[3] = static_cast<float>(cart.ax);
   out[4] = static_cast<float>(cart.ay); out[5] = static_cast<float>(cart.az);
   out[6] = static_cast<float>(gripper);
+
+  // A degenerate pose can make the rotation conversion produce NaN/inf; never
+  // send that to the arm — hold the last good target instead.
+  for (float v : out) {
+    if (!std::isfinite(v)) return last_good_;
+  }
 
   last_good_ = out;
   return out;

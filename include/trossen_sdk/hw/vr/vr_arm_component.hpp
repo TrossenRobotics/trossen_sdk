@@ -16,6 +16,7 @@
 
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/teleop/teleop_capable.hpp"
+#include "trossen_sdk/hw/vr/vr_session.hpp"
 
 namespace trossen::hw::vr {
 
@@ -33,7 +34,7 @@ public:
   explicit VrArmComponent(std::string identifier)
       : HardwareComponent(std::move(identifier)) {}
 
-  ~VrArmComponent() override;
+  ~VrArmComponent() override = default;
 
   VrArmComponent(const VrArmComponent&)            = delete;
   VrArmComponent& operator=(const VrArmComponent&) = delete;
@@ -94,9 +95,9 @@ private:
   double        gripper_max_m_{0.04};
   std::chrono::milliseconds connection_timeout_{std::chrono::seconds{10}};
 
-  /// Session bookkeeping — guards against a double-release from the
-  /// destructor when `end_teleop()` already released.
-  bool session_held_{false};
+  /// Holds this component's reference on the shared VrSession; releases the
+  /// reference and input claims automatically on teardown.
+  VrSessionLease session_lease_;
 
   /// `sync_to_state()` sets this; `read()` only transforms once initialized.
   bool                       initialized_{false};
