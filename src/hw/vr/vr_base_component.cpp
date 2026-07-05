@@ -29,30 +29,22 @@ double apply_deadzone(double v, double deadzone) {
 
 }  // namespace
 
-VrBaseComponent::~VrBaseComponent() {
-  if (session_held_) {
-    VrSession::instance().release_claims(get_identifier());
-    VrSession::instance().release();
-    session_held_ = false;
-  }
-}
-
 void VrBaseComponent::configure(const nlohmann::json& config) {
   // Two accepted shapes:
-  //   * `controller_type` alone → both axes from that controller.
+  //   * `controller_type` alone → both axes from that one controller.
   //   * `linear_controller_type` and/or `angular_controller_type` : per-axis
   //     split mode.
   const bool has_linear  = config.contains("linear_controller_type");
   const bool has_angular = config.contains("angular_controller_type");
-  const bool has_legacy  = config.contains("controller_type");
+  const bool has_shared  = config.contains("controller_type");
 
-  if (!has_linear && !has_angular && !has_legacy) {
+  if (!has_linear && !has_angular && !has_shared) {
     throw std::runtime_error(
       "VrBaseComponent: one of 'controller_type', "
       "'linear_controller_type', or 'angular_controller_type' is required");
   }
 
-  const std::string fallback = has_legacy
+  const std::string fallback = has_shared
     ? config.at("controller_type").get<std::string>()
     : std::string{"left"};
 
@@ -98,8 +90,7 @@ void VrBaseComponent::configure(const nlohmann::json& config) {
   connection_timeout_ = std::chrono::milliseconds(
     static_cast<std::int64_t>(wait_s * 1000.0));
 
-  VrSession::instance().ensure_started(vr_port_);
-  session_held_ = true;
+  session_lease_.acquire(vr_port_, get_identifier());
 
   // Claim the thumbstick on each controller type we read from.
   VrSession::instance().claim_inputs(
@@ -134,16 +125,13 @@ void VrBaseComponent::prepare_for_teleop() {
 }
 
 void VrBaseComponent::end_teleop() {
-  if (session_held_) {
-    VrSession::instance().release_claims(get_identifier());
-    VrSession::instance().release();
-    session_held_ = false;
-  }
+  session_lease_.reset();
 }
 
 std::vector<float> VrBaseComponent::read() {
   // Hold zero velocity while the headset is disconnected so the base does not
-  // coast on a stale frame.
+  // coast on a stale frame. Note: is_vr_connected() reflects the VrSession
+  // heartbeat and can lag a real drop by up to that timeout.
   if (!VrSession::instance().is_vr_connected()) return {0.0f, 0.0f};
 
   const auto frame = VrSession::instance().latest_frame();
@@ -165,6 +153,11 @@ std::vector<float> VrBaseComponent::read() {
   // user-configured limit.
   const double linear  =  y * max_linear_mps_;
   const double angular = -x * max_angular_rps_;
+
+  // A malformed frame can yield non-finite axes; never forward that as a
+  // velocity command — stop the base instead.
+  if (!std::isfinite(linear) || !std::isfinite(angular)) return {0.0f, 0.0f};
+
   return {static_cast<float>(linear), static_cast<float>(angular)};
 }
 

@@ -13,6 +13,7 @@
 
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/teleop/teleop_capable.hpp"
+#include "trossen_sdk/hw/vr/vr_session.hpp"
 
 namespace trossen::hw::vr {
 
@@ -34,7 +35,7 @@ public:
   explicit VrBaseComponent(std::string identifier)
       : HardwareComponent(std::move(identifier)) {}
 
-  ~VrBaseComponent() override;
+  ~VrBaseComponent() override = default;
 
   VrBaseComponent(const VrBaseComponent&)            = delete;
   VrBaseComponent& operator=(const VrBaseComponent&) = delete;
@@ -106,7 +107,9 @@ private:
   double        deadzone_{0.1};
   std::chrono::milliseconds connection_timeout_{std::chrono::seconds{10}};
 
-  bool session_held_{false};
+  /// Holds this component's reference on the shared VrSession; releases the
+  /// reference and input claims automatically on teardown.
+  VrSessionLease session_lease_;
 };
 
 }  // namespace trossen::hw::vr
