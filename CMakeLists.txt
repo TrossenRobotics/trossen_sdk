@@ -92,11 +92,17 @@ if(TROSSEN_ENABLE_VR)
   )
   target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_VR)
 
-  # trossen_vr_lib exports a PUBLIC dependency on nlohmann_json::nlohmann_json,
-  # so the consuming target must be able to resolve it too.
-  find_package(nlohmann_json 3.2 REQUIRED)
-  find_package(trossen_vr REQUIRED)
-  target_link_libraries(trossen_sdk PUBLIC trossen_vr::trossen_vr_lib)
+  # Fetch trossen_vr pinned to a fixed commit.
+  include(FetchContent)
+  FetchContent_Declare(
+    trossen_vr
+    SYSTEM
+    GIT_REPOSITORY https://github.com/TrossenRobotics/trossen_vr.git
+    GIT_TAG 93e33c7a3ad2316f4f4c0290d041941854e29eb6
+    EXCLUDE_FROM_ALL
+  )
+  FetchContent_MakeAvailable(trossen_vr)
+  target_link_libraries(trossen_sdk PUBLIC trossen_vr_lib)
 endif()
 
 # RerunObserver wiring is deferred until after Arrow is found below: rerun-cpp needs

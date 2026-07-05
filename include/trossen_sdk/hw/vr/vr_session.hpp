@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <unordered_map>
+#include <utility>
 
 #include "trossen_vr/network_manager.hpp"
 #include "trossen_vr/vr_types.hpp"
@@ -87,6 +88,9 @@ public:
   void release();
 
   /// True if the VR headset has an active network connection to this process.
+  /// Note: this and `latest_frame()` are independent snapshots — the link can
+  /// drop between the two calls, so a frame may be empty right after this
+  /// returns true. Callers needing both must tolerate that gap.
   bool is_vr_connected() const;
 
   /// Latest VRFrame received from the VR app, or nullopt if the
@@ -169,6 +173,58 @@ private:
     }
   };
   std::unordered_map<ClaimKey, std::string, ClaimKeyHash> claims_;
+};
+
+/**
+ * @brief RAII lease on the shared VrSession for one hardware component.
+ *
+ * Acquires a reference (and remembers the component id for claim cleanup) on
+ * `acquire()`, and releases the reference plus the component's input claims
+ * exactly once on `reset()` / destruction. This makes an accidental
+ * double-release impossible, so a component can never close the shared
+ * connection while another is still using it. Move-only.
+ */
+class VrSessionLease {
+public:
+  VrSessionLease() = default;
+  ~VrSessionLease() { reset(); }
+
+  VrSessionLease(const VrSessionLease&)            = delete;
+  VrSessionLease& operator=(const VrSessionLease&) = delete;
+  VrSessionLease(VrSessionLease&& other) noexcept { *this = std::move(other); }
+  VrSessionLease& operator=(VrSessionLease&& other) noexcept {
+    if (this != &other) {
+      reset();
+      component_id_ = std::move(other.component_id_);
+      held_         = other.held_;
+      other.held_   = false;
+    }
+    return *this;
+  }
+
+  /// Start or join the shared session on `port`, tying the lease to
+  /// `component_id` for claim cleanup. Replaces any lease already held.
+  void acquire(std::uint16_t port, std::string component_id) {
+    reset();
+    VrSession::instance().ensure_started(port);
+    component_id_ = std::move(component_id);
+    held_ = true;
+  }
+
+  /// Release the reference and this component's input claims. Idempotent.
+  void reset() {
+    if (held_) {
+      VrSession::instance().release_claims(component_id_);
+      VrSession::instance().release();
+      held_ = false;
+    }
+  }
+
+  bool held() const { return held_; }
+
+private:
+  std::string component_id_;
+  bool        held_{false};
 };
 
 }  // namespace trossen::hw::vr
