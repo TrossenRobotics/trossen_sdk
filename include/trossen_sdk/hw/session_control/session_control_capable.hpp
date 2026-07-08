@@ -24,7 +24,9 @@
 #ifndef TROSSEN_SDK__HW__SESSION_CONTROL__SESSION_CONTROL_CAPABLE_HPP_
 #define TROSSEN_SDK__HW__SESSION_CONTROL__SESSION_CONTROL_CAPABLE_HPP_
 
+#include <atomic>
 #include <functional>
+#include <utility>
 
 namespace trossen::hw::session_control {
 
@@ -46,10 +48,12 @@ enum class SessionControlEvent {
 /**
  * @brief Push-based session-control input contract.
  *
- * Implementations call `on_event` once per detected user intent and
- * `on_disconnect` once if the source becomes permanently unusable.
- * Both callbacks fire from the source's own thread; implementations
- * must make them cheap and non-blocking.
+ * A source detects user intent on its own thread and pushes it to the host
+ * through the installed callbacks. Concrete sources implement `start()` /
+ * `stop()` and, from their reader thread, call the protected `emit_event()`
+ * and `signal_disconnect()` helpers rather than invoking the callbacks
+ * directly — the base owns the callbacks and guarantees the disconnect
+ * fires at most once per drop.
  *
  * @warning Callbacks run on the source's thread. The host must not call
  * single-threaded `SessionManager` episode methods (start/stop/discard)
@@ -65,14 +69,15 @@ public:
   /**
    * @brief Install the event and disconnect callbacks.
    *
-   * Called by the host before `start()`. Implementations store the
-   * callbacks for use by their reader thread(s). A subsequent call
-   * replaces the previous callbacks.
-   *
-   * @note Callbacks may be invoked from any thread the source owns.
+   * Call before `start()`, and do not swap the callbacks while running — the
+   * reader thread reads them without locking. A callback must not call the
+   * owning component's own `stop()` (that would join the reader thread from
+   * within itself — a deadlock); hand the intent to the main loop instead.
    */
-  virtual void set_callbacks(EventCallback on_event,
-                             DisconnectCallback on_disconnect) = 0;
+  void set_callbacks(EventCallback on_event, DisconnectCallback on_disconnect) {
+    event_cb_      = std::move(on_event);
+    disconnect_cb_ = std::move(on_disconnect);
+  }
 
   /**
    * @brief Begin producing events.
@@ -90,6 +95,30 @@ public:
    * After `stop()` returns, no further callbacks will fire.
    */
   virtual void stop() = 0;
+
+protected:
+  /// Forward a user-intent event to the host. No-op if no callback is
+  /// installed or the event is `kNone`.
+  void emit_event(SessionControlEvent event) {
+    if (event != SessionControlEvent::kNone && event_cb_) event_cb_(event);
+  }
+
+  /// Report that the source has dropped. Guaranteed to fire the host's
+  /// disconnect callback at most once per drop: further calls are ignored
+  /// until `arm_disconnect()` re-arms it. Every source gets fire-once
+  /// behavior here instead of re-implementing it.
+  void signal_disconnect() {
+    if (disconnect_armed_.exchange(false) && disconnect_cb_) disconnect_cb_();
+  }
+
+  /// Re-arm disconnect detection; call when the source (re)connects so a
+  /// later drop fires again.
+  void arm_disconnect() { disconnect_armed_.store(true); }
+
+private:
+  EventCallback      event_cb_;
+  DisconnectCallback disconnect_cb_;
+  std::atomic<bool>  disconnect_armed_{true};
 };
 
 }  // namespace trossen::hw::session_control
