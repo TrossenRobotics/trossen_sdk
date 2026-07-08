@@ -65,6 +65,9 @@ target_link_libraries(test_session_manager PRIVATE trossen_sdk GTest::gtest_main
 add_executable(test_session_manager_discard test_session_manager_discard.cpp)
 target_link_libraries(test_session_manager_discard PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_session_manager_control test_session_manager_control.cpp)
+target_link_libraries(test_session_manager_control PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_keyboard_input_utils test_keyboard_input_utils.cpp)
 target_link_libraries(test_keyboard_input_utils PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -119,6 +122,7 @@ gtest_discover_tests(test_sink)
 gtest_discover_tests(test_scheduler)
 gtest_discover_tests(test_session_manager)
 gtest_discover_tests(test_session_manager_discard)
+gtest_discover_tests(test_session_manager_control)
 gtest_discover_tests(test_keyboard_input_utils)
 gtest_discover_tests(test_announce)
 gtest_discover_tests(test_teleop_space_helpers)
