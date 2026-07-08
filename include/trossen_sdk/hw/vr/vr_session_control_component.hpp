@@ -72,13 +72,6 @@ public:
 
   // ── SessionControlCapable ────────────────────────────────────────────
 
-  /// Install the event/disconnect callbacks. Call before `start()`; the
-  /// reader thread reads them without locking, so do not swap them while
-  /// running. Callbacks run on the reader thread and must not call this
-  /// component's own `stop()` (that self-joins the reader thread — deadlock);
-  /// hand the intent to the main loop instead.
-  void set_callbacks(EventCallback on_event,
-                     DisconnectCallback on_disconnect) override;
   void start() override;
   void stop() override;
 
@@ -104,10 +97,6 @@ private:
   /// Holds this component's reference on the shared VrSession; releases the
   /// reference and input claims automatically on teardown.
   VrSessionLease session_lease_;
-
-  /// Callbacks installed by SessionManager via `set_callbacks()`.
-  EventCallback      event_cb_;
-  DisconnectCallback disconnect_cb_;
 
   /// Reader-thread state. `stop_requested_` ends the loop; `running_`
   /// guards start/stop idempotency.

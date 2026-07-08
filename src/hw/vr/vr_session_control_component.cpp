@@ -8,7 +8,6 @@
 #include <cmath>
 #include <stdexcept>
 #include <string>
-#include <utility>
 #include <vector>
 
 #include "trossen_sdk/hw/hardware_registry.hpp"
@@ -166,14 +165,6 @@ nlohmann::json VrSessionControlComponent::get_info() const {
   return j;
 }
 
-void VrSessionControlComponent::set_callbacks(
-  EventCallback on_event,
-  DisconnectCallback on_disconnect)
-{
-  event_cb_      = std::move(on_event);
-  disconnect_cb_ = std::move(on_disconnect);
-}
-
 void VrSessionControlComponent::start() {
   if (running_.exchange(true)) return;  // Already running.
 
@@ -201,21 +192,17 @@ void VrSessionControlComponent::stop() {
 
 void VrSessionControlComponent::reader_loop() {
   auto& session = VrSession::instance();
-  bool disconnect_fired = false;
 
   while (!stop_requested_.load()) {
     // Use the session's connection state to detect drops: latest_frame()
     // keeps returning the last frame after a disconnect, so it can never
-    // signal one on its own.
+    // signal one on its own. The base guarantees the disconnect fires once.
     if (!session.is_vr_connected()) {
-      if (!disconnect_fired && disconnect_cb_) {
-        disconnect_fired = true;
-        disconnect_cb_();
-      }
+      signal_disconnect();
       std::this_thread::sleep_for(poll_interval_);
       continue;
     }
-    disconnect_fired = false;
+    arm_disconnect();
 
     const auto frame_opt = session.latest_frame();
     if (frame_opt) {
@@ -244,8 +231,8 @@ void VrSessionControlComponent::reader_loop() {
         }
 
         const bool was = prev_pressed_[b.input];
-        if (pressed && !was && event_cb_) {
-          event_cb_(b.event);
+        if (pressed && !was) {
+          emit_event(b.event);
         }
         prev_pressed_[b.input] = pressed;
       }
