@@ -13,9 +13,21 @@ requires = [
     "numpy >= 1.22.4",
     "pybind11 >= 2.12",
     "pybind11-stubgen >= 2.5.3",
-    "scikit-build-core >= 0.5",
+    # Pinned to the 1.x line: the metadata.version regex provider below is
+    # verified against 1.0.x, and this guards against a future upstream release
+    # changing dynamic-version handling and breaking clean-cache builds again.
+    "scikit-build-core >= 1.0, < 2",
 ]
 build-backend = "scikit_build_core.build"
+
+# Pull the version dynamically from the CMake project() declaration so
+# CMakeLists.txt stays the single source of truth. A provider MUST be set
+# explicitly: newer scikit-build-core errors on `dynamic = ["version"]` with no
+# provider (older versions silently defaulted to the CMake project version).
+[tool.scikit-build.metadata.version]
+provider = "scikit_build_core.metadata.regex"
+input = "CMakeLists.txt"
+regex = 'project\([^)]*VERSION\s+(?P<value>[0-9.]+)'
 
 [tool.scikit-build]
 cmake.build-type = "Release"
