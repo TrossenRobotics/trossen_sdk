@@ -34,7 +34,7 @@ set -uo pipefail
 # ---------------------------------------------------------------------------
 # Configuration (can be overridden with environment variables)
 # ---------------------------------------------------------------------------
-TROSSEN_ARM_VERSION="${TROSSEN_ARM_VERSION:-1.10.0}"   # matches webapp/backend/Dockerfile
+TROSSEN_ARM_VERSION="${TROSSEN_ARM_VERSION:-1.11.0}"   # matches webapp/backend/Dockerfile
 NODE_MAJOR="${NODE_MAJOR:-20}"                          # matches webapp/frontend/Dockerfile
 ENABLE_REALSENSE=1
 SETUP_WEBAPP=1

@@ -31,7 +31,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # firmware. The library enforces at configure() time that the driver and
 # controller firmware share major.minor versions, so this needs to track
 # whatever firmware the arms in the field are running.
-ENV TROSSEN_ARM_VERSION=1.10.0
+ENV TROSSEN_ARM_VERSION=1.11.0
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 

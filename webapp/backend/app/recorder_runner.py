@@ -240,11 +240,13 @@ def _block_signals_on_this_thread() -> Any:
     with every signal blocked, so a signal delivered to the process can
     never interrupt their blocking recvfrom() with EINTR.
 
-    libtrossen_arm at the main-branch SHA we pin does not retry on
-    EINTR — an interrupted UDP read throws trossen_arm::RuntimeError out
+    The pinned libtrossen_arm release (see TROSSEN_ARM_VERSION in
+    webapp/backend/Dockerfile) did not retry on EINTR when this guard was
+    added — an interrupted UDP read throws trossen_arm::RuntimeError out
     of the control loop, which unwinds past a noexcept thread boundary
     and aborts the process (SIGABRT, exit code -6). Masking signals on
-    the SDK threads sidesteps that path entirely.
+    the SDK threads sidesteps that path entirely regardless, so this stays
+    correct even if a newer driver starts retrying on EINTR.
 
     The Python main thread's original mask is restored on exit, so the
     interpreter keeps receiving SIGINT/SIGTERM normally for clean
