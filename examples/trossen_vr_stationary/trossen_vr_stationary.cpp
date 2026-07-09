@@ -326,7 +326,10 @@ int main(int argc, char** argv) {
   const bool has_teleop = !controllers.empty();
   for (auto& ctrl : controllers) mgr.add_teleop(std::move(ctrl));
 
-  // ── Wire VR session control callbacks ───────────────────────────────────
+  // ── Wire VR session control ─────────────────────────────────────────────
+  // attach_control() installs callbacks that only post events onto a
+  // thread-safe queue, starts each reader thread, and remembers the source so
+  // shutdown() stops it. The session is only mutated on the main loop thread.
   if (!session_ctrls.empty()) {
     // Read the connection timeout from whichever session-control block is
     // present (right preferred), falling back to a default.
@@ -338,29 +341,8 @@ int main(int argc, char** argv) {
               << " (timeout " << static_cast<int>(sc_timeout)
               << " s) — open the VR app and connect to this host's IP...\n";
 
-    auto event_cb = [&](trossen::hw::session_control::SessionControlEvent ev) {
-      using E = trossen::hw::session_control::SessionControlEvent;
-      switch (ev) {
-        case E::kStart:
-          mgr.stop_episode();
-          mgr.signal_reset_complete();
-          break;
-        case E::kRerecord:   mgr.request_rerecord();      break;
-        case E::kStopEarly:  mgr.stop_episode();          break;
-        case E::kStopSession: trossen::utils::g_stop_requested = true; break;
-        default: break;
-      }
-    };
-    auto disconnect_cb = [&]() {
-      // VR headset disconnected mid-session — end cleanly.
-      std::cout << "\n[vr] Headset disconnected. Ending session.\n";
-      trossen::utils::g_stop_requested = true;
-    };
-
-    for (auto& sc : session_ctrls) sc->set_callbacks(event_cb, disconnect_cb);
-
     try {
-      for (auto& sc : session_ctrls) sc->start();
+      for (auto& sc : session_ctrls) mgr.attach_control(*sc);
       std::cout << "VR headset connected. "
                    "Right A=start B=re-record, Left X=stop-early Y=stop-session.\n";
     } catch (const std::exception& e) {
@@ -416,7 +398,6 @@ int main(int argc, char** argv) {
     if (initial == trossen::runtime::UserAction::kStop ||
         trossen::utils::g_stop_requested) {
       std::cout << "\nAborted before first episode.\n";
-      for (auto& sc : session_ctrls) sc->stop();
       mgr.shutdown();
       return 0;
     }
@@ -454,8 +435,6 @@ int main(int argc, char** argv) {
 
   // shutdown() calls stop_episode() (no-op if already stopped) then on_pre_shutdown
   mgr.shutdown();
-
-  for (auto& sc : session_ctrls) sc->stop();
 
   const auto final_stats = mgr.stats();
   std::vector<std::string> extra_info = {
