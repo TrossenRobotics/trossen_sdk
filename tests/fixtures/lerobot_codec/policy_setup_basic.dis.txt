@@ -1,0 +1,122 @@
+    0: \x80 PROTO      4
+    2: \x95 FRAME      689
+   11: \x8c SHORT_BINUNICODE 'lerobot.async_inference.helpers'
+   44: \x94 MEMOIZE    (as 0)
+   45: \x8c SHORT_BINUNICODE 'RemotePolicyConfig'
+   65: \x94 MEMOIZE    (as 1)
+   66: \x93 STACK_GLOBAL
+   67: \x94 MEMOIZE    (as 2)
+   68: )    EMPTY_TUPLE
+   69: \x81 NEWOBJ
+   70: \x94 MEMOIZE    (as 3)
+   71: }    EMPTY_DICT
+   72: \x94 MEMOIZE    (as 4)
+   73: (    MARK
+   74: \x8c     SHORT_BINUNICODE 'policy_type'
+   87: \x94     MEMOIZE    (as 5)
+   88: \x8c     SHORT_BINUNICODE 'act'
+   93: \x94     MEMOIZE    (as 6)
+   94: \x8c     SHORT_BINUNICODE 'pretrained_name_or_path'
+  119: \x94     MEMOIZE    (as 7)
+  120: \x8c     SHORT_BINUNICODE 'trossen/act_bimanual'
+  142: \x94     MEMOIZE    (as 8)
+  143: \x8c     SHORT_BINUNICODE 'lerobot_features'
+  161: \x94     MEMOIZE    (as 9)
+  162: }        EMPTY_DICT
+  163: \x94     MEMOIZE    (as 10)
+  164: (        MARK
+  165: \x8c         SHORT_BINUNICODE 'observation.state'
+  184: \x94         MEMOIZE    (as 11)
+  185: }            EMPTY_DICT
+  186: \x94         MEMOIZE    (as 12)
+  187: (            MARK
+  188: \x8c             SHORT_BINUNICODE 'dtype'
+  195: \x94             MEMOIZE    (as 13)
+  196: \x8c             SHORT_BINUNICODE 'float32'
+  205: \x94             MEMOIZE    (as 14)
+  206: \x8c             SHORT_BINUNICODE 'shape'
+  213: \x94             MEMOIZE    (as 15)
+  214: K                BININT1    14
+  216: \x85             TUPLE1
+  217: \x94             MEMOIZE    (as 16)
+  218: \x8c             SHORT_BINUNICODE 'names'
+  225: \x94             MEMOIZE    (as 17)
+  226: ]                EMPTY_LIST
+  227: \x94             MEMOIZE    (as 18)
+  228: (                MARK
+  229: \x8c                 SHORT_BINUNICODE 'left_waist.pos'
+  245: \x94                 MEMOIZE    (as 19)
+  246: \x8c                 SHORT_BINUNICODE 'left_shoulder.pos'
+  265: \x94                 MEMOIZE    (as 20)
+  266: \x8c                 SHORT_BINUNICODE 'left_elbow.pos'
+  282: \x94                 MEMOIZE    (as 21)
+  283: \x8c                 SHORT_BINUNICODE 'left_forearm_roll.pos'
+  306: \x94                 MEMOIZE    (as 22)
+  307: \x8c                 SHORT_BINUNICODE 'left_wrist_angle.pos'
+  329: \x94                 MEMOIZE    (as 23)
+  330: \x8c                 SHORT_BINUNICODE 'left_wrist_rotate.pos'
+  353: \x94                 MEMOIZE    (as 24)
+  354: \x8c                 SHORT_BINUNICODE 'left_gripper.pos'
+  372: \x94                 MEMOIZE    (as 25)
+  373: \x8c                 SHORT_BINUNICODE 'right_waist.pos'
+  390: \x94                 MEMOIZE    (as 26)
+  391: \x8c                 SHORT_BINUNICODE 'right_shoulder.pos'
+  411: \x94                 MEMOIZE    (as 27)
+  412: \x8c                 SHORT_BINUNICODE 'right_elbow.pos'
+  429: \x94                 MEMOIZE    (as 28)
+  430: \x8c                 SHORT_BINUNICODE 'right_forearm_roll.pos'
+  454: \x94                 MEMOIZE    (as 29)
+  455: \x8c                 SHORT_BINUNICODE 'right_wrist_angle.pos'
+  478: \x94                 MEMOIZE    (as 30)
+  479: \x8c                 SHORT_BINUNICODE 'right_wrist_rotate.pos'
+  503: \x94                 MEMOIZE    (as 31)
+  504: \x8c                 SHORT_BINUNICODE 'right_gripper.pos'
+  523: \x94                 MEMOIZE    (as 32)
+  524: e                    APPENDS    (MARK at 228)
+  525: u                SETITEMS   (MARK at 187)
+  526: \x8c         SHORT_BINUNICODE 'observation.images.cam_high'
+  555: \x94         MEMOIZE    (as 33)
+  556: }            EMPTY_DICT
+  557: \x94         MEMOIZE    (as 34)
+  558: (            MARK
+  559: h                BINGET     13
+  561: \x8c             SHORT_BINUNICODE 'image'
+  568: \x94             MEMOIZE    (as 35)
+  569: h                BINGET     15
+  571: M                BININT2    480
+  574: M                BININT2    640
+  577: K                BININT1    3
+  579: \x87             TUPLE3
+  580: \x94             MEMOIZE    (as 36)
+  581: h                BINGET     17
+  583: ]                EMPTY_LIST
+  584: \x94             MEMOIZE    (as 37)
+  585: (                MARK
+  586: \x8c                 SHORT_BINUNICODE 'height'
+  594: \x94                 MEMOIZE    (as 38)
+  595: \x8c                 SHORT_BINUNICODE 'width'
+  602: \x94                 MEMOIZE    (as 39)
+  603: \x8c                 SHORT_BINUNICODE 'channels'
+  613: \x94                 MEMOIZE    (as 40)
+  614: e                    APPENDS    (MARK at 585)
+  615: u                SETITEMS   (MARK at 558)
+  616: u            SETITEMS   (MARK at 164)
+  617: \x8c     SHORT_BINUNICODE 'actions_per_chunk'
+  636: \x94     MEMOIZE    (as 41)
+  637: K        BININT1    100
+  639: \x8c     SHORT_BINUNICODE 'device'
+  647: \x94     MEMOIZE    (as 42)
+  648: \x8c     SHORT_BINUNICODE 'cpu'
+  653: \x94     MEMOIZE    (as 43)
+  654: \x8c     SHORT_BINUNICODE 'rename_map'
+  666: \x94     MEMOIZE    (as 44)
+  667: }        EMPTY_DICT
+  668: \x94     MEMOIZE    (as 45)
+  669: h        BINGET     33
+  671: \x8c     SHORT_BINUNICODE 'observation.images.top'
+  695: \x94     MEMOIZE    (as 46)
+  696: s        SETITEM
+  697: u        SETITEMS   (MARK at 73)
+  698: b    BUILD
+  699: .    STOP
+highest protocol among opcodes = 4

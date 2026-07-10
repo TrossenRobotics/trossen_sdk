@@ -25,7 +25,23 @@ Outputs (written next to this script):
     action_chunk_f32_3x14.dis.txt       pickletools disassembly (the VM opcode spec)
     observation_basic.pkl               raw SendObservations payload bytes (emit target)
     observation_basic.dis.txt           pickletools disassembly of the observation
+    policy_setup_basic.pkl              raw SendPolicyInstructions payload (emit target)
+    policy_setup_basic.dis.txt          pickletools disassembly of the handshake
     versions.json                       exact stack + pickle protocol provenance
+
+EMIT-SIDE GOLDENS (observation_basic.emit.bin, policy_setup_basic.emit.bin):
+    The C++ emit path (encode_observation / encode_policy_setup) does NOT produce
+    CPython-identical bytes — it writes no memo table and spells fixed-rank shape
+    tuples as MARK/TUPLE rather than TUPLEn — so it cannot be byte-compared to the
+    .pkl fixtures above. Instead the emitter's own output is checked in as a
+    ``*.emit.bin`` golden and its disassembly as ``*.emit.dis.txt``. The C++ tests
+    EmitObservationParity / EmitPolicySetupParity byte-compare fresh emitter output
+    against those goldens (a drift tripwire); the goldens' CORRECTNESS was verified
+    once by disassembling them (pickletools.dis) and confirming the same
+    _reconstruct / dtype-state / BUILD structure as the CPython .pkl fixtures here,
+    differing only by the memo table and TUPLE encoding. Regenerate a golden by
+    running the throwaway emit harness (tests build target) and re-checking its
+    .emit.dis.txt against the matching .dis.txt after any emit-format change.
 """
 
 import io
@@ -38,7 +54,11 @@ import numpy as np
 import torch
 
 import lerobot
-from lerobot.async_inference.helpers import TimedAction, TimedObservation
+from lerobot.async_inference.helpers import (
+    RemotePolicyConfig,
+    TimedAction,
+    TimedObservation,
+)
 from lerobot.transport.utils import python_object_to_bytes
 
 OUT_DIR = Path(__file__).resolve().parent
@@ -124,6 +144,55 @@ def capture_observation() -> None:
     _write("observation_basic.pkl", data)
 
 
+def capture_policy_setup() -> None:
+    """Serialize a RemotePolicyConfig exactly as robot_client sends on connect.
+
+    This is the SendPolicyInstructions handshake: the client declares its policy
+    plus the dataset feature schema the server uses to assemble frames. The
+    server reads each feature via ft["dtype"]/["shape"]/["names"] (plain dict
+    access in build_dataset_frame), so lerobot_features holds plain feature
+    dicts, NOT PolicyFeature dataclasses — the C++ emit path targets those dicts.
+
+    Feature set is bimanual (two 7-DoF arms): one 1-D float32 observation.state
+    carrying its 14 ordered "<motor>.pos" names, plus one HWC image feature.
+    """
+    # 7-DoF-per-arm bimanual joint order; names give the server the gather order
+    # for observation.state (values[name] for name in names).
+    joints = [
+        "waist",
+        "shoulder",
+        "elbow",
+        "forearm_roll",
+        "wrist_angle",
+        "wrist_rotate",
+        "gripper",
+    ]
+    state_names = [f"{side}_{j}.pos" for side in ("left", "right") for j in joints]
+
+    lerobot_features = {
+        "observation.state": {
+            "dtype": "float32",
+            "shape": (len(state_names),),
+            "names": state_names,
+        },
+        "observation.images.cam_high": {
+            "dtype": "image",
+            "shape": (480, 640, 3),
+            "names": ["height", "width", "channels"],
+        },
+    }
+    cfg = RemotePolicyConfig(
+        policy_type="act",
+        pretrained_name_or_path="trossen/act_bimanual",
+        lerobot_features=lerobot_features,
+        actions_per_chunk=100,
+        device="cpu",
+        rename_map={"observation.images.cam_high": "observation.images.top"},
+    )
+    data = python_object_to_bytes(cfg)  # == pickle.dumps(cfg), client's path
+    _write("policy_setup_basic.pkl", data)
+
+
 def capture_versions() -> None:
     """Record the exact stack and the pickle protocol the payloads use (answers D0c)."""
     sample = python_object_to_bytes([1])
@@ -145,6 +214,7 @@ def main() -> None:
     print(f"Capturing LeRobot codec fixtures into {OUT_DIR}")
     capture_action_chunk()
     capture_observation()
+    capture_policy_setup()
     capture_versions()
     print("Done.")
 

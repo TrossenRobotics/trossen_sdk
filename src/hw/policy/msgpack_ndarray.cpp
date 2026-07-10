@@ -90,6 +90,13 @@ void pack_ndarray(msgpack::packer<msgpack::sbuffer>& pk,
 
   pk.pack_bin(std::strlen(kKeyData));
   pk.pack_bin_body(kKeyData, std::strlen(kKeyData));
+  // msgpack bin32 carries a 32-bit length, so a payload of 2^32 bytes or more
+  // would silently truncate when narrowed to uint32_t. Reject it instead of
+  // emitting a corrupt frame (no runtime test: allocating 4 GiB is infeasible).
+  if (data_size > std::numeric_limits<uint32_t>::max()) {
+    throw std::runtime_error(
+        "msgpack_ndarray: array payload exceeds 4 GiB msgpack bin limit");
+  }
   pk.pack_bin(static_cast<uint32_t>(data_size));
   pk.pack_bin_body(reinterpret_cast<const char*>(data), data_size);
 

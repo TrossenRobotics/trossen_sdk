@@ -67,6 +67,11 @@ struct DecodedActions
 // tests/fixtures/lerobot_codec/versions.json). Output is NOT byte-identical to
 // CPython's pickler (no memo table is emitted), but ``pickle.loads`` decodes it
 // to the equivalent object — which is all the server requires.
+//
+// Image observations are emitted as a numpy ndarray under the module path
+// ``numpy._core.multiarray`` — the numpy >= 2.0 path (renamed from
+// ``numpy.core`` in 2.0). The unpickling server must therefore run numpy >= 2.0,
+// which matches the pinned stack.
 // ===========================================================================
 
 /// One entry of ``RemotePolicyConfig.lerobot_features`` — a LeRobot *dataset*

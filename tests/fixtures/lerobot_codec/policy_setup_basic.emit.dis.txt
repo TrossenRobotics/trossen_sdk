@@ -1,0 +1,78 @@
+    0: \x80 PROTO      4
+    2: \x95 FRAME      687
+   11: \x8c SHORT_BINUNICODE 'lerobot.async_inference.helpers'
+   44: \x8c SHORT_BINUNICODE 'RemotePolicyConfig'
+   64: \x93 STACK_GLOBAL
+   65: )    EMPTY_TUPLE
+   66: \x81 NEWOBJ
+   67: }    EMPTY_DICT
+   68: (    MARK
+   69: \x8c     SHORT_BINUNICODE 'policy_type'
+   82: \x8c     SHORT_BINUNICODE 'act'
+   87: \x8c     SHORT_BINUNICODE 'pretrained_name_or_path'
+  112: \x8c     SHORT_BINUNICODE 'trossen/act_bimanual'
+  134: \x8c     SHORT_BINUNICODE 'lerobot_features'
+  152: }        EMPTY_DICT
+  153: (        MARK
+  154: \x8c         SHORT_BINUNICODE 'observation.state'
+  173: }            EMPTY_DICT
+  174: (            MARK
+  175: \x8c             SHORT_BINUNICODE 'dtype'
+  182: \x8c             SHORT_BINUNICODE 'float32'
+  191: \x8c             SHORT_BINUNICODE 'shape'
+  198: (                MARK
+  199: K                    BININT1    14
+  201: t                    TUPLE      (MARK at 198)
+  202: \x8c             SHORT_BINUNICODE 'names'
+  209: ]                EMPTY_LIST
+  210: (                MARK
+  211: \x8c                 SHORT_BINUNICODE 'left_waist.pos'
+  227: \x8c                 SHORT_BINUNICODE 'left_shoulder.pos'
+  246: \x8c                 SHORT_BINUNICODE 'left_elbow.pos'
+  262: \x8c                 SHORT_BINUNICODE 'left_forearm_roll.pos'
+  285: \x8c                 SHORT_BINUNICODE 'left_wrist_angle.pos'
+  307: \x8c                 SHORT_BINUNICODE 'left_wrist_rotate.pos'
+  330: \x8c                 SHORT_BINUNICODE 'left_gripper.pos'
+  348: \x8c                 SHORT_BINUNICODE 'right_waist.pos'
+  365: \x8c                 SHORT_BINUNICODE 'right_shoulder.pos'
+  385: \x8c                 SHORT_BINUNICODE 'right_elbow.pos'
+  402: \x8c                 SHORT_BINUNICODE 'right_forearm_roll.pos'
+  426: \x8c                 SHORT_BINUNICODE 'right_wrist_angle.pos'
+  449: \x8c                 SHORT_BINUNICODE 'right_wrist_rotate.pos'
+  473: \x8c                 SHORT_BINUNICODE 'right_gripper.pos'
+  492: e                    APPENDS    (MARK at 210)
+  493: u                SETITEMS   (MARK at 174)
+  494: \x8c         SHORT_BINUNICODE 'observation.images.cam_high'
+  523: }            EMPTY_DICT
+  524: (            MARK
+  525: \x8c             SHORT_BINUNICODE 'dtype'
+  532: \x8c             SHORT_BINUNICODE 'image'
+  539: \x8c             SHORT_BINUNICODE 'shape'
+  546: (                MARK
+  547: M                    BININT2    480
+  550: M                    BININT2    640
+  553: K                    BININT1    3
+  555: t                    TUPLE      (MARK at 546)
+  556: \x8c             SHORT_BINUNICODE 'names'
+  563: ]                EMPTY_LIST
+  564: (                MARK
+  565: \x8c                 SHORT_BINUNICODE 'height'
+  573: \x8c                 SHORT_BINUNICODE 'width'
+  580: \x8c                 SHORT_BINUNICODE 'channels'
+  590: e                    APPENDS    (MARK at 564)
+  591: u                SETITEMS   (MARK at 524)
+  592: u            SETITEMS   (MARK at 153)
+  593: \x8c     SHORT_BINUNICODE 'actions_per_chunk'
+  612: K        BININT1    100
+  614: \x8c     SHORT_BINUNICODE 'device'
+  622: \x8c     SHORT_BINUNICODE 'cpu'
+  627: \x8c     SHORT_BINUNICODE 'rename_map'
+  639: }        EMPTY_DICT
+  640: (        MARK
+  641: \x8c         SHORT_BINUNICODE 'observation.images.cam_high'
+  670: \x8c         SHORT_BINUNICODE 'observation.images.top'
+  694: u            SETITEMS   (MARK at 640)
+  695: u        SETITEMS   (MARK at 68)
+  696: b    BUILD
+  697: .    STOP
+highest protocol among opcodes = 4

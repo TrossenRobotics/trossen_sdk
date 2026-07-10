@@ -303,11 +303,19 @@ void emit_newobj_shell(ByteWriter & w, const std::string & module, const std::st
   w.u8(0x81);           // NEWOBJ
 }
 
-/// Emit a C-contiguous uint8 ndarray exactly as numpy 2.2.6 (the pin) pickles
-/// it: _reconstruct shell, then BUILD with state (1, shape, dtype, False, raw),
-/// where dtype is numpy.dtype('u1', False, True) + BUILD. Mirrors the fixture
-/// observation_basic.dis.txt offsets 265-416. uint8 only — RGB HWC images; any
-/// other dtype is intentionally unsupported (would need its own dtype state).
+/// Emit a C-contiguous uint8 ndarray reproducing the SAME structure numpy 2.2.6
+/// (the pin) pickles: _reconstruct shell, then BUILD with state
+/// (1, shape, dtype, False, raw), where dtype is numpy.dtype('u1', False, True)
+/// + BUILD. It is NOT byte-identical to numpy's own output: numpy emits a memo
+/// table (MEMOIZE/BINGET) and spells the shape tuple as TUPLE3, whereas this
+/// emitter writes no memo (repeats strings) and uses MARK/TUPLE; the byte
+/// offsets therefore differ from the observation_basic fixture. Equivalent
+/// under pickle.loads, which is all the server needs. uint8 only — RGB HWC
+/// images; any other dtype is intentionally unsupported (own dtype state).
+///
+/// The emitted module path "numpy._core.multiarray" is numpy >= 2.0 only (the
+/// numpy.core -> numpy._core rename landed in numpy 2.0), so the SERVER that
+/// unpickles this must run numpy >= 2.0 — which matches the pinned stack.
 void emit_numpy_uint8_array(
   ByteWriter & w, const std::vector<int64_t> & shape, const uint8_t * data, std::size_t n)
 {
@@ -320,6 +328,8 @@ void emit_numpy_uint8_array(
   }
 
   // ① empty shell: numpy._core.multiarray._reconstruct(numpy.ndarray, (0,), b'b')
+  // "numpy._core" is the numpy >= 2.0 module path (renamed from numpy.core in
+  // 2.0); the unpickling server must run numpy >= 2.0.
   emit_global(w, "numpy._core.multiarray", "_reconstruct");
   emit_global(w, "numpy", "ndarray");
   emit_int(w, 0);
