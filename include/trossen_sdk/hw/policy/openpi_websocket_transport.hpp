@@ -7,6 +7,7 @@
 #define TROSSEN_SDK__HW__POLICY__OPENPI_WEBSOCKET_TRANSPORT_HPP_
 
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <memory>
 #include <mutex>
@@ -56,10 +57,18 @@ class OpenpiWebsocketTransport : public PolicyTransport {
 public:
   /**
    * @brief Construct the transport (does not open the socket).
-   * @param url      Full WebSocket URL (e.g. ``ws://host:port``).
-   * @param api_key  Optional API key sent as ``Authorization: Api-Key <key>``.
+   * @param url              Full WebSocket URL (e.g. ``ws://host:port``).
+   * @param api_key          Optional API key sent as
+   *                         ``Authorization: Api-Key <key>``.
+   * @param request_timeout  Upper bound on how long a single observation
+   *                         round-trip waits for the server's reply frame.
+   *                         Generous vs real inference latency by default — it
+   *                         exists only to break a permanent stall against a
+   *                         wedged/half-open server, not to bound normal calls.
    */
-  OpenpiWebsocketTransport(std::string url, std::optional<std::string> api_key);
+  OpenpiWebsocketTransport(std::string url, std::optional<std::string> api_key,
+                           std::chrono::milliseconds request_timeout =
+                             std::chrono::seconds(30));
 
   ~OpenpiWebsocketTransport() override;
 
@@ -103,6 +112,7 @@ private:
 
   std::string url_;
   std::optional<std::string> api_key_;
+  std::chrono::milliseconds request_timeout_;  ///< reply-wait ceiling, round_trip_
 
   std::unique_ptr<ix::WebSocket> ws_;
   nlohmann::json server_metadata_;

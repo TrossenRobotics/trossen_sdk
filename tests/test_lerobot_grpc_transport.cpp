@@ -6,6 +6,7 @@
  *        only asserted to honor the no-op contract.
  */
 
+#include <atomic>
 #include <chrono>
 #include <cstdint>
 #include <fstream>
@@ -144,6 +145,71 @@ public:
 private:
   int port_{0};
   FakeLerobotServer service_;
+  std::unique_ptr<grpc::Server> server_;
+};
+
+// AsyncInference server that stalls inside GetActions: it never returns a
+// status, holding the receiver's poll open until the call is cancelled or
+// deadlined (or teardown flips stop_). SendObservations returns immediately.
+// Used to prove the hot-path deadline bounds a wedged poll — without
+// ctx.set_deadline(rpc_timeout_) the receiver would block here forever.
+// (GetActions is unary; the pre-existing PushStreams test shows the
+// client-streaming SendObservations path has a separate gRPC teardown flake,
+// so the deadline is pinned on the unary RPC to keep this test deterministic.)
+class StallingLerobotServer final : public transport::AsyncInference::Service {
+public:
+  grpc::Status Ready(grpc::ServerContext*, const transport::Empty*,
+                     transport::Empty*) override {
+    return grpc::Status::OK;
+  }
+  grpc::Status SendPolicyInstructions(grpc::ServerContext*,
+                                      const transport::PolicySetup*,
+                                      transport::Empty*) override {
+    return grpc::Status::OK;
+  }
+  grpc::Status SendObservations(grpc::ServerContext*,
+                                grpc::ServerReader<transport::Observation>* reader,
+                                transport::Empty*) override {
+    transport::Observation msg;
+    while (reader->Read(&msg)) {
+    }
+    return grpc::Status::OK;
+  }
+  grpc::Status GetActions(grpc::ServerContext* ctx, const transport::Empty*,
+                          transport::Actions*) override {
+    using std::chrono_literals::operator""ms;
+    while (!stop_.load() && !ctx->IsCancelled()) {
+      std::this_thread::sleep_for(2ms);
+    }
+    return grpc::Status::OK;
+  }
+  /// Release a stalled handler at teardown so Server::Shutdown cannot hang.
+  void request_stop() { stop_.store(true); }
+
+private:
+  std::atomic<bool> stop_{false};
+};
+
+// Owns a StallingLerobotServer on an OS-assigned loopback port; releases the
+// stall before Shutdown so destruction is bounded even if a cancel was missed.
+class ScopedStallingServer {
+public:
+  ScopedStallingServer() {
+    grpc::ServerBuilder builder;
+    builder.AddListeningPort("127.0.0.1:0", grpc::InsecureServerCredentials(),
+                             &port_);
+    builder.RegisterService(&service_);
+    server_ = builder.BuildAndStart();
+  }
+  ~ScopedStallingServer() {
+    service_.request_stop();
+    if (server_) server_->Shutdown();
+  }
+  std::string target() const { return "127.0.0.1:" + std::to_string(port_); }
+
+private:
+  int port_{0};
+  StallingLerobotServer service_;
   std::unique_ptr<grpc::Server> server_;
 };
 
@@ -374,4 +440,51 @@ TEST(LerobotGrpcTransport, ReceiverDecodesActionsFromServer) {
   t->close();
   // After close, a chunk decoded pre-disconnect is not served.
   EXPECT_FALSE(t->try_poll_chunk().has_value());
+}
+
+TEST(LerobotGrpcTransport, FactoryRejectsNonPositiveRpcTimeout) {
+  // Same parse/validate contract as connect_timeout_s: number, strictly > 0.
+  nlohmann::json bad_type = valid_transport_config();
+  bad_type["rpc_timeout_s"] = "soon";
+  EXPECT_THROW(
+    TransportRegistry::create("lerobot_grpc", "pc", "127.0.0.1:8000", bad_type),
+    std::runtime_error);
+
+  nlohmann::json non_positive = valid_transport_config();
+  non_positive["rpc_timeout_s"] = 0.0;
+  EXPECT_THROW(
+    TransportRegistry::create("lerobot_grpc", "pc", "127.0.0.1:8000",
+                              non_positive),
+    std::runtime_error);
+}
+
+TEST(LerobotGrpcTransport, HotPathRpcDeadlineBoundsAStalledPoll) {
+  using std::chrono_literals::operator""ms;
+  using std::chrono_literals::operator""s;
+  ScopedStallingServer server;
+  // Short hot-path deadline so a wedged GetActions cannot park the receiver
+  // forever: without ctx.set_deadline(rpc_timeout_) the poll would block in the
+  // stalled server for the whole (default) budget; with it, GetActions returns
+  // DEADLINE_EXCEEDED and the receiver records a failure and retries. That
+  // bound is the hardware-safety property this test pins.
+  nlohmann::json tc = valid_transport_config();
+  tc["rpc_timeout_s"] = 0.3;
+  auto t = TransportRegistry::create("lerobot_grpc", "pc", server.target(), tc);
+  t->connect();  // starts the receiver, which enters the stalled GetActions
+
+  // The stalled poll must be bounded by the deadline: a failure is recorded
+  // well within a window many times the 0.3s deadline (never "forever").
+  const auto deadline = std::chrono::steady_clock::now() + 3s;
+  while (t->status().failure_count == 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(5ms);
+  }
+  const auto st = t->status();
+  EXPECT_GE(st.failure_count, 1u);
+  EXPECT_FALSE(st.last_error.empty());
+
+  // close() cancels the in-flight GetActions and joins the receiver; the
+  // transport ends up disconnected regardless of the stall.
+  t->close();
+  EXPECT_EQ(t->status().state, TransportStatus::State::kDisconnected);
 }

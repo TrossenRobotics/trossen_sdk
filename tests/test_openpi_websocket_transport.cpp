@@ -47,6 +47,7 @@ enum class ReplyMode {
   ReplyWithTextError,     // Send a text "error" response instead of bytes.
   ReplyWithGoldenBytes,   // Send a hard-coded Python-captured msgpack reply.
   CloseAfterConnect,      // Send metadata, then close the connection.
+  AcceptThenNeverReply,   // Send metadata, then swallow observations silently.
 };
 
 // Golden bytes captured from Python via
@@ -173,6 +174,12 @@ private:
       last_obs_bytes_.assign(msg.str.begin(), msg.str.end());
     }
     obs_received_.fetch_add(1);
+    if (mode_ == ReplyMode::AcceptThenNeverReply) {
+      // Half-open server: the handshake succeeded and the frame was accepted,
+      // but no reply (and no Close) ever comes — the exact wedge round_trip_'s
+      // bounded wait must break out of.
+      return;
+    }
     if (mode_ == ReplyMode::ReplyWithTextError) {
       ws.sendText("policy server error: bad observation");
       return;
@@ -295,6 +302,37 @@ TEST(OpenpiWebsocketTransport, ServerTextReplyReportsFailureViaStatus) {
          std::chrono::steady_clock::now() < deadline) {
     std::this_thread::sleep_for(std::chrono::milliseconds(1));
   }
+  const auto st = t.status();
+  EXPECT_GE(st.failure_count, 1u);
+  EXPECT_EQ(st.state, TransportStatus::State::kDisconnected);
+  EXPECT_FALSE(st.last_error.empty());
+  EXPECT_FALSE(t.try_poll_chunk().has_value());
+}
+
+TEST(OpenpiWebsocketTransport, ReplyTimeoutReportsFailureAndDisconnects) {
+  // A half-open server that accepts the handshake but never answers an
+  // observation would, without a bounded reply wait, park the worker forever
+  // while status() still read kConnected. The round_trip_ wait_for must break
+  // that stall: record a failure and flip to kDisconnected (die-on-disconnect).
+  TestServer server(ReplyMode::AcceptThenNeverReply);
+  // Short reply budget so the wedge is detected quickly (real default is 30s).
+  OpenpiWebsocketTransport t(url_for(server.port()), std::nullopt,
+                             std::chrono::milliseconds(300));
+  t.connect();
+  ASSERT_EQ(t.status().state, TransportStatus::State::kConnected);
+
+  t.push_observation(sample_observation());
+
+  // Poll for the timeout to fire — comfortably longer than request_timeout so
+  // the assertion is on behavior, not on exact timing.
+  const auto deadline =
+    std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (t.status().failure_count == 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  // The server did receive the observation; it just never replied.
+  EXPECT_GE(server.observation_count(), 1u);
   const auto st = t.status();
   EXPECT_GE(st.failure_count, 1u);
   EXPECT_EQ(st.state, TransportStatus::State::kDisconnected);
@@ -435,6 +473,20 @@ TEST(OpenpiWebsocketTransport, FactoryRejectsNonStringApiKey) {
     TransportRegistry::create(
       "openpi_ws", "pc-test", "ws://127.0.0.1:1",
       nlohmann::json{{"api_key", 42}}),
+    std::runtime_error);
+}
+
+TEST(OpenpiWebsocketTransport, FactoryRejectsNonPositiveRequestTimeout) {
+  // Same parse/validate contract as connect_timeout_s: number, strictly > 0.
+  EXPECT_THROW(
+    TransportRegistry::create(
+      "openpi_ws", "pc-test", "ws://127.0.0.1:1",
+      nlohmann::json{{"request_timeout_s", "soon"}}),
+    std::runtime_error);
+  EXPECT_THROW(
+    TransportRegistry::create(
+      "openpi_ws", "pc-test", "ws://127.0.0.1:1",
+      nlohmann::json{{"request_timeout_s", 0.0}}),
     std::runtime_error);
 }
 

@@ -55,11 +55,20 @@ public:
    * @param connect_timeout Per-step handshake budget (channel-ready wait and
    *                        each RPC). Generous by default — a real server may
    *                        JIT/load weights before answering Ready.
+   * @param rpc_timeout     Deadline on each hot-path RPC (SendObservations,
+   *                        GetActions). Short by default: GetActions is a
+   *                        unary short-poll that returns immediately and
+   *                        SendObservations streams one already-built payload,
+   *                        so a few-second deadline never truncates a legit
+   *                        call — it only bounds a wedged server so a worker
+   *                        cannot block forever on the robot path.
    */
   LerobotGrpcTransport(std::string id, std::string target,
                        LerobotPolicyConfig policy_config,
                        std::chrono::milliseconds connect_timeout =
-                         std::chrono::seconds(10));
+                         std::chrono::seconds(10),
+                       std::chrono::milliseconds rpc_timeout =
+                         std::chrono::seconds(5));
   ~LerobotGrpcTransport() override;
 
   /**
@@ -122,6 +131,7 @@ private:
   std::string target_;
   LerobotPolicyConfig policy_config_;
   std::chrono::milliseconds connect_timeout_;
+  std::chrono::milliseconds rpc_timeout_;  ///< deadline for hot-path RPCs
 
   std::shared_ptr<grpc::Channel> channel_;
   std::unique_ptr<transport::AsyncInference::Stub> stub_;

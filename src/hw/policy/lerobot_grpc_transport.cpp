@@ -189,11 +189,13 @@ LerobotPolicyConfig parse_policy_config(const nlohmann::json& tc,
 
 LerobotGrpcTransport::LerobotGrpcTransport(std::string id, std::string target,
                                            LerobotPolicyConfig policy_config,
-                                           std::chrono::milliseconds connect_timeout)
+                                           std::chrono::milliseconds connect_timeout,
+                                           std::chrono::milliseconds rpc_timeout)
     : id_(std::move(id)),
       target_(std::move(target)),
       policy_config_(std::move(policy_config)),
-      connect_timeout_(connect_timeout) {}
+      connect_timeout_(connect_timeout),
+      rpc_timeout_(rpc_timeout) {}
 
 LerobotGrpcTransport::~LerobotGrpcTransport() { close(); }
 
@@ -351,6 +353,9 @@ void LerobotGrpcTransport::send_loop_() {
 
 bool LerobotGrpcTransport::send_observation_bytes_(const std::vector<uint8_t>& bytes) {
   grpc::ClientContext ctx;
+  // Bound the stream so a wedged server cannot park the sender forever on the
+  // robot path (the handshake RPCs already deadline; the hot path must too).
+  ctx.set_deadline(deadline_in(rpc_timeout_));
   active_send_ctx_.store(&ctx);
   // Clear the published ctx pointer on every exit so close()'s TryCancel never
   // dereferences this stack object after it dies.
@@ -358,6 +363,19 @@ bool LerobotGrpcTransport::send_observation_bytes_(const std::vector<uint8_t>& b
     std::atomic<grpc::ClientContext*>& slot;
     ~CtxGuard() { slot.store(nullptr); }
   } guard{active_send_ctx_};
+
+  // Ordering invariant: close() flips sender_running_ false (under send_mu_)
+  // BEFORE it TryCancels the published ctx. A cancel requested in the window
+  // between the send_loop_ running-check and the store above saw no ctx and was
+  // lost; re-read the flag here and self-cancel to close that race before the
+  // RPC can block. Read under send_mu_ (sender_running_ is a plain bool).
+  {
+    std::lock_guard<std::mutex> lk(send_mu_);
+    if (!sender_running_) {
+      ctx.TryCancel();
+      return false;
+    }
+  }
 
   transport::Empty resp;
   std::unique_ptr<grpc::ClientWriter<transport::Observation>> writer(
@@ -417,11 +435,23 @@ void LerobotGrpcTransport::receive_loop_() {
   using std::chrono_literals::operator""ms;
   while (receiver_running_.load()) {
     grpc::ClientContext ctx;
+    // Bound the poll so a wedged server cannot park the receiver forever
+    // (GetActions is a unary short-poll; this never truncates a legit reply).
+    ctx.set_deadline(deadline_in(rpc_timeout_));
     active_get_ctx_.store(&ctx);
     struct CtxGuard {
       std::atomic<grpc::ClientContext*>& slot;
       ~CtxGuard() { slot.store(nullptr); }
     } guard{active_get_ctx_};
+
+    // Ordering invariant (same as the sender): close() clears receiver_running_
+    // before TryCancelling the published ctx, so a cancel requested between the
+    // loop guard and the store above is lost. Re-check after publishing and
+    // self-cancel to close that window before GetActions can block.
+    if (!receiver_running_.load()) {
+      ctx.TryCancel();
+      return;
+    }
 
     transport::Empty req;
     transport::Actions resp;
@@ -580,8 +610,26 @@ const bool kLerobotGrpcRegistered = [] {
         }
         timeout = std::chrono::milliseconds(static_cast<int64_t>(secs * 1000));
       }
+
+      // Optional hot-path RPC deadline; default lives in the constructor. Same
+      // parse/validate shape as connect_timeout_s.
+      auto rpc_timeout = std::chrono::milliseconds(std::chrono::seconds(5));
+      if (transport_config.contains("rpc_timeout_s")) {
+        if (!transport_config.at("rpc_timeout_s").is_number()) {
+          throw std::runtime_error(
+            "lerobot_grpc: transport_config 'rpc_timeout_s' must be a "
+            "number for policy_client '" + id + "'");
+        }
+        const double secs = transport_config.at("rpc_timeout_s").get<double>();
+        if (!(secs > 0.0)) {
+          throw std::runtime_error(
+            "lerobot_grpc: transport_config 'rpc_timeout_s' must be "
+            "positive for policy_client '" + id + "'");
+        }
+        rpc_timeout = std::chrono::milliseconds(static_cast<int64_t>(secs * 1000));
+      }
       return std::make_unique<LerobotGrpcTransport>(
-        id, server_url, std::move(policy_config), timeout);
+        id, server_url, std::move(policy_config), timeout, rpc_timeout);
     });
   return true;
 }();

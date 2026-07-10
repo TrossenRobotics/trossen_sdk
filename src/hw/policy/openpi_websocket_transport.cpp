@@ -229,9 +229,12 @@ void ensure_net_initialized() {
 
 }  // namespace
 
-OpenpiWebsocketTransport::OpenpiWebsocketTransport(std::string url,
-                                                   std::optional<std::string> api_key)
-    : url_(std::move(url)), api_key_(std::move(api_key)) {
+OpenpiWebsocketTransport::OpenpiWebsocketTransport(
+    std::string url, std::optional<std::string> api_key,
+    std::chrono::milliseconds request_timeout)
+    : url_(std::move(url)),
+      api_key_(std::move(api_key)),
+      request_timeout_(request_timeout) {
   ensure_net_initialized();
 }
 
@@ -553,7 +556,18 @@ nlohmann::json OpenpiWebsocketTransport::round_trip_(const nlohmann::json& obs) 
   }
 
   std::unique_lock<std::mutex> lk(reply_mu_);
-  reply_cv_.wait(lk, [this] { return reply_ready_ || reply_closed_; });
+  // Bounded wait, mirroring the handshake in connect(). Invariant: a healthy
+  // server always answers within request_timeout_; a wedged/half-open server
+  // that never replies (and never sends a Close frame to trip reply_closed_)
+  // must NOT park the worker forever while status() still reads kConnected.
+  // On timeout we throw; the worker's catch records the failure and stores
+  // connected_=false (die-on-disconnect), so the next status() is kDisconnected.
+  if (!reply_cv_.wait_for(lk, request_timeout_,
+                          [this] { return reply_ready_ || reply_closed_; })) {
+    throw std::runtime_error(
+      "openpi_ws: timed out waiting for server reply after " +
+      std::to_string(request_timeout_.count()) + " ms");
+  }
   if (reply_closed_ && !reply_ready_) {
     throw std::runtime_error("openpi_ws: connection closed: " + close_reason_);
   }
@@ -720,7 +734,29 @@ const bool kOpenpiWsRegistered = [] {
         }
         api_key = transport_config.at("api_key").get<std::string>();
       }
-      return std::make_unique<OpenpiWebsocketTransport>(server_url, api_key);
+
+      // Optional reply-wait budget; default (generous vs inference latency)
+      // lives in the constructor. Same parse/validate shape as connect_timeout_s
+      // on the grpc transport: number, strictly positive.
+      auto request_timeout = std::chrono::milliseconds(std::chrono::seconds(30));
+      if (transport_config.contains("request_timeout_s")) {
+        if (!transport_config.at("request_timeout_s").is_number()) {
+          throw std::runtime_error(
+            "openpi_ws: transport_config 'request_timeout_s' must be a number "
+            "for policy_client '" + id + "'");
+        }
+        const double secs =
+          transport_config.at("request_timeout_s").get<double>();
+        if (!(secs > 0.0)) {
+          throw std::runtime_error(
+            "openpi_ws: transport_config 'request_timeout_s' must be positive "
+            "for policy_client '" + id + "'");
+        }
+        request_timeout =
+          std::chrono::milliseconds(static_cast<int64_t>(secs * 1000));
+      }
+      return std::make_unique<OpenpiWebsocketTransport>(server_url, api_key,
+                                                        request_timeout);
     });
   return true;
 }();
