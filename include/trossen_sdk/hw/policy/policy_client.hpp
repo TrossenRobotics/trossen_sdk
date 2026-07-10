@@ -16,6 +16,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "nlohmann/json.hpp"
@@ -70,8 +71,8 @@ struct ObservationDiagnostics {
  * ``cache_mu_``; handlers never block on the network.
  *
  * Failure mode: server stalls or exceptions keep the inference thread alive and
- * leave the previous chunk in place; ``Face::read()`` returns the last commanded
- * row indefinitely (see ADR-004 hold-last-action).
+ * leave the previous chunk in place; ``Face::read()`` holds the last commanded
+ * row indefinitely rather than emitting a fresh command (hold-last-action).
  */
 class PolicyClient
   : public hw::HardwareComponent,
@@ -79,6 +80,17 @@ class PolicyClient
 public:
   class Face;
 
+private:
+  /// State shared between a ``PolicyClient`` and the ``Face`` adapters it owns.
+  /// Held by ``shared_ptr`` so a Face that outlives its client — a
+  /// ``TeleopController`` retains its leader Face for its whole life and may be
+  /// torn down after the client — degrades to hold-last instead of
+  /// dereferencing freed memory. ``Face::read()`` touches ONLY this block, never
+  /// the client. Defined in the .cpp (implementation detail). Contains exactly
+  /// what a read touches: the action slot, the scalars, and the tick-log sink.
+  struct SharedState;
+
+public:
   /**
    * @brief Construct with a logical id only; configuration is deferred to
    *        ``configure()``.
@@ -128,16 +140,14 @@ public:
   std::string get_type() const override { return "policy_client"; }
 
   /// Sum of ``joint_count`` across the configured ``joint_layout``.
-  [[nodiscard]] int total_joint_count() const noexcept { return total_n_; }
+  [[nodiscard]] int total_joint_count() const noexcept;
 
   /// Row currently being commanded to all Faces; length is ``total_joint_count()``.
   [[nodiscard]] std::vector<float> current_command() const;
 
   /// Row-selection rate Faces and ``current_command()`` use when indexing the chunk.
   void set_control_rate_hz(double hz) noexcept;
-  [[nodiscard]] double control_rate_hz() const noexcept {
-    return control_rate_hz_.load(std::memory_order_acquire);
-  }
+  [[nodiscard]] double control_rate_hz() const noexcept;
 
   /// Faces registered by this client, in ``joint_layout`` order.
   [[nodiscard]] const std::vector<std::shared_ptr<Face>>& faces() const noexcept {
@@ -149,12 +159,17 @@ public:
     return chunks_published_.load(std::memory_order_acquire);
   }
 
+  /// Monotonic count of chunks rejected by a client-side safety gate (width
+  /// mismatch, non-finite element, all-past or far-future alignment). Held
+  /// last on every rejection; never published (test/diagnostic accessor).
+  [[nodiscard]] uint64_t chunks_rejected() const noexcept {
+    return chunks_rejected_.load(std::memory_order_acquire);
+  }
+
   /// Snapshot of the currently-published action chunk; null if none has been
   /// received yet. Used by ``PolicyClientProducer`` to derive a chunk-aligned
   /// timestamp when ``use_device_time`` is enabled.
-  [[nodiscard]] std::shared_ptr<const ActionChunk> latest_chunk() const noexcept {
-    return chunk_slot_.peek();
-  }
+  [[nodiscard]] std::shared_ptr<const ActionChunk> latest_chunk() const noexcept;
 
   /// Transport health snapshot. ``failure_count`` is the transport-lifetime
   /// failure counter (replaces the old ``round_trip_failures()``); episode
@@ -227,13 +242,32 @@ private:
   /// (ages, skew) into @p diag. The skew/age math uses the steady-clock
   /// timestamps producers attach to every record. Wire shaping (flattening,
   /// channel quirks, transposes) is the transport's job, not done here.
-  Observation pack_observation_(ObservationDiagnostics& diag);
+  /// Pack the neutral Observation. Returns ``std::nullopt`` when a configured
+  /// camera cannot be represented this cycle (no valid frame and no dimensions
+  /// to synthesize a placeholder), which tells the inference loop to skip
+  /// publishing rather than ship an observation with a diverging image set.
+  std::optional<Observation> pack_observation_(ObservationDiagnostics& diag);
 
-  /// Extract one camera frame as a neutral Image: resized per @p sub, HWC,
-  /// TRUE RGB (bgr8 records are converted; rgb8 pass through). Returns
-  /// nullopt to skip the camera (bad record with no configured resize).
+  /// Resolve one configured camera into a neutral Image. @p rec may be null
+  /// (no record delivered yet). A valid, non-empty, channel-mappable frame is
+  /// resized per @p sub, delivered HWC and TRUE RGB (mono8 is expanded to RGB,
+  /// bgr8 is converted, rgb8 passes through). Any other case (missing/wrong
+  /// record type, empty Mat, unmappable channel count) falls back to a zero
+  /// (black) placeholder of the same shape so the observation's image set stays
+  /// stable. Returns ``std::nullopt`` ONLY when even a placeholder cannot be
+  /// sized (no resize configured and no prior frame seen), signalling the
+  /// caller to fail the whole observation.
   std::optional<Observation::Image> pack_image_(
     const std::shared_ptr<data::RecordBase>& rec,
+    const configuration::PolicyClientSubscriptionConfig& sub,
+    const std::string& camera_key);
+
+  /// Produce a zero (black) placeholder Image for @p camera_key, sized from the
+  /// subscription's ``resize`` if set, else from the last successfully packed
+  /// frame for this camera. Returns ``std::nullopt`` when neither source of
+  /// dimensions is available (a configured camera we have never seen and that
+  /// declares no resize) — the observation then cannot be represented uniformly.
+  std::optional<Observation::Image> substitute_image_(
     const configuration::PolicyClientSubscriptionConfig& sub,
     const std::string& camera_key);
 
@@ -246,6 +280,14 @@ private:
   void apply_chunk_(ActionChunk chunk, uint64_t request_seq, double rt_ms);
 
   void warn_once_(const std::string& key, const std::string& message);
+
+  /// Rate-limited sibling of ``warn_once_``: logs @p message when at least
+  /// @p interval_ms has elapsed since the last log for @p key (always logs the
+  /// first time). Used for conditions that must keep surfacing while they
+  /// persist — a server streaming non-finite actions, say — where a one-shot
+  /// warning would hide an ongoing hazard yet per-event logging would flood.
+  void warn_throttled_(const std::string& key, const std::string& message,
+                       std::chrono::milliseconds interval_ms);
 
   /// Open the JSONL log file declared in @p log_path. No-op when empty.
   /// Performs tilde expansion and creates parent directories. Logs but does
@@ -262,16 +304,6 @@ private:
                      std::chrono::steady_clock::time_point t_recv,
                      double rt_ms,
                      const std::shared_ptr<const ActionChunk>& chunk);
-
-  /// Per-tick log emitted from @c Face::read on every control-loop sample.
-  /// Carries the action row slice the follower actually executed, plus the
-  /// chunk-playback metadata (chunk_seq, t_idx, saturated, blend_active)
-  /// required to correlate the action stream with chunk boundaries and
-  /// wait windows. Thread-safe (multiple faces poll concurrently).
-  void log_tick_(const std::string& face_id,
-                 std::chrono::steady_clock::time_point t,
-                 const std::vector<float>& action,
-                 const ChunkSlot::SampleInfo* info_ptr);
 
   bool configured_{false};
   configuration::PolicyClientConfig cfg_;
@@ -308,7 +340,7 @@ private:
   /// only updated on the next face sample after a chunk is applied —
   /// a stale read here was the cause of the "wait skipped after cycle ~6"
   /// regression where the loop fell back to wall-clock cadence and
-  /// re-introduced the mid-chunk observation problem (4.3). Updated in
+  /// re-introduced the mid-chunk observation problem. Updated in
   /// @c apply_chunk_ on every successful publish; consumed by
   /// @c wait_for_fire_point_ on the following cycle. Cleared to the default
   /// (epoch zero) by the inference thread when it wakes from a pause, and on
@@ -330,9 +362,17 @@ private:
   /// window yet". Inference-thread only (set in inference_loop_).
   std::chrono::steady_clock::time_point inference_epoch_{};
 
-  ChunkSlot chunk_slot_;
+  /// The action slot, control scalars, and JSONL log sink read by Faces. Owned
+  /// jointly with every Face (see @c SharedState) so a surviving Face is safe.
+  /// Created in the ctor / @c init_; never null once the object is constructed.
+  std::shared_ptr<SharedState> shared_;
   std::vector<std::shared_ptr<Face>> faces_;
-  int total_n_{0};
+
+  /// Per-camera dimensions of the last successfully packed frame, used to size
+  /// a zero placeholder when a camera's record is missing or unmappable and no
+  /// ``resize`` is configured. Inference-thread only (written in @c pack_image_,
+  /// read in @c substitute_image_), so no synchronization is required.
+  std::unordered_map<std::string, std::pair<int, int>> last_image_dims_;
 
   std::thread inference_thread_;
   std::atomic<bool> inference_running_{false};
@@ -340,35 +380,36 @@ private:
   std::mutex inference_mu_;
   std::condition_variable inference_cv_;
 
-  std::atomic<double> control_rate_hz_{30.0};
   // Chunk identity (chunk_seq) is stamped by the transport, per connection —
   // the client deliberately has no counter of its own, so JSONL logs and
   // Face tick logs can never disagree on a chunk's number.
   std::atomic<uint64_t> chunks_published_{0};
+  /// Count of chunks dropped by a client-side safety gate (see @c chunks_rejected).
+  std::atomic<uint64_t> chunks_rejected_{0};
 
   std::mutex warn_mu_;
   std::unordered_map<std::string, bool> warned_;
-
-  /// JSONL log shared by the inference thread (request/response events) and
-  /// every Face::read tick (tick events). The mutex serializes line writes
-  /// so multi-arm setups don't interleave bytes mid-line.
-  std::ofstream log_file_;
-  std::mutex log_mu_;
-  std::chrono::steady_clock::time_point log_t0_;
+  /// Last-log instants for @c warn_throttled_, keyed like @c warned_. Guarded
+  /// by @c warn_mu_ alongside @c warned_.
+  std::unordered_map<std::string, std::chrono::steady_clock::time_point> warn_throttle_at_;
 };
 
 /**
- * @brief Per-arm leader Face: presents a sliced view of the owner's action chunk.
+ * @brief Per-arm leader Face: presents a sliced view of the action chunk.
  *
- * Owns no state of its own besides ``[offset, count)``; ``read()`` delegates to
- * the owner's ``ChunkSlot``. ``write()`` is a no-op because Faces are leader-only.
- * Lifetime is tied to the owning ``PolicyClient``; Faces hold a raw back-pointer.
+ * Owns no state of its own besides ``[offset, count)`` and the EMA history;
+ * ``read()`` delegates to the shared ``ChunkSlot``. ``write()`` is a no-op
+ * because Faces are leader-only. A Face holds a ``shared_ptr`` to the client's
+ * ``SharedState`` (the action slot + scalars + log sink), NOT a back-pointer to
+ * the client, so a Face that outlives its ``PolicyClient`` still reads valid
+ * memory and safely holds last.
  */
 class PolicyClient::Face
   : public hw::HardwareComponent,
     public hw::teleop::JointSpaceTeleop {
 public:
-  Face(PolicyClient* owner, std::string id, int joint_offset, int joint_count);
+  Face(std::shared_ptr<SharedState> state, std::string id,
+       int joint_offset, int joint_count);
 
   /// No-op: Face is configured at construction by its owning PolicyClient.
   void configure(const nlohmann::json& cfg) override { (void)cfg; }
@@ -376,8 +417,10 @@ public:
   std::string get_type() const override { return "policy_client_face"; }
 
   /// Returns the per-arm slice of the latest commanded action row.
-  /// Honors hold-last-action: under any failure path (including allocation
-  /// failure) returns a ``joint_count``-sized zero vector and never throws.
+  /// Honors hold-last-action: on any failure path it returns the previous
+  /// output (or an empty vector meaning "no command this tick" when no prior
+  /// output exists) rather than a zero vector — commanding every joint to zero
+  /// would be a large, unsafe motion. Never throws.
   std::vector<float> read() noexcept override;
 
   /// No-op: Faces are leader-only; commands are produced by the policy server.
@@ -392,8 +435,22 @@ public:
   /// blend the new chunk against pre-pause output on resume.
   void reset_output_filter() noexcept { prev_out_.clear(); }
 
+  /// Apply the two-alpha output EMA in place: for each channel
+  /// ``out[i] = a·out[i] + (1-a)·prev[i]``, with ``a = alpha_arm`` for arm
+  /// joints and ``a = alpha_gripper`` for the last channel (the gripper by
+  /// convention). Channels whose alpha is >= 1 pass through unchanged. A
+  /// non-finite history term is NOT blended against (it would latch NaN/Inf
+  /// through the recurrence forever); that channel passes the current value
+  /// through instead. @p prev is then updated per-channel with the new finite
+  /// outputs only, so one bad row never poisons subsequent ticks. Exposed as a
+  /// pure static helper so the non-finite guard is unit-testable in isolation.
+  static void apply_output_ema(std::vector<float>& out,
+                               std::vector<float>& prev,
+                               double alpha_arm,
+                               double alpha_gripper) noexcept;
+
 private:
-  PolicyClient* owner_;
+  std::shared_ptr<SharedState> state_;
   int joint_offset_;
   int joint_count_;
   /// Output of the previous ``read()`` after EMA application, used as the

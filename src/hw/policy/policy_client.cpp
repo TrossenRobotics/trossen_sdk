@@ -58,14 +58,46 @@ bool is_expected_camera(const std::string& key) {
 
 }  // namespace
 
+// State shared (by shared_ptr) between a PolicyClient and its Faces. Face::read
+// touches ONLY this block, so a Face that outlives the client stays safe. The
+// JSONL log sink lives here (not on PolicyClient) for the same reason: a
+// surviving Face can still emit tick lines, and the ofstream is closed only
+// when the last owner — client or Face — drops. All scalars are atomic because
+// the inference thread writes them while Face threads read them.
+struct PolicyClient::SharedState {
+  ChunkSlot chunk_slot;
+  std::atomic<int> total_n{0};
+  std::atomic<double> control_rate_hz{30.0};
+  std::atomic<double> output_ema_alpha{1.0};
+  std::atomic<double> output_ema_alpha_gripper{1.0};
+
+  // JSONL log sink, shared with the owning client's request/response logging.
+  // The mutex serializes line writes so multi-arm setups don't interleave
+  // bytes mid-line.
+  std::ofstream log_file;
+  std::mutex log_mu;
+  std::chrono::steady_clock::time_point log_t0{};
+
+  /// Append one per-tick action line. Best-effort; a no-op when no log file is
+  /// open. Safe to call from any Face thread and after the owning client is
+  /// gone (the sink lives as long as this block). Defined out-of-line below,
+  /// after the timestamp helper it depends on.
+  void log_tick(const std::string& face_id,
+                std::chrono::steady_clock::time_point t,
+                const std::vector<float>& action,
+                const ChunkSlot::SampleInfo* info_ptr) noexcept;
+};
+
 PolicyClient::PolicyClient(std::string id)
   : HardwareComponent(id),
-    ObserverBase(id) {}
+    ObserverBase(id),
+    shared_(std::make_shared<SharedState>()) {}
 
 PolicyClient::PolicyClient(configuration::PolicyClientConfig cfg,
                            std::unique_ptr<PolicyTransport> transport)
   : HardwareComponent(cfg.id),
-    ObserverBase(cfg.id) {
+    ObserverBase(cfg.id),
+    shared_(std::make_shared<SharedState>()) {
   if (!transport) {
     throw std::invalid_argument(
       "PolicyClient: transport must not be null for policy_client '" + cfg.id + "'");
@@ -75,8 +107,10 @@ PolicyClient::PolicyClient(configuration::PolicyClientConfig cfg,
 
 PolicyClient::~PolicyClient() {
   // Order: stop the inference thread + observer worker first so no live thread
-  // can dereference owner_/transport_ during teardown, then drop each Face from
-  // the registry so external lookups cannot resolve to a soon-dead object.
+  // touches transport_ during teardown, then drop each Face from the registry
+  // so external lookups cannot resolve to a soon-dead object. Faces themselves
+  // stay safe regardless of order: they hold the shared state, not the client,
+  // so any Face retained elsewhere degrades to hold-last after we are gone.
   try {
     stop();
   } catch (...) {
@@ -200,7 +234,7 @@ void PolicyClient::init_(configuration::PolicyClientConfig cfg,
         "' is already registered in ActiveHardwareRegistry");
     }
     staged.push_back(std::make_shared<Face>(
-      this, row.leader_id, row.joint_offset, row.joint_count));
+      shared_, row.leader_id, row.joint_offset, row.joint_count));
   }
 
   std::vector<std::string> registered_ids;
@@ -217,18 +251,25 @@ void PolicyClient::init_(configuration::PolicyClientConfig cfg,
       registered_ids.push_back(cfg_.joint_layout[i].leader_id);
     }
     faces_ = std::move(staged);
-    total_n_ = 0;
+    int total = 0;
     for (const auto& row : cfg_.joint_layout) {
-      total_n_ += row.joint_count;
+      total += row.joint_count;
     }
+    shared_->total_n.store(total, std::memory_order_release);
   } catch (...) {
     rollback();
     throw;
   }
 
+  // Publish the output-filter coefficients into the shared block so Faces read
+  // them without touching the client (they are fixed for the object's life).
+  shared_->output_ema_alpha.store(cfg_.output_ema_alpha, std::memory_order_release);
+  shared_->output_ema_alpha_gripper.store(
+    cfg_.output_ema_alpha_gripper, std::memory_order_release);
+
   open_log_file_(cfg_.log_path);
 
-  chunk_slot_.set_boundary_blend_s(cfg_.chunk_boundary_blend_s);
+  shared_->chunk_slot.set_boundary_blend_s(cfg_.chunk_boundary_blend_s);
 
   // Tell the slot to skip the boundary cross-fade on gripper channels. By
   // joint_layout convention each entry's last column is the gripper; with
@@ -242,7 +283,7 @@ void PolicyClient::init_(configuration::PolicyClientConfig cfg,
       gripper_indices.push_back(row.joint_offset + row.joint_count - 1);
     }
   }
-  chunk_slot_.set_boundary_blend_skip_indices(std::move(gripper_indices));
+  shared_->chunk_slot.set_boundary_blend_skip_indices(std::move(gripper_indices));
 
   configured_ = true;
 }
@@ -254,7 +295,7 @@ void PolicyClient::set_inference_active(bool active) noexcept {
     // drive the mirror after resume. Faces fall back to hold-last-action,
     // which keeps the follower at its last commanded pose during reset.
     // (ChunkSlot is internally synchronized, so this cross-thread call is safe.)
-    chunk_slot_.swap_in(nullptr);
+    shared_->chunk_slot.swap_in(nullptr);
     // The chunk-exhaust/fire wait targets are NOT touched here: they are owned
     // by the inference thread, which clears them when it wakes from the pause
     // (see inference_loop_). Writing them from this thread would race the loop.
@@ -272,15 +313,27 @@ void PolicyClient::set_inference_active(bool active) noexcept {
 
 void PolicyClient::set_control_rate_hz(double hz) noexcept {
   if (hz > 0.0) {
-    control_rate_hz_.store(hz, std::memory_order_release);
+    shared_->control_rate_hz.store(hz, std::memory_order_release);
   }
 }
 
+double PolicyClient::control_rate_hz() const noexcept {
+  return shared_->control_rate_hz.load(std::memory_order_acquire);
+}
+
+int PolicyClient::total_joint_count() const noexcept {
+  return shared_->total_n.load(std::memory_order_acquire);
+}
+
+std::shared_ptr<const ActionChunk> PolicyClient::latest_chunk() const noexcept {
+  return shared_->chunk_slot.peek();
+}
+
 std::vector<float> PolicyClient::current_command() const {
-  return chunk_slot_.sample(
+  return shared_->chunk_slot.sample(
     std::chrono::steady_clock::now(),
-    total_n_,
-    control_rate_hz_.load(std::memory_order_acquire));
+    shared_->total_n.load(std::memory_order_acquire),
+    shared_->control_rate_hz.load(std::memory_order_acquire));
 }
 
 bool PolicyClient::on_start() {
@@ -388,7 +441,8 @@ void PolicyClient::inference_loop_() {
       next_chunk_fire_target_ = {};
     }
 
-    // One status poll per cycle (§7 failure model); log transitions only.
+    // One status poll per cycle; log transitions only (a disconnect mid-episode
+    // is one warning line, not a per-cycle error stream).
     {
       const TransportStatus st = transport_->status();
       if (st.state != prev_transport_state) {
@@ -479,6 +533,17 @@ void PolicyClient::inference_loop_() {
       // shutdown-interruptible. Exits: chunk, shutdown, or transport gone
       // unhealthy (a disconnected transport polls nullopt forever). NOT on
       // pause — a chunk completing mid-pause is still applied, as before.
+      // Inference deadline: a half-open server can stay kConnected yet never
+      // return a chunk. Without a bound the loop would spin here forever,
+      // silently sending no further observations while the arm holds last. On
+      // the deadline we abandon this round-trip and fall through to the next
+      // cycle, which re-packs and re-pushes a fresh observation (latest-wins
+      // supersedes the abandoned one). cfg_.inference_timeout_ms <= 0 disables
+      // the bound. Logged per-occurrence (ONGOING, not warn_once_) so a
+      // persistent stall keeps surfacing.
+      const bool deadline_enabled = (cfg_.inference_timeout_ms > 0.0);
+      const auto deadline_dur = std::chrono::duration_cast<clock::duration>(
+        std::chrono::duration<double, std::milli>(cfg_.inference_timeout_ms));
       std::optional<ActionChunk> chunk;
       while (inference_running_.load(std::memory_order_acquire)) {
         chunk = transport_->try_poll_chunk();
@@ -486,6 +551,17 @@ void PolicyClient::inference_loop_() {
         if (transport_->status().state !=
             TransportStatus::State::kConnected) {
           break;  // next cycle's status poll logs the transition
+        }
+        if (deadline_enabled && (clock::now() - t_send) > deadline_dur) {
+          const double waited_ms =
+            std::chrono::duration<double, std::milli>(clock::now() - t_send)
+              .count();
+          std::cerr << "[policy_client:" << name() << "] req#" << req_seq
+                    << " no chunk after " << std::fixed << std::setprecision(0)
+                    << waited_ms << " ms (deadline "
+                    << cfg_.inference_timeout_ms
+                    << " ms); abandoning round-trip, re-observing next cycle\n";
+          break;  // abandon; the next cycle re-observes and re-pushes
         }
         std::unique_lock<std::mutex> lk(inference_mu_);
         inference_cv_.wait_for(lk, std::chrono::milliseconds(1), [this] {
@@ -520,7 +596,7 @@ int64_t PolicyClient::current_timestep_(
   if (epoch.time_since_epoch().count() == 0) {
     return 0;  // no active window yet
   }
-  const double rate = control_rate_hz_.load(std::memory_order_acquire);
+  const double rate = shared_->control_rate_hz.load(std::memory_order_acquire);
   if (!(rate > 0.0)) {
     return 0;  // control rate unknown — the clock cannot advance
   }
@@ -654,7 +730,7 @@ double PolicyClient::wait_for_fresh_observations_() {
   return elapsed_ms();
 }
 
-Observation PolicyClient::pack_observation_(
+std::optional<Observation> PolicyClient::pack_observation_(
     ObservationDiagnostics& diag) {
   std::unordered_map<std::string, std::shared_ptr<data::RecordBase>> snapshot;
   {
@@ -746,6 +822,13 @@ Observation PolicyClient::pack_observation_(
     obs.state.push_back(std::move(group));
   }
 
+  // Images: one entry per configured camera, ALWAYS in image_subs_ order and
+  // count. pack_image_ handles a null/bad/unmappable record by substituting a
+  // same-shaped zero frame (see F7), so the observation's image set never
+  // depends on which cameras happened to deliver this cycle. A std::nullopt
+  // means a configured camera cannot be represented at all yet (no valid frame
+  // and no dimensions to synthesize one); publishing an observation with a
+  // missing camera would silently change its shape, so fail the whole cycle.
   obs.images.reserve(image_subs_.size());
   for (std::size_t i = 0; i < image_subs_.size(); ++i) {
     const auto* sub = image_subs_[i];
@@ -753,18 +836,15 @@ Observation PolicyClient::pack_observation_(
     auto it = snapshot.find(sub->record_id);
     std::shared_ptr<data::RecordBase> rec =
       (it != snapshot.end()) ? it->second : nullptr;
-    if (!rec) {
-      warn_once_("missing_record:" + sub->record_id,
-                 "no image record yet for '" + sub->record_id + "'");
-      if (sub->resize.has_value()) {
-        obs.images.push_back(
-          zero_image_(cam_key, sub->resize->first, sub->resize->second));
-      }
-      continue;
+    auto img = pack_image_(rec, *sub, cam_key);
+    if (!img) {
+      warn_once_("camera_unrepresentable:" + cam_key,
+                 "cannot represent configured camera '" + cam_key +
+                 "' (no valid frame and no resize/last-known dimensions to "
+                 "synthesize a placeholder); skipping this observation");
+      return std::nullopt;
     }
-    if (auto img = pack_image_(rec, *sub, cam_key)) {
-      obs.images.push_back(std::move(*img));
-    }
+    obs.images.push_back(std::move(*img));
   }
 
   return obs;
@@ -774,16 +854,20 @@ std::optional<Observation::Image> PolicyClient::pack_image_(
     const std::shared_ptr<data::RecordBase>& rec,
     const configuration::PolicyClientSubscriptionConfig& sub,
     const std::string& camera_key) {
-  auto img_ptr = std::dynamic_pointer_cast<data::ImageRecord>(rec);
+  auto img_ptr = rec ? std::dynamic_pointer_cast<data::ImageRecord>(rec)
+                     : nullptr;
   if (!img_ptr || img_ptr->image.empty()) {
-    warn_once_("unsupported_image:" + sub.record_id,
-               "record '" + sub.record_id +
-               "' is not a non-empty ImageRecord; skipping camera '" +
-               camera_key + "'");
-    if (sub.resize.has_value()) {
-      return zero_image_(camera_key, sub.resize->first, sub.resize->second);
-    }
-    return std::nullopt;
+    // Missing / wrong-type / empty record. Substitute a same-shaped zero frame
+    // so the observation's image set stays stable regardless of which cameras
+    // delivered this cycle (see F7).
+    warn_once_(
+      "missing_image:" + sub.record_id,
+      rec ? ("record '" + sub.record_id +
+             "' is not a non-empty ImageRecord; substituting zero frame for "
+             "camera '" + camera_key + "'")
+          : ("no image record yet for '" + sub.record_id +
+             "'; substituting zero frame for camera '" + camera_key + "'"));
+    return substitute_image_(sub, camera_key);
   }
   const auto& img = *img_ptr;
 
@@ -801,21 +885,38 @@ std::optional<Observation::Image> PolicyClient::pack_image_(
     resized = img.image;
   }
 
-  // The neutral Observation contract is TRUE RGB, always. Producers deliver
-  // either rgb8 (camera-native, pass through) or bgr8 (already converted by
-  // the producer; convert back). Any model-specific channel quirk (openpi's
-  // BGR training convention) is applied inside that transport, never here.
+  // The neutral Observation contract is TRUE RGB, always. Derive the channel
+  // count from the actual Mat, NOT the encoding string: a mono8 (1-channel)
+  // frame has cols bytes/row, so copying cols*3 bytes/row would over-read the
+  // heap. mono8 is expanded to RGB; bgr8 is converted; rgb8 (and any other
+  // 3-channel frame) passes through. A channel count that cannot map to RGB
+  // is rejected via the same zero-substitute path as a missing frame. Any
+  // model-specific channel quirk (openpi's BGR training convention) is applied
+  // inside that transport, never here.
   cv::Mat rgb;
-  if (img.encoding == "bgr8") {
-    cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
+  const int channels = resized.channels();
+  if (channels == 1) {
+    cv::cvtColor(resized, rgb, cv::COLOR_GRAY2RGB);
+  } else if (channels == 3) {
+    if (img.encoding == "bgr8") {
+      cv::cvtColor(resized, rgb, cv::COLOR_BGR2RGB);
+    } else {
+      rgb = resized;  // rgb8 (camera-native) passes through
+    }
   } else {
-    rgb = resized;
+    warn_once_("unsupported_image_channels:" + sub.record_id,
+               "record '" + sub.record_id + "' image has " +
+               std::to_string(channels) +
+               " channels, which cannot map to RGB; substituting zero frame "
+               "for camera '" + camera_key + "'");
+    return substitute_image_(sub, camera_key);
   }
 
   Observation::Image out;
   out.camera = camera_key;
   out.width = rgb.cols;
   out.height = rgb.rows;
+  // rgb now has exactly 3 channels, so cols*3 bytes/row is valid.
   const std::size_t row_bytes = static_cast<std::size_t>(rgb.cols) * 3;
   out.rgb.resize(static_cast<std::size_t>(rgb.rows) * row_bytes);
   // Row-wise copy: cv::Mat rows may be padded (non-continuous), e.g. for
@@ -824,7 +925,34 @@ std::optional<Observation::Image> PolicyClient::pack_image_(
     std::memcpy(out.rgb.data() + static_cast<std::size_t>(y) * row_bytes,
                 rgb.ptr<uint8_t>(y), row_bytes);
   }
+  // Remember the shape so a later missing/unmappable frame for this camera can
+  // still be substituted with a correctly-sized zero frame even when no resize
+  // is configured. Inference-thread only, so no lock needed.
+  last_image_dims_[camera_key] = {out.width, out.height};
   return out;
+}
+
+std::optional<Observation::Image> PolicyClient::substitute_image_(
+    const configuration::PolicyClientSubscriptionConfig& sub,
+    const std::string& camera_key) {
+  int w = 0;
+  int h = 0;
+  if (sub.resize.has_value()) {
+    w = sub.resize->first;
+    h = sub.resize->second;
+  } else {
+    auto it = last_image_dims_.find(camera_key);
+    if (it != last_image_dims_.end()) {
+      w = it->second.first;
+      h = it->second.second;
+    }
+  }
+  if (w > 0 && h > 0) {
+    return zero_image_(camera_key, w, h);
+  }
+  // No resize and no prior frame: we cannot size a placeholder. The caller
+  // fails the whole observation rather than shipping a diverging image set.
+  return std::nullopt;
 }
 
 Observation::Image PolicyClient::zero_image_(
@@ -845,12 +973,34 @@ void PolicyClient::apply_chunk_(ActionChunk chunk_in,
   // which also stamped chunk_seq (per-connection) and received_at. The
   // client's own gate is the one fact the transport cannot know: the chunk
   // width must match the configured joint layout.
-  if (chunk_in.N != total_n_) {
+  const int total_n = shared_->total_n.load(std::memory_order_acquire);
+  if (chunk_in.N != total_n) {
     warn_once_("chunk_n_mismatch",
                "policy reply actions N=" + std::to_string(chunk_in.N) +
-               " does not match sum(joint_count)=" + std::to_string(total_n_) +
+               " does not match sum(joint_count)=" + std::to_string(total_n) +
                "; ignoring chunk (hold-last-action)");
+    chunks_rejected_.fetch_add(1, std::memory_order_relaxed);
     return;
+  }
+
+  // Safety gate: this chunk is about to drive physical arms. A single
+  // non-finite action (NaN/Inf from a diverged or malfunctioning server) would
+  // command a garbage pose. Scan the whole [T x N] buffer and reject the WHOLE
+  // chunk on the first non-finite element — never publish a partially
+  // sanitized chunk. Rejection is hold-last-action: the slot keeps playing the
+  // chunk it already has (or its last row). Throttled (not warn_once_) so a
+  // persistently bad server keeps surfacing rather than warning only once.
+  // NOTE: per-joint range/limit clamping is a fast-follow — this branch has no
+  // per-joint bounds surface to check against yet, so only finiteness is gated.
+  for (float v : chunk_in.data) {
+    if (!std::isfinite(v)) {
+      warn_throttled_("chunk_non_finite",
+                      "policy reply chunk contains a non-finite action "
+                      "(NaN/Inf); rejecting the whole chunk (hold-last-action)",
+                      std::chrono::milliseconds(1000));
+      chunks_rejected_.fetch_add(1, std::memory_order_relaxed);
+      return;
+    }
   }
 
   auto chunk = std::make_shared<const ActionChunk>(std::move(chunk_in));
@@ -871,7 +1021,7 @@ void PolicyClient::apply_chunk_(ActionChunk chunk_in,
 
   log_response_(request_seq, chunk->received_at, rt_ms, chunk);
 
-  const double rate = control_rate_hz_.load(std::memory_order_acquire);
+  const double rate = shared_->control_rate_hz.load(std::memory_order_acquire);
 
   // Async-overlap path (drain threshold θ>0): the chunk was inferred while the
   // previous one still plays, so it takes over immediately, aligned to the
@@ -880,11 +1030,27 @@ void PolicyClient::apply_chunk_(ActionChunk chunk_in,
   if (cfg_.drain_threshold > 0.0 && rate > 0.0 && chunk->T > 0 &&
       inference_epoch_.time_since_epoch().count() != 0) {
     const auto now = std::chrono::steady_clock::now();
-    const int64_t start_row = current_timestep_(now) - chunk->base_timestep;
+    const int64_t ts_now = current_timestep_(now);
+    const int64_t start_row = ts_now - chunk->base_timestep;
     if (start_row >= chunk->T) {
       warn_once_("chunk_all_past",
                  "policy reply chunk is already fully in the past "
                  "(base_timestep behind the timestep clock); discarding");
+      chunks_rejected_.fetch_add(1, std::memory_order_relaxed);
+      return;  // hold-last-action; keep the chunk currently playing
+    }
+    // Symmetric forward bound: a far-future base_timestep (server clock ahead,
+    // or a corrupt/garbage value) makes start_row strongly negative, so the
+    // all-past guard above passes, yet aligned_start / the fire target land far
+    // ahead — the arm would stall on hold-last for a long time. Reject any
+    // chunk claiming to start more than a full chunk's worth of ticks ahead of
+    // the timestep clock.
+    if (chunk->base_timestep - ts_now > chunk->T) {
+      warn_once_("chunk_far_future",
+                 "policy reply chunk starts more than a full chunk ahead of "
+                 "the timestep clock (base_timestep far in the future); "
+                 "discarding (hold-last-action)");
+      chunks_rejected_.fetch_add(1, std::memory_order_relaxed);
       return;  // hold-last-action; keep the chunk currently playing
     }
     const auto tick_ns = [rate](int64_t ticks) {
@@ -899,19 +1065,21 @@ void PolicyClient::apply_chunk_(ActionChunk chunk_in,
     next_chunk_fire_target_ = aligned_start + std::chrono::nanoseconds(
       static_cast<int64_t>(play_fraction * static_cast<double>(chunk->T) /
                            rate * 1e9));
-    chunk_slot_.swap_in_aligned(chunk, aligned_start, now);
+    shared_->chunk_slot.swap_in_aligned(chunk, aligned_start, now);
     chunks_published_.fetch_add(1, std::memory_order_relaxed);
     return;
   }
 
-  // Consume-fully path (openpi θ=0 cadence) — unchanged.
-  // Compute the freshly-applied chunk's expected exhaust BEFORE moving it
-  // into the slot — once swap_in runs we no longer own the pointer.
-  // The new chunk's playback_start_ inside the slot will be
-  // max(received_at, prev_chunk_exhaust) (the slot promotes pending → latest
-  // only when the previous chunk has played to its last row). Mirror that
-  // here so the next cycle's wait gates on the right instant regardless of
-  // whether the previous chunk was still playing when this one arrived.
+  // Consume-fully path (openpi θ=0 cadence). The two members set below are
+  // scheduling ESTIMATES the client uses to time the next cycle's fire point;
+  // they are not the slot's actual playback anchor. The slot itself parks this
+  // chunk in its pending_ slot (when one is already playing) and, on the sample
+  // tick where the current chunk exhausts (t_idx >= T), promotes it and
+  // re-anchors playback_start_ = now (that sample instant). We compute the
+  // estimate BEFORE moving the chunk into the slot — once swap_in runs we no
+  // longer own the pointer — using max(received_at, previous exhaust estimate)
+  // as the base so the next cycle's wait gates on roughly the right instant
+  // whether or not the previous chunk was still playing when this one arrived.
   if (rate > 0.0 && chunk->T > 0) {
     const auto duration_ns = std::chrono::nanoseconds(
       static_cast<int64_t>(
@@ -928,7 +1096,7 @@ void PolicyClient::apply_chunk_(ActionChunk chunk_in,
                            rate * 1e9));
   }
 
-  chunk_slot_.swap_in(std::move(chunk));
+  shared_->chunk_slot.swap_in(std::move(chunk));
   chunks_published_.fetch_add(1, std::memory_order_relaxed);
 }
 
@@ -1013,13 +1181,13 @@ void PolicyClient::open_log_file_(const std::string& log_path) {
         return;
       }
     }
-    log_file_.open(resolved, std::ios::out | std::ios::app);
-    if (!log_file_) {
+    shared_->log_file.open(resolved, std::ios::out | std::ios::app);
+    if (!shared_->log_file) {
       std::cerr << "[policy_client:" << name()
                 << "] failed to open log file '" << resolved << "'\n";
       return;
     }
-    log_t0_ = std::chrono::steady_clock::now();
+    shared_->log_t0 = std::chrono::steady_clock::now();
     std::cerr << "[policy_client:" << name()
               << "] JSONL log → " << resolved << "\n";
   } catch (const std::exception& e) {
@@ -1032,9 +1200,9 @@ void PolicyClient::log_request_(uint64_t seq,
                                 std::chrono::steady_clock::time_point t_send,
                                 const Observation& obs,
                                 const ObservationDiagnostics& diag) {
-  if (!log_file_.is_open()) return;
+  if (!shared_->log_file.is_open()) return;
   try {
-    const auto ts = render_timestamps(t_send, log_t0_);
+    const auto ts = render_timestamps(t_send, shared_->log_t0);
 
     nlohmann::json line;
     line["event"] = "request";
@@ -1086,9 +1254,9 @@ void PolicyClient::log_request_(uint64_t seq,
 
     line["prompt"] = obs.task;
     {
-      std::lock_guard<std::mutex> lk(log_mu_);
-      log_file_ << line.dump() << '\n';
-      log_file_.flush();
+      std::lock_guard<std::mutex> lk(shared_->log_mu);
+      shared_->log_file << line.dump() << '\n';
+      shared_->log_file.flush();
     }
   } catch (...) {
     // Logging is best-effort.
@@ -1100,9 +1268,9 @@ void PolicyClient::log_response_(
     std::chrono::steady_clock::time_point t_recv,
     double rt_ms,
     const std::shared_ptr<const ActionChunk>& chunk) {
-  if (!log_file_.is_open() || !chunk) return;
+  if (!shared_->log_file.is_open() || !chunk) return;
   try {
-    const auto ts = render_timestamps(t_recv, log_t0_);
+    const auto ts = render_timestamps(t_recv, shared_->log_t0);
     nlohmann::json line;
     line["event"] = "response";
     line["seq"] = seq;
@@ -1202,25 +1370,25 @@ void PolicyClient::log_response_(
     }
 
     {
-      std::lock_guard<std::mutex> lk(log_mu_);
-      log_file_ << line.dump() << '\n';
-      log_file_.flush();
+      std::lock_guard<std::mutex> lk(shared_->log_mu);
+      shared_->log_file << line.dump() << '\n';
+      shared_->log_file.flush();
     }
   } catch (...) {
     // Logging is best-effort.
   }
 }
 
-void PolicyClient::log_tick_(
+void PolicyClient::SharedState::log_tick(
     const std::string& face_id,
     std::chrono::steady_clock::time_point t,
     const std::vector<float>& action,
-    const ChunkSlot::SampleInfo* info_ptr) {
+    const ChunkSlot::SampleInfo* info_ptr) noexcept {
   // Cheap guard before any allocation: tick logging is best-effort and
   // must add minimal overhead to the real-time face.read() path.
-  if (!log_file_.is_open()) return;
+  if (!log_file.is_open()) return;
   try {
-    const auto ts = render_timestamps(t, log_t0_);
+    const auto ts = render_timestamps(t, log_t0);
     nlohmann::json line;
     line["event"] = "tick";
     line["t_mono_s"] = ts.mono_s;
@@ -1235,8 +1403,8 @@ void PolicyClient::log_tick_(
       line["blend_active"] = info_ptr->blend_active;
     }
     {
-      std::lock_guard<std::mutex> lk(log_mu_);
-      log_file_ << line.dump() << '\n';
+      std::lock_guard<std::mutex> lk(log_mu);
+      log_file << line.dump() << '\n';
       // No flush per tick — 60 lines/s × flush() would dominate CPU.
       // The file stream's internal buffer flushes on overflow; the
       // request/response paths flush(), which also flushes any buffered
@@ -1266,22 +1434,98 @@ void PolicyClient::warn_once_(const std::string& key, const std::string& message
   }
 }
 
+void PolicyClient::warn_throttled_(const std::string& key,
+                                   const std::string& message,
+                                   std::chrono::milliseconds interval_ms) {
+  const auto now = std::chrono::steady_clock::now();
+  bool should_log = false;
+  {
+    std::lock_guard<std::mutex> lk(warn_mu_);
+    auto it = warn_throttle_at_.find(key);
+    if (it == warn_throttle_at_.end() || (now - it->second) >= interval_ms) {
+      warn_throttle_at_[key] = now;
+      should_log = true;
+    }
+  }
+  if (!should_log) {
+    return;
+  }
+  try {
+    std::cerr << "[policy_client:" << name() << "] " << message << "\n";
+  } catch (...) {
+    // Logging failures are not propagated.
+  }
+}
+
 // ── PolicyClient::Face ───────────────────────────────────────────────────────
 
-PolicyClient::Face::Face(PolicyClient* owner, std::string id,
+PolicyClient::Face::Face(std::shared_ptr<SharedState> state, std::string id,
                          int joint_offset, int joint_count)
   : HardwareComponent(std::move(id)),
-    owner_(owner),
+    state_(std::move(state)),
     joint_offset_(joint_offset),
     joint_count_(joint_count) {}
+
+void PolicyClient::Face::apply_output_ema(std::vector<float>& out,
+                                          std::vector<float>& prev,
+                                          double alpha_arm,
+                                          double alpha_gripper) noexcept {
+  // EMA smoothing: layered on top of the arm's write_moving_time_s controller
+  // filter to reject per-row chunk noise. Two alphas — one for the arm joints
+  // and a separate one for the last joint (gripper by convention). The gripper
+  // alpha defaults to 1.0 (pass-through) because gripper open/close is a fast
+  // transient that must reach full extent within a few rows; filtering it like
+  // the arm joints causes incomplete grasps. α=1.0 is a no-op on either side;
+  // the filter activates only when at least one channel needs it.
+  const bool filter_arm = (alpha_arm > 0.0 && alpha_arm < 1.0);
+  const bool filter_grip = (alpha_gripper > 0.0 && alpha_gripper < 1.0);
+  if (!(filter_arm || filter_grip)) {
+    return;  // pure pass-through; do not even seed history
+  }
+  if (prev.size() == out.size()) {
+    const float a_arm = static_cast<float>(alpha_arm);
+    const float a_grip = static_cast<float>(alpha_gripper);
+    const std::size_t grip_idx =
+      out.empty() ? 0 : out.size() - 1;  // last joint of the slice
+    for (std::size_t i = 0; i < out.size(); ++i) {
+      const bool is_grip = (i == grip_idx);
+      const float a = is_grip ? a_grip : a_arm;
+      // Skip the blend entirely on channels whose alpha is 1.0 — that
+      // preserves bit-for-bit pass-through and avoids needless float rounding
+      // when only one of the two filters is active.
+      if (a >= 1.0f) continue;
+      const float prev_v = prev[i];
+      // A non-finite history term would latch forever: NaN/Inf propagate
+      // through out_t = a·row + (1-a)·prev to every future output. Pass the
+      // current row value through instead of blending against a poisoned
+      // previous output, so the filter self-heals on the next finite row.
+      if (!std::isfinite(prev_v)) continue;
+      out[i] = a * out[i] + (1.0f - a) * prev_v;
+    }
+  }
+  // Write-back guard: cache only finite values, per channel. One non-finite
+  // output must never become next tick's history term (which would latch);
+  // a channel that is non-finite this tick keeps its last finite cached value.
+  // On the first tick (or after reset) prev is empty, so seed it to the right
+  // width first — this reproduces the original "seed from the first read"
+  // behavior while dropping any non-finite element.
+  if (prev.size() != out.size()) {
+    prev.assign(out.size(), 0.0f);
+  }
+  for (std::size_t i = 0; i < out.size(); ++i) {
+    if (std::isfinite(out[i])) {
+      prev[i] = out[i];
+    }
+  }
+}
 
 std::vector<float> PolicyClient::Face::read() noexcept {
   try {
     const auto now = std::chrono::steady_clock::now();
-    const auto info = owner_->chunk_slot_.sample_with_info(
+    const auto info = state_->chunk_slot.sample_with_info(
       now,
-      owner_->total_n_,
-      owner_->control_rate_hz_.load(std::memory_order_acquire));
+      state_->total_n.load(std::memory_order_acquire),
+      state_->control_rate_hz.load(std::memory_order_acquire));
 
     std::vector<float> out(static_cast<std::size_t>(joint_count_), 0.0f);
     const int avail = static_cast<int>(info.row.size());
@@ -1290,54 +1534,31 @@ std::vector<float> PolicyClient::Face::read() noexcept {
     if (end > begin) {
       std::copy(info.row.begin() + begin, info.row.begin() + end, out.begin());
     }
-    // EMA smoothing: layered on top of the arm's write_moving_time_s
-    // controller filter to reject per-row chunk noise. Two alphas — one
-    // for the arm joints and a separate one for the last joint (gripper
-    // by convention). The gripper alpha defaults to 1.0 (pass-through)
-    // because gripper open/close is a fast transient that needs to
-    // reach full extent within a few rows; filtering it like the arm
-    // joints causes incomplete grasps. α=1.0 is a no-op on either side;
-    // the filter activates only when at least one channel needs it.
-    // prev_out_ seeds itself from the first non-trivial read so we never
-    // blend against zeros on the first tick.
-    const double alpha_arm = owner_->cfg_.output_ema_alpha;
-    const double alpha_grip = owner_->cfg_.output_ema_alpha_gripper;
-    const bool filter_arm = (alpha_arm > 0.0 && alpha_arm < 1.0);
-    const bool filter_grip = (alpha_grip > 0.0 && alpha_grip < 1.0);
-    if (filter_arm || filter_grip) {
-      if (prev_out_.size() == out.size()) {
-        const float a_arm = static_cast<float>(alpha_arm);
-        const float a_grip = static_cast<float>(alpha_grip);
-        const std::size_t grip_idx =
-          out.empty() ? 0 : out.size() - 1;  // last joint of the slice
-        for (std::size_t i = 0; i < out.size(); ++i) {
-          const bool is_grip = (i == grip_idx);
-          const float a = is_grip ? a_grip : a_arm;
-          // Skip the blend entirely on channels whose alpha is 1.0 — that
-          // preserves bit-for-bit pass-through and avoids needless float
-          // rounding when only one of the two filters is active.
-          if (a >= 1.0f) continue;
-          const float one_minus = 1.0f - a;
-          out[i] = a * out[i] + one_minus * prev_out_[i];
-        }
-      }
-      // Cache for next tick whether or not any channel was filtered.
-      prev_out_ = out;
-    }
-    // Per-tick action log. log_tick_ early-exits when no log file is open,
-    // so this is essentially free in non-diagnostic runs.
+    apply_output_ema(out, prev_out_,
+                     state_->output_ema_alpha.load(std::memory_order_acquire),
+                     state_->output_ema_alpha_gripper.load(
+                       std::memory_order_acquire));
+    // Per-tick action log. log_tick early-exits when no log file is open, so
+    // this is essentially free in non-diagnostic runs. It reads the shared log
+    // sink, never the client, so it is safe even if the client is gone.
     try {
-      owner_->log_tick_(get_identifier(), now, out, &info);
+      state_->log_tick(get_identifier(), now, out, &info);
     } catch (...) {
       // Logging must never propagate into the real-time control loop.
     }
     return out;
   } catch (...) {
+    // Hold-last-action: NEVER command every joint to zero (a large, dangerous
+    // motion). Return the last emitted output when we have one; otherwise an
+    // empty vector, which the teleop loop treats as "no command this tick".
     try {
-      return std::vector<float>(static_cast<std::size_t>(joint_count_), 0.0f);
+      if (!prev_out_.empty()) {
+        return prev_out_;
+      }
     } catch (...) {
-      return std::vector<float>{};
+      // fall through to the empty vector
     }
+    return std::vector<float>{};
   }
 }
 

@@ -302,6 +302,17 @@ struct PolicyClientConfig {
   /// (one-shot). Default 200 ms is ~6 camera periods at 30 Hz throttling.
   double freshness_timeout_ms{200.0};
 
+  /// Maximum time (ms) the inference loop will wait for a reply chunk after
+  /// pushing an observation before abandoning that round-trip. A half-open
+  /// server that stays ``kConnected`` but never returns a chunk would
+  /// otherwise stall the loop forever with no new observations sent. On the
+  /// deadline the loop stops polling this request, logs the elapsed time, and
+  /// proceeds to the next cycle (which re-packs and re-pushes a fresh
+  /// observation — latest-wins supersedes the abandoned one). 0 disables the
+  /// deadline (unbounded wait). Default 15 s is well beyond normal inference
+  /// (~1-2 s) and typical cold starts, so it only trips on a genuine stall.
+  double inference_timeout_ms{15000.0};
+
   /// First-order EMA coefficient applied to each Face's per-tick output:
   /// ``out_t = alpha * chunk_row_t + (1-alpha) * out_{t-1}``. Acts as a low-pass
   /// filter on the action stream sent to the followers - masks per-row
@@ -472,6 +483,22 @@ struct PolicyClientConfig {
       if (!(c.freshness_timeout_ms >= 0.0 && c.freshness_timeout_ms <= 10000.0)) {
         throw std::runtime_error(
           "PolicyClientConfig: 'freshness_timeout_ms' must be within [0, 10000] "
+          "for policy_client '" + c.id + "'");
+      }
+    }
+
+    if (j.contains("inference_timeout_ms")) {
+      if (!j.at("inference_timeout_ms").is_number()) {
+        throw std::runtime_error(
+          "PolicyClientConfig: 'inference_timeout_ms' must be a number for "
+          "policy_client '" + c.id + "'");
+      }
+      j.at("inference_timeout_ms").get_to(c.inference_timeout_ms);
+      // [0, 600000]: 0 disables the deadline; 10 min is a generous ceiling.
+      // Negated bounded comparison also rejects NaN.
+      if (!(c.inference_timeout_ms >= 0.0 && c.inference_timeout_ms <= 600000.0)) {
+        throw std::runtime_error(
+          "PolicyClientConfig: 'inference_timeout_ms' must be within [0, 600000] "
           "for policy_client '" + c.id + "'");
       }
     }

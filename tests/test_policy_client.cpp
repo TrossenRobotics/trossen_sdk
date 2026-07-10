@@ -4,9 +4,11 @@
  */
 
 #include <chrono>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <limits>
 #include <fstream>
 #include <memory>
 #include <mutex>
@@ -128,6 +130,11 @@ class FakeTransport : public PolicyTransport {
     if (state_ != TransportStatus::State::kConnected || !pending_) {
       return std::nullopt;
     }
+    // Half-open server simulation: stay connected but never deliver a chunk.
+    // The client's inference deadline must break the poll loop on its own.
+    if (never_reply_) {
+      return std::nullopt;
+    }
     const auto now = std::chrono::steady_clock::now();
     if (now < ready_at_) {
       return std::nullopt;  // reply still "in flight"
@@ -138,8 +145,10 @@ class FakeTransport : public PolicyTransport {
     chunk.received_at = now;
     // Mirror the real transports: row 0 is the timestep of the observation
     // that produced this chunk (openpi stamps obs.timestep). Needed by the
-    // drain-threshold aligned take-over path.
-    chunk.base_timestep = last_obs_.timestep;
+    // drain-threshold aligned take-over path. A forced value lets tests drive
+    // the client's alignment guards (all-past / far-future).
+    chunk.base_timestep =
+      forced_base_timestep_.value_or(last_obs_.timestep);
     return chunk;
   }
 
@@ -171,6 +180,14 @@ class FakeTransport : public PolicyTransport {
     std::lock_guard<std::mutex> lk(mu_);
     reply_delay_ = d;
   }
+  void set_never_reply(bool v) {
+    std::lock_guard<std::mutex> lk(mu_);
+    never_reply_ = v;
+  }
+  void set_base_timestep(int64_t ts) {
+    std::lock_guard<std::mutex> lk(mu_);
+    forced_base_timestep_ = ts;
+  }
 
   uint64_t request_count() const noexcept {
     std::lock_guard<std::mutex> lk(mu_);
@@ -192,6 +209,8 @@ class FakeTransport : public PolicyTransport {
   TransportStatus::State state_{TransportStatus::State::kDisconnected};
   bool connect_throws_{false};
   bool fail_requests_{false};
+  bool never_reply_{false};
+  std::optional<int64_t> forced_base_timestep_;
   std::chrono::milliseconds reply_delay_{0};
   uint64_t requests_{0};
   uint64_t failure_count_{0};
@@ -1250,6 +1269,409 @@ TEST_F(PolicyClientTest, DestructorUnregistersFaces) {
     EXPECT_TRUE(ActiveHardwareRegistry::is_registered("policy_left"));
   }
   EXPECT_FALSE(ActiveHardwareRegistry::is_registered("policy_left"));
+}
+
+// PR253-F1: a chunk carrying any non-finite action must be rejected whole
+// (never partially applied) and the slot must keep playing the prior chunk.
+TEST_F(PolicyClientTest, NonFiniteChunkIsRejectedAndHeldLast) {
+  auto fake_owned = std::make_unique<FakeTransport>();
+  FakeTransport* fake = fake_owned.get();
+  fake->set_canned_chunk(1, 2, {5.0f, 6.0f});  // valid first chunk
+
+  PolicyClient client(
+    make_config("pc1",
+                {make_joint_sub("follower_left", "state.left", 200.0)},
+                {make_layout("policy_left", 0, 2)},
+                /*inference_hz=*/200.0),
+    std::move(fake_owned));
+  client.set_control_rate_hz(30.0);
+
+  auto rec = std::make_shared<JointStateRecord>();
+  rec->id = "follower_left";
+  rec->positions = {0.0f, 0.0f};
+
+  ASSERT_TRUE(client.start());
+  const auto first_deadline =
+    std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (client.chunks_published() == 0 &&
+         std::chrono::steady_clock::now() < first_deadline) {
+    client.offer(rec);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  ASSERT_GT(client.chunks_published(), 0u);
+  // Latch the good row as the last commanded action.
+  auto good = client.faces()[0]->read();
+  ASSERT_EQ(good.size(), 2u);
+  EXPECT_FLOAT_EQ(good[0], 5.0f);
+  EXPECT_FLOAT_EQ(good[1], 6.0f);
+
+  // Now serve a chunk with a NaN element — it must be rejected wholesale.
+  const float nan_v = std::numeric_limits<float>::quiet_NaN();
+  fake->set_canned_chunk(1, 2, {nan_v, 2.0f});
+  const auto rejects_before = client.chunks_rejected();
+  const auto pubs_before = client.chunks_published();
+  const auto rej_deadline =
+    std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (client.chunks_rejected() == rejects_before &&
+         std::chrono::steady_clock::now() < rej_deadline) {
+    client.offer(rec);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_GT(client.chunks_rejected(), rejects_before);
+  EXPECT_EQ(client.chunks_published(), pubs_before)
+    << "a non-finite chunk must not publish";
+
+  // Hold-last-action: the Face still yields the prior (finite) row.
+  auto held = client.faces()[0]->read();
+  ASSERT_EQ(held.size(), 2u);
+  EXPECT_FLOAT_EQ(held[0], 5.0f);
+  EXPECT_FLOAT_EQ(held[1], 6.0f);
+  client.stop();
+}
+
+// PR253-F2: the output EMA must not latch a non-finite value. A poisoned
+// history term is passed through (not blended against), and a non-finite
+// output is never cached as next tick's history.
+TEST(PolicyClientFaceEmaTest, GuardsAgainstNonFiniteHistory) {
+  using Face = trossen::hw::policy::PolicyClient::Face;
+  const float nan_v = std::numeric_limits<float>::quiet_NaN();
+
+  // Channel 0's history is poisoned; channel 1 (gripper by last-index) is fine.
+  std::vector<float> out = {10.0f, 20.0f};
+  std::vector<float> prev = {nan_v, 5.0f};
+  Face::apply_output_ema(out, prev, /*alpha_arm=*/0.5, /*alpha_gripper=*/0.5);
+  // ch0: non-finite prev → pass current row through; ch1: 0.5*20 + 0.5*5.
+  EXPECT_FLOAT_EQ(out[0], 10.0f);
+  EXPECT_FLOAT_EQ(out[1], 12.5f);
+  // History is re-seeded to finite values, so tracking resumes next tick.
+  ASSERT_EQ(prev.size(), 2u);
+  EXPECT_TRUE(std::isfinite(prev[0]));
+  EXPECT_FLOAT_EQ(prev[0], 10.0f);
+  EXPECT_FLOAT_EQ(prev[1], 12.5f);
+
+  std::vector<float> out2 = {10.0f, 20.0f};
+  Face::apply_output_ema(out2, prev, 0.5, 0.5);
+  EXPECT_TRUE(std::isfinite(out2[0]));
+  EXPECT_TRUE(std::isfinite(out2[1]));
+  EXPECT_FLOAT_EQ(out2[0], 10.0f);        // 0.5*10 + 0.5*10
+  EXPECT_FLOAT_EQ(out2[1], 16.25f);       // 0.5*20 + 0.5*12.5
+
+  // Write-back guard: a non-finite OUTPUT must not overwrite finite history.
+  std::vector<float> out3 = {nan_v, 3.0f};
+  std::vector<float> prev3 = {1.0f, 2.0f};
+  Face::apply_output_ema(out3, prev3, 0.5, 0.5);
+  EXPECT_FLOAT_EQ(prev3[0], 1.0f)         // stayed finite, not poisoned
+    << "a non-finite output must not become next tick's history";
+  EXPECT_FLOAT_EQ(prev3[1], 2.5f);        // 0.5*3 + 0.5*2 cached normally
+}
+
+// PR253-F3: a half-open server (stays connected, never returns a chunk) must
+// not spin the poll loop forever. The inference deadline breaks the wait and
+// the next cycle re-observes, so the request count keeps advancing.
+TEST_F(PolicyClientTest, InferenceDeadlineBreaksPollLoop) {
+  auto fake_owned = std::make_unique<FakeTransport>();
+  FakeTransport* fake = fake_owned.get();
+  fake->set_canned_chunk(1, 2, {1.0f, 2.0f});
+  fake->set_never_reply(true);  // connected, but no chunk ever arrives
+
+  auto cfg = make_config("pc1",
+                         {make_joint_sub("follower_left", "state.left", 200.0)},
+                         {make_layout("policy_left", 0, 2)},
+                         /*inference_hz=*/200.0);
+  cfg.inference_timeout_ms = 40.0;   // short deadline so the test is quick
+  cfg.freshness_timeout_ms = 20.0;   // do not stall on the freshness barrier
+  PolicyClient client(std::move(cfg), std::move(fake_owned));
+  client.set_control_rate_hz(1000.0);
+
+  auto rec = std::make_shared<JointStateRecord>();
+  rec->id = "follower_left";
+  rec->positions = {0.1f, 0.2f};
+
+  ASSERT_TRUE(client.start());
+  // Without the deadline the loop would push exactly once and spin forever;
+  // with it, each abandoned round-trip is followed by a fresh push.
+  const auto deadline =
+    std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while (fake->request_count() < 2 &&
+         std::chrono::steady_clock::now() < deadline) {
+    client.offer(rec);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_GE(fake->request_count(), 2u)
+    << "inference deadline should abandon the stalled request and re-observe";
+  EXPECT_EQ(client.chunks_published(), 0u);
+  client.stop();
+}
+
+// PR253-F4: a chunk whose base_timestep is far in the future (server clock
+// ahead / corrupt value) must be discarded rather than stalling the arm on
+// hold-last for a long time while the aligned start sits far ahead.
+TEST_F(PolicyClientTest, FarFutureBaseTimestepIsDiscarded) {
+  auto fake_owned = std::make_unique<FakeTransport>();
+  FakeTransport* fake = fake_owned.get();
+  fake->set_canned_chunk(10, 2, std::vector<float>(20, 0.5f));  // T=10
+  fake->set_base_timestep(1'000'000);  // absurdly far ahead of the clock
+
+  auto cfg = make_config("pc1",
+                         {make_joint_sub("follower_left", "state.left", 200.0)},
+                         {make_layout("policy_left", 0, 2)},
+                         /*inference_hz=*/200.0);
+  cfg.drain_threshold = 0.5;  // exercise the aligned take-over path
+  PolicyClient client(std::move(cfg), std::move(fake_owned));
+  client.set_control_rate_hz(100.0);
+
+  auto rec = std::make_shared<JointStateRecord>();
+  rec->id = "follower_left";
+  rec->positions = {0.1f, 0.2f};
+
+  ASSERT_TRUE(client.start());
+  const auto deadline =
+    std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (client.chunks_rejected() == 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    client.offer(rec);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  EXPECT_GT(fake->request_count(), 0u);
+  EXPECT_GT(client.chunks_rejected(), 0u)
+    << "a far-future base_timestep must be discarded";
+  EXPECT_EQ(client.chunks_published(), 0u);
+  client.stop();
+}
+
+// PR253-F5: a Face retained past its PolicyClient's destruction must still be
+// safe to read (no use-after-free) and must hold last / yield no command.
+// Run under AddressSanitizer to prove the UAF is gone.
+TEST_F(PolicyClientTest, FaceOutlivingClientHoldsLastSafely) {
+  std::shared_ptr<trossen::hw::policy::PolicyClient::Face> face;
+  {
+    auto fake = std::make_unique<FakeTransport>();
+    fake->set_canned_chunk(1, 2, {3.0f, 4.0f});
+    PolicyClient client(
+      make_config("pc1",
+                  {make_joint_sub("follower_left", "state.left", 200.0)},
+                  {make_layout("policy_left", 0, 2)},
+                  /*inference_hz=*/200.0),
+      std::move(fake));
+    client.set_control_rate_hz(30.0);
+    face = client.faces()[0];  // retain the Face beyond the client's lifetime
+
+    auto rec = std::make_shared<JointStateRecord>();
+    rec->id = "follower_left";
+    rec->positions = {0.0f, 0.0f};
+    ASSERT_TRUE(client.start());
+    const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (client.chunks_published() == 0 &&
+           std::chrono::steady_clock::now() < deadline) {
+      client.offer(rec);
+      std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+    ASSERT_GT(client.chunks_published(), 0u);
+    (void)face->read();  // latch a last commanded row
+    client.stop();
+  }  // client destroyed here; `face` (and its shared state) survive
+
+  auto cmd = face->read();
+  EXPECT_TRUE(cmd.size() == 2u || cmd.empty())
+    << "a surviving Face must hold-last (sized) or yield no command (empty)";
+  for (float v : cmd) {
+    EXPECT_TRUE(std::isfinite(v));
+  }
+  auto cmd2 = face->read();  // repeated reads must stay safe
+  EXPECT_TRUE(cmd2.size() == 2u || cmd2.empty());
+}
+
+// PR253-F6: a 1-channel (mono8) frame must be expanded to a correctly sized
+// 3-channel RGB image, not memcpy'd as if it had 3 channels (heap over-read).
+// Run under AddressSanitizer to prove the over-read is gone.
+TEST_F(PolicyClientTest, Mono8ImagePacksAsThreeChannelRgb) {
+  auto fake_owned = std::make_unique<FakeTransport>();
+  FakeTransport* fake = fake_owned.get();
+  fake->set_canned_chunk(1, 14, std::vector<float>(14, 0.0f));
+
+  PolicyClientSubscriptionConfig cam_sub;
+  cam_sub.record_id = "cam_high/color";
+  cam_sub.obs_key = "images.cam_high";
+  cam_sub.throttle_hz = 200.0;
+  cam_sub.resize = std::make_pair(4, 4);
+
+  PolicyClient client(
+    make_config("pc1",
+                {make_joint_sub("follower_left",  "state.left",  200.0),
+                 make_joint_sub("follower_right", "state.right", 200.0),
+                 cam_sub},
+                {make_layout("policy_left",  0, 7),
+                 make_layout("policy_right", 7, 7)},
+                /*inference_hz=*/200.0),
+    std::move(fake_owned));
+
+  auto left = std::make_shared<JointStateRecord>();
+  left->id = "follower_left";
+  left->positions = std::vector<float>(7, 0.0f);
+  auto right = std::make_shared<JointStateRecord>();
+  right->id = "follower_right";
+  right->positions = std::vector<float>(7, 0.0f);
+
+  // Single-channel (mono8) 8x8 image, uniform gray = 123.
+  auto img_rec = std::make_shared<trossen::data::ImageRecord>();
+  img_rec->id = "cam_high/color";
+  img_rec->encoding = "mono8";
+  img_rec->image = cv::Mat(8, 8, CV_8UC1, cv::Scalar(123));
+
+  ASSERT_TRUE(client.start());
+  const auto deadline =
+    std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (client.chunks_published() == 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    client.offer(left);
+    client.offer(right);
+    client.offer(img_rec);
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  ASSERT_GT(client.chunks_published(), 0u);
+  client.stop();
+
+  const auto obs = fake->last_observation();
+  ASSERT_EQ(obs.images.size(), 1u);
+  const auto& img = obs.images[0];
+  EXPECT_EQ(img.camera, "cam_high");
+  EXPECT_EQ(img.width, 4);
+  EXPECT_EQ(img.height, 4);
+  ASSERT_EQ(img.rgb.size(), 4u * 4u * 3u);  // exactly 3 channels, no over-read
+  for (int p = 0; p < 16; ++p) {
+    EXPECT_EQ(static_cast<int>(img.rgb[p * 3 + 0]), 123);
+    EXPECT_EQ(static_cast<int>(img.rgb[p * 3 + 1]), 123);
+    EXPECT_EQ(static_cast<int>(img.rgb[p * 3 + 2]), 123);
+  }
+}
+
+// PR253-F7: a missing camera WITH a configured resize is substituted with a
+// same-shaped zero frame, so the observation's image set never depends on
+// which cameras happened to deliver this cycle.
+TEST_F(PolicyClientTest, MissingCameraWithResizeShipsZeroFrame) {
+  auto fake_owned = std::make_unique<FakeTransport>();
+  FakeTransport* fake = fake_owned.get();
+  fake->set_canned_chunk(1, 14, std::vector<float>(14, 0.0f));
+
+  PolicyClientSubscriptionConfig cam_high;
+  cam_high.record_id = "cam_high/color";
+  cam_high.obs_key = "images.cam_high";
+  cam_high.throttle_hz = 200.0;
+  cam_high.resize = std::make_pair(4, 4);
+  PolicyClientSubscriptionConfig cam_low;  // never delivered
+  cam_low.record_id = "cam_low/color";
+  cam_low.obs_key = "images.cam_low";
+  cam_low.throttle_hz = 200.0;
+  cam_low.resize = std::make_pair(4, 4);
+
+  auto cfg = make_config("pc1",
+                         {make_joint_sub("follower_left",  "state.left",  200.0),
+                          make_joint_sub("follower_right", "state.right", 200.0),
+                          cam_high, cam_low},
+                         {make_layout("policy_left",  0, 7),
+                          make_layout("policy_right", 7, 7)},
+                         /*inference_hz=*/200.0);
+  cfg.freshness_timeout_ms = 20.0;  // cam_low never arrives; don't block long
+  PolicyClient client(std::move(cfg), std::move(fake_owned));
+  client.set_control_rate_hz(30.0);
+
+  auto left = std::make_shared<JointStateRecord>();
+  left->id = "follower_left";
+  left->positions = std::vector<float>(7, 0.0f);
+  auto right = std::make_shared<JointStateRecord>();
+  right->id = "follower_right";
+  right->positions = std::vector<float>(7, 0.0f);
+  auto img_rec = std::make_shared<trossen::data::ImageRecord>();
+  img_rec->id = "cam_high/color";
+  img_rec->encoding = "bgr8";
+  img_rec->image = cv::Mat(4, 4, CV_8UC3, cv::Scalar(10, 20, 30));
+
+  ASSERT_TRUE(client.start());
+  const auto deadline =
+    std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while (client.chunks_published() == 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    client.offer(left);
+    client.offer(right);
+    client.offer(img_rec);  // cam_low deliberately never offered
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  ASSERT_GT(client.chunks_published(), 0u);
+  client.stop();
+
+  const auto obs = fake->last_observation();
+  // BOTH configured cameras are present (stable image set), cam_low zero-filled.
+  ASSERT_EQ(obs.images.size(), 2u);
+  const trossen::hw::policy::Observation::Image* low = nullptr;
+  for (const auto& im : obs.images) {
+    if (im.camera == "cam_low") low = &im;
+  }
+  ASSERT_NE(low, nullptr);
+  EXPECT_EQ(low->width, 4);
+  EXPECT_EQ(low->height, 4);
+  ASSERT_EQ(low->rgb.size(), 4u * 4u * 3u);
+  for (uint8_t b : low->rgb) {
+    EXPECT_EQ(static_cast<int>(b), 0);  // black placeholder
+  }
+}
+
+// PR253-F7: a missing camera WITHOUT a resize (and never seen, so no
+// last-known dimensions) cannot be represented; the whole observation is
+// skipped rather than shipped with a diverging image set. So the transport
+// never receives an observation — the same-shape-or-nothing contract.
+TEST_F(PolicyClientTest, MissingCameraWithoutResizeFailsObservation) {
+  auto fake_owned = std::make_unique<FakeTransport>();
+  FakeTransport* fake = fake_owned.get();
+  fake->set_canned_chunk(1, 14, std::vector<float>(14, 0.0f));
+
+  PolicyClientSubscriptionConfig cam_high;
+  cam_high.record_id = "cam_high/color";
+  cam_high.obs_key = "images.cam_high";
+  cam_high.throttle_hz = 200.0;
+  cam_high.resize = std::make_pair(4, 4);
+  PolicyClientSubscriptionConfig cam_low;  // never delivered, NO resize
+  cam_low.record_id = "cam_low/color";
+  cam_low.obs_key = "images.cam_low";
+  cam_low.throttle_hz = 200.0;
+
+  auto cfg = make_config("pc1",
+                         {make_joint_sub("follower_left",  "state.left",  200.0),
+                          make_joint_sub("follower_right", "state.right", 200.0),
+                          cam_high, cam_low},
+                         {make_layout("policy_left",  0, 7),
+                          make_layout("policy_right", 7, 7)},
+                         /*inference_hz=*/200.0);
+  cfg.freshness_timeout_ms = 20.0;
+  PolicyClient client(std::move(cfg), std::move(fake_owned));
+  client.set_control_rate_hz(30.0);
+
+  auto left = std::make_shared<JointStateRecord>();
+  left->id = "follower_left";
+  left->positions = std::vector<float>(7, 0.0f);
+  auto right = std::make_shared<JointStateRecord>();
+  right->id = "follower_right";
+  right->positions = std::vector<float>(7, 0.0f);
+  auto img_rec = std::make_shared<trossen::data::ImageRecord>();
+  img_rec->id = "cam_high/color";
+  img_rec->encoding = "bgr8";
+  img_rec->image = cv::Mat(4, 4, CV_8UC3, cv::Scalar(10, 20, 30));
+
+  ASSERT_TRUE(client.start());
+  const auto until = std::chrono::steady_clock::now() +
+                     std::chrono::milliseconds(400);
+  while (std::chrono::steady_clock::now() < until) {
+    client.offer(left);
+    client.offer(right);
+    client.offer(img_rec);  // cam_low never offered
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+  client.stop();
+
+  // No representable observation was ever produced, so none was pushed and no
+  // chunk was published — never a 1-image (diverging) observation.
+  EXPECT_EQ(client.chunks_published(), 0u);
+  EXPECT_EQ(fake->request_count(), 0u);
 }
 
 }  // namespace
