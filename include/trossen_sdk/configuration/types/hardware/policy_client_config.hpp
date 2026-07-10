@@ -538,6 +538,19 @@ struct PolicyClientConfig {
         }
       }
     }
+    {
+      // obs_key is the observation-dict slot for this record; two records sharing
+      // a key would overwrite each other at pack time, dropping one arm's state
+      // silently. Reject duplicates here so the collision surfaces at config load.
+      std::unordered_set<std::string> seen_obs_keys;
+      for (const auto& sub : c.subscriptions) {
+        if (!seen_obs_keys.insert(sub.obs_key).second) {
+          throw std::runtime_error(
+            "PolicyClientConfig: duplicate subscription obs_key '" + sub.obs_key +
+            "' for policy_client '" + c.id + "'");
+        }
+      }
+    }
     // The inference loop must never sample a record that hasn't been delivered to the
     // cache yet; throttle_hz must therefore be at least inference_hz for each entry.
     for (const auto& sub : c.subscriptions) {

@@ -360,6 +360,13 @@ TEST(PolicyClientConfigTest, RejectsDuplicateSubscriptionRecordIds) {
   EXPECT_THROW(PolicyClientConfig::from_json(j), std::runtime_error);
 }
 
+TEST(PolicyClientConfigTest, RejectsDuplicateSubscriptionObsKeys) {
+  auto j = nlohmann::json::parse(kCanonicalConfig);
+  // Distinct record_id (follower_right stays), but collide obs_key with subscription[0].
+  j["subscriptions"][1]["obs_key"] = "state.left";
+  EXPECT_THROW(PolicyClientConfig::from_json(j), std::runtime_error);
+}
+
 TEST(PolicyClientConfigTest, RejectsThrottleBelowInferenceHz) {
   auto j = nlohmann::json::parse(kCanonicalConfig);
   // inference_hz = 10, set one throttle to 5 (still within absolute bounds).
