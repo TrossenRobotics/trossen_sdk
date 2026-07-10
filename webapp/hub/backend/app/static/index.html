@@ -77,6 +77,23 @@
   .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 4px; }
   .chips { display: flex; flex-wrap: wrap; gap: 5px; }
   .chip { font-size: 11px; padding: 2px 7px; border-radius: 6px; background: var(--panel-2); color: var(--muted); }
+  /* Fleet alerts */
+  #alerts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  #alerts:empty { display: none; }
+  .alert {
+    display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-radius: 9px;
+    font-size: 13px; font-weight: 600; border: 1px solid transparent;
+  }
+  .alert.warn { background: rgba(210,153,34,.12); border-color: rgba(210,153,34,.4); color: var(--warn); }
+  .alert.err { background: rgba(248,81,73,.12); border-color: rgba(248,81,73,.4); color: var(--err); }
+  .alert .names { color: var(--muted); font-weight: 400; }
+
+  /* Per-card episode health */
+  .fail { color: var(--err); }
+  .fail-list { display: flex; flex-direction: column; gap: 2px; margin-top: 5px; }
+  .fail-row { display: flex; justify-content: space-between; font-size: 12px; }
+  .fail-row .fid { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fail-row .fc { color: var(--err); font-variant-numeric: tabular-nums; flex: none; margin-left: 10px; }
   .empty { color: var(--muted); text-align: center; padding: 12vh 0; }
   a.linkbtn { color: var(--brand); text-decoration: none; font-size: 12px; font-weight: 600; }
   a.linkbtn:hover { text-decoration: underline; }
@@ -103,6 +120,7 @@
       </div>
     </header>
     <main>
+      <div id="alerts"></div>
       <div class="grid" id="grid"></div>
       <div class="empty hidden" id="empty">No machines have connected yet.<br/><span class="sub">Set <code>HUB_URL</code> on a collection machine to have it dial in.</span></div>
     </main>
@@ -148,6 +166,20 @@ function card(m) {
   const freeCls = usedPct >= 92 ? "crit" : usedPct >= 80 ? "low" : "";
   const epPct = sess && sess.num_episodes ? Math.round((sess.current_episode / sess.num_episodes) * 100) : 0;
   const robots = (m.systems || []).map(s => s.robot_name || s.id).filter(Boolean);
+  const eh = m.episode_health || {};
+  const failing = eh.datasets_with_failures || [];
+
+  const healthBlock = eh.total_corrupt
+    ? `<div>
+        <div class="section-label fail">Failed episodes · ${eh.total_corrupt}</div>
+        <div class="fail-list">
+          ${failing.map(d => `<div class="fail-row"><span class="fid">${esc(d.id)}</span><span class="fc">${d.corrupt} of ${d.good + d.corrupt}</span></div>`).join("")}
+          ${eh.truncated ? `<div class="sub">…and more</div>` : ""}
+        </div>
+      </div>`
+    : (eh.total_good != null
+        ? `<div class="sub">${eh.total_good} episodes recorded · no failures</div>`
+        : "");
 
   const sessBlock = sess ? `
     <div>
@@ -173,6 +205,7 @@ function card(m) {
       <div class="bar storage"><span class="${freeCls}" style="width:${usedPct}%"></span></div>
       <div class="sub" style="margin-top:4px;">${fmtBytes(st.free)} free of ${fmtBytes(st.total)} · ${st.dataset_count ?? 0} datasets</div>
     </div>
+    ${healthBlock}
     ${robots.length ? `<div><div class="section-label">Systems</div><div class="chips">${robots.map(r => `<span class="chip">${esc(r)}</span>`).join("")}</div></div>` : ""}
     <div class="kv">
       <span class="k">Host</span><span class="v">${esc(m.hostname || "—")}${m.ip ? " · " + esc(m.ip) : ""}</span>
@@ -183,12 +216,36 @@ function card(m) {
   </div>`;
 }
 
+function storagePct(m) {
+  const st = m.storage || {};
+  return st.total ? (st.used / st.total) * 100 : 0;
+}
+
+function renderAlerts(list) {
+  const alerts = [];
+  const failed = list.filter(m => (m.episode_health || {}).total_corrupt > 0);
+  if (failed.length) {
+    const names = failed.map(m => `${esc(m.name)} (${m.episode_health.total_corrupt})`).join(", ");
+    alerts.push(`<div class="alert err">⚠ ${failed.length} machine${failed.length > 1 ? "s" : ""} with failed episodes <span class="names">· ${names}</span></div>`);
+  }
+  const crit = list.filter(m => m.online && storagePct(m) >= 92);
+  const low = list.filter(m => m.online && storagePct(m) >= 80 && storagePct(m) < 92);
+  if (crit.length) {
+    alerts.push(`<div class="alert err">⚠ ${crit.length} machine${crit.length > 1 ? "s" : ""} critically low on disk <span class="names">· ${crit.map(m => esc(m.name)).join(", ")}</span></div>`);
+  }
+  if (low.length) {
+    alerts.push(`<div class="alert warn">⚠ ${low.length} machine${low.length > 1 ? "s" : ""} low on disk <span class="names">· ${low.map(m => esc(m.name)).join(", ")}</span></div>`);
+  }
+  $("alerts").innerHTML = alerts.join("");
+}
+
 async function refresh() {
   let list;
   try { list = await api("/api/machines"); } catch { return; }
   const online = list.filter(m => m.online).length;
   $("summary").textContent = `${online} online · ${list.length} known`;
   $("empty").classList.toggle("hidden", list.length > 0);
+  renderAlerts(list);
   $("grid").innerHTML = list.map(card).join("");
 }
 

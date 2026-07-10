@@ -132,6 +132,7 @@ def fleet() -> list[dict[str, Any]]:
                     "sessions": hb.get("sessions", []),
                     "storage": hb.get("storage", {}),
                     "systems": hb.get("systems", []),
+                    "episode_health": hb.get("episode_health", {}),
                 }
             )
     # Most recently seen at the top so active machines lead the dashboard.

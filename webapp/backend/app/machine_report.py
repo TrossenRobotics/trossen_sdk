@@ -15,6 +15,7 @@ import socket
 from pathlib import Path
 from typing import Any
 
+from app.dataset_health import scan_dataset_health
 from app.dataset_settings import load_dataset_settings
 from app.machine_identity import get_machine_id, get_machine_name
 from app.sessions import list_sessions
@@ -137,4 +138,5 @@ def build_heartbeat() -> dict[str, Any]:
         "state": _machine_state(sessions),
         "sessions": sessions,
         "storage": _storage_status(),
+        "episode_health": scan_dataset_health(),
     }
