@@ -1,8 +1,9 @@
 import { useParams, Link, useNavigate, useSearchParams } from 'react-router';
-import { ArrowLeft, FolderOpen, FileText, Video, RefreshCw, Copy, Check, Film, Database, Trash2, Loader2 } from 'lucide-react';
+import { ArrowLeft, FolderOpen, FileText, Video, RefreshCw, Copy, Check, Film, Database, Trash2, Loader2, Play, X } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { toast } from 'sonner';
 import { AppModal } from '@/app/components/AppModal';
+import { DatasetRerunViewer } from '@/app/components/DatasetRerunViewer';
 import { useApiFetch } from '@/hooks/useApiFetch';
 import { useDatasets } from '@/lib/DatasetsContext';
 import { apiDelete, ApiError, describeError } from '@/lib/api';
@@ -93,6 +94,7 @@ export function DatasetDetailsPage() {
     data: mcap,
     error: mcapErr,
     loading: mcapLoading,
+    refetch: refetchMcap,
   } = useApiFetch<McapDataset>(mcapPath);
   const {
     data: lerobotData,
@@ -107,6 +109,13 @@ export function DatasetDetailsPage() {
   const framesPath: string | null = null;
   const { data: framesResp, loading: framesLoading, refetch: refetchFrames } =
     useApiFetch<FramesResponse>(framesPath);
+
+  // Filename of the episode whose single-file delete is in flight (disables
+  // its row button + shows a spinner). Null when no delete is running.
+  const [deletingEpisode, setDeletingEpisode] = useState<string | null>(null);
+  // Filename of the episode currently open in the Rerun playback viewer, or
+  // null when the viewer modal is closed.
+  const [vizEpisode, setVizEpisode] = useState<string | null>(null);
   const sampleFrames = framesResp?.cameras ?? {};
 
   // The dataset on this page may exist as MCAP-only, LeRobot-only, or both.
@@ -217,6 +226,23 @@ export function DatasetDetailsPage() {
         toast.error(`Couldn't delete dataset: ${describeError(err)}`);
       }
     }, 'Delete MCAP Dataset');
+  }
+
+  function handleDeleteEpisode(filename: string) {
+    if (!id) return;
+    showConfirm(`Delete episode "${filename}"? This removes just this one .mcap file from disk.`, async () => {
+      setDeletingEpisode(filename);
+      try {
+        await apiDelete(`/api/datasets/${id}/episodes/${filename}`);
+        toast.success(`Deleted ${filename}`);
+        refreshDatasets();
+        refetchMcap();
+      } catch (err) {
+        toast.error(`Couldn't delete episode: ${describeError(err)}`);
+      } finally {
+        setDeletingEpisode(null);
+      }
+    }, 'Delete Episode');
   }
 
   function handleDeleteLerobot() {
@@ -434,7 +460,30 @@ export function DatasetDetailsPage() {
                 {dataset.episodes.map((ep, i) => (
                   <div key={i} className={`flex items-center justify-between p-4 ${i < dataset.episodes.length - 1 ? 'border-b border-edge' : ''}`}>
                     <div><div className="text-ink text-sm">{ep.filename}</div><div className="text-dim text-[11px] mt-0.5">{formatDate(ep.created_at || ep.modified)}</div></div>
-                    <div className="text-dim text-sm">{formatBytes(ep.size_bytes)}</div>
+                    <div className="flex items-center gap-3">
+                      <div className="text-dim text-sm">{formatBytes(ep.size_bytes)}</div>
+                      {!mcapMissing && (
+                        <button
+                          onClick={() => setVizEpisode(ep.filename)}
+                          aria-label={`Visualize ${ep.filename}`}
+                          title="Visualize this episode"
+                          className="text-dim hover:text-brand transition-colors"
+                        >
+                          <Play className="w-4 h-4" />
+                        </button>
+                      )}
+                      {!mcapMissing && (
+                        <button
+                          onClick={() => handleDeleteEpisode(ep.filename)}
+                          disabled={deletingEpisode !== null}
+                          aria-label={`Delete ${ep.filename}`}
+                          title="Delete this episode"
+                          className="text-dim hover:text-red-400 disabled:opacity-40 transition-colors"
+                        >
+                          {deletingEpisode === ep.filename ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
+                        </button>
+                      )}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -707,6 +756,31 @@ export function DatasetDetailsPage() {
           onConfirm={appModal.onConfirm}
           onCancel={appModal.onCancel}
         />
+      )}
+
+      {/* Episode playback: full-screen Rerun web viewer over the recorded
+          episode's .rrd (decoded on demand by the backend). */}
+      {vizEpisode && id && (
+        <div
+          className="fixed inset-0 bg-black/80 flex items-center justify-center z-50 p-4"
+          onClick={(e) => { if (e.target === e.currentTarget) setVizEpisode(null); }}
+        >
+          <div className="bg-surface border border-edge w-full max-w-[1400px] h-[85vh] flex flex-col">
+            <div className="flex items-center justify-between p-3 border-b border-edge">
+              <div className="text-ink text-sm font-mono">{vizEpisode}</div>
+              <button
+                onClick={() => setVizEpisode(null)}
+                aria-label="Close viewer"
+                className="text-dim hover:text-ink transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0">
+              <DatasetRerunViewer rrdUrl={`${window.location.origin}/api/datasets/${id}/episodes/${vizEpisode}/rerun.rrd`} />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

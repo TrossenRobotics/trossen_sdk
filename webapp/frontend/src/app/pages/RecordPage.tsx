@@ -10,6 +10,20 @@ import { formatDate } from '@/lib/format';
 
 type StatusFilter = 'all' | 'active' | 'pending' | 'paused' | 'completed' | 'error';
 
+/** Lowercase and reduce arbitrary text to the safe dataset-id charset
+ *  ([A-Za-z0-9_.-], enforced server-side by is_safe_id). */
+function slugify(text: string): string {
+  return text.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '');
+}
+
+/** Compose an auto dataset id: {robot_name}_{task}_{YYYYMMDD}. Empty parts
+ *  drop out, so with no task selected it degrades to {robot_name}_{date}. */
+function composeDatasetId(robotName: string, task: string): string {
+  const now = new Date();
+  const ymd = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+  return [robotName, slugify(task), ymd].filter(Boolean).join('_');
+}
+
 interface Session {
   id: string;
   name: string;
@@ -59,6 +73,7 @@ export function RecordPage() {
   const [formData, setFormData] = useState({
     sessionName: '',
     hardwareSystem: '',
+    taskName: '',
     datasetId: '',
     numEpisodes: '10',
     episodeDuration: '10',
@@ -66,9 +81,14 @@ export function RecordPage() {
     compression: '',
     chunkSizeBytes: '4194304',
   });
+  // Once the operator hand-edits the Dataset ID, stop auto-deriving it from
+  // system + task so we never clobber their choice (also true for edit/clone,
+  // where the id is loaded from an existing session).
+  const [datasetIdManual, setDatasetIdManual] = useState(false);
 
-  // Fetch available hardware systems
-  const [availableSystems, setAvailableSystems] = useState<Array<{ id: string; name: string }>>([]);
+  // Fetch available hardware systems. `robotName` is the device identity
+  // (config.robot_name, e.g. "trossen_solo_ai") used to auto-name datasets.
+  const [availableSystems, setAvailableSystems] = useState<Array<{ id: string; name: string; robotName: string }>>([]);
 
   // Re-seed HwStatusContext from /api/systems on every poll so a session
   // crash that the backend handles by flipping hw_status to red surfaces
@@ -77,9 +97,9 @@ export function RecordPage() {
   // fire. Keep this in sync with the equivalent seed in
   // ConfigurationPage so both pages share one source of truth.
   const fetchSystems = useCallback(() => {
-    apiGet<Array<{ id: string; name?: string; hw_status?: string | null; hw_message?: string | null }>>('/api/systems')
+    apiGet<Array<{ id: string; name?: string; hw_status?: string | null; hw_message?: string | null; config?: { robot_name?: string } }>>('/api/systems')
       .then(data => {
-        setAvailableSystems(data.map(s => ({ id: s.id, name: s.name || s.id })));
+        setAvailableSystems(data.map(s => ({ id: s.id, name: s.name || s.id, robotName: s.config?.robot_name || s.id })));
         data.forEach(s => {
           if (s.hw_status) {
             setHwStatus(s.id, {
@@ -148,6 +168,7 @@ export function RecordPage() {
     setFormData({
       sessionName: clone.name ?? '',
       hardwareSystem: clone.system_id ?? '',
+      taskName: '',
       datasetId: clone.dataset_id ?? '',
       numEpisodes: String(clone.num_episodes ?? 10),
       episodeDuration: String(clone.episode_duration ?? 10),
@@ -155,10 +176,25 @@ export function RecordPage() {
       compression: '',
       chunkSizeBytes: '4194304',
     });
+    // The cloned id is a real prior choice — treat it as manual so the
+    // auto-namer doesn't overwrite it.
+    setDatasetIdManual(true);
     setShowSessionModal(true);
     // Clear the router state so a refresh / back doesn't re-open the modal.
     window.history.replaceState({}, '');
   }, [location.state]);
+
+  // Auto-name datasets: {robot_name}_{task}_{YYYYMMDD}. The device
+  // (robot_name) and date are already known, so the operator only needs to
+  // supply the task. Runs only for brand-new sessions and only until the
+  // operator hand-edits the Dataset ID (datasetIdManual), so append-to-
+  // existing and edit/clone flows are never disturbed.
+  useEffect(() => {
+    if (editingSessionId || datasetIdManual) return;
+    const sys = availableSystems.find(s => s.id === formData.hardwareSystem);
+    const derived = composeDatasetId(sys?.robotName ?? '', formData.taskName);
+    setFormData(fd => (fd.datasetId === derived ? fd : { ...fd, datasetId: derived }));
+  }, [formData.hardwareSystem, formData.taskName, availableSystems, datasetIdManual, editingSessionId]);
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -234,7 +270,10 @@ export function RecordPage() {
     // predictable convention; episode/duration/reset already carried defaults.
     const now = new Date();
     const ymd = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    setFormData({ sessionName: `Session ${ymd}`, hardwareSystem: '', datasetId: `dataset_${ymd.replace(/-/g, '')}`, numEpisodes: '10', episodeDuration: '10', resetDuration: '2', compression: '', chunkSizeBytes: '4194304' });
+    // datasetId is left blank here — the auto-name effect fills it from the
+    // selected system's robot_name + task + date once a system is chosen.
+    setFormData({ sessionName: `Session ${ymd}`, hardwareSystem: '', taskName: '', datasetId: '', numEpisodes: '10', episodeDuration: '10', resetDuration: '2', compression: '', chunkSizeBytes: '4194304' });
+    setDatasetIdManual(false);
   }
 
   function openEditModal(session: Session) {
@@ -242,6 +281,7 @@ export function RecordPage() {
     setFormData({
       sessionName: session.name,
       hardwareSystem: session.system_id,
+      taskName: '',
       datasetId: session.dataset_id,
       numEpisodes: String(session.num_episodes),
       episodeDuration: String(session.episode_duration),
@@ -249,6 +289,8 @@ export function RecordPage() {
       compression: session.compression || '',
       chunkSizeBytes: String(session.chunk_size_bytes || 4194304),
     });
+    // Editing an existing session keeps its stored dataset id verbatim.
+    setDatasetIdManual(true);
     setFormError('');
     setShowSessionModal(true);
   }
@@ -766,13 +808,29 @@ export function RecordPage() {
 
               <div>
                 <label className="block text-ink text-xs mb-2">
+                  Task
+                </label>
+                <input
+                  type="text"
+                  value={formData.taskName}
+                  onChange={(e) => setFormData({ ...formData, taskName: e.target.value })}
+                  placeholder="e.g. pick and place"
+                  className="w-full bg-app border border-edge text-ink placeholder:text-dim px-3 py-2 text-sm focus:outline-none focus:border-brand"
+                />
+                <div className="text-dim text-[10px] mt-1">
+                  The Dataset ID below is named for you from the selected system + task + date. Just describe the task.
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-ink text-xs mb-2">
                   Dataset ID <span className="text-red-500">*</span>
                 </label>
                 <input
                   type="text"
                   list="dataset-id-suggestions"
                   value={formData.datasetId}
-                  onChange={(e) => setFormData({ ...formData, datasetId: e.target.value })}
+                  onChange={(e) => { setFormData({ ...formData, datasetId: e.target.value }); setDatasetIdManual(true); }}
                   placeholder="e.g. solo_pick_dataset"
                   className="w-full bg-app border border-edge text-ink placeholder:text-dim px-3 py-2 text-sm focus:outline-none focus:border-brand"
                   required
@@ -783,7 +841,7 @@ export function RecordPage() {
                   ))}
                 </datalist>
                 <div className="text-dim text-[10px] mt-1">
-                  Folder name under ~/.trossen_sdk/ where episodes are saved — pick an existing one to add episodes to it
+                  Auto-generated from system + task; edit to override or pick an existing one to add episodes to it. Folder name under ~/.trossen_sdk/ where episodes are saved.
                 </div>
               </div>
 

@@ -48,6 +48,19 @@ class WsBus:
             if not self._subs[session_id]:
                 del self._subs[session_id]
 
+    def subscriber_count(self, session_id: str) -> int:
+        """Number of live WebSocket subscribers for `session_id`.
+
+        Used by the recorder's orphan watchdog to detect when every client
+        has gone away (e.g. the operator's browser crashed) so an unattended
+        recording isn't left accumulating data. A dead TCP connection is
+        pruned on the next failed `send_text` in the WS handler, which — given
+        the 5 Hz stats broadcast — happens within a second or two, so this
+        count tracks real liveness closely.
+        """
+        with self._lock:
+            return len(self._subs.get(session_id, ()))
+
     def publish(self, session_id: str, message: dict[str, Any]) -> None:
         """Broadcast to all subscribers of `session_id`. Safe from any thread."""
         with self._lock:

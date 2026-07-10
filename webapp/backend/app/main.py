@@ -1,4 +1,5 @@
 import json
+import re
 import shutil
 from contextlib import asynccontextmanager
 from dataclasses import asdict
@@ -29,8 +30,11 @@ from app.datasets import (
 from app.db import apply_migrations
 from app.hw_test import stream_system_hardware_test
 from app.io_utils import is_safe_id
+from app.rerun_playback import build_rrd
 from app.recorder import (
     RecorderError,
+    clear_session_headless,
+    mark_session_headless,
     signal_next,
     signal_rerecord,
     start_recording,
@@ -202,6 +206,86 @@ def delete_dataset(
     for sess in sessions_for_dataset(dataset_id, format):
         if sess.status in ("paused", "completed", "error"):
             reset_to_pending(sess.id)
+
+
+# Episode files are named episode_NNNNNN.mcap (6-digit, zero-padded) by the
+# MCAP backend; matched exactly so a filename can never carry path separators
+# or otherwise escape the dataset directory.
+_EPISODE_FILENAME_RE = re.compile(r"^episode_\d{6}\.mcap$")
+
+
+def _resolve_mcap_episode(dataset_id: str, filename: str) -> Path:
+    """Validate ids and return the resolved path to an MCAP episode file.
+
+    Raises HTTPException (400/404) on bad input or a missing file. Guarantees
+    the returned path is a regular file directly inside the dataset directory,
+    so neither the id nor the filename can traverse out of the MCAP root.
+    """
+    if not is_safe_id(dataset_id):
+        raise HTTPException(status_code=400, detail="Invalid dataset id")
+    if not _EPISODE_FILENAME_RE.match(filename):
+        raise HTTPException(status_code=400, detail="Invalid episode filename")
+    settings = load_dataset_settings()
+    if not settings.mcap_root:
+        raise HTTPException(status_code=404, detail="MCAP root not configured")
+    ds_dir = (Path(settings.mcap_root).expanduser() / dataset_id).resolve()
+    target = (ds_dir / filename).resolve()
+    if target.parent != ds_dir:
+        raise HTTPException(status_code=400, detail="Invalid episode path")
+    if not target.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail=f"Episode '{filename}' not found in dataset '{dataset_id}'",
+        )
+    return target
+
+
+@app.delete("/api/datasets/{dataset_id}/episodes/{filename}", status_code=204)
+def delete_mcap_episode(dataset_id: str, filename: str) -> None:
+    """Delete one episode file from an MCAP dataset.
+
+    Each MCAP episode is a standalone `episode_NNNNNN.mcap` file, so removing
+    one is a plain unlink — no re-indexing, and downstream tools rediscover
+    episodes by filename and tolerate the resulting numbering gap. LeRobot
+    datasets are intentionally NOT supported here: their episodes are
+    interleaved into shared, size-rolled parquet and concatenated video files
+    that would require full re-aggregation to split.
+
+    Refuses with 409 if a session is actively recording into this dataset.
+    """
+    target = _resolve_mcap_episode(dataset_id, filename)
+
+    blocking = [s for s in sessions_for_dataset(dataset_id, "mcap") if s.status == "active"]
+    if blocking:
+        names = ", ".join(s.name or s.id for s in blocking)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot delete an episode while session '{names}' is actively "
+                f"recording into this dataset. Stop or complete it first."
+            ),
+        )
+
+    target.unlink()
+
+
+@app.get("/api/datasets/{dataset_id}/episodes/{filename}/rerun.rrd")
+def dataset_episode_rrd(dataset_id: str, filename: str) -> Response:
+    """Serve one recorded MCAP episode as a Rerun `.rrd` for playback.
+
+    The frontend hands this URL to the embedded Rerun web viewer as a
+    recording source. Joint-state channels render as scalar time-series;
+    image channels are decoded best-effort (see app/rerun_playback.py).
+    """
+    target = _resolve_mcap_episode(dataset_id, filename)
+    try:
+        data = build_rrd(target)
+    except Exception as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Could not decode episode for playback: {e}",
+        ) from e
+    return Response(content=data, media_type="application/octet-stream")
 
 
 @app.post("/api/datasets/{dataset_id}/convert-to-lerobot")
@@ -613,6 +697,20 @@ def clear_session_error(session_id: str) -> Session:
     return cleared
 
 
+@app.post("/api/sessions/{session_id}/detach", status_code=204)
+def detach_session(session_id: str) -> None:
+    """Mark an active recording as deliberately headless.
+
+    The frontend calls this when the operator leaves the live monitor on
+    purpose (ESC / in-app navigation) so the orphan watchdog keeps the
+    recording running in the background instead of treating the disconnect as
+    a crash. A no-op (still 204) if no active recorder is found — leaving is
+    always allowed. Crash protection re-arms automatically when a client next
+    connects to the session WebSocket.
+    """
+    mark_session_headless(session_id)
+
+
 @app.websocket("/api/ws/{session_id}")
 async def session_ws(ws: WebSocket, session_id: str) -> None:
     """Stream lifecycle events and stats for a recording session.
@@ -628,6 +726,10 @@ async def session_ws(ws: WebSocket, session_id: str) -> None:
     """
     await ws.accept()
     queue = bus.subscribe(session_id)
+    # A live client is watching again — re-arm crash protection so a deliberate
+    # earlier detach (headless) doesn't suppress teardown if this client later
+    # crashes.
+    clear_session_headless(session_id)
     try:
         await ws.send_text(json.dumps({"type": "lifecycle", "data": {"event": "ready"}}))
         while True:

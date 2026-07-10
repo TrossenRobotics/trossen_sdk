@@ -129,6 +129,11 @@ export function MonitorEpisodePage() {
   const [loaded, setLoaded] = useState(false);
   const [currentEpisode, setCurrentEpisode] = useState(0);
   const [elapsed, setElapsed] = useState(0);
+  // The SDK's own authoritative countdown for the current episode (seconds
+  // left), forwarded by the backend stats sampler as `episode_remaining`.
+  // Preferred over deriving from `elapsed` because it doesn't lurch when the
+  // local fallback clock and the 5 Hz WS stream disagree.
+  const [episodeRemaining, setEpisodeRemaining] = useState<number | null>(null);
   const [resetCountdown, setResetCountdown] = useState(0);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
@@ -545,9 +550,10 @@ export function MonitorEpisodePage() {
     }
 
     if (msg.type === 'stats') {
-      const data = msg.data as { episode_elapsed?: number; episode_index?: number };
+      const data = msg.data as { episode_elapsed?: number; episode_index?: number; episode_remaining?: number };
       lastStatsTime.current = Date.now();
       setElapsed(data.episode_elapsed ?? 0);
+      setEpisodeRemaining(typeof data.episode_remaining === 'number' ? data.episode_remaining : null);
       if (data.episode_index !== undefined) setCurrentEpisode(data.episode_index);
       return;
     }
@@ -577,6 +583,7 @@ export function MonitorEpisodePage() {
         const idx = (data.episode_index ?? 0) + 1;
         setCurrentEpisode(idx);
         setElapsed(0);
+        setEpisodeRemaining(null);
         setPhase('resetting');
         addLog('success', `Episode saved (${idx} total) — resetting`);
         announce(`Episode ${data.episode_index ?? ''} complete`);
@@ -786,6 +793,34 @@ export function MonitorEpisodePage() {
     return () => clearInterval(interval);
   }, [phase, resetDuration]);
 
+  // Deliberate-detach detection. When the operator leaves the live monitor on
+  // purpose (ESC / clicking another page), the component unmounts while the
+  // page stays alive — we tell the backend this is an intentional headless
+  // detach so it keeps recording in the background. A tab close / reload /
+  // browser crash instead fires `beforeunload` (or never unmounts cleanly),
+  // so we do NOT signal intent there: the backend's orphan watchdog then sees
+  // an unrecoverable frontend and performs its elegant teardown. `isUnloading`
+  // is the discriminator between the two unmount causes.
+  const isUnloadingRef = useRef(false);
+  const phaseRef = useRef(phase);
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+  useEffect(() => {
+    const onBeforeUnload = () => { isUnloadingRef.current = true; };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, []);
+  useEffect(() => {
+    return () => {
+      const active = phaseRef.current === 'recording' || phaseRef.current === 'resetting';
+      // In-app navigation (not a tab close/reload) away from an active
+      // recording == deliberate headless. Fire-and-forget; a spurious signal
+      // is harmless because the next client connect re-arms crash protection.
+      if (active && !isUnloadingRef.current && sessionId) {
+        apiPost(`/api/sessions/${sessionId}/detach`).catch(() => {});
+      }
+    };
+  }, [sessionId]);
+
   // ESC leaves the monitor. While an episode is actively recording or
   // resetting, confirm first — an accidental keypress shouldn't yank the
   // operator off the live view mid-episode. The session keeps running on the
@@ -844,6 +879,40 @@ export function MonitorEpisodePage() {
   const elapsedSec = Math.floor(elapsed % 60);
   const maxMin = Math.floor(maxDuration / 60);
   const maxSec = Math.floor(maxDuration % 60);
+
+  // Session-level progress & time-remaining. The per-episode bar above resets
+  // every episode (a sawtooth) and can't tell the operator how much of the
+  // WHOLE run is left — the recurring complaint. We model each episode as a
+  // record window (maxDuration) followed by a reset window (resetDuration) and
+  // accumulate completed cycles + progress into the current one, so the
+  // estimate advances smoothly and monotonically through both recording and
+  // reset phases instead of jumping only at episode boundaries.
+  const perEpisodeSec = maxDuration + resetDuration;
+  const totalSessionSec = totalEpisodes * perEpisodeSec;
+  const resetElapsedSec = Math.max(0, resetDuration - resetCountdown);
+  let doneSessionSec: number;
+  if (phase === 'complete') {
+    doneSessionSec = totalSessionSec;
+  } else if (phase === 'recording') {
+    // currentEpisode = # of episodes already recorded; we're `elapsed` into
+    // the record window of the current one.
+    doneSessionSec = currentEpisode * perEpisodeSec + Math.min(elapsed, maxDuration);
+  } else if (phase === 'resetting') {
+    // The just-finished episode's record window is complete; we're
+    // `resetElapsedSec` into its reset window. currentEpisode was already
+    // bumped past it, so index back by one cycle.
+    doneSessionSec = Math.max(0, currentEpisode - 1) * perEpisodeSec + maxDuration + Math.min(resetElapsedSec, resetDuration);
+  } else {
+    // paused / stopped / not_started
+    doneSessionSec = currentEpisode * perEpisodeSec;
+  }
+  doneSessionSec = Math.min(totalSessionSec, Math.max(0, doneSessionSec));
+  const sessionProgress = totalSessionSec > 0 ? Math.min(100, Math.round((doneSessionSec / totalSessionSec) * 100)) : 0;
+  const sessionRemainingSec = Math.max(0, Math.round(totalSessionSec - doneSessionSec));
+  const sessionRemMin = Math.floor(sessionRemainingSec / 60);
+  const sessionLeftText = `${sessionRemMin}:${String(sessionRemainingSec % 60).padStart(2, '0')}`;
+  // SDK-authoritative seconds left in the current episode, when available.
+  const episodeSecLeft = episodeRemaining != null ? Math.max(0, Math.ceil(episodeRemaining)) : null;
 
   const statusText = {
     not_started: 'Ready',
@@ -1067,8 +1136,10 @@ export function MonitorEpisodePage() {
             </div>
           </div>
           <div>
-            <div className="text-dim text-[9px] uppercase mb-[2px]">Episode %</div>
-            <div className="text-ink text-[13px]">{phase === 'recording' ? episodeProgress + '%' : '--'}</div>
+            <div className="text-dim text-[9px] uppercase mb-[2px]">Session Left</div>
+            <div className="text-ink text-[13px] font-mono">
+              {phase === 'recording' || phase === 'resetting' ? `~${sessionLeftText}` : phase === 'complete' ? '0:00' : '--'}
+            </div>
           </div>
           <div>
             <div className="text-dim text-[9px] uppercase mb-[2px]">Reset Time</div>
@@ -1078,7 +1149,19 @@ export function MonitorEpisodePage() {
           </div>
         </div>
 
-        {/* Progress bar */}
+        {/* Session progress (whole run) — a steady, monotonic strip so the
+            operator can gauge total time remaining. Distinct from the
+            per-episode bar below, which resets each episode. */}
+        {(phase === 'recording' || phase === 'resetting' || phase === 'paused' || phase === 'stopped' || phase === 'complete') && (
+          <div className="h-[6px] bg-edge border border-edge relative overflow-hidden mb-[6px]" title={`Session ${sessionProgress}% — ~${sessionLeftText} left`}>
+            <div
+              className="absolute inset-y-0 left-0 bg-brand transition-all duration-500"
+              style={{ width: `${sessionProgress}%` }}
+            />
+          </div>
+        )}
+
+        {/* Per-episode progress bar */}
         <div className="h-[32px] bg-edge border border-edge relative overflow-hidden">
           {phase === 'recording' && (
             <div
@@ -1096,7 +1179,7 @@ export function MonitorEpisodePage() {
             <div className="text-ink text-[12px] relative z-10">
               {phase === 'not_started' && 'Press Start to begin recording'}
               {phase === 'paused' && `Paused at ${currentEpisode} of ${totalEpisodes} — press Resume when ready`}
-              {phase === 'recording' && `Recording episode ${currentEpisode} — ${elapsedMin}:${String(elapsedSec).padStart(2, '0')} / ${maxMin}:${String(maxSec).padStart(2, '0')}`}
+              {phase === 'recording' && `Recording — ${episodeSecLeft != null ? `${episodeSecLeft}s left this episode` : `${elapsedMin}:${String(elapsedSec).padStart(2, '0')} / ${maxMin}:${String(maxSec).padStart(2, '0')}`} · ~${sessionLeftText} left in session`}
               {phase === 'resetting' && (resetCountdown > 0
                 ? `Reset — next episode in ${resetCountdown}s (press Next to skip)`
                 : `Reset — press Next to start episode ${currentEpisode}`

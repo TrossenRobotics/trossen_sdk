@@ -7,6 +7,10 @@ dependencies = [
     "alembic>=1.13",
     "fastapi>=0.115",
     "mcap>=1.2",
+    # Dataset playback (app/rerun_playback.py): decode recorded protobuf-
+    # encoded MCAP messages back into Rerun for after-the-fact visualization.
+    "mcap-protobuf-support>=0.5",
+    "protobuf>=4",
     # Rerun Python SDK: the recorder child logs live records (images, joint
     # state, odometry) into an in-process gRPC server (rr.serve_grpc) that the
     # browser-embedded Rerun web viewer connects to. Pinned to 0.32.0 because

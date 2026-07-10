@@ -264,11 +264,17 @@ def _emit(payload: dict[str, Any]) -> None:
     print(json.dumps(payload), flush=True)
 
 
-def _episode_has_joint_state(path: Path) -> bool:
-    """Return True iff `path` is a parseable MCAP with at least one
-    message on a `*/joints/state` channel.
+# Episode-file classification outcomes.
+_EPISODE_HAS_DATA = "has_data"        # parseable MCAP with joint-state records
+_EPISODE_EMPTY = "empty"              # parseable MCAP, no joint-state records (ghost)
+_EPISODE_UNPARSEABLE = "unparseable"  # parse error: corrupt / truncated / in-flight
 
-    Used to detect the "ghost episode" case: the SDK opens a new MCAP
+
+def _classify_episode(path: Path) -> str:
+    """Classify an episode MCAP as one of `_EPISODE_HAS_DATA`,
+    `_EPISODE_EMPTY`, or `_EPISODE_UNPARSEABLE`.
+
+    The "ghost episode" (`_EPISODE_EMPTY`) case: the SDK opens a new MCAP
     file at start_episode and writes a header even before any producer
     ticks. If the episode is stopped (e.g. the timer expires immediately
     or the user hits Next before the trossen_arm producer has emitted a
@@ -278,27 +284,32 @@ def _episode_has_joint_state(path: Path) -> bool:
     converter's own detection rule (substring "/joints/state" on the
     channel topic; see trossen_mcap_to_lerobot_v2.cpp:714).
 
-    Defensive: any parse error (corrupt header, premature EOF) counts as
-    "no joint state" so the caller deletes the file. The mcap library
-    raises a variety of typed exceptions plus stdlib OSError on read
-    failures; catch broadly because the recovery action is the same.
+    Crucially, a *parse error* is classified `_EPISODE_UNPARSEABLE`, NOT
+    lumped in with the empty case. A corrupt header or premature EOF is
+    exactly what a crash / SIGKILL mid-write leaves behind, and that file
+    may hold a real, partially-recorded episode. Callers must never delete
+    it — losing one truncated file was enough, at scale, to empty a whole
+    dataset directory and surface as "Dataset not found" in the browser.
+    The mcap library raises a variety of typed exceptions plus stdlib
+    OSError on read failures; catch broadly since the classification is
+    the same regardless of which one fired.
     """
     try:
         from mcap.reader import make_reader
     except ImportError:
-        # mcap dep missing — skip the check rather than blocking the
-        # recorder. Surfaces as the original "no joint state" failure
-        # at conversion time, matching pre-fix behaviour.
-        return True
+        # mcap dep missing — assume the file has data rather than acting on
+        # it. Surfaces as the original "no joint state" failure at conversion
+        # time, matching pre-fix behaviour.
+        return _EPISODE_HAS_DATA
     try:
         with path.open("rb") as fd:
             reader = make_reader(fd)
             for _schema, channel, _msg in reader.iter_messages():
                 if channel.topic and "/joints/state" in channel.topic:
-                    return True
+                    return _EPISODE_HAS_DATA
     except Exception:
-        return False
-    return False
+        return _EPISODE_UNPARSEABLE
+    return _EPISODE_EMPTY
 
 
 def _episode_file_is_empty(mcap_root: str, episode_index: int) -> bool:
@@ -312,38 +323,84 @@ def _episode_file_is_empty(mcap_root: str, episode_index: int) -> bool:
     path = Path(mcap_root) / f"episode_{episode_index:06d}.mcap"
     if not path.is_file():
         return False
-    return not _episode_has_joint_state(path)
+    # Only a genuine header-only ghost counts as "empty" and thus discardable.
+    # An unparseable (crash-truncated) file is deliberately NOT treated as
+    # empty — discarding it would throw away a partially-recorded episode.
+    return _classify_episode(path) == _EPISODE_EMPTY
+
+
+# Corrupt / truncated episode files are moved here (a subdirectory of the
+# dataset dir) rather than deleted. The name is dotted so the non-recursive
+# `*.mcap` globs in datasets.py (and the SDK's filename scan) skip it, keeping
+# it out of the episode count while preserving the bytes for later recovery.
+_QUARANTINE_DIRNAME = ".corrupt"
+
+
+def _quarantine_episode(base: Path, path: Path) -> bool:
+    """Move `path` into `base/.corrupt/`, preserving the bytes. Returns True
+    on success. Never overwrites an existing quarantined file of the same name
+    (a numeric suffix is appended if needed)."""
+    quarantine_dir = base / _QUARANTINE_DIRNAME
+    try:
+        quarantine_dir.mkdir(exist_ok=True)
+        dest = quarantine_dir / path.name
+        suffix = 1
+        while dest.exists():
+            dest = quarantine_dir / f"{path.stem}.{suffix}{path.suffix}"
+            suffix += 1
+        path.rename(dest)
+        return True
+    except OSError as e:
+        print(f"[recorder-runner] failed to quarantine corrupt episode "
+              f"{path.name}: {e}", flush=True)
+        return False
 
 
 def _reconcile_empty_episodes(dataset_dir: str) -> int:
-    """Delete ghost / header-only episode files before the SDK scans.
+    """Reconcile ghost / corrupt episode files before the SDK scans.
 
     scan_existing_episodes() counts episode_NNNNNN.mcap files by filename
     (max index + 1), so a file the SDK opened at start_episode() but that never
     received joint-state data — the recorder crashed / was SIGKILLed, or an
     episode ended before the arm producer ticked — inflates the count. On resume
     that wedges a dataset at "N/N complete" even though fewer real episodes were
-    saved, surfacing as start_episode() returning False. Removing the empties
-    here (they carry no recorded data) keeps the scan honest. Returns the count
-    removed.
+    saved, surfacing as start_episode() returning False.
+
+    Two distinct dispositions, based on classification:
+      * `_EPISODE_EMPTY` (parseable, header-only, no data): a true ghost with
+        nothing to lose — deleted.
+      * `_EPISODE_UNPARSEABLE` (corrupt / crash-truncated): may hold a real,
+        partially-recorded episode — quarantined into `.corrupt/`, never
+        deleted. Deleting these was the root cause of "Dataset not found"
+        after long sessions: a single truncated in-flight file at crash time
+        would be destroyed, and if it was the only remaining file the dataset
+        directory went empty and the browser 404'd.
+
+    Returns the number of files removed (deleted ghosts only; quarantined
+    files are preserved, not counted as removed).
     """
     base = Path(dataset_dir)
     if not base.is_dir():
         return 0
     removed = 0
     for path in sorted(base.glob("episode_*.mcap")):
-        # _episode_has_joint_state treats unreadable/corrupt files as "no joint
-        # state", so a parse failure here also gets cleaned up.
-        if _episode_has_joint_state(path):
+        kind = _classify_episode(path)
+        if kind == _EPISODE_HAS_DATA:
             continue
-        try:
-            path.unlink()
-            removed += 1
-            print(f"[recorder-runner] removed ghost episode {path.name} "
-                  f"(no joint-state data) before scan", flush=True)
-        except OSError as e:
-            print(f"[recorder-runner] failed to remove ghost episode "
-                  f"{path.name}: {e}", flush=True)
+        if kind == _EPISODE_EMPTY:
+            try:
+                path.unlink()
+                removed += 1
+                print(f"[recorder-runner] removed ghost episode {path.name} "
+                      f"(no joint-state data) before scan", flush=True)
+            except OSError as e:
+                print(f"[recorder-runner] failed to remove ghost episode "
+                      f"{path.name}: {e}", flush=True)
+        else:  # _EPISODE_UNPARSEABLE
+            if _quarantine_episode(base, path):
+                print(f"[recorder-runner] quarantined corrupt episode "
+                      f"{path.name} -> {_QUARANTINE_DIRNAME}/ (preserved, "
+                      f"excluded from scan)", flush=True)
     return removed
 
 
@@ -539,12 +596,18 @@ def _stdin_reader(
     stop_event: threading.Event,
     next_event: threading.Event,
     rerecord_event: threading.Event,
+    abort_event: threading.Event,
     shutdown_event: threading.Event,
 ) -> None:
     """Consume JSON-line control messages from stdin and flip Events.
 
     Exits on EOF (parent closed stdin) or when `shutdown_event` is set
     by the main thread at the end of the run.
+
+    `abort` is `stop` with prejudice: it stops the loop AND flags that the
+    in-flight episode should be discarded rather than finalized. The parent
+    sends it when the operator's frontend vanished unrecoverably (crash /
+    tab close) so the unattended partial episode isn't kept.
     """
     while not shutdown_event.is_set():
         try:
@@ -564,6 +627,10 @@ def _stdin_reader(
         if msg.get("type") != "signal":
             continue
         signal = msg.get("signal")
+        if signal == "abort":
+            abort_event.set()
+            stop_event.set()
+            return
         if signal == "stop":
             stop_event.set()
             return
@@ -601,6 +668,7 @@ def _run_episode_loop(
     stop_event: threading.Event,
     next_event: threading.Event,
     rerecord_event: threading.Event,
+    abort_event: threading.Event,
     num_episodes: int,
     reset_duration: float,
     start_episode_index: int,
@@ -800,18 +868,35 @@ def _run_episode_loop(
             if not retry_this_episode:
                 episode_index += 1
 
-        print(f"{tag} loop exiting, beginning shutdown", flush=True)
+        aborted = abort_event.is_set()
+        print(f"{tag} loop exiting, beginning shutdown"
+              f"{' (aborted — discarding in-flight episode)' if aborted else ''}",
+              flush=True)
 
-        # Finalize any in-flight episode (the SDK keeps the partial
-        # recording as a normal episode, incrementing its internal
-        # next_episode_index_), then capture the SDK's authoritative
-        # episode count before shutdown clears state.
+        # Dispose of any in-flight episode, then capture the SDK's
+        # authoritative episode count before shutdown clears state.
+        #   * Normal exit: finalize the partial (the SDK keeps it as a normal
+        #     episode, incrementing its internal next_episode_index_).
+        #   * Abort (frontend vanished): discard it — it was recorded with
+        #     nobody at the controls, so keeping it would pollute the dataset.
         if mgr.is_episode_active():
-            mgr.stop_episode()
+            if aborted:
+                try:
+                    mgr.discard_current_episode()
+                    _emit({"type": "event", "event": "episode_discarded",
+                           "episode_index": episode_index})
+                except Exception as e:
+                    print(f"{tag} abort discard_current_episode failed: {e}",
+                          flush=True)
+            else:
+                mgr.stop_episode()
         try:
             sdk_episodes_completed = int(mgr.stats().current_episode_index)
         except Exception:
             sdk_episodes_completed = -1
+        # mgr.shutdown() fires on_pre_shutdown -> _stop_controllers -> each
+        # arm's end_teleop() (returns it to the rest pose and releases the
+        # driver), i.e. the arms are safely put to sleep.
         mgr.shutdown()
 
         _emit({
@@ -820,6 +905,7 @@ def _run_episode_loop(
             "total_episodes": num_episodes,
             "dry_run": dry_run,
             "sdk_episodes_completed": sdk_episodes_completed,
+            "aborted": aborted,
         })
         print(f"{tag} loop exiting cleanly", flush=True)
     finally:
@@ -928,11 +1014,12 @@ def main() -> int:
     stop_event = threading.Event()
     next_event = threading.Event()
     rerecord_event = threading.Event()
+    abort_event = threading.Event()
     shutdown_event = threading.Event()
 
     stdin_thread = threading.Thread(
         target=_stdin_reader,
-        args=(stop_event, next_event, rerecord_event, shutdown_event),
+        args=(stop_event, next_event, rerecord_event, abort_event, shutdown_event),
         name="recorder-stdin",
         daemon=True,
     )
@@ -944,6 +1031,7 @@ def main() -> int:
             stop_event,
             next_event,
             rerecord_event,
+            abort_event,
             num_episodes,
             reset_duration,
             start_episode_index,

@@ -31,11 +31,13 @@ import re
 import subprocess
 import sys
 import threading
+import time
 from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
 from app import hw_status
+from app.dataset_settings import load_dataset_settings
 from app.sessions import (
     Session,
     force_session_to_error,
@@ -72,6 +74,21 @@ _GRACEFUL_STOP_TIMEOUT_S = 30.0
 
 # After SIGTERM, how long until SIGKILL.
 _KILL_TIMEOUT_S = 5.0
+
+# Orphan-recording watchdog. If every WebSocket client for an active recording
+# goes away and none returns within this grace window — and the operator did
+# NOT deliberately detach (ESC / in-app nav set headless_intended) — the session
+# is torn down so an unattended rig isn't left accumulating episodes with nobody
+# at the controls. The watchdog only *arms* after at least one client has
+# connected, so an intentional headless start (via the API with no browser) is
+# never affected. Set the env var RECORDER_ORPHAN_GRACE_S=0 to disable entirely.
+# 5s reacts quickly to a real crash; a page reload / brief blip reconnects in
+# ~1-2s (well inside the window), while a sustained >5s disappearance is taken
+# as an unrecoverable frontend. Raise it if flaky networks cause false teardowns.
+_ORPHAN_GRACE_S = float(os.environ.get("RECORDER_ORPHAN_GRACE_S", "5"))
+
+# How often the watchdog samples client liveness.
+_ORPHAN_POLL_S = 2.0
 
 # Bounded ring buffer of recent stdout lines, used to build a useful
 # error message when the child crashes without printing a sentinel
@@ -169,6 +186,11 @@ class _Runner:
     last_lines: deque  # bounded log buffer for crash diagnostics
     reader: threading.Thread | None = None
     in_flight_episode: int | None = None
+    # Set True when the operator deliberately left the live monitor (ESC /
+    # in-app navigation) — signals "keep recording headless, this is not a
+    # crash", so the orphan watchdog must not tear the session down. Cleared
+    # when a client reconnects, which re-arms crash protection.
+    headless_intended: bool = False
 
 
 # In-memory registry of running recorders, keyed by session id. A uvicorn
@@ -302,23 +324,41 @@ def start_recording(session: Session) -> None:
         _runners[session.id] = runner
     runner.reader.start()
 
+    # Guard against unattended recording: if the operator's browser goes away
+    # and never comes back, stop the run instead of silently filling the
+    # dataset with garbage. Skipped for dry runs (they write no data via the
+    # null backend) and when disabled via RECORDER_ORPHAN_GRACE_S=0.
+    if _ORPHAN_GRACE_S > 0 and not session.dry_run:
+        threading.Thread(
+            target=_orphan_watchdog,
+            args=(session.id,),
+            name=f"recorder-watchdog-{session.id[:8]}",
+            daemon=True,
+        ).start()
 
-def stop_recording(session_id: str) -> None:
+
+def stop_recording(session_id: str, *, discard_in_flight: bool = False) -> None:
     """Signal the recorder child to stop and wait for it to wind down.
 
-    Best-effort: writes `{"signal":"stop"}` to the child's stdin, then
-    waits up to `_GRACEFUL_STOP_TIMEOUT_S` for the child to exit. If
-    the child doesn't exit cleanly we escalate to SIGTERM, then SIGKILL
-    after another 5s. The reader thread observes the EOF and runs its
-    own cleanup (registry pop + DB / hw_status / WS bus updates) in
-    parallel, so the most we wait for here is the reader join.
+    With `discard_in_flight=True` the child is sent `abort` instead of `stop`,
+    so it discards the in-flight (partial) episode rather than finalizing it —
+    used by the orphan watchdog's elegant teardown, where the current episode
+    was being recorded with no operator present. Either way the SDK shutdown
+    puts the arms to sleep (rest pose + driver release).
+
+    Best-effort: writes the control signal to the child's stdin, then waits up
+    to `_GRACEFUL_STOP_TIMEOUT_S` for the child to exit. If the child doesn't
+    exit cleanly we escalate to SIGTERM, then SIGKILL after another 5s. The
+    reader thread observes the EOF and runs its own cleanup (registry pop +
+    DB / hw_status / WS bus updates) in parallel, so the most we wait for here
+    is the reader join.
     """
     with _lock:
         runner = _runners.get(session_id)
     if runner is None:
         return
     try:
-        _send_signal(runner, "stop")
+        _send_signal(runner, "abort" if discard_in_flight else "stop")
     except Exception:
         # Best-effort: the child may have already died. Fall through to
         # the wait+escalate logic so we still surface a clean teardown.
@@ -341,6 +381,90 @@ def stop_recording(session_id: str) -> None:
             f"Recorder subprocess for '{session_id}' did not stop within "
             f"{_GRACEFUL_STOP_TIMEOUT_S}s"
         )
+
+
+def mark_session_headless(session_id: str) -> bool:
+    """Mark a session as deliberately headless (operator left the monitor on
+    purpose via ESC / in-app navigation). The orphan watchdog then leaves it
+    running. Returns True if a matching active recorder was found."""
+    with _lock:
+        runner = _runners.get(session_id)
+        if runner is None:
+            return False
+        runner.headless_intended = True
+    return True
+
+
+def clear_session_headless(session_id: str) -> None:
+    """Re-arm crash protection for a session: called when a client (re)connects,
+    so a subsequent crash while someone is watching triggers teardown again."""
+    with _lock:
+        runner = _runners.get(session_id)
+        if runner is not None:
+            runner.headless_intended = False
+
+
+def _orphan_watchdog(session_id: str) -> None:
+    """Elegantly tear a recording down when its frontend vanishes unrecoverably.
+
+    Distinguishes a deliberate headless detach from a crash:
+      * If the operator left on purpose (ESC / in-app nav), the frontend calls
+        `mark_session_headless`; the watchdog then never fires — headless
+        recording continues, exactly as the "recording continues in the
+        background" copy promises.
+      * If instead the client just disappears (tab close, browser/JS crash,
+        network death) and none returns within `_ORPHAN_GRACE_S`, that's an
+        unrecoverable frontend: the watchdog performs the elegant teardown —
+        discard the unattended in-flight episode, stop recording, put the arms
+        to sleep (SDK shutdown) — via stop_recording(discard_in_flight=True).
+
+    Arms only after the first client connects, so a headless-by-API start (no
+    browser ever) is never torn down. A reconnecting client clears the headless
+    flag (re-arming) and resets the grace timer, so reloads / brief blinks ride
+    through untouched.
+    """
+    armed = False
+    zero_since: float | None = None
+    while True:
+        time.sleep(_ORPHAN_POLL_S)
+        with _lock:
+            runner = _runners.get(session_id)
+            headless = runner.headless_intended if runner is not None else False
+        if runner is None:
+            return  # session ended (normally or otherwise) — nothing to guard
+        if bus.subscriber_count(session_id) > 0:
+            armed = True
+            zero_since = None
+            continue
+        if headless or not armed:
+            # Deliberate headless run, or no client has ever connected: don't
+            # fire. Reset the grace timer so a later un-detach starts fresh.
+            zero_since = None
+            continue
+        now = time.monotonic()
+        if zero_since is None:
+            zero_since = now
+            continue
+        if now - zero_since < _ORPHAN_GRACE_S:
+            continue
+        print(
+            f"[recorder] session {session_id[:8]}: frontend gone for "
+            f"{_ORPHAN_GRACE_S:.0f}s with no deliberate detach — elegant "
+            f"teardown (discard in-flight, stop, sleep arms)",
+            flush=True,
+        )
+        bus.publish(session_id, {
+            "type": "lifecycle",
+            "data": {"event": "orphaned_teardown", "grace_seconds": _ORPHAN_GRACE_S},
+        })
+        try:
+            stop_recording(session_id, discard_in_flight=True)
+        except Exception as e:
+            print(
+                f"[recorder] orphan teardown for {session_id[:8]} failed: {e}",
+                flush=True,
+            )
+        return
 
 
 def signal_next(session_id: str) -> bool:
@@ -758,7 +882,7 @@ def _apply_session_overrides(
 
     The system config provides hardware + defaults; the session provides
     user-supplied recording parameters (dataset id, episode counts,
-    compression). Pure dict manipulation — stays in the parent so the
+    compression). Runs in the parent (which owns DB/settings access) so the
     child has no DB or system-config concerns.
 
     For a dry-run session, the SDK backend is swapped to the registered
@@ -772,6 +896,19 @@ def _apply_session_overrides(
     backend["dataset_id"] = session.dataset_id
     backend["compression"] = session.compression
     backend["chunk_size_bytes"] = session.chunk_size_bytes
+    # Pin the recording root to the very directory the dataset browser scans
+    # (dataset-settings `mcap_root`), so a recording can never land somewhere
+    # the browser won't look — that record/browse divergence is one way a
+    # freshly recorded dataset shows up as "not found". It also guarantees a
+    # non-empty root: an empty backend.root makes the SDK fall back to
+    # ~/.cache/trossen_sdk, which in the containerized deployment is NOT
+    # bind-mounted to the host and is silently lost on teardown (the "datasets
+    # in some random root folder" complaint). mcap_root always resolves to a
+    # value (dataset_settings defaults it), so we only skip the override in the
+    # defensive case of an unexpectedly empty string.
+    mcap_root = load_dataset_settings().mcap_root
+    if mcap_root:
+        backend["root"] = mcap_root
 
     sess = merged.setdefault("session", {})
     # Dry runs cap at one episode so the user can rehearse the full
