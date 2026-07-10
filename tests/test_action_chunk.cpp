@@ -50,6 +50,18 @@ TEST(ActionChunkTest, RowOutOfRangeThrows) {
   EXPECT_THROW(c->row(99), std::out_of_range);
 }
 
+TEST(ActionChunkTest, RowShortDataThrows) {
+  // A malformed server chunk advertises T=3, N=4 but ships too few floats.
+  // row() must reject the in-range index rather than slice past data.end().
+  auto c = std::make_shared<ActionChunk>();
+  c->T = 3;
+  c->N = 4;
+  c->data.resize(4);  // only room for row 0; row 1+ would run off the end
+  EXPECT_NO_THROW(c->row(0));
+  EXPECT_THROW(c->row(1), std::out_of_range);
+  EXPECT_THROW(c->row(2), std::out_of_range);
+}
+
 TEST(ChunkSlotTest, HoldLastActionReturnsZerosBeforeAnyChunk) {
   ChunkSlot slot;
   auto v = slot.sample(Clock::now(), 6, 30.0);
@@ -155,6 +167,82 @@ TEST(ChunkSlotTest, WrongWidthPendingDoesNotLeakToFollowers) {
   EXPECT_EQ(info.row.size(), 3u);
 }
 
+TEST(ChunkSlotTest, WrongWidthLatestSelfHealsToSuccessor) {
+  // A wrong-width chunk that reaches latest_ must not permanently wedge the
+  // slot in hold-last: once a correct-width successor is queued, the slot
+  // discards the bad latest_, promotes the successor, and resumes playing.
+  ChunkSlot slot;
+  const auto t0 = Clock::now();
+  slot.swap_in(make_chunk(5, 3, t0, /*seq=*/1, /*base=*/0.0f));
+  (void)slot.sample(t0, 3, 30.0);  // anchor, chunk 1 row 0
+
+  // Wrong-width successor parks in pending_ and is promoted to latest_ when
+  // chunk 1 exhausts (~167 ms); the promotion holds last (width stays 3).
+  slot.swap_in(make_chunk(5, 4, t0, /*seq=*/2, /*base=*/100.0f));
+  auto held = slot.sample(t0 + std::chrono::milliseconds(400), 3, 30.0);
+  ASSERT_EQ(held.size(), 3u);
+  EXPECT_NE(held[0], 100.0f);  // never emitted the wrong-width row
+
+  // A correct-width chunk now arrives and parks behind the wrong-width latest_.
+  slot.swap_in(make_chunk(5, 3, t0, /*seq=*/3, /*base=*/300.0f));
+
+  // The next sample discards the unplayable latest_ and promotes the good
+  // successor (holding last for this one tick)...
+  const auto heal_at = t0 + std::chrono::milliseconds(500);
+  auto healing = slot.sample(heal_at, 3, 30.0);
+  ASSERT_EQ(healing.size(), 3u);
+
+  // ...and the following sample plays the recovered chunk's row 0: recovery.
+  auto recovered = slot.sample(heal_at + std::chrono::milliseconds(1), 3, 30.0);
+  ASSERT_EQ(recovered.size(), 3u);
+  EXPECT_FLOAT_EQ(recovered[0], 300.0f);
+}
+
+TEST(ChunkSlotTest, FirstChunkWrongWidthSelfHeals) {
+  // When the very first chunk is the wrong width it becomes latest_ directly.
+  // The slot must discard it (not wedge) so a later correct chunk can play.
+  ChunkSlot slot;
+  const auto t0 = Clock::now();
+  slot.swap_in(make_chunk(5, 4, t0, /*seq=*/1, /*base=*/9.0f));  // wrong width
+
+  // Sampling holds last (zeros at width 3) and discards the unplayable latest_.
+  auto held = slot.sample(t0, 3, 30.0);
+  ASSERT_EQ(held.size(), 3u);
+  EXPECT_FLOAT_EQ(held[0], 0.0f);
+
+  // A correct-width chunk now installs cleanly and plays from row 0.
+  const auto t1 = t0 + std::chrono::milliseconds(10);
+  slot.swap_in(make_chunk(5, 3, t1, /*seq=*/2, /*base=*/50.0f));
+  auto row = slot.sample(t1, 3, 30.0);
+  ASSERT_EQ(row.size(), 3u);
+  EXPECT_FLOAT_EQ(row[0], 50.0f);
+}
+
+TEST(ChunkSlotTest, MalformedChunkDataSampleHoldsLast) {
+  // A chunk that advertises T*N floats but ships fewer must be treated as
+  // unplayable by the sample family — hold-last, never crash on the short
+  // slice through row().
+  ChunkSlot slot;
+  const auto t0 = Clock::now();
+  auto bad = std::make_shared<ActionChunk>();
+  bad->T = 5;
+  bad->N = 3;
+  bad->chunk_seq = 1;
+  bad->received_at = t0;
+  bad->data.resize(3);  // only row 0's worth; advertises 15
+  slot.swap_in(bad);
+
+  auto v = slot.sample(t0 + std::chrono::milliseconds(100), 3, 30.0);
+  ASSERT_EQ(v.size(), 3u);
+  for (float x : v) {
+    EXPECT_FLOAT_EQ(x, 0.0f);  // hold-last with no prior command → zeros
+  }
+
+  // sample_with_info honors the same guard.
+  auto info = slot.sample_with_info(t0 + std::chrono::milliseconds(150), 3, 30.0);
+  EXPECT_EQ(info.row.size(), 3u);
+}
+
 TEST(ChunkSlotTest, PendingPromotionRestartsRowSelection) {
   // After promotion, row indexing must be relative to the promotion instant —
   // not the original playback_start_ — so the new chunk starts at row 0 and
@@ -246,6 +334,12 @@ TEST(ChunkSlotTest, NonPositiveTotalNReturnsSingleZeroNotEmpty) {
 }
 
 TEST(ChunkSlotTest, ConcurrentSampleWithSwapIn) {
+  // This is a 1-sampler / 1-writer stress test, NOT multi-sampler: the
+  // ChunkSlot single-consumer contract allows exactly one thread in the sample
+  // family concurrently with swap_in. The kReaders threads below all call the
+  // SAME slot but the assertion only checks race-freedom (no crash, correct row
+  // width) — not playback correctness under concurrent samplers, which is
+  // logically undefined by contract.
   ChunkSlot slot;
   constexpr int kN = 7;
   constexpr int kT = 50;

@@ -3,8 +3,8 @@
  * @brief Action chunk POD and slot publishing actions to TeleopController readers.
  */
 
-#ifndef TROSSEN_SDK__HW__POLICY__ACTION_CHUNK_HPP
-#define TROSSEN_SDK__HW__POLICY__ACTION_CHUNK_HPP
+#ifndef TROSSEN_SDK__HW__POLICY__ACTION_CHUNK_HPP_
+#define TROSSEN_SDK__HW__POLICY__ACTION_CHUNK_HPP_
 
 #include <chrono>
 #include <cmath>
@@ -41,7 +41,8 @@ struct ActionChunk {
   /**
    * @brief Return the action row at index t.
    * @param t row index in [0, T).
-   * @throws std::out_of_range if t is outside [0, T).
+   * @throws std::out_of_range if t is outside [0, T), or if @c data is shorter
+   *         than the [t*N, t*N+N) slice it would return.
    */
   [[nodiscard]] std::vector<float> row(int t) const {
     if (t < 0 || t >= T) {
@@ -50,6 +51,14 @@ struct ActionChunk {
         " out of range [0, " + std::to_string(T) + ")");
     }
     const std::size_t start = static_cast<std::size_t>(t) * static_cast<std::size_t>(N);
+    // data may be shorter than T*N on a malformed server chunk; slicing past
+    // data.end() would be UB, so reject it rather than build from bad iterators.
+    if (start + static_cast<std::size_t>(N) > data.size()) {
+      throw std::out_of_range(
+        "ActionChunk::row: data.size()=" + std::to_string(data.size()) +
+        " too short for row " + std::to_string(t) + " of width " +
+        std::to_string(N));
+    }
     return std::vector<float>(data.begin() + start, data.begin() + start + N);
   }
 };
@@ -66,6 +75,15 @@ struct ActionChunk {
  * Pass a null pointer to swap_in() to reset the slot entirely (clears both
  * latest_ and pending_); subsequent samples fall back to the cached last
  * commanded row.
+ *
+ * Threading (single-consumer contract): exactly one thread may call the
+ * sample family (sample / sample_with_info). It may run concurrently with
+ * swap_in / swap_in_aligned / peek / exhaustion_time called from the
+ * inference thread — those are all mu_-guarded. Concurrent calls into the
+ * sample family from more than one thread are race-free (mu_ protects the
+ * state) but logically undefined: the samplers interleave playback
+ * advancement (playback_start_, last_cmd_, t_idx progression) and corrupt
+ * each other's notion of "where playback is." Use one sampler.
  */
 class ChunkSlot {
  public:
@@ -184,6 +202,10 @@ class ChunkSlot {
    * non-positive) on configuration mismatch, missing chunk, or internal
    * failure. Never propagates exceptions.
    *
+   * Single-consumer: only one thread may call this (see class doc). The
+   * const-with-mutable playback advancement is intentional — playback state
+   * is logically internal and every access is guarded by mu_.
+   *
    * @param now             Sample timestamp (typically steady_clock::now()).
    * @param total_n         Expected width of the action row.
    * @param control_rate_hz Row-selection rate; must be > 0.
@@ -193,11 +215,27 @@ class ChunkSlot {
     std::chrono::steady_clock::time_point now,
     int total_n,
     double control_rate_hz) const noexcept {
+    // TODO(shantanuparab-tr): fill-into-buffer overload if RT profiling shows alloc jitter
     try {
       std::lock_guard<std::mutex> lk(mu_);
 
-      if (!latest_ || latest_->T <= 0 || latest_->N <= 0 ||
-          control_rate_hz <= 0.0 || latest_->N != total_n) {
+      // control_rate_hz is a caller/config error, not a chunk defect: hold,
+      // never discard a chunk over it.
+      if (control_rate_hz <= 0.0) {
+        return hold_last_locked_(total_n);
+      }
+      // An unplayable latest_ (degenerate dims, wrong width, or data shorter
+      // than T*N on a malformed server chunk) must not wedge the slot in
+      // hold-last: discard it and pull its successor so the slot self-heals,
+      // otherwise a valid pending_ would never be promoted. This tick still
+      // holds the last row; the next tick re-checks the freshly promoted chunk.
+      if (latest_ && !chunk_playable_(*latest_, total_n)) {
+        latest_ = std::move(pending_);
+        pending_.reset();
+        if (latest_) playback_start_ = now;
+        return hold_last_locked_(total_n);
+      }
+      if (!latest_) {
         return hold_last_locked_(total_n);
       }
 
@@ -216,11 +254,12 @@ class ChunkSlot {
         pending_.reset();
         playback_start_ = now;
         t_idx = 0;
-        // The promoted successor must match the configured action width; the
-        // top-of-function guard only checked the outgoing chunk. A mismatched
-        // successor would emit a wrong-length row to the followers, so hold the
-        // last commanded row instead (the next sample re-checks the guard).
-        if (latest_->N != total_n) {
+        // The promoted successor must be playable at the configured width; the
+        // top-of-function guard only checked the outgoing chunk. An unplayable
+        // successor would emit a wrong-length row (or slice past data.end()),
+        // so hold the last commanded row instead (the next sample re-checks the
+        // guard and self-heals).
+        if (!chunk_playable_(*latest_, total_n)) {
           return hold_last_locked_(total_n);
         }
       }
@@ -296,17 +335,37 @@ class ChunkSlot {
    * post-run analysis can identify chunk boundaries, exhaust-and-hold
    * windows, and cross-fade transitions in the actual command stream sent
    * to the followers.
+   *
+   * Single-consumer: only one thread may call this (see class doc). The
+   * const-with-mutable playback advancement is intentional — playback state
+   * is logically internal and every access is guarded by mu_.
    */
   [[nodiscard]] SampleInfo sample_with_info(
     std::chrono::steady_clock::time_point now,
     int total_n,
     double control_rate_hz) const noexcept {
+    // TODO(shantanuparab-tr): fill-into-buffer overload if RT profiling shows alloc jitter
     SampleInfo info;
     try {
       std::lock_guard<std::mutex> lk(mu_);
 
-      if (!latest_ || latest_->T <= 0 || latest_->N <= 0 ||
-          control_rate_hz <= 0.0 || latest_->N != total_n) {
+      // control_rate_hz is a caller/config error, not a chunk defect: hold,
+      // never discard a chunk over it.
+      if (control_rate_hz <= 0.0) {
+        info.row = hold_last_locked_(total_n);
+        return info;
+      }
+      // An unplayable latest_ (degenerate dims, wrong width, or data shorter
+      // than T*N on a malformed server chunk) must not wedge the slot: discard
+      // it and pull its successor so the slot self-heals (mirror of sample()).
+      if (latest_ && !chunk_playable_(*latest_, total_n)) {
+        latest_ = std::move(pending_);
+        pending_.reset();
+        if (latest_) playback_start_ = now;
+        info.row = hold_last_locked_(total_n);
+        return info;
+      }
+      if (!latest_) {
         info.row = hold_last_locked_(total_n);
         return info;
       }
@@ -325,9 +384,9 @@ class ChunkSlot {
         pending_.reset();
         playback_start_ = now;
         t_idx = 0;
-        // See sample(): a promoted successor of the wrong width must not reach
-        // the followers — hold the last commanded row instead.
-        if (latest_->N != total_n) {
+        // See sample(): an unplayable promoted successor must not reach the
+        // followers — hold the last commanded row instead.
+        if (!chunk_playable_(*latest_, total_n)) {
           info.row = hold_last_locked_(total_n);
           return info;
         }
@@ -422,6 +481,16 @@ class ChunkSlot {
   }
 
  private:
+  // A chunk is playable only if its dims are positive, its width matches the
+  // configured action width, and its data buffer actually holds T*N floats.
+  // The last check guards against a malformed server chunk whose data is
+  // shorter than advertised — row() would otherwise slice past data.end().
+  static bool chunk_playable_(const ActionChunk& c, int total_n) noexcept {
+    return c.T > 0 && c.N > 0 && c.N == total_n &&
+           c.data.size() ==
+             static_cast<std::size_t>(c.T) * static_cast<std::size_t>(c.N);
+  }
+
   // Requires mu_ held. Linear scan is fine — the skip list is at most a
   // handful of indices (one gripper per arm), so a sorted-vector + binary
   // search would only add code complexity without measurable benefit.
@@ -476,4 +545,4 @@ class ChunkSlot {
 
 }  // namespace trossen::hw::policy
 
-#endif  // TROSSEN_SDK__HW__POLICY__ACTION_CHUNK_HPP
+#endif  // TROSSEN_SDK__HW__POLICY__ACTION_CHUNK_HPP_

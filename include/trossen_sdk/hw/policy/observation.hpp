@@ -58,6 +58,9 @@ struct Observation
   std::vector<Image> images;
   std::string task;              ///< natural-language instruction
   bool must_go{false};
+  /// Client-owned timestep clock tick; the packer always stamps it. 0 is a
+  /// legitimate first-tick value, NOT an "unset" sentinel — do not treat 0 as
+  /// missing. captured_at == epoch is the only "never populated" signal.
   int64_t timestep{0};
   std::chrono::steady_clock::time_point captured_at{};  ///< epoch == never set
 };
