@@ -215,6 +215,13 @@ public:
    * source, and remembers it so shutdown() stops it (joining its thread)
    * before the session is torn down. Every source drives the session through
    * the same thread-safe queue, so keyboard and VR are interchangeable.
+   *
+   * @note The manager keeps a non-owning pointer to `source`, so `source` must
+   * outlive the SessionManager (until shutdown() / destruction). Destroying it
+   * earlier leaves a dangling pointer that shutdown() would dereference.
+   * @note Events are consumed by the synchronous monitor_episode() /
+   * wait_for_reset() loop, so drive the session with those rather than
+   * start_async_monitoring().
    */
   void attach_control(hw::session_control::SessionControlCapable& source);
 
