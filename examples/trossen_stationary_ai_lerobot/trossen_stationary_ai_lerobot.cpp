@@ -343,11 +343,9 @@ int main(int argc, char** argv) {
 
   auto controllers = trossen::hw::teleop::create_controllers_from_global_config();
 
-  // Followers were sent toward their staged_position by the controller
-  // constructor (non-blocking). Wait for the trajectory to complete before
-  // start_episode() spawns the inference thread and policy commands arrive.
-  std::cout << "Waiting for followers to reach staging pose..." << std::endl;
-  std::this_thread::sleep_for(std::chrono::milliseconds(3500));
+  // No manual wait for staging is needed here: each arm homes synchronously to
+  // its staged_position via the blocking on_pre_episode()/stage() path inside
+  // start_episode(), so the followers are already settled before mirroring begins.
 
   // ──────────────────────────────────────────────────────────
   // Lifecycle callbacks
@@ -371,7 +369,11 @@ int main(int argc, char** argv) {
     std::cout << "Waiting for first policy chunk before starting mirror...\n";
     const auto deadline =
       std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (std::chrono::steady_clock::now() < deadline) {
+    bool ready = false;
+    // Honour Ctrl+C while waiting: the arms are energized here, so the loop
+    // must exit promptly on a stop request instead of blocking for up to 30 s.
+    while (std::chrono::steady_clock::now() < deadline &&
+           !trossen::utils::g_stop_requested) {
       bool all_ready = true;
       for (const auto& [id, client] : policy_clients) {
         if (!client->latest_chunk()) {
@@ -379,13 +381,27 @@ int main(int argc, char** argv) {
           break;
         }
       }
-      if (all_ready) break;
+      if (all_ready) {
+        ready = true;
+        break;
+      }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
-    for (auto& ctrl : controllers) ctrl->teleop();
-    std::cout << "Episode started - recording"
-              << (controllers.empty() ? "" : " and policy-driven mirroring")
-              << " active.\n";
+    // Start mirroring only after a real chunk has landed: kicking off teleop on
+    // the zero-fill hold-last-action row would jerk the followers off the staged
+    // pose toward rest. On timeout or Ctrl+C, leave the followers on the held
+    // staged pose (safe) and let the episode loop's g_stop_requested checks
+    // drive shutdown.
+    if (ready) {
+      for (auto& ctrl : controllers) ctrl->teleop();
+      std::cout << "Episode started - recording"
+                << (controllers.empty() ? "" : " and policy-driven mirroring")
+                << " active.\n";
+    } else {
+      std::cerr << "WARNING: no policy chunk within deadline"
+                << (trossen::utils::g_stop_requested ? " (stop requested)" : "")
+                << "; mirroring not started, followers holding staged pose.\n";
+    }
   });
 
   int depth_cameras = 0;

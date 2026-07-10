@@ -46,7 +46,7 @@ The program will:
 1. Connect to both follower arms and move them to the staged starting position.
 2. Open the WebSocket to the policy server; spawn the inference thread.
 3. Wait for the first action chunk, then mirror each follower against its policy-driven leader Face.
-4. Record an episode (default: 20 seconds) including the followers, cameras, and the policy's commanded action stream.
+4. Record an episode (default: 60 seconds) including the followers, cameras, and the policy's commanded action stream.
 5. Stop, flush, and save the `.mcap` file.
 6. Repeat until `max_episodes` is reached or Ctrl+C is pressed.
 7. Return arms to the sleep position.
@@ -90,12 +90,12 @@ If the server stalls or the chunk is exhausted, the last commanded row is held i
 
 | Setting | Value |
 |---|---|
-| Episode duration | 20 seconds |
-| Max episodes | 5 |
+| Episode duration | 60 seconds |
+| Max episodes | 1 |
 | Joint poll rate | 30 Hz |
 | Camera frame rate | 30 Hz @ 640×480 |
 | Teleop rate | 30 Hz |
-| Policy inference rate | 10 Hz |
+| Policy inference rate | 0.6 Hz |
 | Policy action rate | 30 Hz |
 | Teleop pairs | policy_left → follower_left, policy_right → follower_right |
 | Output directory | `~/.trossen_sdk` |

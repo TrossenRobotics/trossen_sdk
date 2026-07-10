@@ -299,7 +299,13 @@ Mutex-serialized so left + right faces don't interleave bytes mid-line.
 No flush per tick (avoids dominating CPU); request/response writes flush,
 which also flushes buffered tick lines.
 
-### 5.3 `/tmp/analyze_actions.py`
+### 5.3 `analyze_actions.py`
+
+> **Note.** `analyze_actions.py` and `diff_runs.py` (§5.4) were ad-hoc scripts
+> written during bring-up debugging and are **not shipped in this repo**. The
+> `python3 /tmp/...` command blocks below are illustrative only — they will not
+> run as-is. This section documents what those scripts computed and why, as a
+> guide for writing your own analysis over the JSONL tick stream.
 
 Reads the JSONL tick stream and produces:
 
@@ -318,7 +324,7 @@ Reads the JSONL tick stream and produces:
   drop on the chunk-aligned-timing fix was the most compact "this worked"
   metric.
 
-Run:
+Run (illustrative — script not shipped):
 
 ```
 python3 /tmp/analyze_actions.py ~/.trossen_sdk/policy_logs/sdk_run.jsonl
@@ -326,7 +332,7 @@ python3 /tmp/analyze_actions.py <log> --face policy_left
 python3 /tmp/analyze_actions.py <log> --jump-threshold 0.15
 ```
 
-### 5.4 `/tmp/diff_runs.py`
+### 5.4 `diff_runs.py`
 
 Diffs two JSONL logs side-by-side (openpi vs SDK, or before vs after a
 fix). Key sections: state @ seq=1, image fingerprints @ seq=1, action `row0`
@@ -340,6 +346,7 @@ with `|Δstate|`, `|Δimg|`, `|Δrow0|`, `|Δrow_last|`.
 3. Re-run analyze on both, diff the reports.
 
 ```
+# Illustrative — scripts not shipped in this repo.
 mv ~/.trossen_sdk/policy_logs/sdk_run.jsonl ~/.trossen_sdk/policy_logs/sdk_run.before_fix.jsonl
 # ... run SDK ...
 python3 /tmp/analyze_actions.py <before> > /tmp/before.txt
