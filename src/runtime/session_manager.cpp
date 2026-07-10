@@ -911,8 +911,14 @@ UserAction SessionManager::wait_for_reset() {
   auto wait_or_signal = [this]() {
     std::unique_lock<std::mutex> lk(reset_mutex_);
     reset_cv_.wait_for(lk, std::chrono::milliseconds(100), [this]() {
-      return reset_signaled_.load() || rerecord_requested_.load() ||
-             trossen::utils::g_stop_requested;
+      if (reset_signaled_.load() || rerecord_requested_.load() ||
+          trossen::utils::g_stop_requested) {
+        return true;
+      }
+      // Also wake when a control-source event is queued so poll_keys() drains
+      // it promptly instead of waiting out the interval.
+      std::lock_guard<std::mutex> qlk(control_events_mutex_);
+      return !control_events_.empty();
     });
   };
 
@@ -992,7 +998,8 @@ void SessionManager::post_event(hw::session_control::SessionControlEvent event) 
     std::lock_guard<std::mutex> lock(control_events_mutex_);
     control_events_.push_back(event);
   }
-  // Wake wait_for_reset() if it is blocked so the event is handled promptly.
+  // Wake wait_for_reset() if it is blocked so the queued event is drained on
+  // the next poll pass instead of waiting out the ~100 ms interval.
   reset_cv_.notify_all();
 }
 
@@ -1068,6 +1075,12 @@ UserAction SessionManager::monitor_episode(
     // Apply any queued control-source events (VR buttons, etc.) on this thread.
     drain_control_events(ControlPhase::kRecording);
 
+    // End-session takes priority over any episode-level action queued in the
+    // same drain.
+    if (trossen::utils::g_stop_requested) {
+      return UserAction::kStop;
+    }
+
     // Check for re-record request
     if (rerecord_requested_.load()) {
       return UserAction::kReRecord;
@@ -1077,10 +1090,6 @@ UserAction SessionManager::monitor_episode(
     // just stops); return so the main loop stops it on this thread.
     if (episode_stop_requested_.load()) {
       return UserAction::kContinue;
-    }
-
-    if (trossen::utils::g_stop_requested) {
-      return UserAction::kStop;
     }
 
     // Poll for arrow keys: left = re-record, right = early exit to next episode
