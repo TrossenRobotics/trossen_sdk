@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trossen Fleet Hub</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel-2: #1c232d; --border: #2d333b;
+    --text: #e6edf3; --muted: #8b949e; --brand: #f26722; --ok: #3fb950;
+    --warn: #d29922; --err: #f85149; --off: #6e7681;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 22px; border-bottom: 1px solid var(--border); background: var(--panel);
+    position: sticky; top: 0; z-index: 5;
+  }
+  header .title { font-weight: 700; font-size: 17px; letter-spacing: .2px; }
+  header .title b { color: var(--brand); }
+  header .meta { color: var(--muted); font-size: 13px; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text); padding: 7px 13px;
+  }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+  button:hover { filter: brightness(1.1); }
+
+  /* Login */
+  #login {
+    max-width: 340px; margin: 12vh auto; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 12px; padding: 28px;
+  }
+  #login h1 { margin: 0 0 4px; font-size: 20px; }
+  #login h1 b { color: var(--brand); }
+  #login p { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+  #login input {
+    width: 100%; padding: 10px 12px; margin-bottom: 12px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit;
+  }
+  #login button { width: 100%; }
+  #login .err { color: var(--err); font-size: 13px; min-height: 18px; margin-top: 8px; }
+
+  /* Fleet */
+  main { padding: 22px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .card.off { opacity: .62; }
+  .card .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .card .name { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); flex: none; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(63,185,80,.18); }
+  .badge {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+    padding: 3px 8px; border-radius: 20px; background: var(--panel-2); color: var(--muted);
+  }
+  .badge.recording { background: rgba(63,185,80,.16); color: var(--ok); }
+  .badge.idle { background: rgba(139,148,158,.16); color: var(--muted); }
+  .badge.error { background: rgba(248,81,73,.16); color: var(--err); }
+  .badge.offline { background: rgba(110,118,129,.16); color: var(--off); }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
+  .kv .k { color: var(--muted); }
+  .kv .v { text-align: right; font-variant-numeric: tabular-nums; }
+  .bar { height: 7px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--brand); }
+  .bar.storage > span { background: var(--ok); }
+  .bar.storage > span.low { background: var(--warn); }
+  .bar.storage > span.crit { background: var(--err); }
+  .sub { font-size: 12px; color: var(--muted); }
+  .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip { font-size: 11px; padding: 2px 7px; border-radius: 6px; background: var(--panel-2); color: var(--muted); }
+  .empty { color: var(--muted); text-align: center; padding: 12vh 0; }
+  a.linkbtn { color: var(--brand); text-decoration: none; font-size: 12px; font-weight: 600; }
+  a.linkbtn:hover { text-decoration: underline; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+  <!-- Login gate -->
+  <div id="login" class="hidden">
+    <h1>Trossen <b>Fleet Hub</b></h1>
+    <p>Enter the admin password to view the collection fleet.</p>
+    <input id="pw" type="password" placeholder="Admin password" autocomplete="current-password" />
+    <button class="primary" id="loginBtn">Sign in</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="app" class="hidden">
+    <header>
+      <div class="title">Trossen <b>Fleet Hub</b></div>
+      <div style="display:flex; align-items:center; gap:16px;">
+        <span class="meta" id="summary"></span>
+        <button id="logoutBtn">Sign out</button>
+      </div>
+    </header>
+    <main>
+      <div class="grid" id="grid"></div>
+      <div class="empty hidden" id="empty">No machines have connected yet.<br/><span class="sub">Set <code>HUB_URL</code> on a collection machine to have it dial in.</span></div>
+    </main>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let pollTimer = null;
+
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));
+  if (res.status === 401) { showLogin(); throw new Error("unauthorized"); }
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.status === 204 ? null : res.json();
+}
+
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(n < 10 && i > 0 ? 1 : 0) + " " + u[i];
+}
+function relTime(iso) {
+  if (!iso) return "never";
+  const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (d < 60) return Math.floor(d) + "s ago";
+  if (d < 3600) return Math.floor(d / 60) + "m ago";
+  if (d < 86400) return Math.floor(d / 3600) + "h ago";
+  return Math.floor(d / 86400) + "d ago";
+}
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+
+function activeSession(m) {
+  const s = (m.sessions || []);
+  return s.find(x => x.status === "active") || s.find(x => x.status === "error") || s[0] || null;
+}
+
+function card(m) {
+  const online = m.online;
+  const sess = activeSession(m);
+  const st = m.storage || {};
+  const usedPct = st.total ? Math.round((st.used / st.total) * 100) : 0;
+  const freeCls = usedPct >= 92 ? "crit" : usedPct >= 80 ? "low" : "";
+  const epPct = sess && sess.num_episodes ? Math.round((sess.current_episode / sess.num_episodes) * 100) : 0;
+  const robots = (m.systems || []).map(s => s.robot_name || s.id).filter(Boolean);
+
+  const sessBlock = sess ? `
+    <div>
+      <div class="section-label">Session · ${esc(sess.status)}</div>
+      <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px;">
+        <span>${esc(sess.name || sess.dataset_id)}</span>
+        <span class="v">${sess.current_episode}/${sess.num_episodes}</span>
+      </div>
+      <div class="bar"><span style="width:${epPct}%"></span></div>
+    </div>` : `<div class="sub">No session</div>`;
+
+  const liveView = (online && m.ip) ? `<a class="linkbtn" href="http://${esc(m.ip)}:5173" target="_blank" rel="noopener">Open machine ↗</a>` : "";
+
+  return `
+  <div class="card ${online ? "" : "off"}">
+    <div class="top">
+      <div class="name"><span class="dot ${online ? "on" : ""}"></span>${esc(m.name)}</div>
+      <span class="badge ${esc(m.state)}">${esc(m.state)}</span>
+    </div>
+    ${sessBlock}
+    <div>
+      <div class="section-label">Storage${st.root ? " · " + esc(st.root) : ""}</div>
+      <div class="bar storage"><span class="${freeCls}" style="width:${usedPct}%"></span></div>
+      <div class="sub" style="margin-top:4px;">${fmtBytes(st.free)} free of ${fmtBytes(st.total)} · ${st.dataset_count ?? 0} datasets</div>
+    </div>
+    ${robots.length ? `<div><div class="section-label">Systems</div><div class="chips">${robots.map(r => `<span class="chip">${esc(r)}</span>`).join("")}</div></div>` : ""}
+    <div class="kv">
+      <span class="k">Host</span><span class="v">${esc(m.hostname || "—")}${m.ip ? " · " + esc(m.ip) : ""}</span>
+      <span class="k">Version</span><span class="v">${esc(m.app_version || "—")}</span>
+      <span class="k">Last seen</span><span class="v">${online ? "now" : relTime(m.last_seen)}</span>
+    </div>
+    ${liveView}
+  </div>`;
+}
+
+async function refresh() {
+  let list;
+  try { list = await api("/api/machines"); } catch { return; }
+  const online = list.filter(m => m.online).length;
+  $("summary").textContent = `${online} online · ${list.length} known`;
+  $("empty").classList.toggle("hidden", list.length > 0);
+  $("grid").innerHTML = list.map(card).join("");
+}
+
+function startPolling() {
+  refresh();
+  clearInterval(pollTimer);
+  pollTimer = setInterval(refresh, 2000);
+}
+function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
+
+function showLogin() {
+  stopPolling();
+  $("app").classList.add("hidden");
+  $("login").classList.remove("hidden");
+  $("pw").focus();
+}
+function showApp() {
+  $("login").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  startPolling();
+}
+
+async function doLogin() {
+  $("loginErr").textContent = "";
+  try {
+    await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("pw").value }) });
+    $("pw").value = "";
+    showApp();
+  } catch {
+    $("loginErr").textContent = "Incorrect password.";
+  }
+}
+
+$("loginBtn").addEventListener("click", doLogin);
+$("pw").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+$("logoutBtn").addEventListener("click", async () => { try { await api("/api/logout", { method: "POST" }); } catch {} showLogin(); });
+
+(async function init() {
+  try {
+    const s = await api("/api/session");
+    if (s.authenticated) showApp(); else showLogin();
+  } catch { showLogin(); }
+})();
+</script>
+</body>
+</html>

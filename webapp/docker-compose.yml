@@ -70,6 +70,16 @@ services:
       # UVICORN_RELOAD= (empty) in the host shell or a .env file to turn it
       # off — e.g. if the file-watcher ever competes with the arm UDP loop.
       UVICORN_RELOAD: ${UVICORN_RELOAD:-1}
+      # Fleet hub (webapp/hub): to have this machine join a central admin
+      # console, point it at the hub and share its token. Unset = standalone
+      # (default; the machine never phones home). MACHINE_NAME is an optional
+      # friendly label on the dashboard (defaults to the hostname).
+      #   HUB_URL: ws://<hub-host-ip>:8100
+      #   HUB_TOKEN: <same token as the hub's HUB_TOKEN>
+      #   MACHINE_NAME: Cell-A
+      HUB_URL: ${HUB_URL:-}
+      HUB_TOKEN: ${HUB_TOKEN:-}
+      MACHINE_NAME: ${MACHINE_NAME:-}
     restart: unless-stopped
 
   frontend:

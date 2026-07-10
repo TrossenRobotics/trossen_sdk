@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from app import hw_status
+from app import hub_client, hw_status
 from app.converter import ConvertBody, stream_conversion, validate_body
 from app.dataset_settings import (
     DatasetSettings,
@@ -84,11 +84,16 @@ async def lifespan(_app: FastAPI):
        presets and an existing install picks up newly shipped presets on the
        next restart (without clobbering user edits).
 
-    Yields once — there is no shutdown work to do.
+    3. `hub_client.start()` opens the persistent link to the fleet hub if
+       `HUB_URL` is set; it is a no-op otherwise, so a standalone machine is
+       unaffected. Cancelled on shutdown so uvicorn's reload doesn't leak a
+       dangling connector task.
     """
     apply_migrations()
     seed_missing_factory_systems()
+    hub_client.start()
     yield
+    await hub_client.stop()
 
 
 app = FastAPI(title="Trossen SDK Webapp Backend", lifespan=lifespan)

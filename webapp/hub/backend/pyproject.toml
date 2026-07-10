@@ -1,0 +1,30 @@
+[project]
+name = "trossen-sdk-fleet-hub"
+version = "0.1.0"
+description = "Central admin console for a fleet of Trossen data-collection machines"
+requires-python = ">=3.12"
+# Deliberately tiny: the hub is pure Python + SQLite, with no SDK, no arm
+# driver, no camera stack. Auth is stdlib (hmac/hashlib), so nothing crypto
+# to pin here.
+dependencies = [
+    "fastapi>=0.115",
+    "sqlmodel>=0.0.22",
+    "uvicorn[standard]>=0.30",
+]
+
+# No [build-system] on purpose: uv treats this as a "virtual" project, so
+# `uv sync` installs the dependencies into .venv without trying to build and
+# install the app itself (the app is run from source via uvicorn).
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I"]
