@@ -838,10 +838,14 @@ std::optional<Observation> PolicyClient::pack_observation_(
       (it != snapshot.end()) ? it->second : nullptr;
     auto img = pack_image_(rec, *sub, cam_key);
     if (!img) {
-      warn_once_("camera_unrepresentable:" + cam_key,
-                 "cannot represent configured camera '" + cam_key +
-                 "' (no valid frame and no resize/last-known dimensions to "
-                 "synthesize a placeholder); skipping this observation");
+      // Throttled (not warn-once): returning nullopt every cycle here freezes
+      // inference indefinitely (no observation is ever published), so this is
+      // an ongoing hazard that must keep surfacing, like the non-finite reject.
+      warn_throttled_("camera_unrepresentable:" + cam_key,
+                      "cannot represent configured camera '" + cam_key +
+                      "' (no valid frame and no resize/last-known dimensions to "
+                      "synthesize a placeholder); skipping this observation",
+                      std::chrono::milliseconds(1000));
       return std::nullopt;
     }
     obs.images.push_back(std::move(*img));
@@ -1027,6 +1031,10 @@ void PolicyClient::apply_chunk_(ActionChunk chunk_in,
   // previous one still plays, so it takes over immediately, aligned to the
   // Timestep Clock. Row 0 anchors at epoch + base_timestep/rate; rows already
   // in the past are skipped by sample(), and an all-past chunk is discarded.
+  // The base_timestep sanity guards (all-past / far-future) live here because
+  // base_timestep is load-bearing only for this alignment. The consume-fully
+  // path (θ=0, openpi's default) ignores base_timestep entirely — it re-anchors
+  // playback_start_ = now on promotion — so it needs no such guard.
   if (cfg_.drain_threshold > 0.0 && rate > 0.0 && chunk->T > 0 &&
       inference_epoch_.time_since_epoch().count() != 0) {
     const auto now = std::chrono::steady_clock::now();
