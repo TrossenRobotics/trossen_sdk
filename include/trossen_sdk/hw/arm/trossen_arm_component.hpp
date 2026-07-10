@@ -215,6 +215,16 @@ private:
   /// (the hardware-test park step does exactly that).
   bool  gripper_feedback_engaged_{false};
 
+  /// Optional per-joint operating limits applied to the controller in
+  /// configure() (right after driver_->configure). Each, when non-empty, has
+  /// one entry per joint; empty leaves the firmware default for that field.
+  /// The controller resets these on power cycle, so they are re-applied on
+  /// every reconnect.
+  std::vector<float> position_min_;
+  std::vector<float> position_max_;
+  std::vector<float> velocity_max_;
+  std::vector<float> effort_max_;
+
   /// Joint-space pose this arm moves to at session start (via stage()).
   /// Empty = no staging.
   std::vector<float> staged_position_;

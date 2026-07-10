@@ -63,6 +63,19 @@ struct ArmConfig {
   float gripper_feedback_follower_max{87.5f};
   float gripper_feedback_offset{8.0f};
 
+  /// @brief Optional per-joint operating limits pushed to the controller on
+  /// connect. Each array, when non-empty, must have one entry per joint (arm
+  /// joints in rad / rad·s⁻¹ / N·m, gripper in m / m·s⁻¹ / N). Empty = leave
+  /// the controller's firmware default untouched for that field.
+  ///
+  /// The controller clips commands to these limits and does NOT persist them
+  /// across a power cycle — they reset to firmware defaults on reboot — so the
+  /// SDK re-applies them on every reconfigure (see TrossenArmComponent).
+  std::vector<float> position_min{};
+  std::vector<float> position_max{};
+  std::vector<float> velocity_max{};
+  std::vector<float> effort_max{};
+
   static ArmConfig from_json(const nlohmann::json& j) {
     ArmConfig c;
     if (j.contains("ip_address")) j.at("ip_address").get_to(c.ip_address);
@@ -79,6 +92,10 @@ struct ArmConfig {
       j.at("gripper_feedback_follower_max").get_to(c.gripper_feedback_follower_max);
     if (j.contains("gripper_feedback_offset"))
       j.at("gripper_feedback_offset").get_to(c.gripper_feedback_offset);
+    if (j.contains("position_min")) j.at("position_min").get_to(c.position_min);
+    if (j.contains("position_max")) j.at("position_max").get_to(c.position_max);
+    if (j.contains("velocity_max")) j.at("velocity_max").get_to(c.velocity_max);
+    if (j.contains("effort_max")) j.at("effort_max").get_to(c.effort_max);
     return c;
   }
 
@@ -99,6 +116,11 @@ struct ArmConfig {
       j["gripper_feedback_follower_max"] = gripper_feedback_follower_max;
       j["gripper_feedback_offset"] = gripper_feedback_offset;
     }
+    // Emit per-joint limits only when set, to keep ordinary arm configs clean.
+    if (!position_min.empty()) j["position_min"] = position_min;
+    if (!position_max.empty()) j["position_max"] = position_max;
+    if (!velocity_max.empty()) j["velocity_max"] = velocity_max;
+    if (!effort_max.empty()) j["effort_max"] = effort_max;
     return j;
   }
 };

@@ -64,6 +64,15 @@ interface ArmHardware {
   gripper_feedback_leader_max?: number;
   gripper_feedback_follower_max?: number;
   gripper_feedback_offset?: number;
+  // Optional per-joint operating limits pushed to the controller on connect.
+  // Each array, when set, has one entry per joint (arm joints in rad / rad·s⁻¹
+  // / N·m, gripper in m / m·s⁻¹ / N). The controller resets these on power
+  // cycle, so the SDK re-applies them every reconnect. undefined = leave the
+  // firmware default untouched.
+  position_min?: number[];
+  position_max?: number[];
+  velocity_max?: number[];
+  effort_max?: number[];
   producers: Producer[];
 }
 
@@ -125,6 +134,48 @@ function wristSideFromOffsets(offsets?: number[]): WristSide {
   return offsets && offsets.length > 5 && offsets[5] > 0 ? 'right' : 'left';
 }
 
+// Per-joint operating limits (wxai_v0: 6 arm joints + gripper). The controller
+// clips commands to these and does NOT persist them across a power cycle, so the
+// SDK re-applies them on every connect. The defaults below are deliberately
+// PERMISSIVE starting points (wide position range, generous velocity/effort) —
+// meant to be tightened per arm in the UI. Starting permissive means simply
+// enabling limits can't by itself clip motion an existing setup relied on.
+const ARM_JOINT_LABELS: readonly string[] = ['J1', 'J2', 'J3', 'J4', 'J5', 'J6', 'Gripper'];
+const NUM_ARM_JOINTS = ARM_JOINT_LABELS.length;
+interface JointLimitArrays {
+  position_min: number[];
+  position_max: number[];
+  velocity_max: number[];
+  effort_max: number[];
+}
+// Pick a stored per-joint limit array for the edit form, falling back to the
+// permissive default when absent or the wrong length (e.g. a config from a
+// different arm model). Always returns a fresh copy so form edits don't mutate
+// the persisted system object in place.
+function armLimitOrDefault(stored: number[] | undefined, key: keyof JointLimitArrays): number[] {
+  return Array.isArray(stored) && stored.length === NUM_ARM_JOINTS
+    ? [...stored]
+    : [...DEFAULT_JOINT_LIMITS[key]];
+}
+
+const DEFAULT_JOINT_LIMITS: JointLimitArrays = {
+  //             J1     J2     J3     J4     J5     J6    Gripper
+  position_min: [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14, 0.0],
+  position_max: [3.14, 3.14, 3.14, 3.14, 3.14, 3.14, 0.05],
+  velocity_max: [5.0, 5.0, 5.0, 5.0, 5.0, 5.0, 0.2],
+  effort_max: [40, 40, 40, 40, 40, 40, 80],
+};
+
+// Units shown per limit column. Arm joints are angular (rad), the gripper is
+// linear (m); the table labels the gripper row separately.
+type LimitFormKey = 'positionMin' | 'positionMax' | 'velocityMax' | 'effortMax';
+const LIMIT_COLUMNS: readonly { formKey: LimitFormKey; label: string; armUnit: string; gripperUnit: string }[] = [
+  { formKey: 'positionMin', label: 'Pos min', armUnit: 'rad', gripperUnit: 'm' },
+  { formKey: 'positionMax', label: 'Pos max', armUnit: 'rad', gripperUnit: 'm' },
+  { formKey: 'velocityMax', label: 'Vel max', armUnit: 'rad/s', gripperUnit: 'm/s' },
+  { formKey: 'effortMax', label: 'Eff max', armUnit: 'N·m', gripperUnit: 'N' },
+];
+
 // ---------------------------------------------------------------------------
 // Raw wire shapes for the SDK config blob.
 // These mirror the JSON layout returned by /api/systems and accepted by
@@ -154,6 +205,10 @@ interface RawArmConfig {
   gripper_feedback_leader_max?: number;
   gripper_feedback_follower_max?: number;
   gripper_feedback_offset?: number;
+  position_min?: number[];
+  position_max?: number[];
+  velocity_max?: number[];
+  effort_max?: number[];
   [key: string]: unknown;
 }
 
@@ -255,6 +310,10 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
       gripper_feedback_leader_max: typeof armCfg.gripper_feedback_leader_max === 'number' ? armCfg.gripper_feedback_leader_max : undefined,
       gripper_feedback_follower_max: typeof armCfg.gripper_feedback_follower_max === 'number' ? armCfg.gripper_feedback_follower_max : undefined,
       gripper_feedback_offset: typeof armCfg.gripper_feedback_offset === 'number' ? armCfg.gripper_feedback_offset : undefined,
+      position_min: Array.isArray(armCfg.position_min) ? armCfg.position_min : undefined,
+      position_max: Array.isArray(armCfg.position_max) ? armCfg.position_max : undefined,
+      velocity_max: Array.isArray(armCfg.velocity_max) ? armCfg.velocity_max : undefined,
+      effort_max: Array.isArray(armCfg.effort_max) ? armCfg.effort_max : undefined,
       producers: armProducers,
     } as ArmHardware);
   }
@@ -394,6 +453,12 @@ function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig 
         if (typeof arm.gripper_feedback_follower_max === 'number') armEntry.gripper_feedback_follower_max = arm.gripper_feedback_follower_max;
         if (typeof arm.gripper_feedback_offset === 'number') armEntry.gripper_feedback_offset = arm.gripper_feedback_offset;
       }
+      // Only emit per-joint limits that are actually set, so arms left at the
+      // controller's firmware defaults stay clean in the config.
+      if (arm.position_min && arm.position_min.length) armEntry.position_min = arm.position_min;
+      if (arm.position_max && arm.position_max.length) armEntry.position_max = arm.position_max;
+      if (arm.velocity_max && arm.velocity_max.length) armEntry.velocity_max = arm.velocity_max;
+      if (arm.effort_max && arm.effort_max.length) armEntry.effort_max = arm.effort_max;
       armsObj[arm.name] = armEntry;
 
       for (const p of arm.producers) {
@@ -884,6 +949,14 @@ export function ConfigurationPage() {
     gripperFeedbackLeaderMax: 27,
     gripperFeedbackFollowerMax: 87.5,
     gripperFeedbackOffset: 8,
+    // Per-joint operating limits. When disabled, nothing is emitted and the
+    // controller's firmware defaults apply. When enabled, all four arrays
+    // (length NUM_ARM_JOINTS) are pushed to the arm on every connect.
+    limitsEnabled: false,
+    positionMin: [...DEFAULT_JOINT_LIMITS.position_min],
+    positionMax: [...DEFAULT_JOINT_LIMITS.position_max],
+    velocityMax: [...DEFAULT_JOINT_LIMITS.velocity_max],
+    effortMax: [...DEFAULT_JOINT_LIMITS.effort_max],
   });
 
   const [baseForm, setBaseForm] = useState({
@@ -1034,6 +1107,11 @@ export function ConfigurationPage() {
       gripperFeedbackLeaderMax: 27,
       gripperFeedbackFollowerMax: 87.5,
       gripperFeedbackOffset: 8,
+      limitsEnabled: false,
+      positionMin: [...DEFAULT_JOINT_LIMITS.position_min],
+      positionMax: [...DEFAULT_JOINT_LIMITS.position_max],
+      velocityMax: [...DEFAULT_JOINT_LIMITS.velocity_max],
+      effortMax: [...DEFAULT_JOINT_LIMITS.effort_max],
     });
     setBaseForm({
       name: '',
@@ -1078,6 +1156,11 @@ export function ConfigurationPage() {
         gripperFeedbackLeaderMax: typeof arm.gripper_feedback_leader_max === 'number' ? arm.gripper_feedback_leader_max : 27,
         gripperFeedbackFollowerMax: typeof arm.gripper_feedback_follower_max === 'number' ? arm.gripper_feedback_follower_max : 87.5,
         gripperFeedbackOffset: typeof arm.gripper_feedback_offset === 'number' ? arm.gripper_feedback_offset : 8,
+        limitsEnabled: !!(arm.position_min || arm.position_max || arm.velocity_max || arm.effort_max),
+        positionMin: armLimitOrDefault(arm.position_min, 'position_min'),
+        positionMax: armLimitOrDefault(arm.position_max, 'position_max'),
+        velocityMax: armLimitOrDefault(arm.velocity_max, 'velocity_max'),
+        effortMax: armLimitOrDefault(arm.effort_max, 'effort_max'),
       });
     } else if (hardware.type === 'slate_base') {
       const base = hardware as BaseHardware;
@@ -1217,6 +1300,10 @@ export function ConfigurationPage() {
       gripper_feedback_leader_max: isGripperFeedback ? armForm.gripperFeedbackLeaderMax : undefined,
       gripper_feedback_follower_max: isGripperFeedback ? armForm.gripperFeedbackFollowerMax : undefined,
       gripper_feedback_offset: isGripperFeedback ? armForm.gripperFeedbackOffset : undefined,
+      position_min: armForm.limitsEnabled ? [...armForm.positionMin] : undefined,
+      position_max: armForm.limitsEnabled ? [...armForm.positionMax] : undefined,
+      velocity_max: armForm.limitsEnabled ? [...armForm.velocityMax] : undefined,
+      effort_max: armForm.limitsEnabled ? [...armForm.effortMax] : undefined,
       producers: []
     };
 
@@ -2316,6 +2403,66 @@ export function ConfigurationPage() {
                     )}
                   </div>
                 )}
+                <div className="space-y-[12px]">
+                  <div className="flex items-start gap-[8px]">
+                    <input type="checkbox" id="arm_limits" checked={armForm.limitsEnabled} onChange={e => setArmForm({ ...armForm, limitsEnabled: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
+                    <label htmlFor="arm_limits" className="text-ink text-[12px]">
+                      Set joint limits
+                      <span className="block text-dim text-[11px] mt-[2px]">Per-joint velocity, position, and effort caps pushed to the controller. The control box does not keep these across a power cycle, so the SDK re-applies them on every connect. Leave off to use the controller's firmware defaults. The values below start permissive — tighten per joint as needed.</span>
+                    </label>
+                  </div>
+                  {armForm.limitsEnabled && (
+                    <div className="pl-[24px] overflow-x-auto">
+                      <table className="text-[12px] border-collapse">
+                        <thead>
+                          <tr className="text-dim">
+                            <th className="text-left font-normal py-[4px] pr-[8px]">Joint</th>
+                            {LIMIT_COLUMNS.map(col => (
+                              <th key={col.formKey} className="text-left font-normal py-[4px] px-[4px]">{col.label}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ARM_JOINT_LABELS.map((jointLabel, jointIdx) => {
+                            const isGripper = jointIdx === NUM_ARM_JOINTS - 1;
+                            return (
+                              <tr key={jointLabel}>
+                                <td className="text-ink py-[3px] pr-[8px] whitespace-nowrap">{jointLabel}</td>
+                                {LIMIT_COLUMNS.map(col => (
+                                  <td key={col.formKey} className="py-[3px] px-[4px]">
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      value={armForm[col.formKey][jointIdx]}
+                                      title={isGripper ? col.gripperUnit : col.armUnit}
+                                      onChange={e => {
+                                        const v = parseFloat(e.target.value);
+                                        setArmForm(prev => {
+                                          const next = [...prev[col.formKey]];
+                                          next[jointIdx] = Number.isNaN(v) ? 0 : v;
+                                          return { ...prev, [col.formKey]: next };
+                                        });
+                                      }}
+                                      className="w-[72px] bg-app border border-edge text-ink px-[6px] py-[4px] text-[12px] focus:outline-none focus:border-brand"
+                                    />
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr className="text-dim">
+                            <td className="pt-[6px] pr-[8px]" />
+                            {LIMIT_COLUMNS.map(col => (
+                              <td key={col.formKey} className="pt-[6px] px-[4px] text-[10px] whitespace-nowrap">{col.armUnit} · grip {col.gripperUnit}</td>
+                            ))}
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
                 <div className="flex justify-end gap-[12px] pt-[12px]">
                   <button type="button" onClick={() => setShowAddHardwareModal(false)} className="bg-app border border-edge text-dim px-[20px] py-[10px] text-[14px] hover:border-white hover:text-ink transition-colors">Cancel</button>
                   <button type="submit" className="bg-brand text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">Add Arm</button>

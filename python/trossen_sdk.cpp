@@ -533,6 +533,10 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("gripper_feedback_leader_max", &ArmConfig::gripper_feedback_leader_max)
     .def_readwrite("gripper_feedback_follower_max", &ArmConfig::gripper_feedback_follower_max)
     .def_readwrite("gripper_feedback_offset", &ArmConfig::gripper_feedback_offset)
+    .def_readwrite("position_min", &ArmConfig::position_min)
+    .def_readwrite("position_max", &ArmConfig::position_max)
+    .def_readwrite("velocity_max", &ArmConfig::velocity_max)
+    .def_readwrite("effort_max", &ArmConfig::effort_max)
     .def_static("from_json", &ArmConfig::from_json, py::arg("json"))
     .def("to_json", &ArmConfig::to_json);
 
