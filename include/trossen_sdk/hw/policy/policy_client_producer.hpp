@@ -40,6 +40,10 @@ public:
     /// When true, stamp emitted records with the latest action chunk's
     /// ``received_at`` (steady-clock nanoseconds since epoch). When false, or
     /// when no chunk has been published yet, use the wall-clock monotonic now.
+    /// Known limitation: every action row sourced from a single chunk shares
+    /// that chunk's ``received_at``, so a multi-row chunk yields repeated
+    /// timestamps until the next chunk arrives. Correct per-row timing is a
+    /// deferred follow-up requiring a new PolicyClient accessor.
     bool use_device_time{false};
   };
 

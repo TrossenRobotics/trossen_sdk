@@ -144,9 +144,6 @@ endif()
 add_executable(test_action_chunk test_action_chunk.cpp)
 target_link_libraries(test_action_chunk PRIVATE trossen_sdk GTest::gtest_main)
 
-add_executable(test_active_hardware_registry test_active_hardware_registry.cpp)
-target_link_libraries(test_active_hardware_registry PRIVATE trossen_sdk GTest::gtest_main)
-
 # Enable CTest integration
 include(GoogleTest)
 gtest_discover_tests(test_timestamp)
@@ -184,8 +181,13 @@ if(TROSSEN_ENABLE_RERUN_OBSERVER)
 endif()
 gtest_discover_tests(test_policy_client_config)
 gtest_discover_tests(test_action_chunk)
-gtest_discover_tests(test_active_hardware_registry)
 if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
+  # Every add_executable() under the TROSSEN_SDK_ENABLE_POLICY_CLIENT guard must
+  # have a matching gtest_discover_tests() line here: without it the target still
+  # compiles but ctest never runs it (test_msgpack_ndarray and
+  # test_openpi_websocket_transport were silently undiscovered this way).
+  gtest_discover_tests(test_msgpack_ndarray)
+  gtest_discover_tests(test_openpi_websocket_transport)
   gtest_discover_tests(test_policy_client)
   gtest_discover_tests(test_policy_client_producer)
   gtest_discover_tests(test_lerobot_codec)

@@ -55,10 +55,17 @@ struct ArmConfig {
   bool episode_lifecycle_enabled{false};
 
   /// @brief Per-tick trajectory time (seconds) passed to set_all_positions in
-  /// write_joint(). Zero applies the goal immediately (libtrossen_arm treats
-  /// goal_time < 0.001s as no-interpolation); non-zero smooths the per-tick
-  /// motion between successive writes. Used by the policy-client playback path
-  /// on top of its own EMA output filter.
+  /// TrossenArmComponent::write_joint(). Applies to every write on this arm,
+  /// regardless of who issues it (teleop, replay, or policy playback), not just
+  /// the policy-client path. Zero applies the goal immediately (libtrossen_arm
+  /// treats goal_time < 0.001s as no-interpolation); non-zero smooths the
+  /// per-tick motion between successive writes. Opt-in; defaults to 0.0 to
+  /// preserve prior immediate-apply behavior byte-for-byte. Validated as
+  /// non-negative and finite by TrossenArmComponent::configure().
+  /// Tuning trap: keep this below the session's control period. A per-tick
+  /// trajectory time longer than the interval to the next write means each goal
+  /// is superseded before it is reached, so the arm perpetually chases a moving
+  /// target and never settles.
   float write_moving_time_s{0.0f};
 
   static ArmConfig from_json(const nlohmann::json& j) {
