@@ -23,6 +23,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from sqlalchemy import func
 from sqlmodel import select
 
 from app import activity
@@ -53,10 +54,19 @@ def _duration_since(start: str | None) -> float:
 
 
 def mark_started(recording_session_id: str) -> None:
-    """Remember when the current episode began (called on episode_started)."""
+    """Remember when the current episode began (called on episode_started).
+
+    Runs in the recorder's monitor thread, so — like `record` — the activity
+    bookkeeping is best-effort and never raises: a locked DB or any other
+    failure must not propagate into the recording loop and skip its finalizers.
+    """
     _starts[recording_session_id] = _now_iso()
-    # Recording an episode is activity — reset the idle clock / clear idle break.
-    activity.mark_activity()
+    try:
+        # Recording an episode is activity — reset the idle clock / clear idle break.
+        activity.mark_activity()
+    except Exception as exc:  # noqa: BLE001 — must not disturb the recording loop
+        logger.warning("episodes.mark_started activity failed for %s: %s",
+                       recording_session_id, exc)
 
 
 def record(recording_session_id: str, episode_index: int, outcome: str) -> None:
@@ -91,17 +101,27 @@ def record(recording_session_id: str, episode_index: int, outcome: str) -> None:
 
 
 def stats_for(work_session_id: str) -> dict[str, Any]:
-    """Aggregate a work session's episodes into efficiency-metric inputs."""
+    """Aggregate a work session's episodes into efficiency-metric inputs.
+
+    Aggregated in SQL (count + summed duration grouped by outcome) rather than
+    loading every row, so this stays constant work as the episode table grows
+    across a shift — it runs on every heartbeat.
+    """
     with SessionLocal() as db:
         rows = db.exec(
-            select(EpisodeRecord).where(
-                EpisodeRecord.work_session_id == work_session_id
+            select(
+                EpisodeRecord.outcome,
+                func.count(EpisodeRecord.id),
+                func.coalesce(func.sum(EpisodeRecord.duration_s), 0.0),
             )
+            .where(EpisodeRecord.work_session_id == work_session_id)
+            .group_by(EpisodeRecord.outcome)
         ).all()
-    success_s = sum(r.duration_s for r in rows if r.outcome == "success")
-    failed_s = sum(r.duration_s for r in rows if r.outcome == "failed")
+    by_outcome = {outcome: (count, total) for outcome, count, total in rows}
+    success_n, success_s = by_outcome.get("success", (0, 0.0))
+    failed_n, failed_s = by_outcome.get("failed", (0, 0.0))
     return {
-        "num_episodes": len(rows),
+        "num_episodes": success_n + failed_n,
         "collection_seconds": success_s + failed_s,
         "success_seconds": success_s,
         "failed_seconds": failed_s,

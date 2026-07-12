@@ -13,6 +13,7 @@ machine WS in a later phase.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
@@ -212,13 +213,18 @@ async def machine_ws(ws: WebSocket) -> None:
         while True:
             msg = json.loads(await ws.receive_text())
             if msg.get("type") == "heartbeat":
+                # record_heartbeat is in-memory and fast; the reconcile/upsert
+                # touch SQLite, so run them in a thread — a heartbeat's DB work
+                # must not block the event loop (every other machine's WS and
+                # the admin routes share it).
                 registry.record_heartbeat(machine_id, msg)
-                # Turn the heartbeat's open-fault snapshot into durable
-                # downtime records (open new, close resolved).
-                downtime.reconcile(machine_id, msg.get("faults") or [])
-                # Mirror the operator's live work-session totals for the
-                # productivity leaderboard.
-                leaderboard.upsert_from_work(machine_id, msg.get("work") or {})
+                loop = asyncio.get_running_loop()
+                await loop.run_in_executor(
+                    None, downtime.reconcile, machine_id, msg.get("faults") or []
+                )
+                await loop.run_in_executor(
+                    None, leaderboard.upsert_from_work, machine_id, msg.get("work") or {}
+                )
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # noqa: BLE001 — a malformed frame shouldn't crash the hub

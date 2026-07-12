@@ -57,6 +57,11 @@ def upsert_from_work(machine_id: str, work: dict[str, Any]) -> None:
         db.commit()
 
 
+# Below this much aggregate session time, an episodes/hour rate is noise (one
+# episode in a few seconds extrapolates to hundreds/hour), so we report 0.
+_MIN_SECONDS_FOR_THROUGHPUT = 60.0
+
+
 def _ratio(numerator: float, denominator: float) -> float:
     return numerator / denominator if denominator > 0 else 0.0
 
@@ -99,13 +104,18 @@ def leaderboard() -> list[dict[str, Any]]:
         total = agg["total_seconds"]
         collection = agg["collection_seconds"]
         idle = max(0.0, total - collection - agg["break_seconds"])
+        throughput = (
+            _ratio(agg["num_episodes"], total / 3600.0)
+            if total >= _MIN_SECONDS_FOR_THROUGHPUT
+            else 0.0
+        )
         out.append(
             {
                 **agg,
                 "idle_seconds": idle,
                 "collection_ratio": _ratio(collection, total),
                 "success_ratio": _ratio(agg["success_seconds"], collection),
-                "episodes_per_hour": _ratio(agg["num_episodes"], total / 3600.0),
+                "episodes_per_hour": throughput,
             }
         )
     out.sort(key=lambda o: o["num_episodes"], reverse=True)

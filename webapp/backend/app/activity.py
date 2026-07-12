@@ -15,6 +15,7 @@ never has two live clocks.
 
 from __future__ import annotations
 
+import threading
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -23,6 +24,15 @@ from sqlmodel import select
 
 from app.db import SessionLocal
 from app.models import BreakEvent, WorkSession
+
+# Serializes the read-decide-write on breaks. Break mutations are driven from
+# two independent ~5s pulses on different threads — the hub heartbeat executor
+# (build_heartbeat -> evaluate_idle) and the webapp status poll (a request
+# thread) — plus the manual break endpoint. Without this, two callers can each
+# see "no open break" and both open one, double-counting break time and
+# leaving a stuck break. Reentrant so evaluate_idle can call start_break while
+# holding it.
+_break_lock = threading.RLock()
 
 # An idle span (no break declared, nothing being recorded) longer than this is
 # treated as an auto-break: the spec counts "idle detection" as one of the two
@@ -62,14 +72,36 @@ def _current_ws(db) -> WorkSession | None:
     return rows[0] if rows else None
 
 
+def _open_breaks(db, ws_id: str) -> list[BreakEvent]:
+    """All currently-open breaks for a work session (normally 0 or 1)."""
+    return list(
+        db.exec(
+            select(BreakEvent).where(
+                BreakEvent.work_session_id == ws_id,
+                BreakEvent.ended_at.is_(None),  # type: ignore[union-attr]
+            )
+        ).all()
+    )
+
+
 def _open_break(db, ws_id: str) -> BreakEvent | None:
-    rows = db.exec(
-        select(BreakEvent).where(
-            BreakEvent.work_session_id == ws_id,
-            BreakEvent.ended_at.is_(None),  # type: ignore[union-attr]
-        )
-    ).all()
+    rows = _open_breaks(db, ws_id)
     return rows[0] if rows else None
+
+
+def _close_open_breaks(db, ws_id: str, now: str, source: str | None = None) -> int:
+    """Close all open breaks for a session (optionally only one source).
+
+    Closes *every* matching open row, not just the first, so a stray duplicate
+    (e.g. from a pre-lock race) can never leave a break stuck open. Caller commits.
+    """
+    closed = 0
+    for b in _open_breaks(db, ws_id):
+        if source is None or b.source == source:
+            b.ended_at = now
+            db.add(b)
+            closed += 1
+    return closed
 
 
 def _break_seconds(db, ws_id: str) -> float:
@@ -105,10 +137,7 @@ def start_work_session(operator: dict[str, str]) -> WorkSession:
 
 def _close_ws(db, ws: WorkSession, now: str) -> None:
     """Close a work session and any open break on it (caller commits)."""
-    ob = _open_break(db, ws.id)
-    if ob is not None:
-        ob.ended_at = now
-        db.add(ob)
+    _close_open_breaks(db, ws.id, now)
     ws.ended_at = now
     db.add(ws)
 
@@ -125,9 +154,13 @@ def end_work_session() -> None:
 
 def start_break(source: str = "manual") -> bool:
     """Begin a break on the current work session. No-op if already on break
-    or no one is signed in; returns True if a break was started."""
+    or no one is signed in; returns True if a break was started.
+
+    Held under `_break_lock` so a concurrent caller can't also pass the
+    "no open break" check and open a duplicate.
+    """
     now = _now_iso()
-    with SessionLocal() as db:
+    with _break_lock, SessionLocal() as db:
         ws = _current_ws(db)
         if ws is None or _open_break(db, ws.id) is not None:
             return False
@@ -143,20 +176,17 @@ def start_break(source: str = "manual") -> bool:
 
 def end_break() -> bool:
     """End the current break; returns True if one was open."""
+    global _last_activity_at
     now = _now_iso()
-    with SessionLocal() as db:
+    with _break_lock, SessionLocal() as db:
         ws = _current_ws(db)
         if ws is None:
             return False
-        ob = _open_break(db, ws.id)
-        if ob is None:
+        if _close_open_breaks(db, ws.id, now) == 0:
             return False
-        ob.ended_at = now
-        db.add(ob)
         db.commit()
     # Coming off a break is activity — restart the idle clock so we don't
     # immediately re-open an idle break.
-    global _last_activity_at
     _last_activity_at = now
     return True
 
@@ -177,14 +207,6 @@ def current_work_session() -> dict[str, str] | None:
         }
 
 
-def _end_idle_break(db, ws_id: str, now: str) -> None:
-    """Close an open *auto-idle* break (leave a manual break untouched)."""
-    ob = _open_break(db, ws_id)
-    if ob is not None and ob.source == "idle":
-        ob.ended_at = now
-        db.add(ob)
-
-
 def mark_activity() -> None:
     """Record that the operator is doing something right now.
 
@@ -196,10 +218,9 @@ def mark_activity() -> None:
     global _last_activity_at
     now = _now_iso()
     _last_activity_at = now
-    with SessionLocal() as db:
+    with _break_lock, SessionLocal() as db:
         ws = _current_ws(db)
-        if ws is not None:
-            _end_idle_break(db, ws.id, now)
+        if ws is not None and _close_open_breaks(db, ws.id, now, "idle"):
             db.commit()
 
 
@@ -210,24 +231,29 @@ def evaluate_idle(is_recording: bool) -> None:
     ~5s). Recording counts as activity; a manual or existing idle break is left
     alone; otherwise, once the gap since the last activity exceeds
     IDLE_THRESHOLD_S, a `source="idle"` break opens and starts accruing.
+
+    The whole read-decide-write runs under `_break_lock` (reentrant, so the
+    `start_break` call inside is fine) so the two concurrent pulse threads
+    can't both open an idle break.
     """
     global _last_activity_at
     if is_recording:
         # Active recording is the strongest activity signal.
         mark_activity()
         return
-    with SessionLocal() as db:
-        ws = _current_ws(db)
-        if ws is None:
+    with _break_lock:
+        with SessionLocal() as db:
+            ws = _current_ws(db)
+            if ws is None:
+                return
+            if _open_break(db, ws.id) is not None:
+                # Already on a break (manual or idle) — nothing to start.
+                return
+        if _last_activity_at is None:
+            _last_activity_at = _now_iso()
             return
-        if _open_break(db, ws.id) is not None:
-            # Already on a break (manual or idle) — nothing to start.
-            return
-    if _last_activity_at is None:
-        _last_activity_at = _now_iso()
-        return
-    if _seconds_between(_last_activity_at, None) > IDLE_THRESHOLD_S:
-        start_break("idle")
+        if _seconds_between(_last_activity_at, None) > IDLE_THRESHOLD_S:
+            start_break("idle")
 
 
 def work_status() -> dict[str, Any]:

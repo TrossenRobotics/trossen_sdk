@@ -67,6 +67,13 @@ def _enable_sqlite_fks(dbapi_connection, _connection_record):
         return
     cursor = dbapi_connection.cursor()
     cursor.execute("PRAGMA foreign_keys = ON")
+    # This DB now has several concurrent writer contexts — request threads, the
+    # heartbeat executor thread, and the recorder monitor thread. WAL lets a
+    # reader (a heartbeat snapshot) proceed while a writer holds the lock, and
+    # busy_timeout makes a contended writer wait-and-retry for up to 5s instead
+    # of failing immediately with "database is locked".
+    cursor.execute("PRAGMA journal_mode = WAL")
+    cursor.execute("PRAGMA busy_timeout = 5000")
     cursor.close()
 
 
