@@ -25,11 +25,16 @@ from app.db import SessionLocal
 from app.models import BreakEvent, WorkSession
 
 # An idle span (no break declared, nothing being recorded) longer than this is
-# treated as an auto-break for efficiency purposes. Exposed so a caller/UI can
-# reuse the same threshold; the auto-idle *detection* itself lands with the
-# recorder wiring (it needs episode activity), but the constant lives here so
-# both sides agree on what "idle" means.
+# treated as an auto-break: the spec counts "idle detection" as one of the two
+# sources of break_time, alongside the manual button. Below the threshold, a
+# gap is just fumbling/resetting and stays in the residual idle_time.
 IDLE_THRESHOLD_S = 120.0
+
+# Wall-clock of the last observed activity (recording, an episode, or a manual
+# break ending) for the open work session. In-memory: a backend restart just
+# restarts the idle clock, which is the safe default (it won't retroactively
+# invent an idle break across the gap). Reset when a work session opens.
+_last_activity_at: str | None = None
 
 
 def _now_iso() -> str:
@@ -77,6 +82,7 @@ def _break_seconds(db, ws_id: str) -> float:
 
 def start_work_session(operator: dict[str, str]) -> WorkSession:
     """Open a work session for `operator`, closing any dangling one first."""
+    global _last_activity_at
     now = _now_iso()
     with SessionLocal() as db:
         stale = _current_ws(db)
@@ -91,6 +97,9 @@ def start_work_session(operator: dict[str, str]) -> WorkSession:
         db.add(ws)
         db.commit()
         db.refresh(ws)
+    # Fresh sign-in starts the idle clock now, so a long gap before the *previous*
+    # operator signed out is never charged to this one.
+    _last_activity_at = now
     return ws
 
 
@@ -145,6 +154,10 @@ def end_break() -> bool:
         ob.ended_at = now
         db.add(ob)
         db.commit()
+    # Coming off a break is activity — restart the idle clock so we don't
+    # immediately re-open an idle break.
+    global _last_activity_at
+    _last_activity_at = now
     return True
 
 
@@ -164,6 +177,59 @@ def current_work_session() -> dict[str, str] | None:
         }
 
 
+def _end_idle_break(db, ws_id: str, now: str) -> None:
+    """Close an open *auto-idle* break (leave a manual break untouched)."""
+    ob = _open_break(db, ws_id)
+    if ob is not None and ob.source == "idle":
+        ob.ended_at = now
+        db.add(ob)
+
+
+def mark_activity() -> None:
+    """Record that the operator is doing something right now.
+
+    Resets the idle clock and closes any auto-idle break in progress — the
+    operator is clearly back. Called from the recorder on episode boundaries,
+    when recording is live, and when a manual break ends. Never touches a
+    manual break (only the operator ends those).
+    """
+    global _last_activity_at
+    now = _now_iso()
+    _last_activity_at = now
+    with SessionLocal() as db:
+        ws = _current_ws(db)
+        if ws is not None:
+            _end_idle_break(db, ws.id, now)
+            db.commit()
+
+
+def evaluate_idle(is_recording: bool) -> None:
+    """Open an auto-idle break when the operator has been idle too long.
+
+    Called on each pulse (the hub heartbeat and the webapp status poll, both
+    ~5s). Recording counts as activity; a manual or existing idle break is left
+    alone; otherwise, once the gap since the last activity exceeds
+    IDLE_THRESHOLD_S, a `source="idle"` break opens and starts accruing.
+    """
+    global _last_activity_at
+    if is_recording:
+        # Active recording is the strongest activity signal.
+        mark_activity()
+        return
+    with SessionLocal() as db:
+        ws = _current_ws(db)
+        if ws is None:
+            return
+        if _open_break(db, ws.id) is not None:
+            # Already on a break (manual or idle) — nothing to start.
+            return
+    if _last_activity_at is None:
+        _last_activity_at = _now_iso()
+        return
+    if _seconds_between(_last_activity_at, None) > IDLE_THRESHOLD_S:
+        start_break("idle")
+
+
 def work_status() -> dict[str, Any]:
     """Current work/break state for the heartbeat and the machine UI.
 
@@ -175,14 +241,17 @@ def work_status() -> dict[str, Any]:
         ws = _current_ws(db)
         if ws is None:
             return {"active": False, "on_break": False}
-        on_break = _open_break(db, ws.id) is not None
+        ob = _open_break(db, ws.id)
         return {
             "active": True,
             "work_session_id": ws.id,
             "operator_id": ws.operator_id,
             "operator_name": ws.operator_name,
             "started_at": ws.started_at,
-            "on_break": on_break,
+            "on_break": ob is not None,
+            # "manual" or "idle" while on a break; None otherwise — lets the UI
+            # show a declared break differently from auto-detected idle.
+            "break_source": ob.source if ob is not None else None,
             "total_seconds": _seconds_between(ws.started_at, None),
             "break_seconds": _break_seconds(db, ws.id),
         }

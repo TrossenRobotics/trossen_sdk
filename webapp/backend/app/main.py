@@ -404,7 +404,12 @@ def operator_sign_out() -> None:
 
 @app.get("/api/operator/status")
 def operator_status() -> dict[str, Any]:
-    """Current work/break state (active, on_break, running time totals)."""
+    """Current work/break state (active, on_break, running time totals).
+
+    Also advances idle detection: the webapp polls this ~5s, so a machine with
+    no hub link still auto-detects idle whenever an operator has the UI open.
+    """
+    activity.evaluate_idle(any(s.status == "active" for s in list_sessions()))
     return activity.work_status()
 
 

@@ -25,6 +25,7 @@ interface Operator {
 interface WorkStatus {
   active: boolean;
   on_break: boolean;
+  break_source?: 'manual' | 'idle' | null;
   total_seconds?: number;
   break_seconds?: number;
 }
@@ -157,7 +158,9 @@ export function OperatorBadge() {
                 </div>
               )}
               {status.on_break && (
-                <div className="text-xs text-center text-[#58a6ff] font-semibold">On break</div>
+                <div className="text-xs text-center text-[#58a6ff] font-semibold">
+                  {status.break_source === 'idle' ? 'Idle — no activity detected' : 'On break'}
+                </div>
               )}
               <button
                 className={`w-full px-3 py-1.5 rounded border text-sm flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 ${
@@ -169,7 +172,9 @@ export function OperatorBadge() {
                 disabled={busy}
               >
                 <Coffee className="w-4 h-4" />
-                {status.on_break ? 'End break' : 'Take a break'}
+                {status.on_break
+                  ? (status.break_source === 'idle' ? "I'm back" : 'End break')
+                  : 'Take a break'}
               </button>
               {error && <div className="text-xs text-red-500">{error}</div>}
               <button

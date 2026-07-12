@@ -354,7 +354,7 @@ function card(m) {
     ${healthBlock}
     ${robots.length ? `<div><div class="section-label">Systems</div><div class="chips">${robots.map(r => `<span class="chip">${esc(r)}</span>`).join("")}</div></div>` : ""}
     <div class="kv">
-      <span class="k">Operator</span><span class="v">${m.operator ? esc(m.operator.name) + (m.work && m.work.on_break ? " · on break" : "") : "—"}</span>
+      <span class="k">Operator</span><span class="v">${m.operator ? esc(m.operator.name) + (m.work && m.work.on_break ? (m.work.break_source === "idle" ? " · idle" : " · on break") : "") : "—"}</span>
       <span class="k">Host</span><span class="v">${esc(m.hostname || "—")}${m.ip ? " · " + esc(m.ip) : ""}</span>
       <span class="k">Version</span><span class="v">${esc(m.app_version || "—")}</span>
       <span class="k">Last seen</span><span class="v">${online ? "now" : relTime(m.last_seen)}</span>

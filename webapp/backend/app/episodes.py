@@ -55,6 +55,8 @@ def _duration_since(start: str | None) -> float:
 def mark_started(recording_session_id: str) -> None:
     """Remember when the current episode began (called on episode_started)."""
     _starts[recording_session_id] = _now_iso()
+    # Recording an episode is activity — reset the idle clock / clear idle break.
+    activity.mark_activity()
 
 
 def record(recording_session_id: str, episode_index: int, outcome: str) -> None:
@@ -64,6 +66,7 @@ def record(recording_session_id: str, episode_index: int, outcome: str) -> None:
     No-op for dry runs or when no operator is signed in. Never raises.
     """
     try:
+        activity.mark_activity()  # finishing an episode is activity too
         duration = _duration_since(_starts.pop(recording_session_id, None))
         sess = get_session(recording_session_id)
         if sess is not None and sess.dry_run:

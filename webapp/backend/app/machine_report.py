@@ -15,7 +15,7 @@ import socket
 from pathlib import Path
 from typing import Any
 
-from app.activity import work_status
+from app.activity import evaluate_idle, work_status
 from app.dataset_health import scan_dataset_health
 from app.episodes import stats_for
 from app.dataset_settings import load_dataset_settings
@@ -143,6 +143,9 @@ def build_registration() -> dict[str, Any]:
 def build_heartbeat() -> dict[str, Any]:
     """Volatile snapshot sent on every heartbeat tick."""
     sessions = _session_snapshots()
+    # Advance idle detection on the heartbeat pulse before reading work state,
+    # so an idle gap surfaces as a break in this same snapshot.
+    evaluate_idle(any(s["status"] == "active" for s in sessions))
     faults = open_faults_for_report()
     work = work_status()
     # Fold the signed-in operator's episode tallies into the work summary so
