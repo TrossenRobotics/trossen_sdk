@@ -10,6 +10,9 @@
 #   docker compose up --build
 #
 # Then open http://localhost:5173 in a browser.
+#
+# To join a fleet hub, copy .env.example to .env and set HUB_URL + HUB_TOKEN
+# (see that file). With no .env the machine runs standalone.
 
 services:
   backend:
