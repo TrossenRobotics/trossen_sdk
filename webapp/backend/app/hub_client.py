@@ -28,6 +28,7 @@ import os
 
 import websockets
 
+from app import operators
 from app.machine_report import build_heartbeat, build_registration
 
 logger = logging.getLogger("app.hub_client")
@@ -68,15 +69,28 @@ def _hub_ws_url() -> str | None:
     return url
 
 
-async def _drain_incoming(ws) -> None:
-    """Read and discard inbound frames until the socket closes.
+async def _handle_incoming(ws) -> None:
+    """Dispatch inbound hub→machine frames until the socket closes.
 
-    Runs alongside the heartbeat sender purely so a server-side close is
-    detected without waiting for the next heartbeat's send to fail. Phase 1
-    ignores the payloads; the command plane (Phase 4) will dispatch here.
+    Runs alongside the heartbeat sender so a server-side close is noticed
+    without waiting for the next heartbeat send to fail. Currently the hub
+    sends one downstream frame type — `roster` — which we cache so operators
+    can sign in at this station. Unknown frames are ignored so newer hubs can
+    add frame types without breaking older machines. The blocking DB write is
+    offloaded to a thread so it never stalls the event loop.
     """
-    async for _message in ws:
-        pass
+    loop = asyncio.get_running_loop()
+    async for message in ws:
+        try:
+            frame = json.loads(message)
+        except (ValueError, TypeError):
+            continue
+        if frame.get("type") == "roster":
+            await loop.run_in_executor(
+                None, operators.cache_roster, frame.get("operators") or []
+            )
+            logger.info("hub_client: cached roster of %d operator(s)",
+                        len(frame.get("operators") or []))
 
 
 async def _session(url: str, token: str) -> None:
@@ -92,7 +106,7 @@ async def _session(url: str, token: str) -> None:
         await ws.send(json.dumps({"type": "register", "token": token, "machine": registration}))
         logger.info("hub_client: registered with %s as %s", url, registration.get("name"))
 
-        reader = asyncio.ensure_future(_drain_incoming(ws))
+        reader = asyncio.ensure_future(_handle_incoming(ws))
         try:
             while True:
                 heartbeat = await loop.run_in_executor(None, build_heartbeat)

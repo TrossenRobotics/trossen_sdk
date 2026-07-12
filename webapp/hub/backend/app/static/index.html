@@ -64,7 +64,16 @@
   .badge.recording { background: rgba(63,185,80,.16); color: var(--ok); }
   .badge.idle { background: rgba(139,148,158,.16); color: var(--muted); }
   .badge.error { background: rgba(248,81,73,.16); color: var(--err); }
+  .badge.downtime { background: rgba(210,153,34,.18); color: var(--warn); }
+  .badge.break { background: rgba(88,166,255,.16); color: #58a6ff; }
   .badge.offline { background: rgba(110,118,129,.16); color: var(--off); }
+  /* Per-card open faults */
+  .faults-list { display: flex; flex-direction: column; gap: 4px; margin-top: 5px; }
+  .fault-row { font-size: 12px; padding: 6px 8px; border-radius: 6px; background: rgba(210,153,34,.10); border: 1px solid rgba(210,153,34,.3); }
+  .fault-row .fh { display: flex; justify-content: space-between; gap: 8px; }
+  .fault-row .fdev { font-weight: 600; color: var(--warn); }
+  .fault-row .fdur { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .fault-row .fpart { color: var(--muted); margin-top: 2px; }
   .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
   .kv .k { color: var(--muted); }
   .kv .v { text-align: right; font-variant-numeric: tabular-nums; }
@@ -98,6 +107,61 @@
   a.linkbtn { color: var(--brand); text-decoration: none; font-size: 12px; font-weight: 600; }
   a.linkbtn:hover { text-decoration: underline; }
   .hidden { display: none !important; }
+
+  /* Operators modal */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 20;
+    display: flex; align-items: flex-start; justify-content: center; padding: 10vh 16px;
+  }
+  .modal {
+    width: 100%; max-width: 460px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px;
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; }
+  .modal-head h2 { margin: 0; font-size: 18px; }
+  .modal-head button { border: none; background: none; color: var(--muted); font-size: 16px; padding: 4px 8px; }
+  .op-add { display: grid; grid-template-columns: 1fr 90px auto; gap: 8px; margin: 14px 0 6px; }
+  .op-add input {
+    padding: 9px 11px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font: inherit; min-width: 0;
+  }
+  .op-err { min-height: 16px; font-size: 13px; margin-bottom: 6px; }
+  .op-list { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; }
+  .op-row {
+    display: flex; align-items: center; gap: 10px; padding: 9px 11px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+  }
+  .op-row .op-nm { flex: 1; font-weight: 600; }
+  .op-row.inactive .op-nm { color: var(--muted); font-weight: 400; text-decoration: line-through; }
+  .op-row .op-tag { font-size: 11px; color: var(--muted); }
+  .op-row button { padding: 4px 9px; font-size: 12px; }
+  .op-row button.danger { color: var(--err); border-color: rgba(248,81,73,.4); }
+
+  /* Downtime log */
+  .dt-list { display: flex; flex-direction: column; gap: 6px; }
+  .dt-list:empty::after { content: "None"; color: var(--muted); font-size: 13px; }
+  .dt-row {
+    display: grid; grid-template-columns: 1fr auto; gap: 2px 12px;
+    padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+  }
+  .dt-row .dt-dev { font-weight: 600; }
+  .dt-row.open .dt-dev { color: var(--warn); }
+  .dt-row .dt-dur { text-align: right; font-variant-numeric: tabular-nums; color: var(--warn); font-weight: 600; }
+  .dt-row.closed .dt-dur { color: var(--muted); font-weight: 400; }
+  .dt-row .dt-meta { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+  .dt-row .dt-part { grid-column: 1 / -1; font-size: 12px; }
+  .dt-row .dt-part b { color: var(--text); font-weight: 600; }
+
+  /* Leaderboard */
+  .lb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .lb-table th, .lb-table td { padding: 8px 10px; text-align: right; white-space: nowrap; }
+  .lb-table th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .4px; border-bottom: 1px solid var(--border); }
+  .lb-table td { border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  .lb-table th.l, .lb-table td.l { text-align: left; }
+  .lb-table td.rank { color: var(--muted); }
+  .lb-table td.op { font-weight: 700; color: var(--text); }
+  .lb-table tr:first-child td.op { color: var(--brand); }
+  .lb-empty { color: var(--muted); font-size: 13px; padding: 10px 2px; }
 </style>
 </head>
 <body>
@@ -114,8 +178,11 @@
   <div id="app" class="hidden">
     <header>
       <div class="title">Trossen <b>Fleet Hub</b></div>
-      <div style="display:flex; align-items:center; gap:16px;">
+      <div style="display:flex; align-items:center; gap:12px;">
         <span class="meta" id="summary"></span>
+        <button id="leaderboardBtn">Leaderboard</button>
+        <button id="downtimeBtn">Downtime</button>
+        <button id="operatorsBtn">Operators</button>
         <button id="logoutBtn">Sign out</button>
       </div>
     </header>
@@ -124,6 +191,53 @@
       <div class="grid" id="grid"></div>
       <div class="empty hidden" id="empty">No machines have connected yet.<br/><span class="sub">Set <code>HUB_URL</code> on a collection machine to have it dial in.</span></div>
     </main>
+  </div>
+
+  <!-- Leaderboard -->
+  <div id="lbOverlay" class="overlay hidden">
+    <div class="modal" style="max-width:760px;">
+      <div class="modal-head">
+        <h2>Operator leaderboard</h2>
+        <button id="lbClose" aria-label="Close">✕</button>
+      </div>
+      <p class="sub">Productivity across the fleet. Collection = share of time spent recording; Success = share of recording that was kept; Eps/hr = episodes per hour of session time.</p>
+      <div style="overflow-x:auto;">
+        <table class="lb-table" id="lbTable"></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Downtime log -->
+  <div id="dtOverlay" class="overlay hidden">
+    <div class="modal" style="max-width:640px;">
+      <div class="modal-head">
+        <h2>Downtime log</h2>
+        <button id="dtClose" aria-label="Close">✕</button>
+      </div>
+      <p class="sub">Hardware faults reported by operators. Open faults are counted from when they were filed until an operator marks them resolved.</p>
+      <div class="section-label" style="margin-top:12px;">Currently down</div>
+      <div id="dtOpen" class="dt-list"></div>
+      <div class="section-label" style="margin-top:14px;">Recently resolved</div>
+      <div id="dtRecent" class="dt-list"></div>
+    </div>
+  </div>
+
+  <!-- Operators management -->
+  <div id="opsOverlay" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Operators</h2>
+        <button id="opsClose" aria-label="Close">✕</button>
+      </div>
+      <p class="sub">The fleet roster. Operators sign in by name + PIN at any machine; changes here push to every connected station.</p>
+      <form id="opAddForm" class="op-add">
+        <input id="opName" placeholder="Name" autocomplete="off" />
+        <input id="opPin" placeholder="PIN" inputmode="numeric" autocomplete="off" />
+        <button class="primary" type="submit">Add</button>
+      </form>
+      <div class="op-err err" id="opErr"></div>
+      <div id="opList" class="op-list"></div>
+    </div>
   </div>
 
 <script>
@@ -152,6 +266,23 @@ function relTime(iso) {
   return Math.floor(d / 86400) + "d ago";
 }
 function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+// Human duration since an ISO timestamp (for a running downtime clock).
+function dur(iso) {
+  if (!iso) return "—";
+  let s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return Math.floor(s) + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+  return Math.floor(s / 86400) + "d " + Math.floor((s % 86400) / 3600) + "h";
+}
+// Duration between two ISO timestamps in seconds (for resolved events).
+function durSecs(secs) {
+  let s = Math.max(0, secs || 0);
+  if (s < 60) return Math.floor(s) + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+  return Math.floor(s / 86400) + "d " + Math.floor((s % 86400) / 3600) + "h";
+}
 
 function activeSession(m) {
   const s = (m.sessions || []);
@@ -168,6 +299,20 @@ function card(m) {
   const robots = (m.systems || []).map(s => s.robot_name || s.id).filter(Boolean);
   const eh = m.episode_health || {};
   const failing = eh.datasets_with_failures || [];
+  const faults = m.faults || [];
+
+  const faultsBlock = faults.length
+    ? `<div>
+        <div class="section-label" style="color:var(--warn);">Down · ${faults.length} device${faults.length > 1 ? "s" : ""}</div>
+        <div class="faults-list">
+          ${faults.map(f => `<div class="fault-row">
+            <div class="fh"><span class="fdev">${esc(f.device_type)}${f.device_label ? " · " + esc(f.device_label) : ""}</span><span class="fdur">${dur(f.since)}</span></div>
+            <div>${esc(f.reason || "—")}</div>
+            ${f.parts_needed ? `<div class="fpart">Needs: ${esc(f.parts_needed)}</div>` : ""}
+          </div>`).join("")}
+        </div>
+      </div>`
+    : "";
 
   const healthBlock = eh.total_corrupt
     ? `<div>
@@ -205,9 +350,11 @@ function card(m) {
       <div class="bar storage"><span class="${freeCls}" style="width:${usedPct}%"></span></div>
       <div class="sub" style="margin-top:4px;">${fmtBytes(st.free)} free of ${fmtBytes(st.total)} · ${st.dataset_count ?? 0} datasets</div>
     </div>
+    ${faultsBlock}
     ${healthBlock}
     ${robots.length ? `<div><div class="section-label">Systems</div><div class="chips">${robots.map(r => `<span class="chip">${esc(r)}</span>`).join("")}</div></div>` : ""}
     <div class="kv">
+      <span class="k">Operator</span><span class="v">${m.operator ? esc(m.operator.name) + (m.work && m.work.on_break ? " · on break" : "") : "—"}</span>
       <span class="k">Host</span><span class="v">${esc(m.hostname || "—")}${m.ip ? " · " + esc(m.ip) : ""}</span>
       <span class="k">Version</span><span class="v">${esc(m.app_version || "—")}</span>
       <span class="k">Last seen</span><span class="v">${online ? "now" : relTime(m.last_seen)}</span>
@@ -223,6 +370,11 @@ function storagePct(m) {
 
 function renderAlerts(list) {
   const alerts = [];
+  const down = list.filter(m => (m.faults || []).length > 0);
+  if (down.length) {
+    const names = down.map(m => `${esc(m.name)} (${m.faults.length})`).join(", ");
+    alerts.push(`<div class="alert err">⚠ ${down.length} machine${down.length > 1 ? "s" : ""} with hardware down <span class="names">· ${names}</span></div>`);
+  }
   const failed = list.filter(m => (m.episode_health || {}).total_corrupt > 0);
   if (failed.length) {
     const names = failed.map(m => `${esc(m.name)} (${m.episode_health.total_corrupt})`).join(", ");
@@ -242,11 +394,15 @@ function renderAlerts(list) {
 async function refresh() {
   let list;
   try { list = await api("/api/machines"); } catch { return; }
+  _lastFleet = list;
   const online = list.filter(m => m.online).length;
   $("summary").textContent = `${online} online · ${list.length} known`;
   $("empty").classList.toggle("hidden", list.length > 0);
   renderAlerts(list);
   $("grid").innerHTML = list.map(card).join("");
+  // Keep the downtime log's running clocks fresh while it's open.
+  if (!$("dtOverlay").classList.contains("hidden")) loadDowntime();
+  if (!$("lbOverlay").classList.contains("hidden")) loadLeaderboard();
 }
 
 function startPolling() {
@@ -278,6 +434,140 @@ async function doLogin() {
     $("loginErr").textContent = "Incorrect password.";
   }
 }
+
+// ---- Leaderboard ----
+function pct(x) { return Math.round((x || 0) * 100) + "%"; }
+function hrs(secs) { return ((secs || 0) / 3600).toFixed(1) + "h"; }
+
+async function loadLeaderboard() {
+  let rows;
+  try { rows = await api("/api/leaderboard"); } catch { return; }
+  if (!rows.length) {
+    $("lbTable").innerHTML = `<tr><td class="lb-empty">No collection recorded yet. Operator stats appear once episodes are recorded while signed in.</td></tr>`;
+    return;
+  }
+  const head = `<tr>
+    <th class="l">#</th><th class="l">Operator</th>
+    <th>Episodes</th><th>Eps/hr</th><th>Collection</th><th>Success</th>
+    <th>Session</th><th>Breaks</th><th>Sessions</th>
+  </tr>`;
+  const body = rows.map((r, i) => `<tr>
+    <td class="rank">${i + 1}</td>
+    <td class="op l">${esc(r.operator_name)}</td>
+    <td>${r.num_episodes}</td>
+    <td>${(r.episodes_per_hour || 0).toFixed(1)}</td>
+    <td>${pct(r.collection_ratio)}</td>
+    <td>${pct(r.success_ratio)}</td>
+    <td>${hrs(r.total_seconds)}</td>
+    <td>${hrs(r.break_seconds)}</td>
+    <td>${r.sessions}</td>
+  </tr>`).join("");
+  $("lbTable").innerHTML = head + body;
+}
+function openLeaderboard() { $("lbOverlay").classList.remove("hidden"); loadLeaderboard(); }
+function closeLeaderboard() { $("lbOverlay").classList.add("hidden"); }
+
+$("leaderboardBtn").addEventListener("click", openLeaderboard);
+$("lbClose").addEventListener("click", closeLeaderboard);
+$("lbOverlay").addEventListener("click", e => { if (e.target === $("lbOverlay")) closeLeaderboard(); });
+
+// ---- Downtime log ----
+function dtRow(e, open) {
+  const dcls = open ? "open" : "closed";
+  const durTxt = open ? dur(e.started_at) : durSecs(e.duration_s);
+  const dev = `${esc(e.device_type)}${e.device_label ? " · " + esc(e.device_label) : ""}`;
+  const machine = machineName(e.machine_id);
+  return `
+  <div class="dt-row ${dcls}">
+    <span class="dt-dev">${dev}</span>
+    <span class="dt-dur">${durTxt}</span>
+    <span class="dt-meta">${esc(machine)}${e.system_name ? " · " + esc(e.system_name) : ""} · ${esc(e.reason || "—")}${e.reported_by ? " · by " + esc(e.reported_by) : ""}</span>
+    ${e.parts_needed ? `<span class="dt-part">Needs: <b>${esc(e.parts_needed)}</b></span>` : ""}
+  </div>`;
+}
+
+// Resolve machine_id -> friendly name using the last fleet snapshot.
+let _lastFleet = [];
+function machineName(id) {
+  const m = _lastFleet.find(x => x.id === id);
+  return m ? m.name : id;
+}
+
+async function loadDowntime() {
+  let data;
+  try { data = await api("/api/downtime"); } catch { return; }
+  $("dtOpen").innerHTML = (data.open || []).map(e => dtRow(e, true)).join("");
+  $("dtRecent").innerHTML = (data.recent || []).map(e => dtRow(e, false)).join("");
+}
+function openDowntime() { $("dtOverlay").classList.remove("hidden"); loadDowntime(); }
+function closeDowntime() { $("dtOverlay").classList.add("hidden"); }
+
+$("downtimeBtn").addEventListener("click", openDowntime);
+$("dtClose").addEventListener("click", closeDowntime);
+$("dtOverlay").addEventListener("click", e => { if (e.target === $("dtOverlay")) closeDowntime(); });
+
+// ---- Operators management ----
+function opRow(o) {
+  return `
+  <div class="op-row ${o.active ? "" : "inactive"}" data-id="${esc(o.id)}">
+    <span class="op-nm">${esc(o.name)}</span>
+    ${o.active ? "" : `<span class="op-tag">inactive</span>`}
+    <button class="op-toggle">${o.active ? "Deactivate" : "Activate"}</button>
+    <button class="op-del danger">Delete</button>
+  </div>`;
+}
+
+async function loadOperators() {
+  $("opErr").textContent = "";
+  let ops;
+  try { ops = await api("/api/operators"); } catch { return; }
+  $("opList").innerHTML = ops.length
+    ? ops.map(opRow).join("")
+    : `<div class="sub" style="padding:8px 2px;">No operators yet. Add one above.</div>`;
+}
+
+async function addOperator(e) {
+  e.preventDefault();
+  $("opErr").textContent = "";
+  const name = $("opName").value.trim();
+  const pin = $("opPin").value.trim();
+  if (!name || !pin) { $("opErr").textContent = "Name and PIN are both required."; return; }
+  try {
+    await api("/api/operators", { method: "POST", body: JSON.stringify({ name, pin }) });
+    $("opName").value = ""; $("opPin").value = "";
+    $("opName").focus();
+    await loadOperators();
+  } catch (err) {
+    $("opErr").textContent = "Could not add operator.";
+  }
+}
+
+async function onOpListClick(e) {
+  const row = e.target.closest(".op-row");
+  if (!row) return;
+  const id = row.dataset.id;
+  try {
+    if (e.target.classList.contains("op-toggle")) {
+      const activating = row.classList.contains("inactive");
+      await api(`/api/operators/${id}`, { method: "PATCH", body: JSON.stringify({ active: activating }) });
+      await loadOperators();
+    } else if (e.target.classList.contains("op-del")) {
+      await api(`/api/operators/${id}`, { method: "DELETE" });
+      await loadOperators();
+    }
+  } catch {
+    $("opErr").textContent = "Action failed.";
+  }
+}
+
+function openOperators() { $("opsOverlay").classList.remove("hidden"); loadOperators(); $("opName").focus(); }
+function closeOperators() { $("opsOverlay").classList.add("hidden"); }
+
+$("operatorsBtn").addEventListener("click", openOperators);
+$("opsClose").addEventListener("click", closeOperators);
+$("opsOverlay").addEventListener("click", e => { if (e.target === $("opsOverlay")) closeOperators(); });
+$("opAddForm").addEventListener("submit", addOperator);
+$("opList").addEventListener("click", onOpListClick);
 
 $("loginBtn").addEventListener("click", doLogin);
 $("pw").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });

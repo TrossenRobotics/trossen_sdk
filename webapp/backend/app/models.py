@@ -107,3 +107,106 @@ class Session(SQLModel, table=True):
     error_message: str = ""
     created_at: str = Field(default_factory=_now_iso)
     updated_at: str = Field(default_factory=_now_iso)
+
+
+class DeviceFault(SQLModel, table=True):
+    """One reported hardware fault on a device of a configured system.
+
+    Filed by an operator when a piece of hardware (an arm, a camera, …)
+    breaks — the granular downtime signal the fleet admin needs but the
+    per-system pass/fail Hardware Test can't express. Deliberately NOT
+    foreign-keyed to `system.id`: a fault can outlive a system being
+    reconfigured or removed, and losing the fault when the system row
+    changes would erase downtime history. `system_id`/`system_name` are
+    kept as loose labels instead.
+
+    The row `id` doubles as the stable key the machine reports to the hub
+    each heartbeat, so the hub can track this exact fault across heartbeats
+    (open a downtime event when it first appears, close it when it clears)
+    without guessing from field values.
+    """
+
+    __tablename__ = "device_fault"
+
+    id: str = Field(primary_key=True)
+    system_id: str = ""
+    system_name: str = ""
+    # "arm" | "camera" | "other" — a coarse category the UI offers as a
+    # dropdown; `device_label` carries the specific unit (e.g. follower_left).
+    device_type: str = "other"
+    device_label: str = ""
+    reason: str = ""
+    parts_needed: str = ""
+    notes: str = ""
+    reported_by: str = ""
+    reported_by_id: str = ""
+    # "open" while the hardware is down, "resolved" once fixed. Resolved rows
+    # are kept as history and drop out of the heartbeat report.
+    status: str = "open"
+    created_at: str = Field(default_factory=_now_iso)
+    resolved_at: str | None = None
+
+
+class WorkSession(SQLModel, table=True):
+    """One operator's continuous stint at this machine (sign-in → sign-out).
+
+    This is the unit the efficiency metric is computed over: total_time is
+    `ended_at - started_at`, break_time is the sum of this session's
+    `break_event` rows, and (in the next phase) collection time and episode
+    counts attach here. One work session is open at a time — signing a new
+    operator in closes any that was left dangling.
+    """
+
+    __tablename__ = "work_session"
+
+    id: str = Field(primary_key=True)
+    operator_id: str = ""
+    operator_name: str = ""
+    started_at: str = Field(default_factory=_now_iso)
+    ended_at: str | None = None
+
+
+class BreakEvent(SQLModel, table=True):
+    """One break taken during a work session (declared, or auto-detected idle).
+
+    `ended_at` is null while the operator is on break; the sum of finished
+    break spans is the `break_time` the efficiency metric subtracts from
+    total time. `source` distinguishes an operator-pressed break from an
+    idle span the machine inferred, so the two can be reported differently.
+    """
+
+    __tablename__ = "break_event"
+
+    id: str = Field(primary_key=True)
+    work_session_id: str = Field(index=True)
+    # "manual" (operator pressed Break) or "idle" (auto-detected gap).
+    source: str = "manual"
+    started_at: str = Field(default_factory=_now_iso)
+    ended_at: str | None = None
+
+
+class EpisodeRecord(SQLModel, table=True):
+    """One recorded episode, attributed to the work session it happened in.
+
+    The efficiency metric's collection numbers come from these rows: the count
+    is `number_of_episodes`, the summed `duration_s` is
+    `actual_data_collection_time`, and splitting that sum by `outcome` gives
+    the successful-vs-failed task times. An accepted episode (operator pressed
+    Next) is `success`; a re-recorded/discarded one is `failed` — that maps the
+    existing recording controls onto the metric without a new button.
+
+    Rows exist only when an operator was signed in at record time; unattributed
+    episodes simply don't count toward anyone's productivity.
+    """
+
+    __tablename__ = "episode_record"
+
+    id: str = Field(primary_key=True)
+    work_session_id: str = Field(index=True)
+    operator_id: str = ""
+    recording_session_id: str = ""
+    episode_index: int = 0
+    # "success" (kept) or "failed" (discarded / re-recorded).
+    outcome: str = "success"
+    duration_s: float = 0.0
+    created_at: str = Field(default_factory=_now_iso)

@@ -32,7 +32,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import auth, registry
+from app import auth, connections, downtime, leaderboard, operators, registry
 from app.db import init_db
 
 logging.basicConfig(level=logging.INFO)
@@ -110,6 +110,76 @@ def machines(_: None = Depends(require_admin)) -> list[dict]:
     return registry.fleet()
 
 
+class CreateOperatorBody(BaseModel):
+    """POST /api/operators request body."""
+
+    name: str
+    pin: str
+
+
+class OperatorActiveBody(BaseModel):
+    """PATCH /api/operators/{id} request body."""
+
+    active: bool
+
+
+@app.get("/api/downtime")
+def get_downtime(_: None = Depends(require_admin)) -> dict[str, list[dict]]:
+    """Return open (ongoing) + recently-closed downtime events for the console."""
+    return downtime.events()
+
+
+@app.get("/api/leaderboard")
+def get_leaderboard(_: None = Depends(require_admin)) -> list[dict]:
+    """Return the operator productivity leaderboard (TDS-130 efficiency metric)."""
+    return leaderboard.leaderboard()
+
+
+@app.get("/api/operators")
+def get_operators(_: None = Depends(require_admin)) -> list[dict]:
+    """Return the roster (no PIN hashes) for the console's Operators view."""
+    return operators.roster_public()
+
+
+@app.post("/api/operators", status_code=201)
+async def create_operator(
+    body: CreateOperatorBody, _: None = Depends(require_admin)
+) -> dict:
+    """Add an operator, then push the refreshed roster to every machine."""
+    try:
+        op = operators.create_operator(body.name, body.pin)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    await connections.broadcast_roster(operators.roster_for_push())
+    return operators.roster_public([op])[0]
+
+
+@app.patch("/api/operators/{operator_id}")
+async def update_operator(
+    operator_id: str, body: OperatorActiveBody, _: None = Depends(require_admin)
+) -> dict:
+    """Activate/deactivate an operator and re-push the roster.
+
+    Deactivating drops the operator from the pushed (active-only) roster, so
+    stations stop accepting their PIN within one broadcast.
+    """
+    op = operators.set_active(operator_id, body.active)
+    if op is None:
+        raise HTTPException(status_code=404, detail="operator not found")
+    await connections.broadcast_roster(operators.roster_for_push())
+    return operators.roster_public([op])[0]
+
+
+@app.delete("/api/operators/{operator_id}", status_code=204)
+async def delete_operator(
+    operator_id: str, _: None = Depends(require_admin)
+) -> None:
+    """Hard-delete an operator and re-push the roster."""
+    if not operators.delete_operator(operator_id):
+        raise HTTPException(status_code=404, detail="operator not found")
+    await connections.broadcast_roster(operators.roster_for_push())
+
+
 @app.websocket("/ws/machine")
 async def machine_ws(ws: WebSocket) -> None:
     """Handle one machine's persistent connection.
@@ -131,20 +201,35 @@ async def machine_ws(ws: WebSocket) -> None:
             await ws.close(code=4401)
             return
         machine_id = registry.register_machine(first.get("machine") or {})
+        connections.register(machine_id, ws)
         await ws.send_text(json.dumps({"type": "ack"}))
+        # Seed the freshly-connected machine with the current roster so an
+        # operator can sign in there immediately, without waiting for the
+        # next roster change to broadcast one.
+        await connections.send_roster(ws, operators.roster_for_push())
         logger.info("machine_ws: %s registered", machine_id)
 
         while True:
             msg = json.loads(await ws.receive_text())
             if msg.get("type") == "heartbeat":
                 registry.record_heartbeat(machine_id, msg)
+                # Turn the heartbeat's open-fault snapshot into durable
+                # downtime records (open new, close resolved).
+                downtime.reconcile(machine_id, msg.get("faults") or [])
+                # Mirror the operator's live work-session totals for the
+                # productivity leaderboard.
+                leaderboard.upsert_from_work(machine_id, msg.get("work") or {})
     except WebSocketDisconnect:
         pass
     except Exception as exc:  # noqa: BLE001 — a malformed frame shouldn't crash the hub
         logger.warning("machine_ws: error on %s: %s", machine_id, exc)
     finally:
         if machine_id:
+            connections.drop(machine_id, ws)
             registry.mark_offline(machine_id)
+            # No more heartbeats to confirm faults are still open; close them
+            # so the downtime clock doesn't run forever on a dark machine.
+            downtime.close_all(machine_id)
             logger.info("machine_ws: %s disconnected", machine_id)
 
 

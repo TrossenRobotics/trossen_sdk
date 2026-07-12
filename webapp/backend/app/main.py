@@ -10,7 +10,9 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from app import hub_client, hw_status
+from app import activity
+from app import faults as faults_mod
+from app import hub_client, hw_status, operators
 from app.converter import ConvertBody, stream_conversion, validate_body
 from app.dataset_settings import (
     DatasetSettings,
@@ -359,6 +361,91 @@ def get_settings() -> DatasetSettings:
 def update_settings(new_settings: DatasetSettings) -> DatasetSettings:
     """Update the dataset directory settings, persisted to disk."""
     return save_dataset_settings(new_settings)
+
+
+class OperatorSignInBody(BaseModel):
+    """POST /api/operator/signin request body."""
+
+    operator_id: str
+    pin: str
+
+
+@app.get("/api/operators")
+def machine_operators() -> list[dict[str, str]]:
+    """Return the cached roster ({id, name}) for the sign-in picker.
+
+    Sourced from the last roster the hub pushed over the WS link, so this
+    works even while the hub is momentarily unreachable. Empty on a machine
+    that has never joined a hub.
+    """
+    return operators.get_roster_public()
+
+
+@app.get("/api/operator/current")
+def current_operator() -> dict[str, str] | None:
+    """Return the signed-in operator ({id, name}), or null if none."""
+    return operators.get_active_operator()
+
+
+@app.post("/api/operator/signin")
+def operator_sign_in(body: OperatorSignInBody) -> dict[str, str]:
+    """Sign an operator in against the cached roster. 401 on bad id/PIN."""
+    try:
+        return operators.sign_in(body.operator_id, body.pin)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
+
+@app.post("/api/operator/signout", status_code=204)
+def operator_sign_out() -> None:
+    """Sign the current operator out."""
+    operators.sign_out()
+
+
+@app.get("/api/operator/status")
+def operator_status() -> dict[str, Any]:
+    """Current work/break state (active, on_break, running time totals)."""
+    return activity.work_status()
+
+
+@app.post("/api/operator/break/start")
+def operator_break_start() -> dict[str, Any]:
+    """Start a break for the signed-in operator. 409 if not signed in / already on break."""
+    if not activity.start_break("manual"):
+        raise HTTPException(status_code=409, detail="No work session, or already on break")
+    return activity.work_status()
+
+
+@app.post("/api/operator/break/stop")
+def operator_break_stop() -> dict[str, Any]:
+    """End the current break. 409 if not on a break."""
+    if not activity.end_break():
+        raise HTTPException(status_code=409, detail="Not currently on a break")
+    return activity.work_status()
+
+
+@app.get("/api/faults")
+def list_faults(status: str | None = None) -> list[faults_mod.DeviceFault]:
+    """Return device faults, newest first. Pass `?status=open` to filter."""
+    return faults_mod.list_faults(status)
+
+
+@app.post("/api/faults", status_code=201)
+def create_fault(body: faults_mod.CreateFaultBody) -> faults_mod.DeviceFault:
+    """File a hardware fault. The reporter is the signed-in operator (if any)."""
+    try:
+        return faults_mod.create_fault(body, operators.get_active_operator())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/api/faults/{fault_id}/resolve")
+def resolve_fault(fault_id: str) -> faults_mod.DeviceFault:
+    """Mark a fault resolved (hardware fixed). 404 if the fault is unknown."""
+    resolved = faults_mod.resolve_fault(fault_id)
+    if resolved is None:
+        raise HTTPException(status_code=404, detail=f"Fault '{fault_id}' not found")
+    return resolved
 
 
 @app.post("/api/system/update")

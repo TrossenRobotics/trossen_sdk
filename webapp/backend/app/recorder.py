@@ -36,7 +36,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
-from app import hw_status
+from app import episodes, hw_status
 from app.dataset_settings import load_dataset_settings
 from app.sessions import (
     Session,
@@ -715,8 +715,18 @@ def _handle_event(runner: _Runner, payload: dict[str, Any]) -> None:
             episode_index = 0
         if event == "episode_started":
             runner.in_flight_episode = episode_index
+            # Start the productivity clock for this episode (see app/episodes).
+            episodes.mark_started(runner.session_id)
         else:
             runner.in_flight_episode = None
+            # Attribute the finished episode to the signed-in operator:
+            # a kept episode is a success, a discarded/re-recorded one is
+            # failed time. Best-effort — episodes.record never raises.
+            episodes.record(
+                runner.session_id,
+                episode_index,
+                "failed" if event == "episode_discarded" else "success",
+            )
         bus.publish(runner.session_id, {
             "type": "lifecycle",
             "data": {"event": event, "episode_index": episode_index},

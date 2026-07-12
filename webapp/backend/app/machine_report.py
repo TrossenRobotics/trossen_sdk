@@ -15,9 +15,13 @@ import socket
 from pathlib import Path
 from typing import Any
 
+from app.activity import work_status
 from app.dataset_health import scan_dataset_health
+from app.episodes import stats_for
 from app.dataset_settings import load_dataset_settings
+from app.faults import open_faults_for_report
 from app.machine_identity import get_machine_id, get_machine_name
+from app.operators import get_active_operator
 from app.sessions import list_sessions
 from app.systems import list_systems
 from app.version import get_version_info
@@ -95,17 +99,23 @@ def _session_snapshots() -> list[dict[str, Any]]:
     return out
 
 
-def _machine_state(sessions: list[dict[str, Any]]) -> str:
-    """Derive a one-word machine state from its sessions.
+def _machine_state(sessions: list[dict[str, Any]], open_faults: int, on_break: bool) -> str:
+    """Derive a one-word machine state.
 
-    "recording" when any session is active, else "error" if any session is
-    errored, else "idle". Break/downtime states are layered on in a later
-    phase (operator tracking); until then this is purely recording-derived.
+    Priority: an active recording wins (the box is productively busy even if a
+    spare device is flagged), then a hardware "downtime" fault, then a session
+    "error", then an operator "break", else "idle". Downtime ranks above a
+    session error because a broken device is the more actionable, longer-lived
+    condition; a declared break ranks last since it's the most benign.
     """
     if any(s["status"] == "active" for s in sessions):
         return "recording"
+    if open_faults > 0:
+        return "downtime"
     if any(s["status"] == "error" for s in sessions):
         return "error"
+    if on_break:
+        return "break"
     return "idle"
 
 
@@ -133,10 +143,19 @@ def build_registration() -> dict[str, Any]:
 def build_heartbeat() -> dict[str, Any]:
     """Volatile snapshot sent on every heartbeat tick."""
     sessions = _session_snapshots()
+    faults = open_faults_for_report()
+    work = work_status()
+    # Fold the signed-in operator's episode tallies into the work summary so
+    # the hub can build the productivity leaderboard from the heartbeat alone.
+    if work.get("active") and work.get("work_session_id"):
+        work.update(stats_for(work["work_session_id"]))
     return {
         "machine_id": get_machine_id(),
-        "state": _machine_state(sessions),
+        "state": _machine_state(sessions, len(faults), work.get("on_break", False)),
+        "operator": get_active_operator(),
+        "work": work,
         "sessions": sessions,
+        "faults": faults,
         "storage": _storage_status(),
         "episode_health": scan_dataset_health(),
     }

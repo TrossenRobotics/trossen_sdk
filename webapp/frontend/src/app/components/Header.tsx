@@ -9,6 +9,8 @@ import { useTheme } from '@/lib/ThemeContext';
 import { useTour } from '@/lib/TourContext';
 import { UpdateButton } from '@/app/components/UpdateButton';
 import { AboutButton } from '@/app/components/AboutButton';
+import { OperatorBadge } from '@/app/components/OperatorBadge';
+import { HardwareIssues } from '@/app/components/HardwareIssues';
 
 const navLinks = [
   { to: "/record", label: "Record", match: ["/", "/record"] },
@@ -155,6 +157,13 @@ export function Header() {
             </Link>
           )
         )}
+
+        {/* Report/track broken hardware — drives the fleet downtime log. */}
+        <HardwareIssues />
+
+        {/* Operator sign-in — attributes collection to a person for the
+            downtime log and productivity leaderboard. */}
+        <OperatorBadge />
 
         {/* Pull the latest app version from GitHub + reload. */}
         <UpdateButton />
