@@ -10,6 +10,7 @@ Layout follows XDG conventions:
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 # XDG-compliant roots
@@ -28,8 +29,10 @@ SESSIONS_DIR = STATE_ROOT / "sessions"
 # SQLite database file backing the systems / sessions / app_settings
 # tables. Lives under STATE_ROOT because it is app-managed rather than
 # user-edited (the JSON layout in CONFIG_ROOT predates this file and
-# will be migrated into the DB by a future commit).
-DB_PATH = STATE_ROOT / "app.db"
+# will be migrated into the DB by a future commit). Overridable via
+# TROSSEN_WEBAPP_DB_PATH so a test run (or an alternate deployment) can point
+# it at an isolated file, mirroring the hub's HUB_DB_PATH.
+DB_PATH = Path(os.environ.get("TROSSEN_WEBAPP_DB_PATH", str(STATE_ROOT / "app.db")))
 
 # Read-only factory defaults — ships with the webapp source
 FACTORY_DEFAULTS_DIR = Path(__file__).parent / "factory_defaults"
