@@ -28,7 +28,7 @@ import os
 
 import websockets
 
-from app import operators
+from app import assignments, operators
 from app.machine_report import build_heartbeat, build_registration
 
 logger = logging.getLogger("app.hub_client")
@@ -73,11 +73,12 @@ async def _handle_incoming(ws) -> None:
     """Dispatch inbound hub→machine frames until the socket closes.
 
     Runs alongside the heartbeat sender so a server-side close is noticed
-    without waiting for the next heartbeat send to fail. Currently the hub
-    sends one downstream frame type — `roster` — which we cache so operators
-    can sign in at this station. Unknown frames are ignored so newer hubs can
-    add frame types without breaking older machines. The blocking DB write is
-    offloaded to a thread so it never stalls the event loop.
+    without waiting for the next heartbeat send to fail. The hub sends a few
+    downstream frame types — `roster` (who may sign in) and the assignment
+    command plane (`assignments` bulk on connect, `assignment` on create,
+    `assignment_cancel` on cancel). Unknown frames are ignored so newer hubs
+    can add frame types without breaking older machines. Blocking DB writes are
+    offloaded to a thread so they never stall the event loop.
     """
     loop = asyncio.get_running_loop()
     async for message in ws:
@@ -85,12 +86,23 @@ async def _handle_incoming(ws) -> None:
             frame = json.loads(message)
         except (ValueError, TypeError):
             continue
-        if frame.get("type") == "roster":
+        ftype = frame.get("type")
+        if ftype == "roster":
             await loop.run_in_executor(
                 None, operators.cache_roster, frame.get("operators") or []
             )
             logger.info("hub_client: cached roster of %d operator(s)",
                         len(frame.get("operators") or []))
+        elif ftype == "assignments":
+            await loop.run_in_executor(
+                None, assignments.apply_bulk, frame.get("assignments") or []
+            )
+        elif ftype == "assignment":
+            assignment = frame.get("assignment") or {}
+            await loop.run_in_executor(None, assignments.apply_one, assignment)
+            logger.info("hub_client: received assignment %s", assignment.get("id"))
+        elif ftype == "assignment_cancel":
+            await loop.run_in_executor(None, assignments.remove, frame.get("id"))
 
 
 async def _session(url: str, token: str) -> None:

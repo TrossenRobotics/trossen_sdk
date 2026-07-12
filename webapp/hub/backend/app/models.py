@@ -122,3 +122,29 @@ class SessionStats(SQLModel, table=True):
     failed_seconds: float = 0.0
     num_episodes: int = 0
     updated_at: str = Field(default_factory=_now_iso)
+
+
+class Assignment(SQLModel, table=True):
+    """A task the admin assigns to a machine from the console (command plane).
+
+    The hub owns assignments and pushes them to the machine over the same WS
+    link the roster rides; the machine surfaces them to the operator, who
+    acknowledges and completes them, with the status flowing back in the
+    heartbeat. Deliberately a lightweight directive (what to collect, how much)
+    rather than a full recording-session config — the operator sets the session
+    up from it — so the command plane isn't coupled to the SDK's session schema.
+
+    status: assigned -> acknowledged -> done, or cancelled at any point.
+    """
+
+    __tablename__ = "assignment"
+
+    id: str = Field(primary_key=True)
+    machine_id: str = Field(index=True)
+    title: str
+    instructions: str = ""
+    # Optional target episode count for the operator; None = unspecified.
+    target_episodes: int | None = None
+    status: str = "assigned"
+    created_at: str = Field(default_factory=_now_iso)
+    updated_at: str = Field(default_factory=_now_iso)

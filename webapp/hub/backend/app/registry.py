@@ -108,6 +108,16 @@ def _is_online(live: _Live | None) -> bool:
     return (time.monotonic() - live.last_heartbeat_at) <= _STALE_AFTER_S
 
 
+def online_ids() -> set[str]:
+    """The machine ids currently considered online (connected + fresh heartbeat).
+
+    Used by the downtime staleness sweep to decide whose open faults can no
+    longer be confirmed and should be force-closed.
+    """
+    with _lock:
+        return {mid for mid, live in _live.items() if _is_online(live)}
+
+
 def fleet() -> list[dict[str, Any]]:
     """Return every known machine merged with its live status, newest-seen first."""
     with get_session() as db:

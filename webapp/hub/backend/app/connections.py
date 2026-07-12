@@ -62,3 +62,29 @@ async def broadcast_roster(operators: list[dict[str, Any]]) -> None:
             await ws.send_text(frame)
         except Exception as exc:  # noqa: BLE001 — skip dead sockets, keep going
             logger.warning("broadcast_roster: %s unreachable: %s", machine_id, exc)
+
+
+async def send_assignments(ws: WebSocket, assignments: list[dict[str, Any]]) -> None:
+    """Push a machine's open assignments to it (used right after registration)."""
+    try:
+        await ws.send_text(json.dumps({"type": "assignments", "assignments": assignments}))
+    except Exception as exc:  # noqa: BLE001 — a dead socket just drops the push
+        logger.warning("send_assignments: push failed: %s", exc)
+
+
+async def send_to_machine(machine_id: str, frame: dict[str, Any]) -> bool:
+    """Send one command frame to a specific machine if it's connected.
+
+    Returns True if the machine had a live socket the frame was written to.
+    A machine that's offline picks the change up on its next reconnect (the
+    hub re-pushes its open assignments then), so a failed send is not an error.
+    """
+    ws = _conns.get(machine_id)
+    if ws is None:
+        return False
+    try:
+        await ws.send_text(json.dumps(frame))
+        return True
+    except Exception as exc:  # noqa: BLE001 — treat a dead socket as "not delivered"
+        logger.warning("send_to_machine: %s unreachable: %s", machine_id, exc)
+        return False

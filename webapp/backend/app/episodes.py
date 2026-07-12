@@ -20,7 +20,7 @@ from __future__ import annotations
 
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import func
@@ -83,6 +83,13 @@ def record(recording_session_id: str, episode_index: int, outcome: str) -> None:
             return
         ws = activity.current_work_session()
         if ws is None:
+            # A real episode recorded with nobody signed in isn't charged to
+            # anyone (by design), but leave a trace so a shift with a missing
+            # sign-in doesn't silently vanish from the productivity numbers.
+            logger.info(
+                "episodes.record: episode %s of %s not attributed — no operator signed in",
+                episode_index, recording_session_id,
+            )
             return
         rec = EpisodeRecord(
             id=str(uuid.uuid4()),
@@ -126,3 +133,33 @@ def stats_for(work_session_id: str) -> dict[str, Any]:
         "success_seconds": success_s,
         "failed_seconds": failed_s,
     }
+
+
+# Episode records feed only the *current* work session's live stats (the hub
+# keeps the durable per-session totals), so old rows are safe to drop. Retain a
+# generous window for local debugging, then prune to bound table growth.
+_EPISODE_RETENTION_DAYS = 90
+
+
+def prune(retention_days: int = _EPISODE_RETENTION_DAYS) -> int:
+    """Delete episode records older than the retention window; returns the count.
+
+    Called once at startup. Best-effort — a failure here is logged and ignored
+    so it can never block the app from starting.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    try:
+        with SessionLocal() as db:
+            stale = db.exec(
+                select(EpisodeRecord).where(EpisodeRecord.created_at < cutoff)
+            ).all()
+            for r in stale:
+                db.delete(r)
+            db.commit()
+        if stale:
+            logger.info("episodes.prune: removed %d record(s) older than %dd",
+                        len(stale), retention_days)
+        return len(stale)
+    except Exception as exc:  # noqa: BLE001 — pruning must never block startup
+        logger.warning("episodes.prune failed: %s", exc)
+        return 0

@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
-from app import activity
+from app import activity, assignments, episodes
 from app import faults as faults_mod
 from app import hub_client, hw_status, operators
 from app.converter import ConvertBody, stream_conversion, validate_body
@@ -93,6 +93,7 @@ async def lifespan(_app: FastAPI):
     """
     apply_migrations()
     seed_missing_factory_systems()
+    episodes.prune()  # bound episode_record growth (keeps a 90d window)
     hub_client.start()
     yield
     await hub_client.stop()
@@ -451,6 +452,30 @@ def resolve_fault(fault_id: str) -> faults_mod.DeviceFault:
     if resolved is None:
         raise HTTPException(status_code=404, detail=f"Fault '{fault_id}' not found")
     return resolved
+
+
+@app.get("/api/assignments")
+def list_assignments() -> list[dict[str, Any]]:
+    """Return the tasks the hub has assigned to this machine (cached copy)."""
+    return assignments.list_assignments()
+
+
+@app.post("/api/assignments/{assignment_id}/ack")
+def ack_assignment(assignment_id: str) -> dict[str, Any]:
+    """Operator acknowledges an assigned task. 409 if not a forward move."""
+    updated = assignments.set_status(assignment_id, "acknowledged")
+    if updated is None:
+        raise HTTPException(status_code=409, detail="Assignment not found or already past this state")
+    return updated
+
+
+@app.post("/api/assignments/{assignment_id}/done")
+def complete_assignment(assignment_id: str) -> dict[str, Any]:
+    """Operator marks an assigned task complete. 409 if not a forward move."""
+    updated = assignments.set_status(assignment_id, "done")
+    if updated is None:
+        raise HTTPException(status_code=409, detail="Assignment not found or already done")
+    return updated
 
 
 @app.post("/api/system/update")

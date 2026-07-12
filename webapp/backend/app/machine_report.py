@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from app.activity import evaluate_idle, work_status
+from app.assignments import statuses_for_report
 from app.dataset_health import scan_dataset_health
 from app.episodes import stats_for
 from app.dataset_settings import load_dataset_settings
@@ -157,6 +158,7 @@ def build_heartbeat() -> dict[str, Any]:
         "state": _machine_state(sessions, len(faults), work.get("on_break", False)),
         "operator": get_active_operator(),
         "work": work,
+        "assignments": statuses_for_report(),
         "sessions": sessions,
         "faults": faults,
         "storage": _storage_status(),

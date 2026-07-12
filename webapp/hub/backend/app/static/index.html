@@ -162,6 +162,20 @@
   .lb-table td.op { font-weight: 700; color: var(--text); }
   .lb-table tr:first-child td.op { color: var(--brand); }
   .lb-empty { color: var(--muted); font-size: 13px; padding: 10px 2px; }
+
+  /* Assignments */
+  .asg-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+  .asg-form input, .asg-form textarea {
+    padding: 9px 11px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font: inherit; resize: vertical;
+  }
+  .asg-form button.primary { align-self: flex-end; }
+  .asg-badge { font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 2px 7px; border-radius: 20px; }
+  .asg-badge.assigned { background: rgba(88,166,255,.16); color: #58a6ff; }
+  .asg-badge.acknowledged { background: rgba(210,153,34,.18); color: var(--warn); }
+  .asg-badge.done { background: rgba(63,185,80,.16); color: var(--ok); }
+  .asg-badge.cancelled { background: rgba(139,148,158,.16); color: var(--muted); }
+  .card .assign-btn { align-self: flex-start; font-size: 12px; padding: 4px 10px; }
 </style>
 </head>
 <body>
@@ -180,6 +194,7 @@
       <div class="title">Trossen <b>Fleet Hub</b></div>
       <div style="display:flex; align-items:center; gap:12px;">
         <span class="meta" id="summary"></span>
+        <button id="assignmentsBtn">Assignments</button>
         <button id="leaderboardBtn">Leaderboard</button>
         <button id="downtimeBtn">Downtime</button>
         <button id="operatorsBtn">Operators</button>
@@ -191,6 +206,36 @@
       <div class="grid" id="grid"></div>
       <div class="empty hidden" id="empty">No machines have connected yet.<br/><span class="sub">Set <code>HUB_URL</code> on a collection machine to have it dial in.</span></div>
     </main>
+  </div>
+
+  <!-- Assign a task to a machine -->
+  <div id="asgOverlay" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Assign task</h2>
+        <button id="asgClose" aria-label="Close">✕</button>
+      </div>
+      <p class="sub">Send a task to <b id="asgMachineName">—</b>. The operator sees it at the station and marks it acknowledged / done.</p>
+      <form id="asgForm" class="asg-form">
+        <input id="asgTitle" placeholder="Task title (e.g. Fold the towel)" autocomplete="off" />
+        <textarea id="asgInstr" placeholder="Instructions (optional)" rows="3"></textarea>
+        <input id="asgTarget" type="number" min="1" placeholder="Target episodes (optional)" />
+        <div class="op-err err" id="asgErr"></div>
+        <button class="primary" type="submit">Assign</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- All assignments -->
+  <div id="asgListOverlay" class="overlay hidden">
+    <div class="modal" style="max-width:640px;">
+      <div class="modal-head">
+        <h2>Assignments</h2>
+        <button id="asgListClose" aria-label="Close">✕</button>
+      </div>
+      <p class="sub">Tasks assigned across the fleet and their status.</p>
+      <div id="asgList" class="dt-list"></div>
+    </div>
   </div>
 
   <!-- Leaderboard -->
@@ -359,7 +404,10 @@ function card(m) {
       <span class="k">Version</span><span class="v">${esc(m.app_version || "—")}</span>
       <span class="k">Last seen</span><span class="v">${online ? "now" : relTime(m.last_seen)}</span>
     </div>
-    ${liveView}
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+      <button class="assign-btn" data-mid="${esc(m.id)}" data-mname="${esc(m.name)}">Assign task</button>
+      ${liveView}
+    </div>
   </div>`;
 }
 
@@ -403,6 +451,7 @@ async function refresh() {
   // Keep the downtime log's running clocks fresh while it's open.
   if (!$("dtOverlay").classList.contains("hidden")) loadDowntime();
   if (!$("lbOverlay").classList.contains("hidden")) loadLeaderboard();
+  if (!$("asgListOverlay").classList.contains("hidden")) loadAssignments();
 }
 
 function startPolling() {
@@ -434,6 +483,74 @@ async function doLogin() {
     $("loginErr").textContent = "Incorrect password.";
   }
 }
+
+// ---- Assignments (command plane) ----
+let _asgMachineId = null;
+
+function openAssign(mid, mname) {
+  _asgMachineId = mid;
+  $("asgMachineName").textContent = mname;
+  $("asgErr").textContent = "";
+  $("asgTitle").value = ""; $("asgInstr").value = ""; $("asgTarget").value = "";
+  $("asgOverlay").classList.remove("hidden");
+  $("asgTitle").focus();
+}
+function closeAssign() { $("asgOverlay").classList.add("hidden"); }
+
+async function submitAssign(e) {
+  e.preventDefault();
+  $("asgErr").textContent = "";
+  const title = $("asgTitle").value.trim();
+  if (!title) { $("asgErr").textContent = "A task title is required."; return; }
+  const target = $("asgTarget").value ? parseInt($("asgTarget").value, 10) : null;
+  try {
+    await api(`/api/machines/${_asgMachineId}/assignments`, {
+      method: "POST",
+      body: JSON.stringify({ title, instructions: $("asgInstr").value.trim(), target_episodes: target }),
+    });
+    closeAssign();
+  } catch { $("asgErr").textContent = "Could not assign the task."; }
+}
+
+function asgRow(a) {
+  const machine = machineName(a.machine_id);
+  const canCancel = a.status === "assigned" || a.status === "acknowledged";
+  return `
+  <div class="dt-row">
+    <span class="dt-dev">${esc(a.title)}${a.target_episodes ? ` · ${a.target_episodes} eps` : ""}</span>
+    <span class="asg-badge ${esc(a.status)}">${esc(a.status)}</span>
+    <span class="dt-meta">${esc(machine)}${a.instructions ? " · " + esc(a.instructions) : ""}</span>
+    ${canCancel ? `<span class="dt-part"><button class="op-del danger asg-cancel" data-id="${esc(a.id)}">Cancel</button></span>` : ""}
+  </div>`;
+}
+
+async function loadAssignments() {
+  let rows;
+  try { rows = await api("/api/assignments"); } catch { return; }
+  $("asgList").innerHTML = rows.length ? rows.map(asgRow).join("") : "";
+}
+function openAssignments() { $("asgListOverlay").classList.remove("hidden"); loadAssignments(); }
+function closeAssignments() { $("asgListOverlay").classList.add("hidden"); }
+
+async function onAsgListClick(e) {
+  const btn = e.target.closest(".asg-cancel");
+  if (!btn) return;
+  try { await api(`/api/assignments/${btn.dataset.id}/cancel`, { method: "POST" }); await loadAssignments(); }
+  catch { /* ignore */ }
+}
+
+$("assignmentsBtn").addEventListener("click", openAssignments);
+$("asgClose").addEventListener("click", closeAssign);
+$("asgOverlay").addEventListener("click", e => { if (e.target === $("asgOverlay")) closeAssign(); });
+$("asgForm").addEventListener("submit", submitAssign);
+$("asgListClose").addEventListener("click", closeAssignments);
+$("asgListOverlay").addEventListener("click", e => { if (e.target === $("asgListOverlay")) closeAssignments(); });
+$("asgList").addEventListener("click", onAsgListClick);
+// Per-card "Assign task" buttons (event delegation on the grid).
+$("grid").addEventListener("click", e => {
+  const b = e.target.closest(".assign-btn");
+  if (b) openAssign(b.dataset.mid, b.dataset.mname);
+});
 
 // ---- Leaderboard ----
 function pct(x) { return Math.round((x || 0) * 100) + "%"; }

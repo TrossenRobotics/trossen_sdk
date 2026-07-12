@@ -16,14 +16,20 @@ outlive both the machine and the hub.
 
 from __future__ import annotations
 
+import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlmodel import select
 
 from app.db import get_session
 from app.models import DowntimeEvent
+
+logger = logging.getLogger("app.downtime")
+
+# Closed downtime events older than this are pruned to bound table growth.
+_DOWNTIME_RETENTION_DAYS = 90
 
 
 def _now_iso() -> str:
@@ -99,6 +105,54 @@ def close_all(machine_id: str) -> None:
             event.ended_at = now
             db.add(event)
         db.commit()
+
+
+def sweep_offline(online_machine_ids: set[str]) -> int:
+    """Close open downtime events for machines that are no longer online.
+
+    A clean WS disconnect already runs `close_all`; this catches the cases it
+    can't — a wedged connection that stopped heartbeating, or a machine that
+    was decommissioned while faulty — so the running downtime clock doesn't
+    tick forever against a box we'll never hear from again. If the machine
+    returns and re-reports the fault, `reconcile` opens a fresh event whose age
+    is seeded from the fault's original `since`, so history isn't lost.
+    """
+    now = _now_iso()
+    closed = 0
+    with get_session() as db:
+        open_events = db.exec(
+            select(DowntimeEvent).where(DowntimeEvent.ended_at.is_(None))  # type: ignore[union-attr]
+        ).all()
+        for event in open_events:
+            if event.machine_id not in online_machine_ids:
+                event.ended_at = now
+                db.add(event)
+                closed += 1
+        if closed:
+            db.commit()
+    if closed:
+        logger.info("downtime.sweep_offline: closed %d event(s) for offline machines", closed)
+    return closed
+
+
+def prune(retention_days: int = _DOWNTIME_RETENTION_DAYS) -> int:
+    """Delete closed downtime events older than the retention window."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    with get_session() as db:
+        stale = db.exec(
+            select(DowntimeEvent).where(
+                DowntimeEvent.ended_at.is_not(None),  # type: ignore[union-attr]
+                DowntimeEvent.ended_at < cutoff,
+            )
+        ).all()
+        for r in stale:
+            db.delete(r)
+        if stale:
+            db.commit()
+    if stale:
+        logger.info("downtime.prune: removed %d closed event(s) older than %dd",
+                    len(stale), retention_days)
+    return len(stale)
 
 
 def _duration_s(started_at: str, ended_at: str | None) -> float:

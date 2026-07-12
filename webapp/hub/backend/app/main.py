@@ -6,9 +6,10 @@ One process serves three surfaces:
     all behind a session cookie except login and the health probe.
   - `/` — the static dashboard (single self-contained page under static/).
 
-Phase 1 is read-only from the admin's side: you can see the fleet, not yet
-command it. The command plane (assign task, etc.) mounts onto the same
-machine WS in a later phase.
+The admin can both observe the fleet (machines, operators, downtime,
+leaderboard) and command it: the task-assignment command plane pushes work to a
+machine over the same machine WS and folds the operator's status back in from
+the heartbeat.
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import asyncio
 import json
 import logging
 import os
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from fastapi import (
@@ -33,7 +34,15 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from app import auth, connections, downtime, leaderboard, operators, registry
+from app import (
+    assignments,
+    auth,
+    connections,
+    downtime,
+    leaderboard,
+    operators,
+    registry,
+)
 from app.db import init_db
 
 logging.basicConfig(level=logging.INFO)
@@ -42,15 +51,51 @@ logger = logging.getLogger("app.main")
 _STATIC_DIR = Path(__file__).parent / "static"
 
 
+# Maintenance cadence: sweep stale downtime every minute; prune old rows hourly.
+_MAINTENANCE_INTERVAL_S = 60.0
+_PRUNE_EVERY_N_TICKS = 60
+
+
+async def _maintenance_loop() -> None:
+    """Periodically close downtime for vanished machines and prune old rows.
+
+    Runs the DB work in a thread so it never blocks the event loop. Prunes once
+    immediately (bounds growth on a long-lived DB even if the hub rarely
+    restarts), then sweeps every minute and prunes hourly.
+    """
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, downtime.prune)
+    await loop.run_in_executor(None, leaderboard.prune)
+    tick = 0
+    while True:
+        try:
+            await asyncio.sleep(_MAINTENANCE_INTERVAL_S)
+            await loop.run_in_executor(None, downtime.sweep_offline, registry.online_ids())
+            tick += 1
+            if tick % _PRUNE_EVERY_N_TICKS == 0:
+                await loop.run_in_executor(None, downtime.prune)
+                await loop.run_in_executor(None, leaderboard.prune)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # noqa: BLE001 — a bad tick shouldn't kill the loop
+            logger.warning("maintenance loop tick failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    """Create the schema and log the security posture on startup."""
+    """Create the schema, log the security posture, and run maintenance."""
     init_db()
     if os.environ.get("HUB_ADMIN_PASSWORD", "admin") == "admin":
         logger.warning("HUB_ADMIN_PASSWORD is the default 'admin' — set it before field use")
     if not os.environ.get("HUB_TOKEN"):
         logger.warning("HUB_TOKEN unset — any machine on the network may register")
-    yield
+    maintenance = asyncio.ensure_future(_maintenance_loop())
+    try:
+        yield
+    finally:
+        maintenance.cancel()
+        with suppress(asyncio.CancelledError):
+            await maintenance
 
 
 app = FastAPI(title="Trossen SDK Fleet Hub", lifespan=lifespan)
@@ -136,6 +181,52 @@ def get_leaderboard(_: None = Depends(require_admin)) -> list[dict]:
     return leaderboard.leaderboard()
 
 
+class CreateAssignmentBody(BaseModel):
+    """POST /api/machines/{id}/assignments request body."""
+
+    title: str
+    instructions: str = ""
+    target_episodes: int | None = None
+
+
+@app.get("/api/assignments")
+def get_assignments(_: None = Depends(require_admin)) -> list[dict]:
+    """Return every task assignment (all machines, all statuses) for the console."""
+    return assignments.all_assignments()
+
+
+@app.post("/api/machines/{machine_id}/assignments", status_code=201)
+async def create_assignment(
+    machine_id: str, body: CreateAssignmentBody, _: None = Depends(require_admin)
+) -> dict:
+    """Assign a task to a machine and push it over the machine's live link."""
+    try:
+        row = assignments.create(
+            machine_id, body.title, body.instructions, body.target_episodes
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    payload = assignments.to_dict(row)
+    await connections.send_to_machine(
+        machine_id, {"type": "assignment", "assignment": payload}
+    )
+    return payload
+
+
+@app.post("/api/assignments/{assignment_id}/cancel")
+async def cancel_assignment(
+    assignment_id: str, _: None = Depends(require_admin)
+) -> dict:
+    """Cancel a task and tell the machine to drop it."""
+    row = assignments.cancel(assignment_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="assignment not found")
+    await connections.send_to_machine(
+        row.machine_id, {"type": "assignment_cancel", "id": assignment_id}
+    )
+    return assignments.to_dict(row)
+
+
 @app.get("/api/operators")
 def get_operators(_: None = Depends(require_admin)) -> list[dict]:
     """Return the roster (no PIN hashes) for the console's Operators view."""
@@ -208,6 +299,8 @@ async def machine_ws(ws: WebSocket) -> None:
         # operator can sign in there immediately, without waiting for the
         # next roster change to broadcast one.
         await connections.send_roster(ws, operators.roster_for_push())
+        # …and any open task assignments it may have missed while offline.
+        await connections.send_assignments(ws, assignments.for_machine_push(machine_id))
         logger.info("machine_ws: %s registered", machine_id)
 
         while True:
@@ -224,6 +317,11 @@ async def machine_ws(ws: WebSocket) -> None:
                 )
                 await loop.run_in_executor(
                     None, leaderboard.upsert_from_work, machine_id, msg.get("work") or {}
+                )
+                # Fold back the operator's acknowledge/done on assigned tasks.
+                await loop.run_in_executor(
+                    None, assignments.reconcile_status, machine_id,
+                    msg.get("assignments") or [],
                 )
     except WebSocketDisconnect:
         pass

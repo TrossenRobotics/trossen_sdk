@@ -6,6 +6,7 @@ import { apiDelete, apiGet, apiPost, apiPut, describeError } from '@/lib/api';
 import { useHwStatus } from '@/lib/HwStatusContext';
 import { useDatasets } from '@/lib/DatasetsContext';
 import { useConfirm } from '@/app/hooks/useConfirm';
+import { AssignmentBanner } from '@/app/components/AssignmentBanner';
 import { formatDate } from '@/lib/format';
 
 type StatusFilter = 'all' | 'active' | 'pending' | 'paused' | 'completed' | 'error';
@@ -451,6 +452,9 @@ export function RecordPage() {
       <p className="text-dim text-sm mb-5 sm:mb-[30px]">
         Manage recording sessions. Create a session, start it, and control episodes from the monitor.
       </p>
+
+      {/* Tasks the fleet admin has assigned to this machine (command plane). */}
+      <AssignmentBanner />
 
       {/* Action Bar */}
       <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 mb-5 sm:mb-[30px]">

@@ -15,13 +15,20 @@ Idle time falls out of the same inputs: total - collection - break.
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import logging
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from sqlmodel import select
 
 from app.db import get_session
 from app.models import SessionStats
+
+logger = logging.getLogger("app.leaderboard")
+
+# Work-session stats are leaderboard history, so retention is generous — this
+# only bounds unbounded growth over long-term deployment.
+_STATS_RETENTION_DAYS = 180
 
 
 def _now_iso() -> str:
@@ -60,6 +67,23 @@ def upsert_from_work(machine_id: str, work: dict[str, Any]) -> None:
 # Below this much aggregate session time, an episodes/hour rate is noise (one
 # episode in a few seconds extrapolates to hundreds/hour), so we report 0.
 _MIN_SECONDS_FOR_THROUGHPUT = 60.0
+
+
+def prune(retention_days: int = _STATS_RETENTION_DAYS) -> int:
+    """Delete work-session stats last updated beyond the retention window."""
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=retention_days)).isoformat()
+    with get_session() as db:
+        stale = db.exec(
+            select(SessionStats).where(SessionStats.updated_at < cutoff)
+        ).all()
+        for r in stale:
+            db.delete(r)
+        if stale:
+            db.commit()
+    if stale:
+        logger.info("leaderboard.prune: removed %d session(s) older than %dd",
+                    len(stale), retention_days)
+    return len(stale)
 
 
 def _ratio(numerator: float, denominator: float) -> float:
