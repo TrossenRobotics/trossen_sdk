@@ -26,6 +26,21 @@ if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
   target_link_libraries(trossen_stationary_ai_lerobot trossen_sdk libtrossen_arm)
 endif()
 
+# VR demos require the VR hardware layer (TROSSEN_ENABLE_VR).
+if(TROSSEN_ENABLE_VR)
+  # Trossen VR Solo — 1 VR controller leader + 1 follower arm + 2 cameras
+  add_executable(trossen_vr_solo trossen_vr_solo/trossen_vr_solo.cpp)
+  target_link_libraries(trossen_vr_solo trossen_sdk libtrossen_arm)
+
+  # Trossen VR Stationary — 2 VR controllers + 2 follower arms + 4 cameras
+  add_executable(trossen_vr_stationary trossen_vr_stationary/trossen_vr_stationary.cpp)
+  target_link_libraries(trossen_vr_stationary trossen_sdk libtrossen_arm)
+
+  # Trossen VR Mobile — 2 VR controllers + 2 follower arms + SLATE base + 3 cameras
+  add_executable(trossen_vr_mobile trossen_vr_mobile/trossen_vr_mobile.cpp)
+  target_link_libraries(trossen_vr_mobile trossen_sdk libtrossen_arm)
+endif()
+
 # Registry demo executable
 add_executable(backend_registry_demo backend_registry_demo.cpp)
 target_link_libraries(backend_registry_demo trossen_sdk)

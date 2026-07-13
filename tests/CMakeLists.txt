@@ -35,6 +35,20 @@ if(TROSSEN_ENABLE_REALSENSE)
   target_compile_definitions(test_realsense_push_producer_metadata PRIVATE TROSSEN_ENABLE_REALSENSE)
 endif()
 
+if(TROSSEN_ENABLE_VR)
+  add_executable(test_vr_session test_vr_session.cpp)
+  target_link_libraries(test_vr_session PRIVATE trossen_sdk GTest::gtest_main)
+
+  add_executable(test_vr_arm_component test_vr_arm_component.cpp)
+  target_link_libraries(test_vr_arm_component PRIVATE trossen_sdk GTest::gtest_main)
+
+  add_executable(test_vr_base_component test_vr_base_component.cpp)
+  target_link_libraries(test_vr_base_component PRIVATE trossen_sdk GTest::gtest_main)
+
+  add_executable(test_vr_session_control_component test_vr_session_control_component.cpp)
+  target_link_libraries(test_vr_session_control_component PRIVATE trossen_sdk GTest::gtest_main)
+endif()
+
 add_executable(test_lerobot_depth_utils test_lerobot_depth_utils.cpp)
 target_link_libraries(test_lerobot_depth_utils PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -64,6 +78,9 @@ target_link_libraries(test_session_manager PRIVATE trossen_sdk GTest::gtest_main
 
 add_executable(test_session_manager_discard test_session_manager_discard.cpp)
 target_link_libraries(test_session_manager_discard PRIVATE trossen_sdk GTest::gtest_main)
+
+add_executable(test_session_manager_control test_session_manager_control.cpp)
+target_link_libraries(test_session_manager_control PRIVATE trossen_sdk GTest::gtest_main)
 
 add_executable(test_keyboard_input_utils test_keyboard_input_utils.cpp)
 target_link_libraries(test_keyboard_input_utils PRIVATE trossen_sdk GTest::gtest_main)
@@ -152,6 +169,12 @@ gtest_discover_tests(test_session_manager_push_producer)
 if(TROSSEN_ENABLE_REALSENSE)
   gtest_discover_tests(test_realsense_push_producer_metadata)
 endif()
+if(TROSSEN_ENABLE_VR)
+  gtest_discover_tests(test_vr_session)
+  gtest_discover_tests(test_vr_arm_component)
+  gtest_discover_tests(test_vr_base_component)
+  gtest_discover_tests(test_vr_session_control_component)
+endif()
 gtest_discover_tests(test_lerobot_depth_utils)
 gtest_discover_tests(test_record_types)
 gtest_discover_tests(test_config)
@@ -162,6 +185,7 @@ gtest_discover_tests(test_sink)
 gtest_discover_tests(test_scheduler)
 gtest_discover_tests(test_session_manager)
 gtest_discover_tests(test_session_manager_discard)
+gtest_discover_tests(test_session_manager_control)
 gtest_discover_tests(test_keyboard_input_utils)
 gtest_discover_tests(test_announce)
 gtest_discover_tests(test_teleop_space_helpers)

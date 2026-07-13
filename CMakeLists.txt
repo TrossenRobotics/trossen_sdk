@@ -21,6 +21,10 @@ option(TROSSEN_ENABLE_RERUN_OBSERVER "Build RerunObserver (depends on rerun-cpp 
 option(TROSSEN_SDK_ENABLE_POLICY_CLIENT
   "Build PolicyClient (depends on IXWebSocket + msgpack-cxx)" OFF)
 
+# OFF by default: VR teleop depends on the external trossen_vr library. Enable explicitly
+# to build the VR hardware components and demos: cmake -DTROSSEN_ENABLE_VR=ON ...
+option(TROSSEN_ENABLE_VR "Enable VR teleoperation support (requires trossen_vr)" OFF)
+
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
@@ -84,6 +88,29 @@ if(TROSSEN_ENABLE_ZED)
   target_include_directories(trossen_sdk PUBLIC ${ZED_INCLUDE_DIRS} ${CUDA_INCLUDE_DIRS})
   target_link_directories(trossen_sdk PUBLIC ${ZED_LIBRARY_DIR})
   target_link_libraries(trossen_sdk PUBLIC ${ZED_LIBRARIES} ${CUDA_LIBRARIES})
+endif()
+
+if(TROSSEN_ENABLE_VR)
+  message(STATUS "VR teleoperation support enabled")
+  target_sources(trossen_sdk PRIVATE
+    src/hw/vr/vr_session.cpp
+    src/hw/vr/vr_arm_component.cpp
+    src/hw/vr/vr_base_component.cpp
+    src/hw/vr/vr_session_control_component.cpp
+  )
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_VR)
+
+  # Fetch trossen_vr pinned to a fixed commit.
+  include(FetchContent)
+  FetchContent_Declare(
+    trossen_vr
+    SYSTEM
+    GIT_REPOSITORY https://github.com/TrossenRobotics/trossen_vr.git
+    GIT_TAG 93e33c7a3ad2316f4f4c0290d041941854e29eb6
+    EXCLUDE_FROM_ALL
+  )
+  FetchContent_MakeAvailable(trossen_vr)
+  target_link_libraries(trossen_sdk PUBLIC trossen_vr_lib)
 endif()
 
 # RerunObserver wiring is deferred until after Arrow is found below: rerun-cpp needs

@@ -93,6 +93,13 @@ SessionManager::~SessionManager() {
 }
 
 void SessionManager::shutdown() {
+  // Stop attached control sources first (joins their reader threads) so no
+  // queued event can drive the session while it is being torn down.
+  for (auto* source : control_sources_) {
+    if (source) source->stop();
+  }
+  control_sources_.clear();
+
   // stop_episode() runs first so episode-ended callbacks fire against a still-non-
   // terminal SessionManager; shutdown_called_ latches afterwards and gates start_episode().
   stop_episode();
@@ -891,6 +898,12 @@ UserAction SessionManager::wait_for_reset() {
   reset_signaled_.store(false);
   rerecord_requested_.store(false);
 
+  // A kStart received while recording asked to skip the reset wait entirely.
+  if (skip_reset_.exchange(false)) {
+    return trossen::utils::g_stop_requested ? UserAction::kStop
+                                            : UserAction::kContinue;
+  }
+
   // Enable raw terminal input to detect keypresses without Enter
   trossen::utils::RawModeGuard raw_mode;
 
@@ -898,12 +911,22 @@ UserAction SessionManager::wait_for_reset() {
   auto wait_or_signal = [this]() {
     std::unique_lock<std::mutex> lk(reset_mutex_);
     reset_cv_.wait_for(lk, std::chrono::milliseconds(100), [this]() {
-      return reset_signaled_.load() || rerecord_requested_.load() ||
-             trossen::utils::g_stop_requested;
+      if (reset_signaled_.load() || rerecord_requested_.load() ||
+          trossen::utils::g_stop_requested) {
+        return true;
+      }
+      // Also wake when a control-source event is queued so poll_keys() drains
+      // it promptly instead of waiting out the interval.
+      std::lock_guard<std::mutex> qlk(control_events_mutex_);
+      return !control_events_.empty();
     });
   };
 
   auto poll_keys = [this]() -> UserAction {
+    // Apply any queued control-source events (VR buttons, etc.) on this thread.
+    drain_control_events(ControlPhase::kReset);
+    if (rerecord_requested_.load()) return UserAction::kReRecord;
+
     auto key = trossen::utils::poll_keypress();
     if (key == trossen::utils::KeyPress::kRightArrow) {
       reset_signaled_.store(true);
@@ -968,12 +991,80 @@ void SessionManager::signal_reset_complete() {
   reset_cv_.notify_all();
 }
 
+void SessionManager::post_event(hw::session_control::SessionControlEvent event) {
+  using Event = hw::session_control::SessionControlEvent;
+  if (event == Event::kNone) return;
+  {
+    std::lock_guard<std::mutex> lock(control_events_mutex_);
+    control_events_.push_back(event);
+  }
+  // Wake wait_for_reset() if it is blocked so the queued event is drained on
+  // the next poll pass instead of waiting out the ~100 ms interval.
+  reset_cv_.notify_all();
+}
+
+void SessionManager::attach_control(
+  hw::session_control::SessionControlCapable& source)
+{
+  using Event = hw::session_control::SessionControlEvent;
+  source.set_callbacks(
+    [this](Event e) { post_event(e); },
+    [this] {
+      std::cerr << "\n[session] control source disconnected; ending session."
+                << std::endl;
+      post_event(Event::kStopSession);
+    });
+  source.start();
+  control_sources_.push_back(&source);
+}
+
+void SessionManager::drain_control_events(ControlPhase phase) {
+  using Event = hw::session_control::SessionControlEvent;
+
+  std::deque<Event> events;
+  {
+    std::lock_guard<std::mutex> lock(control_events_mutex_);
+    events.swap(control_events_);
+  }
+
+  for (const Event e : events) {
+    switch (e) {
+      case Event::kStart:
+        // "Advance": during recording, end the episode and skip the reset
+        // wait; during reset, resume immediately.
+        if (phase == ControlPhase::kRecording) {
+          skip_reset_.store(true);
+          episode_stop_requested_.store(true);
+        } else {
+          reset_signaled_.store(true);
+        }
+        break;
+      case Event::kStopEarly:
+        // Stop the current episode (a normal reset follows). Only meaningful
+        // while recording.
+        if (phase == ControlPhase::kRecording) {
+          episode_stop_requested_.store(true);
+        }
+        break;
+      case Event::kRerecord:
+        rerecord_requested_.store(true);
+        break;
+      case Event::kStopSession:
+        trossen::utils::g_stop_requested = true;
+        break;
+      case Event::kNone:
+        break;
+    }
+  }
+}
+
 UserAction SessionManager::monitor_episode(
   std::chrono::duration<double> update_interval,
   std::chrono::duration<double> sleep_interval,
   bool print_stats)
 {
   rerecord_requested_.store(false);
+  episode_stop_requested_.store(false);
 
   // Enable raw terminal input to detect keypresses during recording
   trossen::utils::RawModeGuard raw_mode;
@@ -981,9 +1072,24 @@ UserAction SessionManager::monitor_episode(
   auto last_update = std::chrono::steady_clock::now();
 
   while (!are_final_stats_emitted()) {
+    // Apply any queued control-source events (VR buttons, etc.) on this thread.
+    drain_control_events(ControlPhase::kRecording);
+
+    // End-session takes priority over any episode-level action queued in the
+    // same drain.
+    if (trossen::utils::g_stop_requested) {
+      return UserAction::kStop;
+    }
+
     // Check for re-record request
     if (rerecord_requested_.load()) {
       return UserAction::kReRecord;
+    }
+
+    // A control source asked to end the episode (kStart advances, kStopEarly
+    // just stops); return so the main loop stops it on this thread.
+    if (episode_stop_requested_.load()) {
+      return UserAction::kContinue;
     }
 
     // Poll for arrow keys: left = re-record, right = early exit to next episode

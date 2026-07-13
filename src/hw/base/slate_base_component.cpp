@@ -60,6 +60,40 @@ nlohmann::json SlateBaseComponent::get_info() const {
   return info;
 }
 
+std::vector<float> SlateBaseComponent::read() {
+  if (!driver_) {
+    std::cerr << "SlateBaseComponent::read: driver not initialized" << std::endl;
+    return {};
+  }
+  // Refresh state so the returned velocity is current, not the last poll.
+  if (!driver_->update_state()) {
+    std::cerr << "SlateBaseComponent::read: update_state() failed" << std::endl;
+  }
+  const auto vel = driver_->get_vel();  // [linear_mps, angular_rps]
+  return {vel[0], vel[1]};
+}
+
+void SlateBaseComponent::write(const std::vector<float>& cmd) {
+  if (!driver_) {
+    std::cerr << "SlateBaseComponent::write: driver not initialized" << std::endl;
+    return;
+  }
+  if (cmd.size() < 2) {
+    std::cerr << "SlateBaseComponent::write: expected 2 elements "
+                 "[linear_mps, angular_rps], got " << cmd.size() << std::endl;
+    return;
+  }
+  if (!driver_->set_cmd_vel(cmd[0], cmd[1])) {
+    std::cerr << "SlateBaseComponent::write: set_cmd_vel failed" << std::endl;
+  }
+}
+
+void SlateBaseComponent::end_teleop() {
+  if (driver_ && !driver_->set_cmd_vel(0.0f, 0.0f)) {
+    std::cerr << "SlateBaseComponent::end_teleop: failed to stop the base" << std::endl;
+  }
+}
+
 // Register the hardware component with the hardware registry
 REGISTER_HARDWARE(SlateBaseComponent, "slate_base")
 
