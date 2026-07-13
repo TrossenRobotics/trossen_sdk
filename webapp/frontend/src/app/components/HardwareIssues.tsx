@@ -33,10 +33,7 @@ interface Fault {
 
 interface SystemOption { id: string; name: string }
 
-// Keep in sync with DEVICE_TYPES in backend/app/faults.py. `software` covers a
-// non-hardware outage (crashed recorder, driver/SDK error) — it counts toward
-// downtime the same as a broken device.
-const DEVICE_TYPES = ['arm', 'camera', 'software', 'other'];
+const DEVICE_TYPES = ['arm', 'camera', 'other'];
 
 const EMPTY_FORM = {
   system_id: '',

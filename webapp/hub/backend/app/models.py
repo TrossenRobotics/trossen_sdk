@@ -117,9 +117,6 @@ class SessionStats(SQLModel, table=True):
     started_at: str = ""
     total_seconds: float = 0.0
     break_seconds: float = 0.0
-    # Time a hardware/software fault was open during the session. Subtracted
-    # from productive time like break_seconds — neutral to the operator.
-    downtime_seconds: float = 0.0
     collection_seconds: float = 0.0
     success_seconds: float = 0.0
     failed_seconds: float = 0.0

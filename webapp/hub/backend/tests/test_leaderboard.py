@@ -6,11 +6,10 @@ from app import leaderboard
 
 
 def _work(wsid, op="op-1", name="Frank", total=3600, brk=600, coll=1800,
-          succ=1500, fail=300, eps=20, active=True, dt=0):
+          succ=1500, fail=300, eps=20, active=True):
     return {
         "active": active, "work_session_id": wsid, "operator_id": op, "operator_name": name,
-        "total_seconds": total, "break_seconds": brk, "downtime_seconds": dt,
-        "collection_seconds": coll,
+        "total_seconds": total, "break_seconds": brk, "collection_seconds": coll,
         "success_seconds": succ, "failed_seconds": fail, "num_episodes": eps,
     }
 
@@ -42,23 +41,6 @@ def test_aggregates_across_machines_and_ranks_by_episodes():
 def test_throughput_floored_for_tiny_sessions():
     leaderboard.upsert_from_work("m1", _work("w1", total=10, eps=1))
     assert leaderboard.leaderboard()[0]["episodes_per_hour"] == 0.0
-
-
-def test_downtime_subtracted_like_break_and_reported():
-    # 3600 total, 1800 collection, 600 break, 300 downtime.
-    leaderboard.upsert_from_work("m1", _work("w1", brk=600, dt=300))
-    row = leaderboard.leaderboard()[0]
-    # Downtime is surfaced and folded out of idle alongside break — neither
-    # counts against the operator.
-    assert row["downtime_seconds"] == 300
-    assert row["idle_seconds"] == 3600 - 1800 - 600 - 300
-
-
-def test_downtime_aggregates_across_sessions():
-    leaderboard.upsert_from_work("m1", _work("w1", op="a", name="Amy", dt=120))
-    leaderboard.upsert_from_work("m2", _work("w2", op="a", name="Amy", dt=200))
-    amy = leaderboard.leaderboard()[0]
-    assert amy["downtime_seconds"] == 320
 
 
 def test_upsert_updates_same_session_in_place():

@@ -23,7 +23,7 @@ from typing import Any
 from sqlmodel import select
 
 from app.db import SessionLocal
-from app.models import BreakEvent, DeviceFault, WorkSession
+from app.models import BreakEvent, WorkSession
 
 # Serializes the read-decide-write on breaks. Break mutations are driven from
 # two independent ~5s pulses on different threads — the hub heartbeat executor
@@ -110,63 +110,6 @@ def _break_seconds(db, ws_id: str) -> float:
         select(BreakEvent).where(BreakEvent.work_session_id == ws_id)
     ).all()
     return sum(_seconds_between(b.started_at, b.ended_at) for b in breaks)
-
-
-def _parse_iso(value: str | None) -> datetime | None:
-    """Parse an ISO-8601 timestamp, or None if absent/unparseable."""
-    if not value:
-        return None
-    try:
-        return datetime.fromisoformat(value)
-    except (ValueError, TypeError):
-        return None
-
-
-def _union_seconds(intervals: list[tuple[datetime, datetime]]) -> float:
-    """Total covered seconds across possibly-overlapping [start, end] intervals.
-
-    Merges overlaps so two faults open at the same time count once, not twice.
-    """
-    if not intervals:
-        return 0.0
-    ordered = sorted(intervals, key=lambda iv: iv[0])
-    total = 0.0
-    cur_start, cur_end = ordered[0]
-    for start, end in ordered[1:]:
-        if start <= cur_end:  # overlaps/adjacent — extend the current span
-            if end > cur_end:
-                cur_end = end
-        else:  # disjoint — bank the current span, open a new one
-            total += (cur_end - cur_start).total_seconds()
-            cur_start, cur_end = start, end
-    total += (cur_end - cur_start).total_seconds()
-    return max(0.0, total)
-
-
-def _downtime_seconds(db, ws: WorkSession) -> float:
-    """Seconds this work session overlapped an open device/software fault.
-
-    Downtime is wall-clock the machine was unusable due to a hardware OR
-    software fault while this operator was signed in. Computed as the UNION of
-    every fault's [reported, resolved-or-now] window intersected with the work
-    session, so simultaneous faults count once. Treated like break time
-    downstream (subtracted from productive time; neutral to the operator).
-    """
-    win_start = _parse_iso(ws.started_at)
-    if win_start is None:
-        return 0.0
-    win_end = datetime.now(timezone.utc)
-    intervals: list[tuple[datetime, datetime]] = []
-    for f in db.exec(select(DeviceFault)).all():
-        fs = _parse_iso(f.created_at)
-        if fs is None:
-            continue
-        fe = _parse_iso(f.resolved_at) or win_end  # open fault runs to now
-        lo = max(fs, win_start)
-        hi = min(fe, win_end)
-        if hi > lo:
-            intervals.append((lo, hi))
-    return _union_seconds(intervals)
 
 
 def start_work_session(operator: dict[str, str]) -> WorkSession:
@@ -337,7 +280,4 @@ def work_status() -> dict[str, Any]:
             "break_source": ob.source if ob is not None else None,
             "total_seconds": _seconds_between(ws.started_at, None),
             "break_seconds": _break_seconds(db, ws.id),
-            # Downtime accrues while a hardware/software fault is open during
-            # this session — subtracted from productive time like a break.
-            "downtime_seconds": _downtime_seconds(db, ws),
         }

@@ -55,7 +55,6 @@ def upsert_from_work(machine_id: str, work: dict[str, Any]) -> None:
         row.started_at = work.get("started_at", "") or row.started_at
         row.total_seconds = float(work.get("total_seconds", 0.0) or 0.0)
         row.break_seconds = float(work.get("break_seconds", 0.0) or 0.0)
-        row.downtime_seconds = float(work.get("downtime_seconds", 0.0) or 0.0)
         row.collection_seconds = float(work.get("collection_seconds", 0.0) or 0.0)
         row.success_seconds = float(work.get("success_seconds", 0.0) or 0.0)
         row.failed_seconds = float(work.get("failed_seconds", 0.0) or 0.0)
@@ -109,7 +108,6 @@ def leaderboard() -> list[dict[str, Any]]:
                 "num_episodes": 0,
                 "total_seconds": 0.0,
                 "break_seconds": 0.0,
-                "downtime_seconds": 0.0,
                 "collection_seconds": 0.0,
                 "success_seconds": 0.0,
                 "failed_seconds": 0.0,
@@ -121,7 +119,6 @@ def leaderboard() -> list[dict[str, Any]]:
         agg["num_episodes"] += r.num_episodes
         agg["total_seconds"] += r.total_seconds
         agg["break_seconds"] += r.break_seconds
-        agg["downtime_seconds"] += getattr(r, "downtime_seconds", 0.0) or 0.0
         agg["collection_seconds"] += r.collection_seconds
         agg["success_seconds"] += r.success_seconds
         agg["failed_seconds"] += r.failed_seconds
@@ -130,9 +127,7 @@ def leaderboard() -> list[dict[str, Any]]:
     for agg in by_op.values():
         total = agg["total_seconds"]
         collection = agg["collection_seconds"]
-        # Downtime is subtracted alongside break so a machine outage doesn't
-        # masquerade as operator idle time — neither counts against the operator.
-        idle = max(0.0, total - collection - agg["break_seconds"] - agg["downtime_seconds"])
+        idle = max(0.0, total - collection - agg["break_seconds"])
         throughput = (
             _ratio(agg["num_episodes"], total / 3600.0)
             if total >= _MIN_SECONDS_FOR_THROUGHPUT

@@ -383,14 +383,6 @@ function card(m) {
 
   const liveView = (online && m.ip) ? `<a class="linkbtn" href="http://${esc(m.ip)}:5173" target="_blank" rel="noopener">Open machine ↗</a>` : "";
 
-  // Deep-link straight to the live episode in READ-ONLY mode (?view=1): the
-  // operator's Monitor page opens with all controls disabled, so an admin can
-  // watch the recording without being able to Stop/Next/Re-record it. Only
-  // offered while a session is actively recording — that's the thing to watch.
-  const monitorView = (online && m.ip && sess && sess.status === "active")
-    ? `<a class="linkbtn" href="http://${esc(m.ip)}:5173/monitor/${esc(sess.id)}?view=1" target="_blank" rel="noopener">Monitor ↗</a>`
-    : "";
-
   return `
   <div class="card ${online ? "" : "off"}">
     <div class="top">
@@ -414,7 +406,7 @@ function card(m) {
     </div>
     <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
       <button class="assign-btn" data-mid="${esc(m.id)}" data-mname="${esc(m.name)}">Assign task</button>
-      <span style="display:flex; gap:10px;">${monitorView}${liveView}</span>
+      ${liveView}
     </div>
   </div>`;
 }
@@ -574,7 +566,7 @@ async function loadLeaderboard() {
   const head = `<tr>
     <th class="l">#</th><th class="l">Operator</th>
     <th>Episodes</th><th>Eps/hr</th><th>Collection</th><th>Success</th>
-    <th>Session</th><th>Breaks</th><th>Downtime</th><th>Sessions</th>
+    <th>Session</th><th>Breaks</th><th>Sessions</th>
   </tr>`;
   const body = rows.map((r, i) => `<tr>
     <td class="rank">${i + 1}</td>
@@ -585,7 +577,6 @@ async function loadLeaderboard() {
     <td>${pct(r.success_ratio)}</td>
     <td>${hrs(r.total_seconds)}</td>
     <td>${hrs(r.break_seconds)}</td>
-    <td>${hrs(r.downtime_seconds)}</td>
     <td>${r.sessions}</td>
   </tr>`).join("");
   $("lbTable").innerHTML = head + body;

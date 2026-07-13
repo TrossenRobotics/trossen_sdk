@@ -23,11 +23,9 @@ from sqlmodel import select
 from app.db import SessionLocal
 from app.models import DeviceFault
 
-# Coarse fault categories offered in the report UI. `software` covers non-hardware
-# outages (a crashed recorder, a driver/SDK error, a wedged service) that stop
-# collection just like a broken device — they count toward downtime the same way.
-# `other` is the catch-all so an operator is never blocked from filing a fault.
-DEVICE_TYPES = ("arm", "camera", "software", "other")
+# Coarse device categories offered in the report UI. `other` is the catch-all
+# so an operator is never blocked from filing a fault for an unlisted device.
+DEVICE_TYPES = ("arm", "camera", "other")
 
 
 class CreateFaultBody(BaseModel):
