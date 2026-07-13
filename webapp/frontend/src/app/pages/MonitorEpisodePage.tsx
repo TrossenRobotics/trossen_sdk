@@ -1,6 +1,6 @@
 import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Loader2, Lock, CheckCircle } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { useNavigate, useParams } from 'react-router';
+import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { toast } from 'sonner';
 import { announce, playCue } from '@/lib/announce';
 import { isTypingTarget } from '@/app/components/KeyboardShortcuts';
@@ -105,6 +105,14 @@ function ConnectionBadge({ status, recording }: { status: WsStatus; recording: b
 export function MonitorEpisodePage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
+  // View-only mode: the fleet hub deep-links here with `?view=1` so an admin
+  // can watch a machine's live episode without being able to touch the
+  // operator's session. In this mode every control action is inert and the
+  // control panel is replaced by a read-only notice. It's a UX/safety guard,
+  // not auth — the machine webapp has no login — so it also refrains from
+  // sending detach/headless signals that would perturb the operator's run.
+  const [searchParams] = useSearchParams();
+  const viewOnly = searchParams.get('view') === '1';
   const { statuses: hwStatus, setStatus: setHwStatus } = useHwStatus();
   const { confirm, modalElement } = useConfirm();
   // Inline hardware test — lets the Start/Resume gates and the error-recovery
@@ -185,6 +193,7 @@ export function MonitorEpisodePage() {
   // completes the backend resets the session to pending, so the button
   // is re-callable from the complete screen too.
   async function handleDryRun() {
+    if (viewOnly) return;  // admin monitor view — controls are inert
     if ((phase !== 'not_started' && phase !== 'complete') || starting) return;
     setStarting(true);
     setStartingMode('dry');
@@ -335,6 +344,7 @@ export function MonitorEpisodePage() {
 
   // Start: launches session + first episode in one click
   async function handleStart() {
+    if (viewOnly) return;  // admin monitor view — controls are inert
     if (phase !== 'not_started' || starting) return;
     setStarting(true);
     setStartingMode('start');
@@ -378,6 +388,7 @@ export function MonitorEpisodePage() {
   // resumed episode's `episode_started` is fired here too, since the WS
   // bus drops it the same way it drops episode 0 (TDS-154).
   async function handleResume() {
+    if (viewOnly) return;  // admin monitor view — controls are inert
     if (phase !== 'paused' || starting) return;
     setStarting(true);
     try {
@@ -410,6 +421,7 @@ export function MonitorEpisodePage() {
   // that actually re-enables Resume. Idempotent on retry: if the error was
   // already cleared (session now paused), skip straight to the test.
   async function handleRecover() {
+    if (viewOnly) return;  // admin monitor view — controls are inert
     if (recoverStage === 'clearing' || recoverStage === 'testing') return;
     try {
       // 1. Clear the fault. Reconcile against the *backend's* status first
@@ -461,6 +473,7 @@ export function MonitorEpisodePage() {
 
   // Stop: ends the entire session
   async function handleStop() {
+    if (viewOnly) return;  // admin monitor view — controls are inert
     if (stopping) return;
     const ok = await confirm({
       title: 'Stop recording session?',
@@ -494,6 +507,7 @@ export function MonitorEpisodePage() {
   // the right slot, runs the reset window, then auto-starts the re-attempt.
   // We just send the signal and update the log.
   async function handleRerecord() {
+    if (viewOnly) return;  // admin monitor view — controls are inert
     if (rerecording) return;
     setRerecording(true);
     try {
@@ -516,6 +530,7 @@ export function MonitorEpisodePage() {
   // auto-starts the next one; we just listen for `episode_started` on
   // the WebSocket.
   async function handleNext() {
+    if (viewOnly) return;  // admin monitor view — controls are inert
     if (nexting) return;
     setNexting(true);
     try {
@@ -815,11 +830,13 @@ export function MonitorEpisodePage() {
       // In-app navigation (not a tab close/reload) away from an active
       // recording == deliberate headless. Fire-and-forget; a spurious signal
       // is harmless because the next client connect re-arms crash protection.
-      if (active && !isUnloadingRef.current && sessionId) {
+      // Skipped in admin view-only mode: a monitoring admin leaving must never
+      // flip the operator's session into headless / affect its watchdog.
+      if (active && !isUnloadingRef.current && sessionId && !viewOnly) {
         apiPost(`/api/sessions/${sessionId}/detach`).catch(() => {});
       }
     };
-  }, [sessionId]);
+  }, [sessionId, viewOnly]);
 
   // ESC leaves the monitor. While an episode is actively recording or
   // resetting, confirm first — an accidental keypress shouldn't yank the
@@ -851,6 +868,7 @@ export function MonitorEpisodePage() {
   // while typing. The cheatsheet (?) lists these.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (viewOnly) return;  // admin monitor view — no control shortcuts
       if (isTypingTarget(e) || e.ctrlKey || e.metaKey || e.altKey) return;
       if (e.key === ' ') {
         e.preventDefault();
@@ -867,7 +885,7 @@ export function MonitorEpisodePage() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [phase, handleStart, handleResume, handleStop, handleRerecord, handleNext, handleDryRun]);
+  }, [phase, viewOnly, handleStart, handleResume, handleStop, handleRerecord, handleNext, handleDryRun]);
 
   // Computed values
   const totalEpisodes = session?.num_episodes || 0;
@@ -1266,7 +1284,16 @@ export function MonitorEpisodePage() {
         </div>
       </div>
 
-      {/* Bottom Control Panel */}
+      {/* Bottom Control Panel — replaced by a read-only notice in admin
+          view-only mode so a monitoring admin can't drive the operator's
+          session. The handlers are guarded too; this is the UX half. */}
+      {viewOnly ? (
+        <div className="bg-surface border-t-2 border-edge p-[16px] text-center">
+          <p className="text-dim text-[13px]">
+            Monitoring (read-only) — session controls are disabled in the admin view.
+          </p>
+        </div>
+      ) : (
       <div className="bg-surface border-t-2 border-edge p-[16px]">
         {phase === 'not_started' ? (
           /* Dry Run + Start buttons. Both transition into the regular
@@ -1515,6 +1542,7 @@ export function MonitorEpisodePage() {
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }

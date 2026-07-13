@@ -14,6 +14,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+from sqlalchemy import inspect, text
 from sqlmodel import Session, SQLModel, create_engine
 
 _DEFAULT_DB = Path("~/.local/state/trossen_sdk_hub/hub.db").expanduser()
@@ -36,6 +37,31 @@ def init_db() -> None:
     from app import models  # noqa: F401
 
     SQLModel.metadata.create_all(engine)
+    _ensure_additive_columns()
+
+
+# Columns added to existing tables after their first release. create_all() only
+# creates missing *tables*, never alters existing ones, so a hub DB from before
+# a column existed would be missing it. These are all additive with safe SQLite
+# defaults; run idempotently on every startup (still cheaper than Alembic for a
+# handful of append-only tables — graduate to Alembic if this list grows).
+_ADDITIVE_COLUMNS: dict[str, dict[str, str]] = {
+    "session_stats": {"downtime_seconds": "FLOAT NOT NULL DEFAULT 0"},
+}
+
+
+def _ensure_additive_columns() -> None:
+    """Add any missing post-release columns to existing tables (idempotent)."""
+    inspector = inspect(engine)
+    existing_tables = set(inspector.get_table_names())
+    with engine.begin() as conn:
+        for table, columns in _ADDITIVE_COLUMNS.items():
+            if table not in existing_tables:
+                continue  # create_all just made it with the column present
+            have = {c["name"] for c in inspector.get_columns(table)}
+            for name, ddl in columns.items():
+                if name not in have:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {ddl}"))
 
 
 def get_session() -> Session:
