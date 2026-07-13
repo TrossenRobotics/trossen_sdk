@@ -83,19 +83,6 @@ services:
       HUB_URL: ${HUB_URL:-}
       HUB_TOKEN: ${HUB_TOKEN:-}
       MACHINE_NAME: ${MACHINE_NAME:-}
-    # Report "healthy" only once uvicorn is actually serving on :8000, so the
-    # frontend can wait for a ready backend instead of spraying ECONNREFUSED
-    # proxy errors while `uv sync` + the SDK build are still running. curl is in
-    # the image and /api/version is a cheap always-on GET; localhost:8000 is the
-    # backend itself under host networking. start_period is generous because the
-    # first-launch dependency download + pybind build is slow on a Pi (it costs
-    # nothing on a fast box — a passing check flips to healthy immediately).
-    healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://localhost:8000/api/version"]
-      interval: 15s
-      timeout: 5s
-      retries: 10
-      start_period: 900s
     restart: unless-stopped
 
   frontend:
@@ -109,10 +96,7 @@ services:
       - ./frontend:/app/webapp/frontend
       - frontend_node_modules:/app/webapp/frontend/node_modules
     depends_on:
-      backend:
-        # Wait for the backend to be serving, not merely created — this is what
-        # stops Vite from proxying to a not-yet-listening :8000 on startup.
-        condition: service_healthy
+      - backend
     restart: unless-stopped
 
 volumes:
