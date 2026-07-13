@@ -120,6 +120,61 @@ def _start_rerun_server(grpc_port: int) -> bool:
         return False
 
 
+# How long to wait for the Rerun sink to disconnect before giving up and letting
+# hardware shutdown proceed regardless. Bounded so a pathological disconnect can
+# never itself become the hang we're trying to avoid.
+_RERUN_TEARDOWN_TIMEOUT_S = 3.0
+
+
+def _shutdown_rerun() -> None:
+    """Tear down the live Rerun preview BEFORE the SDK shuts down.
+
+    Why this exists (the camera-loss-on-second-session bug): the SDK's
+    SessionManager.shutdown() stops observers by joining their worker threads
+    (session_manager.cpp). A Rerun observer worker blocked inside rr.log() under
+    gRPC backpressure — a web viewer that connected and then stopped draining —
+    makes that join hang. The recorder child then outlives the parent's stop
+    timeout and gets SIGKILLed; a SIGKILL skips the camera producers' clean
+    pipeline.stop(), so a RealSense device is left mid-stream and the NEXT
+    session opens a dead device (no frames -> nothing recorded, "Live viewer
+    unavailable"). Arms survive because the SDK safes them before the observer
+    stop and bootstrap has a stale-client retry loop; cameras have neither.
+
+    Dropping the gRPC sink first (disconnect) makes any blocked or subsequent
+    rr.log() return immediately, so the observer join is fast and the child
+    exits cleanly — which lets the camera destructors run pipeline.stop()
+    properly and frees port 9876 for the next session. Idempotent and
+    best-effort: it must never itself raise into the shutdown path.
+    """
+    global _rr_stream
+    stream = _rr_stream
+    # Flip the handle to None first so every observer handler's up-front
+    # `if _rr_stream is None: return` no-ops on its next tick — no new logging
+    # can start blocking while we tear the sink down.
+    _rr_stream = None
+    if stream is None:
+        return
+
+    def _teardown() -> None:
+        try:
+            stream.disconnect()
+        except Exception as e:  # noqa: BLE001 — teardown must not raise
+            print(f"[recorder-runner] rerun disconnect failed: {e}", flush=True)
+
+    # Run the disconnect under a hard timeout: if it can't complete promptly we
+    # proceed to hardware shutdown anyway rather than trading one hang for
+    # another. The sink handle is already dropped, so handlers are no-oping.
+    t = threading.Thread(target=_teardown, name="rerun-teardown", daemon=True)
+    t.start()
+    t.join(timeout=_RERUN_TEARDOWN_TIMEOUT_S)
+    if t.is_alive():
+        print(f"[recorder-runner] rerun teardown slow (>"
+              f"{_RERUN_TEARDOWN_TIMEOUT_S:.0f}s); proceeding with hardware "
+              f"shutdown anyway", flush=True)
+    else:
+        print("[recorder-runner] rerun preview torn down", flush=True)
+
+
 def _log_image_record(record_id: str, rec: Any) -> None:
     """Log one ImageRecord (and its depth map, if present) to the viewer.
 
@@ -894,6 +949,10 @@ def _run_episode_loop(
             sdk_episodes_completed = int(mgr.stats().current_episode_index)
         except Exception:
             sdk_episodes_completed = -1
+        # Drop the Rerun preview sink BEFORE mgr.shutdown() so the observer
+        # stop() inside shutdown can't hang on gRPC backpressure — that hang is
+        # what left cameras un-released (SIGKILL) and dead for the next session.
+        _shutdown_rerun()
         # mgr.shutdown() fires on_pre_shutdown -> _stop_controllers -> each
         # arm's end_teleop() (returns it to the rest pose and releases the
         # driver), i.e. the arms are safely put to sleep.
@@ -991,11 +1050,13 @@ def main() -> int:
             _reconcile_empty_episodes(mcap_root)
             started = mgr.start_episode()
         if not started:
+            _shutdown_rerun()
             mgr.shutdown()
             print(f"{_ERROR_PREFIX} SessionManager.start_episode() returned False",
                   flush=True)
             return 2
     except Exception as e:
+        _shutdown_rerun()
         if mgr is not None:
             try:
                 mgr.shutdown()
@@ -1050,6 +1111,7 @@ def main() -> int:
                 mgr.discard_current_episode()
         except Exception:
             pass
+        _shutdown_rerun()
         try:
             mgr.shutdown()
         except Exception:
