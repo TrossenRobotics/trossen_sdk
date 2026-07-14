@@ -5,4 +5,6 @@ package trossen_sdk;
 // Robot description message containing the URDF string
 message RobotDescription {
   string robot_description = 1;
+  // Git ref (branch or tag) used to download the URDF, e.g. "main" or "v1.2.0".
+  string git_ref = 2;
 }
