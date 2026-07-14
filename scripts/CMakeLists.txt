@@ -26,3 +26,12 @@ target_include_directories(trossen_mcap_to_lerobot_v2 PRIVATE
 )
 target_compile_definitions(trossen_mcap_to_lerobot_v2 PRIVATE MCAP_IMPLEMENTATION)
 target_link_libraries(trossen_mcap_to_lerobot_v2 trossen_sdk arrow parquet zstd lz4 protobuf ${OpenCV_LIBS})
+
+# URDF extractor — writes the /robot_description URDF from an MCAP file
+add_executable(visualize_robot_description visualize_robot_description/visualize_robot_description.cpp)
+target_include_directories(visualize_robot_description PRIVATE
+  ${mcap_SOURCE_DIR}/cpp/mcap/include
+  ${CMAKE_BINARY_DIR}
+)
+target_compile_definitions(visualize_robot_description PRIVATE MCAP_IMPLEMENTATION)
+target_link_libraries(visualize_robot_description trossen_sdk zstd lz4 protobuf)
