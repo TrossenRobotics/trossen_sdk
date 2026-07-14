@@ -41,6 +41,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import rerun as rr
 import trossen_sdk as ts
 
@@ -48,13 +49,110 @@ _READY_PREFIX = "__READY__:"
 _SUCCESS_PREFIX = "__SUCCESS__:"
 _ERROR_PREFIX = "__ERROR__:"
 
-# Live-preview Rerun stream tuning.
-#   - subscribe at 30 Hz: the SDK throttles the per-record handler, so the
-#     log cost is bounded regardless of the producer's native poll rate.
-#     30 Hz is a smooth preview for both camera images and joint/odometry
-#     scalar plots; the durable recording is unaffected (observers are a
-#     non-durable fan-out off the same records).
-_RERUN_SUBSCRIBE_HZ = 30.0
+# --- Live-preview payload tuning -------------------------------------------
+#
+# Everything the live viewer receives is a LOSSY, size-reduced tap off the same
+# records that feed the durable MCAP recording. The recording is never touched
+# by any knob here; these only shrink what crosses the Rerun gRPC wire into the
+# browser viewer. Raw color+depth for 4 cameras at 30 Hz is ~180 MB/s, which
+# swamps the WASM/WebGPU viewer; these knobs bring it back to the old JPEG-tile
+# budget. All are env-tunable so a machine can A/B them live without a rebuild.
+
+
+def _env_int(name: str, default: int) -> int:
+    """Parse an int env var; blank/absent/garbage falls back to `default`."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Parse a float env var; blank/absent/garbage falls back to `default`."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw.strip())
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse a bool env var. 0/false/off/no => False; anything else => True."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() not in ("0", "false", "off", "no")
+
+
+# Subscribe rate: the SDK throttles the per-record handler here, so log cost is
+# bounded regardless of the producer's native poll rate. 30 Hz is smooth;
+# lowering it (e.g. TROSSEN_PREVIEW_HZ=12) is the cheapest linear payload cut and
+# costs no per-frame quality. Applies to camera images AND scalar plots.
+_RERUN_SUBSCRIBE_HZ = _env_float("TROSSEN_PREVIEW_HZ", 30.0)
+
+# (1) Downscale: take every Nth pixel of color AND depth before logging (nearest
+# subsample, quadratic saving). 1 = full res, 2 = half each dim (=1/4 payload).
+# A monitor overlay does not need capture resolution.
+_PREVIEW_DOWNSCALE = max(1, _env_int("TROSSEN_PREVIEW_DOWNSCALE", 2))
+
+# Color JPEG quality (Rerun's built-in encoder). 1-100 => send JPEG bytes
+# instead of raw RGB (~10-20x on color); <=0 => send raw. Depth is NOT jpeg-able
+# (16-bit measurements, DCT invents geometry) — see the depth knobs below.
+_PREVIEW_JPEG_QUALITY = _env_int("TROSSEN_PREVIEW_JPEG_QUALITY", 75)
+
+# Depth-in-preview switch. Default OFF: depth is the dominant wire cost and the
+# live overlay isn't worth it, so the viewer is colour-only and the UI shows a
+# small "Depth recording" badge instead (depth still lands in the MCAP). Set
+# TROSSEN_PREVIEW_DEPTH=1 to stream the depth overlay again (then the
+# EVERY/CLIP knobs below apply).
+_PREVIEW_DEPTH = _env_bool("TROSSEN_PREVIEW_DEPTH", False)
+
+# (3) Depth decimation: log depth only every Nth image frame per camera (color
+# stays smoother). 1 = every frame, 2 = half-rate depth. Linear saving, no
+# per-frame quality loss.
+_PREVIEW_DEPTH_EVERY = max(1, _env_int("TROSSEN_PREVIEW_DEPTH_EVERY", 2))
+
+# (2) Depth quantization: >0 clips raw depth to [0, N] in the SDK's native depth
+# units and maps it to uint8 (halves depth bytes vs uint16). D405 depth is
+# typically millimeters, so 2000 ≈ near-field 2 m. 0 = keep native uint16
+# precision (no quantize). Lossy in precision — preview only, never recording.
+_PREVIEW_DEPTH_CLIP = _env_int("TROSSEN_PREVIEW_DEPTH_CLIP", 0)
+
+# Per-camera frame counter driving depth decimation (keyed by record_id).
+_depth_frame_counter: dict[str, int] = {}
+
+
+def _preview_config_summary() -> str:
+    """One-line description of the active preview knobs (logged at startup)."""
+    color = (f"jpeg q{_PREVIEW_JPEG_QUALITY}"
+             if _PREVIEW_JPEG_QUALITY > 0 else "raw")
+    if not _PREVIEW_DEPTH:
+        depth = "OFF"
+    else:
+        depth = f"every{_PREVIEW_DEPTH_EVERY}"
+        depth += (f"+clip{_PREVIEW_DEPTH_CLIP}->u8"
+                  if _PREVIEW_DEPTH_CLIP > 0 else "+u16")
+    return (f"hz={_RERUN_SUBSCRIBE_HZ} downscale={_PREVIEW_DOWNSCALE}x "
+            f"color={color} depth={depth}")
+
+
+def _downscale(arr: np.ndarray) -> np.ndarray:
+    """Nearest-neighbour subsample by _PREVIEW_DOWNSCALE on the first two axes.
+
+    Works for HxW (depth/mono) and HxWxC (color) alike. Nearest (strided) is the
+    correct choice for depth — averaging across depth discontinuities would
+    invent in-between distances at object edges — and is fine for a color
+    preview. Dependency-free (cv2 is not installed in the backend venv).
+    """
+    step = _PREVIEW_DOWNSCALE
+    if step <= 1:
+        return arr
+    return arr[::step, ::step]
 
 # Rerun application id shown in the web viewer's title.
 _RERUN_APP_ID = "trossen_sdk"
@@ -123,28 +221,51 @@ def _start_rerun_server(grpc_port: int) -> bool:
 def _log_image_record(record_id: str, rec: Any) -> None:
     """Log one ImageRecord (and its depth map, if present) to the viewer.
 
-    The SDK's `encoding` string selects the Rerun color model so the viewer
-    renders colours correctly: rgb8 -> "RGB", bgr8 -> "BGR", mono8 -> a
-    plain 2-D grayscale image. Rerun accepts the numpy array directly — no
-    JPEG / OpenCV round-trip is needed (unlike the old tile preview).
+    This is the LOSSY live-preview tap — it downscales, JPEG-compresses the
+    colour, and decimates/quantizes depth to fit the Rerun gRPC wire. The
+    durable MCAP recording is a separate fan-out off the same record and is
+    untouched by any of it. See the "Live-preview payload tuning" knobs above.
+
+    The SDK's `encoding` string selects the Rerun colour model so the viewer
+    renders colours correctly: rgb8 -> "RGB", bgr8 -> "BGR", mono8 -> a plain
+    2-D grayscale image (model inferred from the 2-D array).
     """
     img = rec.image
     if img is None or getattr(img, "size", 0) == 0:
         return
+    img = _downscale(img)
     encoding = (rec.encoding or "").lower()
     if encoding == "bgr8":
-        rr.log(record_id, rr.Image(img, "BGR"), recording=_rr_stream)
+        image = rr.Image(img, "BGR")
     elif encoding in ("mono8", "mono", "gray", "grayscale"):
-        # Single channel: let Rerun infer grayscale from the 2-D array.
-        rr.log(record_id, rr.Image(img), recording=_rr_stream)
+        image = rr.Image(img)  # single channel: Rerun infers grayscale
     else:
         # rgb8 and any unrecognised 3-channel encoding default to RGB.
-        rr.log(record_id, rr.Image(img, "RGB"), recording=_rr_stream)
-    if rec.has_depth():
-        depth = rec.depth_image
-        if depth is not None and getattr(depth, "size", 0) > 0:
-            rr.log(f"{record_id}/depth", rr.DepthImage(depth),
-                   recording=_rr_stream)
+        image = rr.Image(img, "RGB")
+    # (1) JPEG-encode the colour before it hits the wire (Rerun's built-in
+    # encoder). ~10-20x smaller than raw RGB; the viewer decodes natively.
+    if _PREVIEW_JPEG_QUALITY > 0:
+        image = image.compress(jpeg_quality=_PREVIEW_JPEG_QUALITY)
+    rr.log(record_id, image, recording=_rr_stream)
+
+    if not _PREVIEW_DEPTH or not rec.has_depth():
+        return
+    # (3) Decimate depth relative to colour: only every Nth frame per camera.
+    n = _depth_frame_counter.get(record_id, 0)
+    _depth_frame_counter[record_id] = n + 1
+    if n % _PREVIEW_DEPTH_EVERY:
+        return
+    depth = rec.depth_image
+    if depth is None or getattr(depth, "size", 0) == 0:
+        return
+    depth = _downscale(depth)
+    # (2) Quantize uint16 -> uint8 over [0, clip] native depth units. Halves
+    # depth bytes; the viewer auto-colormaps the range, so the overlay looks the
+    # same (relative depth) as the un-quantized path. Lossy in precision only.
+    if _PREVIEW_DEPTH_CLIP > 0:
+        clipped = np.clip(depth, 0, _PREVIEW_DEPTH_CLIP).astype(np.uint32)
+        depth = (clipped * 255 // _PREVIEW_DEPTH_CLIP).astype(np.uint8)
+    rr.log(f"{record_id}/depth", rr.DepthImage(depth), recording=_rr_stream)
 
 
 def _log_joint_state_record(record_id: str, rec: Any) -> None:
@@ -572,6 +693,8 @@ def _register_rerun_observer(
         _rerun_record_ids = list(camera_stream_ids)
         print(f"[recorder-runner] rerun observer subscribed to cameras "
               f"{camera_stream_ids} at {_RERUN_SUBSCRIBE_HZ} Hz", flush=True)
+        print(f"[recorder-runner] live-preview payload: "
+              f"{_preview_config_summary()}", flush=True)
     except Exception as e:
         # Live preview is best-effort; never block bootstrap on it.
         print(f"[recorder-runner] rerun observer setup failed: {e}; "

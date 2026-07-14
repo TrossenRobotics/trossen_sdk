@@ -93,6 +93,23 @@ services:
       HUB_URL: ${HUB_URL:-}
       HUB_TOKEN: ${HUB_TOKEN:-}
       MACHINE_NAME: ${MACHINE_NAME:-}
+      # Live-preview payload knobs (recorder_runner.py). All optional — unset
+      # falls back to the code defaults. These only shrink what the browser
+      # Rerun viewer receives; the durable MCAP recording is never affected.
+      # Tune per machine in webapp/.env, then `docker compose up -d backend`.
+      #   TROSSEN_PREVIEW_HZ            subscribe rate   (default 30)
+      #   TROSSEN_PREVIEW_DOWNSCALE     Nth-pixel color+depth (default 2 = 1/4)
+      #   TROSSEN_PREVIEW_JPEG_QUALITY  color JPEG 1-100, <=0=raw (default 75)
+      #   TROSSEN_PREVIEW_DEPTH         1 = stream depth overlay (default OFF)
+      #   TROSSEN_PREVIEW_DEPTH_EVERY   log depth every Nth frame (default 2)
+      #   TROSSEN_PREVIEW_DEPTH_CLIP    quantize u16->u8 over [0,N] units,
+      #                                 0=keep u16 (default 0; D405≈mm, 2000≈2 m)
+      TROSSEN_PREVIEW_HZ: ${TROSSEN_PREVIEW_HZ:-}
+      TROSSEN_PREVIEW_DOWNSCALE: ${TROSSEN_PREVIEW_DOWNSCALE:-}
+      TROSSEN_PREVIEW_JPEG_QUALITY: ${TROSSEN_PREVIEW_JPEG_QUALITY:-}
+      TROSSEN_PREVIEW_DEPTH: ${TROSSEN_PREVIEW_DEPTH:-}
+      TROSSEN_PREVIEW_DEPTH_EVERY: ${TROSSEN_PREVIEW_DEPTH_EVERY:-}
+      TROSSEN_PREVIEW_DEPTH_CLIP: ${TROSSEN_PREVIEW_DEPTH_CLIP:-}
     restart: unless-stopped
 
   frontend:

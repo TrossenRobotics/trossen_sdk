@@ -9,8 +9,6 @@ import { useHwStatus } from '@/lib/HwStatusContext';
 import { apiGet, apiPost, describeError } from '@/lib/api';
 import { useReconnectingWebSocket } from '@/hooks/useReconnectingWebSocket';
 import type { WsStatus } from '@/hooks/useReconnectingWebSocket';
-import { RerunViewer } from '@/app/components/RerunViewer';
-import { ErrorBoundary } from '@/app/components/ErrorBoundary';
 import { HwTestButton } from '@/app/components/HwTestButton';
 import { useConfirm } from '@/app/hooks/useConfirm';
 import { useHardwareTest } from '@/app/hooks/useHardwareTest';
@@ -178,6 +176,14 @@ export function MonitorEpisodePage() {
   // and the feeds froze until you navigated away and back. Keyed into the viewer.
   const [viewerEpoch, setViewerEpoch] = useState(0);
 
+  // Camera configs for this session's system, used only to tell the operator
+  // that depth IS being recorded even though it's no longer drawn in the live
+  // viewer (the depth stream was dropped from the preview — it's the dominant
+  // wire cost — but still lands in the MCAP). Populated from /api/systems.
+  const [systems, setSystems] = useState<
+    Array<{ id: string; config?: { hardware?: { cameras?: Array<{ use_depth?: boolean }> } } | null }>
+  >([]);
+
   // Dry Run runs the full session lifecycle (Staging → Recording →
   // Resetting × N → Sleeping) but the backend swaps in NullBackend, so
   // no MCAP / LeRobot data is written. Same UI controls as a real run
@@ -289,7 +295,12 @@ export function MonitorEpisodePage() {
   // gate would falsely show "needs Hardware Test" even for a ready system.
   useEffect(() => {
     const controller = new AbortController();
-    apiGet<Array<{ id: string; hw_status?: string | null; hw_message?: string | null }>>(
+    apiGet<Array<{
+      id: string;
+      hw_status?: string | null;
+      hw_message?: string | null;
+      config?: { hardware?: { cameras?: Array<{ use_depth?: boolean }> } } | null;
+    }>>(
       '/api/systems',
       { signal: controller.signal },
     )
@@ -297,10 +308,18 @@ export function MonitorEpisodePage() {
         list.forEach(s => {
           if (s.hw_status) setHwStatus(s.id, { status: s.hw_status, message: s.hw_message ?? '' });
         });
+        setSystems(list.map(s => ({ id: s.id, config: s.config })));
       })
       .catch(() => { /* gate stays closed until a test runs — safe default */ });
     return () => controller.abort();
   }, [setHwStatus]);
+
+  // How many of this session's cameras record depth. Drives the "Depth
+  // recording" badge over the (colour-only) live viewer.
+  const depthCameraCount = useMemo(() => {
+    const sys = systems.find(s => s.id === session?.system_id);
+    return (sys?.config?.hardware?.cameras ?? []).filter(c => c.use_depth).length;
+  }, [systems, session?.system_id]);
 
   // --- API calls ---
   const apiBase = `/api/sessions/${sessionId}`;
@@ -1197,37 +1216,44 @@ export function MonitorEpisodePage() {
       {/* Main Content — viewer beside the logs in landscape; in portrait the
           logs drop below the viewer so the feeds keep the full width. */}
       <div className="flex-1 flex portrait:flex-col overflow-hidden min-h-0">
-        {/* Live viewer — embedded Rerun web (WASM) viewer streaming every
-            sensor the recorder publishes (camera images + depth, joint-state
-            and odometry plots) from the recorder child's in-process Rerun
-            gRPC server. Replaces the old per-camera JPEG tiles. */}
+        {/* Live viewer — embedded Rerun web (WASM) viewer streaming the sensors
+            the recorder publishes (colour camera images, joint-state and
+            odometry plots) from the recorder child's in-process Rerun gRPC
+            server. Depth is intentionally NOT streamed to the preview (it's the
+            dominant wire cost); it is still recorded to the MCAP, and the badge
+            below tells the operator so. Replaces the old per-camera JPEG tiles. */}
         <div
-          className="flex-1 p-[16px] min-h-0"
+          className="relative flex-1 p-[16px] min-h-0"
           aria-label="Live sensor viewer"
           role="region"
         >
-          {phase !== 'not_started' && sessionId ? (
-            // Keyed by sessionId so navigating between sessions remounts the
-            // viewer onto the new recorder's gRPC server cleanly. Wrapped in an
-            // ErrorBoundary because the Rerun WASM viewer's teardown can throw
-            // when the recorder's gRPC server dies (mid-session crash) — the
-            // boundary keeps that contained to the viewer pane instead of
-            // crashing the whole monitor.
-            <ErrorBoundary
-              label="RerunViewer"
-              resetKey={viewerEpoch}
-              fallback={
-                <div className="w-full h-full flex items-center justify-center select-none bg-edge">
-                  <p className="text-dim text-[13px]">Live viewer unavailable</p>
-                </div>
-              }
+          {phase === 'recording' && depthCameraCount > 0 && (
+            <div
+              className="absolute top-[24px] right-[24px] z-20 flex items-center gap-[6px]
+                         bg-surface/90 border border-edge rounded px-[10px] py-[5px]
+                         text-[11px] text-ink pointer-events-none select-none"
+              title="Depth is being recorded to the dataset but is not shown in the live preview."
             >
-              <RerunViewer
-                key={`${sessionId}:${viewerEpoch}`}
-                sessionId={sessionId}
-                recording={phase === 'recording' || phase === 'resetting'}
-              />
-            </ErrorBoundary>
+              <span className="w-[7px] h-[7px] rounded-full bg-red-500 animate-pulse" />
+              Depth recording ({depthCameraCount} {depthCameraCount === 1 ? 'camera' : 'cameras'})
+            </div>
+          )}
+          {phase !== 'not_started' && sessionId ? (
+            // The Rerun WASM viewer is hosted in an iframe (EmbeddedViewerPage),
+            // keyed by session + epoch. Recreating a keyed iframe on a new/resumed
+            // session makes the browser tear down the previous viewer's entire
+            // document — WASM instance, WebGPU device, and gRPC connection — and
+            // load a fresh one. Mounting the viewer directly and letting React
+            // remount it instead leaks that WASM/WebGPU context, so the 2nd
+            // session showed a blank feed / "Live viewer unavailable" on every
+            // machine until a full page reload. The iframe is that reload, scoped.
+            <iframe
+              key={`${sessionId}:${viewerEpoch}`}
+              src={`/embed/viewer/${sessionId}`}
+              title="Live sensor viewer"
+              className="w-full h-full"
+              style={{ border: 0 }}
+            />
           ) : (
             <div className="w-full h-full flex items-center justify-center select-none">
               <p className="text-dim text-[13px]">Press Start to begin…</p>
