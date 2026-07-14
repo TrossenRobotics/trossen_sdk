@@ -935,19 +935,4 @@ def _apply_session_overrides(
         # backend factory key — different registries.
         sess["backend_type"] = "null"
 
-    # Recover a camera a prior unclean exit left mid-stream. A RealSense whose
-    # pipeline wasn't stopped (SIGKILL after a stuck shutdown, a crash, power
-    # loss) can't be re-acquired by the next session — it opens but yields no
-    # frames, so cameras neither preview nor record. `force_hardware_reset`
-    # (RealsenseCameraComponent.configure) resets the device on bootstrap so a
-    # new session always starts from a clean state; non-RealSense cameras ignore
-    # the flag. Applied here (per-run) rather than in each saved system config so
-    # every machine gets the recovery without re-editing hardware. setdefault
-    # respects a camera that explicitly opted out. Toggle off with
-    # RECORDER_FORCE_CAMERA_RESET=0 if the ~1-2s/camera reset isn't wanted.
-    if os.environ.get("RECORDER_FORCE_CAMERA_RESET", "1") != "0":
-        for cam in merged.get("hardware", {}).get("cameras", []) or []:
-            if isinstance(cam, dict):
-                cam.setdefault("force_hardware_reset", True)
-
     return merged
