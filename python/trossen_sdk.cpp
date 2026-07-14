@@ -54,6 +54,9 @@ namespace {
 #include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 
+// Observer subsystem (webapp Monitor page subclasses ObserverBase in Python)
+#include "trossen_sdk/observer/observer_base.hpp"
+
 // Configuration
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
@@ -312,6 +315,24 @@ PYBIND11_MODULE(trossen_sdk, m) {
         else { r.depth_scale = obj.cast<float>(); }
       })
     .def("has_depth", &ImageRecord::has_depth);
+
+  // ── Observer ────────────────────────────────────────────────────────────
+  {
+    using trossen::observer::ObserverBase;
+    py::class_<ObserverBase, std::shared_ptr<ObserverBase>>(m, "ObserverBase")
+      .def(py::init<std::string>(), py::arg("name") = "",
+           "Construct an observer with a human-readable logging name.")
+      .def("add_subscription", &ObserverBase::add_subscription,
+           py::arg("record_id"), py::arg("throttle_hz"), py::arg("handler"),
+           "Register a per-stream subscription. handler is a Python callable "
+           "invoked on the observer's worker thread with the freshest record "
+           "matching record_id, capped at throttle_hz invocations per second. "
+           "Must be called before the observer is added to a SessionManager.")
+      .def("name", &ObserverBase::name, "Logging name supplied at construction.")
+      .def("is_running", &ObserverBase::is_running)
+      .def("is_stopped", &ObserverBase::is_stopped)
+      .def("subscription_count", &ObserverBase::subscription_count);
+  }
 
   // ── 3. Hardware + producers ─────────────────────────────────────────────
   using namespace trossen::hw;
@@ -811,6 +832,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
            py::arg("opts") = Scheduler::TaskOptions{})
       .def("add_push_producer", &SessionManager::add_push_producer,
            py::arg("producer"))
+      .def("add_observer", &SessionManager::add_observer, py::arg("observer"))
       .def("start_episode", &SessionManager::start_episode)
       .def("stop_episode", &SessionManager::stop_episode)
       .def("discard_current_episode", &SessionManager::discard_current_episode)
