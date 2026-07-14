@@ -89,11 +89,19 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() not in ("0", "false", "off", "no")
 
 
-# Subscribe rate: the SDK throttles the per-record handler here, so log cost is
-# bounded regardless of the producer's native poll rate. 30 Hz is smooth;
-# lowering it (e.g. TROSSEN_PREVIEW_HZ=12) is the cheapest linear payload cut and
-# costs no per-frame quality. Applies to camera images AND scalar plots.
-_RERUN_SUBSCRIBE_HZ = _env_float("TROSSEN_PREVIEW_HZ", 30.0)
+# SDK subscription rate: the ceiling at which the per-record handler is invoked
+# (bounds cost regardless of the producer's native poll rate). Kept fixed at 30;
+# the actual, LIVE-adjustable display fps for camera images is applied on top as
+# an in-handler throttle (`_preview_target_hz`) so the UI can change it
+# mid-session without re-subscribing.
+_RERUN_SUBSCRIBE_HZ = 30.0
+
+# Live display fps for camera images (in-handler throttle, per camera). 0 = emit
+# at the subscribe ceiling (no throttle). Initial value from the env knob;
+# changed at runtime by a {"type":"preview"} control message.
+_preview_target_hz = _env_float("TROSSEN_PREVIEW_HZ", 15.0)
+# Per-record last-emit monotonic timestamp, driving the fps throttle.
+_preview_last_emit: dict[str, float] = {}
 
 # (1) Downscale: take every Nth pixel of color AND depth before logging (nearest
 # subsample, quadratic saving). 1 = full res, 2 = half each dim (=1/4 payload).
@@ -137,8 +145,44 @@ def _preview_config_summary() -> str:
         depth = f"every{_PREVIEW_DEPTH_EVERY}"
         depth += (f"+clip{_PREVIEW_DEPTH_CLIP}->u8"
                   if _PREVIEW_DEPTH_CLIP > 0 else "+u16")
-    return (f"hz={_RERUN_SUBSCRIBE_HZ} downscale={_PREVIEW_DOWNSCALE}x "
+    return (f"fps={_preview_target_hz} downscale={_PREVIEW_DOWNSCALE}x "
             f"color={color} depth={depth}")
+
+
+def _apply_preview_settings(
+    fps: Any = None, downscale: Any = None, jpeg_quality: Any = None
+) -> None:
+    """Apply live preview-quality changes from a control message (best-effort).
+
+    Mutates the module-level tuning globals so the change takes effect on the
+    next logged frame — no re-subscription needed. Out-of-range or unparseable
+    values are ignored so a malformed message can never break the preview or the
+    recording.
+    """
+    global _preview_target_hz, _PREVIEW_DOWNSCALE, _PREVIEW_JPEG_QUALITY
+    if fps is not None:
+        try:
+            f = float(fps)
+            if 0 <= f <= 60:
+                _preview_target_hz = f
+        except (TypeError, ValueError):
+            pass
+    if downscale is not None:
+        try:
+            d = int(downscale)
+            if 1 <= d <= 8:
+                _PREVIEW_DOWNSCALE = d
+        except (TypeError, ValueError):
+            pass
+    if jpeg_quality is not None:
+        try:
+            q = int(jpeg_quality)
+            if -1 <= q <= 100:
+                _PREVIEW_JPEG_QUALITY = q
+        except (TypeError, ValueError):
+            pass
+    print(f"[recorder-runner] live-preview updated: {_preview_config_summary()}",
+          flush=True)
 
 
 def _downscale(arr: np.ndarray) -> np.ndarray:
@@ -233,6 +277,15 @@ def _log_image_record(record_id: str, rec: Any) -> None:
     img = rec.image
     if img is None or getattr(img, "size", 0) == 0:
         return
+    # (live) display-fps throttle: drop this camera's frame if it arrives sooner
+    # than 1/_preview_target_hz since its last emit. Per record_id, so each
+    # camera is throttled independently. _preview_target_hz is adjustable
+    # mid-session via a preview control message; 0 disables the throttle.
+    if _preview_target_hz > 0:
+        now = time.monotonic()
+        if now - _preview_last_emit.get(record_id, 0.0) < 1.0 / _preview_target_hz:
+            return
+        _preview_last_emit[record_id] = now
     img = _downscale(img)
     encoding = (rec.encoding or "").lower()
     if encoding == "bgr8":
@@ -747,7 +800,17 @@ def _stdin_reader(
             msg = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if msg.get("type") != "signal":
+        mtype = msg.get("type")
+        if mtype == "preview":
+            # Live viewer-quality change (display fps / resolution). Applied
+            # immediately; never touches the recording or the loop.
+            _apply_preview_settings(
+                fps=msg.get("fps"),
+                downscale=msg.get("downscale"),
+                jpeg_quality=msg.get("jpeg_quality"),
+            )
+            continue
+        if mtype != "signal":
             continue
         signal = msg.get("signal")
         if signal == "abort":

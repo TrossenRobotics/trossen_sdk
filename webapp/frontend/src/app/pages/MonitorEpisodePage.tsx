@@ -321,6 +321,31 @@ export function MonitorEpisodePage() {
     return (sys?.config?.hardware?.cameras ?? []).filter(c => c.use_depth).length;
   }, [systems, session?.system_id]);
 
+  // Live preview quality (display fps + resolution). Persisted per-browser so a
+  // low-power viewer (e.g. a Raspberry Pi kiosk) keeps its lighter setting
+  // across reloads. Pushed to the recorder whenever recording (re)starts and
+  // whenever a knob changes; server-side it no-ops if no recorder is running,
+  // and it only affects the live feed — never the recording.
+  const [previewFps, setPreviewFps] = useState<number>(() => {
+    const v = Number(localStorage.getItem('previewFps'));
+    return v > 0 ? v : 15;
+  });
+  const [previewDownscale, setPreviewDownscale] = useState<number>(() => {
+    const v = Number(localStorage.getItem('previewDownscale'));
+    return v >= 1 ? v : 2;
+  });
+  useEffect(() => {
+    localStorage.setItem('previewFps', String(previewFps));
+    localStorage.setItem('previewDownscale', String(previewDownscale));
+  }, [previewFps, previewDownscale]);
+  useEffect(() => {
+    if (phase !== 'recording' || !sessionId) return;
+    apiPost(`/api/sessions/${sessionId}/preview`, {
+      fps: previewFps,
+      downscale: previewDownscale,
+    }).catch(() => { /* viewer-only; safe to ignore if no recorder */ });
+  }, [phase, previewFps, previewDownscale, sessionId]);
+
   // --- API calls ---
   const apiBase = `/api/sessions/${sessionId}`;
 
@@ -1223,42 +1248,80 @@ export function MonitorEpisodePage() {
             dominant wire cost); it is still recorded to the MCAP, and the badge
             below tells the operator so. Replaces the old per-camera JPEG tiles. */}
         <div
-          className="relative flex-1 p-[16px] min-h-0"
+          className="flex-1 p-[16px] min-h-0 flex flex-col"
           aria-label="Live sensor viewer"
           role="region"
         >
-          {phase === 'recording' && depthCameraCount > 0 && (
+          {/* Toolbar — ALWAYS visible (a real row above the viewer, not an
+              overlay, so it can't hide behind the iframe). Left: live preview
+              quality (display fps / resolution) — set these low on a weak
+              display like a Raspberry Pi; they persist per-browser and affect
+              only the on-screen feed, never the recording. Right: a badge noting
+              depth is recorded but not previewed. */}
+          <div className="shrink-0 mb-[10px] flex items-center justify-between gap-[12px] text-[11px] text-ink">
             <div
-              className="absolute top-[24px] right-[24px] z-20 flex items-center gap-[6px]
-                         bg-surface/90 border border-edge rounded px-[10px] py-[5px]
-                         text-[11px] text-ink pointer-events-none select-none"
-              title="Depth is being recorded to the dataset but is not shown in the live preview."
+              className="flex items-center gap-[12px]"
+              title="Live preview quality — lower these on a weak display (e.g. a Raspberry Pi). Affects only the on-screen feed, never the recording."
             >
-              <span className="w-[7px] h-[7px] rounded-full bg-red-500 animate-pulse" />
-              Depth recording ({depthCameraCount} {depthCameraCount === 1 ? 'camera' : 'cameras'})
+              <label className="flex items-center gap-[4px]">
+                FPS
+                <select
+                  value={previewFps}
+                  onChange={e => setPreviewFps(Number(e.target.value))}
+                  className="bg-app border border-edge rounded px-[6px] py-[2px] text-ink"
+                >
+                  <option value={5}>5</option>
+                  <option value={10}>10</option>
+                  <option value={15}>15</option>
+                  <option value={30}>30</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-[4px]">
+                Res
+                <select
+                  value={previewDownscale}
+                  onChange={e => setPreviewDownscale(Number(e.target.value))}
+                  className="bg-app border border-edge rounded px-[6px] py-[2px] text-ink"
+                >
+                  <option value={1}>Full</option>
+                  <option value={2}>Half</option>
+                  <option value={4}>Quarter</option>
+                </select>
+              </label>
             </div>
-          )}
-          {phase !== 'not_started' && sessionId ? (
-            // The Rerun WASM viewer is hosted in an iframe (EmbeddedViewerPage),
-            // keyed by session + epoch. Recreating a keyed iframe on a new/resumed
-            // session makes the browser tear down the previous viewer's entire
-            // document — WASM instance, WebGPU device, and gRPC connection — and
-            // load a fresh one. Mounting the viewer directly and letting React
-            // remount it instead leaks that WASM/WebGPU context, so the 2nd
-            // session showed a blank feed / "Live viewer unavailable" on every
-            // machine until a full page reload. The iframe is that reload, scoped.
-            <iframe
-              key={`${sessionId}:${viewerEpoch}`}
-              src={`/embed/viewer/${sessionId}`}
-              title="Live sensor viewer"
-              className="w-full h-full"
-              style={{ border: 0 }}
-            />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center select-none">
-              <p className="text-dim text-[13px]">Press Start to begin…</p>
-            </div>
-          )}
+            {phase === 'recording' && depthCameraCount > 0 && (
+              <div
+                className="flex items-center gap-[6px] select-none"
+                title="Depth is being recorded to the dataset but is not shown in the live preview."
+              >
+                <span className="w-[7px] h-[7px] rounded-full bg-red-500 animate-pulse" />
+                Depth recording ({depthCameraCount} {depthCameraCount === 1 ? 'camera' : 'cameras'})
+              </div>
+            )}
+          </div>
+          <div className="flex-1 min-h-0">
+            {phase !== 'not_started' && sessionId ? (
+              // The Rerun WASM viewer is hosted in an iframe (EmbeddedViewerPage),
+              // keyed by session + epoch. Recreating a keyed iframe on a new/resumed
+              // session makes the browser tear down the previous viewer's entire
+              // document — WASM instance, WebGPU device, and gRPC connection — and
+              // load a fresh one. Mounting the viewer directly and letting React
+              // remount it instead leaks that WASM/WebGPU context, so the 2nd
+              // session showed a blank feed / "Live viewer unavailable" on every
+              // machine until a full page reload. The iframe is that reload, scoped.
+              <iframe
+                key={`${sessionId}:${viewerEpoch}`}
+                src={`/embed/viewer/${sessionId}`}
+                title="Live sensor viewer"
+                className="w-full h-full"
+                style={{ border: 0 }}
+              />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center select-none">
+                <p className="text-dim text-[13px]">Press Start to begin…</p>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Logs Panel — fixed-width column on the right in landscape; in
