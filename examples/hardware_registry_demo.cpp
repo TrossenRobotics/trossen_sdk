@@ -10,7 +10,6 @@
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
-#include "trossen_sdk/hw/camera/realsense_camera_component.hpp"
 #include "trossen_sdk/hw/camera/opencv_camera_component.hpp"
 
 // Mock hardware component for demo (doesn't require real devices)
