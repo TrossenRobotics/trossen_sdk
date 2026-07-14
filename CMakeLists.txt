@@ -51,6 +51,7 @@ add_library(trossen_sdk SHARED
   src/runtime/push_producer_registry.cpp
   src/utils/app_utils.cpp
   src/utils/keyboard_input_utils.cpp
+  src/utils/robot_description_cache.cpp
 )
 
 if(TROSSEN_ENABLE_REALSENSE)
@@ -142,6 +143,7 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64")
   set(BZIP2_LIBRARIES /usr/lib/aarch64-linux-gnu/libbz2.so)
   set(BZIP2_INCLUDE_DIRS /usr/include)
 endif()
+find_package(CURL REQUIRED)
 find_package(ZLIB REQUIRED)
 find_package(BZip2 REQUIRED)
 
@@ -261,6 +263,7 @@ target_include_directories(trossen_sdk PUBLIC
 
 # Link against foxglove library
 target_link_libraries(trossen_sdk PRIVATE ${foxglove_SOURCE_DIR}/lib/libfoxglove.a)
+target_link_libraries(trossen_sdk PRIVATE CURL::libcurl)
 
 # Required OpenCV dependency for camera producer
 # On Ubuntu/Debian, OpenCV 4.x is typically installed as opencv4
