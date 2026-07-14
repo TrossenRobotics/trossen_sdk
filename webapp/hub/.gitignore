@@ -1,0 +1,5 @@
+# Local secrets — never commit. Copy .env.example to .env and fill in.
+.env
+
+# Python virtualenv (materialised in-container by uv sync).
+backend/.venv/

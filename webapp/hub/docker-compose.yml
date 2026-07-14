@@ -1,0 +1,44 @@
+# Compose for the fleet hub — run this on ONE designated box on the LAN.
+#
+# Unlike the collection-machine webapp (host networking, for arm/camera
+# subnets), the hub only needs to be reachable by the machines and the admin
+# browser, so it uses a normal bridge network and publishes port 8100.
+#
+# Usage:
+#   cd webapp/hub
+#   cp .env.example .env      # then edit the password + token
+#   docker compose up --build
+#
+# Admin console: http://<this-host-ip>:8100
+# Machines join by setting, in their own environment:
+#   HUB_URL=ws://<this-host-ip>:8100   HUB_TOKEN=<same token as below>
+
+services:
+  hub:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    image: trossen-sdk-fleet-hub:dev
+    container_name: trossen_fleet_hub
+    ports:
+      - "8100:8100"
+    volumes:
+      # Source bind-mount for hot reload (uvicorn --reload watches ./backend/app).
+      - ./backend:/app/webapp/hub/backend
+      # Keep the .venv out of the host source tree.
+      - hub_venv:/app/webapp/hub/backend/.venv
+      # Persist the SQLite machine registry across restarts.
+      - ${HOME}/.local/state/trossen_sdk_hub:/root/.local/state/trossen_sdk_hub
+    environment:
+      # Admin console password. CHANGE THIS — default is 'admin'.
+      HUB_ADMIN_PASSWORD: ${HUB_ADMIN_PASSWORD:-admin}
+      # Pre-shared token machines must present to register. CHANGE THIS.
+      HUB_TOKEN: ${HUB_TOKEN:-}
+      # Cookie-signing secret. Set a stable value so admin sessions survive
+      # a hub restart; left unset, a random per-boot secret is used.
+      HUB_SECRET: ${HUB_SECRET:-}
+      UVICORN_RELOAD: ${UVICORN_RELOAD:-1}
+    restart: unless-stopped
+
+volumes:
+  hub_venv:

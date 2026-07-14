@@ -1,0 +1,701 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Trossen Fleet Hub</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --panel-2: #1c232d; --border: #2d333b;
+    --text: #e6edf3; --muted: #8b949e; --brand: #f26722; --ok: #3fb950;
+    --warn: #d29922; --err: #f85149; --off: #6e7681;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 22px; border-bottom: 1px solid var(--border); background: var(--panel);
+    position: sticky; top: 0; z-index: 5;
+  }
+  header .title { font-weight: 700; font-size: 17px; letter-spacing: .2px; }
+  header .title b { color: var(--brand); }
+  header .meta { color: var(--muted); font-size: 13px; }
+  button {
+    font: inherit; cursor: pointer; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--panel-2); color: var(--text); padding: 7px 13px;
+  }
+  button.primary { background: var(--brand); border-color: var(--brand); color: #fff; font-weight: 600; }
+  button:hover { filter: brightness(1.1); }
+
+  /* Login */
+  #login {
+    max-width: 340px; margin: 12vh auto; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 12px; padding: 28px;
+  }
+  #login h1 { margin: 0 0 4px; font-size: 20px; }
+  #login h1 b { color: var(--brand); }
+  #login p { margin: 0 0 18px; color: var(--muted); font-size: 13px; }
+  #login input {
+    width: 100%; padding: 10px 12px; margin-bottom: 12px; border-radius: 7px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); font: inherit;
+  }
+  #login button { width: 100%; }
+  #login .err { color: var(--err); font-size: 13px; min-height: 18px; margin-top: 8px; }
+
+  /* Fleet */
+  main { padding: 22px; }
+  .grid { display: grid; gap: 16px; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); }
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+    padding: 16px 18px; display: flex; flex-direction: column; gap: 12px;
+  }
+  .card.off { opacity: .62; }
+  .card .top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .card .name { font-weight: 700; font-size: 16px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--off); flex: none; }
+  .dot.on { background: var(--ok); box-shadow: 0 0 0 3px rgba(63,185,80,.18); }
+  .badge {
+    font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .4px;
+    padding: 3px 8px; border-radius: 20px; background: var(--panel-2); color: var(--muted);
+  }
+  .badge.recording { background: rgba(63,185,80,.16); color: var(--ok); }
+  .badge.idle { background: rgba(139,148,158,.16); color: var(--muted); }
+  .badge.error { background: rgba(248,81,73,.16); color: var(--err); }
+  .badge.downtime { background: rgba(210,153,34,.18); color: var(--warn); }
+  .badge.break { background: rgba(88,166,255,.16); color: #58a6ff; }
+  .badge.offline { background: rgba(110,118,129,.16); color: var(--off); }
+  /* Per-card open faults */
+  .faults-list { display: flex; flex-direction: column; gap: 4px; margin-top: 5px; }
+  .fault-row { font-size: 12px; padding: 6px 8px; border-radius: 6px; background: rgba(210,153,34,.10); border: 1px solid rgba(210,153,34,.3); }
+  .fault-row .fh { display: flex; justify-content: space-between; gap: 8px; }
+  .fault-row .fdev { font-weight: 600; color: var(--warn); }
+  .fault-row .fdur { color: var(--muted); font-variant-numeric: tabular-nums; flex: none; }
+  .fault-row .fpart { color: var(--muted); margin-top: 2px; }
+  .kv { display: grid; grid-template-columns: auto 1fr; gap: 3px 12px; font-size: 13px; }
+  .kv .k { color: var(--muted); }
+  .kv .v { text-align: right; font-variant-numeric: tabular-nums; }
+  .bar { height: 7px; border-radius: 4px; background: var(--panel-2); overflow: hidden; }
+  .bar > span { display: block; height: 100%; background: var(--brand); }
+  .bar.storage > span { background: var(--ok); }
+  .bar.storage > span.low { background: var(--warn); }
+  .bar.storage > span.crit { background: var(--err); }
+  .sub { font-size: 12px; color: var(--muted); }
+  .section-label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--muted); margin-bottom: 4px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; }
+  .chip { font-size: 11px; padding: 2px 7px; border-radius: 6px; background: var(--panel-2); color: var(--muted); }
+  /* Fleet alerts */
+  #alerts { display: flex; flex-direction: column; gap: 8px; margin-bottom: 16px; }
+  #alerts:empty { display: none; }
+  .alert {
+    display: flex; align-items: center; gap: 9px; padding: 10px 14px; border-radius: 9px;
+    font-size: 13px; font-weight: 600; border: 1px solid transparent;
+  }
+  .alert.warn { background: rgba(210,153,34,.12); border-color: rgba(210,153,34,.4); color: var(--warn); }
+  .alert.err { background: rgba(248,81,73,.12); border-color: rgba(248,81,73,.4); color: var(--err); }
+  .alert .names { color: var(--muted); font-weight: 400; }
+
+  /* Per-card episode health */
+  .fail { color: var(--err); }
+  .fail-list { display: flex; flex-direction: column; gap: 2px; margin-top: 5px; }
+  .fail-row { display: flex; justify-content: space-between; font-size: 12px; }
+  .fail-row .fid { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .fail-row .fc { color: var(--err); font-variant-numeric: tabular-nums; flex: none; margin-left: 10px; }
+  .empty { color: var(--muted); text-align: center; padding: 12vh 0; }
+  a.linkbtn { color: var(--brand); text-decoration: none; font-size: 12px; font-weight: 600; }
+  a.linkbtn:hover { text-decoration: underline; }
+  .hidden { display: none !important; }
+
+  /* Operators modal */
+  .overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 20;
+    display: flex; align-items: flex-start; justify-content: center; padding: 10vh 16px;
+  }
+  .modal {
+    width: 100%; max-width: 460px; background: var(--panel);
+    border: 1px solid var(--border); border-radius: 12px; padding: 20px 22px;
+  }
+  .modal-head { display: flex; align-items: center; justify-content: space-between; }
+  .modal-head h2 { margin: 0; font-size: 18px; }
+  .modal-head button { border: none; background: none; color: var(--muted); font-size: 16px; padding: 4px 8px; }
+  .op-add { display: grid; grid-template-columns: 1fr 90px auto; gap: 8px; margin: 14px 0 6px; }
+  .op-add input {
+    padding: 9px 11px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font: inherit; min-width: 0;
+  }
+  .op-err { min-height: 16px; font-size: 13px; margin-bottom: 6px; }
+  .op-list { display: flex; flex-direction: column; gap: 6px; max-height: 46vh; overflow-y: auto; }
+  .op-row {
+    display: flex; align-items: center; gap: 10px; padding: 9px 11px;
+    border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+  }
+  .op-row .op-nm { flex: 1; font-weight: 600; }
+  .op-row.inactive .op-nm { color: var(--muted); font-weight: 400; text-decoration: line-through; }
+  .op-row .op-tag { font-size: 11px; color: var(--muted); }
+  .op-row button { padding: 4px 9px; font-size: 12px; }
+  .op-row button.danger { color: var(--err); border-color: rgba(248,81,73,.4); }
+
+  /* Downtime log */
+  .dt-list { display: flex; flex-direction: column; gap: 6px; }
+  .dt-list:empty::after { content: "None"; color: var(--muted); font-size: 13px; }
+  .dt-row {
+    display: grid; grid-template-columns: 1fr auto; gap: 2px 12px;
+    padding: 9px 11px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel-2);
+  }
+  .dt-row .dt-dev { font-weight: 600; }
+  .dt-row.open .dt-dev { color: var(--warn); }
+  .dt-row .dt-dur { text-align: right; font-variant-numeric: tabular-nums; color: var(--warn); font-weight: 600; }
+  .dt-row.closed .dt-dur { color: var(--muted); font-weight: 400; }
+  .dt-row .dt-meta { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+  .dt-row .dt-part { grid-column: 1 / -1; font-size: 12px; }
+  .dt-row .dt-part b { color: var(--text); font-weight: 600; }
+
+  /* Leaderboard */
+  .lb-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .lb-table th, .lb-table td { padding: 8px 10px; text-align: right; white-space: nowrap; }
+  .lb-table th { color: var(--muted); font-weight: 600; text-transform: uppercase; font-size: 11px; letter-spacing: .4px; border-bottom: 1px solid var(--border); }
+  .lb-table td { border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
+  .lb-table th.l, .lb-table td.l { text-align: left; }
+  .lb-table td.rank { color: var(--muted); }
+  .lb-table td.op { font-weight: 700; color: var(--text); }
+  .lb-table tr:first-child td.op { color: var(--brand); }
+  .lb-empty { color: var(--muted); font-size: 13px; padding: 10px 2px; }
+
+  /* Assignments */
+  .asg-form { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
+  .asg-form input, .asg-form textarea {
+    padding: 9px 11px; border-radius: 7px; border: 1px solid var(--border);
+    background: var(--bg); color: var(--text); font: inherit; resize: vertical;
+  }
+  .asg-form button.primary { align-self: flex-end; }
+  .asg-badge { font-size: 11px; font-weight: 700; text-transform: uppercase; padding: 2px 7px; border-radius: 20px; }
+  .asg-badge.assigned { background: rgba(88,166,255,.16); color: #58a6ff; }
+  .asg-badge.acknowledged { background: rgba(210,153,34,.18); color: var(--warn); }
+  .asg-badge.done { background: rgba(63,185,80,.16); color: var(--ok); }
+  .asg-badge.cancelled { background: rgba(139,148,158,.16); color: var(--muted); }
+  .card .assign-btn { align-self: flex-start; font-size: 12px; padding: 4px 10px; }
+</style>
+</head>
+<body>
+  <!-- Login gate -->
+  <div id="login" class="hidden">
+    <h1>Trossen <b>Fleet Hub</b></h1>
+    <p>Enter the admin password to view the collection fleet.</p>
+    <input id="pw" type="password" placeholder="Admin password" autocomplete="current-password" />
+    <button class="primary" id="loginBtn">Sign in</button>
+    <div class="err" id="loginErr"></div>
+  </div>
+
+  <!-- Dashboard -->
+  <div id="app" class="hidden">
+    <header>
+      <div class="title">Trossen <b>Fleet Hub</b></div>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <span class="meta" id="summary"></span>
+        <button id="assignmentsBtn">Assignments</button>
+        <button id="leaderboardBtn">Leaderboard</button>
+        <button id="downtimeBtn">Downtime</button>
+        <button id="operatorsBtn">Operators</button>
+        <button id="logoutBtn">Sign out</button>
+      </div>
+    </header>
+    <main>
+      <div id="alerts"></div>
+      <div class="grid" id="grid"></div>
+      <div class="empty hidden" id="empty">No machines have connected yet.<br/><span class="sub">Set <code>HUB_URL</code> on a collection machine to have it dial in.</span></div>
+    </main>
+  </div>
+
+  <!-- Assign a task to a machine -->
+  <div id="asgOverlay" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Assign task</h2>
+        <button id="asgClose" aria-label="Close">✕</button>
+      </div>
+      <p class="sub">Send a task to <b id="asgMachineName">—</b>. The operator sees it at the station and marks it acknowledged / done.</p>
+      <form id="asgForm" class="asg-form">
+        <input id="asgTitle" placeholder="Task title (e.g. Fold the towel)" autocomplete="off" />
+        <textarea id="asgInstr" placeholder="Instructions (optional)" rows="3"></textarea>
+        <input id="asgTarget" type="number" min="1" placeholder="Target episodes (optional)" />
+        <div class="op-err err" id="asgErr"></div>
+        <button class="primary" type="submit">Assign</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- All assignments -->
+  <div id="asgListOverlay" class="overlay hidden">
+    <div class="modal" style="max-width:640px;">
+      <div class="modal-head">
+        <h2>Assignments</h2>
+        <button id="asgListClose" aria-label="Close">✕</button>
+      </div>
+      <p class="sub">Tasks assigned across the fleet and their status.</p>
+      <div id="asgList" class="dt-list"></div>
+    </div>
+  </div>
+
+  <!-- Leaderboard -->
+  <div id="lbOverlay" class="overlay hidden">
+    <div class="modal" style="max-width:760px;">
+      <div class="modal-head">
+        <h2>Operator leaderboard</h2>
+        <button id="lbClose" aria-label="Close">✕</button>
+      </div>
+      <p class="sub">Productivity across the fleet. Collection = share of time spent recording; Success = share of recording that was kept; Eps/hr = episodes per hour of session time.</p>
+      <div style="overflow-x:auto;">
+        <table class="lb-table" id="lbTable"></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Downtime log -->
+  <div id="dtOverlay" class="overlay hidden">
+    <div class="modal" style="max-width:640px;">
+      <div class="modal-head">
+        <h2>Downtime log</h2>
+        <button id="dtClose" aria-label="Close">✕</button>
+      </div>
+      <p class="sub">Hardware faults reported by operators. Open faults are counted from when they were filed until an operator marks them resolved.</p>
+      <div class="section-label" style="margin-top:12px;">Currently down</div>
+      <div id="dtOpen" class="dt-list"></div>
+      <div class="section-label" style="margin-top:14px;">Recently resolved</div>
+      <div id="dtRecent" class="dt-list"></div>
+    </div>
+  </div>
+
+  <!-- Operators management -->
+  <div id="opsOverlay" class="overlay hidden">
+    <div class="modal">
+      <div class="modal-head">
+        <h2>Operators</h2>
+        <button id="opsClose" aria-label="Close">✕</button>
+      </div>
+      <p class="sub">The fleet roster. Operators sign in by name + PIN at any machine; changes here push to every connected station.</p>
+      <form id="opAddForm" class="op-add">
+        <input id="opName" placeholder="Name" autocomplete="off" />
+        <input id="opPin" placeholder="PIN" inputmode="numeric" autocomplete="off" />
+        <button class="primary" type="submit">Add</button>
+      </form>
+      <div class="op-err err" id="opErr"></div>
+      <div id="opList" class="op-list"></div>
+    </div>
+  </div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let pollTimer = null;
+
+async function api(path, opts) {
+  const res = await fetch(path, Object.assign({ headers: { "Content-Type": "application/json" } }, opts));
+  if (res.status === 401) { showLogin(); throw new Error("unauthorized"); }
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  return res.status === 204 ? null : res.json();
+}
+
+function fmtBytes(n) {
+  if (!n) return "0 B";
+  const u = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0; while (n >= 1024 && i < u.length - 1) { n /= 1024; i++; }
+  return n.toFixed(n < 10 && i > 0 ? 1 : 0) + " " + u[i];
+}
+function relTime(iso) {
+  if (!iso) return "never";
+  const d = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (d < 60) return Math.floor(d) + "s ago";
+  if (d < 3600) return Math.floor(d / 60) + "m ago";
+  if (d < 86400) return Math.floor(d / 3600) + "h ago";
+  return Math.floor(d / 86400) + "d ago";
+}
+function esc(s) { return String(s ?? "").replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c])); }
+// Human duration since an ISO timestamp (for a running downtime clock).
+function dur(iso) {
+  if (!iso) return "—";
+  let s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
+  if (s < 60) return Math.floor(s) + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+  return Math.floor(s / 86400) + "d " + Math.floor((s % 86400) / 3600) + "h";
+}
+// Duration between two ISO timestamps in seconds (for resolved events).
+function durSecs(secs) {
+  let s = Math.max(0, secs || 0);
+  if (s < 60) return Math.floor(s) + "s";
+  if (s < 3600) return Math.floor(s / 60) + "m";
+  if (s < 86400) return Math.floor(s / 3600) + "h " + Math.floor((s % 3600) / 60) + "m";
+  return Math.floor(s / 86400) + "d " + Math.floor((s % 86400) / 3600) + "h";
+}
+
+function activeSession(m) {
+  const s = (m.sessions || []);
+  return s.find(x => x.status === "active") || s.find(x => x.status === "error") || s[0] || null;
+}
+
+function card(m) {
+  const online = m.online;
+  const sess = activeSession(m);
+  const st = m.storage || {};
+  const usedPct = st.total ? Math.round((st.used / st.total) * 100) : 0;
+  const freeCls = usedPct >= 92 ? "crit" : usedPct >= 80 ? "low" : "";
+  const epPct = sess && sess.num_episodes ? Math.round((sess.current_episode / sess.num_episodes) * 100) : 0;
+  const robots = (m.systems || []).map(s => s.robot_name || s.id).filter(Boolean);
+  const eh = m.episode_health || {};
+  const failing = eh.datasets_with_failures || [];
+  const faults = m.faults || [];
+
+  const faultsBlock = faults.length
+    ? `<div>
+        <div class="section-label" style="color:var(--warn);">Down · ${faults.length} device${faults.length > 1 ? "s" : ""}</div>
+        <div class="faults-list">
+          ${faults.map(f => `<div class="fault-row">
+            <div class="fh"><span class="fdev">${esc(f.device_type)}${f.device_label ? " · " + esc(f.device_label) : ""}</span><span class="fdur">${dur(f.since)}</span></div>
+            <div>${esc(f.reason || "—")}</div>
+            ${f.parts_needed ? `<div class="fpart">Needs: ${esc(f.parts_needed)}</div>` : ""}
+          </div>`).join("")}
+        </div>
+      </div>`
+    : "";
+
+  const healthBlock = eh.total_corrupt
+    ? `<div>
+        <div class="section-label fail">Failed episodes · ${eh.total_corrupt}</div>
+        <div class="fail-list">
+          ${failing.map(d => `<div class="fail-row"><span class="fid">${esc(d.id)}</span><span class="fc">${d.corrupt} of ${d.good + d.corrupt}</span></div>`).join("")}
+          ${eh.truncated ? `<div class="sub">…and more</div>` : ""}
+        </div>
+      </div>`
+    : (eh.total_good != null
+        ? `<div class="sub">${eh.total_good} episodes recorded · no failures</div>`
+        : "");
+
+  const sessBlock = sess ? `
+    <div>
+      <div class="section-label">Session · ${esc(sess.status)}</div>
+      <div style="display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px;">
+        <span>${esc(sess.name || sess.dataset_id)}</span>
+        <span class="v">${sess.current_episode}/${sess.num_episodes}</span>
+      </div>
+      <div class="bar"><span style="width:${epPct}%"></span></div>
+    </div>` : `<div class="sub">No session</div>`;
+
+  const liveView = (online && m.ip) ? `<a class="linkbtn" href="http://${esc(m.ip)}:5173" target="_blank" rel="noopener">Open machine ↗</a>` : "";
+
+  return `
+  <div class="card ${online ? "" : "off"}">
+    <div class="top">
+      <div class="name"><span class="dot ${online ? "on" : ""}"></span>${esc(m.name)}</div>
+      <span class="badge ${esc(m.state)}">${esc(m.state)}</span>
+    </div>
+    ${sessBlock}
+    <div>
+      <div class="section-label">Storage${st.root ? " · " + esc(st.root) : ""}</div>
+      <div class="bar storage"><span class="${freeCls}" style="width:${usedPct}%"></span></div>
+      <div class="sub" style="margin-top:4px;">${fmtBytes(st.free)} free of ${fmtBytes(st.total)} · ${st.dataset_count ?? 0} datasets</div>
+    </div>
+    ${faultsBlock}
+    ${healthBlock}
+    ${robots.length ? `<div><div class="section-label">Systems</div><div class="chips">${robots.map(r => `<span class="chip">${esc(r)}</span>`).join("")}</div></div>` : ""}
+    <div class="kv">
+      <span class="k">Operator</span><span class="v">${m.operator ? esc(m.operator.name) + (m.work && m.work.on_break ? (m.work.break_source === "idle" ? " · idle" : " · on break") : "") : "—"}</span>
+      <span class="k">Host</span><span class="v">${esc(m.hostname || "—")}${m.ip ? " · " + esc(m.ip) : ""}</span>
+      <span class="k">Version</span><span class="v">${esc(m.app_version || "—")}</span>
+      <span class="k">Last seen</span><span class="v">${online ? "now" : relTime(m.last_seen)}</span>
+    </div>
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+      <button class="assign-btn" data-mid="${esc(m.id)}" data-mname="${esc(m.name)}">Assign task</button>
+      ${liveView}
+    </div>
+  </div>`;
+}
+
+function storagePct(m) {
+  const st = m.storage || {};
+  return st.total ? (st.used / st.total) * 100 : 0;
+}
+
+function renderAlerts(list) {
+  const alerts = [];
+  const down = list.filter(m => (m.faults || []).length > 0);
+  if (down.length) {
+    const names = down.map(m => `${esc(m.name)} (${m.faults.length})`).join(", ");
+    alerts.push(`<div class="alert err">⚠ ${down.length} machine${down.length > 1 ? "s" : ""} with hardware down <span class="names">· ${names}</span></div>`);
+  }
+  const failed = list.filter(m => (m.episode_health || {}).total_corrupt > 0);
+  if (failed.length) {
+    const names = failed.map(m => `${esc(m.name)} (${m.episode_health.total_corrupt})`).join(", ");
+    alerts.push(`<div class="alert err">⚠ ${failed.length} machine${failed.length > 1 ? "s" : ""} with failed episodes <span class="names">· ${names}</span></div>`);
+  }
+  const crit = list.filter(m => m.online && storagePct(m) >= 92);
+  const low = list.filter(m => m.online && storagePct(m) >= 80 && storagePct(m) < 92);
+  if (crit.length) {
+    alerts.push(`<div class="alert err">⚠ ${crit.length} machine${crit.length > 1 ? "s" : ""} critically low on disk <span class="names">· ${crit.map(m => esc(m.name)).join(", ")}</span></div>`);
+  }
+  if (low.length) {
+    alerts.push(`<div class="alert warn">⚠ ${low.length} machine${low.length > 1 ? "s" : ""} low on disk <span class="names">· ${low.map(m => esc(m.name)).join(", ")}</span></div>`);
+  }
+  $("alerts").innerHTML = alerts.join("");
+}
+
+async function refresh() {
+  let list;
+  try { list = await api("/api/machines"); } catch { return; }
+  _lastFleet = list;
+  const online = list.filter(m => m.online).length;
+  $("summary").textContent = `${online} online · ${list.length} known`;
+  $("empty").classList.toggle("hidden", list.length > 0);
+  renderAlerts(list);
+  $("grid").innerHTML = list.map(card).join("");
+  // Keep the downtime log's running clocks fresh while it's open.
+  if (!$("dtOverlay").classList.contains("hidden")) loadDowntime();
+  if (!$("lbOverlay").classList.contains("hidden")) loadLeaderboard();
+  if (!$("asgListOverlay").classList.contains("hidden")) loadAssignments();
+}
+
+function startPolling() {
+  refresh();
+  clearInterval(pollTimer);
+  pollTimer = setInterval(refresh, 2000);
+}
+function stopPolling() { clearInterval(pollTimer); pollTimer = null; }
+
+function showLogin() {
+  stopPolling();
+  $("app").classList.add("hidden");
+  $("login").classList.remove("hidden");
+  $("pw").focus();
+}
+function showApp() {
+  $("login").classList.add("hidden");
+  $("app").classList.remove("hidden");
+  startPolling();
+}
+
+async function doLogin() {
+  $("loginErr").textContent = "";
+  try {
+    await api("/api/login", { method: "POST", body: JSON.stringify({ password: $("pw").value }) });
+    $("pw").value = "";
+    showApp();
+  } catch {
+    $("loginErr").textContent = "Incorrect password.";
+  }
+}
+
+// ---- Assignments (command plane) ----
+let _asgMachineId = null;
+
+function openAssign(mid, mname) {
+  _asgMachineId = mid;
+  $("asgMachineName").textContent = mname;
+  $("asgErr").textContent = "";
+  $("asgTitle").value = ""; $("asgInstr").value = ""; $("asgTarget").value = "";
+  $("asgOverlay").classList.remove("hidden");
+  $("asgTitle").focus();
+}
+function closeAssign() { $("asgOverlay").classList.add("hidden"); }
+
+async function submitAssign(e) {
+  e.preventDefault();
+  $("asgErr").textContent = "";
+  const title = $("asgTitle").value.trim();
+  if (!title) { $("asgErr").textContent = "A task title is required."; return; }
+  const target = $("asgTarget").value ? parseInt($("asgTarget").value, 10) : null;
+  try {
+    await api(`/api/machines/${_asgMachineId}/assignments`, {
+      method: "POST",
+      body: JSON.stringify({ title, instructions: $("asgInstr").value.trim(), target_episodes: target }),
+    });
+    closeAssign();
+  } catch { $("asgErr").textContent = "Could not assign the task."; }
+}
+
+function asgRow(a) {
+  const machine = machineName(a.machine_id);
+  const canCancel = a.status === "assigned" || a.status === "acknowledged";
+  return `
+  <div class="dt-row">
+    <span class="dt-dev">${esc(a.title)}${a.target_episodes ? ` · ${a.target_episodes} eps` : ""}</span>
+    <span class="asg-badge ${esc(a.status)}">${esc(a.status)}</span>
+    <span class="dt-meta">${esc(machine)}${a.instructions ? " · " + esc(a.instructions) : ""}</span>
+    ${canCancel ? `<span class="dt-part"><button class="op-del danger asg-cancel" data-id="${esc(a.id)}">Cancel</button></span>` : ""}
+  </div>`;
+}
+
+async function loadAssignments() {
+  let rows;
+  try { rows = await api("/api/assignments"); } catch { return; }
+  $("asgList").innerHTML = rows.length ? rows.map(asgRow).join("") : "";
+}
+function openAssignments() { $("asgListOverlay").classList.remove("hidden"); loadAssignments(); }
+function closeAssignments() { $("asgListOverlay").classList.add("hidden"); }
+
+async function onAsgListClick(e) {
+  const btn = e.target.closest(".asg-cancel");
+  if (!btn) return;
+  try { await api(`/api/assignments/${btn.dataset.id}/cancel`, { method: "POST" }); await loadAssignments(); }
+  catch { /* ignore */ }
+}
+
+$("assignmentsBtn").addEventListener("click", openAssignments);
+$("asgClose").addEventListener("click", closeAssign);
+$("asgOverlay").addEventListener("click", e => { if (e.target === $("asgOverlay")) closeAssign(); });
+$("asgForm").addEventListener("submit", submitAssign);
+$("asgListClose").addEventListener("click", closeAssignments);
+$("asgListOverlay").addEventListener("click", e => { if (e.target === $("asgListOverlay")) closeAssignments(); });
+$("asgList").addEventListener("click", onAsgListClick);
+// Per-card "Assign task" buttons (event delegation on the grid).
+$("grid").addEventListener("click", e => {
+  const b = e.target.closest(".assign-btn");
+  if (b) openAssign(b.dataset.mid, b.dataset.mname);
+});
+
+// ---- Leaderboard ----
+function pct(x) { return Math.round((x || 0) * 100) + "%"; }
+function hrs(secs) { return ((secs || 0) / 3600).toFixed(1) + "h"; }
+
+async function loadLeaderboard() {
+  let rows;
+  try { rows = await api("/api/leaderboard"); } catch { return; }
+  if (!rows.length) {
+    $("lbTable").innerHTML = `<tr><td class="lb-empty">No collection recorded yet. Operator stats appear once episodes are recorded while signed in.</td></tr>`;
+    return;
+  }
+  const head = `<tr>
+    <th class="l">#</th><th class="l">Operator</th>
+    <th>Episodes</th><th>Eps/hr</th><th>Collection</th><th>Success</th>
+    <th>Session</th><th>Breaks</th><th>Sessions</th>
+  </tr>`;
+  const body = rows.map((r, i) => `<tr>
+    <td class="rank">${i + 1}</td>
+    <td class="op l">${esc(r.operator_name)}</td>
+    <td>${r.num_episodes}</td>
+    <td>${(r.episodes_per_hour || 0).toFixed(1)}</td>
+    <td>${pct(r.collection_ratio)}</td>
+    <td>${pct(r.success_ratio)}</td>
+    <td>${hrs(r.total_seconds)}</td>
+    <td>${hrs(r.break_seconds)}</td>
+    <td>${r.sessions}</td>
+  </tr>`).join("");
+  $("lbTable").innerHTML = head + body;
+}
+function openLeaderboard() { $("lbOverlay").classList.remove("hidden"); loadLeaderboard(); }
+function closeLeaderboard() { $("lbOverlay").classList.add("hidden"); }
+
+$("leaderboardBtn").addEventListener("click", openLeaderboard);
+$("lbClose").addEventListener("click", closeLeaderboard);
+$("lbOverlay").addEventListener("click", e => { if (e.target === $("lbOverlay")) closeLeaderboard(); });
+
+// ---- Downtime log ----
+function dtRow(e, open) {
+  const dcls = open ? "open" : "closed";
+  const durTxt = open ? dur(e.started_at) : durSecs(e.duration_s);
+  const dev = `${esc(e.device_type)}${e.device_label ? " · " + esc(e.device_label) : ""}`;
+  const machine = machineName(e.machine_id);
+  return `
+  <div class="dt-row ${dcls}">
+    <span class="dt-dev">${dev}</span>
+    <span class="dt-dur">${durTxt}</span>
+    <span class="dt-meta">${esc(machine)}${e.system_name ? " · " + esc(e.system_name) : ""} · ${esc(e.reason || "—")}${e.reported_by ? " · by " + esc(e.reported_by) : ""}</span>
+    ${e.parts_needed ? `<span class="dt-part">Needs: <b>${esc(e.parts_needed)}</b></span>` : ""}
+  </div>`;
+}
+
+// Resolve machine_id -> friendly name using the last fleet snapshot.
+let _lastFleet = [];
+function machineName(id) {
+  const m = _lastFleet.find(x => x.id === id);
+  return m ? m.name : id;
+}
+
+async function loadDowntime() {
+  let data;
+  try { data = await api("/api/downtime"); } catch { return; }
+  $("dtOpen").innerHTML = (data.open || []).map(e => dtRow(e, true)).join("");
+  $("dtRecent").innerHTML = (data.recent || []).map(e => dtRow(e, false)).join("");
+}
+function openDowntime() { $("dtOverlay").classList.remove("hidden"); loadDowntime(); }
+function closeDowntime() { $("dtOverlay").classList.add("hidden"); }
+
+$("downtimeBtn").addEventListener("click", openDowntime);
+$("dtClose").addEventListener("click", closeDowntime);
+$("dtOverlay").addEventListener("click", e => { if (e.target === $("dtOverlay")) closeDowntime(); });
+
+// ---- Operators management ----
+function opRow(o) {
+  return `
+  <div class="op-row ${o.active ? "" : "inactive"}" data-id="${esc(o.id)}">
+    <span class="op-nm">${esc(o.name)}</span>
+    ${o.active ? "" : `<span class="op-tag">inactive</span>`}
+    <button class="op-toggle">${o.active ? "Deactivate" : "Activate"}</button>
+    <button class="op-del danger">Delete</button>
+  </div>`;
+}
+
+async function loadOperators() {
+  $("opErr").textContent = "";
+  let ops;
+  try { ops = await api("/api/operators"); } catch { return; }
+  $("opList").innerHTML = ops.length
+    ? ops.map(opRow).join("")
+    : `<div class="sub" style="padding:8px 2px;">No operators yet. Add one above.</div>`;
+}
+
+async function addOperator(e) {
+  e.preventDefault();
+  $("opErr").textContent = "";
+  const name = $("opName").value.trim();
+  const pin = $("opPin").value.trim();
+  if (!name || !pin) { $("opErr").textContent = "Name and PIN are both required."; return; }
+  try {
+    await api("/api/operators", { method: "POST", body: JSON.stringify({ name, pin }) });
+    $("opName").value = ""; $("opPin").value = "";
+    $("opName").focus();
+    await loadOperators();
+  } catch (err) {
+    $("opErr").textContent = "Could not add operator.";
+  }
+}
+
+async function onOpListClick(e) {
+  const row = e.target.closest(".op-row");
+  if (!row) return;
+  const id = row.dataset.id;
+  try {
+    if (e.target.classList.contains("op-toggle")) {
+      const activating = row.classList.contains("inactive");
+      await api(`/api/operators/${id}`, { method: "PATCH", body: JSON.stringify({ active: activating }) });
+      await loadOperators();
+    } else if (e.target.classList.contains("op-del")) {
+      await api(`/api/operators/${id}`, { method: "DELETE" });
+      await loadOperators();
+    }
+  } catch {
+    $("opErr").textContent = "Action failed.";
+  }
+}
+
+function openOperators() { $("opsOverlay").classList.remove("hidden"); loadOperators(); $("opName").focus(); }
+function closeOperators() { $("opsOverlay").classList.add("hidden"); }
+
+$("operatorsBtn").addEventListener("click", openOperators);
+$("opsClose").addEventListener("click", closeOperators);
+$("opsOverlay").addEventListener("click", e => { if (e.target === $("opsOverlay")) closeOperators(); });
+$("opAddForm").addEventListener("submit", addOperator);
+$("opList").addEventListener("click", onOpListClick);
+
+$("loginBtn").addEventListener("click", doLogin);
+$("pw").addEventListener("keydown", e => { if (e.key === "Enter") doLogin(); });
+$("logoutBtn").addEventListener("click", async () => { try { await api("/api/logout", { method: "POST" }); } catch {} showLogin(); });
+
+(async function init() {
+  try {
+    const s = await api("/api/session");
+    if (s.authenticated) showApp(); else showLogin();
+  } catch { showLogin(); }
+})();
+</script>
+</body>
+</html>

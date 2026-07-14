@@ -1,0 +1,17 @@
+**/node_modules
+**/.venv
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+**/.mypy_cache
+**/dist
+**/build
+**/build-*
+**/*.egg-info
+**/.git
+**/.vscode
+**/.idea
+**/.DS_Store
+**/.env
+**/.env.local
+**/.env.*.local
