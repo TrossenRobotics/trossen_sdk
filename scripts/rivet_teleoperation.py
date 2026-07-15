@@ -17,6 +17,7 @@ https://github.com/TrossenRobotics/input_controller/blob/8f73ef4d04a1b6d466649ae
 import time
 import numpy as np
 import trossen_arm
+import trossen_base
 
 
 ENABLE_RIGHT = True
@@ -30,9 +31,15 @@ IP_LEFT_LEADER = "192.168.1.3"
 IP_LEFT_FOLLOWER = "192.168.1.5"
 
 # Gripper force feedback parameters
-LEADER_MAX = 27.0  # N - leader effort at full grip (not including offset)
-FOLLOWER_MAX = 87.5  # N - follower effort at full grip
-OFFSET = 8.0  # N - leader opening offset
+LEADER_MAX = 27.0       # N - leader effort at full grip (not including offset)
+FOLLOWER_MAX = 87.5     # N - follower effort at full grip
+LEADER_OFFSET = 8.0      # N - leader opening offset
+
+BASE_MIN = -1           # Min translational/rotational velocity (m/s and rad/s)
+BASE_MAX = 1            # Min translational/rotational velocity (m/s and rad/s)
+
+MIN_JOYSTICK = 0        # Joystick min value
+MAX_JOYSTICK = 4095     # Joystick max value
 
 
 def scale(value, val_min, val_max, scaled_min, scaled_max):
@@ -51,6 +58,8 @@ if __name__ == "__main__":
     if ENABLE_LEFT:
         driver_left_leader = trossen_arm.TrossenArmDriver()
         driver_left_follower = trossen_arm.TrossenArmDriver()
+    if ENABLE_BASE:
+        base = trossen_base.TrossenBase()
 
     print("Configuring the drivers...")
 
@@ -85,7 +94,7 @@ if __name__ == "__main__":
             IP_LEFT_FOLLOWER,
             True,
         )
-
+    
     if ENABLE_RIGHT:
         motor_parameters = driver_right_follower.get_motor_parameters()
         motor_parameters[0][trossen_arm.Mode.position].velocity.ki = 0.0
@@ -159,17 +168,15 @@ if __name__ == "__main__":
     time.sleep(1)
 
     try:
+        base_velocity_linear_x = 0.0
+        base_velocity_linear_y = 0.0
+        base_velocity_angular_z = 0.0
+        base_velocity_lift = 0.0
         while True:
-            base_velocity_linear_x = 0.0
-            base_velocity_linear_y = 0.0
-            base_velocity_angular_z = 0.0
-            base_velocity_lift = 0.0
 
-            MIN_JOYSTICK = 0
-            MAX_JOYSTICK = 4095
-            MIN_SCALED = -1
-            MAX_SCALED = 1
 
+
+            ################################### LEADER COMMANDS ####################################
             if ENABLE_RIGHT:
                 right_efforts = driver_right_follower.get_all_external_efforts()
                 right_positions = driver_right_leader.get_all_positions()
@@ -177,7 +184,7 @@ if __name__ == "__main__":
 
                 # Scale to -1 to 1 velocity (rad/s)
                 base_velocity_angular_z = scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
-                                MIN_SCALED, MAX_SCALED)
+                                BASE_MIN, BASE_MAX)
 
 
             if ENABLE_LEFT:
@@ -187,15 +194,22 @@ if __name__ == "__main__":
 
                 # Scale to -1 to 1 velocity (m/s)
                 base_velocity_linear_x = scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
-                                               MIN_SCALED, MAX_SCALED)
+                                               BASE_MIN, BASE_MAX)
                 base_velocity_linear_y = scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
-                                               MIN_SCALED, MAX_SCALED)
+                                               BASE_MIN, BASE_MAX)
 
                 # Button bitmap: bit n is SEL_(n+1), 1 is pressed:
                 #   [SEL_1, SEL_2, SEL_3, SEL_4] = [???]
                 left_up_btn = left_input.buttons & (1 << 1) # TODO: Check these
                 left_down_btn = left_input.buttons & (1 << 2)
                 base_velocity_lift = left_up_btn - left_down_btn # -1 to 1
+
+            ###################################### FOLLOWERS #######################################
+            if ENABLE_BASE:
+                trossen_base.update_base()
+                trossen_base.set_cmd_ves(base_velocity_linear_x, base_velocity_linear_y,
+                                         base_velocity_angular_z)
+                trossen_base.set_actuator_velocity(base_velocity_lift)
 
             # RIGHT ARM
             if ENABLE_RIGHT:
@@ -239,7 +253,7 @@ if __name__ == "__main__":
 
                 # Cubic curve for more resistance at higher efforts and less at lower efforts, with an offset to keep the gripper open when not gripping
                 effort_right_norm = min(abs(follower_right_effort) / FOLLOWER_MAX, 1.0)
-                leader_right_effort = LEADER_MAX * (effort_right_norm**3) + OFFSET
+                leader_right_effort = LEADER_MAX * (effort_right_norm**3) + LEADER_OFFSET
 
                 # Set the leader's gripper effort based on the follower's gripper effort
                 driver_right_leader.set_gripper_external_effort(
@@ -296,7 +310,7 @@ if __name__ == "__main__":
 
                 # Cubic curve for more resistance at higher efforts and less at lower efforts, with an offset to keep the gripper open when not gripping
                 effort_left_norm = min(abs(follower_left_effort) / FOLLOWER_MAX, 1.0)
-                leader_left_effort = LEADER_MAX * (effort_left_norm**3) + OFFSET
+                leader_left_effort = LEADER_MAX * (effort_left_norm**3) + LEADER_OFFSET
 
                 # Set the leader's gripper effort based on the follower's gripper effort
                 driver_left_leader.set_gripper_external_effort(
