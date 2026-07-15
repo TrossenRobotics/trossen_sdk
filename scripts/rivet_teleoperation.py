@@ -2,10 +2,12 @@
 Temporary script to demonstration teleopration of Rivet with the Bimanual Glides.
 
 Requirements:
-- trossen_base (dev branch) Python installation:
-      https://github.com/TrossenRobotics/trossen_base/tree/dev
-- trossen_arm-source (lightweight-leader branch) Python installation:
-     https://github.com/TrossenRobotics/trossen_arm-source/tree/lightweight-leader
+- trossen_base (dev branch): https://github.com/TrossenRobotics/trossen_base/tree/dev
+    1. Python installation
+    2. Start CAN interface (using README)
+- trossen_arm-source (lightweight-leader branch):
+    https://github.com/TrossenRobotics/trossen_arm-source/tree/lightweight-leader
+    1. Python installation
 
 
 This is adapted from:
@@ -36,7 +38,8 @@ FOLLOWER_MAX = 87.5     # N - follower effort at full grip
 LEADER_OFFSET = 8.0      # N - leader opening offset
 
 BASE_MIN = -1           # Min translational/rotational velocity (m/s and rad/s)
-BASE_MAX = 1            # Min translational/rotational velocity (m/s and rad/s)
+BASE_MAX = 1            # Max translational/rotational velocity (m/s and rad/s)
+BASE_LIFT_MAX = 500     # 10000   # Max lift velocity (motor units/s)
 
 MIN_JOYSTICK = 0        # Joystick min value
 MAX_JOYSTICK = 4095     # Joystick max value
@@ -94,7 +97,7 @@ if __name__ == "__main__":
             IP_LEFT_FOLLOWER,
             True,
         )
-    
+
     if ENABLE_RIGHT:
         motor_parameters = driver_right_follower.get_motor_parameters()
         motor_parameters[0][trossen_arm.Mode.position].velocity.ki = 0.0
@@ -153,6 +156,11 @@ if __name__ == "__main__":
 
     print("Moving to home positions...")
 
+    if ENABLE_BASE:
+        if not base.wait_until_ready():
+            raise RuntimeError("Base failed to become ready")
+
+
     # Follower gripper is offset by -pi/4 to match the leader's gripper position at home
     if ENABLE_RIGHT:
         driver_right_follower.set_all_positions(
@@ -171,7 +179,7 @@ if __name__ == "__main__":
         base_velocity_linear_x = 0.0
         base_velocity_linear_y = 0.0
         base_velocity_angular_z = 0.0
-        base_velocity_lift = 0.0
+        base_velocity_lift = 0  # MUST BE INT
         while True:
 
 
@@ -200,16 +208,16 @@ if __name__ == "__main__":
 
                 # Button bitmap: bit n is SEL_(n+1), 1 is pressed:
                 #   [SEL_1, SEL_2, SEL_3, SEL_4] = [???]
-                left_up_btn = left_input.buttons & (1 << 1) # TODO: Check these
-                left_down_btn = left_input.buttons & (1 << 2)
-                base_velocity_lift = left_up_btn - left_down_btn # -1 to 1
+                left_up_btn = int(left_input.buttons & (1 << 1)) # TODO: Check these
+                left_down_btn = int(left_input.buttons & (1 << 2))
+                base_velocity_lift = int(left_up_btn - left_down_btn) * BASE_LIFT_MAX
 
             ###################################### FOLLOWERS #######################################
             if ENABLE_BASE:
-                trossen_base.update_base()
-                trossen_base.set_cmd_ves(base_velocity_linear_x, base_velocity_linear_y,
+                base.update_base()
+                base.set_cmd_vels(base_velocity_linear_x, base_velocity_linear_y,
                                          base_velocity_angular_z)
-                trossen_base.set_actuator_velocity(base_velocity_lift)
+                base.set_actuator_velocity(base_velocity_lift)
 
             # RIGHT ARM
             if ENABLE_RIGHT:
@@ -326,7 +334,7 @@ if __name__ == "__main__":
                 follower_left_position = driver_left_follower.get_gripper_position()
 
     except KeyboardInterrupt:
-        print("Moving to sleep positions...")
+        print("Moving to stop positions...")
         if ENABLE_RIGHT:
             driver_right_follower.set_all_modes(trossen_arm.Mode.position)
             driver_right_follower.set_all_positions(
@@ -338,3 +346,6 @@ if __name__ == "__main__":
             driver_left_follower.set_all_positions(
                 np.zeros(driver_left_follower.get_num_joints()), 2.0, True
             )
+        if ENABLE_BASE:
+            base.set_cmd_vels(0.0, 0.0, 0.0)
+            base.set_actuator_velocity(0)
