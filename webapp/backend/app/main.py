@@ -439,7 +439,7 @@ def list_faults(status: str | None = None) -> list[faults_mod.DeviceFault]:
 
 @app.post("/api/faults", status_code=201)
 def create_fault(body: faults_mod.CreateFaultBody) -> faults_mod.DeviceFault:
-    """File a hardware fault. The reporter is the signed-in operator (if any)."""
+    """File a hardware or software issue. Reporter is the signed-in operator (if any)."""
     try:
         return faults_mod.create_fault(body, operators.get_active_operator())
     except ValueError as e:

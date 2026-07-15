@@ -23,9 +23,23 @@ from sqlmodel import select
 from app.db import SessionLocal
 from app.models import DeviceFault
 
-# Coarse device categories offered in the report UI. `other` is the catch-all
-# so an operator is never blocked from filing a fault for an unlisted device.
-DEVICE_TYPES = ("arm", "camera", "other")
+# Issue classes. Both are reported to the hub and drive machine downtime; the
+# class only selects which category vocabulary (below) and UI the operator sees.
+ISSUE_CLASSES = ("hardware", "software")
+
+# Coarse categories offered in the report UI, per class. `other` is the
+# catch-all so an operator is never blocked from filing an issue. The chosen
+# value is stored in DeviceFault.device_type regardless of class.
+HARDWARE_TYPES = ("arm", "camera", "other")
+SOFTWARE_TYPES = ("webapp", "recorder", "viewer", "converter", "other")
+# Back-compat alias: hardware categories were the only ones before software
+# issues existed.
+DEVICE_TYPES = HARDWARE_TYPES
+
+
+def _types_for_class(issue_class: str) -> tuple[str, ...]:
+    """Valid category vocabulary for an issue class (hardware by default)."""
+    return SOFTWARE_TYPES if issue_class == "software" else HARDWARE_TYPES
 
 
 class CreateFaultBody(BaseModel):
@@ -33,6 +47,7 @@ class CreateFaultBody(BaseModel):
 
     system_id: str = ""
     system_name: str = ""
+    issue_class: str = "hardware"
     device_type: str = "other"
     device_label: str = ""
     reason: str
@@ -60,11 +75,14 @@ def create_fault(
     """File a new open fault. Raises ValueError on missing reason/bad type."""
     if not (body.reason or "").strip():
         raise ValueError("a reason is required")
-    device_type = body.device_type if body.device_type in DEVICE_TYPES else "other"
+    issue_class = body.issue_class if body.issue_class in ISSUE_CLASSES else "hardware"
+    valid_types = _types_for_class(issue_class)
+    device_type = body.device_type if body.device_type in valid_types else "other"
     fault = DeviceFault(
         id=str(uuid.uuid4()),
         system_id=body.system_id or "",
         system_name=body.system_name or "",
+        issue_class=issue_class,
         device_type=device_type,
         device_label=(body.device_label or "").strip(),
         reason=body.reason.strip(),
@@ -113,6 +131,7 @@ def open_faults_for_report() -> list[dict[str, Any]]:
             "key": f.id,
             "system_id": f.system_id,
             "system_name": f.system_name,
+            "issue_class": f.issue_class,
             "device_type": f.device_type,
             "device_label": f.device_label,
             "reason": f.reason,
