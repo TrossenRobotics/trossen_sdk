@@ -47,7 +47,9 @@ TrossenMCAPBackend::TrossenMCAPBackend(
   std::cout << "Compression: " << cfg_->compression << std::endl;
   std::cout << "Dataset ID: " << cfg_->dataset_id << std::endl;
   std::cout << "Episode Index: " << cfg_->episode_index << std::endl;
-  std::cout << "Task Description: " << cfg_->task_description << std::endl;
+  if (!cfg_->task_description.empty()) {
+    std::cout << "Task Description: " << cfg_->task_description << std::endl;
+  }
   std::cout << "======================================================" << std::endl;
   }
 TrossenMCAPBackend::~TrossenMCAPBackend() { close(); }
