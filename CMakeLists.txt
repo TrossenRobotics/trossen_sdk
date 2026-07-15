@@ -44,16 +44,15 @@ add_library(trossen_sdk SHARED
   src/hw/arm/feetech_bus.cpp
   src/hw/base/slate_base_component.cpp
   src/hw/base/slate_base_producer.cpp
-  src/hw/base/trossen_base_session.cpp
-  src/hw/base/trossen_base_component_drivetrain.cpp
-  src/hw/base/trossen_base_component_lift.cpp
-  src/hw/base/trossen_base_producer.cpp
   src/hw/teleop/teleop_controller.cpp
   src/hw/teleop/teleop_factory.cpp
   src/hw/camera/opencv_camera_component.cpp
   src/hw/camera/opencv_producer.cpp
   src/hw/camera/mock_producer.cpp
   src/hw/camera/mock_synced_producer.cpp
+  src/hw/composite/bimanual_glide_component.cpp
+  src/hw/composite/rivet_component.cpp
+  src/hw/composite/rivet_producer.cpp
   src/observer/observer_registry.cpp
   src/runtime/session_manager.cpp
   src/runtime/producer_registry.cpp
