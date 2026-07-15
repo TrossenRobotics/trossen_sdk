@@ -142,6 +142,35 @@ TEST_F(BackendRegistryTest, PolymorphicBackendUsage) {
   backend->close();
 }
 
+// Test that a non-empty task_description flows into the backend config and
+// is written into the MCAP file's metadata record on open().
+TEST_F(BackendRegistryTest, TaskDescriptionWrittenToMetadata) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+
+  // Isolate this test's output and restore shared GlobalConfig state after.
+  const std::string original_root = cfg->root;
+  const std::string original_dataset_id = cfg->dataset_id;
+  const std::string original_task_description = cfg->task_description;
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "task_description_test";
+  cfg->task_description = "pick up the cube";
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  EXPECT_TRUE(backend->open());
+  backend->close();
+
+  const auto mcap_path = std::filesystem::path(cfg->root) / cfg->dataset_id / "episode_000000.mcap";
+  EXPECT_TRUE(std::filesystem::exists(mcap_path));
+
+  cfg->root = original_root;
+  cfg->dataset_id = original_dataset_id;
+  cfg->task_description = original_task_description;
+}
+
 // Demo test showing typical usage pattern
 TEST_F(BackendRegistryTest, TypicalUsageDemo) {
   // Simulate selecting backend type at runtime (e.g., from config file)
