@@ -47,6 +47,7 @@ TrossenMCAPBackend::TrossenMCAPBackend(
   std::cout << "Compression: " << cfg_->compression << std::endl;
   std::cout << "Dataset ID: " << cfg_->dataset_id << std::endl;
   std::cout << "Episode Index: " << cfg_->episode_index << std::endl;
+  std::cout << "Task Description: " << cfg_->task_description << std::endl;
   std::cout << "======================================================" << std::endl;
   }
 TrossenMCAPBackend::~TrossenMCAPBackend() { close(); }
@@ -124,6 +125,9 @@ bool TrossenMCAPBackend::open() {
   metadata["episode_index"] = std::to_string(episode_index_);
   auto now = trossen::data::now_real();
   metadata["recording_start_time"] = std::to_string(now.to_ns());
+  if (!cfg_->task_description.empty()) {
+    metadata["task_description"] = cfg_->task_description;
+  }
 
   // Build dataset_info JSON from producer metadata (joint names, camera specs, etc.)
   nlohmann::ordered_json dataset_info;
