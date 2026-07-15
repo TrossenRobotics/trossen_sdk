@@ -580,19 +580,19 @@ export function RecordPage() {
               <div className="px-4 sm:px-6 pb-6 border-t border-edge">
                 <div className="pt-5 space-y-4">
                   <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 sm:gap-5">
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-dim text-[10px] uppercase mb-1">Dataset ID</div>
-                      <div className="text-ink text-sm">{session.dataset_id}</div>
+                      <div className="text-ink text-sm break-words">{session.dataset_id}</div>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-dim text-[10px] uppercase mb-1">Hardware System</div>
-                      <div className="text-ink text-sm">{session.system_name}</div>
+                      <div className="text-ink text-sm break-words">{session.system_name}</div>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-dim text-[10px] uppercase mb-1">Backend</div>
-                      <div className="text-ink text-sm">{session.backend_type}</div>
+                      <div className="text-ink text-sm break-words">{session.backend_type}</div>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <div className="text-dim text-[10px] uppercase mb-1">Created</div>
                       <div className="text-ink text-sm">{formatDate(session.created_at)}</div>
                     </div>
