@@ -10,6 +10,7 @@ Requirements:
 
 This is adapted from:
 https://github.com/TrossenRobotics/input_controller/blob/8f73ef4d04a1b6d466649aeb36286f6c6782ad49/scripts/teleop.py
+
 """
 
 
@@ -20,6 +21,7 @@ import trossen_arm
 
 ENABLE_RIGHT = True
 ENABLE_LEFT = True
+ENABLE_BASE = True
 
 # IP addresses for the leader and follower
 IP_RIGHT_LEADER = "192.168.1.2"
@@ -31,6 +33,13 @@ IP_LEFT_FOLLOWER = "192.168.1.5"
 LEADER_MAX = 27.0  # N - leader effort at full grip (not including offset)
 FOLLOWER_MAX = 87.5  # N - follower effort at full grip
 OFFSET = 8.0  # N - leader opening offset
+
+
+def scale(value, val_min, val_max, scaled_min, scaled_max):
+    """ Scale a value linearly from val_min..val_max to scaled_min..scaled_max """
+    scaled_val = ((value - val_min) / (val_max - val_min) * (scaled_min - scaled_max) + scaled_max)
+    return scaled_val
+
 
 if __name__ == "__main__":
     # Enable/disable left and right arms
@@ -151,13 +160,42 @@ if __name__ == "__main__":
 
     try:
         while True:
+            base_velocity_linear_x = 0.0
+            base_velocity_linear_y = 0.0
+            base_velocity_angular_z = 0.0
+            base_velocity_lift = 0.0
+
+            MIN_JOYSTICK = 0
+            MAX_JOYSTICK = 4095
+            MIN_SCALED = -1
+            MAX_SCALED = 1
+
             if ENABLE_RIGHT:
                 right_efforts = driver_right_follower.get_all_external_efforts()
                 right_positions = driver_right_leader.get_all_positions()
+                right_input = driver_right_follower.get_input_report()
+
+                # Scale to -1 to 1 velocity (rad/s)
+                base_velocity_angular_z = scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
+                                MIN_SCALED, MAX_SCALED)
+
 
             if ENABLE_LEFT:
                 left_efforts = driver_left_follower.get_all_external_efforts()
                 left_positions = driver_left_leader.get_all_positions()
+                left_input = driver_left_follower.get_input_report()
+
+                # Scale to -1 to 1 velocity (m/s)
+                base_velocity_linear_x = scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
+                                               MIN_SCALED, MAX_SCALED)
+                base_velocity_linear_y = scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
+                                               MIN_SCALED, MAX_SCALED)
+
+                # Button bitmap: bit n is SEL_(n+1), 1 is pressed:
+                #   [SEL_1, SEL_2, SEL_3, SEL_4] = [???]
+                left_up_btn = left_input.buttons & (1 << 1) # TODO: Check these
+                left_down_btn = left_input.buttons & (1 << 2)
+                base_velocity_lift = left_up_btn - left_down_btn # -1 to 1
 
             # RIGHT ARM
             if ENABLE_RIGHT:
