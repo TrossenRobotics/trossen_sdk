@@ -107,11 +107,11 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     }
   }
 
-  // Optional per-joint operating limits (velocity / position / effort). The
-  // controller clips commands to these and resets them to firmware defaults on
-  // every power cycle, so we re-push them here on each (re)connect. Start from
-  // the controller's current limits and override only the fields provided,
-  // leaving tolerances and any unset field at their firmware default.
+  // Optional per-joint operating limits (position / velocity / effort) and
+  // their tolerances. The controller clips commands to these and resets them to
+  // firmware defaults on every power cycle, so we re-push them here on each
+  // (re)connect. Start from the controller's current limits and override only
+  // the fields provided, leaving any unset field at its firmware default.
   {
     auto parse_limit = [&](const char* key, std::vector<float>& dst) {
       if (!config.contains(key)) return;
@@ -127,15 +127,26 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     parse_limit("position_max", position_max_);
     parse_limit("velocity_max", velocity_max_);
     parse_limit("effort_max", effort_max_);
+    parse_limit("position_tolerance", position_tolerance_);
+    parse_limit("velocity_tolerance", velocity_tolerance_);
+    parse_limit("effort_tolerance", effort_tolerance_);
 
     if (!position_min_.empty() || !position_max_.empty() ||
-        !velocity_max_.empty() || !effort_max_.empty()) {
+        !velocity_max_.empty() || !effort_max_.empty() ||
+        !position_tolerance_.empty() || !velocity_tolerance_.empty() ||
+        !effort_tolerance_.empty()) {
       auto limits = driver_->get_joint_limits();
       for (size_t j = 0; j < njoints && j < limits.size(); ++j) {
         if (!position_min_.empty()) limits[j].position_min = position_min_[j];
         if (!position_max_.empty()) limits[j].position_max = position_max_[j];
         if (!velocity_max_.empty()) limits[j].velocity_max = velocity_max_[j];
         if (!effort_max_.empty()) limits[j].effort_max = effort_max_[j];
+        if (!position_tolerance_.empty())
+          limits[j].position_tolerance = position_tolerance_[j];
+        if (!velocity_tolerance_.empty())
+          limits[j].velocity_tolerance = velocity_tolerance_[j];
+        if (!effort_tolerance_.empty())
+          limits[j].effort_tolerance = effort_tolerance_[j];
       }
       try {
         driver_->set_joint_limits(limits);

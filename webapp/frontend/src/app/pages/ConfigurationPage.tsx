@@ -73,6 +73,13 @@ interface ArmHardware {
   position_max?: number[];
   velocity_max?: number[];
   effort_max?: number[];
+  // Optional per-joint limit tolerances. These PAD the limits for the
+  // controller's feedback fault check: it errors if actual position/velocity/
+  // effort exceeds the limit ± tolerance. undefined = leave the firmware
+  // default untouched; 0 = fault on any overshoot.
+  position_tolerance?: number[];
+  velocity_tolerance?: number[];
+  effort_tolerance?: number[];
   producers: Producer[];
 }
 
@@ -176,6 +183,34 @@ const LIMIT_COLUMNS: readonly { formKey: LimitFormKey; label: string; armUnit: s
   { formKey: 'effortMax', label: 'Eff max', armUnit: 'N·m', gripperUnit: 'N' },
 ];
 
+interface JointToleranceArrays {
+  position_tolerance: number[];
+  velocity_tolerance: number[];
+  effort_tolerance: number[];
+}
+// Tolerances pad the limits for the controller's feedback fault check. Per the
+// Trossen docs, a new/untested setup should start at 0.0 (fault on any
+// overshoot to catch problems); raise them once tuned to avoid false positives.
+// So — unlike the permissive limit defaults — tolerances default to 0.
+const DEFAULT_JOINT_TOLERANCES: JointToleranceArrays = {
+  //                  J1   J2   J3   J4   J5   J6  Gripper
+  position_tolerance: [0, 0, 0, 0, 0, 0, 0],
+  velocity_tolerance: [0, 0, 0, 0, 0, 0, 0],
+  effort_tolerance: [0, 0, 0, 0, 0, 0, 0],
+};
+// Same fallback semantics as armLimitOrDefault, for the tolerance arrays.
+function armToleranceOrDefault(stored: number[] | undefined, key: keyof JointToleranceArrays): number[] {
+  return Array.isArray(stored) && stored.length === NUM_ARM_JOINTS
+    ? [...stored]
+    : [...DEFAULT_JOINT_TOLERANCES[key]];
+}
+type ToleranceFormKey = 'positionTolerance' | 'velocityTolerance' | 'effortTolerance';
+const TOLERANCE_COLUMNS: readonly { formKey: ToleranceFormKey; label: string; armUnit: string; gripperUnit: string }[] = [
+  { formKey: 'positionTolerance', label: 'Pos tol', armUnit: 'rad', gripperUnit: 'm' },
+  { formKey: 'velocityTolerance', label: 'Vel tol', armUnit: 'rad/s', gripperUnit: 'm/s' },
+  { formKey: 'effortTolerance', label: 'Eff tol', armUnit: 'N·m', gripperUnit: 'N' },
+];
+
 // ---------------------------------------------------------------------------
 // Raw wire shapes for the SDK config blob.
 // These mirror the JSON layout returned by /api/systems and accepted by
@@ -209,6 +244,9 @@ interface RawArmConfig {
   position_max?: number[];
   velocity_max?: number[];
   effort_max?: number[];
+  position_tolerance?: number[];
+  velocity_tolerance?: number[];
+  effort_tolerance?: number[];
   [key: string]: unknown;
 }
 
@@ -314,6 +352,9 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
       position_max: Array.isArray(armCfg.position_max) ? armCfg.position_max : undefined,
       velocity_max: Array.isArray(armCfg.velocity_max) ? armCfg.velocity_max : undefined,
       effort_max: Array.isArray(armCfg.effort_max) ? armCfg.effort_max : undefined,
+      position_tolerance: Array.isArray(armCfg.position_tolerance) ? armCfg.position_tolerance : undefined,
+      velocity_tolerance: Array.isArray(armCfg.velocity_tolerance) ? armCfg.velocity_tolerance : undefined,
+      effort_tolerance: Array.isArray(armCfg.effort_tolerance) ? armCfg.effort_tolerance : undefined,
       producers: armProducers,
     } as ArmHardware);
   }
@@ -459,6 +500,10 @@ function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig 
       if (arm.position_max && arm.position_max.length) armEntry.position_max = arm.position_max;
       if (arm.velocity_max && arm.velocity_max.length) armEntry.velocity_max = arm.velocity_max;
       if (arm.effort_max && arm.effort_max.length) armEntry.effort_max = arm.effort_max;
+      // Per-joint tolerances, same emit-only-when-set rule.
+      if (arm.position_tolerance && arm.position_tolerance.length) armEntry.position_tolerance = arm.position_tolerance;
+      if (arm.velocity_tolerance && arm.velocity_tolerance.length) armEntry.velocity_tolerance = arm.velocity_tolerance;
+      if (arm.effort_tolerance && arm.effort_tolerance.length) armEntry.effort_tolerance = arm.effort_tolerance;
       armsObj[arm.name] = armEntry;
 
       for (const p of arm.producers) {
@@ -957,6 +1002,10 @@ export function ConfigurationPage() {
     positionMax: [...DEFAULT_JOINT_LIMITS.position_max],
     velocityMax: [...DEFAULT_JOINT_LIMITS.velocity_max],
     effortMax: [...DEFAULT_JOINT_LIMITS.effort_max],
+    tolerancesEnabled: false,
+    positionTolerance: [...DEFAULT_JOINT_TOLERANCES.position_tolerance],
+    velocityTolerance: [...DEFAULT_JOINT_TOLERANCES.velocity_tolerance],
+    effortTolerance: [...DEFAULT_JOINT_TOLERANCES.effort_tolerance],
   });
 
   const [baseForm, setBaseForm] = useState({
@@ -1112,6 +1161,10 @@ export function ConfigurationPage() {
       positionMax: [...DEFAULT_JOINT_LIMITS.position_max],
       velocityMax: [...DEFAULT_JOINT_LIMITS.velocity_max],
       effortMax: [...DEFAULT_JOINT_LIMITS.effort_max],
+      tolerancesEnabled: false,
+      positionTolerance: [...DEFAULT_JOINT_TOLERANCES.position_tolerance],
+      velocityTolerance: [...DEFAULT_JOINT_TOLERANCES.velocity_tolerance],
+      effortTolerance: [...DEFAULT_JOINT_TOLERANCES.effort_tolerance],
     });
     setBaseForm({
       name: '',
@@ -1161,6 +1214,10 @@ export function ConfigurationPage() {
         positionMax: armLimitOrDefault(arm.position_max, 'position_max'),
         velocityMax: armLimitOrDefault(arm.velocity_max, 'velocity_max'),
         effortMax: armLimitOrDefault(arm.effort_max, 'effort_max'),
+        tolerancesEnabled: !!(arm.position_tolerance || arm.velocity_tolerance || arm.effort_tolerance),
+        positionTolerance: armToleranceOrDefault(arm.position_tolerance, 'position_tolerance'),
+        velocityTolerance: armToleranceOrDefault(arm.velocity_tolerance, 'velocity_tolerance'),
+        effortTolerance: armToleranceOrDefault(arm.effort_tolerance, 'effort_tolerance'),
       });
     } else if (hardware.type === 'slate_base') {
       const base = hardware as BaseHardware;
@@ -1304,6 +1361,9 @@ export function ConfigurationPage() {
       position_max: armForm.limitsEnabled ? [...armForm.positionMax] : undefined,
       velocity_max: armForm.limitsEnabled ? [...armForm.velocityMax] : undefined,
       effort_max: armForm.limitsEnabled ? [...armForm.effortMax] : undefined,
+      position_tolerance: armForm.tolerancesEnabled ? [...armForm.positionTolerance] : undefined,
+      velocity_tolerance: armForm.tolerancesEnabled ? [...armForm.velocityTolerance] : undefined,
+      effort_tolerance: armForm.tolerancesEnabled ? [...armForm.effortTolerance] : undefined,
       producers: []
     };
 
@@ -2455,6 +2515,66 @@ export function ConfigurationPage() {
                           <tr className="text-dim">
                             <td className="pt-[6px] pr-[8px]" />
                             {LIMIT_COLUMNS.map(col => (
+                              <td key={col.formKey} className="pt-[6px] px-[4px] text-[10px] whitespace-nowrap">{col.armUnit} · grip {col.gripperUnit}</td>
+                            ))}
+                          </tr>
+                        </tfoot>
+                      </table>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-[12px]">
+                  <div className="flex items-start gap-[8px]">
+                    <input type="checkbox" id="arm_tolerances" checked={armForm.tolerancesEnabled} onChange={e => setArmForm({ ...armForm, tolerancesEnabled: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
+                    <label htmlFor="arm_tolerances" className="text-ink text-[12px]">
+                      Set joint tolerances
+                      <span className="block text-dim text-[11px] mt-[2px]">Per-joint tolerances that PAD the limits above for the controller's feedback fault check — it errors if the measured position/velocity/effort exceeds the limit ± its tolerance. Also reset on power cycle, so re-applied every connect. Leave off for firmware defaults. Start at 0 (fault on any overshoot) and raise once tuned to avoid false-positive faults.</span>
+                    </label>
+                  </div>
+                  {armForm.tolerancesEnabled && (
+                    <div className="pl-[24px] overflow-x-auto">
+                      <table className="text-[12px] border-collapse">
+                        <thead>
+                          <tr className="text-dim">
+                            <th className="text-left font-normal py-[4px] pr-[8px]">Joint</th>
+                            {TOLERANCE_COLUMNS.map(col => (
+                              <th key={col.formKey} className="text-left font-normal py-[4px] px-[4px]">{col.label}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {ARM_JOINT_LABELS.map((jointLabel, jointIdx) => {
+                            const isGripper = jointIdx === NUM_ARM_JOINTS - 1;
+                            return (
+                              <tr key={jointLabel}>
+                                <td className="text-ink py-[3px] pr-[8px] whitespace-nowrap">{jointLabel}</td>
+                                {TOLERANCE_COLUMNS.map(col => (
+                                  <td key={col.formKey} className="py-[3px] px-[4px]">
+                                    <input
+                                      type="number"
+                                      step="any"
+                                      value={armForm[col.formKey][jointIdx]}
+                                      title={isGripper ? col.gripperUnit : col.armUnit}
+                                      onChange={e => {
+                                        const v = parseFloat(e.target.value);
+                                        setArmForm(prev => {
+                                          const next = [...prev[col.formKey]];
+                                          next[jointIdx] = Number.isNaN(v) ? 0 : v;
+                                          return { ...prev, [col.formKey]: next };
+                                        });
+                                      }}
+                                      className="w-[72px] bg-app border border-edge text-ink px-[6px] py-[4px] text-[12px] focus:outline-none focus:border-brand"
+                                    />
+                                  </td>
+                                ))}
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                        <tfoot>
+                          <tr className="text-dim">
+                            <td className="pt-[6px] pr-[8px]" />
+                            {TOLERANCE_COLUMNS.map(col => (
                               <td key={col.formKey} className="pt-[6px] px-[4px] text-[10px] whitespace-nowrap">{col.armUnit} · grip {col.gripperUnit}</td>
                             ))}
                           </tr>

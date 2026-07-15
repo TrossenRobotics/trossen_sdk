@@ -1,4 +1,4 @@
-import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Loader2, Lock, CheckCircle } from 'lucide-react';
+import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Loader2, Lock, CheckCircle, ChevronDown } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
@@ -97,6 +97,52 @@ function ConnectionBadge({ status, recording }: { status: WsStatus; recording: b
     >
       {label}
     </span>
+  );
+}
+
+// Column count for the Lite camera grid, biased toward landscape-ish cells so
+// typical (wide) camera frames fill the cell with minimal letterboxing: 1 cam
+// full, 2-4 in a 2-wide grid (2x2 for the common 4-camera rig), then 3/4 wide.
+function liteGridCols(n: number): number {
+  if (n <= 1) return 1;
+  if (n <= 4) return 2;
+  if (n <= 9) return 3;
+  return 4;
+}
+
+// A compact "value chip" select: the trigger is a filled accent pill showing
+// the current, applied value, so it reads as a committed setting rather than an
+// empty "pick one" dropdown. Still a native <select> under the hood (keyboard +
+// a11y for free); appearance-none strips the default chrome and we draw our own
+// caret. Options are given readable neutral colors so the open list stays legible
+// on the accent trigger.
+function ChipSelect({
+  label,
+  value,
+  onChange,
+  title,
+  children,
+}: {
+  label: string;
+  value: string | number;
+  onChange: (value: string) => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="flex items-center gap-[6px]" title={title}>
+      <span className="text-dim">{label}</span>
+      <span className="relative inline-flex items-center">
+        <select
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          className="appearance-none bg-brand text-white font-medium rounded-full pl-[10px] pr-[22px] py-[3px] cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand/50"
+        >
+          {children}
+        </select>
+        <ChevronDown className="w-[13px] h-[13px] text-white/85 absolute right-[6px] pointer-events-none" />
+      </span>
+    </label>
   );
 }
 
@@ -345,6 +391,71 @@ export function MonitorEpisodePage() {
       downscale: previewDownscale,
     }).catch(() => { /* viewer-only; safe to ignore if no recorder */ });
   }, [phase, previewFps, previewDownscale, sessionId]);
+
+  // Viewer mode: "rerun" = the full WASM/WebGPU viewer (3D, depth, plots);
+  // "lite" = a plain-<img> MJPEG grid for low-power clients (e.g. a Raspberry
+  // Pi kiosk) that can't drive WebGPU. Both feed off the SAME preview tap, so
+  // the FPS/Res knobs above apply to either. Persisted per-browser so the Pi
+  // stays on Lite across reloads.
+  const [viewerMode, setViewerMode] = useState<'rerun' | 'lite'>(() =>
+    localStorage.getItem('viewerMode') === 'lite' ? 'lite' : 'rerun');
+  useEffect(() => { localStorage.setItem('viewerMode', viewerMode); }, [viewerMode]);
+
+  // The recorder's in-process servers (Rerun gRPC + the Lite MJPEG feed) exist
+  // ONLY while a recording child is alive — i.e. during 'recording' and the
+  // inter-episode 'resetting'. 'paused'/'stopped'/'complete' have no child (a
+  // resume spawns a fresh one), so there is no feed to show; rendering the
+  // viewer then would just sit on a misleading "connecting…" spinner or a
+  // frozen last frame. Gate the whole viewer on this instead.
+  const feedLive = !!sessionId && (phase === 'recording' || phase === 'resetting');
+
+  // The recorder serves the Lite MJPEG feed from a fixed port on the SAME host
+  // that serves this page (network_mode: host on the backend). MUST match
+  // _MJPEG_PORT in webapp/backend/app/recorder_runner.py.
+  const MJPEG_PORT = 9877;
+  const mjpegBase = `http://${window.location.hostname}:${MJPEG_PORT}`;
+
+  // A plain <img> MJPEG stream never auto-reconnects: if the recorder restarts
+  // (new session / resume / re-record) or the connection drops, the <img>
+  // freezes on its last frame until the URL changes (a normal reload can reuse
+  // the dead connection — only a hard refresh forced it before). We make the
+  // URL carry a reconnect token: `viewerEpoch` (bumped on every fresh recorder)
+  // plus a retry counter bumped on <img> error, so teardown/bringup is seamless
+  // with no manual refresh.
+  const [streamRetry, setStreamRetry] = useState(0);
+  useEffect(() => { setStreamRetry(0); }, [viewerEpoch]);
+  const retryTimer = useRef<number | null>(null);
+  const handleStreamError = useCallback(() => {
+    if (retryTimer.current != null) return; // coalesce a burst of img errors
+    retryTimer.current = window.setTimeout(() => {
+      retryTimer.current = null;
+      setStreamRetry(r => r + 1);
+    }, 1500);
+  }, []);
+  useEffect(() => () => {
+    if (retryTimer.current != null) window.clearTimeout(retryTimer.current);
+  }, []);
+
+  // Authoritative list of live camera streams, from the MJPEG server. Cameras
+  // appear once frames start flowing, so poll while Lite mode is showing a
+  // live feed; stop (and clear) as soon as the feed goes away.
+  const [liteCameras, setLiteCameras] = useState<string[]>([]);
+  useEffect(() => {
+    if (viewerMode !== 'lite' || !feedLive) {
+      setLiteCameras([]);
+      return;
+    }
+    let cancelled = false;
+    const poll = () => {
+      fetch(`${mjpegBase}/cameras`)
+        .then(r => r.json())
+        .then(d => { if (!cancelled) setLiteCameras(Array.isArray(d?.cameras) ? d.cameras : []); })
+        .catch(() => { if (!cancelled) setLiteCameras([]); });
+    };
+    poll();
+    const id = setInterval(poll, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [viewerMode, feedLive, mjpegBase, streamRetry]);
 
   // --- API calls ---
   const apiBase = `/api/sessions/${sessionId}`;
@@ -1263,31 +1374,26 @@ export function MonitorEpisodePage() {
               className="flex items-center gap-[12px]"
               title="Live preview quality — lower these on a weak display (e.g. a Raspberry Pi). Affects only the on-screen feed, never the recording."
             >
-              <label className="flex items-center gap-[4px]">
-                FPS
-                <select
-                  value={previewFps}
-                  onChange={e => setPreviewFps(Number(e.target.value))}
-                  className="bg-app border border-edge rounded px-[6px] py-[2px] text-ink"
-                >
-                  <option value={5}>5</option>
-                  <option value={10}>10</option>
-                  <option value={15}>15</option>
-                  <option value={30}>30</option>
-                </select>
-              </label>
-              <label className="flex items-center gap-[4px]">
-                Res
-                <select
-                  value={previewDownscale}
-                  onChange={e => setPreviewDownscale(Number(e.target.value))}
-                  className="bg-app border border-edge rounded px-[6px] py-[2px] text-ink"
-                >
-                  <option value={1}>Full</option>
-                  <option value={2}>Half</option>
-                  <option value={4}>Quarter</option>
-                </select>
-              </label>
+              <ChipSelect
+                label="View"
+                value={viewerMode}
+                onChange={v => setViewerMode(v as 'rerun' | 'lite')}
+                title="Rerun = full 3D/depth/plot viewer (needs WebGPU). Lite = plain image grid for weak clients like a Raspberry Pi."
+              >
+                <option className="bg-surface text-ink" value="rerun">Rerun (3D)</option>
+                <option className="bg-surface text-ink" value="lite">Lite (Pi)</option>
+              </ChipSelect>
+              <ChipSelect label="FPS" value={previewFps} onChange={v => setPreviewFps(Number(v))}>
+                <option className="bg-surface text-ink" value={5}>5</option>
+                <option className="bg-surface text-ink" value={10}>10</option>
+                <option className="bg-surface text-ink" value={15}>15</option>
+                <option className="bg-surface text-ink" value={30}>30</option>
+              </ChipSelect>
+              <ChipSelect label="Res" value={previewDownscale} onChange={v => setPreviewDownscale(Number(v))}>
+                <option className="bg-surface text-ink" value={1}>Full</option>
+                <option className="bg-surface text-ink" value={2}>Half</option>
+                <option className="bg-surface text-ink" value={4}>Quarter</option>
+              </ChipSelect>
             </div>
             {phase === 'recording' && depthCameraCount > 0 && (
               <div
@@ -1300,7 +1406,62 @@ export function MonitorEpisodePage() {
             )}
           </div>
           <div className="flex-1 min-h-0">
-            {phase !== 'not_started' && sessionId ? (
+            {!feedLive ? (
+              // No recording child is running, so there is no live feed. Show a
+              // clear, phase-specific instruction rather than a viewer stuck on
+              // a "connecting…" spinner or a frozen frame — nothing is broken,
+              // the session simply isn't live yet.
+              <div className="w-full h-full flex items-center justify-center select-none px-[16px] text-center">
+                <p className="text-dim text-[13px]">
+                  {phase === 'paused'
+                    ? 'Paused — press Resume to continue the feed'
+                    : phase === 'stopped'
+                    ? 'Session stopped — press Start to record again'
+                    : phase === 'complete'
+                    ? 'Session complete — press Start for a new run'
+                    : 'Press Start to begin the session'}
+                </p>
+              </div>
+            ) : viewerMode === 'lite' ? (
+              // Lite mode: a grid of plain <img> MJPEG streams (JPEG decode +
+              // blit only, no WebGPU). w-full h-full + object-contain makes each
+              // frame fill its grid cell (scaling the downscaled JPEG UP), so a
+              // low-res preview isn't rendered tiny; the cell — not the image's
+              // intrinsic size — drives layout, keeping sizing stable across
+              // reloads. The ?e=/r= token forces a fresh connection on recorder
+              // restart / stream error (see streamRetry) so it never sticks on a
+              // stale frame.
+              liteCameras.length > 0 ? (
+                <div
+                  className="w-full h-full grid gap-[8px]"
+                  style={{
+                    gridTemplateColumns: `repeat(${liteGridCols(liteCameras.length)}, minmax(0, 1fr))`,
+                    gridAutoRows: '1fr',
+                  }}
+                >
+                  {liteCameras.map(cam => (
+                    <div
+                      key={cam}
+                      className="relative bg-black rounded overflow-hidden min-h-0 min-w-0"
+                    >
+                      <img
+                        src={`${mjpegBase}/stream/${encodeURIComponent(cam)}?e=${viewerEpoch}&r=${streamRetry}`}
+                        alt={cam}
+                        onError={handleStreamError}
+                        className="w-full h-full object-contain"
+                      />
+                      <span className="absolute bottom-[4px] left-[6px] text-[10px] text-white/80 bg-black/50 px-[4px] rounded select-none">
+                        {cam}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="w-full h-full flex items-center justify-center select-none">
+                  <p className="text-dim text-[13px]">Connecting to cameras…</p>
+                </div>
+              )
+            ) : (
               // The Rerun WASM viewer is hosted in an iframe (EmbeddedViewerPage),
               // keyed by session + epoch. Recreating a keyed iframe on a new/resumed
               // session makes the browser tear down the previous viewer's entire
@@ -1316,10 +1477,6 @@ export function MonitorEpisodePage() {
                 className="w-full h-full"
                 style={{ border: 0 }}
               />
-            ) : (
-              <div className="w-full h-full flex items-center justify-center select-none">
-                <p className="text-dim text-[13px]">Press Start to begin…</p>
-              </div>
             )}
           </div>
         </div>

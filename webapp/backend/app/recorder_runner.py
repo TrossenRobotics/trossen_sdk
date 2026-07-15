@@ -31,6 +31,7 @@ Status / verdict signalling on stdout:
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import signal
@@ -38,8 +39,10 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
 import numpy as np
 import rerun as rr
@@ -226,6 +229,191 @@ _rerun_observer: Any | None = None
 _rerun_record_ids: list[str] = []
 
 
+# --- Lightweight MJPEG live feed (low-power / Raspberry Pi viewer) ----------
+#
+# A second, dependency-light preview path for clients that can't drive the
+# Rerun WASM/WebGPU viewer (e.g. a Raspberry Pi kiosk). It rides the SAME
+# throttled + downscaled tap as the Rerun preview (see _log_image_record):
+# each color frame is JPEG-encoded once and stashed in `_latest_jpeg`, then
+# served as an MJPEG (multipart/x-mixed-replace) stream a plain <img> tag can
+# consume — JPEG decode + blit only, no WebGPU/WASM. Color-only by design
+# (depth stays a "recording" badge in the UI). Best-effort: any failure here
+# disables the Lite feed and must never touch the recording or the Rerun path.
+
+# Fixed port the MJPEG HTTP server listens on. Reachable from the browser at
+# http://<host>:<port>/stream/<camera> because both webapp containers run with
+# network_mode: host (mirrors _RERUN_GRPC_PORT — no port publishing needed).
+# MUST match the port the frontend builds its Lite viewer URLs from (see
+# MJPEG_PORT in webapp/frontend/src/app/pages/MonitorEpisodePage.tsx).
+_MJPEG_PORT = 9877
+
+# Latest JPEG frame per camera record_id + a monotonically increasing sequence
+# number, so a streaming client can block until a genuinely new frame exists
+# (rather than busy-spin or re-send duplicates). Guarded by _mjpeg_cond; every
+# write does notify_all().
+_mjpeg_cond = threading.Condition()
+_latest_jpeg: dict[str, bytes] = {}
+_mjpeg_seq: dict[str, int] = {}
+
+# Retained for the process lifetime so the daemon server thread stays alive.
+_mjpeg_server: Any | None = None
+
+
+def _encode_jpeg(img: np.ndarray, encoding: str) -> bytes | None:
+    """JPEG-encode an already-downscaled camera frame to bytes for the MJPEG feed.
+
+    Converts to an RGB/grayscale layout PIL can save based on the SDK encoding
+    string (bgr8 gets a channel swap; mono8 stays 2-D). Returns None on any
+    failure so the caller simply skips stashing the frame — a bad frame can
+    never break the feed or the recording. PIL is imported lazily so a missing
+    Pillow disables only the Lite feed (Rerun preview is unaffected).
+    """
+    try:
+        from PIL import Image
+        arr = img
+        enc = (encoding or "").lower()
+        if enc == "bgr8" and arr.ndim == 3 and arr.shape[2] == 3:
+            arr = arr[:, :, ::-1]  # BGR -> RGB for correct colors in <img>
+        mode = "L" if arr.ndim == 2 else "RGB"
+        # Reuse the live JPEG-quality knob; fall back to 75 when color JPEG is
+        # disabled for Rerun (the MJPEG wire always needs a JPEG).
+        quality = _PREVIEW_JPEG_QUALITY if _PREVIEW_JPEG_QUALITY > 0 else 75
+        buf = io.BytesIO()
+        Image.fromarray(np.ascontiguousarray(arr), mode).save(
+            buf, format="JPEG", quality=int(quality))
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def _publish_mjpeg_frame(record_id: str, img: np.ndarray, encoding: str) -> None:
+    """Encode + stash the latest color frame for `record_id` and wake streamers.
+
+    Called from _log_image_record on the already-throttled, already-downscaled
+    frame, so the Lite feed inherits the live fps/downscale knobs for free.
+    """
+    data = _encode_jpeg(img, encoding)
+    if data is None:
+        return
+    with _mjpeg_cond:
+        _latest_jpeg[record_id] = data
+        _mjpeg_seq[record_id] = _mjpeg_seq.get(record_id, 0) + 1
+        _mjpeg_cond.notify_all()
+
+
+class _MJPEGHandler(BaseHTTPRequestHandler):
+    """Serves the Lite live feed: /cameras, /stream/<id>, /snapshot/<id>.
+
+    One handler thread per connection (ThreadingHTTPServer). A /stream response
+    is an open-ended multipart/x-mixed-replace body that a browser <img> renders
+    frame-by-frame; it lives until the client disconnects.
+    """
+
+    # Silence per-request logging: the SDK's stdout is a control channel the
+    # parent parses as JSON event lines — request noise would corrupt it.
+    def log_message(self, *args: Any) -> None:  # noqa: N802
+        pass
+
+    def _cors(self) -> None:
+        self.send_header("Access-Control-Allow-Origin", "*")
+
+    def do_GET(self) -> None:  # noqa: N802
+        path = unquote(self.path.split("?", 1)[0])
+        if path in ("/", "/health"):
+            self._respond_json({"status": "ok", "cameras": sorted(_latest_jpeg)})
+        elif path == "/cameras":
+            self._respond_json({"cameras": sorted(_latest_jpeg)})
+        elif path.startswith("/snapshot/"):
+            self._serve_snapshot(path[len("/snapshot/"):])
+        elif path.startswith("/stream/"):
+            self._serve_stream(path[len("/stream/"):])
+        else:
+            self.send_error(404)
+
+    def _respond_json(self, obj: dict[str, Any]) -> None:
+        body = json.dumps(obj).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self._cors()
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_snapshot(self, cam: str) -> None:
+        with _mjpeg_cond:
+            data = _latest_jpeg.get(cam)
+        if data is None:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self._cors()
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_stream(self, cam: str) -> None:
+        boundary = "frame"
+        self.send_response(200)
+        self.send_header(
+            "Content-Type", f"multipart/x-mixed-replace; boundary={boundary}")
+        self._cors()
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        last_seq = -1
+        try:
+            while True:
+                with _mjpeg_cond:
+                    # Block until a newer frame than we last sent exists. The
+                    # timeout re-sends the latest frame as a keepalive (keeps the
+                    # <img> painted if the camera stalls) and lets a disconnected
+                    # client be noticed on the next write.
+                    _mjpeg_cond.wait_for(
+                        lambda: _mjpeg_seq.get(cam, 0) != last_seq, timeout=5.0)
+                    data = _latest_jpeg.get(cam)
+                    last_seq = _mjpeg_seq.get(cam, 0)
+                if data is None:
+                    continue
+                self.wfile.write(
+                    b"--" + boundary.encode() + b"\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n")
+                self.wfile.write(data)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return  # browser <img> went away — normal
+        except Exception:
+            return
+
+
+def _start_mjpeg_server(port: int) -> bool:
+    """Start the Lite MJPEG HTTP server in a daemon thread (best-effort).
+
+    Mirrors _start_rerun_server: a bind failure (e.g. a stale recorder still
+    holding the port) just disables the Lite feed and must never abort
+    recording. The daemon thread + daemon_threads dies with the process.
+    """
+    global _mjpeg_server
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", port), _MJPEGHandler)
+        server.daemon_threads = True
+        threading.Thread(
+            target=server.serve_forever, name="mjpeg-server", daemon=True
+        ).start()
+        _mjpeg_server = server
+        print(f"[recorder-runner] MJPEG live feed listening on :{port} "
+              f"(/stream/<camera>)", flush=True)
+        return True
+    except Exception as e:
+        _mjpeg_server = None
+        print(f"[recorder-runner] MJPEG server setup failed: {e}; "
+              f"Lite feed disabled", flush=True)
+        return False
+
+
 def _start_rerun_server(grpc_port: int) -> bool:
     """Start the in-process Rerun gRPC server for the live web viewer.
 
@@ -288,6 +476,10 @@ def _log_image_record(record_id: str, rec: Any) -> None:
         _preview_last_emit[record_id] = now
     img = _downscale(img)
     encoding = (rec.encoding or "").lower()
+    # Fan the same throttled/downscaled color frame out to the Lite MJPEG feed.
+    # Independent of the Rerun path below, so the <img> stream works even when
+    # the browser can't run the WASM viewer.
+    _publish_mjpeg_frame(record_id, img, encoding)
     if encoding == "bgr8":
         image = rr.Image(img, "BGR")
     elif encoding in ("mono8", "mono", "gray", "grayscale"):
@@ -1161,6 +1353,9 @@ def main() -> int:
     # to subscribe, and the observer must be added before the first
     # start_episode(). Best-effort — a failure just disables live preview.
     _start_rerun_server(_RERUN_GRPC_PORT)
+    # Lite MJPEG feed for low-power clients (Raspberry Pi). Also best-effort and
+    # also camera-only; rides the same preview tap as the Rerun observer.
+    _start_mjpeg_server(_MJPEG_PORT)
 
     mgr: ts.SessionManager | None = None
     try:

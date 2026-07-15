@@ -225,6 +225,13 @@ private:
   std::vector<float> velocity_max_;
   std::vector<float> effort_max_;
 
+  /// Optional per-joint limit tolerances applied alongside the limits above.
+  /// Each, when non-empty, has one entry per joint; empty leaves the firmware
+  /// default. Re-applied on every reconnect for the same reason as the limits.
+  std::vector<float> position_tolerance_;
+  std::vector<float> velocity_tolerance_;
+  std::vector<float> effort_tolerance_;
+
   /// Joint-space pose this arm moves to at session start (via stage()).
   /// Empty = no staging.
   std::vector<float> staged_position_;

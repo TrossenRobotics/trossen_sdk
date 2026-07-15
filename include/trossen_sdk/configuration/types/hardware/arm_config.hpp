@@ -76,6 +76,16 @@ struct ArmConfig {
   std::vector<float> velocity_max{};
   std::vector<float> effort_max{};
 
+  /// @brief Optional per-joint limit tolerances pushed to the controller
+  /// alongside the limits above. Each array, when non-empty, must have one
+  /// entry per joint (position in rad / gripper m, velocity in rad·s⁻¹ /
+  /// gripper m·s⁻¹, effort in N·m / gripper N). Empty = leave the controller's
+  /// firmware default untouched for that field. Same non-persistent-across-
+  /// power-cycle behaviour as the limits, so re-applied on every reconfigure.
+  std::vector<float> position_tolerance{};
+  std::vector<float> velocity_tolerance{};
+  std::vector<float> effort_tolerance{};
+
   static ArmConfig from_json(const nlohmann::json& j) {
     ArmConfig c;
     if (j.contains("ip_address")) j.at("ip_address").get_to(c.ip_address);
@@ -96,6 +106,12 @@ struct ArmConfig {
     if (j.contains("position_max")) j.at("position_max").get_to(c.position_max);
     if (j.contains("velocity_max")) j.at("velocity_max").get_to(c.velocity_max);
     if (j.contains("effort_max")) j.at("effort_max").get_to(c.effort_max);
+    if (j.contains("position_tolerance"))
+      j.at("position_tolerance").get_to(c.position_tolerance);
+    if (j.contains("velocity_tolerance"))
+      j.at("velocity_tolerance").get_to(c.velocity_tolerance);
+    if (j.contains("effort_tolerance"))
+      j.at("effort_tolerance").get_to(c.effort_tolerance);
     return c;
   }
 
@@ -121,6 +137,10 @@ struct ArmConfig {
     if (!position_max.empty()) j["position_max"] = position_max;
     if (!velocity_max.empty()) j["velocity_max"] = velocity_max;
     if (!effort_max.empty()) j["effort_max"] = effort_max;
+    // Emit per-joint tolerances only when set, same reasoning.
+    if (!position_tolerance.empty()) j["position_tolerance"] = position_tolerance;
+    if (!velocity_tolerance.empty()) j["velocity_tolerance"] = velocity_tolerance;
+    if (!effort_tolerance.empty()) j["effort_tolerance"] = effort_tolerance;
     return j;
   }
 };

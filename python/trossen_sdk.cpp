@@ -537,6 +537,9 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("position_max", &ArmConfig::position_max)
     .def_readwrite("velocity_max", &ArmConfig::velocity_max)
     .def_readwrite("effort_max", &ArmConfig::effort_max)
+    .def_readwrite("position_tolerance", &ArmConfig::position_tolerance)
+    .def_readwrite("velocity_tolerance", &ArmConfig::velocity_tolerance)
+    .def_readwrite("effort_tolerance", &ArmConfig::effort_tolerance)
     .def_static("from_json", &ArmConfig::from_json, py::arg("json"))
     .def("to_json", &ArmConfig::to_json);
 
