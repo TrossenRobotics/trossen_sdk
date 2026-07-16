@@ -243,8 +243,8 @@ struct PolicyClientConfig {
   std::string id;
 
   /// Endpoint of the remote policy server. The scheme/format is validated by
-  /// the selected transport's factory, not here (``ws[s]://...`` for
-  /// ``openpi_ws``; ``host:port`` for the planned ``lerobot_grpc``).
+  /// the selected transport's factory, not here — e.g. ``ws[s]://host:port``
+  /// for ``openpi_ws``, ``host:port`` for ``lerobot_grpc``.
   std::string server_url;
 
   /// Optional bearer key sent as ``Authorization: Api-Key <value>``
@@ -264,7 +264,7 @@ struct PolicyClientConfig {
   /// fraction of the current chunk drops to this value. 0 reproduces the
   /// synchronous openpi cadence (observe at end-of-chunk pose); higher values
   /// overlap inference with playback. Parsed and validated here; consumed by
-  /// the drain-threshold firing logic (slice L5).
+  /// the drain-threshold firing logic.
   double drain_threshold{0.0};
 
   /// Inference cadence in Hz; must lie in (0, 1e4].
