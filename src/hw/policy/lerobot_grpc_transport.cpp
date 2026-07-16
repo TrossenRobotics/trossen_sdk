@@ -1,8 +1,8 @@
 /**
  * @file lerobot_grpc_transport.cpp
- * @brief L3 skeleton: channel + async_inference handshake. See the header for
- *        the slice status of each method (handshake is real; payload path and
- *        policy_setup_bytes_() are L4).
+ * @brief LeRobot async_inference transport: gRPC channel setup, the connect
+ *        handshake (Ready + SendPolicyInstructions), and the observation/action
+ *        payload path. See the header for each method's contract.
  */
 
 #include "lerobot_grpc_transport.hpp"
@@ -230,8 +230,8 @@ void LerobotGrpcTransport::connect() {
   }
 
   // Step 2: SendPolicyInstructions(PolicySetup) — declares this client's
-  // policy config to the server. L3 ships a placeholder payload (see
-  // policy_setup_bytes_); L4 ships the pickled RemotePolicyConfig.
+  // policy config to the server as the pickled RemotePolicyConfig
+  // (see policy_setup_bytes_).
   {
     grpc::ClientContext ctx;
     ctx.set_deadline(deadline_in(connect_timeout_));
