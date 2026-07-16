@@ -26,6 +26,10 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
   // TODO(shantanuparab-tr): Remove episode index if not being used
   int episode_index{0};
 
+  /// Text description of the task being demonstrated (e.g. "pick up the cube").
+  /// Written to the MCAP file-level metadata if non-empty.
+  std::string task_description{""};
+
   std::string type() const override { return "trossen_mcap_backend"; }
 
   static TrossenMCAPBackendConfig from_json(const nlohmann::json& j) {
@@ -42,6 +46,7 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
     if (j.contains("compression")) j.at("compression").get_to(c.compression);
     if (j.contains("dataset_id")) j.at("dataset_id").get_to(c.dataset_id);
     if (j.contains("episode_index")) j.at("episode_index").get_to(c.episode_index);
+    if (j.contains("task_description")) j.at("task_description").get_to(c.task_description);
 
     return c;
   }

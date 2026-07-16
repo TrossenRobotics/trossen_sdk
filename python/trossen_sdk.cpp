@@ -593,6 +593,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("compression", &TrossenMCAPBackendConfig::compression)
     .def_readwrite("dataset_id", &TrossenMCAPBackendConfig::dataset_id)
     .def_readwrite("episode_index", &TrossenMCAPBackendConfig::episode_index)
+    .def_readwrite("task_description", &TrossenMCAPBackendConfig::task_description)
     .def_static("from_json", &TrossenMCAPBackendConfig::from_json, py::arg("json"));
 
   py::class_<LeRobotV2BackendConfig, BaseConfig,
