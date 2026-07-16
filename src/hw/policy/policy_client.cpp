@@ -457,11 +457,11 @@ void PolicyClient::inference_loop_() {
       }
     }
 
-    // Gate observation packing on the drain-threshold firing instant. At θ=0
+    // Gate observation packing on the drain-threshold firing instant. At theta=0
     // this is chunk exhaustion (openpi semantics): packing waits until the
     // current chunk is about to exhaust so the observation captures the arm at
     // its end-of-chunk pose, avoiding the mid-chunk wall-clock schedule that
-    // made the policy return chunks computed for a stale pose. At θ>0 it fires
+    // made the policy return chunks computed for a stale pose. At theta>0 it fires
     // earlier, overlapping inference with playback. Skipped on the first cycle
     // (no chunk yet) and after a pause-driven slot clear.
     wait_for_fire_point_();
@@ -527,7 +527,7 @@ void PolicyClient::inference_loop_() {
 
       transport_->push_observation(*obs);
 
-      // Poll for the reply chunk (θ=0 cadence: the cycle re-synchronizes on
+      // Poll for the reply chunk (theta=0 cadence: the cycle re-synchronizes on
       // arrival, exactly like the old blocking round_trip). The 1 ms tick is
       // noise against ~1 s inference, and using inference_cv_ keeps the wait
       // shutdown-interruptible. Exits: chunk, shutdown, or transport gone
@@ -614,7 +614,7 @@ void PolicyClient::wait_for_fire_point_() {
   // only swapped to N+1 by the next face sample(), which happens up to one
   // face period later. Reading the slot at the top of cycle N+2 therefore
   // sees chunk N's already-expired time and the wait short-circuits. We
-  // instead wait for the *applied* chunk's firing instant (θ point).
+  // instead wait for the *applied* chunk's firing instant (theta point).
   const auto target = next_chunk_fire_target_;
   // Default-constructed (epoch zero) signals "no chunk applied yet" — first
   // cycle of an active window or just after a pause clear. Proceed
@@ -782,8 +782,8 @@ std::optional<Observation> PolicyClient::pack_observation_(
   obs.timestep = current_timestep_(obs.captured_at);
   // must_go: the action buffer is empty — no chunk applied yet, or the last
   // applied chunk has played past its final row by now. The server prioritizes
-  // such observations. At θ>0 the fire point precedes exhaustion (overlap), so
-  // must_go marks the exceptional stall/slow-server case; at θ=0 the buffer
+  // such observations. At theta>0 the fire point precedes exhaustion (overlap), so
+  // must_go marks the exceptional stall/slow-server case; at theta=0 the buffer
   // empties every cycle by design, so it is set each time.
   obs.must_go = (next_chunk_exhaust_target_.time_since_epoch().count() == 0) ||
                 (obs.captured_at >= next_chunk_exhaust_target_);
@@ -1027,13 +1027,13 @@ void PolicyClient::apply_chunk_(ActionChunk chunk_in,
 
   const double rate = shared_->control_rate_hz.load(std::memory_order_acquire);
 
-  // Async-overlap path (drain threshold θ>0): the chunk was inferred while the
+  // Async-overlap path (drain threshold theta>0): the chunk was inferred while the
   // previous one still plays, so it takes over immediately, aligned to the
   // Timestep Clock. Row 0 anchors at epoch + base_timestep/rate; rows already
   // in the past are skipped by sample(), and an all-past chunk is discarded.
   // The base_timestep sanity guards (all-past / far-future) live here because
   // base_timestep is load-bearing only for this alignment. The consume-fully
-  // path (θ=0, openpi's default) ignores base_timestep entirely — it re-anchors
+  // path (theta=0, openpi's default) ignores base_timestep entirely — it re-anchors
   // playback_start_ = now on promotion — so it needs no such guard.
   if (cfg_.drain_threshold > 0.0 && rate > 0.0 && chunk->T > 0 &&
       inference_epoch_.time_since_epoch().count() != 0) {
@@ -1068,7 +1068,7 @@ void PolicyClient::apply_chunk_(ActionChunk chunk_in,
     const auto aligned_start = inference_epoch_ + tick_ns(chunk->base_timestep);
     next_chunk_exhaust_target_ = aligned_start + tick_ns(chunk->T);
     // Fire the next observation when the remaining playable fraction drops to
-    // θ: at (1-θ)·T ticks into this chunk.
+    // theta: at (1-theta)·T ticks into this chunk.
     const double play_fraction = 1.0 - cfg_.drain_threshold;
     next_chunk_fire_target_ = aligned_start + std::chrono::nanoseconds(
       static_cast<int64_t>(play_fraction * static_cast<double>(chunk->T) /
@@ -1078,7 +1078,7 @@ void PolicyClient::apply_chunk_(ActionChunk chunk_in,
     return;
   }
 
-  // Consume-fully path (openpi θ=0 cadence). The two members set below are
+  // Consume-fully path (openpi theta=0 cadence). The two members set below are
   // scheduling ESTIMATES the client uses to time the next cycle's fire point;
   // they are not the slot's actual playback anchor. The slot itself parks this
   // chunk in its pending_ slot (when one is already playing) and, on the sample
@@ -1096,8 +1096,8 @@ void PolicyClient::apply_chunk_(ActionChunk chunk_in,
       ? next_chunk_exhaust_target_   // previous chunk hadn't exhausted yet
       : chunk->received_at;           // previous chunk done; we play from now
     next_chunk_exhaust_target_ = base + duration_ns;
-    // θ=0 on this path (θ>0 takes the aligned branch above), so the fire point
-    // coincides with exhaustion. Compute it via the same θ rule for clarity.
+    // theta=0 on this path (theta>0 takes the aligned branch above), so the fire point
+    // coincides with exhaustion. Compute it via the same theta rule for clarity.
     const double play_fraction = 1.0 - cfg_.drain_threshold;
     next_chunk_fire_target_ = base + std::chrono::nanoseconds(
       static_cast<int64_t>(play_fraction * static_cast<double>(chunk->T) /

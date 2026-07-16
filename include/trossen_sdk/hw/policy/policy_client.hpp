@@ -224,9 +224,9 @@ private:
   double wait_for_fresh_observations_();
 
   /// Block until the firing instant of the currently-playing chunk
-  /// (@c next_chunk_fire_target_): the drain-threshold θ point. At θ=0 this is
+  /// (@c next_chunk_fire_target_): the drain-threshold theta point. At theta=0 this is
   /// the chunk's exhaustion instant, so the next observation captures the arm
-  /// at its end-of-chunk pose (openpi's synchronous cadence); at θ>0 it fires
+  /// at its end-of-chunk pose (openpi's synchronous cadence); at theta>0 it fires
   /// earlier, overlapping inference with playback. No-op when no chunk is
   /// playing (first cycle, after pause/clear, or when the previous round-trip
   /// produced no chunk). Interruptible by pause or shutdown via @c inference_cv_.
@@ -348,9 +348,9 @@ private:
   /// (the pause path defers the clear here rather than writing from the caller).
   std::chrono::steady_clock::time_point next_chunk_exhaust_target_{};
 
-  /// Instant at which to fire the next observation: the drain-threshold θ point
-  /// of the last applied chunk, ``exhaust - θ·duration`` (= exhaust when θ=0).
-  /// For θ>0 this is earlier than @c next_chunk_exhaust_target_, overlapping
+  /// Instant at which to fire the next observation: the drain-threshold theta point
+  /// of the last applied chunk, ``exhaust - theta·duration`` (= exhaust when theta=0).
+  /// For theta>0 this is earlier than @c next_chunk_exhaust_target_, overlapping
   /// the next inference with the current chunk's playback. Cleared with the
   /// exhaust target on resume/shutdown. Consumed by @c wait_for_fire_point_.
   /// Inference-thread only.

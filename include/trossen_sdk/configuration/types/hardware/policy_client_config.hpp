@@ -308,7 +308,7 @@ struct PolicyClientConfig {
   /// otherwise stall the loop forever with no new observations sent. On the
   /// deadline the loop stops polling this request, logs the elapsed time, and
   /// proceeds to the next cycle (which re-packs and re-pushes a fresh
-  /// observation — latest-wins supersedes the abandoned one). 0 disables the
+  /// observation - latest-wins supersedes the abandoned one). 0 disables the
   /// deadline (unbounded wait). Default 15 s is well beyond normal inference
   /// (~1-2 s) and typical cold starts, so it only trips on a genuine stall.
   double inference_timeout_ms{15000.0};

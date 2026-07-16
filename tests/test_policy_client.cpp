@@ -672,7 +672,7 @@ TEST_F(PolicyClientTest, ObservationMatchesNeutralContract) {
 
   EXPECT_EQ(obs.task, "test");
   // L5: timestep is stamped from the Timestep Clock (non-negative ticks since
-  // the active-window epoch). At the default θ=0 cadence each observation is
+  // the active-window epoch). At the default theta=0 cadence each observation is
   // packed at end-of-chunk, so the action buffer is empty and must_go is set.
   EXPECT_GE(obs.timestep, 0);
   EXPECT_TRUE(obs.must_go);
@@ -880,12 +880,12 @@ TEST_F(PolicyClientTest, InferenceFiringIsGatedByChunkExhaustion) {
 }
 
 TEST_F(PolicyClientTest, DrainThresholdFiresMidChunkAndClearsMustGo) {
-  // θ=0.5: fire the next observation halfway through each chunk (async
-  // overlap), so the cadence is ~2x the θ=0 end-of-chunk rate and the buffer
+  // theta=0.5: fire the next observation halfway through each chunk (async
+  // overlap), so the cadence is ~2x the theta=0 end-of-chunk rate and the buffer
   // is not empty at the fire point (must_go clears).
   auto fake_owned = std::make_unique<FakeTransport>();
   FakeTransport* fake = fake_owned.get();
-  // T=10 rows at 100 Hz → 100 ms/chunk; θ=0.5 fires at 50 ms.
+  // T=10 rows at 100 Hz → 100 ms/chunk; theta=0.5 fires at 50 ms.
   fake->set_canned_chunk(10, 2, std::vector<float>(20, 0.5f));
 
   auto cfg = make_config("pc1",
@@ -925,9 +925,9 @@ TEST_F(PolicyClientTest, DrainThresholdFiresMidChunkAndClearsMustGo) {
   const auto obs = fake->last_observation();
   client.stop();
 
-  // ~450 ms / 50 ms ≈ 9 fires + initial; faster than the θ=0 cadence (~5) but
+  // ~450 ms / 50 ms ≈ 9 fires + initial; faster than the theta=0 cadence (~5) but
   // still gated well below the 200 Hz × 0.45 s = 90 free-run cap.
-  EXPECT_GE(trips, 6u) << "θ=0.5 should fire roughly twice the θ=0 cadence";
+  EXPECT_GE(trips, 6u) << "theta=0.5 should fire roughly twice the theta=0 cadence";
   EXPECT_LE(trips, 20u) << "drain firing should still gate the loop";
   // Steady-state fires happen mid-chunk, so the buffer is not empty.
   EXPECT_FALSE(obs.must_go) << "mid-chunk fire should not flag starvation";
