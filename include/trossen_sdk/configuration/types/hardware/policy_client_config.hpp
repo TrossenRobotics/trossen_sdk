@@ -11,7 +11,7 @@
  *   "api_key":      "optional-string",
  *   "transport":        "openpi_ws",       // optional; TransportRegistry name
  *   "transport_config": {},                // optional; opaque per-transport options
- *   "drain_threshold":  0.0,               // optional; firing rule θ in [0, 1)
+ *   "drain_threshold":  0.0,               // optional; firing rule theta in [0, 1)
  *   "inference_hz": 10.0,
  *   "prompt":       "Pick up the red block",
  *   "subscriptions": [
@@ -25,6 +25,9 @@
  *   ]
  * }
  * @endcode
+ *
+ * The ``type`` field selects this schema at the hardware-registry level and is
+ * not parsed by ``from_json()``; every field below (``id`` onward) is.
  */
 
 #ifndef TROSSEN_SDK__CONFIGURATION__TYPES__HARDWARE__POLICY_CLIENT_CONFIG_HPP_
@@ -260,7 +263,7 @@ struct PolicyClientConfig {
   /// Defaults to an empty object.
   nlohmann::json transport_config = nlohmann::json::object();
 
-  /// Firing rule θ: send the next observation when the remaining playable
+  /// Firing rule theta: send the next observation when the remaining playable
   /// fraction of the current chunk drops to this value. 0 reproduces the
   /// synchronous openpi cadence (observe at end-of-chunk pose); higher values
   /// overlap inference with playback. Parsed and validated here; consumed by
@@ -286,7 +289,7 @@ struct PolicyClientConfig {
   /// this many seconds after a new chunk takes over from the previous one,
   /// sample() blends the outgoing chunk's last commanded row into the new
   /// chunk's rows (linear ramp from 0 to 1). Zero disables blending (hard
-  /// step). Typical values 0.05–0.15 s.
+  /// step). Typical values 0.05-0.15 s.
   double chunk_boundary_blend_s{0.0};
 
   /// Maximum time (ms) the inference loop will wait for a fresh delivery from
@@ -393,7 +396,7 @@ struct PolicyClientConfig {
       }
       j.at("drain_threshold").get_to(c.drain_threshold);
     }
-    // Strict [0, 1): θ=1 ("fire with the whole chunk unplayed") degenerates
+    // Strict [0, 1): theta=1 ("fire with the whole chunk unplayed") degenerates
     // to firing always; the negated bounded comparison also rejects NaN.
     if (!(c.drain_threshold >= 0.0 && c.drain_threshold < 1.0)) {
       throw std::runtime_error(

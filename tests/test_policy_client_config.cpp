@@ -188,7 +188,7 @@ TEST(PolicyClientConfigTest, RoundTripCanonical) {
   EXPECT_EQ(c.joint_layout[1].joint_offset, 7);
   EXPECT_EQ(c.joint_layout[1].joint_count, 7);
   // Transport-selection defaults: existing configs resolve openpi_ws with an
-  // empty options object and the synchronous θ=0 firing cadence.
+  // empty options object and the synchronous theta=0 firing cadence.
   EXPECT_EQ(c.transport, "openpi_ws");
   EXPECT_TRUE(c.transport_config.is_object());
   EXPECT_TRUE(c.transport_config.empty());
@@ -296,7 +296,7 @@ TEST(PolicyClientConfigTest, DrainThresholdParsed) {
 }
 
 TEST(PolicyClientConfigTest, RejectsDrainThresholdAtOne) {
-  // θ=1 ("fire with the whole chunk unplayed") degenerates to firing always.
+  // theta=1 ("fire with the whole chunk unplayed") degenerates to firing always.
   auto j = nlohmann::json::parse(kCanonicalConfig);
   j["drain_threshold"] = 1.0;
   EXPECT_THROW(PolicyClientConfig::from_json(j), std::runtime_error);
