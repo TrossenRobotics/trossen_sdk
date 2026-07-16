@@ -26,7 +26,7 @@ namespace trossen::hw::bimanual_glide {
  * that forwards to space-specific helpers on this
  * class. The controller selects the active space via `as_space_io()`.
  */
-class TrossenArmComponent : public HardwareComponent,
+class BimanualGlideComponent : public HardwareComponent,
                             public teleop::TeleopCapable {
 public:
   /**
@@ -34,15 +34,15 @@ public:
    *
    * @param identifier Component identifier
    */
-  explicit TrossenArmComponent(std::string identifier) : HardwareComponent(identifier) {}
-  ~TrossenArmComponent() override = default;
+  explicit BimanualGlideComponent(std::string identifier) : HardwareComponent(identifier) {}
+  ~BimanualGlideComponent() override = default;
 
   // Non-copyable, non-movable: the nested adapter views hold raw back-
   // pointers to `this` that would dangle after a copy or move.
-  TrossenArmComponent(const TrossenArmComponent&) = delete;
-  TrossenArmComponent& operator=(const TrossenArmComponent&) = delete;
-  TrossenArmComponent(TrossenArmComponent&&) = delete;
-  TrossenArmComponent& operator=(TrossenArmComponent&&) = delete;
+  BimanualGlideComponent(const BimanualGlideComponent&) = delete;
+  BimanualGlideComponent& operator=(const BimanualGlideComponent&) = delete;
+  BimanualGlideComponent(BimanualGlideComponent&&) = delete;
+  BimanualGlideComponent& operator=(BimanualGlideComponent&&) = delete;
 
   /**
    * @brief Configure the arm from JSON
@@ -50,9 +50,9 @@ public:
    * Expected JSON format ):
    * {
    *   "left_ip_address": "192.168.1.100",
-   *   "left_model": "glide_v0",
+   *   "left_model": "glide_right",
    *   "right_ip_address": "192.168.1.101",
-   *   "right_model: "glide_v0",
+   *   "right_model: "glide_left",
    * }
    *
    * @param config JSON configuration object
@@ -111,34 +111,44 @@ public:
 
 private:
   // Space-specific IO helpers. Called by the nested adapter views.
-  std::vector<float> read_bimanual_joint_base();
-  void               write_bimanual_joint_base(const std::vector<float>& cmd);
+  std::vector<float> read_joint();
+  void               write_joint(const std::vector<float>& cmd);
 
-  std::vector<float> read_bimanual_cartesian_base();
-  void               write_bimanual_cartesian_base(const std::vector<float>& cmd);
+  std::vector<float> read_cartesian();
+  void               write_cartesian(const std::vector<float>& cmd);
 
   // Adapter views: implement the space child classes and forward to the
   // private helpers above. See the class-level docstring for why this
   // indirection is necessary.
   struct JointView : teleop::JointSpaceTeleop {
-    TrossenArmComponent* self;
-    explicit JointView(TrossenArmComponent* s) : self(s) {}
+    BimanualGlideComponent* self;
+    explicit JointView(BimanualGlideComponent* s) : self(s) {}
+
+    /**
+     * @brief Read the joint positions from both arms
+     * @return Vector () of joint positions [left_q0, left_q1, ..., right_q0, right_q1, ...]
+     */
     std::vector<float> read() override {
-      return self->read_bimanual_joint_base();
+      return self->read_joint();
     }
     void write(const std::vector<float>& cmd) override {
-      self->write_bimanual_joint_base(cmd);
+      self->write_joint(cmd);
     }
   };
 
   struct CartView : teleop::CartesianSpaceTeleop {
-    TrossenArmComponent* self;
-    explicit CartView(TrossenArmComponent* s) : self(s) {}
+    BimanualGlideComponent* self;
+    explicit CartView(BimanualGlideComponent* s) : self(s) {}
+    /**
+     * @brief Read the cartesian positions from both arms
+     * @return Vector (12) of joint positions [left_x, left_y, left_z, left_rx, left_ry, left_rz,
+     *         left_gripper_m, right_x, right_y, ...]
+     */
     std::vector<float> read() override {
-      return self->read_bimanual_cartesian_base();
+      return self->read_cartesian();
     }
     void write(const std::vector<float>& cmd) override {
-      self->write_bimanual_cartesian_base(cmd);
+      // Do nothing
     }
   };
 
