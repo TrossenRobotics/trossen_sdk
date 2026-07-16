@@ -38,17 +38,24 @@ LEADER_MAX = 27.0       # N - leader effort at full grip (not including offset)
 FOLLOWER_MAX = 87.5     # N - follower effort at full grip
 LEADER_OFFSET = 8.0      # N - leader opening offset
 
-BASE_MIN = -1           # Min translational/rotational velocity (m/s and rad/s)
-BASE_MAX = 1            # Max translational/rotational velocity (m/s and rad/s)
-BASE_LIFT_MAX = 8000     # 10000   # Max lift velocity (motor units/s)
+BASE_MIN = -2           # Min translational/rotational velocity (units/s and rad/s)
+BASE_MAX = 2            # Max translational/rotational velocity (units/s and rad/s)
+BASE_DEADZONE = 0.1    # Base set to 0 velocity if less than this value
+BASE_LIFT_MAX = 8000    # Max lift velocity (motor units/s)
 
 MIN_JOYSTICK = 0        # Joystick min value
 MAX_JOYSTICK = 4095     # Joystick max value
 
 
-def scale(value, val_min, val_max, scaled_min, scaled_max):
-    """ Scale a value linearly from val_min..val_max to scaled_min..scaled_max """
+def scale(value, val_min, val_max, scaled_min, scaled_max, scaled_deadzone=None):
+    """ Scale a value linearly from val_min..val_max to scaled_min..scaled_max.
+    Deadzone applied to scaled value (-scaled_deadzone->scaled_deadzone)"""
+
     scaled_val = ((value - val_min) / (val_max - val_min) * (scaled_min - scaled_max) + scaled_max)
+
+    if scaled_deadzone:
+        if abs(scaled_val) < scaled_deadzone:
+            return 0
     return scaled_val
 
 
@@ -67,12 +74,10 @@ if __name__ == "__main__":
     if ENABLE_BASE:
         base = trossen_base.TrossenBase()
 
-    print("Configuring the drivers...")
-
     if ENABLE_RIGHT:
         driver_right_leader.configure(
             trossen_arm.Model.glide_right,
-            trossen_arm.StandardEndEffector.wxai_v0_leader,
+            trossen_arm.StandardEndEffector.no_gripper,
             IP_RIGHT_LEADER,
             True,
         )
@@ -88,7 +93,7 @@ if __name__ == "__main__":
     if ENABLE_LEFT:
         driver_left_leader.configure(
             trossen_arm.Model.glide_left,
-            trossen_arm.StandardEndEffector.wxai_v0_leader,
+            trossen_arm.StandardEndEffector.no_gripper,
             IP_LEFT_LEADER,
             True,
         )
@@ -195,21 +200,29 @@ if __name__ == "__main__":
                 right_input = driver_right_leader.get_input_report()
                 if ENABLE_FOLLOWER:
                     right_efforts = driver_right_follower.get_all_external_efforts()
-                # Scale to -1 to 1 velocity (rad/s)
-                base_velocity_angular_z = scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
-                                BASE_MIN, BASE_MAX)
+                # # Scale to -1 to 1 velocity (rad/s)
+                # base_velocity_angular_z = scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
+                #                 BASE_MIN, BASE_MAX, BASE_DEADZONE)
+
 
                 # Button bitmap: bit n is SEL_(n+1), 1 is pressed:
                 #   [SEL_1, SEL_2, SEL_3, SEL_4, SEL_5]
-                left_up_btn = int(right_input.buttons & (1 << 0))
-                left_down_btn = int(right_input.buttons & (1 << 2))
-                base_velocity_lift = int(left_up_btn - left_down_btn) * BASE_LIFT_MAX
+                right_up_btn = int(right_input.buttons & (1 << 0))
+                right_down_btn = int(right_input.buttons & (1 << 2))
+                right_left_btn = int(right_input.buttons & (1 << 1))
+                right_right_btn = int(right_input.buttons & (1 << 3))
 
-                # TODO: @schromya Move to other controller when available
+                base_velocity_lift = int(right_up_btn - right_down_btn) * BASE_LIFT_MAX
+
+                base_velocity_linear_x = scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
+                                               BASE_MIN, BASE_MAX, BASE_DEADZONE)
+                # TODO: @schromya Move to other controller when available and move angle back to
+                # buttons
                 # TODO: See why negative needed
                 base_velocity_linear_y = -scale(right_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
-                                BASE_MIN, BASE_MAX)
+                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
 
+                base_velocity_angular_z = int(right_right_btn - right_left_btn) * BASE_MAX
 
             if ENABLE_LEFT:
                 left_positions = driver_left_leader.get_all_positions()
@@ -219,10 +232,10 @@ if __name__ == "__main__":
                     left_efforts = driver_left_follower.get_all_external_efforts()
 
                 # Scale to -1 to 1 velocity (m/s)
-                base_velocity_linear_x = scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
-                                               BASE_MIN, BASE_MAX)
+                # base_velocity_linear_x = scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
+                #                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
                 # base_velocity_linear_y = scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
-                #                                BASE_MIN, BASE_MAX)
+                #                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
 
 
 
