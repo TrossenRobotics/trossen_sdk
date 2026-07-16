@@ -157,7 +157,7 @@ class ChunkSlot {
    * @brief Aligned take-over: install @p chunk as the playing chunk at once.
    *
    * Unlike swap_in's consume-fully parking, this replaces @c latest_
-   * immediately (the async-overlap / drain-threshold θ>0 path). Row 0 is
+   * immediately (the async-overlap / drain-threshold theta>0 path). Row 0 is
    * anchored at @p playback_start on the wall clock — typically
    * ``epoch + base_timestep / rate`` — so the next sample() serves the row
    * matching "now" and skips rows already in the past. The caller is
