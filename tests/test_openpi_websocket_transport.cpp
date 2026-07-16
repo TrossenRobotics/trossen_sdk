@@ -493,13 +493,22 @@ TEST(OpenpiWebsocketTransport, FactoryRejectsNonPositiveRequestTimeout) {
 TEST(OpenpiWebsocketTransport, ServerInitiatedCloseClearsConnectedFlag) {
   TestServer server(ReplyMode::CloseAfterConnect);
   OpenpiWebsocketTransport t(url_for(server.port()), std::nullopt);
-  // The server queues a close right after metadata, racing connect()'s
-  // return — connected() may be true or already false here, so only the
-  // eventual state is asserted.
-  t.connect();
 
-  // Poll briefly for the Close frame to propagate through IXWebSocket's
-  // worker into on_message_.
+  // The server queues a close immediately after metadata. Two outcomes race,
+  // both legitimate:
+  //   (a) the Close lands during the handshake -> connect() throws;
+  //   (b) connect() returns, then the Close clears the flag shortly after.
+  // The invariant under test is "a server-initiated close ends in the
+  // disconnected state" — independent of that timing. connect() calls close()
+  // on the failure path, so either outcome leaves connected_ == false; assert
+  // the eventual state rather than depending on which side of the race wins.
+  try {
+    t.connect();
+  } catch (const std::exception&) {
+    // (a) close raced the handshake — transport already torn down/disconnected.
+  }
+
+  // (b) let a late Close frame propagate through IXWebSocket's worker.
   for (int i = 0; i < 200 && t.connected(); ++i) {
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
