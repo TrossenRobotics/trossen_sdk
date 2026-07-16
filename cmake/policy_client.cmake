@@ -60,13 +60,16 @@ set(_lerobot_proto_generated
   ${_lerobot_proto_out}/lerobot_transport_services.pb.h
   ${_lerobot_proto_out}/lerobot_transport_services.grpc.pb.cc
   ${_lerobot_proto_out}/lerobot_transport_services.grpc.pb.h
+  # generate_mock_code=true also emits MockAsyncInferenceStub here, so the
+  # transport can be unit-tested against a gmock stub with no real channel.
+  ${_lerobot_proto_out}/lerobot_transport_services_mock.grpc.pb.h
 )
 add_custom_command(
   OUTPUT ${_lerobot_proto_generated}
   COMMAND ${TROSSEN_PROTOC}
     -I ${_lerobot_proto_dir}
     --cpp_out=${_lerobot_proto_out}
-    --grpc_out=${_lerobot_proto_out}
+    --grpc_out=generate_mock_code=true:${_lerobot_proto_out}
     --plugin=protoc-gen-grpc=${TROSSEN_GRPC_CPP_PLUGIN}
     ${_lerobot_proto}
   DEPENDS ${_lerobot_proto}

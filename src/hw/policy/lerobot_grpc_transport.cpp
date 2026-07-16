@@ -202,16 +202,20 @@ LerobotGrpcTransport::~LerobotGrpcTransport() { close(); }
 void LerobotGrpcTransport::connect() {
   if (connected_.load()) return;
 
-  channel_ = grpc::CreateChannel(target_, grpc::InsecureChannelCredentials());
-  // Fail fast on an unreachable target instead of letting the first RPC hang
-  // for the full deadline.
-  if (!channel_->WaitForConnected(deadline_in(connect_timeout_))) {
-    channel_.reset();
-    throw std::runtime_error(
-      "lerobot_grpc: channel to '" + target_ + "' not ready within timeout "
-      "for policy_client '" + id_ + "'");
+  // A test may have injected a stub (set_stub_for_test); only open a real
+  // channel on the production path.
+  if (!stub_) {
+    channel_ = grpc::CreateChannel(target_, grpc::InsecureChannelCredentials());
+    // Fail fast on an unreachable target instead of letting the first RPC hang
+    // for the full deadline.
+    if (!channel_->WaitForConnected(deadline_in(connect_timeout_))) {
+      channel_.reset();
+      throw std::runtime_error(
+        "lerobot_grpc: channel to '" + target_ + "' not ready within timeout "
+        "for policy_client '" + id_ + "'");
+    }
+    stub_ = transport::AsyncInference::NewStub(channel_);
   }
-  stub_ = transport::AsyncInference::NewStub(channel_);
 
   // Step 1: Ready(Empty) — liveness probe; the server answers once it can
   // accept policy instructions.
@@ -378,7 +382,9 @@ bool LerobotGrpcTransport::send_observation_bytes_(const std::vector<uint8_t>& b
   }
 
   transport::Empty resp;
-  std::unique_ptr<grpc::ClientWriter<transport::Observation>> writer(
+  // StubInterface returns the *Interface* writer (Write/WritesDone/Finish); the
+  // concrete Stub returned ClientWriter. Same API, so the send path is unchanged.
+  std::unique_ptr<grpc::ClientWriterInterface<transport::Observation>> writer(
     stub_->SendObservations(&ctx, &resp));
 
   const std::size_t size = bytes.size();

@@ -97,6 +97,16 @@ public:
 
   [[nodiscard]] TransportStatus status() const noexcept override;
 
+  /// Test-only seam: inject a stub (e.g. a gmock MockAsyncInferenceStub) before
+  /// connect(). When a stub is present connect() skips opening a real gRPC
+  /// channel and runs the handshake against it, so the transport logic can be
+  /// exercised with no channel/server (and no gRPC teardown race). Not part of
+  /// the public API — this header is reachable only via the TransportRegistry.
+  void set_stub_for_test(
+    std::unique_ptr<transport::AsyncInference::StubInterface> stub) noexcept {
+    stub_ = std::move(stub);
+  }
+
 private:
   /// Bytes for ``PolicySetup.data``: the pickled RemotePolicyConfig declaring
   /// this client's policy (type, features, rename map) to the server, emitted
@@ -134,7 +144,9 @@ private:
   std::chrono::milliseconds rpc_timeout_;  ///< deadline for hot-path RPCs
 
   std::shared_ptr<grpc::Channel> channel_;
-  std::unique_ptr<transport::AsyncInference::Stub> stub_;
+  // StubInterface (not the concrete Stub) so tests can inject a mock stub via
+  // set_stub_for_test(); the production path assigns AsyncInference::NewStub().
+  std::unique_ptr<transport::AsyncInference::StubInterface> stub_;
 
   nlohmann::json server_metadata_ = nlohmann::json::object();
   std::atomic<bool> connected_{false};
