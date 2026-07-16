@@ -20,6 +20,9 @@ target_link_libraries(test_null_backend PRIVATE trossen_sdk GTest::gtest_main)
 add_executable(test_backend_registry test_backend_registry.cpp)
 target_link_libraries(test_backend_registry PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_trossen_mcap_backend test_trossen_mcap_backend.cpp)
+target_link_libraries(test_trossen_mcap_backend PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_push_producer_registry test_push_producer_registry.cpp)
 target_link_libraries(test_push_producer_registry PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -103,6 +106,7 @@ gtest_discover_tests(test_timestamp)
 gtest_discover_tests(test_record)
 gtest_discover_tests(test_null_backend)
 gtest_discover_tests(test_backend_registry)
+gtest_discover_tests(test_trossen_mcap_backend)
 gtest_discover_tests(test_push_producer_registry)
 gtest_discover_tests(test_push_producer_base)
 gtest_discover_tests(test_session_manager_push_producer)
