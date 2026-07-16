@@ -13,7 +13,7 @@ This example builds only when the SDK is configured with `-DTROSSEN_SDK_ENABLE_P
 The shipped `config.json` targets **`TrossenRoboticsCommunity/pi05-block-transfer-lerobot`** (a π₀.₅ policy), trained on **`TrossenRoboticsCommunity/stationary-block-transfer-lerobot-v3`**:
 
 - `policy_type: pi05`, `actions_per_chunk: 50`, `device: cuda`, prompt **"Grab and handover the red cube to the other arm"**.
-- `observation.state` / `action` are `[14]` (left arm joints 0–5 + gripper, then right); 4 cameras at native **480×640** (`pi05` resizes to 224 internally, so the SDK sends native frames — no client-side resize).
+- `observation.state` / `action` are `[14]` (left arm joints 0-5 + gripper, then right); 4 cameras at native **480×640** (`pi05` resizes to 224 internally, so the SDK sends native frames — no client-side resize).
 
 `pi05` is in the server's `SUPPORTED_POLICIES`. Point `transport_config.pretrained_name_or_path` at a different checkpoint to run another model; update `lerobot_features`, `joint_names`, and the prompt to match its dataset.
 
@@ -86,7 +86,7 @@ builds it from `transport_config`, validated at configure time:
 | `pretrained_name_or_path` | yes | Checkpoint the server should load. |
 | `actions_per_chunk` | yes | Rows `T` per returned action chunk. |
 | `device` | no (`cpu`) | Server inference device, e.g. `cuda`. |
-| `connect_timeout_s` | no (10) | Handshake/channel-ready budget. The server loads the checkpoint *during* `SendPolicyInstructions`, so a large model (pi05) on first run may need 120–300 s; pre-warm the server to shorten this. |
+| `connect_timeout_s` | no (10) | Handshake/channel-ready budget. The server loads the checkpoint *during* `SendPolicyInstructions`, so a large model (pi05) on first run may need 120-300 s; pre-warm the server to shorten this. |
 | `lerobot_features` | yes | Map of dataset-feature name → `{dtype, shape}` — the LeRobot **dataset feature dict** the server consumes verbatim (`build_dataset_frame`). `dtype` is `float32` (1-D state) or `image`/`video`. Component **`names` are auto-derived** (see below), so you don't list them. |
 | `rename_map` | no (`{}`) | Server-side observation-key renames. |
 
@@ -146,7 +146,7 @@ then fires when the current chunk is **halfway** played, so inference for chunk
 **aligned to the timestep clock** — rows already in the past are skipped (an
 all-past chunk is discarded).
 
-If the buffer empties before the θ fire point (slow server / stall), the next
+If the buffer empties before the theta fire point (slow server / stall), the next
 observation is sent with `must_go` set, which the LeRobot server honors.
 
 ---
@@ -195,7 +195,7 @@ end-to-end path** (mapping, chunking, alignment) against the canonical client.
 | Teleop rate | 30 Hz |
 | Policy inference rate (cap) | 10 Hz |
 | Policy action rate | 30 Hz |
-| Drain threshold (θ) | 0.0 (set >0 to enable async overlap) |
+| Drain threshold (theta) | 0.0 (set >0 to enable async overlap) |
 | Teleop pairs | policy_left → follower_left, policy_right → follower_right |
 | Output directory | `~/.trossen_sdk` |
 | Dataset ID | `stationary_lerobot_dataset` |

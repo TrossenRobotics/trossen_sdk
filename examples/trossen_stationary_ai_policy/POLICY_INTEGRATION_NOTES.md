@@ -192,7 +192,7 @@ against pre-pause output.
 
 The gripper is the **last joint of each `joint_layout` entry** by
 convention. Open/close is a fast transient: the policy sometimes commands
-"fully open" for only 2–3 rows of a chunk. Every smoother that's good for
+"fully open" for only 2-3 rows of a chunk. Every smoother that's good for
 arm joints is bad for the gripper. Need three independent carve-outs:
 
 | Smoother | Gripper handling | Knob |
@@ -475,7 +475,7 @@ actually work past the first ~5 chunks.
 
 ### 8.5 Free-running cadence after ~5 chunks (chunk-alignment regression)
 
-**Symptom**: cadence analysis shows 1.97 s intervals for cycles 1–5, then
+**Symptom**: cadence analysis shows 1.97 s intervals for cycles 1-5, then
 1.67 s for cycles 6+. Saturation windows present for first 5 chunks then
 absent. Backward jerks (§8.4) re-appear.
 
@@ -514,7 +514,7 @@ were all in place.
 **Root cause** (two contributors, in order of impact):
 1. `output_ema_alpha = 0.4` was smoothing the gripper channel along with
    the arm joints. With ~50 ms time constant and the policy's "open"
-   command lasting only 2–3 chunk rows (~67–100 ms), the EMA never reached
+   command lasting only 2-3 chunk rows (~67-100 ms), the EMA never reached
    full extent.
 2. `chunk_boundary_blend_s = 0.15` was blending the gripper channel for
    ~5 ticks at every chunk boundary. If "open" landed in row 0 of a new
