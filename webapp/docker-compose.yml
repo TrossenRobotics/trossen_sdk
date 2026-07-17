@@ -59,10 +59,20 @@ services:
       - backend_cpp_build:/var/cache/trossen_sdk/build
       # Host-writable data dirs. Datasets, configs, and the SQLite DB land
       # under the operator's home directory and survive container teardown.
-      - ${HOME}/.trossen_sdk:/root/.trossen_sdk                          # MCAP recordings
-      - ${HOME}/.cache/huggingface/lerobot:/root/.cache/huggingface/lerobot  # LeRobot conversions
-      - ${HOME}/.config/trossen_sdk_webapp:/root/.config/trossen_sdk_webapp  # system + dataset settings
-      - ${HOME}/.local/state/trossen_sdk_webapp:/root/.local/state/trossen_sdk_webapp  # SQLite DB + sessions
+      #
+      # These are keyed off TROSSEN_DATA_ROOT, NOT ${HOME}, on purpose: ${HOME}
+      # is taken from the shell that runs `docker compose`, so `sudo docker
+      # compose` (HOME=/root) would silently relocate every dataset + the
+      # settings + the SQLite DB into /root/.trossen_sdk — a second, divergent
+      # world from a normal (non-sudo) run. Docker Compose lets a shell env var
+      # override the .env file, but a var that exists ONLY in .env can't be
+      # clobbered by sudo. So set TROSSEN_DATA_ROOT in webapp/.env to your real
+      # home (e.g. /home/<user>) and the data lands there whether or not the
+      # command is run with sudo. Falls back to ${HOME} if unset (old behavior).
+      - ${TROSSEN_DATA_ROOT:-${HOME}}/.trossen_sdk:/root/.trossen_sdk                          # MCAP recordings
+      - ${TROSSEN_DATA_ROOT:-${HOME}}/.cache/huggingface/lerobot:/root/.cache/huggingface/lerobot  # LeRobot conversions
+      - ${TROSSEN_DATA_ROOT:-${HOME}}/.config/trossen_sdk_webapp:/root/.config/trossen_sdk_webapp  # system + dataset settings
+      - ${TROSSEN_DATA_ROOT:-${HOME}}/.local/state/trossen_sdk_webapp:/root/.local/state/trossen_sdk_webapp  # SQLite DB + sessions
     group_add:
       - video        # /dev/video* for OpenCV / V4L2 cameras
       - plugdev      # USB hot-plug
@@ -83,6 +93,23 @@ services:
       HUB_URL: ${HUB_URL:-}
       HUB_TOKEN: ${HUB_TOKEN:-}
       MACHINE_NAME: ${MACHINE_NAME:-}
+      # Live-preview payload knobs (recorder_runner.py). All optional — unset
+      # falls back to the code defaults. These only shrink what the browser
+      # Rerun viewer receives; the durable MCAP recording is never affected.
+      # Tune per machine in webapp/.env, then `docker compose up -d backend`.
+      #   TROSSEN_PREVIEW_HZ            subscribe rate   (default 30)
+      #   TROSSEN_PREVIEW_DOWNSCALE     Nth-pixel color+depth (default 2 = 1/4)
+      #   TROSSEN_PREVIEW_JPEG_QUALITY  color JPEG 1-100, <=0=raw (default 75)
+      #   TROSSEN_PREVIEW_DEPTH         1 = stream depth overlay (default OFF)
+      #   TROSSEN_PREVIEW_DEPTH_EVERY   log depth every Nth frame (default 2)
+      #   TROSSEN_PREVIEW_DEPTH_CLIP    quantize u16->u8 over [0,N] units,
+      #                                 0=keep u16 (default 0; D405≈mm, 2000≈2 m)
+      TROSSEN_PREVIEW_HZ: ${TROSSEN_PREVIEW_HZ:-}
+      TROSSEN_PREVIEW_DOWNSCALE: ${TROSSEN_PREVIEW_DOWNSCALE:-}
+      TROSSEN_PREVIEW_JPEG_QUALITY: ${TROSSEN_PREVIEW_JPEG_QUALITY:-}
+      TROSSEN_PREVIEW_DEPTH: ${TROSSEN_PREVIEW_DEPTH:-}
+      TROSSEN_PREVIEW_DEPTH_EVERY: ${TROSSEN_PREVIEW_DEPTH_EVERY:-}
+      TROSSEN_PREVIEW_DEPTH_CLIP: ${TROSSEN_PREVIEW_DEPTH_CLIP:-}
     restart: unless-stopped
 
   frontend:

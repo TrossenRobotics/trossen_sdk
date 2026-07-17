@@ -1,6 +1,14 @@
 /**
  * @file trossen_sdk.cpp
  * @brief Python bindings for the Trossen SDK (pybind11).
+ *
+ * Binding sections are added incrementally across the PR stack:
+ *   1. Version constants  (PR A)
+ *   2. Data types          (PR B — this PR)
+ *   3. Hardware + producers (PR B)
+ *   4. Backends + config    (PR B)
+ *   5. Teleop + session     (PR C)
+ *   6. Utilities            (PR C)
  */
 
 #include <chrono>
@@ -31,6 +39,9 @@ namespace {
 #include "trossen_sdk/data/timestamp.hpp"
 #include "trossen_sdk/data/record.hpp"
 
+// Observer
+#include "trossen_sdk/observer/observer_base.hpp"
+
 // Hardware
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
@@ -50,12 +61,9 @@ namespace {
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/types.hpp"
 
-// Runtime (producer registries)
+// Runtime (producer registries only — session manager deferred to PR C)
 #include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
-
-// Observer subsystem (webapp Monitor page subclasses ObserverBase in Python)
-#include "trossen_sdk/observer/observer_base.hpp"
 
 // Configuration
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
@@ -518,6 +526,20 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("ip_address", &ArmConfig::ip_address)
     .def_readwrite("model", &ArmConfig::model)
     .def_readwrite("end_effector", &ArmConfig::end_effector)
+    .def_readwrite("actuated", &ArmConfig::actuated)
+    .def_readwrite("joint_signs", &ArmConfig::joint_signs)
+    .def_readwrite("joint_offsets", &ArmConfig::joint_offsets)
+    .def_readwrite("gripper_force_feedback", &ArmConfig::gripper_force_feedback)
+    .def_readwrite("gripper_feedback_leader_max", &ArmConfig::gripper_feedback_leader_max)
+    .def_readwrite("gripper_feedback_follower_max", &ArmConfig::gripper_feedback_follower_max)
+    .def_readwrite("gripper_feedback_offset", &ArmConfig::gripper_feedback_offset)
+    .def_readwrite("position_min", &ArmConfig::position_min)
+    .def_readwrite("position_max", &ArmConfig::position_max)
+    .def_readwrite("velocity_max", &ArmConfig::velocity_max)
+    .def_readwrite("effort_max", &ArmConfig::effort_max)
+    .def_readwrite("position_tolerance", &ArmConfig::position_tolerance)
+    .def_readwrite("velocity_tolerance", &ArmConfig::velocity_tolerance)
+    .def_readwrite("effort_tolerance", &ArmConfig::effort_tolerance)
     .def_static("from_json", &ArmConfig::from_json, py::arg("json"))
     .def("to_json", &ArmConfig::to_json);
 
@@ -732,7 +754,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
       std::vector<std::shared_ptr<TeleopController>> result;
       result.reserve(controllers.size());
       for (auto& c : controllers) {
-        result.push_back(std::shared_ptr<TeleopController>(std::move(c)));
+        result.push_back(std::shared_ptr<TeleopController>(c.release()));
       }
       return result;
     },
@@ -776,6 +798,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
       .def_readonly("normal_ticks", &Scheduler::Stats::normal_ticks);
 
     py::class_<SessionManager::Stats>(m, "SessionManagerStats")
+      .def(py::init<>())
       .def_readwrite("current_episode_index",
                      &SessionManager::Stats::current_episode_index)
       .def_readwrite("episode_active", &SessionManager::Stats::episode_active)
@@ -843,7 +866,11 @@ PYBIND11_MODULE(trossen_sdk, m) {
       .def("wait_for_auto_stop", &SessionManager::wait_for_auto_stop,
            py::arg("timeout") = std::chrono::milliseconds::max(),
            py::call_guard<py::gil_scoped_release>())
-      .def("shutdown", &SessionManager::shutdown)
+      // Release the GIL: shutdown() joins the observer worker thread, which
+      // may be mid-flight in a Python record handler (e.g. logging to Rerun)
+      // and needs the GIL to finish. Holding it here would deadlock the join.
+      .def("shutdown", &SessionManager::shutdown,
+           py::call_guard<py::gil_scoped_release>())
       .def("stats", &SessionManager::stats)
       .def("on_pre_episode", &SessionManager::on_pre_episode, py::arg("callback"))
       .def("on_episode_started", &SessionManager::on_episode_started,
@@ -925,7 +952,9 @@ PYBIND11_MODULE(trossen_sdk, m) {
 
     py::class_<RawModeGuard>(m, "RawModeGuard")
       .def(py::init<>())
-      .def("is_active", &RawModeGuard::is_active);
+      .def("is_active", &RawModeGuard::is_active)
+      .def("__enter__", [](RawModeGuard& self) -> RawModeGuard& { return self; })
+      .def("__exit__", [](RawModeGuard&, py::object, py::object, py::object) {});
 
     m.def("poll_keypress", &poll_keypress, "Non-blocking poll for a keypress");
   }

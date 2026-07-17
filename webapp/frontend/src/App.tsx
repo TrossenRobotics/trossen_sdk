@@ -6,6 +6,7 @@ import { ConfigurationPage } from '@/app/pages/ConfigurationPage';
 import { DatasetsPage } from '@/app/pages/DatasetsPage';
 import { DatasetDetailsPage } from "@/app/pages/DatasetDetailsPage";
 import { MonitorEpisodePage } from '@/app/pages/MonitorEpisodePage';
+import { EmbeddedViewerPage } from '@/app/pages/EmbeddedViewerPage';
 import { RouteError } from '@/app/components/RouteError';
 import { DatasetsProvider } from '@/lib/DatasetsContext';
 import { HwStatusProvider } from '@/lib/HwStatusContext';
@@ -14,6 +15,10 @@ import { TourProvider } from '@/lib/TourContext';
 
 
 const router = createBrowserRouter([
+  // Chrome-free viewer, loaded in an iframe by the monitor page. Kept OUTSIDE
+  // the Layout route so it has no nav and is a self-contained browsing context
+  // the monitor can destroy/recreate per session (see EmbeddedViewerPage).
+  { path: '/embed/viewer/:sessionId', element: <EmbeddedViewerPage /> },
   {
     path: '/',
     element: <Layout />,

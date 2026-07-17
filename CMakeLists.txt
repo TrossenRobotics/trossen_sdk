@@ -414,6 +414,7 @@ endif()
 
 # ─── Python bindings (pybind11) ──────────────────────────────────────────────
 # Follows the trossen_arm pattern: SKBUILD-driven, single binding .cpp,
+# module name matches package name, pybind11-stubgen for type stubs.
 option(BUILD_PYTHON_BINDINGS "Build Python pybind11 bindings" OFF)
 
 if(BUILD_PYTHON_BINDINGS OR DEFINED SKBUILD)

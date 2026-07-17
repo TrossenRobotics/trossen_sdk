@@ -3,7 +3,7 @@ FROM ubuntu:24.04
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Set the version of the Trossen Arm driver to install
-ENV TROSSEN_ARM_VERSION=1.9.0
+ENV TROSSEN_ARM_VERSION=1.11.0
 
 # Install build tools and system dependencies
 RUN \

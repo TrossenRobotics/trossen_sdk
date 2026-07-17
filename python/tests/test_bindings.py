@@ -49,6 +49,9 @@ def test_record_types():
     odom.pose.x = 1.0
     assert odom.pose.x == 1.0
 
+    # TeleopJointStateRecord was removed from C++; verify it's gone
+    assert not hasattr(ts, "TeleopJointStateRecord")
+
 
 def test_null_backend():
     """NullBackend can be created and used."""

@@ -21,6 +21,7 @@ interface Fault {
   id: string;
   system_id: string;
   system_name: string;
+  issue_class: string;
   device_type: string;
   device_label: string;
   reason: string;
@@ -33,10 +34,16 @@ interface Fault {
 
 interface SystemOption { id: string; name: string }
 
-const DEVICE_TYPES = ['arm', 'camera', 'other'];
+// Category vocabularies per issue class (mirrors HARDWARE_TYPES / SOFTWARE_TYPES
+// in backend/app/faults.py). The picked value is stored in device_type.
+const HARDWARE_TYPES = ['arm', 'camera', 'other'];
+const SOFTWARE_TYPES = ['webapp', 'recorder', 'viewer', 'converter', 'other'];
+const typesForClass = (issueClass: string) =>
+  issueClass === 'software' ? SOFTWARE_TYPES : HARDWARE_TYPES;
 
 const EMPTY_FORM = {
   system_id: '',
+  issue_class: 'hardware',
   device_type: 'arm',
   device_label: '',
   reason: '',
@@ -123,8 +130,8 @@ export function HardwareIssues() {
       <button
         className="relative flex items-center gap-1.5 px-2.5 py-1.5 rounded text-dim hover:text-ink hover:bg-edge transition-colors mr-1"
         onClick={() => { setError(''); setOpen(true); }}
-        title="Report or review hardware issues"
-        aria-label="Hardware issues"
+        title="Report or review issues"
+        aria-label="Issues"
       >
         <Wrench className="w-4 h-4" />
         {openCount > 0 && (
@@ -141,15 +148,28 @@ export function HardwareIssues() {
         >
           <div className="w-full max-w-lg rounded-xl border border-edge bg-surface p-5">
             <div className="flex items-center justify-between mb-1">
-              <h2 className="text-lg font-semibold text-ink">Hardware issues</h2>
+              <h2 className="text-lg font-semibold text-ink">Issues</h2>
               <button className="text-dim hover:text-ink px-2" onClick={() => setOpen(false)} aria-label="Close">✕</button>
             </div>
             <p className="text-sm text-dim mb-4">
-              Report a broken device. Open issues put this machine into downtime and notify the fleet admin.
+              Report a hardware or software issue. Open issues put this machine into downtime and notify the fleet admin.
             </p>
 
             {/* Report form */}
             <form className="flex flex-col gap-2 mb-5" onSubmit={submit}>
+              {/* Class toggle — switching resets the category to that class's first option. */}
+              <div className="flex gap-1 p-0.5 rounded border border-edge bg-app self-start">
+                {(['hardware', 'software'] as const).map(c => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setForm({ ...form, issue_class: c, device_type: typesForClass(c)[0] })}
+                    className={`px-3 py-1 rounded text-sm capitalize transition ${form.issue_class === c ? 'bg-brand text-white' : 'text-dim hover:text-ink'}`}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
               <div className="flex gap-2">
                 <select
                   className="flex-1 px-2 py-1.5 rounded border border-edge bg-surface text-ink text-sm"
@@ -164,12 +184,12 @@ export function HardwareIssues() {
                   value={form.device_type}
                   onChange={e => setForm({ ...form, device_type: e.target.value })}
                 >
-                  {DEVICE_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                  {typesForClass(form.issue_class).map(t => <option key={t} value={t}>{t}</option>)}
                 </select>
               </div>
               <input
                 className="px-2 py-1.5 rounded border border-edge bg-surface text-ink text-sm"
-                placeholder="Device label (e.g. follower_left, cam_high)"
+                placeholder={form.issue_class === 'software' ? 'Where? (e.g. Monitor page, converter CLI)' : 'Device label (e.g. follower_left, cam_high)'}
                 value={form.device_label}
                 onChange={e => setForm({ ...form, device_label: e.target.value })}
               />
@@ -179,12 +199,15 @@ export function HardwareIssues() {
                 value={form.reason}
                 onChange={e => setForm({ ...form, reason: e.target.value })}
               />
-              <input
-                className="px-2 py-1.5 rounded border border-edge bg-surface text-ink text-sm"
-                placeholder="Part needed to fix (optional)"
-                value={form.parts_needed}
-                onChange={e => setForm({ ...form, parts_needed: e.target.value })}
-              />
+              {/* Part-to-order only applies to hardware. */}
+              {form.issue_class === 'hardware' && (
+                <input
+                  className="px-2 py-1.5 rounded border border-edge bg-surface text-ink text-sm"
+                  placeholder="Part needed to fix (optional)"
+                  value={form.parts_needed}
+                  onChange={e => setForm({ ...form, parts_needed: e.target.value })}
+                />
+              )}
               {error && <div className="text-xs text-red-500">{error}</div>}
               <button
                 className="self-end px-4 py-1.5 rounded bg-brand text-white text-sm font-semibold hover:brightness-110 transition disabled:opacity-50"
@@ -202,9 +225,12 @@ export function HardwareIssues() {
               {openFaults.map(f => (
                 <div key={f.id} className="flex items-start gap-3 p-2.5 rounded border border-yellow-500/40 bg-yellow-500/10">
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-semibold text-ink capitalize">
-                      {f.device_type}{f.device_label ? ` · ${f.device_label}` : ''}
-                      {f.system_name ? <span className="text-dim font-normal"> — {f.system_name}</span> : null}
+                    <div className="text-sm font-semibold text-ink capitalize flex items-center gap-1.5 flex-wrap">
+                      <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${f.issue_class === 'software' ? 'bg-brand/20 text-brand' : 'bg-yellow-500/20 text-yellow-600'}`}>
+                        {f.issue_class === 'software' ? 'SW' : 'HW'}
+                      </span>
+                      <span>{f.device_type}{f.device_label ? ` · ${f.device_label}` : ''}</span>
+                      {f.system_name ? <span className="text-dim font-normal normal-case"> — {f.system_name}</span> : null}
                     </div>
                     <div className="text-sm text-ink/90">{f.reason}</div>
                     {f.parts_needed && <div className="text-xs text-dim">Needs: {f.parts_needed}</div>}
@@ -228,7 +254,7 @@ export function HardwareIssues() {
                 <div className="flex flex-col gap-1">
                   {resolvedFaults.map(f => (
                     <div key={f.id} className="text-xs text-dim capitalize">
-                      {f.device_type}{f.device_label ? ` · ${f.device_label}` : ''} — {f.reason}
+                      <span className="uppercase">{f.issue_class === 'software' ? 'SW' : 'HW'}</span> · {f.device_type}{f.device_label ? ` · ${f.device_label}` : ''} — {f.reason}
                     </div>
                   ))}
                 </div>

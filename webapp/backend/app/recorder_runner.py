@@ -31,6 +31,7 @@ Status / verdict signalling on stdout:
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import signal
@@ -38,9 +39,12 @@ import sys
 import threading
 import time
 from contextlib import contextmanager
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote
 
+import numpy as np
 import rerun as rr
 import trossen_sdk as ts
 
@@ -48,13 +52,154 @@ _READY_PREFIX = "__READY__:"
 _SUCCESS_PREFIX = "__SUCCESS__:"
 _ERROR_PREFIX = "__ERROR__:"
 
-# Live-preview Rerun stream tuning.
-#   - subscribe at 30 Hz: the SDK throttles the per-record handler, so the
-#     log cost is bounded regardless of the producer's native poll rate.
-#     30 Hz is a smooth preview for both camera images and joint/odometry
-#     scalar plots; the durable recording is unaffected (observers are a
-#     non-durable fan-out off the same records).
+# --- Live-preview payload tuning -------------------------------------------
+#
+# Everything the live viewer receives is a LOSSY, size-reduced tap off the same
+# records that feed the durable MCAP recording. The recording is never touched
+# by any knob here; these only shrink what crosses the Rerun gRPC wire into the
+# browser viewer. Raw color+depth for 4 cameras at 30 Hz is ~180 MB/s, which
+# swamps the WASM/WebGPU viewer; these knobs bring it back to the old JPEG-tile
+# budget. All are env-tunable so a machine can A/B them live without a rebuild.
+
+
+def _env_int(name: str, default: int) -> int:
+    """Parse an int env var; blank/absent/garbage falls back to `default`."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return int(raw.strip())
+    except ValueError:
+        return default
+
+
+def _env_float(name: str, default: float) -> float:
+    """Parse a float env var; blank/absent/garbage falls back to `default`."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw.strip())
+    except ValueError:
+        return default
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    """Parse a bool env var. 0/false/off/no => False; anything else => True."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    return raw.strip().lower() not in ("0", "false", "off", "no")
+
+
+# SDK subscription rate: the ceiling at which the per-record handler is invoked
+# (bounds cost regardless of the producer's native poll rate). Kept fixed at 30;
+# the actual, LIVE-adjustable display fps for camera images is applied on top as
+# an in-handler throttle (`_preview_target_hz`) so the UI can change it
+# mid-session without re-subscribing.
 _RERUN_SUBSCRIBE_HZ = 30.0
+
+# Live display fps for camera images (in-handler throttle, per camera). 0 = emit
+# at the subscribe ceiling (no throttle). Initial value from the env knob;
+# changed at runtime by a {"type":"preview"} control message.
+_preview_target_hz = _env_float("TROSSEN_PREVIEW_HZ", 15.0)
+# Per-record last-emit monotonic timestamp, driving the fps throttle.
+_preview_last_emit: dict[str, float] = {}
+
+# (1) Downscale: take every Nth pixel of color AND depth before logging (nearest
+# subsample, quadratic saving). 1 = full res, 2 = half each dim (=1/4 payload).
+# A monitor overlay does not need capture resolution.
+_PREVIEW_DOWNSCALE = max(1, _env_int("TROSSEN_PREVIEW_DOWNSCALE", 2))
+
+# Color JPEG quality (Rerun's built-in encoder). 1-100 => send JPEG bytes
+# instead of raw RGB (~10-20x on color); <=0 => send raw. Depth is NOT jpeg-able
+# (16-bit measurements, DCT invents geometry) — see the depth knobs below.
+_PREVIEW_JPEG_QUALITY = _env_int("TROSSEN_PREVIEW_JPEG_QUALITY", 75)
+
+# Depth-in-preview switch. Default OFF: depth is the dominant wire cost and the
+# live overlay isn't worth it, so the viewer is colour-only and the UI shows a
+# small "Depth recording" badge instead (depth still lands in the MCAP). Set
+# TROSSEN_PREVIEW_DEPTH=1 to stream the depth overlay again (then the
+# EVERY/CLIP knobs below apply).
+_PREVIEW_DEPTH = _env_bool("TROSSEN_PREVIEW_DEPTH", False)
+
+# (3) Depth decimation: log depth only every Nth image frame per camera (color
+# stays smoother). 1 = every frame, 2 = half-rate depth. Linear saving, no
+# per-frame quality loss.
+_PREVIEW_DEPTH_EVERY = max(1, _env_int("TROSSEN_PREVIEW_DEPTH_EVERY", 2))
+
+# (2) Depth quantization: >0 clips raw depth to [0, N] in the SDK's native depth
+# units and maps it to uint8 (halves depth bytes vs uint16). D405 depth is
+# typically millimeters, so 2000 ≈ near-field 2 m. 0 = keep native uint16
+# precision (no quantize). Lossy in precision — preview only, never recording.
+_PREVIEW_DEPTH_CLIP = _env_int("TROSSEN_PREVIEW_DEPTH_CLIP", 0)
+
+# Per-camera frame counter driving depth decimation (keyed by record_id).
+_depth_frame_counter: dict[str, int] = {}
+
+
+def _preview_config_summary() -> str:
+    """One-line description of the active preview knobs (logged at startup)."""
+    color = (f"jpeg q{_PREVIEW_JPEG_QUALITY}"
+             if _PREVIEW_JPEG_QUALITY > 0 else "raw")
+    if not _PREVIEW_DEPTH:
+        depth = "OFF"
+    else:
+        depth = f"every{_PREVIEW_DEPTH_EVERY}"
+        depth += (f"+clip{_PREVIEW_DEPTH_CLIP}->u8"
+                  if _PREVIEW_DEPTH_CLIP > 0 else "+u16")
+    return (f"fps={_preview_target_hz} downscale={_PREVIEW_DOWNSCALE}x "
+            f"color={color} depth={depth}")
+
+
+def _apply_preview_settings(
+    fps: Any = None, downscale: Any = None, jpeg_quality: Any = None
+) -> None:
+    """Apply live preview-quality changes from a control message (best-effort).
+
+    Mutates the module-level tuning globals so the change takes effect on the
+    next logged frame — no re-subscription needed. Out-of-range or unparseable
+    values are ignored so a malformed message can never break the preview or the
+    recording.
+    """
+    global _preview_target_hz, _PREVIEW_DOWNSCALE, _PREVIEW_JPEG_QUALITY
+    if fps is not None:
+        try:
+            f = float(fps)
+            if 0 <= f <= 60:
+                _preview_target_hz = f
+        except (TypeError, ValueError):
+            pass
+    if downscale is not None:
+        try:
+            d = int(downscale)
+            if 1 <= d <= 8:
+                _PREVIEW_DOWNSCALE = d
+        except (TypeError, ValueError):
+            pass
+    if jpeg_quality is not None:
+        try:
+            q = int(jpeg_quality)
+            if -1 <= q <= 100:
+                _PREVIEW_JPEG_QUALITY = q
+        except (TypeError, ValueError):
+            pass
+    print(f"[recorder-runner] live-preview updated: {_preview_config_summary()}",
+          flush=True)
+
+
+def _downscale(arr: np.ndarray) -> np.ndarray:
+    """Nearest-neighbour subsample by _PREVIEW_DOWNSCALE on the first two axes.
+
+    Works for HxW (depth/mono) and HxWxC (color) alike. Nearest (strided) is the
+    correct choice for depth — averaging across depth discontinuities would
+    invent in-between distances at object edges — and is fine for a color
+    preview. Dependency-free (cv2 is not installed in the backend venv).
+    """
+    step = _PREVIEW_DOWNSCALE
+    if step <= 1:
+        return arr
+    return arr[::step, ::step]
 
 # Rerun application id shown in the web viewer's title.
 _RERUN_APP_ID = "trossen_sdk"
@@ -82,6 +227,191 @@ _rerun_observer: Any | None = None
 # episode-boundary Clear can wipe each one. Populated by
 # _register_rerun_observer.
 _rerun_record_ids: list[str] = []
+
+
+# --- Lightweight MJPEG live feed (low-power / Raspberry Pi viewer) ----------
+#
+# A second, dependency-light preview path for clients that can't drive the
+# Rerun WASM/WebGPU viewer (e.g. a Raspberry Pi kiosk). It rides the SAME
+# throttled + downscaled tap as the Rerun preview (see _log_image_record):
+# each color frame is JPEG-encoded once and stashed in `_latest_jpeg`, then
+# served as an MJPEG (multipart/x-mixed-replace) stream a plain <img> tag can
+# consume — JPEG decode + blit only, no WebGPU/WASM. Color-only by design
+# (depth stays a "recording" badge in the UI). Best-effort: any failure here
+# disables the Lite feed and must never touch the recording or the Rerun path.
+
+# Fixed port the MJPEG HTTP server listens on. Reachable from the browser at
+# http://<host>:<port>/stream/<camera> because both webapp containers run with
+# network_mode: host (mirrors _RERUN_GRPC_PORT — no port publishing needed).
+# MUST match the port the frontend builds its Lite viewer URLs from (see
+# MJPEG_PORT in webapp/frontend/src/app/pages/MonitorEpisodePage.tsx).
+_MJPEG_PORT = 9877
+
+# Latest JPEG frame per camera record_id + a monotonically increasing sequence
+# number, so a streaming client can block until a genuinely new frame exists
+# (rather than busy-spin or re-send duplicates). Guarded by _mjpeg_cond; every
+# write does notify_all().
+_mjpeg_cond = threading.Condition()
+_latest_jpeg: dict[str, bytes] = {}
+_mjpeg_seq: dict[str, int] = {}
+
+# Retained for the process lifetime so the daemon server thread stays alive.
+_mjpeg_server: Any | None = None
+
+
+def _encode_jpeg(img: np.ndarray, encoding: str) -> bytes | None:
+    """JPEG-encode an already-downscaled camera frame to bytes for the MJPEG feed.
+
+    Converts to an RGB/grayscale layout PIL can save based on the SDK encoding
+    string (bgr8 gets a channel swap; mono8 stays 2-D). Returns None on any
+    failure so the caller simply skips stashing the frame — a bad frame can
+    never break the feed or the recording. PIL is imported lazily so a missing
+    Pillow disables only the Lite feed (Rerun preview is unaffected).
+    """
+    try:
+        from PIL import Image
+        arr = img
+        enc = (encoding or "").lower()
+        if enc == "bgr8" and arr.ndim == 3 and arr.shape[2] == 3:
+            arr = arr[:, :, ::-1]  # BGR -> RGB for correct colors in <img>
+        mode = "L" if arr.ndim == 2 else "RGB"
+        # Reuse the live JPEG-quality knob; fall back to 75 when color JPEG is
+        # disabled for Rerun (the MJPEG wire always needs a JPEG).
+        quality = _PREVIEW_JPEG_QUALITY if _PREVIEW_JPEG_QUALITY > 0 else 75
+        buf = io.BytesIO()
+        Image.fromarray(np.ascontiguousarray(arr), mode).save(
+            buf, format="JPEG", quality=int(quality))
+        return buf.getvalue()
+    except Exception:
+        return None
+
+
+def _publish_mjpeg_frame(record_id: str, img: np.ndarray, encoding: str) -> None:
+    """Encode + stash the latest color frame for `record_id` and wake streamers.
+
+    Called from _log_image_record on the already-throttled, already-downscaled
+    frame, so the Lite feed inherits the live fps/downscale knobs for free.
+    """
+    data = _encode_jpeg(img, encoding)
+    if data is None:
+        return
+    with _mjpeg_cond:
+        _latest_jpeg[record_id] = data
+        _mjpeg_seq[record_id] = _mjpeg_seq.get(record_id, 0) + 1
+        _mjpeg_cond.notify_all()
+
+
+class _MJPEGHandler(BaseHTTPRequestHandler):
+    """Serves the Lite live feed: /cameras, /stream/<id>, /snapshot/<id>.
+
+    One handler thread per connection (ThreadingHTTPServer). A /stream response
+    is an open-ended multipart/x-mixed-replace body that a browser <img> renders
+    frame-by-frame; it lives until the client disconnects.
+    """
+
+    # Silence per-request logging: the SDK's stdout is a control channel the
+    # parent parses as JSON event lines — request noise would corrupt it.
+    def log_message(self, *args: Any) -> None:  # noqa: N802
+        pass
+
+    def _cors(self) -> None:
+        self.send_header("Access-Control-Allow-Origin", "*")
+
+    def do_GET(self) -> None:  # noqa: N802
+        path = unquote(self.path.split("?", 1)[0])
+        if path in ("/", "/health"):
+            self._respond_json({"status": "ok", "cameras": sorted(_latest_jpeg)})
+        elif path == "/cameras":
+            self._respond_json({"cameras": sorted(_latest_jpeg)})
+        elif path.startswith("/snapshot/"):
+            self._serve_snapshot(path[len("/snapshot/"):])
+        elif path.startswith("/stream/"):
+            self._serve_stream(path[len("/stream/"):])
+        else:
+            self.send_error(404)
+
+    def _respond_json(self, obj: dict[str, Any]) -> None:
+        body = json.dumps(obj).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self._cors()
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def _serve_snapshot(self, cam: str) -> None:
+        with _mjpeg_cond:
+            data = _latest_jpeg.get(cam)
+        if data is None:
+            self.send_error(404)
+            return
+        self.send_response(200)
+        self.send_header("Content-Type", "image/jpeg")
+        self._cors()
+        self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        self.wfile.write(data)
+
+    def _serve_stream(self, cam: str) -> None:
+        boundary = "frame"
+        self.send_response(200)
+        self.send_header(
+            "Content-Type", f"multipart/x-mixed-replace; boundary={boundary}")
+        self._cors()
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Connection", "close")
+        self.end_headers()
+        last_seq = -1
+        try:
+            while True:
+                with _mjpeg_cond:
+                    # Block until a newer frame than we last sent exists. The
+                    # timeout re-sends the latest frame as a keepalive (keeps the
+                    # <img> painted if the camera stalls) and lets a disconnected
+                    # client be noticed on the next write.
+                    _mjpeg_cond.wait_for(
+                        lambda: _mjpeg_seq.get(cam, 0) != last_seq, timeout=5.0)
+                    data = _latest_jpeg.get(cam)
+                    last_seq = _mjpeg_seq.get(cam, 0)
+                if data is None:
+                    continue
+                self.wfile.write(
+                    b"--" + boundary.encode() + b"\r\n"
+                    b"Content-Type: image/jpeg\r\n"
+                    b"Content-Length: " + str(len(data)).encode() + b"\r\n\r\n")
+                self.wfile.write(data)
+                self.wfile.write(b"\r\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError):
+            return  # browser <img> went away — normal
+        except Exception:
+            return
+
+
+def _start_mjpeg_server(port: int) -> bool:
+    """Start the Lite MJPEG HTTP server in a daemon thread (best-effort).
+
+    Mirrors _start_rerun_server: a bind failure (e.g. a stale recorder still
+    holding the port) just disables the Lite feed and must never abort
+    recording. The daemon thread + daemon_threads dies with the process.
+    """
+    global _mjpeg_server
+    try:
+        server = ThreadingHTTPServer(("0.0.0.0", port), _MJPEGHandler)
+        server.daemon_threads = True
+        threading.Thread(
+            target=server.serve_forever, name="mjpeg-server", daemon=True
+        ).start()
+        _mjpeg_server = server
+        print(f"[recorder-runner] MJPEG live feed listening on :{port} "
+              f"(/stream/<camera>)", flush=True)
+        return True
+    except Exception as e:
+        _mjpeg_server = None
+        print(f"[recorder-runner] MJPEG server setup failed: {e}; "
+              f"Lite feed disabled", flush=True)
+        return False
 
 
 def _start_rerun_server(grpc_port: int) -> bool:
@@ -123,28 +453,64 @@ def _start_rerun_server(grpc_port: int) -> bool:
 def _log_image_record(record_id: str, rec: Any) -> None:
     """Log one ImageRecord (and its depth map, if present) to the viewer.
 
-    The SDK's `encoding` string selects the Rerun color model so the viewer
-    renders colours correctly: rgb8 -> "RGB", bgr8 -> "BGR", mono8 -> a
-    plain 2-D grayscale image. Rerun accepts the numpy array directly — no
-    JPEG / OpenCV round-trip is needed (unlike the old tile preview).
+    This is the LOSSY live-preview tap — it downscales, JPEG-compresses the
+    colour, and decimates/quantizes depth to fit the Rerun gRPC wire. The
+    durable MCAP recording is a separate fan-out off the same record and is
+    untouched by any of it. See the "Live-preview payload tuning" knobs above.
+
+    The SDK's `encoding` string selects the Rerun colour model so the viewer
+    renders colours correctly: rgb8 -> "RGB", bgr8 -> "BGR", mono8 -> a plain
+    2-D grayscale image (model inferred from the 2-D array).
     """
     img = rec.image
     if img is None or getattr(img, "size", 0) == 0:
         return
+    # (live) display-fps throttle: drop this camera's frame if it arrives sooner
+    # than 1/_preview_target_hz since its last emit. Per record_id, so each
+    # camera is throttled independently. _preview_target_hz is adjustable
+    # mid-session via a preview control message; 0 disables the throttle.
+    if _preview_target_hz > 0:
+        now = time.monotonic()
+        if now - _preview_last_emit.get(record_id, 0.0) < 1.0 / _preview_target_hz:
+            return
+        _preview_last_emit[record_id] = now
+    img = _downscale(img)
     encoding = (rec.encoding or "").lower()
+    # Fan the same throttled/downscaled color frame out to the Lite MJPEG feed.
+    # Independent of the Rerun path below, so the <img> stream works even when
+    # the browser can't run the WASM viewer.
+    _publish_mjpeg_frame(record_id, img, encoding)
     if encoding == "bgr8":
-        rr.log(record_id, rr.Image(img, "BGR"), recording=_rr_stream)
+        image = rr.Image(img, "BGR")
     elif encoding in ("mono8", "mono", "gray", "grayscale"):
-        # Single channel: let Rerun infer grayscale from the 2-D array.
-        rr.log(record_id, rr.Image(img), recording=_rr_stream)
+        image = rr.Image(img)  # single channel: Rerun infers grayscale
     else:
         # rgb8 and any unrecognised 3-channel encoding default to RGB.
-        rr.log(record_id, rr.Image(img, "RGB"), recording=_rr_stream)
-    if rec.has_depth():
-        depth = rec.depth_image
-        if depth is not None and getattr(depth, "size", 0) > 0:
-            rr.log(f"{record_id}/depth", rr.DepthImage(depth),
-                   recording=_rr_stream)
+        image = rr.Image(img, "RGB")
+    # (1) JPEG-encode the colour before it hits the wire (Rerun's built-in
+    # encoder). ~10-20x smaller than raw RGB; the viewer decodes natively.
+    if _PREVIEW_JPEG_QUALITY > 0:
+        image = image.compress(jpeg_quality=_PREVIEW_JPEG_QUALITY)
+    rr.log(record_id, image, recording=_rr_stream)
+
+    if not _PREVIEW_DEPTH or not rec.has_depth():
+        return
+    # (3) Decimate depth relative to colour: only every Nth frame per camera.
+    n = _depth_frame_counter.get(record_id, 0)
+    _depth_frame_counter[record_id] = n + 1
+    if n % _PREVIEW_DEPTH_EVERY:
+        return
+    depth = rec.depth_image
+    if depth is None or getattr(depth, "size", 0) == 0:
+        return
+    depth = _downscale(depth)
+    # (2) Quantize uint16 -> uint8 over [0, clip] native depth units. Halves
+    # depth bytes; the viewer auto-colormaps the range, so the overlay looks the
+    # same (relative depth) as the un-quantized path. Lossy in precision only.
+    if _PREVIEW_DEPTH_CLIP > 0:
+        clipped = np.clip(depth, 0, _PREVIEW_DEPTH_CLIP).astype(np.uint32)
+        depth = (clipped * 255 // _PREVIEW_DEPTH_CLIP).astype(np.uint8)
+    rr.log(f"{record_id}/depth", rr.DepthImage(depth), recording=_rr_stream)
 
 
 def _log_joint_state_record(record_id: str, rec: Any) -> None:
@@ -572,6 +938,8 @@ def _register_rerun_observer(
         _rerun_record_ids = list(camera_stream_ids)
         print(f"[recorder-runner] rerun observer subscribed to cameras "
               f"{camera_stream_ids} at {_RERUN_SUBSCRIBE_HZ} Hz", flush=True)
+        print(f"[recorder-runner] live-preview payload: "
+              f"{_preview_config_summary()}", flush=True)
     except Exception as e:
         # Live preview is best-effort; never block bootstrap on it.
         print(f"[recorder-runner] rerun observer setup failed: {e}; "
@@ -624,7 +992,17 @@ def _stdin_reader(
             msg = json.loads(line)
         except json.JSONDecodeError:
             continue
-        if msg.get("type") != "signal":
+        mtype = msg.get("type")
+        if mtype == "preview":
+            # Live viewer-quality change (display fps / resolution). Applied
+            # immediately; never touches the recording or the loop.
+            _apply_preview_settings(
+                fps=msg.get("fps"),
+                downscale=msg.get("downscale"),
+                jpeg_quality=msg.get("jpeg_quality"),
+            )
+            continue
+        if mtype != "signal":
             continue
         signal = msg.get("signal")
         if signal == "abort":
@@ -975,6 +1353,9 @@ def main() -> int:
     # to subscribe, and the observer must be added before the first
     # start_episode(). Best-effort — a failure just disables live preview.
     _start_rerun_server(_RERUN_GRPC_PORT)
+    # Lite MJPEG feed for low-power clients (Raspberry Pi). Also best-effort and
+    # also camera-only; rides the same preview tap as the Rerun observer.
+    _start_mjpeg_server(_MJPEG_PORT)
 
     mgr: ts.SessionManager | None = None
     try:

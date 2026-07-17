@@ -503,13 +503,49 @@ def _signal(session_id: str, signal: str) -> bool:
 
 
 def _send_signal(runner: _Runner, signal: str) -> None:
-    """Write one JSON-line control message to the child's stdin."""
-    msg = json.dumps({"type": "signal", "signal": signal}) + "\n"
+    """Write one JSON-line control signal to the child's stdin."""
+    _send_control(runner, {"type": "signal", "signal": signal})
+
+
+def _send_control(runner: _Runner, msg: dict) -> None:
+    """Write one JSON-line control message to the child's stdin (thread-safe)."""
+    data = (json.dumps(msg) + "\n").encode()
     with runner.stdin_lock:
         if runner.proc.stdin is None or runner.proc.stdin.closed:
             return
-        runner.proc.stdin.write(msg.encode())
+        runner.proc.stdin.write(data)
         runner.proc.stdin.flush()
+
+
+def set_preview(
+    session_id: str,
+    *,
+    fps: float | None = None,
+    downscale: int | None = None,
+    jpeg_quality: int | None = None,
+) -> bool:
+    """Push live preview-quality settings (display fps / resolution) to the
+    recorder child. Returns True if delivered, False if no recorder is running.
+
+    Affects only the live viewer feed; the durable MCAP recording is untouched.
+    Omitted fields are left unchanged in the child.
+    """
+    with _lock:
+        runner = _runners.get(session_id)
+    if runner is None:
+        return False
+    msg: dict = {"type": "preview"}
+    if fps is not None:
+        msg["fps"] = fps
+    if downscale is not None:
+        msg["downscale"] = downscale
+    if jpeg_quality is not None:
+        msg["jpeg_quality"] = jpeg_quality
+    try:
+        _send_control(runner, msg)
+    except Exception:
+        return False
+    return True
 
 
 def _wait_for_ready(

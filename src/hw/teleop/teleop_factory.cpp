@@ -75,12 +75,16 @@ create_controllers_from_global_config() {
       TeleopController::Config tc{};
       tc.space = parse_space(pair.space);
       tc.control_rate_hz = cfg->rate_hz;
-      controllers.push_back(std::make_unique<TeleopController>(
-        std::move(leader), std::move(follower), std::move(tc)));
-
+      // Compute the log label BEFORE moving `follower` into the controller —
+      // otherwise the check below reads a moved-from (null) shared_ptr and
+      // always prints "(leader-only)" even when a follower is attached.
       const std::string follower_label =
         pair.follower.empty() ? "(none)"
         : (follower ? pair.follower : pair.follower + " (leader-only)");
+
+      controllers.push_back(std::make_unique<TeleopController>(
+        std::move(leader), std::move(follower), std::move(tc)));
+
       std::cout << "  [ok] " << pair.leader << " -> " << follower_label
                 << " @ " << cfg->rate_hz << " Hz (" << pair.space << ")\n";
     } catch (const std::exception& e) {

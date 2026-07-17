@@ -87,6 +87,15 @@ public:
   /// Apply a teleop command in this space (follower role).
   virtual void write(const std::vector<float>& cmd) = 0;
 
+  /// Optional. Smoothly move to `target` over the follower's configured
+  /// trajectory time, blocking until it arrives. The controller calls this
+  /// once before the mirror loop so the follower is gently "summoned" to the
+  /// leader's current pose instead of snapping to it on the first tick — which
+  /// matters especially for a passive leader that may start anywhere. The
+  /// default falls back to an immediate write (the legacy snap) for hardware
+  /// without a timed move.
+  virtual void summon(const std::vector<float>& target) { write(target); }
+
   /// Optional. Called once by the controller before the mirror loop starts,
   /// with the follower's current state in this space. Real-hardware leaders
   /// have no internal state to sync, so the default is a no-op. Virtual
@@ -94,6 +103,28 @@ public:
   /// before mirroring begins.
   virtual void sync_to_state(const std::vector<float>& state) {
     (void)state;
+  }
+
+  // ── Optional gripper force-feedback channel (follower → leader) ──────────
+  //
+  // A second, reverse channel the controller runs each tick alongside the
+  // forward position mirror: the follower reports its measured gripper effort
+  // and the leader renders a reflected force so the operator feels the grasp.
+  // Both ends are no-ops by default, so hardware that can't sense or render
+  // gripper force simply opts out.
+
+  /// Leader role: true if this hardware renders gripper force feedback. Gates
+  /// whether the controller runs the reverse channel at all.
+  virtual bool renders_gripper_feedback() const { return false; }
+
+  /// Follower role: this hardware's measured gripper effort (N), or nullopt if
+  /// it can't report one. A sensor read — independent of the gripper's mode.
+  virtual std::optional<float> read_gripper_effort() { return std::nullopt; }
+
+  /// Leader role: render gripper force feedback from the follower's measured
+  /// gripper effort (N). Default no-op for hardware without an actuated gripper.
+  virtual void apply_gripper_feedback(float follower_gripper_effort) {
+    (void)follower_gripper_effort;
   }
 };
 

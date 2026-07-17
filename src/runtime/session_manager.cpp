@@ -27,7 +27,9 @@ namespace trossen::runtime {
 namespace {
 
 // Shared fan-out used by both the push-producer and polled-producer emit lambdas so the
-// per-record path stays in lockstep across them.
+// per-record path stays in lockstep across them. The record is always enqueued to the
+// durable sink first; observers are then offered the SAME shared_ptr (a refcount bump, no
+// copy) so the non-durable fan-out never blocks or mutates the sink path.
 void fan_out_record_(
   io::Sink* sink,
   const std::vector<std::shared_ptr<observer::ObserverBase>>& observers,
@@ -113,8 +115,11 @@ void SessionManager::shutdown() {
     }
   }
 
-  // Fire pre-shutdown callbacks once, after recording has stopped.
-  // Useful for returning hardware to safe positions while post-processing runs.
+  // Fire pre-shutdown callbacks FIRST, before tearing down observers. These
+  // return hardware to a safe state (e.g. stopping teleop / disabling arm
+  // torque), so they must run even if an observer's stop() is slow or blocks
+  // — e.g. a Rerun gRPC sink applying backpressure to a connected web viewer.
+  // Safing the hardware must never be gated on telemetry teardown.
   if (!shutdown_callbacks_fired_) {
     shutdown_callbacks_fired_ = true;
 
@@ -128,6 +133,14 @@ void SessionManager::shutdown() {
       } catch (const std::exception& e) {
         std::cerr << "Pre-shutdown callback error: " << e.what() << std::endl;
       }
+    }
+  }
+
+  // Observers stop here, not at episode boundaries. Producers have already stopped
+  // emitting via stop_episode(), so no in-flight offer() can race.
+  for (auto& obs : observers_) {
+    if (obs) {
+      obs->stop();
     }
   }
 }
@@ -408,6 +421,7 @@ bool SessionManager::start_episode() {
     // Capture raw pointer to sink (safe: sink lifetime managed by Session Manager)
     auto* sink_ptr = current_sink_.get();
 
+    // Add task that polls producer and enqueues records.
     // The outer lambda owns observers_snapshot by value (its lifetime spans the task);
     // the inner lambda captures it by reference since poll() invokes emit synchronously
     // and never stores it, avoiding a per-tick vector copy.

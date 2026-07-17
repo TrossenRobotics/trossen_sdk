@@ -37,6 +37,7 @@ from app.recorder import (
     RecorderError,
     clear_session_headless,
     mark_session_headless,
+    set_preview,
     signal_next,
     signal_rerecord,
     start_recording,
@@ -438,7 +439,7 @@ def list_faults(status: str | None = None) -> list[faults_mod.DeviceFault]:
 
 @app.post("/api/faults", status_code=201)
 def create_fault(body: faults_mod.CreateFaultBody) -> faults_mod.DeviceFault:
-    """File a hardware fault. The reporter is the signed-in operator (if any)."""
+    """File a hardware or software issue. Reporter is the signed-in operator (if any)."""
     try:
         return faults_mod.create_fault(body, operators.get_active_operator())
     except ValueError as e:
@@ -795,6 +796,30 @@ def rerecord_episode(session_id: str) -> Session:
             detail=f"No active recorder for session '{session_id}'",
         )
     return sess
+
+
+class PreviewSettings(BaseModel):
+    """Live viewer-quality knobs. All optional; omitted fields are unchanged."""
+
+    fps: float | None = None        # display frame rate for camera images
+    downscale: int | None = None    # resolution divisor (1 = full, 2 = half, ...)
+    jpeg_quality: int | None = None # color JPEG quality; <=0 = raw
+
+
+@app.post("/api/sessions/{session_id}/preview", status_code=204)
+def set_session_preview(session_id: str, body: PreviewSettings) -> None:
+    """Adjust the LIVE viewer feed quality (display fps / resolution) mid-session.
+
+    Viewer-only and best-effort: never touches the durable MCAP recording. No-ops
+    silently when no recorder is running (e.g. between episodes), so the UI can
+    fire it freely without error handling.
+    """
+    set_preview(
+        session_id,
+        fps=body.fps,
+        downscale=body.downscale,
+        jpeg_quality=body.jpeg_quality,
+    )
 
 
 @app.post("/api/sessions/{session_id}/clear-error")

@@ -7,6 +7,7 @@
 #define TROSSEN_SDK__HW__ARM__TROSSEN_ARM_COMPONENT_HPP_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -108,10 +109,39 @@ public:
   void end_teleop() override;
   void stage() override;
 
+  /**
+   * @brief Apply this arm's affine joint remap in place.
+   *
+   * Transforms a joint-space vector into the follower's frame using the same
+   * signs/offsets as read_joint(): v[j] = joint_signs_[j]*v[j] + joint_offsets_[j].
+   * Empty arrays (the follower, or any 1:1 leader) leave the vector unchanged.
+   *
+   * Exposed publicly so the recording producer can store the *processed*
+   * leader stream (the value actually commanded to the follower) rather than
+   * raw driver positions — keeping one source of truth for the formula.
+   *
+   * @param v         Joint-space vector, modified in place.
+   * @param derivative When true, the constant offset is dropped and only the
+   *                   sign is applied. Correct for velocities and efforts,
+   *                   whose frame flips with a joint reversal but which carry
+   *                   no positional offset.
+   */
+  void apply_joint_remap(std::vector<float>& v, bool derivative = false) const;
+
 private:
   // Space-specific IO helpers. Called by the nested adapter views.
   std::vector<float> read_joint();
   void               write_joint(const std::vector<float>& cmd);
+  void               summon_joint(const std::vector<float>& cmd);
+
+  /// Follower role: current measured gripper effort (N), or nullopt without a
+  /// driver. A sensor read, valid regardless of the gripper's control mode.
+  std::optional<float> read_gripper_effort();
+
+  /// Leader role: render gripper force feedback from the follower's measured
+  /// gripper effort (N) via the cubic curve, written as an external effort.
+  /// Only meaningful when gripper_force_feedback_ is set.
+  void apply_gripper_feedback(float follower_gripper_effort);
 
   std::vector<float> read_cartesian();
   void               write_cartesian(const std::vector<float>& cmd);
@@ -127,6 +157,18 @@ private:
     }
     void write(const std::vector<float>& cmd) override {
       self->write_joint(cmd);
+    }
+    void summon(const std::vector<float>& cmd) override {
+      self->summon_joint(cmd);
+    }
+    bool renders_gripper_feedback() const override {
+      return self->gripper_force_feedback_;
+    }
+    std::optional<float> read_gripper_effort() override {
+      return self->read_gripper_effort();
+    }
+    void apply_gripper_feedback(float follower_gripper_effort) override {
+      self->apply_gripper_feedback(follower_gripper_effort);
     }
   };
 
@@ -153,6 +195,50 @@ private:
   /// whether prepare_for_teleop() enters gravity-compensation mode (leader)
   /// or position-mode alignment (follower).
   bool is_leader_{false};
+
+  /// False for a passive leader (no actuators, e.g. the lightweight Trossen
+  /// leader). A passive arm only streams joint positions in position mode, so
+  /// prepare_for_teleop()/stage()/end_teleop() skip every motion command.
+  bool actuated_{true};
+
+  /// Optional affine remap applied in read_joint(): out[j] = joint_signs_[j] *
+  /// raw[j] + joint_offsets_[j]. Empty = identity. Used when a leader's joint
+  /// frame doesn't map 1:1 onto the follower (e.g. inverted/offset joints).
+  std::vector<float> joint_signs_;
+  std::vector<float> joint_offsets_;
+
+  /// Leader-only gripper force feedback. When gripper_force_feedback_ is set,
+  /// the leader's gripper runs in external-effort mode and the teleop loop
+  /// renders a reflected force from the follower's measured gripper effort via
+  /// the cubic curve. The leader's arm joints can still be passive.
+  bool  gripper_force_feedback_{false};
+  float gripper_feedback_leader_max_{27.0f};
+  float gripper_feedback_follower_max_{87.5f};
+  float gripper_feedback_offset_{8.0f};
+
+  /// True while the gripper is actually in external-effort mode for feedback
+  /// (set by prepare_for_teleop, cleared by end_teleop). Guards end_teleop's
+  /// effort release so it never commands external effort on an idle gripper —
+  /// e.g. when end_teleop() runs without a preceding prepare_for_teleop()
+  /// (the hardware-test park step does exactly that).
+  bool  gripper_feedback_engaged_{false};
+
+  /// Optional per-joint operating limits applied to the controller in
+  /// configure() (right after driver_->configure). Each, when non-empty, has
+  /// one entry per joint; empty leaves the firmware default for that field.
+  /// The controller resets these on power cycle, so they are re-applied on
+  /// every reconnect.
+  std::vector<float> position_min_;
+  std::vector<float> position_max_;
+  std::vector<float> velocity_max_;
+  std::vector<float> effort_max_;
+
+  /// Optional per-joint limit tolerances applied alongside the limits above.
+  /// Each, when non-empty, has one entry per joint; empty leaves the firmware
+  /// default. Re-applied on every reconnect for the same reason as the limits.
+  std::vector<float> position_tolerance_;
+  std::vector<float> velocity_tolerance_;
+  std::vector<float> effort_tolerance_;
 
   /// Joint-space pose this arm moves to at session start (via stage()).
   /// Empty = no staging.

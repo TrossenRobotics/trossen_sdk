@@ -21,10 +21,9 @@ namespace trossen::configuration {
  *   "ip_address": "192.168.1.3",
  *   "model": "wxai_v0",
  *   "end_effector": "wxai_v0_leader",
- *   "staged_position": [0.0, 1.04, 0.52, 0.63, 0.0, 0.0, 0.0],  // optional
- *   "staging_time_s": 2.0,                                // optional
- *   "episode_lifecycle_enabled": true,                    // optional, default false
- *   "write_moving_time_s": 0.1                            // optional, default 0.0
+ *   "actuated": false,                       // optional, default true
+ *   "joint_signs":   [1,1,1,-1,-1,1,1],      // optional, default identity
+ *   "joint_offsets": [0,0,0,0,0,-0.7854,0]   // optional, default identity
  * }
  */
 struct ArmConfig {
@@ -61,6 +60,56 @@ struct ArmConfig {
   /// on top of its own EMA output filter.
   float write_moving_time_s{0.0f};
 
+  /// @brief Whether the arm has actuators. A passive leader (e.g. the
+  /// lightweight Trossen leader) only streams joint positions and cannot be
+  /// commanded, so teleop staging / mode setup / rest moves are skipped.
+  bool actuated{true};
+
+  /// @brief Optional affine joint remap applied to this arm's read positions:
+  /// out[j] = joint_signs[j] * raw[j] + joint_offsets[j]. Empty = identity.
+  /// Used for a leader whose joint frame doesn't map 1:1 onto the follower.
+  std::vector<float> joint_signs{};
+  std::vector<float> joint_offsets{};
+
+  /// @brief Leader-only: render gripper force feedback. When true, the teleop
+  /// loop reflects the FOLLOWER's measured gripper effort back onto this
+  /// (actuated) gripper via a cubic curve, so the operator feels the grasp.
+  /// The leader's arm joints may still be passive — only the gripper needs a
+  /// motor. The follower gripper stays plain position passthrough.
+  bool gripper_force_feedback{false};
+
+  /// @brief Cubic feedback constants (N), from the bilateral reference:
+  /// leader effort at full grip, follower effort treated as full grip (the
+  /// normalizer), and a baseline opening offset that keeps the leader gripper
+  /// open when nothing is grasped. leader = leader_max·norm^3 + offset, where
+  /// norm = clamp(|follower_effort| / follower_max, 0, 1).
+  float gripper_feedback_leader_max{27.0f};
+  float gripper_feedback_follower_max{87.5f};
+  float gripper_feedback_offset{8.0f};
+
+  /// @brief Optional per-joint operating limits pushed to the controller on
+  /// connect. Each array, when non-empty, must have one entry per joint (arm
+  /// joints in rad / rad·s⁻¹ / N·m, gripper in m / m·s⁻¹ / N). Empty = leave
+  /// the controller's firmware default untouched for that field.
+  ///
+  /// The controller clips commands to these limits and does NOT persist them
+  /// across a power cycle — they reset to firmware defaults on reboot — so the
+  /// SDK re-applies them on every reconfigure (see TrossenArmComponent).
+  std::vector<float> position_min{};
+  std::vector<float> position_max{};
+  std::vector<float> velocity_max{};
+  std::vector<float> effort_max{};
+
+  /// @brief Optional per-joint limit tolerances pushed to the controller
+  /// alongside the limits above. Each array, when non-empty, must have one
+  /// entry per joint (position in rad / gripper m, velocity in rad·s⁻¹ /
+  /// gripper m·s⁻¹, effort in N·m / gripper N). Empty = leave the controller's
+  /// firmware default untouched for that field. Same non-persistent-across-
+  /// power-cycle behaviour as the limits, so re-applied on every reconfigure.
+  std::vector<float> position_tolerance{};
+  std::vector<float> velocity_tolerance{};
+  std::vector<float> effort_tolerance{};
+
   static ArmConfig from_json(const nlohmann::json& j) {
     ArmConfig c;
     if (j.contains("ip_address")) j.at("ip_address").get_to(c.ip_address);
@@ -78,6 +127,27 @@ struct ArmConfig {
     if (j.contains("write_moving_time_s")) {
       j.at("write_moving_time_s").get_to(c.write_moving_time_s);
     }
+    if (j.contains("actuated")) j.at("actuated").get_to(c.actuated);
+    if (j.contains("joint_signs")) j.at("joint_signs").get_to(c.joint_signs);
+    if (j.contains("joint_offsets")) j.at("joint_offsets").get_to(c.joint_offsets);
+    if (j.contains("gripper_force_feedback"))
+      j.at("gripper_force_feedback").get_to(c.gripper_force_feedback);
+    if (j.contains("gripper_feedback_leader_max"))
+      j.at("gripper_feedback_leader_max").get_to(c.gripper_feedback_leader_max);
+    if (j.contains("gripper_feedback_follower_max"))
+      j.at("gripper_feedback_follower_max").get_to(c.gripper_feedback_follower_max);
+    if (j.contains("gripper_feedback_offset"))
+      j.at("gripper_feedback_offset").get_to(c.gripper_feedback_offset);
+    if (j.contains("position_min")) j.at("position_min").get_to(c.position_min);
+    if (j.contains("position_max")) j.at("position_max").get_to(c.position_max);
+    if (j.contains("velocity_max")) j.at("velocity_max").get_to(c.velocity_max);
+    if (j.contains("effort_max")) j.at("effort_max").get_to(c.effort_max);
+    if (j.contains("position_tolerance"))
+      j.at("position_tolerance").get_to(c.position_tolerance);
+    if (j.contains("velocity_tolerance"))
+      j.at("velocity_tolerance").get_to(c.velocity_tolerance);
+    if (j.contains("effort_tolerance"))
+      j.at("effort_tolerance").get_to(c.effort_tolerance);
     return c;
   }
 
@@ -88,7 +158,8 @@ struct ArmConfig {
       {"end_effector", end_effector},
       {"staging_time_s", staging_time_s},
       {"episode_lifecycle_enabled", episode_lifecycle_enabled},
-      {"write_moving_time_s", write_moving_time_s}
+      {"write_moving_time_s", write_moving_time_s},
+      {"actuated", actuated}
     };
     // Emit staging only when configured. TrossenArmComponent::configure()
     // rejects a present-but-wrong-length staged_position, so an empty array
@@ -96,6 +167,25 @@ struct ArmConfig {
     if (!staged_position.empty()) {
       j["staged_position"] = staged_position;
     }
+    // Emit the remap only when set, to keep ordinary arm configs clean.
+    if (!joint_signs.empty()) j["joint_signs"] = joint_signs;
+    if (!joint_offsets.empty()) j["joint_offsets"] = joint_offsets;
+    // Emit gripper feedback tuning only when enabled, same reasoning.
+    if (gripper_force_feedback) {
+      j["gripper_force_feedback"] = gripper_force_feedback;
+      j["gripper_feedback_leader_max"] = gripper_feedback_leader_max;
+      j["gripper_feedback_follower_max"] = gripper_feedback_follower_max;
+      j["gripper_feedback_offset"] = gripper_feedback_offset;
+    }
+    // Emit per-joint limits only when set, to keep ordinary arm configs clean.
+    if (!position_min.empty()) j["position_min"] = position_min;
+    if (!position_max.empty()) j["position_max"] = position_max;
+    if (!velocity_max.empty()) j["velocity_max"] = velocity_max;
+    if (!effort_max.empty()) j["effort_max"] = effort_max;
+    // Emit per-joint tolerances only when set, same reasoning.
+    if (!position_tolerance.empty()) j["position_tolerance"] = position_tolerance;
+    if (!velocity_tolerance.empty()) j["velocity_tolerance"] = velocity_tolerance;
+    if (!effort_tolerance.empty()) j["effort_tolerance"] = effort_tolerance;
     return j;
   }
 };

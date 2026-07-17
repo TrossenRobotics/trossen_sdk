@@ -102,6 +102,19 @@ void TeleopController::prepare_teleop() {
   if (follower_io_) {
     leader_io_->sync_to_state(follower_io_->read());
   }
+
+  // Summon the follower onto the leader's current pose with a smooth, blocking
+  // move so it eases into position instead of snapping there on the first
+  // mirror tick. Essential for a passive leader, which can be anywhere at the
+  // start of teleop. summon() falls back to an instant write on hardware that
+  // doesn't implement a timed move, so this is safe for every follower.
+  if (follower_io_) {
+    const auto leader_pose = leader_io_->read();
+    if (!leader_pose.empty()) {
+      std::cout << "  [teleop] Summoning follower to leader pose...\n";
+      follower_io_->summon(leader_pose);
+    }
+  }
   std::cout << "  [teleop] Arms ready for teleop\n";
 }
 
@@ -166,6 +179,16 @@ void TeleopController::control_loop() {
       auto cmd = leader_io_->read();
       if (follower_io_) {
         follower_io_->write(cmd);
+      }
+
+      // Reverse channel: reflect the follower's measured gripper effort back
+      // onto the leader so the operator feels the grasp. Only runs when the
+      // leader renders feedback (e.g. a passive-arm leader with an actuated
+      // gripper); otherwise both calls are skipped.
+      if (follower_io_ && leader_io_->renders_gripper_feedback()) {
+        if (const auto effort = follower_io_->read_gripper_effort()) {
+          leader_io_->apply_gripper_feedback(*effort);
+        }
       }
 
       std::this_thread::sleep_until(deadline);

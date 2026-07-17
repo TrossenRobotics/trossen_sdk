@@ -131,8 +131,14 @@ class DeviceFault(SQLModel, table=True):
     id: str = Field(primary_key=True)
     system_id: str = ""
     system_name: str = ""
-    # "arm" | "camera" | "other" — a coarse category the UI offers as a
-    # dropdown; `device_label` carries the specific unit (e.g. follower_left).
+    # "hardware" | "software" — what kind of issue this is. Existing rows and
+    # anything unspecified default to "hardware" (the original meaning of this
+    # table). Both classes are reported to the hub and drive machine downtime.
+    issue_class: str = "hardware"
+    # A coarse category the UI offers as a dropdown; its meaning depends on
+    # issue_class — hardware: "arm"|"camera"|"other"; software: "webapp"|
+    # "recorder"|"viewer"|"converter"|"other". `device_label` carries the
+    # specific unit (e.g. follower_left) for hardware.
     device_type: str = "other"
     device_label: str = ""
     reason: str = ""

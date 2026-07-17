@@ -36,6 +36,11 @@ TrossenArmProducer::TrossenArmProducer(
     throw std::invalid_argument("TrossenArmProducer: TrossenArmComponent has null driver");
   }
 
+  // Retain the component so poll() can apply its affine joint remap, recording
+  // the processed leader stream (identical to what teleop commands the
+  // follower) instead of raw driver values. Identity for the follower.
+  arm_component_ = std::move(arm_component);
+
   // Parse JSON config into Config struct
   cfg_.stream_id = config.value("stream_id", "joint_states");
   cfg_.use_device_time = config.value("use_device_time", false);
@@ -70,7 +75,6 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   // Read robot output, save timestamp and joint states
   robot_output_ = driver_->get_robot_output();
   uint64_t device_ts = robot_output_.header.timestamp;
-  // TODO(shantanuparab-tr): Get actions from the leader arm
   pos_d_ = robot_output_.joint.all.positions;
   vel_d_ = robot_output_.joint.all.velocities;
   eff_d_ = robot_output_.joint.all.efforts;
@@ -103,6 +107,15 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   for (double v : eff_d_) {
     rec->efforts.push_back(static_cast<float>(v));
   }
+
+  // Store the processed stream: apply the arm's affine joint remap so a
+  // mismatched leader records the values it actually commands the follower
+  // (positions get the full affine map; velocities/efforts flip sign only, as
+  // the constant offset drops out of a derivative/torque). Identity — a no-op —
+  // for the follower and any 1:1 leader.
+  arm_component_->apply_joint_remap(rec->positions);
+  arm_component_->apply_joint_remap(rec->velocities, /*derivative=*/true);
+  arm_component_->apply_joint_remap(rec->efforts, /*derivative=*/true);
 
   emit(rec);
   ++stats_.produced;

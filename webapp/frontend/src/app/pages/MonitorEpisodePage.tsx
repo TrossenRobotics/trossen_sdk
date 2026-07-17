@@ -1,4 +1,4 @@
-import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Loader2, Lock, CheckCircle } from 'lucide-react';
+import { Play, Square, RotateCcw, SkipForward, X, AlertTriangle, Loader2, Lock, CheckCircle, ChevronDown } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useParams } from 'react-router';
 import { toast } from 'sonner';
@@ -9,8 +9,6 @@ import { useHwStatus } from '@/lib/HwStatusContext';
 import { apiGet, apiPost, describeError } from '@/lib/api';
 import { useReconnectingWebSocket } from '@/hooks/useReconnectingWebSocket';
 import type { WsStatus } from '@/hooks/useReconnectingWebSocket';
-import { RerunViewer } from '@/app/components/RerunViewer';
-import { ErrorBoundary } from '@/app/components/ErrorBoundary';
 import { HwTestButton } from '@/app/components/HwTestButton';
 import { useConfirm } from '@/app/hooks/useConfirm';
 import { useHardwareTest } from '@/app/hooks/useHardwareTest';
@@ -102,6 +100,52 @@ function ConnectionBadge({ status, recording }: { status: WsStatus; recording: b
   );
 }
 
+// Column count for the Lite camera grid, biased toward landscape-ish cells so
+// typical (wide) camera frames fill the cell with minimal letterboxing: 1 cam
+// full, 2-4 in a 2-wide grid (2x2 for the common 4-camera rig), then 3/4 wide.
+function liteGridCols(n: number): number {
+  if (n <= 1) return 1;
+  if (n <= 4) return 2;
+  if (n <= 9) return 3;
+  return 4;
+}
+
+// A compact "value chip" select: the trigger is a filled accent pill showing
+// the current, applied value, so it reads as a committed setting rather than an
+// empty "pick one" dropdown. Still a native <select> under the hood (keyboard +
+// a11y for free); appearance-none strips the default chrome and we draw our own
+// caret. Options are given readable neutral colors so the open list stays legible
+// on the accent trigger.
+function ChipSelect({
+  label,
+  value,
+  onChange,
+  title,
+  children,
+}: {
+  label: string;
+  value: string | number;
+  onChange: (value: string) => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <label className="flex items-center gap-[6px]" title={title}>
+      <span className="text-dim">{label}</span>
+      <span className="relative inline-flex items-center">
+        <select
+          value={value}
+          onChange={e => onChange(e.target.value)}
+          className="appearance-none bg-brand text-white font-medium rounded-full pl-[10px] pr-[22px] py-[3px] cursor-pointer focus:outline-none focus:ring-2 focus:ring-brand/50"
+        >
+          {children}
+        </select>
+        <ChevronDown className="w-[13px] h-[13px] text-white/85 absolute right-[6px] pointer-events-none" />
+      </span>
+    </label>
+  );
+}
+
 export function MonitorEpisodePage() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
@@ -177,6 +221,14 @@ export function MonitorEpisodePage() {
   // Without this, resuming after a stop left the viewer bound to the dead server
   // and the feeds froze until you navigated away and back. Keyed into the viewer.
   const [viewerEpoch, setViewerEpoch] = useState(0);
+
+  // Camera configs for this session's system, used only to tell the operator
+  // that depth IS being recorded even though it's no longer drawn in the live
+  // viewer (the depth stream was dropped from the preview — it's the dominant
+  // wire cost — but still lands in the MCAP). Populated from /api/systems.
+  const [systems, setSystems] = useState<
+    Array<{ id: string; config?: { hardware?: { cameras?: Array<{ use_depth?: boolean }> } } | null }>
+  >([]);
 
   // Dry Run runs the full session lifecycle (Staging → Recording →
   // Resetting × N → Sleeping) but the backend swaps in NullBackend, so
@@ -289,7 +341,12 @@ export function MonitorEpisodePage() {
   // gate would falsely show "needs Hardware Test" even for a ready system.
   useEffect(() => {
     const controller = new AbortController();
-    apiGet<Array<{ id: string; hw_status?: string | null; hw_message?: string | null }>>(
+    apiGet<Array<{
+      id: string;
+      hw_status?: string | null;
+      hw_message?: string | null;
+      config?: { hardware?: { cameras?: Array<{ use_depth?: boolean }> } } | null;
+    }>>(
       '/api/systems',
       { signal: controller.signal },
     )
@@ -297,10 +354,108 @@ export function MonitorEpisodePage() {
         list.forEach(s => {
           if (s.hw_status) setHwStatus(s.id, { status: s.hw_status, message: s.hw_message ?? '' });
         });
+        setSystems(list.map(s => ({ id: s.id, config: s.config })));
       })
       .catch(() => { /* gate stays closed until a test runs — safe default */ });
     return () => controller.abort();
   }, [setHwStatus]);
+
+  // How many of this session's cameras record depth. Drives the "Depth
+  // recording" badge over the (colour-only) live viewer.
+  const depthCameraCount = useMemo(() => {
+    const sys = systems.find(s => s.id === session?.system_id);
+    return (sys?.config?.hardware?.cameras ?? []).filter(c => c.use_depth).length;
+  }, [systems, session?.system_id]);
+
+  // Live preview quality (display fps + resolution). Persisted per-browser so a
+  // low-power viewer (e.g. a Raspberry Pi kiosk) keeps its lighter setting
+  // across reloads. Pushed to the recorder whenever recording (re)starts and
+  // whenever a knob changes; server-side it no-ops if no recorder is running,
+  // and it only affects the live feed — never the recording.
+  const [previewFps, setPreviewFps] = useState<number>(() => {
+    const v = Number(localStorage.getItem('previewFps'));
+    return v > 0 ? v : 15;
+  });
+  const [previewDownscale, setPreviewDownscale] = useState<number>(() => {
+    const v = Number(localStorage.getItem('previewDownscale'));
+    return v >= 1 ? v : 2;
+  });
+  useEffect(() => {
+    localStorage.setItem('previewFps', String(previewFps));
+    localStorage.setItem('previewDownscale', String(previewDownscale));
+  }, [previewFps, previewDownscale]);
+  useEffect(() => {
+    if (phase !== 'recording' || !sessionId) return;
+    apiPost(`/api/sessions/${sessionId}/preview`, {
+      fps: previewFps,
+      downscale: previewDownscale,
+    }).catch(() => { /* viewer-only; safe to ignore if no recorder */ });
+  }, [phase, previewFps, previewDownscale, sessionId]);
+
+  // Viewer mode: "rerun" = the full WASM/WebGPU viewer (3D, depth, plots);
+  // "lite" = a plain-<img> MJPEG grid for low-power clients (e.g. a Raspberry
+  // Pi kiosk) that can't drive WebGPU. Both feed off the SAME preview tap, so
+  // the FPS/Res knobs above apply to either. Persisted per-browser so the Pi
+  // stays on Lite across reloads.
+  const [viewerMode, setViewerMode] = useState<'rerun' | 'lite'>(() =>
+    localStorage.getItem('viewerMode') === 'lite' ? 'lite' : 'rerun');
+  useEffect(() => { localStorage.setItem('viewerMode', viewerMode); }, [viewerMode]);
+
+  // The recorder's in-process servers (Rerun gRPC + the Lite MJPEG feed) exist
+  // ONLY while a recording child is alive — i.e. during 'recording' and the
+  // inter-episode 'resetting'. 'paused'/'stopped'/'complete' have no child (a
+  // resume spawns a fresh one), so there is no feed to show; rendering the
+  // viewer then would just sit on a misleading "connecting…" spinner or a
+  // frozen last frame. Gate the whole viewer on this instead.
+  const feedLive = !!sessionId && (phase === 'recording' || phase === 'resetting');
+
+  // The recorder serves the Lite MJPEG feed from a fixed port on the SAME host
+  // that serves this page (network_mode: host on the backend). MUST match
+  // _MJPEG_PORT in webapp/backend/app/recorder_runner.py.
+  const MJPEG_PORT = 9877;
+  const mjpegBase = `http://${window.location.hostname}:${MJPEG_PORT}`;
+
+  // A plain <img> MJPEG stream never auto-reconnects: if the recorder restarts
+  // (new session / resume / re-record) or the connection drops, the <img>
+  // freezes on its last frame until the URL changes (a normal reload can reuse
+  // the dead connection — only a hard refresh forced it before). We make the
+  // URL carry a reconnect token: `viewerEpoch` (bumped on every fresh recorder)
+  // plus a retry counter bumped on <img> error, so teardown/bringup is seamless
+  // with no manual refresh.
+  const [streamRetry, setStreamRetry] = useState(0);
+  useEffect(() => { setStreamRetry(0); }, [viewerEpoch]);
+  const retryTimer = useRef<number | null>(null);
+  const handleStreamError = useCallback(() => {
+    if (retryTimer.current != null) return; // coalesce a burst of img errors
+    retryTimer.current = window.setTimeout(() => {
+      retryTimer.current = null;
+      setStreamRetry(r => r + 1);
+    }, 1500);
+  }, []);
+  useEffect(() => () => {
+    if (retryTimer.current != null) window.clearTimeout(retryTimer.current);
+  }, []);
+
+  // Authoritative list of live camera streams, from the MJPEG server. Cameras
+  // appear once frames start flowing, so poll while Lite mode is showing a
+  // live feed; stop (and clear) as soon as the feed goes away.
+  const [liteCameras, setLiteCameras] = useState<string[]>([]);
+  useEffect(() => {
+    if (viewerMode !== 'lite' || !feedLive) {
+      setLiteCameras([]);
+      return;
+    }
+    let cancelled = false;
+    const poll = () => {
+      fetch(`${mjpegBase}/cameras`)
+        .then(r => r.json())
+        .then(d => { if (!cancelled) setLiteCameras(Array.isArray(d?.cameras) ? d.cameras : []); })
+        .catch(() => { if (!cancelled) setLiteCameras([]); });
+    };
+    poll();
+    const id = setInterval(poll, 2000);
+    return () => { cancelled = true; clearInterval(id); };
+  }, [viewerMode, feedLive, mjpegBase, streamRetry]);
 
   // --- API calls ---
   const apiBase = `/api/sessions/${sessionId}`;
@@ -1197,42 +1352,133 @@ export function MonitorEpisodePage() {
       {/* Main Content — viewer beside the logs in landscape; in portrait the
           logs drop below the viewer so the feeds keep the full width. */}
       <div className="flex-1 flex portrait:flex-col overflow-hidden min-h-0">
-        {/* Live viewer — embedded Rerun web (WASM) viewer streaming every
-            sensor the recorder publishes (camera images + depth, joint-state
-            and odometry plots) from the recorder child's in-process Rerun
-            gRPC server. Replaces the old per-camera JPEG tiles. */}
+        {/* Live viewer — embedded Rerun web (WASM) viewer streaming the sensors
+            the recorder publishes (colour camera images, joint-state and
+            odometry plots) from the recorder child's in-process Rerun gRPC
+            server. Depth is intentionally NOT streamed to the preview (it's the
+            dominant wire cost); it is still recorded to the MCAP, and the badge
+            below tells the operator so. Replaces the old per-camera JPEG tiles. */}
         <div
-          className="flex-1 p-[16px] min-h-0"
+          className="flex-1 p-[16px] min-h-0 flex flex-col"
           aria-label="Live sensor viewer"
           role="region"
         >
-          {phase !== 'not_started' && sessionId ? (
-            // Keyed by sessionId so navigating between sessions remounts the
-            // viewer onto the new recorder's gRPC server cleanly. Wrapped in an
-            // ErrorBoundary because the Rerun WASM viewer's teardown can throw
-            // when the recorder's gRPC server dies (mid-session crash) — the
-            // boundary keeps that contained to the viewer pane instead of
-            // crashing the whole monitor.
-            <ErrorBoundary
-              label="RerunViewer"
-              resetKey={viewerEpoch}
-              fallback={
-                <div className="w-full h-full flex items-center justify-center select-none bg-edge">
-                  <p className="text-dim text-[13px]">Live viewer unavailable</p>
-                </div>
-              }
+          {/* Toolbar — ALWAYS visible (a real row above the viewer, not an
+              overlay, so it can't hide behind the iframe). Left: live preview
+              quality (display fps / resolution) — set these low on a weak
+              display like a Raspberry Pi; they persist per-browser and affect
+              only the on-screen feed, never the recording. Right: a badge noting
+              depth is recorded but not previewed. */}
+          <div className="shrink-0 mb-[10px] flex items-center justify-between gap-[12px] text-[11px] text-ink">
+            <div
+              className="flex items-center gap-[12px]"
+              title="Live preview quality — lower these on a weak display (e.g. a Raspberry Pi). Affects only the on-screen feed, never the recording."
             >
-              <RerunViewer
-                key={`${sessionId}:${viewerEpoch}`}
-                sessionId={sessionId}
-                recording={phase === 'recording' || phase === 'resetting'}
-              />
-            </ErrorBoundary>
-          ) : (
-            <div className="w-full h-full flex items-center justify-center select-none">
-              <p className="text-dim text-[13px]">Press Start to begin…</p>
+              <ChipSelect
+                label="View"
+                value={viewerMode}
+                onChange={v => setViewerMode(v as 'rerun' | 'lite')}
+                title="Rerun = full 3D/depth/plot viewer (needs WebGPU). Lite = plain image grid for weak clients like a Raspberry Pi."
+              >
+                <option className="bg-surface text-ink" value="rerun">Rerun (3D)</option>
+                <option className="bg-surface text-ink" value="lite">Lite (Pi)</option>
+              </ChipSelect>
+              <ChipSelect label="FPS" value={previewFps} onChange={v => setPreviewFps(Number(v))}>
+                <option className="bg-surface text-ink" value={5}>5</option>
+                <option className="bg-surface text-ink" value={10}>10</option>
+                <option className="bg-surface text-ink" value={15}>15</option>
+                <option className="bg-surface text-ink" value={30}>30</option>
+              </ChipSelect>
+              <ChipSelect label="Res" value={previewDownscale} onChange={v => setPreviewDownscale(Number(v))}>
+                <option className="bg-surface text-ink" value={1}>Full</option>
+                <option className="bg-surface text-ink" value={2}>Half</option>
+                <option className="bg-surface text-ink" value={4}>Quarter</option>
+              </ChipSelect>
             </div>
-          )}
+            {phase === 'recording' && depthCameraCount > 0 && (
+              <div
+                className="flex items-center gap-[6px] select-none"
+                title="Depth is being recorded to the dataset but is not shown in the live preview."
+              >
+                <span className="w-[7px] h-[7px] rounded-full bg-red-500 animate-pulse" />
+                Depth recording ({depthCameraCount} {depthCameraCount === 1 ? 'camera' : 'cameras'})
+              </div>
+            )}
+          </div>
+          <div className="flex-1 min-h-0">
+            {!feedLive ? (
+              // No recording child is running, so there is no live feed. Show a
+              // clear, phase-specific instruction rather than a viewer stuck on
+              // a "connecting…" spinner or a frozen frame — nothing is broken,
+              // the session simply isn't live yet.
+              <div className="w-full h-full flex items-center justify-center select-none px-[16px] text-center">
+                <p className="text-dim text-[13px]">
+                  {phase === 'paused'
+                    ? 'Paused — press Resume to continue the feed'
+                    : phase === 'stopped'
+                    ? 'Session stopped — press Start to record again'
+                    : phase === 'complete'
+                    ? 'Session complete — press Start for a new run'
+                    : 'Press Start to begin the session'}
+                </p>
+              </div>
+            ) : viewerMode === 'lite' ? (
+              // Lite mode: a grid of plain <img> MJPEG streams (JPEG decode +
+              // blit only, no WebGPU). w-full h-full + object-contain makes each
+              // frame fill its grid cell (scaling the downscaled JPEG UP), so a
+              // low-res preview isn't rendered tiny; the cell — not the image's
+              // intrinsic size — drives layout, keeping sizing stable across
+              // reloads. The ?e=/r= token forces a fresh connection on recorder
+              // restart / stream error (see streamRetry) so it never sticks on a
+              // stale frame.
+              liteCameras.length > 0 ? (
+                <div
+                  className="w-full h-full grid gap-[8px]"
+                  style={{
+                    gridTemplateColumns: `repeat(${liteGridCols(liteCameras.length)}, minmax(0, 1fr))`,
+                    gridAutoRows: '1fr',
+                  }}
+                >
+                  {liteCameras.map(cam => (
+                    <div
+                      key={cam}
+                      className="relative bg-black rounded overflow-hidden min-h-0 min-w-0"
+                    >
+                      <img
+                        src={`${mjpegBase}/stream/${encodeURIComponent(cam)}?e=${viewerEpoch}&r=${streamRetry}`}
+                        alt={cam}
+                        onError={handleStreamError}
+                        className="w-full h-full object-contain"
+                      />
+                      <span className="absolute bottom-[4px] left-[6px] text-[10px] text-white/80 bg-black/50 px-[4px] rounded select-none">
+                        {cam}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="w-full h-full flex items-center justify-center select-none">
+                  <p className="text-dim text-[13px]">Connecting to cameras…</p>
+                </div>
+              )
+            ) : (
+              // The Rerun WASM viewer is hosted in an iframe (EmbeddedViewerPage),
+              // keyed by session + epoch. Recreating a keyed iframe on a new/resumed
+              // session makes the browser tear down the previous viewer's entire
+              // document — WASM instance, WebGPU device, and gRPC connection — and
+              // load a fresh one. Mounting the viewer directly and letting React
+              // remount it instead leaks that WASM/WebGPU context, so the 2nd
+              // session showed a blank feed / "Live viewer unavailable" on every
+              // machine until a full page reload. The iframe is that reload, scoped.
+              <iframe
+                key={`${sessionId}:${viewerEpoch}`}
+                src={`/embed/viewer/${sessionId}`}
+                title="Live sensor viewer"
+                className="w-full h-full"
+                style={{ border: 0 }}
+              />
+            )}
+          </div>
         </div>
 
         {/* Logs Panel — fixed-width column on the right in landscape; in

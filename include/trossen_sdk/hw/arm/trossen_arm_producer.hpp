@@ -20,6 +20,11 @@
 
 namespace trossen::hw::arm {
 
+// Retained by the producer (as a shared_ptr member) to apply its joint remap.
+// The full definition is included in the .cpp; a forward declaration suffices
+// here since the member is only a shared_ptr.
+class TrossenArmComponent;
+
 /**
  * @brief Producer that emits joint states from a Trossen Arm via TrossenArmDriver.
  */
@@ -113,6 +118,11 @@ public:
 private:
   /// @brief Shared pointer to the TrossenArmDriver instance
   std::shared_ptr<trossen_arm::TrossenArmDriver> driver_;
+
+  /// @brief Owning component, retained so poll() can apply its affine joint
+  /// remap — recording the processed leader stream (what is commanded to the
+  /// follower) rather than raw driver values. Identity for the follower.
+  std::shared_ptr<TrossenArmComponent> arm_component_;
 
   /// @brief Configuration parameters
   Config cfg_;
