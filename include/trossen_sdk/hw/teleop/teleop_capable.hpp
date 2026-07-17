@@ -126,6 +126,16 @@ public:
   virtual void apply_gripper_feedback(float follower_gripper_effort) {
     (void)follower_gripper_effort;
   }
+
+  /// Follower role (multiple): this hardware's measured gripper effort (N), or nullopt if
+  /// it can't report one. A sensor read — independent of the gripper's mode.
+  virtual std::vector<float> read_multiple_gripper_efforts() { return {}; }
+
+  /// Leader role (multiple): render gripper force feedback from the follower's measured
+  /// gripper effort (N). Default no-op for hardware without an actuated gripper.
+  virtual void apply_multiple_gripper_feedbacks(std::vector<float> follower_gripper_effort) {
+    (void)follower_gripper_effort;
+  }
 };
 
 /**

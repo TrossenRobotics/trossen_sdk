@@ -68,6 +68,96 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
   }
 
 
+  // Optional affine joint remap applied in read_joint(): out[j] = signs[j] *
+  // raw[j] + offsets[j]. Used when the leader's joint frame doesn't map 1:1
+  // onto the follower (the lightweight leader inverts J3/J4 and offsets J5).
+  // Empty = identity; when provided each array must cover every joint.
+  const auto njoints = static_cast<size_t>(left_driver_->get_num_joints());
+  if (config.contains("joint_signs")) {
+    joint_signs_ = config.at("joint_signs").get<std::vector<float>>();
+    if (!joint_signs_.empty() && joint_signs_.size() != njoints) {
+      throw std::runtime_error(
+        "TrossenArmComponent: 'joint_signs' length (" +
+        std::to_string(joint_signs_.size()) + ") must match joint count (" +
+        std::to_string(njoints) + ")");
+    }
+  }
+  if (config.contains("joint_offsets")) {
+    joint_offsets_ = config.at("joint_offsets").get<std::vector<float>>();
+    if (!joint_offsets_.empty() && joint_offsets_.size() != njoints) {
+      throw std::runtime_error(
+        "TrossenArmComponent: 'joint_offsets' length (" +
+        std::to_string(joint_offsets_.size()) + ") must match joint count (" +
+        std::to_string(njoints) + ")");
+    }
+  }
+
+  // Optional per-joint operating limits (position / velocity / effort) and
+  // their tolerances. The controller clips commands to these and resets them to
+  // firmware defaults on every power cycle, so we re-push them here on each
+  // (re)connect. Start from the controller's current limits and override only
+  // the fields provided, leaving any unset field at its firmware default.
+  {
+    auto parse_limit = [&](const char* key, std::vector<float>& dst) {
+      if (!config.contains(key)) return;
+      dst = config.at(key).get<std::vector<float>>();
+      if (!dst.empty() && dst.size() != njoints) {
+        throw std::runtime_error(
+          std::string("TrossenArmComponent: '") + key + "' length (" +
+          std::to_string(dst.size()) + ") must match joint count (" +
+          std::to_string(njoints) + ")");
+      }
+    };
+    parse_limit("position_min", position_min_);
+    parse_limit("position_max", position_max_);
+    parse_limit("velocity_max", velocity_max_);
+    parse_limit("effort_max", effort_max_);
+    parse_limit("position_tolerance", position_tolerance_);
+    parse_limit("velocity_tolerance", velocity_tolerance_);
+    parse_limit("effort_tolerance", effort_tolerance_);
+
+    if (!position_min_.empty() || !position_max_.empty() ||
+        !velocity_max_.empty() || !effort_max_.empty() ||
+        !position_tolerance_.empty() || !velocity_tolerance_.empty() ||
+        !effort_tolerance_.empty()) {
+      for (auto& driver : {left_driver_, right_driver_}) {
+        auto limits = driver->get_joint_limits();
+        for (size_t j = 0; j < njoints && j < limits.size(); ++j) {
+          if (!position_min_.empty()) limits[j].position_min = position_min_[j];
+          if (!position_max_.empty()) limits[j].position_max = position_max_[j];
+          if (!velocity_max_.empty()) limits[j].velocity_max = velocity_max_[j];
+          if (!effort_max_.empty()) limits[j].effort_max = effort_max_[j];
+          if (!position_tolerance_.empty())
+            limits[j].position_tolerance = position_tolerance_[j];
+          if (!velocity_tolerance_.empty())
+            limits[j].velocity_tolerance = velocity_tolerance_[j];
+          if (!effort_tolerance_.empty())
+            limits[j].effort_tolerance = effort_tolerance_[j];
+        }
+        try {
+          driver->set_joint_limits(limits);
+        } catch (const std::exception& e) {
+          throw std::runtime_error(
+            "BimanualGlideComponent: Failed to set joint limits: " + std::string(e.what()));
+        }
+      }
+    }
+  }
+
+  // Leader-only gripper force feedback: reflect the follower's measured gripper
+  // effort back onto this (actuated) gripper via a cubic curve. Off by default;
+  // the cubic constants only matter when enabled.
+  if (config.contains("gripper_feedback_leader_max")) {
+    gripper_feedback_leader_max_ = config.at("gripper_feedback_leader_max").get<float>();
+  }
+  if (config.contains("gripper_feedback_follower_max")) {
+    gripper_feedback_follower_max_ = config.at("gripper_feedback_follower_max").get<float>();
+  }
+  if (config.contains("gripper_feedback_offset")) {
+    gripper_feedback_offset_ = config.at("gripper_feedback_offset").get<float>();
+  }
+
+
   // Configure mode
   right_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
   // right_driver_->set_all_modes(trossen_arm::Mode::external_effort); // TODO: @schromya
@@ -86,25 +176,63 @@ nlohmann::json BimanualGlideComponent::get_info() const {
 }
 
 // ── Space-specific IO ────────────────────────────────────────────────────
+void BimanualGlideComponent::apply_joint_remap(std::vector<float>& v, bool derivative) const {
+  for (size_t i = 0; i < v.size(); ++i) {
+    const float sign = (i < joint_signs_.size()) ? joint_signs_[i] : 1.0f;
+    const float offset = (i < joint_offsets_.size()) ? joint_offsets_[i] : 0.0f;
+    // Positions are a full affine map; velocities/efforts flip sign with a
+    // joint reversal but carry no positional offset.
+    v[i] = derivative ? sign * v[i] : sign * v[i] + offset;
+  }
+}
+
 std::vector<float> BimanualGlideComponent::read_joint() {
   if (!left_driver_ || !right_driver_) return {};
-  const auto& left_positions_ = left_driver_->get_robot_output().joint.all.positions;
-  const auto& right_positions_ = right_driver_->get_robot_output().joint.all.positions;
-  std::vector<float> positions = std::vector<float>(left_positions_.begin(), left_positions_.end());
-  positions.insert(positions.end(), right_positions_.begin(), right_positions_.end());
+  const auto& left_positions = left_driver_->get_robot_output().joint.all.positions;
+  std::vector<float> left_out(left_positions.begin(), left_positions.end());
+  apply_joint_remap(left_out, false);
+
+  const auto& right_positions = right_driver_->get_robot_output().joint.all.positions;
+  std::vector<float> right_out(right_positions.begin(), right_positions.end());
+  apply_joint_remap(right_out, false);
+
+  std::vector<float> positions(left_out.begin(), left_out.end());
+  positions.insert(positions.end(), right_out.begin(), right_out.end());
   return positions;
 }
 
-void BimanualGlideComponent::write_joint(const std::vector<float>& cmd) {
+std::vector<float> BimanualGlideComponent::read_gripper_effort() {
+  if (!left_driver_ || !right_driver_)  return {};
+  return std::vector<float>({static_cast<float>(left_driver_->get_gripper_effort()),
+    static_cast<float>(right_driver_->get_gripper_effort())});
+}
+
+void BimanualGlideComponent::apply_gripper_feedback(const std::vector<float>& follower_gripper_effort) {
   if (!left_driver_ || !right_driver_) return;
 
-  const int EXPECTED_SIZE = 2;  // left and right
-  if (cmd.size() != EXPECTED_SIZE) {
+  const size_t EXPECTED_SIZE = 2;  // left and right
+  if (follower_gripper_effort.size() != EXPECTED_SIZE) {
     throw std::invalid_argument("BimanualGlideComponent: Invalid command size");
   }
 
-  left_driver_->set_gripper_external_effort(cmd[0], write_moving_time_s_, false);
-  right_driver_->set_gripper_external_effort(cmd[1], write_moving_time_s_, false);
+  float left_follower_effort = follower_gripper_effort[0];
+  float right_follower_effort = follower_gripper_effort[1];
+
+  // Cubic curve (from the bilateral reference): more resistance at higher grip
+  // efforts, with an offset that keeps the leader gripper open when nothing is
+  // grasped. leader = leader_max·norm^3 + offset.
+  float left_norm = 0.0f, right_norm = 0.0f;
+  if (gripper_feedback_follower_max_ != 0.0f) {
+    left_norm = std::min(std::abs(left_follower_effort) / gripper_feedback_follower_max_, 1.0f);
+    right_norm = std::min(std::abs(right_follower_effort) / gripper_feedback_follower_max_, 1.0f);
+  }
+  const double left_effort = gripper_feedback_leader_max_ * std::pow(left_norm, 3)
+    + gripper_feedback_offset_;
+  const double right_effort = gripper_feedback_leader_max_ * std::pow(right_norm, 3)
+    + gripper_feedback_offset_;
+
+  left_driver_->set_gripper_external_effort(left_effort, write_moving_time_s_, false);
+  right_driver_->set_gripper_external_effort(right_effort, write_moving_time_s_, false);
 
 }
 
@@ -114,10 +242,10 @@ std::vector<float> BimanualGlideComponent::read_cartesian() {
   const auto& left_out = left_driver_->get_robot_output();
   const auto& right_out = right_driver_->get_robot_output();
 
-    // Layout: [left_x, left_y, left_z, left_rx, left_ry, left_rz,
-    //         left_gripper_m, right_x, right_y, ...]. The first 6 cartesian come from the
-    // driver's 6-DoF cartesian pose (translation + rotation vector); the
-    // gripper opening is tracked in joint space and appended as a scalar.
+  // Layout: [left_x, left_y, left_z, left_rx, left_ry, left_rz,
+  //         left_gripper_m, right_x, right_y, ...]. The first 6 cartesian come from the
+  // driver's 6-DoF cartesian pose (translation + rotation vector); the
+  // gripper opening is tracked in joint space and appended as a scalar.
   std::vector<float> sample;
   sample.reserve(LEN);
   sample.assign(left_out.cartesian.positions.begin(), left_out.cartesian.positions.end());
