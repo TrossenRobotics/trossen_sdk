@@ -111,6 +111,37 @@ struct JointStateRecord : public RecordBase {
 
 
 /**
+ * @brief End-effector pose of a robot arm, expressed in the robot base frame.
+ *
+ * Position is in meters. Orientation is an axis-angle vector (rotation_x, rotation_y, rotation_z):
+ * the vector magnitude is the rotation angle (rad), the unit vector is the
+ * rotation axis. Computed by libtrossen_arm FK; co-emitted with JointStateRecord
+ * from the same poll() call so the two records share the same seq number.
+ */
+struct EndEffectorPoseRecord : public RecordBase {
+  /// @brief End-effector position along x-axis in the robot base frame (m)
+  float x{0.f};
+
+  /// @brief End-effector position along y-axis in the robot base frame (m)
+  float y{0.f};
+
+  /// @brief End-effector position along z-axis in the robot base frame (m)
+  float z{0.f};
+
+  /// @brief Axis-angle rotation component around x (rad)
+  float rotation_x{0.f};
+
+  /// @brief Axis-angle rotation component around y (rad)
+  float rotation_y{0.f};
+
+  /// @brief Axis-angle rotation component around z (rad)
+  float rotation_z{0.f};
+
+  /// @brief Gripper jaw opening distance (m)
+  float gripper_position{0.f};
+};
+
+/**
  * @brief 2D odometry state (pose + velocity), mirroring nav_msgs/Odometry.
  */
 struct Odometry2DRecord : public RecordBase {

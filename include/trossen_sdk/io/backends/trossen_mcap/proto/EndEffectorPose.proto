@@ -1,0 +1,31 @@
+syntax = "proto3";
+package trossen_sdk.msg;
+
+import "Timestamp.proto";
+
+// End-effector pose of a robot arm, expressed in the robot base frame.
+// Orientation is encoded as a 3-element axis-angle vector (rotation_x, rotation_y, rotation_z).
+// The gripper opening is appended as a separate scalar.
+message EndEffectorPose {
+  // Dual timestamp (monotonic for ordering, realtime for wall-clock alignment)
+  trossen_sdk.Timestamp ts = 1;
+
+  // Monotonic sequence number, shared with the co-emitted JointState record
+  // from the same poll() call for easy temporal alignment.
+  uint64 seq = 2;
+
+  // End-effector position in the robot base frame (meters)
+  float x = 3;
+  float y = 4;
+  float z = 5;
+
+  // End-effector orientation as an axis-angle vector (radians).
+  // The magnitude of (rotation_x, rotation_y, rotation_z) is the rotation
+  // angle; the unit vector gives the rotation axis.
+  float rotation_x = 6;
+  float rotation_y = 7;
+  float rotation_z = 8;
+
+  // Gripper jaw opening distance (meters)
+  float gripper_position = 9;
+}
