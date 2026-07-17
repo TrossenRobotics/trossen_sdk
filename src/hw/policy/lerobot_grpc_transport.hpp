@@ -100,8 +100,8 @@ public:
   /// Test-only seam: inject a stub (e.g. a gmock MockAsyncInferenceStub) before
   /// connect(). When a stub is present connect() skips opening a real gRPC
   /// channel and runs the handshake against it, so the transport logic can be
-  /// exercised with no channel/server (and no gRPC teardown race). Not part of
-  /// the public API — this header is reachable only via the TransportRegistry.
+  /// exercised with no channel or server. Not part of the public API — this
+  /// header is reachable only via the TransportRegistry.
   void set_stub_for_test(
     std::unique_ptr<transport::AsyncInference::StubInterface> stub) noexcept {
     stub_ = std::move(stub);
@@ -160,6 +160,7 @@ private:
   std::optional<Observation> pending_obs_;   ///< in-slot, latest-wins; send_mu_
   /// ClientContext of the in-flight SendObservations, for close() to TryCancel
   /// a blocked stream so the join cannot hang. nullptr when none is active.
+  /// Published/cleared and cancelled only under cancel_mu_ (see below).
   std::atomic<grpc::ClientContext *> active_send_ctx_{nullptr};
 
   // Receive path (receiver thread -> inference thread). The receiver actively
@@ -168,7 +169,15 @@ private:
   std::atomic<bool> receiver_running_{false};
   uint64_t chunk_seq_{0};                    ///< receiver thread is sole writer
   /// ClientContext of the in-flight GetActions, for close() to TryCancel.
+  /// Published/cleared and cancelled only under cancel_mu_ (see below).
   std::atomic<grpc::ClientContext *> active_get_ctx_{nullptr};
+
+  /// Guards the active_*_ctx_ slots. A worker publishes its stack-owned
+  /// ClientContext under this mutex and clears it under this mutex before the
+  /// object leaves scope; close() cancels only while holding it. So a non-null
+  /// slot read under this mutex always points at a live context, which is what
+  /// lets close()'s TryCancel run safely against a worker owning that context.
+  std::mutex cancel_mu_;
 
   mutable std::mutex mu_;
   uint64_t failure_count_{0};            ///< guarded by mu_; lifetime-monotonic

@@ -6,8 +6,7 @@
  * factory. The connect handshake and the GetActions decode path are driven
  * against a gmock MockAsyncInferenceStub injected via set_stub_for_test(), so
  * no real gRPC channel or in-process server is ever created — the transport
- * logic is exercised with no network, and therefore none of the gRPC/abseil
- * teardown race that a real channel+server tear-down triggers.
+ * logic is exercised hermetically, with no network.
  *
  * The client-streaming push path (SendObservations) is intentionally not
  * mocked here; its wire format is covered end-to-end by test_lerobot_codec.

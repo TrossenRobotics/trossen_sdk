@@ -289,11 +289,17 @@ void LerobotGrpcTransport::close() noexcept {
   }
   send_cv_.notify_all();
   receiver_running_.store(false);
-  if (grpc::ClientContext* ctx = active_send_ctx_.load()) {
-    ctx->TryCancel();
-  }
-  if (grpc::ClientContext* ctx = active_get_ctx_.load()) {
-    ctx->TryCancel();
+  // Cancel any in-flight RPC under cancel_mu_. A worker clears its published
+  // slot under this same mutex before its stack ClientContext is destroyed, so
+  // a non-null pointer read here always points at a live context.
+  {
+    std::lock_guard<std::mutex> lk(cancel_mu_);
+    if (grpc::ClientContext* ctx = active_send_ctx_.load()) {
+      ctx->TryCancel();
+    }
+    if (grpc::ClientContext* ctx = active_get_ctx_.load()) {
+      ctx->TryCancel();
+    }
   }
   if (sender_.joinable()) {
     sender_.join();
@@ -302,6 +308,7 @@ void LerobotGrpcTransport::close() noexcept {
     receiver_.join();
   }
 
+  // Workers are joined above, so nothing dereferences the stub or channel now.
   stub_.reset();
   channel_.reset();
 }
@@ -360,13 +367,19 @@ bool LerobotGrpcTransport::send_observation_bytes_(const std::vector<uint8_t>& b
   // Bound the stream so a wedged server cannot park the sender forever on the
   // robot path (the handshake RPCs already deadline; the hot path must too).
   ctx.set_deadline(deadline_in(rpc_timeout_));
-  active_send_ctx_.store(&ctx);
-  // Clear the published ctx pointer on every exit so close()'s TryCancel never
-  // dereferences this stack object after it dies.
+  {
+    std::lock_guard<std::mutex> lk(cancel_mu_);
+    active_send_ctx_.store(&ctx);
+  }
+  // Clear the published pointer under cancel_mu_ when ctx leaves scope. guard is
+  // declared after ctx, so it runs before ctx is destroyed: a slot read as null
+  // under cancel_mu_ means the context is gone, non-null means it is still
+  // alive. That is the invariant close()'s TryCancel relies on.
   struct CtxGuard {
+    std::mutex& m;
     std::atomic<grpc::ClientContext*>& slot;
-    ~CtxGuard() { slot.store(nullptr); }
-  } guard{active_send_ctx_};
+    ~CtxGuard() { std::lock_guard<std::mutex> lk(m); slot.store(nullptr); }
+  } guard{cancel_mu_, active_send_ctx_};
 
   // Ordering invariant: close() flips sender_running_ false (under send_mu_)
   // BEFORE it TryCancels the published ctx. A cancel requested in the window
@@ -444,11 +457,18 @@ void LerobotGrpcTransport::receive_loop_() {
     // Bound the poll so a wedged server cannot park the receiver forever
     // (GetActions is a unary short-poll; this never truncates a legit reply).
     ctx.set_deadline(deadline_in(rpc_timeout_));
-    active_get_ctx_.store(&ctx);
+    {
+      std::lock_guard<std::mutex> lk(cancel_mu_);
+      active_get_ctx_.store(&ctx);
+    }
+    // Clear the published pointer under cancel_mu_ when ctx leaves scope (guard
+    // is declared after ctx, so it runs first). See the send path for the
+    // lifetime invariant this maintains for close()'s TryCancel.
     struct CtxGuard {
+      std::mutex& m;
       std::atomic<grpc::ClientContext*>& slot;
-      ~CtxGuard() { slot.store(nullptr); }
-    } guard{active_get_ctx_};
+      ~CtxGuard() { std::lock_guard<std::mutex> lk(m); slot.store(nullptr); }
+    } guard{cancel_mu_, active_get_ctx_};
 
     // Ordering invariant (same as the sender): close() clears receiver_running_
     // before TryCancelling the published ctx, so a cancel requested between the
