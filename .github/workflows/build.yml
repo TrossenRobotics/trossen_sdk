@@ -28,7 +28,8 @@ jobs:
           protobuf-compiler \
           pkg-config \
           libbz2-dev \
-          zlib1g-dev
+          zlib1g-dev \
+          nlohmann-json3-dev
 
     - name: Install Parquet dependencies
       run: |
@@ -80,9 +81,9 @@ jobs:
     - name: Build SDK
       run: |
         mkdir -p build
-        cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON .. && make -j$(nproc)
+        cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON -DTROSSEN_ENABLE_VR=ON .. && make -j$(nproc)
 
     - name: Run Tests
       run: |
         mkdir -p build
-        cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON -DBUILD_TESTING=ON .. && ctest --output-on-failure
+        cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON -DTROSSEN_ENABLE_VR=ON -DBUILD_TESTING=ON .. && ctest --output-on-failure
