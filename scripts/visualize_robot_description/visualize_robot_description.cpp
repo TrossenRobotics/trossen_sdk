@@ -10,8 +10,8 @@
  *   - include_meshes=true: meshes are embedded in the URDF, so the file is
  *     self-contained and works on any machine.
  *   - include_meshes=false: the URDF points to mesh files in the local cache
- *     (~/.cache/trossen_sdk), so it only renders on the machine that
- *     recorded it.
+ *     (~/.cache/trossen_sdk/robot_description/<git_ref>/), so it only renders
+ *     on the machine that recorded it.
  *
  * Usage:
  *   ./visualize_robot_description <path_to_mcap_file>
@@ -40,8 +40,8 @@ int main(int argc, char** argv) {
   }
 
   std::filesystem::path mcap_path = argv[1];
-  if (!std::filesystem::exists(mcap_path)) {
-    std::cerr << "File not found: " << mcap_path << "\n";
+  if (!std::filesystem::is_regular_file(mcap_path)) {
+    std::cerr << "Not a file: " << mcap_path << "\n";
     return 1;
   }
 
@@ -87,6 +87,7 @@ int main(int argc, char** argv) {
           reinterpret_cast<const char*>(messageView.message.data),
           static_cast<int>(messageView.message.dataSize))) {
       std::cerr << "Failed to parse RobotDescription message.\n";
+      reader.close();
       return 1;
     }
     urdf_string = msg.robot_description();
