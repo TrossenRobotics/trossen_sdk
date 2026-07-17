@@ -107,6 +107,7 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   }
 
   emit(rec);
+  ++stats_.produced;
 
   // Create and populate EndEffectorPoseRecord.
   // Cartesian positions [x, y, z, rx, ry, rz] from the arm driver's FK output;
@@ -127,10 +128,10 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
     eef_rec->gripper_position =
       static_cast<float>(robot_output_.joint.gripper.position);
     emit(eef_rec);
+    ++stats_.produced;
   }
 
   ++seq_;
-  ++stats_.produced;
 }
 
 // Register producer with registry
