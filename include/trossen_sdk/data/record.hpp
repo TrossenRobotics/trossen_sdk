@@ -113,7 +113,7 @@ struct JointStateRecord : public RecordBase {
 /**
  * @brief End-effector pose of a robot arm, expressed in the robot base frame.
  *
- * Position is in meters. Orientation is an axis-angle vector (rx, ry, rz):
+ * Position is in meters. Orientation is an axis-angle vector (rotation_x, rotation_y, rotation_z):
  * the vector magnitude is the rotation angle (rad), the unit vector is the
  * rotation axis. Computed by libtrossen_arm FK; co-emitted with JointStateRecord
  * from the same poll() call so the two records share the same seq number.

@@ -4,7 +4,7 @@ package trossen_sdk.msg;
 import "Timestamp.proto";
 
 // End-effector pose of a robot arm, expressed in the robot base frame.
-// Orientation is encoded as a 3-element axis-angle vector (rx, ry, rz).
+// Orientation is encoded as a 3-element axis-angle vector (rotation_x, rotation_y, rotation_z).
 // The gripper opening is appended as a separate scalar.
 message EndEffectorPose {
   // Dual timestamp (monotonic for ordering, realtime for wall-clock alignment)
