@@ -67,13 +67,14 @@ void print_final_summary(
  * @brief Configuration for sanity check validation
  */
 struct SanityCheckConfig {
-  double actual_duration_s;     ///< Actual episode duration
-  int joint_producers;          ///< Number of joint state producers
-  float joint_rate_hz;          ///< Joint state sample rate
-  int camera_producers;         ///< Number of camera producers
-  int camera_fps;               ///< Camera frame rate
-  double tolerance_percent;     ///< Tolerance as percentage (default: 5.0%)
-  int depth_camera_producers;   ///< Number of depth-capable cameras (each emits 2x records)
+  double actual_duration_s;            ///< Actual episode duration
+  int joint_producers;                 ///< Number of joint state producers
+  float joint_rate_hz;                 ///< Joint state sample rate
+  int camera_producers;                ///< Number of camera producers
+  int camera_fps;                      ///< Camera frame rate
+  double tolerance_percent;            ///< Tolerance as percentage (default: 5.0%)
+  int depth_camera_producers;          ///< Number of depth-capable cameras (each emits 2x records)
+  int end_effector_pose_producers{0};  ///< Number of end-effector pose producers
 };
 
 /**

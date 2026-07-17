@@ -362,7 +362,10 @@ int main(int argc, char** argv) {
 
   mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
     const std::string file_path =
-      trossen::utils::generate_episode_path(root, stats.current_episode_index);
+      trossen::utils::generate_episode_path(
+        root + "/" + cfg.mcap_backend.dataset_id,
+        stats.current_episode_index,
+        "mcap");
     trossen::utils::print_episode_summary(file_path, stats);
 
     trossen::utils::SanityCheckConfig sanity_cfg{
@@ -372,7 +375,8 @@ int main(int argc, char** argv) {
       static_cast<int>(cfg.hardware.cameras.size()),
       static_cast<int>(camera_fps),
       5.0,
-      depth_cameras
+      depth_cameras,
+      static_cast<int>(cfg.hardware.arms.size())  // one EEF pose producer per arm
     };
     perform_sanity_check(stats.current_episode_index, stats.records_written_current, sanity_cfg);
   });
