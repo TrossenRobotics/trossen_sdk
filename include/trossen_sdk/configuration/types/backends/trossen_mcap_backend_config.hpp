@@ -61,6 +61,11 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
     }
     if (j.contains("urdf_variant")) j.at("urdf_variant").get_to(c.urdf_variant);
 
+    // Mesh embedding requires the robot description, so enable it implicitly.
+    if (c.include_meshes && !c.include_robot_description) {
+      c.include_robot_description = true;
+    }
+
     return c;
   }
 };
