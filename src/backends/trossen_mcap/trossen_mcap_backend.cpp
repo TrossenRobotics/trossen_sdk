@@ -166,13 +166,19 @@ bool TrossenMCAPBackend::open() {
   }
 
   if (cfg_->include_robot_description) {
-    std::string urdf = trossen::utils::RobotDescriptionCache::resolve(
-      cfg_->robot_name,
-      cfg_->urdf_variant,
-      cfg_->robot_description_ref,
-      cfg_->include_meshes);
-    if (!urdf.empty()) {
-      write_robot_description_to_mcap(urdf);
+    // The robot description is optional, so a failure here must not abort open().
+    try {
+      std::string urdf = trossen::utils::RobotDescriptionCache::resolve(
+        cfg_->robot_name,
+        cfg_->urdf_variant,
+        cfg_->robot_description_ref,
+        cfg_->include_meshes);
+      if (!urdf.empty()) {
+        write_robot_description_to_mcap(urdf);
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to resolve/write robot description: " << e.what()
+                << "; continuing without it\n";
     }
   }
 
@@ -468,7 +474,10 @@ void TrossenMCAPBackend::write_robot_description_to_mcap(const std::string& urdf
   msg.set_git_ref(cfg_->robot_description_ref);
 
   std::string payload;
-  msg.SerializeToString(&payload);
+  if (!msg.SerializeToString(&payload)) {
+    std::cerr << "Failed to serialize robot description; skipping\n";
+    return;
+  }
 
   auto st = channel->log(
     reinterpret_cast<const std::byte*>(payload.data()),
