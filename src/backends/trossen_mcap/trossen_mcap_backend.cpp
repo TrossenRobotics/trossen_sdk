@@ -11,6 +11,7 @@
 #include "google/protobuf/descriptor.pb.h"
 #include "opencv2/imgcodecs.hpp"
 
+#include "EndEffectorPose.pb.h"
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
 #include "nlohmann/json.hpp"
@@ -172,6 +173,9 @@ void TrossenMCAPBackend::close_resources() {
   for (auto& [stream_id, channel] : joint_channels_) {
     channel.close();
   }
+  for (auto& [stream_id, channel] : end_effector_pose_channels_) {
+    channel.close();
+  }
   for (auto& [stream_id, channel] : odometry_2d_channels_) {
     channel.close();
   }
@@ -185,8 +189,9 @@ void TrossenMCAPBackend::close_resources() {
     }
   }
   joint_channels_.clear();
-  image_channels_.clear();
+  end_effector_pose_channels_.clear();
   odometry_2d_channels_.clear();
+  image_channels_.clear();
   opened_ = false;
 }
 
@@ -234,6 +239,11 @@ void TrossenMCAPBackend::write(const data::RecordBase& record) {
     return;
   }
 
+  if (auto eef = dynamic_cast<const data::EndEffectorPoseRecord*>(&record)) {
+    write_end_effector_pose_record(*eef);
+    return;
+  }
+
   if (auto mb = dynamic_cast<const data::Odometry2DRecord*>(&record)) {
     write_odometry_2d_record(*mb);
     return;
@@ -251,6 +261,10 @@ void TrossenMCAPBackend::write_batch(std::span<const data::RecordBase* const> re
     }
     if (auto js = dynamic_cast<const data::JointStateRecord*>(r)) {
       write_jointstate_record(*js);
+      continue;
+    }
+    if (auto eef = dynamic_cast<const data::EndEffectorPoseRecord*>(r)) {
+      write_end_effector_pose_record(*eef);
       continue;
     }
     if (auto mb = dynamic_cast<const data::Odometry2DRecord*>(r)) {
@@ -366,6 +380,80 @@ void TrossenMCAPBackend::write_jointstate_record(const data::JointStateRecord& j
               << foxglove::strerror(st) << "\n";
   } else {
     ++stats_.joint_states_written;
+  }
+}
+
+foxglove::RawChannel* TrossenMCAPBackend::ensure_end_effector_pose_channel(
+  const std::string& stream_id) {
+  auto it = end_effector_pose_channels_.find(stream_id);
+  if (it != end_effector_pose_channels_.end()) {
+    return &it->second;
+  }
+
+  foxglove::Schema schema;
+  schema.name = "trossen_sdk.msg.EndEffectorPose";
+  schema.encoding = "protobuf";
+  schema.data = reinterpret_cast<const std::byte*>(schema_data_end_effector_pose_.data());
+  schema.data_len = schema_data_end_effector_pose_.size();
+
+  auto channel_result = foxglove::RawChannel::create(
+    trossen_mcap_defs::end_effector_pose_topic(stream_id),
+    "protobuf",
+    schema,
+    context_,
+    std::nullopt);
+
+  if (!channel_result.has_value()) {
+    std::cerr << "Failed to create end-effector pose channel for " << stream_id << ": "
+              << foxglove::strerror(channel_result.error()) << "\n";
+    return nullptr;
+  }
+
+  auto [inserted_it, _] = end_effector_pose_channels_.emplace(
+    stream_id, std::move(channel_result.value()));
+  return &inserted_it->second;
+}
+
+void TrossenMCAPBackend::write_end_effector_pose_record(
+  const data::EndEffectorPoseRecord& end_effector_pose) {
+  auto* channel = ensure_end_effector_pose_channel(end_effector_pose.id);
+  if (!channel) {
+    return;
+  }
+
+  trossen_sdk::msg::EndEffectorPose out;
+  auto* ts = out.mutable_ts();
+
+  auto* mono = ts->mutable_monotonic();
+  mono->set_seconds(end_effector_pose.ts.monotonic.sec);
+  mono->set_nanos(end_effector_pose.ts.monotonic.nsec);
+
+  auto* real = ts->mutable_realtime();
+  real->set_seconds(end_effector_pose.ts.realtime.sec);
+  real->set_nanos(end_effector_pose.ts.realtime.nsec);
+
+  out.set_seq(end_effector_pose.seq);
+  out.set_x(end_effector_pose.x);
+  out.set_y(end_effector_pose.y);
+  out.set_z(end_effector_pose.z);
+  out.set_rotation_x(end_effector_pose.rotation_x);
+  out.set_rotation_y(end_effector_pose.rotation_y);
+  out.set_rotation_z(end_effector_pose.rotation_z);
+  out.set_gripper_position(end_effector_pose.gripper_position);
+
+  std::string payload;
+  out.SerializeToString(&payload);
+
+  auto st = channel->log(
+    reinterpret_cast<const std::byte*>(payload.data()),
+    payload.size(),
+    end_effector_pose.ts.realtime.to_ns());
+
+  if (st != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to write end-effector pose for " << end_effector_pose.id << ": "
+              << foxglove::strerror(st) << "\n";
+  } else {
+    ++stats_.end_effector_pose_written;
   }
 }
 
@@ -612,6 +700,8 @@ void TrossenMCAPBackend::register_schemas_once() {
     "trossen_sdk/io/backends/trossen_mcap/proto/JointState.proto");
   schema_data_odom2d_ = build_schema_blob(
     "trossen_sdk/io/backends/trossen_mcap/proto/Odometry2D.proto");
+  schema_data_end_effector_pose_ = build_schema_blob(
+    "trossen_sdk/io/backends/trossen_mcap/proto/EndEffectorPose.proto");
 }
 
 bool TrossenMCAPBackend::is_depth_topic(const std::string& topic) {

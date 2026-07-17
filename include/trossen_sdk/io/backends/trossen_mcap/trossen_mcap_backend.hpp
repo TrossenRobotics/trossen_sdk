@@ -43,6 +43,9 @@ public:
     /// @brief Number of joint state records written
     uint64_t joint_states_written{0};
 
+    /// @brief Number of end-effector pose records written
+    uint64_t end_effector_pose_written{0};
+
     /// @brief Number of 2D odometry records written
     uint64_t odometry_2d_written{0};
 
@@ -171,6 +174,14 @@ private:
   foxglove::RawChannel* ensure_odometry_2d_channel(const std::string& stream_id);
 
   /**
+   * @brief Ensure the end-effector pose channel exists for a given stream ID
+   *
+   * @param stream_id Stream identifier (e.g., "leader", "follower")
+   * @return Pointer to the channel, or nullptr on failure
+   */
+  foxglove::RawChannel* ensure_end_effector_pose_channel(const std::string& stream_id);
+
+  /**
    * @brief Write an image record
    *
    * @param img Image record to write
@@ -192,6 +203,13 @@ private:
   void write_odometry_2d_record(const data::Odometry2DRecord& odom);
 
   /**
+   * @brief Write an end-effector pose record
+   *
+   * @param end_effector_pose End-effector pose record to write
+   */
+  void write_end_effector_pose_record(const data::EndEffectorPoseRecord& end_effector_pose);
+
+  /**
    * @brief Register protobuf schemas once
    */
   void register_schemas_once();
@@ -207,6 +225,9 @@ private:
 
   /// @brief Serialised FileDescriptorSet for the Odometry2D protobuf schema
   std::string schema_data_odom2d_;
+
+  /// @brief Serialised FileDescriptorSet for the EndEffectorPose protobuf schema
+  std::string schema_data_end_effector_pose_;
 
   /// @brief Output file path
   std::filesystem::path path_;
@@ -231,6 +252,9 @@ private:
 
   /// @brief Map of 2D odometry channels by stream ID
   std::unordered_map<std::string, foxglove::RawChannel> odometry_2d_channels_;
+
+  /// @brief Map of end-effector pose channels by stream ID
+  std::unordered_map<std::string, foxglove::RawChannel> end_effector_pose_channels_;
 
   /// @brief Statistics about written records
   Stats stats_{};
