@@ -1,8 +1,23 @@
-# Stationary Bimanual AI Kit — Policy Driven Example
+# Stationary Bimanual AI Kit — Policy-Driven Example
 
-Records a bimanual setup with **two follower arms** and **four RealSense cameras** to TrossenMCAP format, but unlike `trossen_stationary_ai`, the leaders are **virtual**: a `PolicyClient` connects to an openpi-style WebSocket policy server, streams the follower joint state and resized camera frames as observations, and feeds the resulting per-arm action chunk back into the existing teleop machinery as if it were a physical leader.
+Records a bimanual setup with **two follower arms** and **four RealSense
+cameras** to TrossenMCAP format, but the leaders are **virtual**: a
+`PolicyClient` connects to a remote policy server, streams the follower joint
+state and camera frames as observations, and feeds the returned per-arm action
+chunk back into the existing teleop machinery as if it were a physical leader.
 
-This example builds only when the SDK is configured with `-DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON`.
+The C++ is **transport-agnostic** — which policy server it talks to is a
+*config* concern. One shared source
+(`trossen_stationary_ai_policy.cpp`) builds into **two binaries** that differ
+only in their default config and a display label:
+
+| Binary | Transport | Server URL | Default config |
+|---|---|---|---|
+| `trossen_stationary_ai_openpi`  | `openpi_ws`     | `ws://host:port` (WebSocket)     | `configs/openpi.json`  |
+| `trossen_stationary_ai_lerobot` | `lerobot_grpc`  | `host:port` (gRPC, **no scheme**) | `configs/lerobot.json` |
+
+Both build only when the SDK is configured with
+`-DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON`.
 
 ---
 
@@ -12,41 +27,46 @@ This example builds only when the SDK is configured with `-DTROSSEN_SDK_ENABLE_P
 |---|---|---|
 | Trossen AI Kit arm (wxai_v0) | 2 | Left follower, right follower |
 | RealSense camera | 4 | High view, low view, left wrist, right wrist |
-| Policy server | 1 | openpi-compatible WebSocket server reachable from this host |
-
----
-
-## Prerequisites
-
-A policy server must be running at the `server_url` configured under
-`hardware.policy_clients[0].server_url` (default `ws://localhost:8000`).
-For openpi, see <https://github.com/Physical-Intelligence/openpi>.
+| Policy server | 1 | openpi WebSocket **or** LeRobot `async_inference` gRPC, reachable from this host |
 
 ---
 
 ## Running
 
 ```bash
-# Default config
-./build/examples/trossen_stationary_ai_policy
+# openpi WebSocket variant (default config: configs/openpi.json)
+./build/examples/trossen_stationary_ai_openpi
 
-# Custom config file
-./build/examples/trossen_stationary_ai_policy --config path/to/my_config.json
+# LeRobot async_inference gRPC variant (default config: configs/lerobot.json)
+./build/examples/trossen_stationary_ai_lerobot
 
-# Inspect merged config without running
-./build/examples/trossen_stationary_ai_policy --dump-config
+# Custom config
+./build/examples/trossen_stationary_ai_openpi --config path/to/my_config.json
 
-# Override the episode length
-./build/examples/trossen_stationary_ai_policy --set session.max_duration=30
+# Inspect the merged config without running (no hardware/server touched)
+./build/examples/trossen_stationary_ai_lerobot --dump-config
+
+# Override a top-level field
+./build/examples/trossen_stationary_ai_openpi --set session.max_duration=30
 ```
 
-> **`--set` limitation.** Fields inside `hardware.policy_clients[]` should be edited directly in the config file; the CLI `--set` flag does not support array indexing.
+> **Flag names are exact.** The CLI parser silently ignores unknown flags, so a
+> typo like `--dump_config` (underscore) is dropped and the binary proceeds to
+> connect to real hardware. Use `--dump-config` (hyphen).
+
+> **`--set` limitation.** `--set` walks JSON *map* keys only; it cannot index
+> into `hardware.policy_clients[]`. Edit the prompt, server URL, inference rate,
+> transport, and joint layout **directly in the config file**.
 
 The program will:
 1. Connect to both follower arms and move them to the staged starting position.
-2. Open the WebSocket to the policy server; spawn the inference thread.
-3. Wait for the first action chunk, then mirror each follower against its policy-driven leader Face.
-4. Record an episode (default: 60 seconds) including the followers, cameras, and the policy's commanded action stream.
+2. Open the transport (openpi: WebSocket handshake; LeRobot: gRPC `Ready` →
+   `SendPolicyInstructions` with the pickled `RemotePolicyConfig`) and spawn the
+   inference thread(s).
+3. Wait for the first action chunk, then mirror each follower against its
+   policy-driven leader Face.
+4. Record an episode (default 60 s) including the followers, cameras, and the
+   policy's commanded action stream.
 5. Stop, flush, and save the `.mcap` file.
 6. Repeat until `max_episodes` is reached or Ctrl+C is pressed.
 7. Return arms to the sleep position.
@@ -55,69 +75,142 @@ Episodes are saved to `~/.trossen_sdk/<dataset_id>/episode_NNNNNN.mcap`.
 
 ---
 
-## CLI Flags
+## How the virtual leaders work
 
-| Flag | Description |
-|---|---|
-| `--config PATH` | Path to robot config JSON (default `examples/trossen_stationary_ai_policy/config.json`). |
-| `--set KEY=VALUE` | Override a config value using dot notation; repeatable. |
-| `--dump-config` | Print the merged config and exit. |
-| `--help` | Show usage and exit. |
+In the human-teleop example (`trossen_stationary_ai`), four arms are configured
+under `hardware.arms` (two leaders + two followers). Here, only the two
+followers are physical; the leaders (`policy_left`, `policy_right`) are
+`PolicyClient::Face` objects registered in `ActiveHardwareRegistry` at
+construction time, so the existing teleop factory pairs them with the followers
+without any factory changes.
 
----
-
-## What's Different From `trossen_stationary_ai`
-
-In the human-teleop example, four arms are configured under `hardware.arms` (two leaders + two followers). Here, only the two followers are physical; the leaders (`policy_left`, `policy_right`) are `PolicyClient::Face` objects registered in `ActiveHardwareRegistry` at construction time, so the existing teleop factory pairs them with the followers without any factory changes.
-
----
-
-## Observation / Action Contract
-
-On every inference tick the C++ side packs the latest cached records into a single observation dict matching openpi's Aloha-family schema:
-
-- `state.left`, `state.right` — most recent follower joint vectors (7 each)
-- `images.cam_high`, `images.cam_low`, `images.cam_left_wrist`, `images.cam_right_wrist` — most recent BGR8 frames, resized to 224×224
-- `prompt` — the configured natural-language task prompt
-
-The server replies with an `actions` array of shape `[T, 14]` (a chunk of `T` future action rows, 7 joints per arm). The PolicyClient stores this chunk and indexes one row per control tick at `control_rate_hz` (set to the policy producer's poll rate, 30 Hz by default). Each `Face::read()` returns its slice (`joint_offset`..`joint_offset + joint_count`) of the current row to the paired follower's `TeleopController`.
-
-If the server stalls or the chunk is exhausted, the last commanded row is held indefinitely (hold-last-action invariant).
+On every inference tick the SDK packs the latest cached records into one
+observation and sends it over the configured transport; the server replies with
+an action chunk of shape `[T, 14]` (7 joints per arm). The PolicyClient indexes
+one row per control tick at `control_rate_hz` (derived from the policy
+producer's `poll_rate_hz`, 30 Hz). Each `Face::read()` returns its
+`[joint_offset, joint_offset+joint_count)` slice of the current row to the
+paired follower. If the server stalls or the chunk is exhausted, the last
+commanded row is held indefinitely (hold-last-action invariant).
 
 ---
 
-## Default Session Settings
+## openpi variant (`configs/openpi.json`)
 
-| Setting | Value |
-|---|---|
-| Episode duration | 60 seconds |
-| Max episodes | 1 |
-| Joint poll rate | 30 Hz |
-| Camera frame rate | 30 Hz @ 640×480 |
-| Teleop rate | 30 Hz |
-| Policy inference rate | 0.6 Hz |
-| Policy action rate | 30 Hz |
-| Teleop pairs | policy_left → follower_left, policy_right → follower_right |
-| Output directory | `~/.trossen_sdk` |
-| Dataset ID | `stationary_policy_dataset` |
+Serves over a **WebSocket**; `server_url` is `ws://host:port` (default
+`ws://localhost:8000`). See <https://github.com/Physical-Intelligence/openpi>.
 
-> **Rate note:** Keep the teleop rate and the `policy_client` producer's `poll_rate_hz` aligned. The PolicyClient's control rate is derived from the producer's `poll_rate_hz` — it is not a separate config key. The inference rate may be lower (e.g. 10 Hz with 30 Hz control) because each chunk supplies multiple rows.
+The observation dict matches openpi's Aloha-family schema:
+
+- `state.left`, `state.right` — most recent follower joint vectors (7 each),
+  concatenated **positionally** in `joint_layout` order (openpi ignores
+  `joint_names`).
+- `images.cam_high`, `images.cam_low`, `images.cam_left_wrist`,
+  `images.cam_right_wrist` — most recent BGR8 frames, resized to 224×224. The
+  `<cam>` names must lie in openpi's hardcoded `EXPECTED_CAMERAS`.
+- `prompt` — the configured natural-language task.
+
+openpi carries **no client-declared policy contract** — there is no
+`transport_config` policy block for this variant.
 
 ---
 
-## Customising
+## LeRobot variant (`configs/lerobot.json`)
 
-`hardware.policy_clients[]` lives inside a JSON array; the CLI `--set` flag only walks JSON map keys, so edit the prompt, server URL, inference rate, and joint layout directly in `config.json`.
+Serves over **gRPC**; `server_url` is a **bare `host:port`** (default
+`localhost:8080`) — no `ws://`/`grpc://` scheme (the `lerobot_grpc` factory
+rejects a scheme). See <https://github.com/huggingface/lerobot>
+(`lerobot/async_inference`).
 
-Top-level map keys can still be overridden from the CLI:
+### Target model
 
-```bash
-# Change episode length
-./build/examples/trossen_stationary_ai_policy --set session.max_duration=30
+The shipped config targets **`TrossenRoboticsCommunity/pi05-block-transfer-lerobot`**
+(a π₀.₅ policy), trained on
+**`TrossenRoboticsCommunity/stationary-block-transfer-lerobot-v3`**:
 
-# Change the dataset id (output subdirectory)
-./build/examples/trossen_stationary_ai_policy --set backend.dataset_id=policy_demo
+- `policy_type: pi05`, `actions_per_chunk: 50`, `device: cuda`, prompt
+  **"Grab and handover the red cube to the other arm"**.
+- `observation.state` / `action` are `[14]` (left arm joints 0-5 + gripper, then
+  right); 4 cameras at native **480×640** (`pi05` resizes to 224 internally, so
+  the SDK sends native frames — no client-side resize).
+
+Point `transport_config.pretrained_name_or_path` at a different checkpoint to
+run another model; update `lerobot_features`, `joint_names`, and the prompt to
+match its dataset.
+
+### Version pin
+
+The `lerobot_grpc` transport and its pickle codec target **LeRobot v0.6.0**
+(commit `30da8e68`, the `async_inference` services). Run a **v0.6.0** server —
+that is the only supported version. The pickle wire format is version-sensitive:
+the codec implements exactly the opcode/torch subset the pinned server emits and
+**fails loudly** on anything else. The stack used to capture/verify the codec
+fixtures is recorded in `tests/fixtures/lerobot_codec/versions.json`.
+
+> **Forward incompatibility.** LeRobot releases *after* v0.6.0 replace the
+> pickle transport with safetensors + JSON (the CVE-2026-25874 fix). That is a
+> breaking wire change this codec does **not** support — supporting a newer
+> LeRobot is a separate, larger update, not a config tweak.
+
+### The `transport_config` block
+
+Unlike openpi, LeRobot's handshake sends a pickled `RemotePolicyConfig`, built
+from `transport_config` and validated at configure time:
+
+| Key | Required | Meaning |
+|---|---|---|
+| `policy_type` | yes | LeRobot policy class, e.g. `act`, `pi0`, `pi05`, `smolvla`. |
+| `pretrained_name_or_path` | yes | Checkpoint the server should load (HuggingFace Hub id or local path). |
+| `actions_per_chunk` | yes | Rows `T` per returned action chunk. |
+| `device` | no (`cpu`) | Server inference device, e.g. `cuda`. |
+| `connect_timeout_s` | no (10) | Handshake/channel-ready budget. The server loads the checkpoint *during* `SendPolicyInstructions`, so a large model (pi05) on first run may need 120-300 s; pre-warm the server to shorten this. |
+| `lerobot_features` | yes | Map of dataset-feature name → `{dtype, shape}` consumed verbatim by the server's `build_dataset_frame`. `dtype` is `float32` (1-D state) or `image`/`video`. Component `names` are auto-derived (see below). |
+| `rename_map` | no (`{}`) | Server-side observation-key renames. |
+
+**Per-step observation keys** the SDK streams each tick (must line up with the
+above): per-motor `"<name>.pos"` floats (from `joint_names`); **bare** camera
+keys `"<cam>"` (not `observation.images.<cam>` — the server re-prefixes); and
+`"task"` (the prompt).
+
+### `joint_names` — per-motor keys
+
+Each `joint_layout` entry carries a `joint_names` list (length =
+`joint_count`). These become both the per-motor observation keys `"<name>.pos"`
+*and* the injected `observation.state` component names, so you don't write
+`names` twice. The shipped config uses the exact names from the
+`pi05-block-transfer` dataset (`meta/info.json`), left arm then right:
+
+```json
+{ "leader_id": "policy_left", "joint_offset": 0, "joint_count": 7,
+  "joint_names": ["left_joint_0", "left_joint_1", "left_joint_2",
+                  "left_joint_3", "left_joint_4", "left_joint_5",
+                  "left_left_carriage_joint"] }
 ```
+
+The motor order must match the dataset the policy trained on. If `joint_names`
+is omitted the handshake config is rejected at configure time. (openpi ignores
+`joint_names` and concatenates state positionally.)
+
+### Async overlap (`drain_threshold`)
+
+Ships `drain_threshold: 0.0` — the synchronous openpi cadence (observe at
+end-of-chunk pose, no overlap). Set it in `(0, 1)`, e.g. `0.5`, to fire the next
+observation when the current chunk is halfway played, so inference for chunk
+*N+1* runs *while* chunk *N* executes. The new chunk takes over aligned to the
+timestep clock (past rows skipped). If the buffer empties before the theta fire
+point, the next observation is sent with `must_go` set, which the LeRobot server
+honors.
+
+### Paired logging (parity vs `robot_client.py`)
+
+Set `hardware.policy_clients[0].log_path` (default
+`~/.trossen_sdk/policy_logs/sdk_run.jsonl`) to capture one `request` + one
+`response` JSONL line per inference cycle. To validate against the reference
+client, run LeRobot's own `robot_client.py` against the same server + checkpoint
+and the same observation trace, keep both logs, and compare line-by-line. The
+codec's byte-level parity is covered by `tests/fixtures/lerobot_codec/`; the
+paired-logging check validates the live end-to-end path (mapping, chunking,
+alignment).
 
 ---
 
@@ -137,13 +230,14 @@ Top-level map keys can still be overridden from the CLI:
 
 ## Troubleshooting
 
-**`policy_client` not registered**
-- Rebuild with `-DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON`; the gate disables both the hardware and producer registry entries.
+**`policy_client` not registered** — rebuild with
+`-DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON`; the gate disables both the hardware and
+producer registry entries.
 
-**Transport connect failed**
-- Verify the policy server is running and reachable: `curl http://<host>:<port>/` or use any WS tester against the URL in `server_url`.
-- The transport keeps the inference thread alive on failure; `Face::read()` returns zeros (hold-last-action) until a chunk arrives.
+**Transport connect failed** — verify the server is running and reachable at the
+configured `server_url`. The transport keeps the inference thread alive on
+failure; `Face::read()` returns zeros (hold-last-action) until a chunk arrives.
 
-**Followers do not move**
-- Check `chunks_published()` (logged at debug) to confirm the server is replying.
-- Confirm `teleop.rate_hz` is non-zero and the `teleop.pairs` leaders match the `joint_layout` `leader_id` entries.
+**Followers do not move** — check `chunks_published()` (logged at debug) to
+confirm the server is replying, and that `teleop.rate_hz` is non-zero and the
+`teleop.pairs` leaders match the `joint_layout` `leader_id` entries.

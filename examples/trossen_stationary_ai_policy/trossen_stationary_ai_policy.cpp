@@ -3,22 +3,39 @@
  * @brief Bimanual stationary kit driven by a remote policy server.
  *
  * Two follower arms + four RealSense cameras. Leaders are virtual: a
- * PolicyClient connects to an openpi-style WebSocket server, streams the
- * follower joint state and camera frames as observations, and exposes
- * per-arm Face adapters that the teleop machinery treats as drop-in
- * leaders for the followers.
+ * PolicyClient connects to a remote policy server, streams the follower joint
+ * state and camera frames as observations, and exposes per-arm Face adapters
+ * that the teleop machinery treats as drop-in leaders for the followers.
+ *
+ * This single source builds into two binaries that differ only in their
+ * default config (which selects the transport):
+ *   - trossen_stationary_ai_openpi  -> configs/openpi.json  (openpi_ws)
+ *   - trossen_stationary_ai_lerobot -> configs/lerobot.json (lerobot_grpc)
+ * The transport, server URL, and policy contract all live in that config; the
+ * C++ is transport-agnostic. The default config path and the display label are
+ * injected per target via the TROSSEN_AI_EXAMPLE_CONFIG / _LABEL compile
+ * definitions (see examples/CMakeLists.txt); the fallbacks below keep the file
+ * compiling standalone (e.g. for clangd).
  *
  * Usage:
- *   ./trossen_stationary_ai_policy [OPTIONS]
+ *   ./trossen_stationary_ai_<transport> [OPTIONS]
  *
- *   --config PATH       Path to robot config JSON
- *                       [default: examples/trossen_stationary_ai_policy/config.json]
+ *   --config PATH       Path to robot config JSON [default: per-target]
  *   --set KEY=VALUE     Override a config value using dot notation (repeatable)
  *   --dump-config       Print merged config as JSON and exit
  *   --help              Show this help and exit
  */
 
+#ifndef TROSSEN_AI_EXAMPLE_CONFIG
+#define TROSSEN_AI_EXAMPLE_CONFIG \
+  "examples/trossen_stationary_ai_policy/configs/openpi.json"
+#endif
+#ifndef TROSSEN_AI_EXAMPLE_LABEL
+#define TROSSEN_AI_EXAMPLE_LABEL "openpi"
+#endif
+
 #include <chrono>
+#include <cstdlib>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -50,16 +67,16 @@ static void print_usage(const char* program) {
     "\n"
     "Options:\n"
     "  --config PATH      Path to robot config JSON\n"
-    "                     [default: examples/trossen_stationary_ai_policy/config.json]\n"
+    "                     [default: " TROSSEN_AI_EXAMPLE_CONFIG "]\n"
     "  --set KEY=VALUE    Override a config value using dot notation (repeatable)\n"
     "  --dump-config      Print merged config as JSON and exit\n"
     "  --help             Show this help and exit\n"
     "\n"
     "Examples:\n"
     "  " << program << "\n"
-    "  " << program << " --config examples/trossen_stationary_ai_policy/config.json\n"
+    "  " << program << " --config " TROSSEN_AI_EXAMPLE_CONFIG "\n"
     "  " << program << " --set session.max_duration=30\n"
-    "  " << program << " --set backend.dataset_id=policy_demo\n"
+    "  " << program << " --set backend.dataset_id=my_demo\n"
     "  " << program << " --dump-config\n"
     "\n"
     "Note: --set uses dot-notation over JSON map keys only. Fields inside\n"
@@ -75,7 +92,7 @@ int main(int argc, char** argv) {
   }
 
   const std::string config_path =
-    cli.get_string("config", "examples/trossen_stationary_ai_policy/config.json");
+    cli.get_string("config", TROSSEN_AI_EXAMPLE_CONFIG);
 
   if (!std::filesystem::exists(config_path)) {
     std::cerr << "Error: config file not found: " << config_path << "\n";
@@ -89,7 +106,8 @@ int main(int argc, char** argv) {
   }
 
   if (cli.has_flag("dump-config")) {
-    trossen::configuration::dump_config(j, "Trossen Stationary AI Policy Config");
+    trossen::configuration::dump_config(
+      j, "Trossen Stationary AI Policy (" TROSSEN_AI_EXAMPLE_LABEL ") Config");
     return 0;
   }
 
@@ -172,7 +190,8 @@ int main(int argc, char** argv) {
     " (" + std::to_string(cfg.teleop.pairs.size()) + " pairs)");
 
   trossen::utils::print_config_banner(
-    "Trossen Stationary AI Policy Demo Usage", config_lines);
+    "Trossen Stationary AI Policy (" TROSSEN_AI_EXAMPLE_LABEL ") Demo Usage",
+    config_lines);
 
   trossen::utils::install_signal_handler();
   std::filesystem::create_directories(root);
@@ -346,6 +365,20 @@ int main(int argc, char** argv) {
   // Lifecycle callbacks
   // ──────────────────────────────────────────────────────────
 
+  // Policy-readiness gate. on_episode_started sets policy_ready true once every
+  // policy client has produced its first action chunk; it stays false if none
+  // arrives within kPolicyReadyTimeout. The episode loop discards and stops when
+  // it stays false, so a non-responsive policy never saves an episode of the
+  // followers frozen at the staged pose. policy_urls names the servers for the
+  // error message.
+  constexpr auto kPolicyReadyTimeout = std::chrono::seconds(30);
+  bool policy_ready = false;
+  std::string policy_urls;
+  for (const auto& pc : cfg.hardware.policy_clients) {
+    if (!policy_urls.empty()) policy_urls += ", ";
+    policy_urls += pc.id + " (" + pc.server_url + ")";
+  }
+
   mgr.on_pre_episode([&]() -> bool {
     for (auto& ctrl : controllers) ctrl->prepare_teleop();
     return true;
@@ -362,11 +395,11 @@ int main(int argc, char** argv) {
     // mirror loop would write hold-last-action zeros to the followers and
     // jerk them toward the rest pose.
     std::cout << "Waiting for first policy chunk before starting mirror...\n";
-    const auto deadline =
-      std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    bool ready = false;
+    const auto deadline = std::chrono::steady_clock::now() + kPolicyReadyTimeout;
+    policy_ready = false;
     // Honour Ctrl+C while waiting: the arms are energized here, so the loop
-    // must exit promptly on a stop request instead of blocking for up to 30 s.
+    // must exit promptly on a stop request instead of blocking for the full
+    // timeout.
     while (std::chrono::steady_clock::now() < deadline &&
            !trossen::utils::g_stop_requested) {
       bool all_ready = true;
@@ -377,25 +410,20 @@ int main(int argc, char** argv) {
         }
       }
       if (all_ready) {
-        ready = true;
+        policy_ready = true;
         break;
       }
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
     }
     // Start mirroring only after a real chunk has landed: kicking off teleop on
     // the zero-fill hold-last-action row would jerk the followers off the staged
-    // pose toward rest. On timeout or Ctrl+C, leave the followers on the held
-    // staged pose (safe) and let the episode loop's g_stop_requested checks
-    // drive shutdown.
-    if (ready) {
+    // pose toward rest. When no chunk arrives, leave the followers on the held
+    // staged pose (safe); the episode loop discards this episode and stops.
+    if (policy_ready) {
       for (auto& ctrl : controllers) ctrl->teleop();
       std::cout << "Episode started - recording"
                 << (controllers.empty() ? "" : " and policy-driven mirroring")
                 << " active.\n";
-    } else {
-      std::cerr << "WARNING: no policy chunk within deadline"
-                << (trossen::utils::g_stop_requested ? " (stop requested)" : "")
-                << "; mirroring not started, followers holding staged pose.\n";
     }
   });
 
@@ -451,6 +479,25 @@ int main(int argc, char** argv) {
       break;
     }
 
+    // Policy-readiness gate: on_episode_started waited for the first action
+    // chunk from every policy client. If none arrived, the episode holds the
+    // followers at the staged pose with no policy motion, so discard it (nothing
+    // usable was captured) and stop rather than record more empty episodes.
+    if (!policy_ready) {
+      mgr.discard_current_episode();
+      if (trossen::utils::g_stop_requested) {
+        std::cout << "\nStopping at user request (Ctrl+C).\n";
+      } else {
+        std::cerr << "\nERROR: no policy returned an action within "
+                  << kPolicyReadyTimeout.count()
+                  << "s — the policy server is not responding. Discarded the "
+                     "empty episode and stopping. Check that the policy "
+                     "server(s) are running and serving the configured "
+                     "checkpoint: " << policy_urls << "\n";
+      }
+      break;
+    }
+
     std::cout << "Recording...\n";
 
     auto action = mgr.monitor_episode();
@@ -489,5 +536,13 @@ int main(int argc, char** argv) {
   trossen::utils::print_final_summary(
     final_stats.total_episodes_completed, root, extra_info);
 
-  return 0;
+  // All SDK-owned teardown — arm safing (end_teleop), teleop stop, and the
+  // recording flush/close — has completed inside mgr.shutdown() above: the
+  // dataset is finalized and the arms are at rest. Exit here instead of running
+  // the process through third-party library static/destructor teardown, which
+  // is unreliable on this platform (the RealSense pipeline destructor can abort
+  // during close). Nothing the SDK owns is left to release.
+  std::cout.flush();
+  std::cerr.flush();
+  std::_Exit(0);
 }

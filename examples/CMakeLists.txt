@@ -14,16 +14,28 @@ target_link_libraries(trossen_mobile_ai trossen_sdk libtrossen_arm)
 
 # Trossen Stationary AI Policy — 2 followers + 4 cameras, policy-driven leaders.
 # Requires the PolicyClient gate (FetchContent of IXWebSocket + msgpack-cxx).
+#
+# One transport-agnostic source builds into two binaries; they differ only in
+# the default config (which selects the transport) and a display label, both
+# injected via compile definitions. openpi_ws vs lerobot_grpc is a config
+# concern, not a code concern.
 if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
-  add_executable(trossen_stationary_ai_policy
+  set(_policy_example_src
     trossen_stationary_ai_policy/trossen_stationary_ai_policy.cpp)
-  target_link_libraries(trossen_stationary_ai_policy trossen_sdk libtrossen_arm)
 
-  # LeRobot sibling: same bimanual setup driven by a LeRobot async_inference
-  # gRPC server (transport lerobot_grpc) instead of openpi WebSocket.
-  add_executable(trossen_stationary_ai_lerobot
-    trossen_stationary_ai_lerobot/trossen_stationary_ai_lerobot.cpp)
+  # openpi WebSocket variant.
+  add_executable(trossen_stationary_ai_openpi ${_policy_example_src})
+  target_link_libraries(trossen_stationary_ai_openpi trossen_sdk libtrossen_arm)
+  target_compile_definitions(trossen_stationary_ai_openpi PRIVATE
+    TROSSEN_AI_EXAMPLE_CONFIG="examples/trossen_stationary_ai_policy/configs/openpi.json"
+    TROSSEN_AI_EXAMPLE_LABEL="openpi")
+
+  # LeRobot async_inference gRPC variant (same code, different config).
+  add_executable(trossen_stationary_ai_lerobot ${_policy_example_src})
   target_link_libraries(trossen_stationary_ai_lerobot trossen_sdk libtrossen_arm)
+  target_compile_definitions(trossen_stationary_ai_lerobot PRIVATE
+    TROSSEN_AI_EXAMPLE_CONFIG="examples/trossen_stationary_ai_policy/configs/lerobot.json"
+    TROSSEN_AI_EXAMPLE_LABEL="LeRobot")
 endif()
 
 # Registry demo executable

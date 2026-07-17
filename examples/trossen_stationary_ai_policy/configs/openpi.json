@@ -9,6 +9,7 @@
         "end_effector":    "wxai_v0_follower",
         "staged_position": [0.0, 1.0471975511965976, 0.5235987755982988, 0.6283185307179586, 0.0, 0.0, 0.0],
         "slew_time_s": 3.0,
+        "episode_lifecycle_enabled": true,
         "write_moving_time_s": 0.15
       },
       "follower_right": {
@@ -17,6 +18,7 @@
         "end_effector":    "wxai_v0_follower",
         "staged_position": [0.0, 1.0471975511965976, 0.5235987755982988, 0.6283185307179586, 0.0, 0.0, 0.0],
         "slew_time_s": 3.0,
+        "episode_lifecycle_enabled": true,
         "write_moving_time_s": 0.15
       }
     },
@@ -57,7 +59,7 @@
     "policy_clients": [
       {
         "id":           "policy_main",
-        "server_url":   "ws://localhost:8000",
+        "server_url":   "ws://localhost:8001",
         "inference_hz": 0.6,
         "prompt":       "grab and transfer the red cube",
         "log_path":     "~/.trossen_sdk/policy_logs/sdk_run.jsonl",
@@ -136,25 +138,7 @@
     }
   ],
 
-  "observers": [
-    {
-      "type":      "rerun",
-      "id":        "live_viewer",
-      "rerun_url": "rerun+http://127.0.0.1:9876/proxy",
-      "app_id":    "trossen_stationary_ai_policy",
-      "spawn":     true,
-      "enabled":   true,
-      "subscriptions": [
-        { "record_id": "follower_left",      "throttle_hz": 30.0 },
-        { "record_id": "follower_right",     "throttle_hz": 30.0 },
-        { "record_id": "policy_action",      "throttle_hz": 30.0 },
-        { "record_id": "camera_high",        "throttle_hz": 15.0 },
-        { "record_id": "camera_low",         "throttle_hz": 15.0 },
-        { "record_id": "camera_left_wrist",  "throttle_hz": 15.0 },
-        { "record_id": "camera_right_wrist", "throttle_hz": 15.0 }
-      ]
-    }
-  ],
+
 
   "teleop": {
     "enabled": true,

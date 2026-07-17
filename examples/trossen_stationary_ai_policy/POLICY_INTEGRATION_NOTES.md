@@ -48,7 +48,7 @@ at 30 Hz, the policy-client subscription throttle should also be 30 Hz.
 Anything lower halves freshness for no gain — cameras don't drive the
 load, the network round-trip does.
 
-**Knob**: every `subscriptions[].throttle_hz` in `config.json` set to the
+**Knob**: every `subscriptions[].throttle_hz` in `configs/openpi.json` set to the
 camera FPS.
 
 ### 1.3 Freshness barrier on observation snapshots
@@ -393,7 +393,7 @@ verifiable through §5's diagnostics.
 ## 7. Final tuned values
 
 For quick reference, the values that emerged from this work. All live in
-`examples/trossen_stationary_ai_policy/config.json`.
+`examples/trossen_stationary_ai_policy/configs/openpi.json`.
 
 | Knob | Value | Reason |
 |---|---|---|
@@ -534,7 +534,7 @@ the EMA, full extent reached on every grasp.
 diverged from openpi.
 
 **Root cause**: three of four cameras had different `cam_*` → serial
-mappings between openpi's `main.py` and the SDK's `config.json`. The policy
+mappings between openpi's `main.py` and the SDK's `configs/openpi.json`. The policy
 saw the wrong scene under each label.
 
 **Fix**: matched serials to openpi's mapping

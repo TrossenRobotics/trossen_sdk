@@ -9,6 +9,7 @@
         "end_effector":    "wxai_v0_follower",
         "staged_position": [0.0, 1.0471975511965976, 0.5235987755982988, 0.6283185307179586, 0.0, 0.0, 0.0],
         "slew_time_s": 3.0,
+        "episode_lifecycle_enabled": true,
         "write_moving_time_s": 0.15
       },
       "follower_right": {
@@ -17,6 +18,7 @@
         "end_effector":    "wxai_v0_follower",
         "staged_position": [0.0, 1.0471975511965976, 0.5235987755982988, 0.6283185307179586, 0.0, 0.0, 0.0],
         "slew_time_s": 3.0,
+        "episode_lifecycle_enabled": true,
         "write_moving_time_s": 0.15
       }
     },
