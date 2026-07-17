@@ -197,7 +197,7 @@ TEST(PolicyClientConfigTest, RoundTripCanonical) {
 
 TEST(PolicyClientConfigTest, RejectsOverlappingJointLayout) {
   // Two entries whose slices overlap (both cover column 3) sum to a width that
-  // can still match the chunk, yet they address the same joints — reject it.
+  // can still match the chunk, yet they address the same joints - reject it.
   auto j = nlohmann::json::parse(kCanonicalConfig);
   j["joint_layout"] = nlohmann::json::parse(R"([
     { "leader_id": "a", "joint_offset": 0, "joint_count": 7 },
@@ -252,7 +252,7 @@ TEST(PolicyClientConfigTest, AcceptsWssScheme) {
 
 TEST(PolicyClientConfigTest, AcceptsNonWebsocketUrl) {
   // URL format is transport-specific (a gRPC transport takes host:port), so
-  // the shared config no longer enforces a scheme — the selected transport's
+  // the shared config no longer enforces a scheme - the selected transport's
   // factory does (openpi_ws rejection is pinned in the transport tests).
   auto j = nlohmann::json::parse(kCanonicalConfig);
   j["server_url"] = "10.0.0.5:50051";

@@ -5,7 +5,6 @@
  * JSON format:
  * @code
  * {
- *   "type": "policy_client",
  *   "id":   "policy_main",
  *   "server_url":   "ws://10.0.0.5:8000",
  *   "api_key":      "optional-string",
@@ -156,7 +155,7 @@ struct PolicyClientJointLayoutEntry {
   /// Optional per-joint motor names for this slice. When present, length must
   /// equal ``joint_count``. Consumed by transports that key state by motor
   /// name (LeRobot's ``"<name>.pos"``); ignored by transports that concatenate
-  /// positionally (openpi). Empty means "unnamed" — downstream falls back to a
+  /// positionally (openpi). Empty means "unnamed" - downstream falls back to a
   /// positional key.
   std::vector<std::string> joint_names;
 
@@ -246,7 +245,7 @@ struct PolicyClientConfig {
   std::string id;
 
   /// Endpoint of the remote policy server. The scheme/format is validated by
-  /// the selected transport's factory, not here — e.g. ``ws[s]://host:port``
+  /// the selected transport's factory, not here - e.g. ``ws[s]://host:port``
   /// for ``openpi_ws``, ``host:port`` for ``lerobot_grpc``.
   std::string server_url;
 
@@ -304,18 +303,18 @@ struct PolicyClientConfig {
   double freshness_timeout_ms{200.0};
 
   /// First-order EMA coefficient applied to each Face's per-tick output:
-  /// ``out_t = α · chunk_row_t + (1-α) · out_{t-1}``. Acts as a low-pass
-  /// filter on the action stream sent to the followers — masks per-row
+  /// ``out_t = alpha * chunk_row_t + (1-alpha) * out_{t-1}``. Acts as a low-pass
+  /// filter on the action stream sent to the followers - masks per-row
   /// chunk noise without depending on the arm-side ``write_moving_time_s``
   /// trajectory smoother. 1.0 disables smoothing (pass-through). Lower
   /// values smooth more but add lag; rough time constant at 30 Hz is
-  /// ``(1-α)/α · 33 ms`` → α=0.5 ≈ 33 ms, α=0.4 ≈ 50 ms, α=0.3 ≈ 80 ms.
+  /// ``(1-alpha)/alpha * 33 ms`` -> alpha=0.5 ~ 33 ms, alpha=0.4 ~ 50 ms, alpha=0.3 ~ 80 ms.
   /// Reset to pass-through state on pause / slot clear. Applies to all
   /// joints in a Face's slice *except* the last one (the gripper); the
   /// gripper has its own coefficient below.
   double output_ema_alpha{1.0};
 
-  /// EMA coefficient applied to the *last joint* of each Face slice — by
+  /// EMA coefficient applied to the *last joint* of each Face slice - by
   /// convention the gripper. Defaults to 1.0 (pass-through) because
   /// gripper open/close is a fast transient (often 2-3 chunk rows from
   /// closed to fully open); smoothing it like the arm joints causes the
@@ -602,7 +601,7 @@ struct PolicyClientConfig {
     // The joint_layout entries are slices of one flat action row: each entry
     // owns columns [joint_offset, joint_offset + joint_count) and the row width
     // is the sum of the counts. For the slices to address distinct, complete
-    // joints they must tile [0, sum) exactly — no gaps, no overlap. Validate
+    // joints they must tile [0, sum) exactly - no gaps, no overlap. Validate
     // that here so a transposed or mis-typed offset fails at load instead of
     // silently commanding the wrong joints. Entries are sorted by offset and
     // each offset must equal the running total of the preceding counts.
