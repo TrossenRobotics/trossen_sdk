@@ -6,7 +6,7 @@
  * A LeRobot policy server answers ``GetActions`` with ``pickle.dumps(list[TimedAction])``,
  * where each ``TimedAction`` carries a ``torch.Tensor`` of joint targets. This
  * codec decodes exactly the byte format produced by the pinned server version
- * — LeRobot v0.5.2 (commit e99c55af) — into a flat float matrix.
+ * — LeRobot v0.6.0 (commit 30da8e68) — into a flat float matrix.
  *
  * It is deliberately NOT a general unpickler: only the opcodes and the single
  * torch tensor-rebuild path that the pinned payloads exercise are implemented,

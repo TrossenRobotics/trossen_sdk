@@ -1,7 +1,7 @@
 // Tests for the pinned LeRobot pickle/torch decoder.
 //
 // The fixture pair (.pkl bytes + expected.json) was captured from a real
-// pinned stack (LeRobot v0.5.2, torch 2.10 — see fixtures/lerobot_codec/
+// pinned stack (LeRobot v0.6.0, torch 2.10 — see fixtures/lerobot_codec/
 // versions.json); FixtureParityExact is the regression tripwire for any wire
 // format drift. The negative tests pin the fail-loud contract: malformed or
 // out-of-subset input must throw, never mis-decode.

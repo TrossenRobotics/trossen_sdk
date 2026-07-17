@@ -7,11 +7,19 @@ with LeRobot's own ``pickle.dumps`` path, so the bytes are identical to what a
 live LeRobot ``async_inference`` server/client puts on the wire.
 
 PINNED STACK (the bytes are only meaningful for this exact stack):
-    lerobot 0.5.2  (git commit e99c55af)
+    lerobot 0.6.0  (git commit 30da8e68)
     torch   2.10.0+cpu
     numpy   2.2.6
 A pin bump is a deliberate, tested change: re-run this script under the new
 stack and re-inspect the .dis.txt opcode listings before trusting the decoder.
+
+NOTE on the action-chunk fixture: the pickled torch storage carries a per-run
+storage-KEY string (e.g. "1073252416") that pickle uses only to memo-correlate
+the shared storage — it varies run-to-run and across torch minor versions and is
+NOT part of the wire contract. So action_chunk_f32_3x14.pkl will differ by that
+key on re-capture while remaining structurally identical (same opcodes, same
+float payload, same decoded expected.json). The decoder treats the key as an
+opaque memo id; do not treat that byte delta as format drift.
 
 This script is DEV TOOLING, not part of the SDK build. Run it only inside the
 pinned fixture venv:
@@ -200,7 +208,7 @@ def capture_versions() -> None:
     protocol = sample[1] if len(sample) >= 2 and sample[0] == 0x80 else None
     versions = {
         "lerobot": getattr(lerobot, "__version__", "unknown"),
-        "lerobot_commit": "e99c55af",
+        "lerobot_commit": "30da8e68",
         "torch": torch.__version__,
         "numpy": np.__version__,
         "pickle_default_protocol": pickle.DEFAULT_PROTOCOL,
