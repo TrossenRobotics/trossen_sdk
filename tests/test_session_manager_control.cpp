@@ -10,6 +10,7 @@
 
 #include <atomic>
 #include <cstddef>
+#include <memory>
 #include <mutex>
 
 #include "gtest/gtest.h"
@@ -79,19 +80,19 @@ class SessionManagerControlTest : public ::testing::Test {
 // ── attach / shutdown lifecycle ─────────────────────────────────────────────
 
 TEST_F(SessionManagerControlTest, AttachStartsSourceAndShutdownStopsIt) {
-  FakeControlSource fake;
+  auto fake = std::make_shared<FakeControlSource>();
   sm_.attach_control(fake);
-  EXPECT_TRUE(fake.started);
+  EXPECT_TRUE(fake->started);
 
   sm_.shutdown();
-  EXPECT_TRUE(fake.stopped);
+  EXPECT_TRUE(fake->stopped);
 }
 
 TEST_F(SessionManagerControlTest, SourceEventForwardsThroughAttach) {
-  FakeControlSource fake;
+  auto fake = std::make_shared<FakeControlSource>();
   sm_.attach_control(fake);
 
-  fake.fireEvent(SessionControlEvent::kRerecord);
+  fake->fireEvent(SessionControlEvent::kRerecord);
   drainRecording();
   EXPECT_TRUE(rerecord());
 
@@ -159,13 +160,13 @@ TEST_F(SessionManagerControlTest, StopSessionSetsGlobalStop) {
 // ── disconnect composes with the base fire-once guarantee ───────────────────
 
 TEST_F(SessionManagerControlTest, DisconnectPostsStopSessionExactlyOnce) {
-  FakeControlSource fake;
+  auto fake = std::make_shared<FakeControlSource>();
   sm_.attach_control(fake);
 
   // The base guarantees a single disconnect until re-armed, so two drops
   // queue only one kStopSession.
-  fake.fireDisconnect();
-  fake.fireDisconnect();
+  fake->fireDisconnect();
+  fake->fireDisconnect();
   EXPECT_EQ(pendingCount(), 1u);
 
   drainReset();

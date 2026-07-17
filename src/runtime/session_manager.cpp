@@ -95,7 +95,7 @@ SessionManager::~SessionManager() {
 void SessionManager::shutdown() {
   // Stop attached control sources first (joins their reader threads) so no
   // queued event can drive the session while it is being torn down.
-  for (auto* source : control_sources_) {
+  for (auto& source : control_sources_) {
     if (source) source->stop();
   }
   control_sources_.clear();
@@ -1004,18 +1004,19 @@ void SessionManager::post_event(hw::session_control::SessionControlEvent event) 
 }
 
 void SessionManager::attach_control(
-  hw::session_control::SessionControlCapable& source)
+  std::shared_ptr<hw::session_control::SessionControlCapable> source)
 {
+  if (!source) return;
   using Event = hw::session_control::SessionControlEvent;
-  source.set_callbacks(
+  source->set_callbacks(
     [this](Event e) { post_event(e); },
     [this] {
       std::cerr << "\n[session] control source disconnected; ending session."
                 << std::endl;
       post_event(Event::kStopSession);
     });
-  source.start();
-  control_sources_.push_back(&source);
+  source->start();
+  control_sources_.push_back(std::move(source));
 }
 
 void SessionManager::drain_control_events(ControlPhase phase) {

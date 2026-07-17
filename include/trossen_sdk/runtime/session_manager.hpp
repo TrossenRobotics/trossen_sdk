@@ -216,14 +216,15 @@ public:
    * before the session is torn down. Every source drives the session through
    * the same thread-safe queue, so keyboard and VR are interchangeable.
    *
-   * @note The manager keeps a non-owning pointer to `source`, so `source` must
-   * outlive the SessionManager (until shutdown() / destruction). Destroying it
-   * earlier leaves a dangling pointer that shutdown() would dereference.
+   * @note The manager holds a shared_ptr to `source`, so the source is
+   * guaranteed to outlive the SessionManager's use of it (until shutdown() /
+   * destruction releases it). This removes the dangling-pointer risk a
+   * non-owning pointer would carry if the caller dropped the source early.
    * @note Events are consumed by the synchronous monitor_episode() /
    * wait_for_reset() loop, so drive the session with those rather than
    * start_async_monitoring().
    */
-  void attach_control(hw::session_control::SessionControlCapable& source);
+  void attach_control(std::shared_ptr<hw::session_control::SessionControlCapable> source);
 
   /**
    * @brief Check if an episode is currently running
@@ -563,7 +564,9 @@ private:
   std::mutex control_events_mutex_;
 
   /// @brief Attached control sources; stopped in shutdown() before teardown.
-  std::vector<hw::session_control::SessionControlCapable*> control_sources_;
+  /// Held by shared_ptr so a source cannot be destroyed while the manager may
+  /// still stop it.
+  std::vector<std::shared_ptr<hw::session_control::SessionControlCapable>> control_sources_;
 
   /// @brief Set by drain when a control event asks the current episode to stop.
   std::atomic<bool> episode_stop_requested_{false};
