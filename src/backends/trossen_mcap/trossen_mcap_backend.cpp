@@ -14,10 +14,12 @@
 #include "EndEffectorPose.pb.h"
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
+#include "RobotDescription.pb.h"
 #include "nlohmann/json.hpp"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
+#include "trossen_sdk/utils/robot_description_cache.hpp"
 #include "trossen_sdk/version.hpp"
 
 namespace trossen::io::backends {
@@ -163,6 +165,23 @@ bool TrossenMCAPBackend::open() {
     std::cerr << "Failed to write metadata: " << foxglove::strerror(st) << "\n";
   }
 
+  if (cfg_->include_robot_description) {
+    // The robot description is optional, so a failure here must not abort open().
+    try {
+      std::string urdf = trossen::utils::RobotDescriptionCache::resolve(
+        cfg_->robot_name,
+        cfg_->urdf_variant,
+        cfg_->robot_description_ref,
+        cfg_->include_meshes);
+      if (!urdf.empty()) {
+        write_robot_description_to_mcap(urdf);
+      }
+    } catch (const std::exception& e) {
+      std::cerr << "Failed to resolve/write robot description: " << e.what()
+                << "; continuing without it\n";
+    }
+  }
+
   return true;
 }
 
@@ -181,6 +200,10 @@ void TrossenMCAPBackend::close_resources() {
   }
   for (auto& [name, channel] : image_channels_) {
     channel.close();
+  }
+  if (robot_description_channel_.has_value()) {
+    robot_description_channel_->close();
+    robot_description_channel_.reset();
   }
   if (writer_) {
     auto st = writer_->close();
@@ -412,6 +435,60 @@ foxglove::RawChannel* TrossenMCAPBackend::ensure_end_effector_pose_channel(
   auto [inserted_it, _] = end_effector_pose_channels_.emplace(
     stream_id, std::move(channel_result.value()));
   return &inserted_it->second;
+}
+
+foxglove::RawChannel* TrossenMCAPBackend::ensure_robot_description_channel() {
+  if (robot_description_channel_.has_value()) {
+    return &robot_description_channel_.value();
+  }
+
+  foxglove::Schema schema;
+  schema.name = "trossen_sdk.RobotDescription";
+  schema.encoding = "protobuf";
+  schema.data = reinterpret_cast<const std::byte*>(schema_data_robot_description_.data());
+  schema.data_len = schema_data_robot_description_.size();
+
+  auto channel_result = foxglove::RawChannel::create(
+    trossen_mcap_defs::robot_description_topic(),
+    "protobuf",
+    schema,
+    context_,
+    std::nullopt);
+
+  if (!channel_result.has_value()) {
+    std::cerr << "Failed to create robot description channel: "
+              << foxglove::strerror(channel_result.error()) << "\n";
+    return nullptr;
+  }
+
+  robot_description_channel_ = std::move(channel_result.value());
+  return &robot_description_channel_.value();
+}
+
+void TrossenMCAPBackend::write_robot_description_to_mcap(const std::string& urdf_string) {
+  auto* channel = ensure_robot_description_channel();
+  if (!channel) return;
+
+  trossen_sdk::RobotDescription msg;
+  msg.set_robot_description(urdf_string);
+  msg.set_git_ref(cfg_->robot_description_ref);
+
+  std::string payload;
+  if (!msg.SerializeToString(&payload)) {
+    std::cerr << "Failed to serialize robot description; skipping\n";
+    return;
+  }
+
+  auto st = channel->log(
+    reinterpret_cast<const std::byte*>(payload.data()),
+    payload.size(),
+    trossen::data::now_real().to_ns());
+
+  if (st != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to write robot description: " << foxglove::strerror(st) << "\n";
+  } else {
+    ++stats_.robot_description_written;
+  }
 }
 
 void TrossenMCAPBackend::write_end_effector_pose_record(
@@ -702,6 +779,8 @@ void TrossenMCAPBackend::register_schemas_once() {
     "trossen_sdk/io/backends/trossen_mcap/proto/Odometry2D.proto");
   schema_data_end_effector_pose_ = build_schema_blob(
     "trossen_sdk/io/backends/trossen_mcap/proto/EndEffectorPose.proto");
+  schema_data_robot_description_ = build_schema_blob(
+    "trossen_sdk/io/backends/trossen_mcap/proto/RobotDescription.proto");
 }
 
 bool TrossenMCAPBackend::is_depth_topic(const std::string& topic) {

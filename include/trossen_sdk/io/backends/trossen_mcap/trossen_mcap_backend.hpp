@@ -54,6 +54,9 @@ public:
 
     /// @brief Number of depth images written
     uint64_t depth_images_written{0};
+
+    /// @brief Number of robot description messages written (0 or 1 per MCAP file)
+    uint64_t robot_description_written{0};
   };
 
   /**
@@ -210,6 +213,20 @@ private:
   void write_end_effector_pose_record(const data::EndEffectorPoseRecord& end_effector_pose);
 
   /**
+   * @brief Ensure the robot description channel exists
+   *
+   * @return Pointer to the channel, or nullptr on failure
+   */
+  foxglove::RawChannel* ensure_robot_description_channel();
+
+  /**
+   * @brief Write the URDF string to the /robot_description channel
+   *
+   * @param urdf_string Full URDF XML string to store
+   */
+  void write_robot_description_to_mcap(const std::string& urdf_string);
+
+  /**
    * @brief Register protobuf schemas once
    */
   void register_schemas_once();
@@ -228,6 +245,12 @@ private:
 
   /// @brief Serialised FileDescriptorSet for the EndEffectorPose protobuf schema
   std::string schema_data_end_effector_pose_;
+
+  /// @brief Serialised FileDescriptorSet for the RobotDescription protobuf schema
+  std::string schema_data_robot_description_;
+
+  /// @brief Single robot description channel (written once per MCAP file)
+  std::optional<foxglove::RawChannel> robot_description_channel_;
 
   /// @brief Output file path
   std::filesystem::path path_;

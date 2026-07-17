@@ -65,6 +65,15 @@ inline std::string end_effector_pose_topic(const std::string& stream_id) {
   return stream_id + "/end_effector/pose";
 }
 
+/**
+ * @brief Get topic name for the robot description (URDF) channel
+ *
+ * @return Fixed topic name "/robot_description"
+ */
+inline std::string robot_description_topic() {
+  return "/robot_description";
+}
+
 }  // namespace trossen::trossen_mcap_defs
 
 #endif  // TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__TROSSEN_MCAP_SCHEMAS_HPP_
