@@ -189,6 +189,11 @@ void TeleopController::control_loop() {
         if (const auto effort = follower_io_->read_gripper_effort()) {
           leader_io_->apply_gripper_feedback(*effort);
         }
+
+        std::vector<float> efforts = follower_io_->read_multiple_gripper_efforts();
+        if (efforts.size() >= 1) {
+          leader_io_->apply_multiple_gripper_feedback(efforts);
+        }
       }
 
       std::this_thread::sleep_until(deadline);

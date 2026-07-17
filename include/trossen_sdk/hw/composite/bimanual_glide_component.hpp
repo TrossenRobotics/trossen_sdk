@@ -52,7 +52,7 @@ public:
    *   "left_ip_address": "192.168.1.100",
    *   "left_model": "glide_right",
    *   "right_ip_address": "192.168.1.101",
-   *   "right_model: "glide_left",
+   *   "right_model": "glide_left",
    *   "write_moving_time_s": 0.2,
    *   "episode_lifecycle_enabled": true,
    *   "joint_signs": [1, 1, ...],
@@ -197,7 +197,7 @@ private:
    * @brief Write joint efforts to both arm grippers
    * @param follower_gripper_effort Vector (2) of joint efforts (N) for gripper [left_q6, right_q6]
    */
-    void apply_multiple_gripper_feedbacks(std::vector<float> follower_gripper_effort) override {
+    void apply_multiple_gripper_feedback(std::vector<float> follower_gripper_effort) override {
       self->apply_gripper_feedback(follower_gripper_effort);
     }
   };
@@ -229,7 +229,7 @@ private:
   std::string left_ip_address_;
   std::string right_model_str_;
   std::string right_ip_address_;
-  double write_moving_time_s_{0.0};
+  double write_moving_time_s_{0.2};
 
 
   /// Whether this arm participates in the per-episode lifecycle (staging before

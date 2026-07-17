@@ -12,6 +12,10 @@ target_link_libraries(trossen_stationary_ai trossen_sdk libtrossen_arm)
 add_executable(trossen_mobile_ai trossen_mobile_ai/trossen_mobile_ai.cpp)
 target_link_libraries(trossen_mobile_ai trossen_sdk libtrossen_arm)
 
+# Trossen Rivet - bimanual + mobile base + 3 cameras
+add_executable(trossen_rivet trossen_rivet/trossen_rivet.cpp)
+target_link_libraries(trossen_rivet trossen_sdk libtrossen_arm)
+
 # Trossen Stationary AI Policy — 2 followers + 4 cameras, policy-driven leaders.
 # Requires the PolicyClient gate (FetchContent of IXWebSocket + msgpack-cxx).
 if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)

@@ -28,6 +28,8 @@
  *   "robot_name": "trossen_stationary_ai",
  *   "hardware": {
  *     "arms":    { "<id>": { "ip_address": "...", "model": "...", "end_effector": "..." }, ... },
+ *     "bimanual_arms": { "<id>": { "left_ip_address": "...", "left_model": "...",
+ *                                  "right_ip_address": "...", "right_model": "..." }, ... },
  *     "cameras": [ { "id": "...", "type": "realsense_camera", "serial_number": "...", ... }, ... ],
  *     "mobile_base": { "reset_odometry": false, "enable_torque": false }
  *   },
@@ -73,6 +75,7 @@
 #include "nlohmann/json.hpp"
 
 #include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
+#include "trossen_sdk/configuration/types/hardware/bimanual_glide_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/camera_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/mobile_base_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/policy_client_config.hpp"
@@ -90,6 +93,11 @@ namespace trossen::configuration {
 struct HardwareConfig {
   /// @brief Named arm configs, keyed by logical id (e.g. "leader_left", "follower_right")
   std::unordered_map<std::string, ArmConfig> arms;
+
+  /// @brief Named bimanual glide leader-pair configs, keyed by logical id
+  /// (e.g. "bimanual_glide"). Each entry drives one BimanualGlideComponent
+  /// wrapping two physical arms.
+  std::unordered_map<std::string, BimanualGlideConfig> bimanual_arms;
 
   /// @brief Ordered list of camera configs
   std::vector<CameraConfig> cameras;

@@ -25,6 +25,18 @@ HardwareConfig HardwareConfig::from_json(const nlohmann::json& j) {
     }
   }
 
+  if (j.contains("bimanual_arms") && j.at("bimanual_arms").is_object()) {
+    for (const auto& [id, arm_j] : j.at("bimanual_arms").items()) {
+      if (c.arms.count(id)) {
+        throw std::runtime_error(
+          "HardwareConfig: id '" + id + "' is used by both 'arms' and "
+          "'bimanual_arms' — hardware ids must be unique across both maps "
+          "since teleop pairs and the active hardware registry resolve by id alone");
+      }
+      c.bimanual_arms[id] = BimanualGlideConfig::from_json(arm_j);
+    }
+  }
+
   if (j.contains("cameras") && j.at("cameras").is_array()) {
     for (const auto& cam_j : j.at("cameras")) {
       c.cameras.push_back(CameraConfig::from_json(cam_j));

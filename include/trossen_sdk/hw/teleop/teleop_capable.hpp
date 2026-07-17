@@ -133,7 +133,7 @@ public:
 
   /// Leader role (multiple): render gripper force feedback from the follower's measured
   /// gripper effort (N). Default no-op for hardware without an actuated gripper.
-  virtual void apply_multiple_gripper_feedbacks(std::vector<float> follower_gripper_effort) {
+  virtual void apply_multiple_gripper_feedback(std::vector<float> follower_gripper_effort) {
     (void)follower_gripper_effort;
   }
 };
