@@ -21,17 +21,17 @@ import numpy as np
 import trossen_arm
 import trossen_base
 
-
+ENABLE_LEFT = True
 ENABLE_RIGHT = True
-ENABLE_FOLLOWER = False
-ENABLE_LEFT = False
+ENABLE_FOLLOWER = True
 ENABLE_BASE = True
 
 # IP addresses for the leader and follower
-IP_RIGHT_LEADER = "192.168.1.2"
-IP_RIGHT_FOLLOWER = "192.168.1.2"
 IP_LEFT_LEADER = "192.168.1.3"
-IP_LEFT_FOLLOWER = "192.168.1.5"
+IP_LEFT_FOLLOWER = "192.168.1.4"
+IP_RIGHT_LEADER = "192.168.1.2"
+IP_RIGHT_FOLLOWER = "192.168.1.5"
+
 
 # Gripper force feedback parameters
 LEADER_MAX = 27.0       # N - leader effort at full grip (not including offset)
@@ -74,13 +74,18 @@ if __name__ == "__main__":
     if ENABLE_BASE:
         base = trossen_base.TrossenBase()
 
+
     if ENABLE_RIGHT:
         driver_right_leader.configure(
             trossen_arm.Model.glide_right,
-            trossen_arm.StandardEndEffector.no_gripper,
+            trossen_arm.StandardEndEffector.wxai_v0_leader,
             IP_RIGHT_LEADER,
             True,
         )
+
+        right_leader_joint_limits = driver_right_leader.get_joint_limits()
+        right_leader_joint_limits[-1].position_max = 0.05
+        driver_right_leader.set_joint_limits(right_leader_joint_limits)
 
         if ENABLE_FOLLOWER:
             driver_right_follower.configure(
@@ -93,10 +98,14 @@ if __name__ == "__main__":
     if ENABLE_LEFT:
         driver_left_leader.configure(
             trossen_arm.Model.glide_left,
-            trossen_arm.StandardEndEffector.no_gripper,
+            trossen_arm.StandardEndEffector.wxai_v0_leader,
             IP_LEFT_LEADER,
             True,
         )
+
+        left_leader_joint_limits = driver_left_leader.get_joint_limits()
+        left_leader_joint_limits[-1].position_max = 0.05
+        driver_left_leader.set_joint_limits(left_leader_joint_limits)
 
         if ENABLE_FOLLOWER:
             driver_left_follower.configure(
@@ -166,6 +175,7 @@ if __name__ == "__main__":
 
     print("Moving to home positions...")
 
+
     if ENABLE_BASE:
         if not base.wait_until_ready():
             raise RuntimeError("Base failed to become ready")
@@ -182,8 +192,10 @@ if __name__ == "__main__":
             np.array([0.0, 0.0, 0.0, 0.0, 0.0, -np.pi / 4, 0.0]), 1.0, True
         )
 
+
+
     print("Starting to teleoperate the robots...")
-    time.sleep(1)
+
 
     try:
         base_velocity_linear_x = 0.0
@@ -200,9 +212,9 @@ if __name__ == "__main__":
                 right_input = driver_right_leader.get_input_report()
                 if ENABLE_FOLLOWER:
                     right_efforts = driver_right_follower.get_all_external_efforts()
-                # # Scale to -1 to 1 velocity (rad/s)
-                # base_velocity_angular_z = scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
-                #                 BASE_MIN, BASE_MAX, BASE_DEADZONE)
+                # Scale to -1 to 1 velocity (rad/s)
+                base_velocity_angular_z = scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
+                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
 
 
                 # Button bitmap: bit n is SEL_(n+1), 1 is pressed:
@@ -214,15 +226,6 @@ if __name__ == "__main__":
 
                 base_velocity_lift = int(right_up_btn - right_down_btn) * BASE_LIFT_MAX
 
-                base_velocity_linear_x = scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
-                                               BASE_MIN, BASE_MAX, BASE_DEADZONE)
-                # TODO: @schromya Move to other controller when available and move angle back to
-                # buttons
-                # TODO: See why negative needed
-                base_velocity_linear_y = -scale(right_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
-                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
-
-                base_velocity_angular_z = int(right_right_btn - right_left_btn) * BASE_MAX
 
             if ENABLE_LEFT:
                 left_positions = driver_left_leader.get_all_positions()
@@ -231,11 +234,11 @@ if __name__ == "__main__":
                 if ENABLE_FOLLOWER:
                     left_efforts = driver_left_follower.get_all_external_efforts()
 
-                # Scale to -1 to 1 velocity (m/s)
-                # base_velocity_linear_x = scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
-                #                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
-                # base_velocity_linear_y = scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
-                #                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
+                #Scale to -1 to 1 velocity (m/s)
+                base_velocity_linear_x = -scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
+                                               BASE_MIN, BASE_MAX, BASE_DEADZONE)
+                base_velocity_linear_y = scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
+                                               BASE_MIN, BASE_MAX, BASE_DEADZONE)
 
 
 
@@ -365,6 +368,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Moving to stop positions...")
         if ENABLE_RIGHT and ENABLE_FOLLOWER:
+
             driver_right_follower.set_all_modes(trossen_arm.Mode.position)
             driver_right_follower.set_all_positions(
                 np.zeros(driver_right_follower.get_num_joints()), 2.0, True
