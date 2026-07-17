@@ -89,7 +89,7 @@ if __name__ == "__main__":
 
         if ENABLE_FOLLOWER:
             driver_right_follower.configure(
-                trossen_arm.Model.wxai_v0,
+                trossen_arm.Model.pro,
                 trossen_arm.StandardEndEffector.wxai_v0_follower,
                 IP_RIGHT_FOLLOWER,
                 True,
@@ -109,7 +109,7 @@ if __name__ == "__main__":
 
         if ENABLE_FOLLOWER:
             driver_left_follower.configure(
-                trossen_arm.Model.wxai_v0,
+                trossen_arm.Model.pro,
                 trossen_arm.StandardEndEffector.wxai_v0_follower,
                 IP_LEFT_FOLLOWER,
                 True,
