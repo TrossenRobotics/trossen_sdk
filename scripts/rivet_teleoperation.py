@@ -252,6 +252,7 @@ if __name__ == "__main__":
             # RIGHT ARM
             if ENABLE_RIGHT and ENABLE_FOLLOWER:
                 # Feed the external efforts from the follower robot to the leader robot
+                # TODO: REVERT THIS???
                 driver_right_leader.set_arm_external_efforts(
                     np.array(
                         [

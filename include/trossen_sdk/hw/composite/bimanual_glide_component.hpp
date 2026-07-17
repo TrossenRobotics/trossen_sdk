@@ -53,6 +53,7 @@ public:
    *   "left_model": "glide_right",
    *   "right_ip_address": "192.168.1.101",
    *   "right_model: "glide_left",
+   *   "write_moving_time_s": 0.2
    * }
    *
    * @param config JSON configuration object
@@ -65,7 +66,7 @@ public:
    *
    * @return Type identifier
    */
-  std::string get_type() const override { return "bimanual_glide_component"; }
+  std::string get_type() const override { return "bimanual_glide"; }
 
   /**
    * @brief Get human-readable component information
@@ -131,6 +132,11 @@ private:
     std::vector<float> read() override {
       return self->read_joint();
     }
+
+    /**
+     * @brief Write joint commands to both arms
+     * @param cmd Vector of joint efforts for gripper [left_q6, right_q6]
+     */
     void write(const std::vector<float>& cmd) override {
       self->write_joint(cmd);
     }
@@ -141,12 +147,13 @@ private:
     explicit CartView(BimanualGlideComponent* s) : self(s) {}
     /**
      * @brief Read the cartesian positions from both arms
-     * @return Vector (12) of joint positions [left_x, left_y, left_z, left_rx, left_ry, left_rz,
+     * @return Vector (14) of joint positions [left_x, left_y, left_z, left_rx, left_ry, left_rz,
      *         left_gripper_m, right_x, right_y, ...]
      */
     std::vector<float> read() override {
       return self->read_cartesian();
     }
+    /** DOes nothing */
     void write(const std::vector<float>& cmd) override {
       // Do nothing
     }
@@ -162,6 +169,7 @@ private:
   std::string left_ip_address_;
   std::string right_model_str_;
   std::string right_ip_address_;
+  double write_moving_time_s_{0.0};
 
   /// Whether this arm participates in the per-episode lifecycle (staging before
   /// each episode). Opt-in; parsed from "episode_lifecycle_enabled" in configure().
