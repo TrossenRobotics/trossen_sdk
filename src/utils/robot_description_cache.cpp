@@ -6,10 +6,12 @@
 
 #include <curl/curl.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <system_error>
 #include <unordered_map>
 
 #include "trossen_sdk/io/backend_utils.hpp"
@@ -94,9 +96,23 @@ std::string load_or_download(
   std::string data = download_url(url);
   if (data.empty()) return "";
 
-  std::filesystem::create_directories(cached.parent_path());
+  // Cache writes are best-effort: on failure, still return the downloaded
+  // content and remove any partial file so it is not later read as valid.
+  std::error_code ec;
+  std::filesystem::create_directories(cached.parent_path(), ec);
+  if (ec) {
+    std::cerr << "[robot_description] Failed to create cache dir "
+              << cached.parent_path() << ": " << ec.message() << "\n";
+    return data;
+  }
   std::ofstream out(cached, std::ios::binary);
   out.write(data.data(), static_cast<std::streamsize>(data.size()));
+  if (!out) {
+    std::cerr << "[robot_description] Failed to write cache file " << cached
+              << "; skipping cache\n";
+    out.close();
+    std::filesystem::remove(cached, ec);
+  }
   return data;
 }
 
@@ -163,7 +179,12 @@ std::string patch_paths_to_cache(
       continue;
     }
 
-    load_or_download(rel_path, git_ref, ref_cache_dir);
+    // Skip rewriting when the asset is unavailable; keep the original
+    // package:// reference instead of pointing at a missing cache file.
+    if (load_or_download(rel_path, git_ref, ref_cache_dir).empty()) {
+      pos = end;
+      continue;
+    }
     std::string abs_path = (ref_cache_dir / rel_path).string();
 
     result = result.substr(0, pos) + abs_path + result.substr(end);
@@ -242,7 +263,13 @@ std::string RobotDescriptionCache::resolve(
   }
 
   auto ref_cache_dir = cache_root() / git_ref;
-  std::filesystem::create_directories(ref_cache_dir);
+  std::error_code ec;
+  std::filesystem::create_directories(ref_cache_dir, ec);
+  if (ec) {
+    std::cerr << "[robot_description] Failed to create cache dir "
+              << ref_cache_dir << ": " << ec.message() << "\n";
+    return "";
+  }
 
   std::string urdf = load_or_download(urdf_path, git_ref, ref_cache_dir);
   if (urdf.empty()) return "";

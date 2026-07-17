@@ -29,7 +29,7 @@ public:
   /**
    * @brief Resolves and returns the URDF string ready for MCAP storage.
    *
-   * @param robot_name Robot name from config (e.g. "trossen_ai_solo"). Used to
+   * @param robot_name Robot name from config (e.g. "trossen_solo_ai"). Used to
    *   select the URDF automatically when urdf_variant is empty.
    * @param urdf_variant Explicit repo-relative URDF path override
    *   (e.g. "urdf/generated/wxai/wxai_follower.urdf"). Empty = auto from robot_name.
