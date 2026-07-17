@@ -88,10 +88,15 @@ void VrSession::ensure_started(std::uint16_t port) {
 void VrSession::release() {
   std::lock_guard<std::mutex> lock(mutex_);
   if (ref_count_ == 0) return;
-  if (--ref_count_ == 0 && manager_) {
-    manager_->stop();
-    manager_.reset();
-    port_ = 0;
+  if (--ref_count_ == 0) {
+    if (manager_) {
+      manager_->stop();
+      manager_.reset();
+      port_ = 0;
+    }
+    // No components remain: drop any leftover claims so they can't cause a
+    // false conflict after a restart.
+    claims_.clear();
   }
 }
 

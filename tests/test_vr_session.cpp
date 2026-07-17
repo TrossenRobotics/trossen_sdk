@@ -23,6 +23,7 @@
 
 using trossen::hw::vr::VrInput;
 using trossen::hw::vr::VrSession;
+using trossen::hw::vr::VrSessionLease;
 using trossen::hw::vr::vr_input_name;
 
 namespace {
@@ -148,4 +149,48 @@ TEST_F(VrSessionSeam, ClearLeavesTestMode) {
   session().clear_test_frame();
   EXPECT_FALSE(session().is_vr_connected());
   EXPECT_FALSE(session().latest_frame().has_value());
+}
+
+// ── VrSessionLease: RAII reference + claim cleanup ───────────────────────────
+
+TEST_F(VrSessionSeam, LeaseReleasesClaimsOnDestruction) {
+  session().set_test_frame(trossen_vr::VRFrame{});
+  // Keep-alive lease so the reference count never reaches zero during this test.
+  // That way the claim cleanup below can only come from the destroyed lease's
+  // own release_claims(), not from the full-teardown clear.
+  VrSessionLease keepalive;
+  keepalive.acquire(9000, "keepalive");
+  {
+    VrSessionLease lease;
+    lease.acquire(9000, "lease_owner");
+    session().claim_inputs("right", "lease_owner", {VrInput::kPose});
+    EXPECT_THROW(session().claim_inputs("right", "intruder", {VrInput::kPose}),
+                 std::runtime_error);
+  }  // lease goes out of scope: releases its reference and its own claims.
+  EXPECT_NO_THROW(session().claim_inputs("right", "intruder", {VrInput::kPose}));
+  session().release_claims("intruder");
+  keepalive.reset();
+}
+
+TEST_F(VrSessionSeam, LeaseResetIsIdempotent) {
+  session().set_test_frame(trossen_vr::VRFrame{});
+  VrSessionLease lease;
+  lease.acquire(9000, "idem_owner");
+  EXPECT_TRUE(lease.held());
+  lease.reset();
+  EXPECT_FALSE(lease.held());
+  // A second release must be a no-op, so a lease can never over-release and drop
+  // the shared connection out from under another holder.
+  EXPECT_NO_THROW(lease.reset());
+  EXPECT_FALSE(lease.held());
+}
+
+TEST_F(VrSessionSeam, LeaseMoveTransfersOwnership) {
+  session().set_test_frame(trossen_vr::VRFrame{});
+  VrSessionLease a;
+  a.acquire(9000, "move_owner");
+  EXPECT_TRUE(a.held());
+  VrSessionLease b = std::move(a);
+  EXPECT_FALSE(a.held());  // moved-from lease no longer owns the reference
+  EXPECT_TRUE(b.held());
 }
