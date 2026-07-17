@@ -13,6 +13,7 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <deque>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -23,6 +24,7 @@
 #include <vector>
 
 #include "trossen_sdk/hw/producer_base.hpp"
+#include "trossen_sdk/hw/session_control/session_control_capable.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/io/sink.hpp"
@@ -196,6 +198,33 @@ public:
    * wait_for_reset() to trigger early exit with UserAction::kReRecord.
    */
   void request_rerecord();
+
+  /**
+   * @brief Post a session-control event from any thread.
+   *
+   * Thread-safe. The event is queued and applied on the orchestrating thread
+   * by monitor_episode() / wait_for_reset(), so a hardware callback never
+   * touches the single-threaded session state directly.
+   */
+  void post_event(hw::session_control::SessionControlEvent event);
+
+  /**
+   * @brief Attach a push-based session-control source (VR buttons, keyboard, …).
+   *
+   * Installs callbacks that forward intents through post_event(), starts the
+   * source, and remembers it so shutdown() stops it (joining its thread)
+   * before the session is torn down. Every source drives the session through
+   * the same thread-safe queue, so keyboard and VR are interchangeable.
+   *
+   * @note The manager holds a shared_ptr to `source`, so the source is
+   * guaranteed to outlive the SessionManager's use of it (until shutdown() /
+   * destruction releases it). This removes the dangling-pointer risk a
+   * non-owning pointer would carry if the caller dropped the source early.
+   * @note Events are consumed by the synchronous monitor_episode() /
+   * wait_for_reset() loop, so drive the session with those rather than
+   * start_async_monitoring().
+   */
+  void attach_control(std::shared_ptr<hw::session_control::SessionControlCapable> source);
 
   /**
    * @brief Check if an episode is currently running
@@ -516,6 +545,34 @@ private:
 
   /// @brief Flag indicating that re-record was requested
   std::atomic<bool> rerecord_requested_{false};
+
+  /// @brief Phase in which queued control events are interpreted.
+  enum class ControlPhase { kRecording, kReset };
+
+  /// @brief Apply queued session-control events on the orchestrating thread,
+  /// translating each into the loop's control signals for the given phase.
+  void drain_control_events(ControlPhase phase);
+
+  // Grants the control-integration unit tests access to drain_control_events()
+  // and the resulting control flags.
+  friend class SessionManagerControlTest;
+
+  /// @brief Thread-safe queue of session-control events posted by sources.
+  std::deque<hw::session_control::SessionControlEvent> control_events_;
+
+  /// @brief Guards control_events_.
+  std::mutex control_events_mutex_;
+
+  /// @brief Attached control sources; stopped in shutdown() before teardown.
+  /// Held by shared_ptr so a source cannot be destroyed while the manager may
+  /// still stop it.
+  std::vector<std::shared_ptr<hw::session_control::SessionControlCapable>> control_sources_;
+
+  /// @brief Set by drain when a control event asks the current episode to stop.
+  std::atomic<bool> episode_stop_requested_{false};
+
+  /// @brief Set by drain when kStart during recording asks to skip the reset.
+  std::atomic<bool> skip_reset_{false};
 
   /// @brief Flag indicating that episode final statistics were emitted
   mutable std::atomic<bool> stats_emitted_{false};
