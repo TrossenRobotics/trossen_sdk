@@ -82,10 +82,12 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
     data::Timespec::from_ns(device_ts) : data::now_mono();
   ts.realtime = data::now_real();
 
-  // Create and populate JointStateRecord
+  // Create and populate JointStateRecord.
+  // Both this record and the EndEffectorPoseRecord below share the same seq
+  // number because they come from the same physical driver read.
   auto rec = std::make_shared<data::JointStateRecord>();
   rec->ts = ts;
-  rec->seq = seq_++;
+  rec->seq = seq_;
   rec->id = cfg_.stream_id;
   // Convert double->float
   rec->positions.reserve(pos_d_.size());
@@ -106,6 +108,30 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
 
   emit(rec);
   ++stats_.produced;
+
+  // Create and populate EndEffectorPoseRecord.
+  // Cartesian positions [x, y, z, rx, ry, rz] from the arm driver's FK output;
+  // gripper opening from the joint state. Guard on size to handle transient
+  // partial reads at startup.
+  const auto& cart_positions = robot_output_.cartesian.positions;
+  if (cart_positions.size() >= 6) {
+    auto eef_rec = std::make_shared<data::EndEffectorPoseRecord>();
+    eef_rec->ts = ts;
+    eef_rec->seq = seq_;
+    eef_rec->id = cfg_.stream_id;
+    eef_rec->x = static_cast<float>(cart_positions[0]);
+    eef_rec->y = static_cast<float>(cart_positions[1]);
+    eef_rec->z = static_cast<float>(cart_positions[2]);
+    eef_rec->rotation_x = static_cast<float>(cart_positions[3]);
+    eef_rec->rotation_y = static_cast<float>(cart_positions[4]);
+    eef_rec->rotation_z = static_cast<float>(cart_positions[5]);
+    eef_rec->gripper_position =
+      static_cast<float>(robot_output_.joint.gripper.position);
+    emit(eef_rec);
+    ++stats_.produced;
+  }
+
+  ++seq_;
 }
 
 // Register producer with registry
