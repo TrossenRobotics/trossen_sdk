@@ -37,6 +37,18 @@ HardwareConfig HardwareConfig::from_json(const nlohmann::json& j) {
     }
   }
 
+  if (j.contains("mobile_rivet") && j.at("mobile_rivet").is_object()) {
+    for (const auto& [id, arm_j] : j.at("mobile_rivet").items()) {
+      if (c.arms.count(id) || c.bimanual_arms.count(id)) {
+        throw std::runtime_error(
+          "HardwareConfig: id '" + id + "' is used by both 'mobile_rivet' and "
+          "another hardware map — hardware ids must be unique across all maps "
+          "since teleop pairs and the active hardware registry resolve by id alone");
+      }
+      c.mobile_rivet[id] = RivetConfig::from_json(arm_j);
+    }
+  }
+
   if (j.contains("cameras") && j.at("cameras").is_array()) {
     for (const auto& cam_j : j.at("cameras")) {
       c.cameras.push_back(CameraConfig::from_json(cam_j));

@@ -27,7 +27,7 @@
     "enabled": true,
     "rate_hz": 1000.0,
     "pairs": [
-      { "leader": "bimanual_glide",  "follower": "NONE"  }
+      { "leader": "bimanual_glide",  "follower": "rivet"  }
     ]
   }
 

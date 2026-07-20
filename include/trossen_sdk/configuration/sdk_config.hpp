@@ -30,6 +30,9 @@
  *     "arms":    { "<id>": { "ip_address": "...", "model": "...", "end_effector": "..." }, ... },
  *     "bimanual_arms": { "<id>": { "left_ip_address": "...", "left_model": "...",
  *                                  "right_ip_address": "...", "right_model": "..." }, ... },
+ *     "mobile_rivet": { "<id>": { "left_ip_address": "...", "left_model": "...",
+ *                                 "right_ip_address": "...", "right_model": "...",
+ *                                 "end_effector": "..." }, ... },
  *     "cameras": [ { "id": "...", "type": "realsense_camera", "serial_number": "...", ... }, ... ],
  *     "mobile_base": { "reset_odometry": false, "enable_torque": false }
  *   },
@@ -79,6 +82,7 @@
 #include "trossen_sdk/configuration/types/hardware/camera_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/mobile_base_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/policy_client_config.hpp"
+#include "trossen_sdk/configuration/types/hardware/rivet_config.hpp"
 #include "trossen_sdk/configuration/types/observers/observer_config.hpp"
 #include "trossen_sdk/configuration/types/producers/producer_config.hpp"
 #include "trossen_sdk/configuration/types/teleop_config.hpp"
@@ -98,6 +102,11 @@ struct HardwareConfig {
   /// (e.g. "bimanual_glide"). Each entry drives one BimanualGlideComponent
   /// wrapping two physical arms.
   std::unordered_map<std::string, BimanualGlideConfig> bimanual_arms;
+
+  /// @brief Named bimanual follower-pair configs, keyed by logical id (e.g.
+  /// "rivet"). Each entry drives one RivetComponent wrapping two physical
+  /// follower arms.
+  std::unordered_map<std::string, RivetConfig> mobile_rivet;
 
   /// @brief Ordered list of camera configs
   std::vector<CameraConfig> cameras;
