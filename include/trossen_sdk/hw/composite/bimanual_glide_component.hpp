@@ -123,7 +123,7 @@ public:
   void end_teleop() override;
   void stage() override;
 
-    /**
+  /**
    * @brief Apply this arm's affine joint remap in place.
    *
    * Transforms a joint-space vector into the follower's frame using the same
@@ -150,13 +150,13 @@ private:
 
 
   /**
-   * @brief Write joint efforts to both arm grippers
+   * @brief Read joint efforts from both arm triggers
    * @return Vector (2) of joint efforts (N) for gripper [left_q6, right_q6]
    */
   std::vector<float> read_gripper_effort();
 
   /**
-   * @brief Write joint efforts to both arm grippers
+   * @brief Write joint efforts to both arm triggers
    * @param follower_gripper_effort Vector (2) of joint efforts (N) for gripper [left_q6, right_q6]
    */
   void apply_gripper_feedback(const std::vector<float>& follower_gripper_effort);
@@ -184,8 +184,8 @@ private:
     void summon(const std::vector<float>& cmd) override {}
 
   /**
-   * @brief Write joint efforts to both arm grippers
-   * @return Vector (2) of joint efforts (N) for gripper [left_q6, right_q6]
+   * @brief  Determine if gripper feedback is rendered
+   * @return True if uses gripper feedback
    */
     bool renders_gripper_feedback() const override {return true;}
 
@@ -229,13 +229,17 @@ private:
   std::string left_ip_address_;
   std::string right_model_str_;
   std::string right_ip_address_;
-  double write_moving_time_s_{0.2};
-
+  size_t njoints_;  // Joints per arm (same for both)
 
   /// Whether this arm participates in the per-episode lifecycle (staging before
   /// each episode). Opt-in; parsed from "episode_lifecycle_enabled" in configure().
   bool episode_lifecycle_enabled_{false};
 
+  /// Per-write trajectory time passed to set_all_positions in write_joint().
+  /// Zero means apply the goal immediately (libtrossen_arm interprets
+  /// goal_time < 0.001s as no-interpolation). Non-zero values smooth the
+  /// per-tick motion between successive write_joint() calls.
+  float write_moving_time_s_{0.2f};
 
   /// Optional affine remap applied in read_joint(): out[j] = joint_signs_[j] *
   /// raw[j] + joint_offsets_[j]. Empty = identity. Used when a leader's joint

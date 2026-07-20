@@ -5,6 +5,7 @@
 
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <iostream>

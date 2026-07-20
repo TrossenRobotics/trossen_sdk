@@ -47,13 +47,23 @@ public:
   /**
    * @brief Configure the arm from JSON
    *
-   * Expected JSON format ):
+   * Expected JSON format:
    * {
-   *   "left_ip_address": "192.168.1.100",
-   *   "left_model": "glide_right",
-   *   "right_ip_address": "192.168.1.101",
-   *   "right_model: "glide_left",
-   *    TODO: @schromya add the rest
+   *   "left_ip_address": "192.168.1.5",
+   *   "left_model": "pro",
+   *   "right_ip_address": "192.168.1.4",
+   *   "right_model": "pro",
+   *   "write_moving_time_s": 0.2,
+   *   "staging_time_s": 2.0
+   *   "end_effector": "wxai_v0_follower",
+   *   "episode_lifecycle_enabled": true,
+   *   "position_min": [...],
+   *   "position_max": [...],
+   *   "velocity_max": [...],
+   *   "effort_max": [...],
+   *   "position_tolerance": [...],
+   *   "velocity_tolerance": [...],
+   *   "effort_tolerance": [...],
    * }
    *
    * @param config JSON configuration object
@@ -66,7 +76,7 @@ public:
    *
    * @return Type identifier
    */
-  std::string get_type() const override { return "rivet_component"; }
+  std::string get_type() const override { return "rivet"; }
 
   /**
    * @brief Get human-readable component information
@@ -114,9 +124,17 @@ private:
   // Space-specific IO helpers. Called by the nested adapter views.
   std::vector<float> read_joint();
   void               write_joint(const std::vector<float>& cmd);
+  void               summon_joint(const std::vector<float>& cmd);
 
   std::vector<float> read_cartesian();
   void               write_cartesian(const std::vector<float>& cmd);
+
+  /**
+   * @brief Read joint efforts from both arm triggers
+   * @return Vector (2) of joint efforts (N) for gripper [left_q6, right_q6]
+   */
+  std::vector<float> read_gripper_effort();
+
 
   // Adapter views: implement the space child classes and forward to the
   // private helpers above. See the class-level docstring for why this
@@ -136,6 +154,22 @@ private:
     void write(const std::vector<float>& cmd) override {
       self->write_joint(cmd);
     }
+    /** @brief Moves robots to summoning position */
+    void summon(const std::vector<float>& cmd) override {
+      self->summon_joint(cmd);
+    }
+    /**
+     * @brief  Determine if gripper feedback is rendered
+     * @return True if uses gripper feedback
+     */
+    bool renders_gripper_feedback() const override {return false;}
+
+    std::vector<float> read_multiple_gripper_efforts() override {
+      return self->read_gripper_effort();
+    }
+
+    /** @brief Does nothing */
+    void apply_multiple_gripper_feedback(std::vector<float> follower_gripper_effort) override {}
   };
 
   struct CartView : teleop::CartesianSpaceTeleop {
@@ -149,6 +183,10 @@ private:
     std::vector<float> read() override {
       return self->read_cartesian();
     }
+    /** @brief Write cartesian positions to both arms
+     *  @param cmd Vector of cartesian positions [left_x, left_y, left_z, left_rx, left_ry, left_rz,
+     *         left_gripper_m, right_x, right_y, ...]
+    */
     void write(const std::vector<float>& cmd) override {
       self->write_cartesian(cmd);
     }
@@ -164,6 +202,8 @@ private:
   std::string left_ip_address_;
   std::string right_model_str_;
   std::string right_ip_address_;
+  std::string end_effector_str_;
+  size_t njoints_;  // Joints per arm
 
   // TODO: @schromya complete/check
   /// Joint-space pose this arm moves to at session start (via stage()).
@@ -179,12 +219,28 @@ private:
   /// each episode). Opt-in; parsed from "episode_lifecycle_enabled" in configure().
   bool episode_lifecycle_enabled_{false};
 
-
   /// Per-write trajectory time passed to set_all_positions in write_joint().
   /// Zero means apply the goal immediately (libtrossen_arm interprets
   /// goal_time < 0.001s as no-interpolation). Non-zero values smooth the
   /// per-tick motion between successive write_joint() calls.
   float write_moving_time_s_{0.0f};
+
+  /// Optional per-joint operating limits applied to the controller in
+  /// configure() (right after driver_->configure). Each, when non-empty, has
+  /// one entry per joint; empty leaves the firmware default for that field.
+  /// The controller resets these on power cycle, so they are re-applied on
+  /// every reconnect.
+  std::vector<float> position_min_;
+  std::vector<float> position_max_;
+  std::vector<float> velocity_max_;
+  std::vector<float> effort_max_;
+
+  /// Optional per-joint limit tolerances applied alongside the limits above.
+  /// Each, when non-empty, has one entry per joint; empty leaves the firmware
+  /// default. Re-applied on every reconnect for the same reason as the limits.
+  std::vector<float> position_tolerance_;
+  std::vector<float> velocity_tolerance_;
+  std::vector<float> effort_tolerance_;
 };
 
 }  // namespace trossen::hw::rivet

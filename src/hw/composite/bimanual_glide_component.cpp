@@ -62,6 +62,13 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
       "TrossenArmComponent: Failed to configure driver: " + std::string(e.what()));
   }
 
+  if(left_driver_->get_num_joints() != right_driver_->get_num_joints()) {
+    throw std::runtime_error(
+      "TrossenArmComponent: Left and right arms must have the same number of joints. (LEFT: "
+      + std::to_string(left_driver_->get_num_joints()) + ", RIGHT: "
+      + std::to_string(right_driver_->get_num_joints()) + ")");
+  }
+  njoints_ = static_cast<size_t>(left_driver_->get_num_joints());
 
   if (config.contains("episode_lifecycle_enabled")) {
     episode_lifecycle_enabled_ = config.at("episode_lifecycle_enabled").get<bool>();
@@ -72,23 +79,22 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
   // raw[j] + offsets[j]. Used when the leader's joint frame doesn't map 1:1
   // onto the follower (the lightweight leader inverts J3/J4 and offsets J5).
   // Empty = identity; when provided each array must cover every joint.
-  const auto njoints = static_cast<size_t>(left_driver_->get_num_joints());
   if (config.contains("joint_signs")) {
     joint_signs_ = config.at("joint_signs").get<std::vector<float>>();
-    if (!joint_signs_.empty() && joint_signs_.size() != njoints) {
+    if (!joint_signs_.empty() && joint_signs_.size() != njoints_) {
       throw std::runtime_error(
         "TrossenArmComponent: 'joint_signs' length (" +
         std::to_string(joint_signs_.size()) + ") must match joint count (" +
-        std::to_string(njoints) + ")");
+        std::to_string(njoints_) + ")");
     }
   }
   if (config.contains("joint_offsets")) {
     joint_offsets_ = config.at("joint_offsets").get<std::vector<float>>();
-    if (!joint_offsets_.empty() && joint_offsets_.size() != njoints) {
+    if (!joint_offsets_.empty() && joint_offsets_.size() != njoints_) {
       throw std::runtime_error(
         "TrossenArmComponent: 'joint_offsets' length (" +
         std::to_string(joint_offsets_.size()) + ") must match joint count (" +
-        std::to_string(njoints) + ")");
+        std::to_string(njoints_) + ")");
     }
   }
 
@@ -101,11 +107,11 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
     auto parse_limit = [&](const char* key, std::vector<float>& dst) {
       if (!config.contains(key)) return;
       dst = config.at(key).get<std::vector<float>>();
-      if (!dst.empty() && dst.size() != njoints) {
+      if (!dst.empty() && dst.size() != njoints_) {
         throw std::runtime_error(
           std::string("TrossenArmComponent: '") + key + "' length (" +
           std::to_string(dst.size()) + ") must match joint count (" +
-          std::to_string(njoints) + ")");
+          std::to_string(njoints_) + ")");
       }
     };
     parse_limit("position_min", position_min_);
@@ -122,7 +128,7 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
         !effort_tolerance_.empty()) {
       for (auto& driver : {left_driver_, right_driver_}) {
         auto limits = driver->get_joint_limits();
-        for (size_t j = 0; j < njoints && j < limits.size(); ++j) {
+        for (size_t j = 0; j < njoints_ && j < limits.size(); ++j) {
           if (!position_min_.empty()) limits[j].position_min = position_min_[j];
           if (!position_max_.empty()) limits[j].position_max = position_max_[j];
           if (!velocity_max_.empty()) limits[j].velocity_max = velocity_max_[j];
@@ -157,10 +163,6 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
     gripper_feedback_offset_ = config.at("gripper_feedback_offset").get<float>();
   }
 
-
-  // Configure mode
-  right_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
-  // right_driver_->set_all_modes(trossen_arm::Mode::external_effort); // TODO: @schromya
 }
 
 nlohmann::json BimanualGlideComponent::get_info() const {
@@ -198,6 +200,8 @@ std::vector<float> BimanualGlideComponent::read_joint() {
 
   std::vector<float> positions(left_out.begin(), left_out.end());
   positions.insert(positions.end(), right_out.begin(), right_out.end());
+
+  // TODO: @schromya add base button support
   return positions;
 }
 
@@ -253,6 +257,8 @@ std::vector<float> BimanualGlideComponent::read_cartesian() {
   sample.insert(sample.end(), right_out.cartesian.positions.begin(),
     right_out.cartesian.positions.end());
   sample.push_back(static_cast<float>(right_out.joint.gripper.position));
+
+  // TODO: @schromya add base support
   return sample;
 }
 
@@ -262,7 +268,12 @@ std::vector<float> BimanualGlideComponent::read_cartesian() {
 void BimanualGlideComponent::on_pre_episode() {
   // Nothing needed for glide
 }
-void BimanualGlideComponent::prepare_for_teleop(){}
+void BimanualGlideComponent::prepare_for_teleop(){
+  // Configure mode
+  right_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
+  left_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
+  // right_driver_->set_all_modes(trossen_arm::Mode::external_effort); // TODO: @schromya
+}
 void BimanualGlideComponent::end_teleop(){}
 void BimanualGlideComponent::stage(){}
 
