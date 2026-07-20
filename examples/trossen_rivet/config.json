@@ -10,6 +10,16 @@
         "right_model": "glide_left",
         "write_moving_time_s": 0.2
       }
+    },
+    "mobile_rivet": {
+      "rivet": {
+        "left_ip_address": "192.168.1.4",
+        "left_model": "pro",
+        "right_ip_address": "192.168.1.5",
+        "right_model": "pro",
+        "write_moving_time_s": 0.2,
+        "staging_time_s": 2.0
+      }
     }
   },
 
