@@ -29,7 +29,7 @@ import trossen_base
 ENABLE_LEFT = True
 ENABLE_RIGHT = True
 ENABLE_FOLLOWER = True
-ENABLE_BASE = False
+ENABLE_BASE = True
 
 # IP addresses for the leader and follower
 IP_LEFT_LEADER = "192.168.1.3"
