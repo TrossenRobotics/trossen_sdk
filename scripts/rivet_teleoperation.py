@@ -260,7 +260,7 @@ if __name__ == "__main__":
                 if ENABLE_FOLLOWER:
                     right_efforts = driver_right_follower.get_all_external_efforts()
                 # Scale to -1 to 1 velocity (rad/s)
-                base_velocity_angular_z = scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
+                base_velocity_angular_z = -scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
                                 BASE_MIN, BASE_MAX, BASE_DEADZONE)
 
 
