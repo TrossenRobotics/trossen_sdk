@@ -279,6 +279,17 @@ bool SessionManager::start_episode() {
     return false;
   }
 
+  // Capture the concrete output path now, while the backend is alive. The backend is
+  // reset during teardown before final stats are built, so we snapshot it here for
+  // reporting (episode filenames are non-deterministic, so callers cannot reconstruct it).
+  // Guard the write with episode_mutex_: start_episode() otherwise runs lock-free, and a
+  // concurrent stats() reads this std::string member under the lock -- an unsynchronized
+  // write would be a data race (UB), unlike the trivially-copyable counters nearby.
+  {
+    std::lock_guard<std::mutex> path_lock(episode_mutex_);
+    current_episode_path_ = current_backend_->current_output_path();
+  }
+
   // Create sink with the backend
   current_sink_ = std::make_shared<io::Sink>(current_backend_);
   current_sink_->start();
@@ -544,6 +555,10 @@ void SessionManager::teardown_episode(bool discard) {
   auto lifecycle_components = collect_lifecycle_components_();
 
   if (discard) {
+    // The episode's file was just deleted, so don't let stats() report a path that no
+    // longer exists on disk. (Runs under episode_mutex_, held from the top of this fn.)
+    current_episode_path_.clear();
+
     // Signal stats emitted so monitor_episode() can exit
     stats_emitted_.store(true);
 
@@ -662,6 +677,10 @@ void SessionManager::discard_last_episode() {
     return;
   }
 
+  // The discarded episode's file was deleted; mirror teardown_episode(discard=true) so
+  // stats() never reports a path that no longer exists on disk.
+  current_episode_path_.clear();
+
   --next_episode_index_;
   if (total_episodes_completed_ > 0) {
     --total_episodes_completed_;
@@ -712,6 +731,7 @@ bool SessionManager::wait_for_auto_stop(std::chrono::milliseconds timeout) {
 SessionManager::Stats SessionManager::stats_unlocked() const {
   Stats s;
   s.current_episode_index = next_episode_index_;
+  s.current_episode_path = current_episode_path_;
   s.episode_active = episode_active_;
 
   if (episode_active_ || !stats_emitted_.load()) {

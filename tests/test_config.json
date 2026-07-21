@@ -4,8 +4,7 @@
     "robot_name": "trossen_solo_ai",
     "chunk_size_bytes": 4194304,
     "compression": "zstd",
-    "dataset_id": "test_dataset",
-    "episode_index": 0
+    "dataset_id": "test_dataset"
   },
   "lerobot_v2_backend": {
     "type": "lerobot_v2_backend",

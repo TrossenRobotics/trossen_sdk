@@ -3,8 +3,8 @@
  * @brief Session Manager orchestrates discrete recording sessions (episodes).
  *
  * The Session Manager controls the lifecycle of individual episode recordings, each producing a
- * separate output file (e.g., episode_000000.mcap). It manages Scheduler, Sink, and Backend
- * instances per episode, ensuring clean separation between recording sessions.
+ * separate output file (e.g., a UUIDv7 <id>.mcap). It manages Scheduler, Sink, and
+ * Backend instances per episode, ensuring clean separation between recording sessions.
  */
 
 #ifndef TROSSEN_SDK__RUNTIME__SESSION_MANAGER_HPP
@@ -141,7 +141,7 @@ public:
    *
    * @return true on success, false if max_episodes reached or setup fails
    *
-   * - Creates episode_NNNNNN.mcap file (6-digit zero-padded index)
+   * - Creates the episode's backend output file (e.g. a UUIDv7 <id>.mcap file)
    * - Instantiates Backend + Sink
    * - Starts push producers
    * - Fires pre-episode callbacks (can abort episode)
@@ -244,6 +244,11 @@ public:
   struct Stats {
     /// @brief Current or next episode number
     uint32_t current_episode_index;
+
+    /// @brief Output file path of the active episode, or of the most recently finished
+    /// one between episodes (for post-episode reporting). Empty before the first episode
+    /// and after a discard (the discarded file is deleted, so no path is reported).
+    std::string current_episode_path;
 
     /// @brief Is an episode currently recording?
     bool episode_active;
@@ -459,6 +464,10 @@ private:
 
   /// @brief Next episode index to use
   uint32_t next_episode_index_{0};
+
+  /// @brief Output path of the current/last episode, captured from the backend after
+  /// open() so it survives the backend being reset during teardown (for reporting).
+  std::string current_episode_path_;
 
   /// @brief Episode start time (for duration tracking)
   std::chrono::steady_clock::time_point episode_start_time_;

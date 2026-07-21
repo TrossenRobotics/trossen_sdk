@@ -267,17 +267,6 @@ bool interruptible_sleep(std::chrono::duration<double> duration) {
   return true;
 }
 
-std::string generate_episode_path(
-  const std::string& output_dir,
-  uint32_t episode_index,
-  const std::string& extension)
-{
-  std::ostringstream path;
-  path << output_dir << "/episode_"
-       << std::setfill('0') << std::setw(6) << episode_index
-       << "." << extension;
-  return path.str();
-}
 
 void announce(const std::string& message, bool block) {
   if (message.empty()) return;

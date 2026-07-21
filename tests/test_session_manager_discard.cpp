@@ -8,9 +8,11 @@
 
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 #include <functional>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
 
@@ -225,4 +227,77 @@ TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_WithProducer) {
   // Should be able to start another episode after discard
   ASSERT_TRUE(sm.start_episode());
   sm.stop_episode();
+}
+
+// End-to-end: SessionManager wired to the real TrossenMCAP backend, verifying that
+// discard_last_episode() deletes the previous episode's actual .mcap file on disk (the
+// newest one) while leaving earlier episodes intact. This exercises the full path that the
+// null-backend SD-* tests can't: SessionManager -> fresh MCAP backend -> find_latest.
+class SessionManagerMcapDiscardTest : public ::testing::Test {
+protected:
+  std::filesystem::path dataset_dir;
+
+  void SetUp() override {
+    dataset_dir = std::filesystem::temp_directory_path() / "sm_mcap_discard_test";
+    std::filesystem::remove_all(dataset_dir);
+
+    nlohmann::json config = {
+      {"session_manager", {
+        {"type", "session_manager"},
+        {"max_duration", 10.0},
+        {"max_episodes", 100},
+        {"reset_duration", 0.0},
+        {"backend_type", "trossen_mcap"}
+      }},
+      {"trossen_mcap_backend", {
+        {"type", "trossen_mcap_backend"},
+        {"root", std::filesystem::temp_directory_path().string()},
+        {"dataset_id", "sm_mcap_discard_test"},
+        {"robot_name", "trossen_solo_ai"}
+      }}
+    };
+    trossen::configuration::GlobalConfig::instance().load_from_json(config);
+  }
+
+  void TearDown() override {
+    std::filesystem::remove_all(dataset_dir);
+  }
+};
+
+TEST_F(SessionManagerMcapDiscardTest, DiscardLastEpisode_RemovesPreviousMcapFile) {
+  SessionManager sm;
+
+  // Capture each finished episode's on-disk path as episodes complete.
+  std::vector<std::filesystem::path> paths;
+  sm.on_episode_ended([&paths](const SessionManager::Stats& stats) {
+    paths.emplace_back(stats.current_episode_path);
+  });
+
+  // Record two episodes.
+  ASSERT_TRUE(sm.start_episode());
+  sm.stop_episode();
+  ASSERT_TRUE(sm.start_episode());
+  sm.stop_episode();
+
+  ASSERT_EQ(paths.size(), 2u);
+  const std::filesystem::path first = paths[0];
+  const std::filesystem::path second = paths[1];
+  ASSERT_NE(first, second);
+  ASSERT_TRUE(std::filesystem::exists(first));
+  ASSERT_TRUE(std::filesystem::exists(second));
+  ASSERT_EQ(sm.stats().total_episodes_completed, 2u);
+
+  // Make `first` unambiguously older so `second` is deterministically the newest, regardless
+  // of filesystem mtime granularity.
+  std::error_code ec;
+  std::filesystem::last_write_time(
+    first, std::filesystem::file_time_type::clock::now() - std::chrono::seconds(10), ec);
+  ASSERT_FALSE(ec) << "failed to backdate episode mtime: " << ec.message();
+
+  // Discard the previous (last completed) episode.
+  sm.discard_last_episode();
+
+  EXPECT_FALSE(std::filesystem::exists(second)) << "previous episode's file should be deleted";
+  EXPECT_TRUE(std::filesystem::exists(first)) << "earlier episode's file should remain";
+  EXPECT_EQ(sm.stats().total_episodes_completed, 1u);
 }

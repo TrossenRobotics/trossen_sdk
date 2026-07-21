@@ -15,7 +15,7 @@
  *   --help            Show this help message
  *
  * Examples:
- *   ./replay_trossen_mcap_jointstate ~/datasets/episode_000000.mcap
+ *   ./replay_trossen_mcap_jointstate ~/datasets/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap
  *   ./replay_trossen_mcap_jointstate ~/datasets/episode.mcap --speed 0.5
  *   ./replay_trossen_mcap_jointstate ~/datasets/episode.mcap --config my_config.json
  */
@@ -121,7 +121,7 @@ int main(int argc, char** argv) {
     std::cerr << "  --speed <float>   Playback speed multiplier\n";
     std::cerr << "  --help            Show this help\n";
     std::cerr << "\nExamples:\n";
-    std::cerr << "  " << argv[0] << " ~/datasets/episode_000000.mcap\n";
+    std::cerr << "  " << argv[0] << " ~/datasets/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap\n";
     std::cerr << "  " << argv[0] << " ~/datasets/episode.mcap --speed 0.5\n";
     std::cerr << "  " << argv[0] << " ~/datasets/episode.mcap --config my_config.json\n";
     return 0;

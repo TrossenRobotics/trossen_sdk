@@ -6,12 +6,17 @@
 #ifndef TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP_BACKEND_HPP
 #define TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP_BACKEND_HPP
 
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
+#include <iomanip>
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <random>
 #include <regex>
 #include <span>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -30,6 +35,46 @@ namespace trossen::io::backends {
 
 /// @brief Initial buffer size for encoded messages
 const size_t TROSSEN_MCAP_INITIAL_ENCODED_BUFFER_SIZE = 1024 * 1024;  // 1 MB
+
+/**
+ * @brief Generate a UUIDv7 episode id (RFC 9562) in canonical form
+ * @return A lowercase canonical UUID string, e.g. "0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f"
+ *
+ * UUIDv7 leads with a 48-bit Unix millisecond timestamp, so the canonical string is
+ * lexicographically time-ordered: sorting filenames by name matches recording order.
+ * That keeps ordering stable across distributed machines merged into one dataset (the id
+ * is globally unique without coordination) and lets consumers that sort by filename (e.g.
+ * the cloud episode listing) present episodes chronologically. The remaining 74 bits come
+ * from std::random_device, so the id is also a unique identifier for the episode.
+ */
+inline std::string generate_episode_id() {
+  const auto now = std::chrono::system_clock::now();
+  const std::uint64_t unix_ts_ms = static_cast<std::uint64_t>(
+    std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count());
+
+  std::random_device rd;
+  std::uniform_int_distribution<std::uint64_t> dist;
+  const std::uint64_t rand_a = dist(rd);  // 12 bits used
+  const std::uint64_t rand_b = dist(rd);  // 62 bits used
+
+  // Assemble the 128 bits into two 64-bit halves per RFC 9562.
+  const std::uint64_t high =
+    (unix_ts_ms << 16)              // 48-bit ms timestamp in bits 63..16
+    | (std::uint64_t{0x7} << 12)    // version 7 in bits 15..12
+    | (rand_a & 0x0FFFULL);         // 12 random bits in bits 11..0
+  const std::uint64_t low =
+    (std::uint64_t{0x2} << 62)      // variant 0b10 in the top 2 bits
+    | (rand_b & 0x3FFFFFFFFFFFFFFFULL);  // 62 random bits
+
+  std::ostringstream oss;
+  oss << std::hex << std::setfill('0')
+      << std::setw(8) << (high >> 32) << '-'
+      << std::setw(4) << ((high >> 16) & 0xFFFFULL) << '-'
+      << std::setw(4) << (high & 0xFFFFULL) << '-'
+      << std::setw(4) << (low >> 48) << '-'
+      << std::setw(12) << (low & 0xFFFFFFFFFFFFULL);
+  return oss.str();
+}
 
 /**
  * @brief TrossenMCAPBackend writes records into a TrossenMCAP file.
@@ -68,11 +113,6 @@ public:
 
   /**
    * @brief Prepare backend for a new episode
-   *
-   * @param output_path Output file path for this episode
-   * @param episode_index Zero-based episode index (unused)
-   * @param dataset_id Dataset identifier (unused)
-   * @param repository_id Repository identifier (unused)
    */
   void preprocess_episode() override;
 
@@ -120,11 +160,18 @@ public:
   Stats stats() const { return stats_; }
 
   /**
-   * @brief Scan directory for existing episode files and return next index
+   * @brief Count existing episode files in the dataset directory
    *
-   * @return Next episode index (max_found + 1, or 0 if none found)
+   * @return Number of existing episode files (0 if none)
    */
   uint32_t scan_existing_episodes() override;
+
+  /**
+   * @brief Path of the .mcap file for the current episode
+   *
+   * @return The output path as a string (empty if open() has not run)
+   */
+  std::string current_output_path() const override { return path_.string(); }
 
 private:
   /**
@@ -134,6 +181,16 @@ private:
    * Caller must hold writer_mutex_.
    */
   void close_resources();
+
+  /**
+   * @brief Find the most-recently-written <uuid>.mcap episode file in the dataset dir
+   *
+   * Used by discard_episode() when this backend never opened a file (the re-record
+   * path creates a fresh backend), so there is no stored path_ to delete.
+   *
+   * @return Path to the newest matching episode file, or an empty path if none found
+   */
+  std::filesystem::path find_latest_episode_file() const;
 
   /**
    * @brief Ensure an image channel exists for the given camera name

@@ -61,7 +61,7 @@ Opening an Episode
 
         .. code-block:: text
 
-            ~/.trossen_sdk/solo_dataset/episode_000000.mcap
+            ~/.trossen_sdk/solo_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap
 
     .. group-tab:: Stationary
 
@@ -69,7 +69,7 @@ Opening an Episode
 
         .. code-block:: text
 
-            ~/.trossen_sdk/stationary_dataset/episode_000000.mcap
+            ~/.trossen_sdk/stationary_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap
 
     .. group-tab:: Mobile
 
@@ -77,7 +77,7 @@ Opening an Episode
 
         .. code-block:: text
 
-            ~/.trossen_sdk/mobile_dataset/episode_000000.mcap
+            ~/.trossen_sdk/mobile_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap
 
 Foxglove parses the MCAP index and exposes every channel in the left-hand data source panel.
 

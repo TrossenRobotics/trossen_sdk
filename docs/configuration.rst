@@ -198,8 +198,8 @@ Backend
       "chunk_size_bytes": 4194304             // MCAP chunk size (4 MB default)
     }
 
-Episodes land at ``<root>/<dataset_id>/episode_NNNNNN.mcap``.
-Episode numbers are assigned automatically and resume from the highest existing index in the directory.
+Episodes land at ``<root>/<dataset_id>/<id>.mcap``, where ``<id>`` is a UUIDv7 (e.g. ``0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap``).
+Because UUIDv7 leads with a timestamp, filenames are globally unique and sort chronologically.
 
 Observers
 ---------

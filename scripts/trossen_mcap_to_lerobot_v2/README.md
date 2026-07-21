@@ -19,7 +19,7 @@ The tool is always built as part of the standard SDK build.
 
 ```bash
 # Convert a single episode
-./build/scripts/trossen_mcap_to_lerobot_v2 <path/to/episode_000000.mcap> [output_dir]
+./build/scripts/trossen_mcap_to_lerobot_v2 <path/to/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap> [output_dir]
 
 # Convert all episodes in a folder (batch mode)
 ./build/scripts/trossen_mcap_to_lerobot_v2 <path/to/dataset_folder/> [output_dir]
@@ -31,7 +31,7 @@ Examples:
 
 ```bash
 ./build/scripts/trossen_mcap_to_lerobot_v2 \
-    ~/.trossen_sdk/my_dataset/episode_000000.mcap \
+    ~/.trossen_sdk/my_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
     ~/lerobot_datasets
 
 ./build/scripts/trossen_mcap_to_lerobot_v2 \
@@ -39,8 +39,7 @@ Examples:
     ~/lerobot_datasets
 ```
 
-Episode numbers are extracted automatically from filenames (`episode_NNNNNN.mcap`).
-Batch mode processes all `.mcap` files in the folder in episode-index order.
+Batch mode processes all `.mcap` files in the order they were recorded (by the `recording_start_time` in each file's metadata) and assigns LeRobot episode indices from that order, so episode 0 is the earliest recording.
 
 ---
 
@@ -177,4 +176,6 @@ sudo apt-get install libarrow-dev libparquet-dev
 sudo apt-get install ffmpeg
 ```
 
-**Episode numbering mismatch:** filenames must follow `episode_NNNNNN.mcap` (6-digit zero-padded).
+**Episode ordering:** LeRobot indices follow the order episodes were recorded (`recording_start_time`), not their filenames.
+Newly recorded episodes have later timestamps and append at the end, so you can re-run after recording more without re-converting existing episodes.
+Merging files from machines with unsynchronized clocks is only as reliable as those clocks; files missing `recording_start_time` sort last, by filename.

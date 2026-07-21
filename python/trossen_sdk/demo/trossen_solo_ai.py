@@ -120,8 +120,7 @@ def main():
         lambda: print("Episode started - recording active."))
     mgr.on_episode_ended(lambda stats: (
         _stop_controllers(controllers),
-        ts.print_episode_summary(
-            ts.generate_episode_path(root, stats.current_episode_index), stats),
+        ts.print_episode_summary(stats.current_episode_path, stats),
     ))
     mgr.on_pre_shutdown(lambda: _stop_controllers(controllers))
 

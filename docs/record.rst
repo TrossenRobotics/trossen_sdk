@@ -81,8 +81,9 @@ A recording session proceeds through the following phases:
 #.  **Shutdown.**
     After ``session.max_episodes`` episodes the teleop thread stops and the process exits cleanly.
 
-Episodes are written to ``<backend.root>/<backend.dataset_id>/episode_NNNNNN.mcap``.
-Episode numbers are assigned automatically and resume from the highest existing index in the directory.
+Episodes are written to ``<backend.root>/<backend.dataset_id>/<id>.mcap``, where ``<id>`` is a UUIDv7 (e.g. ``0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap``).
+Because UUIDv7 leads with a timestamp, filenames are globally unique and sort chronologically.
+
 Re-running the demo against the same ``dataset_id`` appends rather than overwriting.
 
 What Gets Recorded
