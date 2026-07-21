@@ -2,6 +2,7 @@
 Temporary script to demonstration teleopration of Rivet with the Bimanual Glides.
 
 Requirements:
+-  `uv pip install OneEuroFilter` or `pip install OneEuroFilter` (in venv)
 - trossen_base (dev branch): https://github.com/TrossenRobotics/trossen_base/tree/dev
     1. Python installation
     2. Start CAN interface (using README)
@@ -17,14 +18,18 @@ https://github.com/TrossenRobotics/input_controller/blob/8f73ef4d04a1b6d466649ae
 
 
 import time
+from collections import deque
+
 import numpy as np
 import trossen_arm
 import trossen_base
 
+
+
 ENABLE_LEFT = True
 ENABLE_RIGHT = True
 ENABLE_FOLLOWER = True
-ENABLE_BASE = True
+ENABLE_BASE = False
 
 # IP addresses for the leader and follower
 IP_LEFT_LEADER = "192.168.1.3"
@@ -32,20 +37,14 @@ IP_LEFT_FOLLOWER = "192.168.1.4"
 IP_RIGHT_LEADER = "192.168.1.2"
 IP_RIGHT_FOLLOWER = "192.168.1.5"
 
-# Gripper contact state machine parameters
-CONTACT_ENTER_EFFORT = 50.0        # N - follower closing effort to declare contact
-CONTACT_BLOCKED_VELOCITY = 0.01    # m/s - follower counts as blocked below this
-CONTACT_EXIT_EFFORT = 5.0          # N - release once at/above anchor with no grip
-CONTACT_RELEASE_MARGIN = 0.004     # m - opening past anchor releases contact
-CONTACT_EMPTY_MARGIN = 0.001       # m - forget anchor if follower passes it freely
-CONTACT_FULL_DEPTH = 0.005         # m - squeeze depth mapped to full resistance
-CONTACT_APPROACH_WINDOW = 30       # cycles of trigger history for squeeze check
-CONTACT_APPROACH_CLOSING = 0.0002  # m - min closing over window to count as squeezing
-
 # Gripper force feedback parameters
 LEADER_MAX = 27.0       # N - leader effort at full grip (not including offset)
 FOLLOWER_MAX = 87.5     # N - follower effort at full grip
-LEADER_OFFSET = 8.0      # N - leader opening offset
+LEADER_OFFSET = 5.0      # N - leader opening offset
+GRIPPER_CURVE_EXPONENT = 0.9  # <1 = front-loaded (fast rise then flattens), >1 = back-loaded
+CONTACT_EFFORT_SLEW_RATE = 10.0  # N/s - max leader_effort rate of change while in contact
+NORM_CONTACT_THRESHOLD = -0.1  # Normalized effort threshold for detecting contact TODO: unormalize
+
 
 BASE_MIN = -1           # Min translational/rotational velocity (units/s and rad/s)
 BASE_MAX = 1            # Max translational/rotational velocity (units/s and rad/s)
@@ -60,7 +59,7 @@ def scale(value, val_min, val_max, scaled_min, scaled_max, scaled_deadzone=None)
     """ Scale a value linearly from val_min..val_max to scaled_min..scaled_max.
     Deadzone applied to scaled value (-scaled_deadzone->scaled_deadzone)"""
 
-    scaled_val = ((value - val_min) / (val_max - val_min) * (scaled_min - scaled_max) + scaled_max)
+    scaled_val = ((value - val_min) / (val_max - val_min) * (scaled_max - scaled_min) + scaled_min)
 
     if scaled_deadzone:
         if abs(scaled_val) < scaled_deadzone:
@@ -72,52 +71,38 @@ class GripperForceFeedback:
     """Contact state machine: effort gates contact, trigger depth renders force."""
 
     def __init__(self):
-        self.contact = False
-        self.anchor = 0.0
-        self.anchor_valid = False
-        self.history = []
 
-    def update(self, leader_pos, follower_pos, follower_effort, follower_vel):
-        squeezing = (
-            len(self.history) == CONTACT_APPROACH_WINDOW
-            and self.history[0] - leader_pos >= CONTACT_APPROACH_CLOSING
-        )
-        self.history.append(leader_pos)
-        if len(self.history) > CONTACT_APPROACH_WINDOW:
-            self.history.pop(0)
+        # Slew-rate state for smoothing repeated large swings while in contact
+        self._prev_leader_effort = LEADER_OFFSET
+        self._prev_slew_time = None
 
-        # Forget the remembered surface once the follower passes it with no force
-        if self.anchor_valid and (
-            follower_pos < self.anchor - CONTACT_EMPTY_MARGIN
-            and follower_effort > -CONTACT_ENTER_EFFORT
-        ):
-            self.anchor_valid = False
-            self.contact = False
 
-        if not self.contact:
-            if (
-                squeezing
-                and follower_effort <= -CONTACT_ENTER_EFFORT
-                and abs(follower_vel) <= CONTACT_BLOCKED_VELOCITY
-            ):
-                # Blocked while closing: the stalled follower marks the surface
-                self.contact = True
-                self.anchor = follower_pos
-                self.anchor_valid = True
-            elif self.anchor_valid and leader_pos < self.anchor:
-                # Sticky re-entry below the remembered surface
-                self.contact = True
-        elif leader_pos > self.anchor + CONTACT_RELEASE_MARGIN or (
-            leader_pos >= self.anchor and -follower_effort < CONTACT_EXIT_EFFORT
-        ):
-            self.contact = False
 
-        if not self.contact:
-            return LEADER_OFFSET
+    def update(self, follower_effort):
 
-        depth = max(self.anchor - leader_pos, 0.0)
-        depth_norm = min(depth / CONTACT_FULL_DEPTH, 1.0)
-        return LEADER_MAX * depth_norm**3 + LEADER_OFFSET
+        effort_norm = scale(follower_effort, -FOLLOWER_MAX, FOLLOWER_MAX, -1, 1) # -1 to 1 (below 1 is contact)
+
+        now = time.time()
+
+        if effort_norm < NORM_CONTACT_THRESHOLD:
+            target_effort = LEADER_MAX * (abs(effort_norm)**GRIPPER_CURVE_EXPONENT) + LEADER_OFFSET
+
+            # Slew-limit while in contact so repeated large swings get damped,
+            # instead of following every oscillation at full speed
+            if self._prev_slew_time is not None:
+                max_delta = CONTACT_EFFORT_SLEW_RATE * (now - self._prev_slew_time)
+                delta = max(-max_delta, min(max_delta, target_effort - self._prev_leader_effort))
+                leader_effort = self._prev_leader_effort + delta
+            else:
+                leader_effort = target_effort
+        else:
+            leader_effort = LEADER_OFFSET
+
+        self._prev_leader_effort = leader_effort
+        self._prev_slew_time = now
+
+        return leader_effort
+
 
 if __name__ == "__main__":
     # Enable/disable left and right arms
@@ -297,9 +282,9 @@ if __name__ == "__main__":
                     left_efforts = driver_left_follower.get_all_external_efforts()
 
                 #Scale to -1 to 1 velocity (m/s)
-                base_velocity_linear_x = -scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
+                base_velocity_linear_x = scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
                                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
-                base_velocity_linear_y = scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
+                base_velocity_linear_y = -scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
                                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
 
 
@@ -351,14 +336,8 @@ if __name__ == "__main__":
                 leader_right_position = driver_right_leader.get_gripper_position()
                 follower_right_position = driver_right_follower.get_gripper_position()
                 follower_right_effort = driver_right_follower.get_gripper_effort()
-                follower_right_velocity = driver_right_follower.get_gripper_velocity()
 
-                leader_right_effort = right_gripper_feedback.update(
-                    leader_right_position,
-                    follower_right_position,
-                    follower_right_effort,
-                    follower_right_velocity,
-                )
+                leader_right_effort = right_gripper_feedback.update(follower_right_effort)
 
                 # Set the leader's gripper effort based on the follower's gripper effort
                 driver_right_leader.set_gripper_effort(
@@ -413,14 +392,8 @@ if __name__ == "__main__":
                 leader_left_position = driver_left_leader.get_gripper_position()
                 follower_left_position = driver_left_follower.get_gripper_position()
                 follower_left_effort = driver_left_follower.get_gripper_effort()
-                follower_left_velocity = driver_left_follower.get_gripper_velocity()
 
-                leader_left_effort = left_gripper_feedback.update(
-                    leader_left_position,
-                    follower_left_position,
-                    follower_left_effort,
-                    follower_left_velocity,
-                )
+                leader_left_effort = left_gripper_feedback.update(follower_left_effort)
 
                 # Set the leader's gripper effort based on the follower's gripper effort
                 driver_left_leader.set_gripper_effort(
