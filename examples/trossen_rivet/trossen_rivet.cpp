@@ -20,6 +20,7 @@
 #include "trossen_sdk/configuration/sdk_config.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/composite/bimanual_glide_component.hpp"
+#include "trossen_sdk/hw/composite/rivet_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/hw/teleop/teleop_factory.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
@@ -146,6 +147,19 @@ int main(int argc, char** argv) {
       std::dynamic_pointer_cast<trossen::hw::bimanual_glide::BimanualGlideComponent>(component);
     std::cout << "  [ok] Bimanual arm [" << id << "] configured ("
               << bimanual_cfg.left_ip_address << ", " << bimanual_cfg.right_ip_address << ")\n";
+  }
+
+
+  std::unordered_map<std::string,
+  std::shared_ptr<trossen::hw::rivet::RivetComponent>> rivet_components;
+
+  for (const auto& [id, rivet_cfg] : cfg.hardware.bimanual_arms) {
+    auto component = trossen::hw::HardwareRegistry::create(
+      "rivet", id, rivet_cfg.to_json(), true);
+    rivet_components[id] =
+      std::dynamic_pointer_cast<trossen::hw::rivet::RivetComponent>(component);
+    std::cout << "  [ok] Bimanual arm [" << id << "] configured ("
+              << rivet_cfg.left_ip_address << ", " << rivet_cfg.right_ip_address << ")\n";
   }
 
 
@@ -309,8 +323,8 @@ int main(int argc, char** argv) {
   // they don't stay in their last commanded pose.
   mgr.on_pre_shutdown([&]() {
     if (!has_teleop) {
-      // for (auto& [id, arm] : arm_components) arm->end_teleop();
       for (auto& [id, arm] : bimanual_components) arm->end_teleop();
+      for (auto& [id, rivet] : rivet_components) rivet->end_teleop();
     }
   });
 
