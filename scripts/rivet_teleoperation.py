@@ -32,14 +32,23 @@ IP_LEFT_FOLLOWER = "192.168.1.4"
 IP_RIGHT_LEADER = "192.168.1.2"
 IP_RIGHT_FOLLOWER = "192.168.1.5"
 
+# Gripper contact state machine parameters
+CONTACT_ENTER_EFFORT = 50.0        # N - follower closing effort to declare contact
+CONTACT_BLOCKED_VELOCITY = 0.01    # m/s - follower counts as blocked below this
+CONTACT_EXIT_EFFORT = 5.0          # N - release once at/above anchor with no grip
+CONTACT_RELEASE_MARGIN = 0.004     # m - opening past anchor releases contact
+CONTACT_EMPTY_MARGIN = 0.001       # m - forget anchor if follower passes it freely
+CONTACT_FULL_DEPTH = 0.005         # m - squeeze depth mapped to full resistance
+CONTACT_APPROACH_WINDOW = 30       # cycles of trigger history for squeeze check
+CONTACT_APPROACH_CLOSING = 0.0002  # m - min closing over window to count as squeezing
 
 # Gripper force feedback parameters
 LEADER_MAX = 27.0       # N - leader effort at full grip (not including offset)
 FOLLOWER_MAX = 87.5     # N - follower effort at full grip
 LEADER_OFFSET = 8.0      # N - leader opening offset
 
-BASE_MIN = -2           # Min translational/rotational velocity (units/s and rad/s)
-BASE_MAX = 2            # Max translational/rotational velocity (units/s and rad/s)
+BASE_MIN = -1           # Min translational/rotational velocity (units/s and rad/s)
+BASE_MAX = 1            # Max translational/rotational velocity (units/s and rad/s)
 BASE_DEADZONE = 0.1    # Base set to 0 velocity if less than this value
 BASE_LIFT_MAX = 8000    # Max lift velocity (motor units/s)
 
@@ -58,6 +67,57 @@ def scale(value, val_min, val_max, scaled_min, scaled_max, scaled_deadzone=None)
             return 0
     return scaled_val
 
+
+class GripperForceFeedback:
+    """Contact state machine: effort gates contact, trigger depth renders force."""
+
+    def __init__(self):
+        self.contact = False
+        self.anchor = 0.0
+        self.anchor_valid = False
+        self.history = []
+
+    def update(self, leader_pos, follower_pos, follower_effort, follower_vel):
+        squeezing = (
+            len(self.history) == CONTACT_APPROACH_WINDOW
+            and self.history[0] - leader_pos >= CONTACT_APPROACH_CLOSING
+        )
+        self.history.append(leader_pos)
+        if len(self.history) > CONTACT_APPROACH_WINDOW:
+            self.history.pop(0)
+
+        # Forget the remembered surface once the follower passes it with no force
+        if self.anchor_valid and (
+            follower_pos < self.anchor - CONTACT_EMPTY_MARGIN
+            and follower_effort > -CONTACT_ENTER_EFFORT
+        ):
+            self.anchor_valid = False
+            self.contact = False
+
+        if not self.contact:
+            if (
+                squeezing
+                and follower_effort <= -CONTACT_ENTER_EFFORT
+                and abs(follower_vel) <= CONTACT_BLOCKED_VELOCITY
+            ):
+                # Blocked while closing: the stalled follower marks the surface
+                self.contact = True
+                self.anchor = follower_pos
+                self.anchor_valid = True
+            elif self.anchor_valid and leader_pos < self.anchor:
+                # Sticky re-entry below the remembered surface
+                self.contact = True
+        elif leader_pos > self.anchor + CONTACT_RELEASE_MARGIN or (
+            leader_pos >= self.anchor and -follower_effort < CONTACT_EXIT_EFFORT
+        ):
+            self.contact = False
+
+        if not self.contact:
+            return LEADER_OFFSET
+
+        depth = max(self.anchor - leader_pos, 0.0)
+        depth_norm = min(depth / CONTACT_FULL_DEPTH, 1.0)
+        return LEADER_MAX * depth_norm**3 + LEADER_OFFSET
 
 if __name__ == "__main__":
     # Enable/disable left and right arms
@@ -159,7 +219,7 @@ if __name__ == "__main__":
 
     if ENABLE_RIGHT:
         driver_right_leader.set_all_modes(trossen_arm.Mode.external_effort)
-        driver_right_leader.set_gripper_mode(trossen_arm.Mode.external_effort)
+        driver_right_leader.set_gripper_mode(trossen_arm.Mode.effort)
 
         if ENABLE_FOLLOWER:
             driver_right_follower.set_all_modes(trossen_arm.Mode.position)
@@ -167,7 +227,7 @@ if __name__ == "__main__":
 
     if ENABLE_LEFT:
         driver_left_leader.set_all_modes(trossen_arm.Mode.external_effort)
-        driver_left_leader.set_gripper_mode(trossen_arm.Mode.external_effort)
+        driver_left_leader.set_gripper_mode(trossen_arm.Mode.effort)
 
         if ENABLE_FOLLOWER:
             driver_left_follower.set_all_modes(trossen_arm.Mode.position)
@@ -196,6 +256,8 @@ if __name__ == "__main__":
 
     print("Starting to teleoperate the robots...")
 
+    right_gripper_feedback = GripperForceFeedback()
+    left_gripper_feedback = GripperForceFeedback()
 
     try:
         base_velocity_linear_x = 0.0
@@ -287,16 +349,19 @@ if __name__ == "__main__":
                 # RIGHT ARM GRIPPER
                 # Read the leader's gripper position and follower's gripper effort
                 leader_right_position = driver_right_leader.get_gripper_position()
-
-
+                follower_right_position = driver_right_follower.get_gripper_position()
                 follower_right_effort = driver_right_follower.get_gripper_effort()
+                follower_right_velocity = driver_right_follower.get_gripper_velocity()
 
-                # Cubic curve for more resistance at higher efforts and less at lower efforts, with an offset to keep the gripper open when not gripping
-                effort_right_norm = min(abs(follower_right_effort) / FOLLOWER_MAX, 1.0)
-                leader_right_effort = LEADER_MAX * (effort_right_norm**3) + LEADER_OFFSET
+                leader_right_effort = right_gripper_feedback.update(
+                    leader_right_position,
+                    follower_right_position,
+                    follower_right_effort,
+                    follower_right_velocity,
+                )
 
                 # Set the leader's gripper effort based on the follower's gripper effort
-                driver_right_leader.set_gripper_external_effort(
+                driver_right_leader.set_gripper_effort(
                     leader_right_effort, 0.2, False
                 )
 
@@ -345,16 +410,20 @@ if __name__ == "__main__":
                 )
 
                 # LEFT ARM GRIPPER
-                # Read the leader's gripper position and follower's gripper effort
                 leader_left_position = driver_left_leader.get_gripper_position()
+                follower_left_position = driver_left_follower.get_gripper_position()
                 follower_left_effort = driver_left_follower.get_gripper_effort()
+                follower_left_velocity = driver_left_follower.get_gripper_velocity()
 
-                # Cubic curve for more resistance at higher efforts and less at lower efforts, with an offset to keep the gripper open when not gripping
-                effort_left_norm = min(abs(follower_left_effort) / FOLLOWER_MAX, 1.0)
-                leader_left_effort = LEADER_MAX * (effort_left_norm**3) + LEADER_OFFSET
+                leader_left_effort = left_gripper_feedback.update(
+                    leader_left_position,
+                    follower_left_position,
+                    follower_left_effort,
+                    follower_left_velocity,
+                )
 
                 # Set the leader's gripper effort based on the follower's gripper effort
-                driver_left_leader.set_gripper_external_effort(
+                driver_left_leader.set_gripper_effort(
                     leader_left_effort, 0.2, False
                 )
 
