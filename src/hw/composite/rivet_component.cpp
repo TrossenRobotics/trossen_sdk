@@ -184,6 +184,9 @@ nlohmann::json RivetComponent::get_info() const {
     {"right_model", right_model_str_}
   };
 
+  trossen_base::TrossenBase base; // TODO: @schromya
+
+
   return info;
 }
 

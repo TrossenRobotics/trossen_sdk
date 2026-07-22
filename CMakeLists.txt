@@ -156,6 +156,7 @@ find_package(BZip2 REQUIRED)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(libtrossen_arm REQUIRED)
+find_package(trossen_base REQUIRED)
 
 include(FetchContent)
 
@@ -339,6 +340,7 @@ target_link_libraries(
   Arrow::arrow_shared
   Parquet::parquet_shared
   libtrossen_arm
+  trossen_base
   SCServo
   trossen_slate
 )
