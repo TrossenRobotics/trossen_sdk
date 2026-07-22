@@ -97,18 +97,26 @@ struct ArmConfig {
   std::vector<float> effort_tolerance{};
 
   /// @brief High-speed mode for fast tasks. When true, TrossenArmComponent
-  /// multiplies every ARM joint's velocity_max by high_speed_velocity_scale on
-  /// connect and sets the GRIPPER's velocity_tolerance to its velocity_max *
-  /// high_speed_gripper_velocity_tolerance_frac, leaving the gripper's
-  /// velocity_max untouched (it is already at the motor ceiling, so raising it
-  /// would be rejected). Scales whatever velocity_max is in effect (explicit
-  /// or firmware default), read live from the controller. Effort limits are
-  /// boosted the same way via high_speed_effort_scale, with the gripper's
-  /// effort_max left untouched and its effort_tolerance widened.
+  /// ADDS a fixed boost to every ARM joint's velocity_max and effort_max on
+  /// connect, and sets the GRIPPER's velocity/effort tolerances to a fraction
+  /// of its (unchanged) maxes. The gripper's velocity_max/effort_max are left
+  /// untouched — already at the motor ceiling, so raising them would be
+  /// rejected.
+  ///
+  /// The boost is ADDITIVE (not multiplicative) and is applied on top of the
+  /// per-joint velocity_max/effort_max BASE above, NOT the controller's live
+  /// value. This is deliberate: the controller keeps its limits until a power
+  /// cycle, so scaling/adding the live value would compound on every reconnect
+  /// (1.2× → 1.44× …, or +Δ → +2Δ …). Referencing the config base makes the
+  /// result idempotent: the ceiling is always base+boost, no matter how many
+  /// times the app connects. Requires the corresponding base limit to be set
+  /// (velocity_max for the velocity boost, effort_max for the effort boost);
+  /// use "Read from arm" to seed the base with the controller's power-cycle
+  /// defaults. A boost with no base is skipped (never touches that ceiling).
   bool high_speed{false};
-  float high_speed_velocity_scale{1.2f};
+  float high_speed_velocity_boost{1.0f};   ///< rad/s added to each arm joint's velocity_max
+  float high_speed_effort_boost{5.0f};     ///< N·m added to each arm joint's effort_max
   float high_speed_gripper_velocity_tolerance_frac{0.2f};
-  float high_speed_effort_scale{1.2f};
   float high_speed_gripper_effort_tolerance_frac{0.2f};
 
   static ArmConfig from_json(const nlohmann::json& j) {
@@ -140,13 +148,13 @@ struct ArmConfig {
     if (j.contains("effort_tolerance"))
       j.at("effort_tolerance").get_to(c.effort_tolerance);
     if (j.contains("high_speed")) j.at("high_speed").get_to(c.high_speed);
-    if (j.contains("high_speed_velocity_scale"))
-      j.at("high_speed_velocity_scale").get_to(c.high_speed_velocity_scale);
+    if (j.contains("high_speed_velocity_boost"))
+      j.at("high_speed_velocity_boost").get_to(c.high_speed_velocity_boost);
+    if (j.contains("high_speed_effort_boost"))
+      j.at("high_speed_effort_boost").get_to(c.high_speed_effort_boost);
     if (j.contains("high_speed_gripper_velocity_tolerance_frac"))
       j.at("high_speed_gripper_velocity_tolerance_frac")
         .get_to(c.high_speed_gripper_velocity_tolerance_frac);
-    if (j.contains("high_speed_effort_scale"))
-      j.at("high_speed_effort_scale").get_to(c.high_speed_effort_scale);
     if (j.contains("high_speed_gripper_effort_tolerance_frac"))
       j.at("high_speed_gripper_effort_tolerance_frac")
         .get_to(c.high_speed_gripper_effort_tolerance_frac);
@@ -184,10 +192,10 @@ struct ArmConfig {
     // Emit high-speed tuning only when enabled, keeping ordinary arm configs clean.
     if (high_speed) {
       j["high_speed"] = high_speed;
-      j["high_speed_velocity_scale"] = high_speed_velocity_scale;
+      j["high_speed_velocity_boost"] = high_speed_velocity_boost;
+      j["high_speed_effort_boost"] = high_speed_effort_boost;
       j["high_speed_gripper_velocity_tolerance_frac"] =
         high_speed_gripper_velocity_tolerance_frac;
-      j["high_speed_effort_scale"] = high_speed_effort_scale;
       j["high_speed_gripper_effort_tolerance_frac"] =
         high_speed_gripper_effort_tolerance_frac;
     }

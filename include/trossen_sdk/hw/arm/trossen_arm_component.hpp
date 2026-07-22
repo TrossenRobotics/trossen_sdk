@@ -232,15 +232,16 @@ private:
   std::vector<float> velocity_tolerance_;
   std::vector<float> effort_tolerance_;
 
-  /// High-speed mode. When true, configure() multiplies every ARM joint's
-  /// velocity_max by high_speed_velocity_scale_ and sets the GRIPPER's
-  /// velocity_tolerance to its velocity_max * the fraction below, leaving the
-  /// gripper's velocity_max untouched (already at the motor ceiling). Applied
-  /// after the explicit-limit overlay so it scales the effective velocity_max.
+  /// High-speed mode. When true, configure() ADDS a fixed boost to each ARM
+  /// joint's velocity_max/effort_max (on top of the config BASE, not the live
+  /// controller value — so it never compounds across reconnects) and sets the
+  /// GRIPPER's velocity/effort tolerances to a fraction of its unmodified
+  /// maxes. The gripper's maxes are left untouched (already at the motor
+  /// ceiling). A boost with no config base for that field is a no-op.
   bool  high_speed_{false};
-  float high_speed_velocity_scale_{1.2f};
+  float high_speed_velocity_boost_{1.0f};   ///< rad/s added to each arm joint's velocity_max
+  float high_speed_effort_boost_{5.0f};     ///< N·m added to each arm joint's effort_max
   float high_speed_gripper_velocity_tolerance_frac_{0.2f};
-  float high_speed_effort_scale_{1.2f};
   float high_speed_gripper_effort_tolerance_frac_{0.2f};
 
   /// Signed metres added to both finger carriage offsets of the end effector

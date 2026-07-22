@@ -151,17 +151,18 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     parse_limit("velocity_tolerance", velocity_tolerance_);
     parse_limit("effort_tolerance", effort_tolerance_);
 
-    // High-speed mode: boost arm-joint velocity ceilings and widen the
-    // gripper's velocity fault band (applied to the live limits below). Parsed
-    // here so it can gate — and share — the same set_joint_limits() push.
+    // High-speed mode: add a fixed boost to the arm-joint velocity/effort
+    // ceilings and widen the gripper's fault bands (applied in the overlay
+    // below). Parsed here so it can gate — and share — the set_joint_limits()
+    // push.
     if (config.contains("high_speed")) high_speed_ = config.at("high_speed").get<bool>();
-    if (config.contains("high_speed_velocity_scale"))
-      high_speed_velocity_scale_ = config.at("high_speed_velocity_scale").get<float>();
+    if (config.contains("high_speed_velocity_boost"))
+      high_speed_velocity_boost_ = config.at("high_speed_velocity_boost").get<float>();
+    if (config.contains("high_speed_effort_boost"))
+      high_speed_effort_boost_ = config.at("high_speed_effort_boost").get<float>();
     if (config.contains("high_speed_gripper_velocity_tolerance_frac"))
       high_speed_gripper_velocity_tolerance_frac_ =
         config.at("high_speed_gripper_velocity_tolerance_frac").get<float>();
-    if (config.contains("high_speed_effort_scale"))
-      high_speed_effort_scale_ = config.at("high_speed_effort_scale").get<float>();
     if (config.contains("high_speed_gripper_effort_tolerance_frac"))
       high_speed_gripper_effort_tolerance_frac_ =
         config.at("high_speed_gripper_effort_tolerance_frac").get<float>();
@@ -171,11 +172,30 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
         !position_tolerance_.empty() || !velocity_tolerance_.empty() ||
         !effort_tolerance_.empty() || high_speed_) {
       auto limits = driver_->get_joint_limits();
+      // The gripper is the last joint; the high-speed boost applies to arm
+      // joints only (the gripper is already at its motor ceiling).
+      const size_t gripper_idx = limits.empty() ? 0 : limits.size() - 1;
       for (size_t j = 0; j < njoints && j < limits.size(); ++j) {
+        const bool is_arm_joint = (j != gripper_idx);
         if (!position_min_.empty()) limits[j].position_min = position_min_[j];
         if (!position_max_.empty()) limits[j].position_max = position_max_[j];
-        if (!velocity_max_.empty()) limits[j].velocity_max = velocity_max_[j];
-        if (!effort_max_.empty()) limits[j].effort_max = effort_max_[j];
+        // Velocity/effort ceilings: set from the config BASE, then ADD the
+        // high-speed boost for arm joints. Referencing the config base (not the
+        // live controller value) is what makes this idempotent — the controller
+        // holds its limits until a power cycle, so adding to the live value
+        // would compound on every reconnect (+Δ, +2Δ, +3Δ …). Anchoring to the
+        // base means the ceiling is always exactly base+boost. A high-speed
+        // boost with no base for that field is a no-op (nothing to anchor to).
+        if (!velocity_max_.empty()) {
+          limits[j].velocity_max = velocity_max_[j];
+          if (high_speed_ && is_arm_joint)
+            limits[j].velocity_max += high_speed_velocity_boost_;
+        }
+        if (!effort_max_.empty()) {
+          limits[j].effort_max = effort_max_[j];
+          if (high_speed_ && is_arm_joint)
+            limits[j].effort_max += high_speed_effort_boost_;
+        }
         if (!position_tolerance_.empty())
           limits[j].position_tolerance = position_tolerance_[j];
         if (!velocity_tolerance_.empty())
@@ -184,18 +204,11 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
           limits[j].effort_tolerance = effort_tolerance_[j];
       }
 
-      // High-speed mode: scale up the arm joints' velocity ceilings and widen
-      // ONLY the gripper's velocity tolerance. Applied after the explicit
-      // overlay so it boosts whatever velocity_max is in effect (config-
-      // provided or firmware default). The gripper's velocity_max is left
-      // untouched — it already sits at the motor ceiling, so raising it would
-      // be rejected; instead we pad its fault band so brief overshoots at speed
-      // don't trip a velocity fault.
+      // High-speed mode: widen ONLY the gripper's velocity/effort fault bands
+      // to a fraction of its (unmodified) maxes so brief overshoots at speed
+      // don't trip a fault. This is an absolute SET derived from a max we never
+      // change, so — like the boosts above — it never compounds.
       if (high_speed_ && !limits.empty()) {
-        for (size_t j = 0; j + 1 < limits.size(); ++j) {
-          limits[j].velocity_max *= high_speed_velocity_scale_;
-          limits[j].effort_max *= high_speed_effort_scale_;
-        }
         auto& gripper = limits.back();
         gripper.velocity_tolerance =
           gripper.velocity_max * high_speed_gripper_velocity_tolerance_frac_;

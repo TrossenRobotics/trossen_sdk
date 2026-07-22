@@ -84,14 +84,15 @@ interface ArmHardware {
   position_tolerance?: number[];
   velocity_tolerance?: number[];
   effort_tolerance?: number[];
-  // High-speed mode: on connect, boost each arm joint's velocity_max by
-  // high_speed_velocity_scale and set the gripper's velocity_tolerance to its
-  // velocity_max * the fraction below (gripper velocity_max is left alone — it
-  // is already at the motor ceiling). undefined/false = normal speed.
+  // High-speed mode: on connect, ADD a fixed boost to each arm joint's
+  // velocity_max/effort_max (on top of the base limits above, so it never
+  // compounds across reconnects) and set the gripper's velocity/effort
+  // tolerances to a fraction of its unchanged maxes. Gripper maxes are left
+  // alone (already at the motor ceiling). undefined/false = normal speed.
   high_speed?: boolean;
-  high_speed_velocity_scale?: number;
+  high_speed_velocity_boost?: number;
   high_speed_gripper_velocity_tolerance_frac?: number;
-  high_speed_effort_scale?: number;
+  high_speed_effort_boost?: number;
   high_speed_gripper_effort_tolerance_frac?: number;
   producers: Producer[];
 }
@@ -262,9 +263,9 @@ interface RawArmConfig {
   velocity_tolerance?: number[];
   effort_tolerance?: number[];
   high_speed?: boolean;
-  high_speed_velocity_scale?: number;
+  high_speed_velocity_boost?: number;
   high_speed_gripper_velocity_tolerance_frac?: number;
-  high_speed_effort_scale?: number;
+  high_speed_effort_boost?: number;
   high_speed_gripper_effort_tolerance_frac?: number;
   [key: string]: unknown;
 }
@@ -376,9 +377,9 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
       velocity_tolerance: Array.isArray(armCfg.velocity_tolerance) ? armCfg.velocity_tolerance : undefined,
       effort_tolerance: Array.isArray(armCfg.effort_tolerance) ? armCfg.effort_tolerance : undefined,
       high_speed: armCfg.high_speed === true ? true : undefined,
-      high_speed_velocity_scale: typeof armCfg.high_speed_velocity_scale === 'number' ? armCfg.high_speed_velocity_scale : undefined,
+      high_speed_velocity_boost: typeof armCfg.high_speed_velocity_boost === 'number' ? armCfg.high_speed_velocity_boost : undefined,
       high_speed_gripper_velocity_tolerance_frac: typeof armCfg.high_speed_gripper_velocity_tolerance_frac === 'number' ? armCfg.high_speed_gripper_velocity_tolerance_frac : undefined,
-      high_speed_effort_scale: typeof armCfg.high_speed_effort_scale === 'number' ? armCfg.high_speed_effort_scale : undefined,
+      high_speed_effort_boost: typeof armCfg.high_speed_effort_boost === 'number' ? armCfg.high_speed_effort_boost : undefined,
       high_speed_gripper_effort_tolerance_frac: typeof armCfg.high_speed_gripper_effort_tolerance_frac === 'number' ? armCfg.high_speed_gripper_effort_tolerance_frac : undefined,
       producers: armProducers,
     } as ArmHardware);
@@ -536,9 +537,9 @@ function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig 
       // Emit high-speed tuning only when enabled, so normal-speed arms stay clean.
       if (arm.high_speed) {
         armEntry.high_speed = true;
-        if (typeof arm.high_speed_velocity_scale === 'number') armEntry.high_speed_velocity_scale = arm.high_speed_velocity_scale;
+        if (typeof arm.high_speed_velocity_boost === 'number') armEntry.high_speed_velocity_boost = arm.high_speed_velocity_boost;
         if (typeof arm.high_speed_gripper_velocity_tolerance_frac === 'number') armEntry.high_speed_gripper_velocity_tolerance_frac = arm.high_speed_gripper_velocity_tolerance_frac;
-        if (typeof arm.high_speed_effort_scale === 'number') armEntry.high_speed_effort_scale = arm.high_speed_effort_scale;
+        if (typeof arm.high_speed_effort_boost === 'number') armEntry.high_speed_effort_boost = arm.high_speed_effort_boost;
         if (typeof arm.high_speed_gripper_effort_tolerance_frac === 'number') armEntry.high_speed_gripper_effort_tolerance_frac = arm.high_speed_gripper_effort_tolerance_frac;
       }
       armsObj[arm.name] = armEntry;
@@ -1049,9 +1050,9 @@ export function ConfigurationPage() {
     // High-speed mode: boost arm-joint velocity ceilings (×scale) and widen the
     // gripper's velocity tolerance on connect. Off by default.
     highSpeed: false,
-    highSpeedVelocityScale: 1.2,
+    highSpeedVelocityBoost: 1.0,
     highSpeedGripperVelTolFrac: 0.2,
-    highSpeedEffortScale: 1.2,
+    highSpeedEffortBoost: 5.0,
     highSpeedGripperEffortTolFrac: 0.2,
   });
 
@@ -1214,9 +1215,9 @@ export function ConfigurationPage() {
       velocityTolerance: [...DEFAULT_JOINT_TOLERANCES.velocity_tolerance],
       effortTolerance: [...DEFAULT_JOINT_TOLERANCES.effort_tolerance],
       highSpeed: false,
-      highSpeedVelocityScale: 1.2,
+      highSpeedVelocityBoost: 1.0,
       highSpeedGripperVelTolFrac: 0.2,
-      highSpeedEffortScale: 1.2,
+      highSpeedEffortBoost: 5.0,
       highSpeedGripperEffortTolFrac: 0.2,
     });
     setBaseForm({
@@ -1273,9 +1274,9 @@ export function ConfigurationPage() {
         velocityTolerance: armToleranceOrDefault(arm.velocity_tolerance, 'velocity_tolerance'),
         effortTolerance: armToleranceOrDefault(arm.effort_tolerance, 'effort_tolerance'),
         highSpeed: arm.high_speed === true,
-        highSpeedVelocityScale: typeof arm.high_speed_velocity_scale === 'number' ? arm.high_speed_velocity_scale : 1.2,
+        highSpeedVelocityBoost: typeof arm.high_speed_velocity_boost === 'number' ? arm.high_speed_velocity_boost : 1.0,
         highSpeedGripperVelTolFrac: typeof arm.high_speed_gripper_velocity_tolerance_frac === 'number' ? arm.high_speed_gripper_velocity_tolerance_frac : 0.2,
-        highSpeedEffortScale: typeof arm.high_speed_effort_scale === 'number' ? arm.high_speed_effort_scale : 1.2,
+        highSpeedEffortBoost: typeof arm.high_speed_effort_boost === 'number' ? arm.high_speed_effort_boost : 5.0,
         highSpeedGripperEffortTolFrac: typeof arm.high_speed_gripper_effort_tolerance_frac === 'number' ? arm.high_speed_gripper_effort_tolerance_frac : 0.2,
       });
     } else if (hardware.type === 'slate_base') {
@@ -1468,9 +1469,9 @@ export function ConfigurationPage() {
       velocity_tolerance: armForm.tolerancesEnabled ? [...armForm.velocityTolerance] : undefined,
       effort_tolerance: armForm.tolerancesEnabled ? [...armForm.effortTolerance] : undefined,
       high_speed: armForm.highSpeed ? true : undefined,
-      high_speed_velocity_scale: armForm.highSpeed ? armForm.highSpeedVelocityScale : undefined,
+      high_speed_velocity_boost: armForm.highSpeed ? armForm.highSpeedVelocityBoost : undefined,
       high_speed_gripper_velocity_tolerance_frac: armForm.highSpeed ? armForm.highSpeedGripperVelTolFrac : undefined,
-      high_speed_effort_scale: armForm.highSpeed ? armForm.highSpeedEffortScale : undefined,
+      high_speed_effort_boost: armForm.highSpeed ? armForm.highSpeedEffortBoost : undefined,
       high_speed_gripper_effort_tolerance_frac: armForm.highSpeed ? armForm.highSpeedGripperEffortTolFrac : undefined,
       producers: []
     };
@@ -2717,18 +2718,18 @@ export function ConfigurationPage() {
                     <input type="checkbox" id="arm_high_speed" checked={armForm.highSpeed} onChange={e => setArmForm({ ...armForm, highSpeed: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
                     <label htmlFor="arm_high_speed" className="text-ink text-[12px]">
                       High-speed motion
-                      <span className="block text-dim text-[11px] mt-[2px]">On connect, multiplies each arm joint's max velocity and max effort by the scales below, and widens the gripper's velocity and effort tolerances to a fraction of their maxes. The gripper's max velocity and effort are left unchanged — they're already at the motor's limit, so raising them would fault. Scales whatever limits are in effect (read live from the controller). Use for tasks needing fast, forceful motion.</span>
+                      <span className="block text-dim text-[11px] mt-[2px]">On connect, ADDS a fixed amount to each arm joint's max velocity and max effort, and widens the gripper's velocity/effort tolerances to a fraction of its (unchanged) maxes. The boost is added on top of the joint limits below — enable "Set joint limits" and use "Read from arm" to set the base. The boost is applied to that base (not the controller's live value), so it's exactly the configured amount every time and never compounds across reconnects; the controller keeps it until it's power-cycled. Gripper maxes are left alone (already at the motor limit). Use for tasks needing fast, forceful motion.</span>
                     </label>
                   </div>
                   {armForm.highSpeed && (
                     <div className="pl-[24px] flex flex-wrap gap-[16px]">
                       <div>
-                        <label className="block text-dim text-[11px] mb-[4px]">Arm velocity scale (×)</label>
-                        <input type="number" step="any" value={armForm.highSpeedVelocityScale} onChange={e => setArmForm({ ...armForm, highSpeedVelocityScale: parseFloat(e.target.value) || 0 })} className="w-[140px] bg-app border border-edge text-ink px-[10px] py-[6px] text-[13px] focus:outline-none focus:border-brand" />
+                        <label className="block text-dim text-[11px] mb-[4px]">Arm velocity boost (rad/s)</label>
+                        <input type="number" step="any" value={armForm.highSpeedVelocityBoost} onChange={e => setArmForm({ ...armForm, highSpeedVelocityBoost: parseFloat(e.target.value) || 0 })} className="w-[140px] bg-app border border-edge text-ink px-[10px] py-[6px] text-[13px] focus:outline-none focus:border-brand" />
                       </div>
                       <div>
-                        <label className="block text-dim text-[11px] mb-[4px]">Arm effort scale (×)</label>
-                        <input type="number" step="any" value={armForm.highSpeedEffortScale} onChange={e => setArmForm({ ...armForm, highSpeedEffortScale: parseFloat(e.target.value) || 0 })} className="w-[140px] bg-app border border-edge text-ink px-[10px] py-[6px] text-[13px] focus:outline-none focus:border-brand" />
+                        <label className="block text-dim text-[11px] mb-[4px]">Arm effort boost (N·m)</label>
+                        <input type="number" step="any" value={armForm.highSpeedEffortBoost} onChange={e => setArmForm({ ...armForm, highSpeedEffortBoost: parseFloat(e.target.value) || 0 })} className="w-[140px] bg-app border border-edge text-ink px-[10px] py-[6px] text-[13px] focus:outline-none focus:border-brand" />
                       </div>
                       <div>
                         <label className="block text-dim text-[11px] mb-[4px]">Gripper vel. tolerance (fraction of max)</label>

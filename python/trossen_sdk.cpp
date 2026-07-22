@@ -543,10 +543,10 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("velocity_tolerance", &ArmConfig::velocity_tolerance)
     .def_readwrite("effort_tolerance", &ArmConfig::effort_tolerance)
     .def_readwrite("high_speed", &ArmConfig::high_speed)
-    .def_readwrite("high_speed_velocity_scale", &ArmConfig::high_speed_velocity_scale)
+    .def_readwrite("high_speed_velocity_boost", &ArmConfig::high_speed_velocity_boost)
+    .def_readwrite("high_speed_effort_boost", &ArmConfig::high_speed_effort_boost)
     .def_readwrite("high_speed_gripper_velocity_tolerance_frac",
                    &ArmConfig::high_speed_gripper_velocity_tolerance_frac)
-    .def_readwrite("high_speed_effort_scale", &ArmConfig::high_speed_effort_scale)
     .def_readwrite("high_speed_gripper_effort_tolerance_frac",
                    &ArmConfig::high_speed_gripper_effort_tolerance_frac)
     .def_static("from_json", &ArmConfig::from_json, py::arg("json"))
