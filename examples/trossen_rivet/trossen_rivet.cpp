@@ -60,7 +60,7 @@ int main(int argc, char** argv) {
   }
 
   const std::string config_path =
-    cli.get_string("config", "examples/rivet/config.json");
+    cli.get_string("config", "examples/trossen_rivet/config.json");
 
   if (!std::filesystem::exists(config_path)) {
     std::cerr << "Error: config file not found: " << config_path << "\n";
@@ -153,12 +153,12 @@ int main(int argc, char** argv) {
   std::unordered_map<std::string,
   std::shared_ptr<trossen::hw::rivet::RivetComponent>> rivet_components;
 
-  for (const auto& [id, rivet_cfg] : cfg.hardware.bimanual_arms) {
+  for (const auto& [id, rivet_cfg] : cfg.hardware.mobile_rivet) {
     auto component = trossen::hw::HardwareRegistry::create(
       "rivet", id, rivet_cfg.to_json(), true);
     rivet_components[id] =
       std::dynamic_pointer_cast<trossen::hw::rivet::RivetComponent>(component);
-    std::cout << "  [ok] Bimanual arm [" << id << "] configured ("
+    std::cout << "  [ok] Rivet [" << id << "] configured ("
               << rivet_cfg.left_ip_address << ", " << rivet_cfg.right_ip_address << ")\n";
   }
 

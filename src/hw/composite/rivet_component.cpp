@@ -37,14 +37,14 @@ void RivetComponent::configure(const nlohmann::json& config) {
   right_model_str_ = config.at("right_model").get<std::string>();
 
   trossen_arm::Model left_model;
-  if (left_model_str_ == "glide") {
-    left_model = trossen_arm::Model::glide_left;
+  if (left_model_str_ == "pro") {
+    left_model = trossen_arm::Model::pro;
   } else {
     throw std::runtime_error("TrossenArmComponent: Unknown model: " + left_model_str_);
   }
   trossen_arm::Model right_model;
-  if (right_model_str_ == "glide") {
-    right_model = trossen_arm::Model::glide_right;
+  if (right_model_str_ == "pro") {
+    right_model = trossen_arm::Model::pro;
   } else {
     throw std::runtime_error("TrossenArmComponent: Unknown model: " + right_model_str_);
   }
