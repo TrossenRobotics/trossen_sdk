@@ -91,6 +91,16 @@ bool load_aligned_episode(
           out.robot_name = out.mcap_dataset_info["robot_name"].get<std::string>();
           std::cout << "    Robot name from MCAP: " << out.robot_name << "\n";
         }
+        // Per-episode task prompt embedded by the recorder (see
+        // trossen_mcap_backend.cpp). Left empty when the recording predates
+        // task-embedding or the operator set no task; the converter falls back
+        // to its configured task_name in that case.
+        if (out.mcap_dataset_info.contains("task")) {
+          out.task_name = out.mcap_dataset_info["task"].get<std::string>();
+          if (!out.task_name.empty()) {
+            std::cout << "    Task from MCAP: " << out.task_name << "\n";
+          }
+        }
       } catch (const std::exception& e) {
         std::cerr << "  Warning: Failed to parse dataset_info metadata: " << e.what() << "\n";
       }

@@ -32,12 +32,14 @@ from app.datasets import (
 from app.db import apply_migrations
 from app.hw_test import stream_system_hardware_test
 from app.io_utils import is_safe_id
+from app.read_limits import ReadLimitsError, read_arm_joint_limits
 from app.rerun_playback import build_rrd
 from app.recorder import (
     RecorderError,
     clear_session_headless,
     mark_session_headless,
     set_preview,
+    set_task,
     signal_next,
     signal_rerecord,
     start_recording,
@@ -57,6 +59,7 @@ from app.sessions import (
     robot_name_for_dataset,
     sessions_for_dataset,
     set_dry_run,
+    set_session_task,
     transition_session,
     update_session,
 )
@@ -584,6 +587,43 @@ def test_system(system_id: str) -> StreamingResponse:
     return StreamingResponse(gen(), media_type="text/event-stream")
 
 
+class ReadArmLimitsBody(BaseModel):
+    """One arm to connect to and read live operating limits from."""
+
+    model: str = "wxai_v0"
+    end_effector: str = "wxai_v0_follower"
+    ip_address: str
+
+
+@app.post("/api/arms/read-limits")
+async def read_arm_limits(body: ReadArmLimitsBody) -> dict[str, list[float]]:
+    """Connect to one arm and read its current per-joint limits + tolerances.
+
+    Seeds the Advanced options in the configuration UI with the values actually
+    on the controller (firmware defaults after a power cycle, or whatever was
+    last applied) so an operator can nudge them from a real baseline.
+
+    Refuses with 409 while any session is active — the arm controller is
+    single-client, so a live recorder holds it and this connect would fail.
+    Returns 502 if the arm can't be reached or the read fails.
+    """
+    active = [s for s in list_sessions() if s.status == "active"]
+    if active:
+        names = ", ".join(s.name or s.id for s in active)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot read arm limits: session '{names}' is active. "
+                f"Stop or complete it first."
+            ),
+        )
+
+    try:
+        return await read_arm_joint_limits(body.model_dump())
+    except ReadLimitsError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
 @app.get("/api/sessions")
 def list_all_sessions() -> list[Session]:
     """Return all sessions, newest first."""
@@ -820,6 +860,32 @@ def set_session_preview(session_id: str, body: PreviewSettings) -> None:
         downscale=body.downscale,
         jpeg_quality=body.jpeg_quality,
     )
+
+
+class TaskBody(BaseModel):
+    """New task prompt for a session (the LeRobot `task`)."""
+
+    task: str
+
+
+@app.post("/api/sessions/{session_id}/task")
+def set_session_task_endpoint(session_id: str, body: TaskBody) -> Session:
+    """Set the task prompt for a session, taking effect on the next episode.
+
+    Persists the task on the session (so it survives pause/resume and seeds
+    the next start), then pushes it live to a running recorder if one exists.
+    Works in any state — setting the task while paused/pending just updates the
+    stored default; setting it mid-recording embeds the new task into every
+    episode recorded after this call, which is how one session yields a
+    multi-task dataset. The in-flight episode keeps its original task.
+    """
+    sess = get_session(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    set_session_task(session_id, body.task)
+    # Best-effort live push; no-ops when no recorder is running (paused/pending).
+    set_task(session_id, body.task)
+    return get_session(session_id) or sess
 
 
 @app.post("/api/sessions/{session_id}/clear-error")

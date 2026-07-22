@@ -50,6 +50,7 @@ namespace {
 // Producers
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
+#include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
 
 // I/O
@@ -529,6 +530,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("actuated", &ArmConfig::actuated)
     .def_readwrite("joint_signs", &ArmConfig::joint_signs)
     .def_readwrite("joint_offsets", &ArmConfig::joint_offsets)
+    .def_readwrite("gripper_finger_offset", &ArmConfig::gripper_finger_offset)
     .def_readwrite("gripper_force_feedback", &ArmConfig::gripper_force_feedback)
     .def_readwrite("gripper_feedback_leader_max", &ArmConfig::gripper_feedback_leader_max)
     .def_readwrite("gripper_feedback_follower_max", &ArmConfig::gripper_feedback_follower_max)
@@ -540,8 +542,38 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("position_tolerance", &ArmConfig::position_tolerance)
     .def_readwrite("velocity_tolerance", &ArmConfig::velocity_tolerance)
     .def_readwrite("effort_tolerance", &ArmConfig::effort_tolerance)
+    .def_readwrite("high_speed", &ArmConfig::high_speed)
+    .def_readwrite("high_speed_velocity_scale", &ArmConfig::high_speed_velocity_scale)
+    .def_readwrite("high_speed_gripper_velocity_tolerance_frac",
+                   &ArmConfig::high_speed_gripper_velocity_tolerance_frac)
+    .def_readwrite("high_speed_effort_scale", &ArmConfig::high_speed_effort_scale)
+    .def_readwrite("high_speed_gripper_effort_tolerance_frac",
+                   &ArmConfig::high_speed_gripper_effort_tolerance_frac)
     .def_static("from_json", &ArmConfig::from_json, py::arg("json"))
     .def("to_json", &ArmConfig::to_json);
+
+  // Live per-joint limits read back from an arm controller, used to seed the
+  // configuration UI's limit fields from the values actually on the hardware.
+  {
+    using trossen::hw::arm::ArmJointLimits;
+    py::class_<ArmJointLimits>(m, "ArmJointLimits")
+      .def_readonly("position_min", &ArmJointLimits::position_min)
+      .def_readonly("position_max", &ArmJointLimits::position_max)
+      .def_readonly("velocity_max", &ArmJointLimits::velocity_max)
+      .def_readonly("effort_max", &ArmJointLimits::effort_max)
+      .def_readonly("position_tolerance", &ArmJointLimits::position_tolerance)
+      .def_readonly("velocity_tolerance", &ArmJointLimits::velocity_tolerance)
+      .def_readonly("effort_tolerance", &ArmJointLimits::effort_tolerance);
+
+    m.def("read_arm_joint_limits", &trossen::hw::arm::read_arm_joint_limits,
+          py::arg("model"), py::arg("end_effector"), py::arg("ip_address"),
+          // Connecting to the controller blocks; drop the GIL so the caller's
+          // event loop / other threads keep running during the round-trip.
+          py::call_guard<py::gil_scoped_release>(),
+          "Connect to an arm controller, read its current per-joint operating "
+          "limits and tolerances, then disconnect. The arm must be reachable "
+          "and not held by a running session.");
+  }
 
   py::class_<CameraConfig>(m, "CameraConfig")
     .def(py::init<>())
@@ -636,6 +668,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("compression", &TrossenMCAPBackendConfig::compression)
     .def_readwrite("dataset_id", &TrossenMCAPBackendConfig::dataset_id)
     .def_readwrite("episode_index", &TrossenMCAPBackendConfig::episode_index)
+    .def_readwrite("task", &TrossenMCAPBackendConfig::task)
     .def_static("from_json", &TrossenMCAPBackendConfig::from_json, py::arg("json"));
 
   py::class_<LeRobotV2BackendConfig, BaseConfig,

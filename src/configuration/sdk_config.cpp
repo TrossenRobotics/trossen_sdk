@@ -102,6 +102,7 @@ void SdkConfig::populate_global_config() const {
     bj["compression"] = b.compression;
     bj["dataset_id"] = b.dataset_id;
     bj["episode_index"] = b.episode_index;
+    bj["task"] = b.task;
     gc_json["trossen_mcap_backend"] = bj;
   }
 

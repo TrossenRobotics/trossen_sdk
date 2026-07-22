@@ -32,6 +32,7 @@ interface Session {
   system_id: string;
   system_name: string;
   dataset_id: string;
+  task: string;
   num_episodes: number;
   episode_duration: number;
   reset_duration: number;
@@ -169,7 +170,7 @@ export function RecordPage() {
     setFormData({
       sessionName: clone.name ?? '',
       hardwareSystem: clone.system_id ?? '',
-      taskName: '',
+      taskName: clone.task ?? '',
       datasetId: clone.dataset_id ?? '',
       numEpisodes: String(clone.num_episodes ?? 10),
       episodeDuration: String(clone.episode_duration ?? 10),
@@ -235,6 +236,7 @@ export function RecordPage() {
       name: formData.sessionName,
       system_id: formData.hardwareSystem,
       dataset_id: formData.datasetId,
+      task: formData.taskName,
       num_episodes: numEpisodes,
       episode_duration: episodeDuration,
       reset_duration: parseFloat(formData.resetDuration) || 0,
@@ -282,7 +284,7 @@ export function RecordPage() {
     setFormData({
       sessionName: session.name,
       hardwareSystem: session.system_id,
-      taskName: '',
+      taskName: session.task ?? '',
       datasetId: session.dataset_id,
       numEpisodes: String(session.num_episodes),
       episodeDuration: String(session.episode_duration),
@@ -376,6 +378,7 @@ export function RecordPage() {
         name: session.name,
         system_id: session.system_id,
         dataset_id: session.dataset_id,
+        task: session.task ?? '',
         num_episodes: newTotal,
         episode_duration: session.episode_duration,
         reset_duration: session.reset_duration,
@@ -822,7 +825,7 @@ export function RecordPage() {
                   className="w-full bg-app border border-edge text-ink placeholder:text-dim px-3 py-2 text-sm focus:outline-none focus:border-brand"
                 />
                 <div className="text-dim text-[10px] mt-1">
-                  The Dataset ID below is named for you from the selected system + task + date. Just describe the task.
+                  Recorded into every episode as the LeRobot task prompt, and used to name the Dataset ID below. You can change the task per-episode from the monitor while recording (for multi-task datasets).
                 </div>
               </div>
 

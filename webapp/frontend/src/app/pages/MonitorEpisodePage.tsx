@@ -48,6 +48,7 @@ interface Session {
   system_name: string;
   status: string;
   dataset_id: string;
+  task: string;
   num_episodes: number;
   current_episode: number;
   episode_duration: number;
@@ -206,6 +207,13 @@ export function MonitorEpisodePage() {
   const [stopping, setStopping] = useState(false);
   const [rerecording, setRerecording] = useState(false);
   const [nexting, setNexting] = useState(false);
+  // Live task-prompt editor. `taskEditing` opens the inline input; `taskDraft`
+  // holds the in-progress value. Changing the task takes effect on the NEXT
+  // episode (the current one keeps its task), which is how one session yields
+  // a multi-task dataset.
+  const [taskEditing, setTaskEditing] = useState(false);
+  const [taskDraft, setTaskDraft] = useState('');
+  const [taskSaving, setTaskSaving] = useState(false);
   // In-place recovery from the error screen. The whole loop (clear the SDK
   // fault → re-test the hardware → resume) runs here without leaving the page:
   //   idle     → showing the error + "Clear Error & Recover"
@@ -487,6 +495,27 @@ export function MonitorEpisodePage() {
   }, [apiBase]);
 
   const anyBusy = starting || stopping || rerecording || nexting;
+
+  // Set the live task prompt. Persists on the session and, if a recorder is
+  // running, is embedded into every episode recorded after this call (the
+  // in-flight episode keeps its task). This is the per-episode, multi-task
+  // collection path.
+  async function handleSetTask() {
+    if (!session || taskSaving) return;
+    const next = taskDraft.trim();
+    setTaskSaving(true);
+    try {
+      const updated = await apiPost<Session>(`${apiBase}/task`, { task: next });
+      setSession(updated);
+      setTaskEditing(false);
+      addLog('info', `Task set to "${next || '(none)'}" — applies to the next episode`);
+      toast.success('Task updated — applies to the next episode');
+    } catch (err) {
+      toast.error(`Couldn't set task: ${describeError(err)}`);
+    } finally {
+      setTaskSaving(false);
+    }
+  }
 
   // Start: launches session + first episode in one click
   async function handleStart() {
@@ -1713,6 +1742,55 @@ export function MonitorEpisodePage() {
           /* Recording / Reset controls. Dry runs cap at a single
              episode so neither Re-record nor Next is meaningful —
              only Stop is offered, centered on its own row. */
+          <>
+          {/* Live task prompt. Changing it here embeds the new task into the
+              NEXT episode's recording, so an operator can collect several
+              tasks into one dataset without stopping. Hidden for dry runs
+              (they write no data). */}
+          {!session?.dry_run && (
+            <div className="max-w-[1000px] mx-auto mb-[16px]">
+              {taskEditing ? (
+                <div className="flex flex-col sm:flex-row gap-2 sm:items-center bg-surface border border-edge p-3">
+                  <input
+                    autoFocus
+                    value={taskDraft}
+                    onChange={(e) => setTaskDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleSetTask();
+                      if (e.key === 'Escape') setTaskEditing(false);
+                    }}
+                    placeholder="Describe the task for upcoming episodes"
+                    className="flex-1 bg-app border border-edge text-ink placeholder:text-dim px-3 py-2 text-sm focus:outline-none focus:border-brand"
+                  />
+                  <button
+                    onClick={handleSetTask}
+                    disabled={taskSaving}
+                    className="bg-brand text-white px-4 py-2 text-sm disabled:opacity-50 disabled:cursor-wait"
+                  >
+                    {taskSaving ? 'Saving…' : 'Set Task'}
+                  </button>
+                  <button
+                    onClick={() => setTaskEditing(false)}
+                    className="bg-app border border-edge text-dim px-4 py-2 text-sm hover:border-white hover:text-ink transition-colors"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => { setTaskDraft(session?.task ?? ''); setTaskEditing(true); }}
+                  className="w-full flex items-center gap-3 bg-surface border border-edge px-4 py-2.5 text-left hover:border-brand transition-colors"
+                  title="Change the task prompt for upcoming episodes"
+                >
+                  <span className="text-dim text-[11px] uppercase shrink-0">Task</span>
+                  <span className="text-ink text-sm truncate flex-1">
+                    {session?.task || <span className="text-dim italic">none — converter default</span>}
+                  </span>
+                  <span className="text-brand text-xs uppercase shrink-0">Change</span>
+                </button>
+              )}
+            </div>
+          )}
           <div
             className={`grid gap-[16px] max-w-[1000px] mx-auto ${
               session?.dry_run ? 'grid-cols-1 max-w-[400px]' : 'grid-cols-3 portrait:grid-cols-1'
@@ -1759,6 +1837,7 @@ export function MonitorEpisodePage() {
               </>
             )}
           </div>
+          </>
         )}
       </div>
     </div>

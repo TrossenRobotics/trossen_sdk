@@ -50,6 +50,10 @@ interface ArmHardware {
   end_effector: string;
   role: 'leader' | 'follower';
   paired_with?: string; // ID of paired arm
+  // Follower gripper calibration. Signed metres added to both finger carriage
+  // offsets of the end effector right after init, so a swapped gripper reaches
+  // full closure. undefined/0 = leave the standard end effector untouched.
+  gripper_finger_offset?: number;
   // Passive leader (lightweight, no actuators). undefined/true = a normal
   // actuated arm. When false, the SDK skips teleop motion commands and applies
   // the joint remap below.
@@ -80,6 +84,15 @@ interface ArmHardware {
   position_tolerance?: number[];
   velocity_tolerance?: number[];
   effort_tolerance?: number[];
+  // High-speed mode: on connect, boost each arm joint's velocity_max by
+  // high_speed_velocity_scale and set the gripper's velocity_tolerance to its
+  // velocity_max * the fraction below (gripper velocity_max is left alone — it
+  // is already at the motor ceiling). undefined/false = normal speed.
+  high_speed?: boolean;
+  high_speed_velocity_scale?: number;
+  high_speed_gripper_velocity_tolerance_frac?: number;
+  high_speed_effort_scale?: number;
+  high_speed_gripper_effort_tolerance_frac?: number;
   producers: Producer[];
 }
 
@@ -233,6 +246,7 @@ interface RawArmConfig {
   ip_address?: string;
   model?: string;
   end_effector?: string;
+  gripper_finger_offset?: number;
   actuated?: boolean;
   joint_signs?: number[];
   joint_offsets?: number[];
@@ -247,6 +261,11 @@ interface RawArmConfig {
   position_tolerance?: number[];
   velocity_tolerance?: number[];
   effort_tolerance?: number[];
+  high_speed?: boolean;
+  high_speed_velocity_scale?: number;
+  high_speed_gripper_velocity_tolerance_frac?: number;
+  high_speed_effort_scale?: number;
+  high_speed_gripper_effort_tolerance_frac?: number;
   [key: string]: unknown;
 }
 
@@ -340,6 +359,7 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
       ip_address: armCfg.ip_address ?? '',
       model: armCfg.model ?? '',
       end_effector: armCfg.end_effector ?? '',
+      gripper_finger_offset: typeof armCfg.gripper_finger_offset === 'number' ? armCfg.gripper_finger_offset : undefined,
       role,
       actuated: typeof armCfg.actuated === 'boolean' ? armCfg.actuated : undefined,
       joint_signs: Array.isArray(armCfg.joint_signs) ? armCfg.joint_signs : undefined,
@@ -355,6 +375,11 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
       position_tolerance: Array.isArray(armCfg.position_tolerance) ? armCfg.position_tolerance : undefined,
       velocity_tolerance: Array.isArray(armCfg.velocity_tolerance) ? armCfg.velocity_tolerance : undefined,
       effort_tolerance: Array.isArray(armCfg.effort_tolerance) ? armCfg.effort_tolerance : undefined,
+      high_speed: armCfg.high_speed === true ? true : undefined,
+      high_speed_velocity_scale: typeof armCfg.high_speed_velocity_scale === 'number' ? armCfg.high_speed_velocity_scale : undefined,
+      high_speed_gripper_velocity_tolerance_frac: typeof armCfg.high_speed_gripper_velocity_tolerance_frac === 'number' ? armCfg.high_speed_gripper_velocity_tolerance_frac : undefined,
+      high_speed_effort_scale: typeof armCfg.high_speed_effort_scale === 'number' ? armCfg.high_speed_effort_scale : undefined,
+      high_speed_gripper_effort_tolerance_frac: typeof armCfg.high_speed_gripper_effort_tolerance_frac === 'number' ? armCfg.high_speed_gripper_effort_tolerance_frac : undefined,
       producers: armProducers,
     } as ArmHardware);
   }
@@ -481,6 +506,10 @@ function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig 
         model: arm.model,
         end_effector: arm.end_effector,
       };
+      // Emit the gripper finger-offset calibration only when set (non-zero).
+      if (typeof arm.gripper_finger_offset === 'number' && arm.gripper_finger_offset !== 0) {
+        armEntry.gripper_finger_offset = arm.gripper_finger_offset;
+      }
       // Only emit passive-leader fields when set, so ordinary arms stay clean
       // (the SDK defaults actuated=true and identity remap).
       if (arm.actuated === false) armEntry.actuated = false;
@@ -504,6 +533,14 @@ function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig 
       if (arm.position_tolerance && arm.position_tolerance.length) armEntry.position_tolerance = arm.position_tolerance;
       if (arm.velocity_tolerance && arm.velocity_tolerance.length) armEntry.velocity_tolerance = arm.velocity_tolerance;
       if (arm.effort_tolerance && arm.effort_tolerance.length) armEntry.effort_tolerance = arm.effort_tolerance;
+      // Emit high-speed tuning only when enabled, so normal-speed arms stay clean.
+      if (arm.high_speed) {
+        armEntry.high_speed = true;
+        if (typeof arm.high_speed_velocity_scale === 'number') armEntry.high_speed_velocity_scale = arm.high_speed_velocity_scale;
+        if (typeof arm.high_speed_gripper_velocity_tolerance_frac === 'number') armEntry.high_speed_gripper_velocity_tolerance_frac = arm.high_speed_gripper_velocity_tolerance_frac;
+        if (typeof arm.high_speed_effort_scale === 'number') armEntry.high_speed_effort_scale = arm.high_speed_effort_scale;
+        if (typeof arm.high_speed_gripper_effort_tolerance_frac === 'number') armEntry.high_speed_gripper_effort_tolerance_frac = arm.high_speed_gripper_effort_tolerance_frac;
+      }
       armsObj[arm.name] = armEntry;
 
       for (const p of arm.producers) {
@@ -988,6 +1025,9 @@ export function ConfigurationPage() {
     // Wrist-roll offset side for a passive leader (±π/4 on J5). Mirror-mounted
     // left/right arms need opposite signs; chosen explicitly per arm.
     wristSide: 'left' as WristSide,
+    // Follower gripper calibration: signed metres shifting the end-effector
+    // finger offsets so a swapped gripper closes fully. 0 = leave preset alone.
+    gripperFingerOffset: 0,
     // Leader gripper force feedback (off by default). Cubic constants from the
     // bilateral reference: leader N at full grip, follower N normalizer, offset.
     gripperFeedback: false,
@@ -1006,6 +1046,13 @@ export function ConfigurationPage() {
     positionTolerance: [...DEFAULT_JOINT_TOLERANCES.position_tolerance],
     velocityTolerance: [...DEFAULT_JOINT_TOLERANCES.velocity_tolerance],
     effortTolerance: [...DEFAULT_JOINT_TOLERANCES.effort_tolerance],
+    // High-speed mode: boost arm-joint velocity ceilings (×scale) and widen the
+    // gripper's velocity tolerance on connect. Off by default.
+    highSpeed: false,
+    highSpeedVelocityScale: 1.2,
+    highSpeedGripperVelTolFrac: 0.2,
+    highSpeedEffortScale: 1.2,
+    highSpeedGripperEffortTolFrac: 0.2,
   });
 
   const [baseForm, setBaseForm] = useState({
@@ -1152,6 +1199,7 @@ export function ConfigurationPage() {
       paired_with: '',
       passive: false,
       wristSide: 'left',
+      gripperFingerOffset: 0,
       gripperFeedback: false,
       gripperFeedbackLeaderMax: 27,
       gripperFeedbackFollowerMax: 87.5,
@@ -1165,6 +1213,11 @@ export function ConfigurationPage() {
       positionTolerance: [...DEFAULT_JOINT_TOLERANCES.position_tolerance],
       velocityTolerance: [...DEFAULT_JOINT_TOLERANCES.velocity_tolerance],
       effortTolerance: [...DEFAULT_JOINT_TOLERANCES.effort_tolerance],
+      highSpeed: false,
+      highSpeedVelocityScale: 1.2,
+      highSpeedGripperVelTolFrac: 0.2,
+      highSpeedEffortScale: 1.2,
+      highSpeedGripperEffortTolFrac: 0.2,
     });
     setBaseForm({
       name: '',
@@ -1205,6 +1258,7 @@ export function ConfigurationPage() {
         paired_with: arm.paired_with || '',
         passive: arm.actuated === false,
         wristSide: wristSideFromOffsets(arm.joint_offsets),
+        gripperFingerOffset: typeof arm.gripper_finger_offset === 'number' ? arm.gripper_finger_offset : 0,
         gripperFeedback: arm.gripper_force_feedback === true,
         gripperFeedbackLeaderMax: typeof arm.gripper_feedback_leader_max === 'number' ? arm.gripper_feedback_leader_max : 27,
         gripperFeedbackFollowerMax: typeof arm.gripper_feedback_follower_max === 'number' ? arm.gripper_feedback_follower_max : 87.5,
@@ -1218,6 +1272,11 @@ export function ConfigurationPage() {
         positionTolerance: armToleranceOrDefault(arm.position_tolerance, 'position_tolerance'),
         velocityTolerance: armToleranceOrDefault(arm.velocity_tolerance, 'velocity_tolerance'),
         effortTolerance: armToleranceOrDefault(arm.effort_tolerance, 'effort_tolerance'),
+        highSpeed: arm.high_speed === true,
+        highSpeedVelocityScale: typeof arm.high_speed_velocity_scale === 'number' ? arm.high_speed_velocity_scale : 1.2,
+        highSpeedGripperVelTolFrac: typeof arm.high_speed_gripper_velocity_tolerance_frac === 'number' ? arm.high_speed_gripper_velocity_tolerance_frac : 0.2,
+        highSpeedEffortScale: typeof arm.high_speed_effort_scale === 'number' ? arm.high_speed_effort_scale : 1.2,
+        highSpeedGripperEffortTolFrac: typeof arm.high_speed_gripper_effort_tolerance_frac === 'number' ? arm.high_speed_gripper_effort_tolerance_frac : 0.2,
       });
     } else if (hardware.type === 'slate_base') {
       const base = hardware as BaseHardware;
@@ -1328,6 +1387,49 @@ export function ConfigurationPage() {
     setEditingHardwareId(null);
   };
 
+  // Seed the per-joint limit + tolerance tables from the values actually on the
+  // arm controller: connect to this arm, read its limits, overlay the returned
+  // arrays, and enable both sections so the operator can nudge from a real base.
+  const [readingLimits, setReadingLimits] = useState(false);
+  const [readLimitsError, setReadLimitsError] = useState<string | null>(null);
+
+  const handleReadLimitsFromArm = async () => {
+    setReadLimitsError(null);
+    setReadingLimits(true);
+    try {
+      const res = await fetch('/api/arms/read-limits', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: armForm.model,
+          end_effector: armForm.end_effector,
+          ip_address: armForm.ip_address,
+        }),
+      });
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null);
+        throw new Error(detail?.detail || `Request failed (${res.status})`);
+      }
+      const lim = await res.json();
+      setArmForm(prev => ({
+        ...prev,
+        limitsEnabled: true,
+        tolerancesEnabled: true,
+        positionMin: lim.position_min?.length ? lim.position_min : prev.positionMin,
+        positionMax: lim.position_max?.length ? lim.position_max : prev.positionMax,
+        velocityMax: lim.velocity_max?.length ? lim.velocity_max : prev.velocityMax,
+        effortMax: lim.effort_max?.length ? lim.effort_max : prev.effortMax,
+        positionTolerance: lim.position_tolerance?.length ? lim.position_tolerance : prev.positionTolerance,
+        velocityTolerance: lim.velocity_tolerance?.length ? lim.velocity_tolerance : prev.velocityTolerance,
+        effortTolerance: lim.effort_tolerance?.length ? lim.effort_tolerance : prev.effortTolerance,
+      }));
+    } catch (err) {
+      setReadLimitsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReadingLimits(false);
+    }
+  };
+
   const handleAddArm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSystem) return;
@@ -1350,6 +1452,7 @@ export function ConfigurationPage() {
       end_effector: armForm.end_effector,
       role: armForm.role,
       paired_with: armForm.paired_with || undefined,
+      gripper_finger_offset: armForm.gripperFingerOffset ? armForm.gripperFingerOffset : undefined,
       actuated: isPassive ? false : undefined,
       joint_signs: remap?.joint_signs,
       joint_offsets: remap?.joint_offsets,
@@ -1364,6 +1467,11 @@ export function ConfigurationPage() {
       position_tolerance: armForm.tolerancesEnabled ? [...armForm.positionTolerance] : undefined,
       velocity_tolerance: armForm.tolerancesEnabled ? [...armForm.velocityTolerance] : undefined,
       effort_tolerance: armForm.tolerancesEnabled ? [...armForm.effortTolerance] : undefined,
+      high_speed: armForm.highSpeed ? true : undefined,
+      high_speed_velocity_scale: armForm.highSpeed ? armForm.highSpeedVelocityScale : undefined,
+      high_speed_gripper_velocity_tolerance_frac: armForm.highSpeed ? armForm.highSpeedGripperVelTolFrac : undefined,
+      high_speed_effort_scale: armForm.highSpeed ? armForm.highSpeedEffortScale : undefined,
+      high_speed_gripper_effort_tolerance_frac: armForm.highSpeed ? armForm.highSpeedGripperEffortTolFrac : undefined,
       producers: []
     };
 
@@ -2463,6 +2571,13 @@ export function ConfigurationPage() {
                     )}
                   </div>
                 )}
+                <div>
+                  <label className="block text-ink text-[12px] mb-[8px]">
+                    Gripper finger offset (m)
+                    <span className="block text-dim text-[11px] mt-[2px] font-normal">Shifts the end-effector's fully-closed reference so a swapped follower gripper closes all the way. Applied right after the arm initializes. Leave 0 for the standard gripper; tune the sign and magnitude on hardware (typically a few mm, e.g. 0.003).</span>
+                  </label>
+                  <input type="number" step="any" value={armForm.gripperFingerOffset} onChange={e => setArmForm({ ...armForm, gripperFingerOffset: parseFloat(e.target.value) || 0 })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
+                </div>
                 <div className="space-y-[12px]">
                   <div className="flex items-start gap-[8px]">
                     <input type="checkbox" id="arm_limits" checked={armForm.limitsEnabled} onChange={e => setArmForm({ ...armForm, limitsEnabled: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
@@ -2470,6 +2585,20 @@ export function ConfigurationPage() {
                       Set joint limits
                       <span className="block text-dim text-[11px] mt-[2px]">Per-joint velocity, position, and effort caps pushed to the controller. The control box does not keep these across a power cycle, so the SDK re-applies them on every connect. Leave off to use the controller's firmware defaults. The values below start permissive — tighten per joint as needed.</span>
                     </label>
+                  </div>
+                  <div className="pl-[24px]">
+                    <button
+                      type="button"
+                      onClick={handleReadLimitsFromArm}
+                      disabled={readingLimits || !armForm.ip_address}
+                      className="bg-app border border-edge text-ink px-[12px] py-[6px] text-[12px] hover:border-brand hover:text-brand transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {readingLimits ? 'Reading from arm…' : 'Read from arm'}
+                    </button>
+                    <span className="block text-dim text-[11px] mt-[4px]">Connect to this arm ({armForm.ip_address || 'no IP set'}) and fill the tables below with the limits currently on the controller, then adjust. The arm must be powered, reachable, and not recording.</span>
+                    {readLimitsError && (
+                      <span className="block text-[11px] mt-[4px] text-[#e0607e]">{readLimitsError}</span>
+                    )}
                   </div>
                   {armForm.limitsEnabled && (
                     <div className="pl-[24px] overflow-x-auto">
@@ -2580,6 +2709,35 @@ export function ConfigurationPage() {
                           </tr>
                         </tfoot>
                       </table>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-[12px]">
+                  <div className="flex items-start gap-[8px]">
+                    <input type="checkbox" id="arm_high_speed" checked={armForm.highSpeed} onChange={e => setArmForm({ ...armForm, highSpeed: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
+                    <label htmlFor="arm_high_speed" className="text-ink text-[12px]">
+                      High-speed motion
+                      <span className="block text-dim text-[11px] mt-[2px]">On connect, multiplies each arm joint's max velocity and max effort by the scales below, and widens the gripper's velocity and effort tolerances to a fraction of their maxes. The gripper's max velocity and effort are left unchanged — they're already at the motor's limit, so raising them would fault. Scales whatever limits are in effect (read live from the controller). Use for tasks needing fast, forceful motion.</span>
+                    </label>
+                  </div>
+                  {armForm.highSpeed && (
+                    <div className="pl-[24px] flex flex-wrap gap-[16px]">
+                      <div>
+                        <label className="block text-dim text-[11px] mb-[4px]">Arm velocity scale (×)</label>
+                        <input type="number" step="any" value={armForm.highSpeedVelocityScale} onChange={e => setArmForm({ ...armForm, highSpeedVelocityScale: parseFloat(e.target.value) || 0 })} className="w-[140px] bg-app border border-edge text-ink px-[10px] py-[6px] text-[13px] focus:outline-none focus:border-brand" />
+                      </div>
+                      <div>
+                        <label className="block text-dim text-[11px] mb-[4px]">Arm effort scale (×)</label>
+                        <input type="number" step="any" value={armForm.highSpeedEffortScale} onChange={e => setArmForm({ ...armForm, highSpeedEffortScale: parseFloat(e.target.value) || 0 })} className="w-[140px] bg-app border border-edge text-ink px-[10px] py-[6px] text-[13px] focus:outline-none focus:border-brand" />
+                      </div>
+                      <div>
+                        <label className="block text-dim text-[11px] mb-[4px]">Gripper vel. tolerance (fraction of max)</label>
+                        <input type="number" step="any" value={armForm.highSpeedGripperVelTolFrac} onChange={e => setArmForm({ ...armForm, highSpeedGripperVelTolFrac: parseFloat(e.target.value) || 0 })} className="w-[140px] bg-app border border-edge text-ink px-[10px] py-[6px] text-[13px] focus:outline-none focus:border-brand" />
+                      </div>
+                      <div>
+                        <label className="block text-dim text-[11px] mb-[4px]">Gripper effort tolerance (fraction of max)</label>
+                        <input type="number" step="any" value={armForm.highSpeedGripperEffortTolFrac} onChange={e => setArmForm({ ...armForm, highSpeedGripperEffortTolFrac: parseFloat(e.target.value) || 0 })} className="w-[140px] bg-app border border-edge text-ink px-[10px] py-[6px] text-[13px] focus:outline-none focus:border-brand" />
+                      </div>
                     </div>
                   )}
                 </div>

@@ -25,6 +25,13 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
   std::string dataset_id{trossen::io::backends::auto_generate_dataset_id()};
   // TODO(shantanuparab-tr): Remove episode index if not being used
   int episode_index{0};
+  // Natural-language task prompt embedded into every episode's MCAP metadata
+  // (the LeRobot `task`). Mutable at runtime between episodes: the backend
+  // re-reads this at each open(), and because the backend caches the same
+  // shared_ptr the GlobalConfig holds, changing it there (e.g. from Python via
+  // GlobalConfig::get("trossen_mcap_backend")) changes what the next episode
+  // records. Empty = no task embedded (converter falls back to its task_name).
+  std::string task{};
 
   std::string type() const override { return "trossen_mcap_backend"; }
 
@@ -42,6 +49,7 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
     if (j.contains("compression")) j.at("compression").get_to(c.compression);
     if (j.contains("dataset_id")) j.at("dataset_id").get_to(c.dataset_id);
     if (j.contains("episode_index")) j.at("episode_index").get_to(c.episode_index);
+    if (j.contains("task")) j.at("task").get_to(c.task);
 
     return c;
   }

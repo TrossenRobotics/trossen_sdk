@@ -122,12 +122,19 @@ bool TrossenMCAPBackend::open() {
   metadata["dataset_id"] = cfg_->dataset_id;
   metadata["robot_name"] = cfg_->robot_name;
   metadata["episode_index"] = std::to_string(episode_index_);
+  metadata["task"] = cfg_->task;
   auto now = trossen::data::now_real();
   metadata["recording_start_time"] = std::to_string(now.to_ns());
 
   // Build dataset_info JSON from producer metadata (joint names, camera specs, etc.)
   nlohmann::ordered_json dataset_info;
   dataset_info["robot_name"] = cfg_->robot_name;
+  // The natural-language task prompt for this episode (the LeRobot `task`).
+  // Read fresh from cfg_ at every open(), so a task changed between episodes
+  // (via the shared GlobalConfig object) is embedded per-episode — this is what
+  // lets one recording session produce a multi-task dataset. Emitted even when
+  // empty so the loader can distinguish "no task recorded" cleanly.
+  dataset_info["task"] = cfg_->task;
 
   for (const auto& producer_meta : producer_metadata_) {
     if (!producer_meta) continue;

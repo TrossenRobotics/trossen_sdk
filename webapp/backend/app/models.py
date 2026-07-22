@@ -96,6 +96,11 @@ class Session(SQLModel, table=True):
     system_id: str = Field(foreign_key="system.id")
     system_name: str
     dataset_id: str
+    # Natural-language task prompt for this session's episodes (the LeRobot
+    # `task`). Seeds the per-dataset tasks.json sidecar at record start and is
+    # the default for every episode unless the operator changes the live task
+    # mid-session. Empty string = fall back to the converter's task_name.
+    task: str = ""
     num_episodes: int
     episode_duration: float
     reset_duration: float

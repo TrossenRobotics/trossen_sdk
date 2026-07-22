@@ -548,6 +548,26 @@ def set_preview(
     return True
 
 
+def set_task(session_id: str, task: str) -> bool:
+    """Push a new task prompt to the recorder child. Returns True if delivered,
+    False if no recorder is running.
+
+    The child applies it to the SDK config just before the *next* episode's
+    start_episode(), so the change is embedded into every episode recorded
+    after this call — that's what lets one session produce a multi-task
+    dataset. The in-flight episode (already opened) keeps the prior task.
+    """
+    with _lock:
+        runner = _runners.get(session_id)
+    if runner is None:
+        return False
+    try:
+        _send_control(runner, {"type": "task", "task": task})
+    except Exception:
+        return False
+    return True
+
+
 def _wait_for_ready(
     session_id: str,
     proc: subprocess.Popen,
@@ -942,6 +962,10 @@ def _apply_session_overrides(
     backend["dataset_id"] = session.dataset_id
     backend["compression"] = session.compression
     backend["chunk_size_bytes"] = session.chunk_size_bytes
+    # The task prompt embedded into episode_0's MCAP metadata. The child seeds
+    # the SDK config with this; later episodes pick up any live change pushed
+    # via set_task(). Empty string is fine — the converter falls back then.
+    backend["task"] = session.task or ""
     # Pin the recording root to the very directory the dataset browser scans
     # (dataset-settings `mcap_root`), so a recording can never land somewhere
     # the browser won't look — that record/browse divergence is one way a

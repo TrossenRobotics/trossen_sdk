@@ -186,7 +186,15 @@ int main(int argc, char** argv) {
           camera_counts);
     }
 
-    bool ok = writer.add_episode(ep, channels, camera_dirs, camera_counts, cfg->task_name);
+    // Prefer the task embedded in this episode's MCAP (dataset_info.task);
+    // fall back to the config's task_name when the recording carried none.
+    // Distinct per-episode tasks here are what make the output a multi-task
+    // dataset — LeRobotV3DatasetWriter de-dupes them into meta/tasks.parquet
+    // and stamps the right task_index onto every frame.
+    const std::string& episode_task =
+        ep.task_name.empty() ? cfg->task_name : ep.task_name;
+    std::cout << "  Task: " << episode_task << "\n";
+    bool ok = writer.add_episode(ep, channels, camera_dirs, camera_counts, episode_task);
 
     // Clean up the per-episode temp images regardless of outcome.
     std::error_code ec;

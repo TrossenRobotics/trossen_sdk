@@ -45,6 +45,7 @@ __all__ = [
     "reset_to_pending",
     "set_dry_run",
     "set_current_episode",
+    "set_session_task",
 ]
 
 
@@ -74,6 +75,9 @@ class CreateSessionBody(BaseModel):
     name: str
     system_id: str
     dataset_id: str
+    # Natural-language task prompt for this session (the LeRobot `task`).
+    # Optional — an empty task falls back to the converter's task_name.
+    task: str = ""
     num_episodes: int
     episode_duration: float
     reset_duration: float
@@ -93,6 +97,7 @@ class UpdateSessionBody(BaseModel):
     name: str
     system_id: str
     dataset_id: str
+    task: str = ""
     num_episodes: int
     episode_duration: float
     reset_duration: float
@@ -201,6 +206,7 @@ def create_session(body: CreateSessionBody) -> Session | None:
         system_id=body.system_id,
         system_name=system_name,
         dataset_id=body.dataset_id,
+        task=body.task,
         num_episodes=body.num_episodes,
         episode_duration=body.episode_duration,
         reset_duration=body.reset_duration,
@@ -245,6 +251,7 @@ def update_session(session_id: str, body: UpdateSessionBody) -> Session | None:
         row.system_id = body.system_id
         row.system_name = system_name
         row.dataset_id = body.dataset_id
+        row.task = body.task
         row.num_episodes = body.num_episodes
         row.episode_duration = body.episode_duration
         row.reset_duration = body.reset_duration
@@ -428,3 +435,24 @@ def set_current_episode(session_id: str, episode_index: int) -> None:
         row.updated_at = _now_iso()
         db.add(row)
         db.commit()
+
+
+def set_session_task(session_id: str, task: str) -> bool:
+    """Persist a new task prompt on the session record.
+
+    Called when the operator changes the live task mid-session so the new
+    value becomes the session's default (survives a pause/resume and seeds the
+    next start). Returns True if a matching session was updated. No state
+    machine check — a task can be changed in any state.
+    """
+    if not is_safe_id(session_id):
+        return False
+    with SessionLocal() as db:
+        row = db.get(Session, session_id)
+        if row is None:
+            return False
+        row.task = task
+        row.updated_at = _now_iso()
+        db.add(row)
+        db.commit()
+        return True

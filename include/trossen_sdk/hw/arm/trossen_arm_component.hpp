@@ -232,6 +232,22 @@ private:
   std::vector<float> velocity_tolerance_;
   std::vector<float> effort_tolerance_;
 
+  /// High-speed mode. When true, configure() multiplies every ARM joint's
+  /// velocity_max by high_speed_velocity_scale_ and sets the GRIPPER's
+  /// velocity_tolerance to its velocity_max * the fraction below, leaving the
+  /// gripper's velocity_max untouched (already at the motor ceiling). Applied
+  /// after the explicit-limit overlay so it scales the effective velocity_max.
+  bool  high_speed_{false};
+  float high_speed_velocity_scale_{1.2f};
+  float high_speed_gripper_velocity_tolerance_frac_{0.2f};
+  float high_speed_effort_scale_{1.2f};
+  float high_speed_gripper_effort_tolerance_frac_{0.2f};
+
+  /// Signed metres added to both finger carriage offsets of the end effector
+  /// right after driver_->configure(), calibrating full closure for a swapped
+  /// gripper (see ArmConfig::gripper_finger_offset). 0 = leave preset untouched.
+  float gripper_finger_offset_{0.0f};
+
   /// Joint-space pose this arm moves to at session start (via stage()).
   /// Empty = no staging.
   std::vector<float> staged_position_;
@@ -239,6 +255,35 @@ private:
   /// Trajectory time used by stage() and the end_teleop() rest move.
   float teleop_moving_time_s_{2.0f};
 };
+
+/// @brief Per-joint operating limits + tolerances read live from an arm
+/// controller. Arrays are parallel and one entry per joint (arm joints in
+/// rad / rad·s⁻¹ / N·m, gripper in m / m·s⁻¹ / N).
+struct ArmJointLimits {
+  std::vector<double> position_min;
+  std::vector<double> position_max;
+  std::vector<double> velocity_max;
+  std::vector<double> effort_max;
+  std::vector<double> position_tolerance;
+  std::vector<double> velocity_tolerance;
+  std::vector<double> effort_tolerance;
+};
+
+/// @brief Connect to an arm controller, read its current joint limits, and
+/// disconnect. Used to seed the UI's per-joint limit fields with the values
+/// actually on the controller (firmware defaults after a power cycle, or
+/// whatever was last applied) so an operator can nudge them from a real base.
+///
+/// This spins up a short-lived TrossenArmDriver, so the arm must be reachable
+/// and NOT held by a running session. Throws std::runtime_error on an unknown
+/// model / end effector or any driver failure.
+///
+/// @param model         Robot model identifier (e.g. "wxai_v0").
+/// @param end_effector  End-effector identifier (e.g. "wxai_v0_follower").
+/// @param ip_address    Network IP of the arm controller.
+ArmJointLimits read_arm_joint_limits(const std::string& model,
+                                     const std::string& end_effector,
+                                     const std::string& ip_address);
 
 }  // namespace trossen::hw::arm
 

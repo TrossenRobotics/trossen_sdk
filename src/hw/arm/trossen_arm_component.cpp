@@ -57,6 +57,26 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
       "TrossenArmComponent: Failed to configure driver: " + std::string(e.what()));
   }
 
+  // Follower gripper calibration: shift the end-effector finger carriage
+  // offsets so a swapped gripper reaches full closure. Applied right after the
+  // driver is configured, before any read/write, so the reported gripper
+  // position (and thus the recorded channel) is consistent from the first tick.
+  if (config.contains("gripper_finger_offset")) {
+    gripper_finger_offset_ = config.at("gripper_finger_offset").get<float>();
+  }
+  if (gripper_finger_offset_ != 0.0f) {
+    try {
+      auto end_effector_props = driver_->get_end_effector();
+      end_effector_props.offset_finger_left += gripper_finger_offset_;
+      end_effector_props.offset_finger_right += gripper_finger_offset_;
+      driver_->set_end_effector(end_effector_props);
+    } catch (const std::exception& e) {
+      throw std::runtime_error(
+        "TrossenArmComponent: Failed to apply gripper_finger_offset: " +
+        std::string(e.what()));
+    }
+  }
+
   // Optional teleop tuning — used by stage() / end_teleop().
   if (config.contains("staged_position")) {
     auto pos = config.at("staged_position").get<std::vector<float>>();
@@ -131,10 +151,25 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     parse_limit("velocity_tolerance", velocity_tolerance_);
     parse_limit("effort_tolerance", effort_tolerance_);
 
+    // High-speed mode: boost arm-joint velocity ceilings and widen the
+    // gripper's velocity fault band (applied to the live limits below). Parsed
+    // here so it can gate — and share — the same set_joint_limits() push.
+    if (config.contains("high_speed")) high_speed_ = config.at("high_speed").get<bool>();
+    if (config.contains("high_speed_velocity_scale"))
+      high_speed_velocity_scale_ = config.at("high_speed_velocity_scale").get<float>();
+    if (config.contains("high_speed_gripper_velocity_tolerance_frac"))
+      high_speed_gripper_velocity_tolerance_frac_ =
+        config.at("high_speed_gripper_velocity_tolerance_frac").get<float>();
+    if (config.contains("high_speed_effort_scale"))
+      high_speed_effort_scale_ = config.at("high_speed_effort_scale").get<float>();
+    if (config.contains("high_speed_gripper_effort_tolerance_frac"))
+      high_speed_gripper_effort_tolerance_frac_ =
+        config.at("high_speed_gripper_effort_tolerance_frac").get<float>();
+
     if (!position_min_.empty() || !position_max_.empty() ||
         !velocity_max_.empty() || !effort_max_.empty() ||
         !position_tolerance_.empty() || !velocity_tolerance_.empty() ||
-        !effort_tolerance_.empty()) {
+        !effort_tolerance_.empty() || high_speed_) {
       auto limits = driver_->get_joint_limits();
       for (size_t j = 0; j < njoints && j < limits.size(); ++j) {
         if (!position_min_.empty()) limits[j].position_min = position_min_[j];
@@ -148,6 +183,26 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
         if (!effort_tolerance_.empty())
           limits[j].effort_tolerance = effort_tolerance_[j];
       }
+
+      // High-speed mode: scale up the arm joints' velocity ceilings and widen
+      // ONLY the gripper's velocity tolerance. Applied after the explicit
+      // overlay so it boosts whatever velocity_max is in effect (config-
+      // provided or firmware default). The gripper's velocity_max is left
+      // untouched — it already sits at the motor ceiling, so raising it would
+      // be rejected; instead we pad its fault band so brief overshoots at speed
+      // don't trip a velocity fault.
+      if (high_speed_ && !limits.empty()) {
+        for (size_t j = 0; j + 1 < limits.size(); ++j) {
+          limits[j].velocity_max *= high_speed_velocity_scale_;
+          limits[j].effort_max *= high_speed_effort_scale_;
+        }
+        auto& gripper = limits.back();
+        gripper.velocity_tolerance =
+          gripper.velocity_max * high_speed_gripper_velocity_tolerance_frac_;
+        gripper.effort_tolerance =
+          gripper.effort_max * high_speed_gripper_effort_tolerance_frac_;
+      }
+
       try {
         driver_->set_joint_limits(limits);
       } catch (const std::exception& e) {
@@ -369,5 +424,58 @@ void TrossenArmComponent::stage() {
 }
 
 REGISTER_HARDWARE(TrossenArmComponent, "trossen_arm")
+
+ArmJointLimits read_arm_joint_limits(const std::string& model,
+                                     const std::string& end_effector,
+                                     const std::string& ip_address) {
+  // Map the model / end-effector identifiers the same way configure() does.
+  trossen_arm::Model model_enum;
+  if (model == "wxai_v0") {
+    model_enum = trossen_arm::Model::wxai_v0;
+  } else {
+    throw std::runtime_error("read_arm_joint_limits: Unknown model: " + model);
+  }
+
+  trossen_arm::EndEffector end_effector_props;
+  if (end_effector == "wxai_v0_leader") {
+    end_effector_props = trossen_arm::StandardEndEffector::wxai_v0_leader;
+  } else if (end_effector == "wxai_v0_follower") {
+    end_effector_props = trossen_arm::StandardEndEffector::wxai_v0_follower;
+  } else {
+    throw std::runtime_error(
+      "read_arm_joint_limits: Unknown end_effector: " + end_effector);
+  }
+
+  // Short-lived driver: configure, read, and let the destructor disconnect.
+  trossen_arm::TrossenArmDriver driver;
+  try {
+    driver.configure(model_enum, end_effector_props, ip_address, true);
+  } catch (const std::exception& e) {
+    throw std::runtime_error(
+      "read_arm_joint_limits: Failed to connect to arm at " + ip_address + ": " +
+      std::string(e.what()));
+  }
+
+  const auto limits = driver.get_joint_limits();
+  ArmJointLimits out;
+  const auto n = limits.size();
+  out.position_min.reserve(n);
+  out.position_max.reserve(n);
+  out.velocity_max.reserve(n);
+  out.effort_max.reserve(n);
+  out.position_tolerance.reserve(n);
+  out.velocity_tolerance.reserve(n);
+  out.effort_tolerance.reserve(n);
+  for (const auto& jl : limits) {
+    out.position_min.push_back(jl.position_min);
+    out.position_max.push_back(jl.position_max);
+    out.velocity_max.push_back(jl.velocity_max);
+    out.effort_max.push_back(jl.effort_max);
+    out.position_tolerance.push_back(jl.position_tolerance);
+    out.velocity_tolerance.push_back(jl.velocity_tolerance);
+    out.effort_tolerance.push_back(jl.effort_tolerance);
+  }
+  return out;
+}
 
 }  // namespace trossen::hw::arm

@@ -960,6 +960,41 @@ def _stop_controllers(controllers: list) -> None:
             ctrl.stop_teleop()
 
 
+# Live task prompt pushed from the UI via a {"type":"task"} control message.
+# `None` means "no change requested since the last apply". Guarded by
+# `_task_lock` because it's written on the stdin thread and read on the episode
+# loop thread. Applied by _apply_pending_task() right before each
+# start_episode(), so the task embedded in an episode's MCAP is whatever was
+# in effect when that episode opened — episode 0 uses the initial config task
+# (no message can arrive before the stdin thread starts).
+_task_lock = threading.Lock()
+_pending_task: str | None = None
+
+
+def _apply_pending_task() -> None:
+    """Push any pending live-task change into the SDK config before an episode.
+
+    The MCAP backend caches the same shared_ptr GlobalConfig holds, so mutating
+    the config's `task` here is picked up by the backend's next open() and thus
+    embedded into that episode's metadata. Best-effort: a failure leaves the
+    prior task in place and never breaks the loop.
+    """
+    global _pending_task
+    with _task_lock:
+        task = _pending_task
+        _pending_task = None
+    if task is None:
+        return
+    try:
+        cfg = ts.GlobalConfig.instance().get("trossen_mcap_backend")
+        cfg.task = task
+        print(f"[recorder-runner] task for next episode set to {task!r}",
+              flush=True)
+    except Exception as e:
+        print(f"[recorder-runner] failed to apply task {task!r}: {e}",
+              flush=True)
+
+
 def _stdin_reader(
     stop_event: threading.Event,
     next_event: threading.Event,
@@ -1001,6 +1036,14 @@ def _stdin_reader(
                 downscale=msg.get("downscale"),
                 jpeg_quality=msg.get("jpeg_quality"),
             )
+            continue
+        if mtype == "task":
+            # Live task-prompt change. Stashed here; applied to the SDK config
+            # by the loop just before the next start_episode(), so it lands in
+            # that episode's MCAP metadata.
+            global _pending_task
+            with _task_lock:
+                _pending_task = str(msg.get("task", ""))
             continue
         if mtype != "signal":
             continue
@@ -1085,6 +1128,10 @@ def _run_episode_loop(
                 next_event.clear()
                 rerecord_event.clear()
                 print(f"{tag} starting episode {episode_index}", flush=True)
+                # Apply any live task change now so it's embedded into THIS
+                # episode's MCAP metadata (the backend reads the config at
+                # open(), which start_episode triggers).
+                _apply_pending_task()
                 # start_episode fires on_pre_episode → ctrl.teleop(), which
                 # spawns the teleop mirror thread; mask signals so it
                 # inherits a blocked mask (see _block_signals_on_this_thread).

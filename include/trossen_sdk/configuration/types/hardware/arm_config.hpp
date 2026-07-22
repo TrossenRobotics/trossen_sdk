@@ -47,6 +47,16 @@ struct ArmConfig {
   std::vector<float> joint_signs{};
   std::vector<float> joint_offsets{};
 
+  /// @brief Follower gripper calibration. Signed offset (metres) added to BOTH
+  /// finger carriage offsets of the end effector right after the driver is
+  /// configured (get_end_effector → adjust offset_finger_left/right →
+  /// set_end_effector). Use it when a swapped gripper no longer reaches full
+  /// closure with the standard preset: shifting the "closed" reference lets the
+  /// fingers meet. Because the reported gripper position derives from these
+  /// offsets, the recorded gripper channel stays self-consistent. 0 leaves the
+  /// standard end effector untouched. Sign is empirical — tune on hardware.
+  float gripper_finger_offset{0.0f};
+
   /// @brief Leader-only: render gripper force feedback. When true, the teleop
   /// loop reflects the FOLLOWER's measured gripper effort back onto this
   /// (actuated) gripper via a cubic curve, so the operator feels the grasp.
@@ -86,6 +96,21 @@ struct ArmConfig {
   std::vector<float> velocity_tolerance{};
   std::vector<float> effort_tolerance{};
 
+  /// @brief High-speed mode for fast tasks. When true, TrossenArmComponent
+  /// multiplies every ARM joint's velocity_max by high_speed_velocity_scale on
+  /// connect and sets the GRIPPER's velocity_tolerance to its velocity_max *
+  /// high_speed_gripper_velocity_tolerance_frac, leaving the gripper's
+  /// velocity_max untouched (it is already at the motor ceiling, so raising it
+  /// would be rejected). Scales whatever velocity_max is in effect (explicit
+  /// or firmware default), read live from the controller. Effort limits are
+  /// boosted the same way via high_speed_effort_scale, with the gripper's
+  /// effort_max left untouched and its effort_tolerance widened.
+  bool high_speed{false};
+  float high_speed_velocity_scale{1.2f};
+  float high_speed_gripper_velocity_tolerance_frac{0.2f};
+  float high_speed_effort_scale{1.2f};
+  float high_speed_gripper_effort_tolerance_frac{0.2f};
+
   static ArmConfig from_json(const nlohmann::json& j) {
     ArmConfig c;
     if (j.contains("ip_address")) j.at("ip_address").get_to(c.ip_address);
@@ -94,6 +119,8 @@ struct ArmConfig {
     if (j.contains("actuated")) j.at("actuated").get_to(c.actuated);
     if (j.contains("joint_signs")) j.at("joint_signs").get_to(c.joint_signs);
     if (j.contains("joint_offsets")) j.at("joint_offsets").get_to(c.joint_offsets);
+    if (j.contains("gripper_finger_offset"))
+      j.at("gripper_finger_offset").get_to(c.gripper_finger_offset);
     if (j.contains("gripper_force_feedback"))
       j.at("gripper_force_feedback").get_to(c.gripper_force_feedback);
     if (j.contains("gripper_feedback_leader_max"))
@@ -112,6 +139,17 @@ struct ArmConfig {
       j.at("velocity_tolerance").get_to(c.velocity_tolerance);
     if (j.contains("effort_tolerance"))
       j.at("effort_tolerance").get_to(c.effort_tolerance);
+    if (j.contains("high_speed")) j.at("high_speed").get_to(c.high_speed);
+    if (j.contains("high_speed_velocity_scale"))
+      j.at("high_speed_velocity_scale").get_to(c.high_speed_velocity_scale);
+    if (j.contains("high_speed_gripper_velocity_tolerance_frac"))
+      j.at("high_speed_gripper_velocity_tolerance_frac")
+        .get_to(c.high_speed_gripper_velocity_tolerance_frac);
+    if (j.contains("high_speed_effort_scale"))
+      j.at("high_speed_effort_scale").get_to(c.high_speed_effort_scale);
+    if (j.contains("high_speed_gripper_effort_tolerance_frac"))
+      j.at("high_speed_gripper_effort_tolerance_frac")
+        .get_to(c.high_speed_gripper_effort_tolerance_frac);
     return c;
   }
 
@@ -125,6 +163,8 @@ struct ArmConfig {
     // Emit the remap only when set, to keep ordinary arm configs clean.
     if (!joint_signs.empty()) j["joint_signs"] = joint_signs;
     if (!joint_offsets.empty()) j["joint_offsets"] = joint_offsets;
+    // Emit the gripper finger-offset calibration only when set.
+    if (gripper_finger_offset != 0.0f) j["gripper_finger_offset"] = gripper_finger_offset;
     // Emit gripper feedback tuning only when enabled, same reasoning.
     if (gripper_force_feedback) {
       j["gripper_force_feedback"] = gripper_force_feedback;
@@ -141,6 +181,16 @@ struct ArmConfig {
     if (!position_tolerance.empty()) j["position_tolerance"] = position_tolerance;
     if (!velocity_tolerance.empty()) j["velocity_tolerance"] = velocity_tolerance;
     if (!effort_tolerance.empty()) j["effort_tolerance"] = effort_tolerance;
+    // Emit high-speed tuning only when enabled, keeping ordinary arm configs clean.
+    if (high_speed) {
+      j["high_speed"] = high_speed;
+      j["high_speed_velocity_scale"] = high_speed_velocity_scale;
+      j["high_speed_gripper_velocity_tolerance_frac"] =
+        high_speed_gripper_velocity_tolerance_frac;
+      j["high_speed_effort_scale"] = high_speed_effort_scale;
+      j["high_speed_gripper_effort_tolerance_frac"] =
+        high_speed_gripper_effort_tolerance_frac;
+    }
     return j;
   }
 };

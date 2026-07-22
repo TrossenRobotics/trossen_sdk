@@ -82,7 +82,11 @@ struct CameraInfo {
 struct AlignedEpisode {
   int episode_index{0};
   std::string robot_name{"trossen_solo_ai"};
-  std::string task_name{"Pick and Place"};
+  /// @brief Task prompt read from the MCAP's embedded `dataset_info.task`.
+  /// Empty when the recording carries no task — the converter then falls back
+  /// to its configured `task_name`. Distinct per episode, which is what lets a
+  /// single recording session yield a multi-task LeRobot dataset.
+  std::string task_name{};
   /// @brief The MCAP-embedded `dataset_info` blob (joint names, camera specs); may be empty.
   nlohmann::json mcap_dataset_info;
 
