@@ -2575,7 +2575,7 @@ export function ConfigurationPage() {
                 <div>
                   <label className="block text-ink text-[12px] mb-[8px]">
                     Gripper finger offset (m)
-                    <span className="block text-dim text-[11px] mt-[2px] font-normal">Shifts the end-effector's fully-closed reference so a swapped follower gripper closes all the way. Applied right after the arm initializes. Leave 0 for the standard gripper; tune the sign and magnitude on hardware (typically a few mm, e.g. 0.003).</span>
+                    <span className="block text-dim text-[11px] mt-[2px] font-normal">Symmetric closure adjustment so a swapped follower gripper closes all the way: moves both fingers toward the palm centre by this amount (closed spacing shrinks by 2×). Applied right after the arm initializes. Positive closes each finger further; negative opens the closed point (for a gripper that binds before reaching closed). Leave 0 for the standard gripper. Tune on hardware — roughly half the gap you measure at commanded-closed (a few mm, e.g. 0.003).</span>
                   </label>
                   <input type="number" step="any" value={armForm.gripperFingerOffset} onChange={e => setArmForm({ ...armForm, gripperFingerOffset: parseFloat(e.target.value) || 0 })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
                 </div>

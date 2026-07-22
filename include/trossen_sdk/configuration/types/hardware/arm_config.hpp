@@ -47,14 +47,17 @@ struct ArmConfig {
   std::vector<float> joint_signs{};
   std::vector<float> joint_offsets{};
 
-  /// @brief Follower gripper calibration. Signed offset (metres) added to BOTH
-  /// finger carriage offsets of the end effector right after the driver is
-  /// configured (get_end_effector → adjust offset_finger_left/right →
-  /// set_end_effector). Use it when a swapped gripper no longer reaches full
-  /// closure with the standard preset: shifting the "closed" reference lets the
-  /// fingers meet. Because the reported gripper position derives from these
-  /// offsets, the recorded gripper channel stays self-consistent. 0 leaves the
-  /// standard end effector untouched. Sign is empirical — tune on hardware.
+  /// @brief Follower gripper calibration (metres). A SYMMETRIC closure
+  /// adjustment applied to the end effector right after the driver is
+  /// configured: it moves both finger carriages toward the palm centre by this
+  /// amount (offset_finger_left -= v, offset_finger_right += v), shrinking the
+  /// closed finger spacing by 2*v. Use it when a swapped gripper no longer
+  /// reaches full closure with the standard preset — a POSITIVE value closes
+  /// each finger further, a NEGATIVE value opens the closed point (for a gripper
+  /// that binds before reaching commanded-closed). Because the reported gripper
+  /// position derives from these offsets, the recorded gripper channel stays
+  /// self-consistent. 0 leaves the standard end effector untouched. Tune on
+  /// hardware: roughly half the residual gap measured at commanded-closed.
   float gripper_finger_offset{0.0f};
 
   /// @brief Leader-only: render gripper force feedback. When true, the teleop

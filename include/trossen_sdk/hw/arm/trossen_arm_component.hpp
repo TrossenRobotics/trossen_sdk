@@ -244,9 +244,11 @@ private:
   float high_speed_gripper_velocity_tolerance_frac_{0.2f};
   float high_speed_gripper_effort_tolerance_frac_{0.2f};
 
-  /// Signed metres added to both finger carriage offsets of the end effector
-  /// right after driver_->configure(), calibrating full closure for a swapped
-  /// gripper (see ArmConfig::gripper_finger_offset). 0 = leave preset untouched.
+  /// Symmetric gripper closure adjustment (metres): moves both finger carriages
+  /// toward the palm centre (left -= v, right += v) right after
+  /// driver_->configure(), shrinking the closed finger spacing by 2*v so a
+  /// swapped gripper reaches full closure (see ArmConfig::gripper_finger_offset).
+  /// Positive closes further, negative opens the closed point. 0 = untouched.
   float gripper_finger_offset_{0.0f};
 
   /// Joint-space pose this arm moves to at session start (via stage()).

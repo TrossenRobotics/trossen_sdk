@@ -57,17 +57,23 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
       "TrossenArmComponent: Failed to configure driver: " + std::string(e.what()));
   }
 
-  // Follower gripper calibration: shift the end-effector finger carriage
-  // offsets so a swapped gripper reaches full closure. Applied right after the
-  // driver is configured, before any read/write, so the reported gripper
-  // position (and thus the recorded channel) is consistent from the first tick.
+  // Follower gripper calibration: shrink the end-effector's closed finger
+  // spacing SYMMETRICALLY so a swapped gripper reaches full closure. The two
+  // carriage offsets are a symmetric pair (left +, right -); moving both toward
+  // the palm centre closes each finger inward by gripper_finger_offset (total
+  // closed-spacing reduction = 2x). A negative value opens the closed point
+  // (for a gripper that binds before reaching commanded-closed). Adding the
+  // same value to both would only shift the pair sideways and leave the spacing
+  // unchanged, so it MUST be applied with opposite signs. Applied right after
+  // configure(), before any read/write, so the reported gripper position (and
+  // the recorded channel) is consistent from the first tick.
   if (config.contains("gripper_finger_offset")) {
     gripper_finger_offset_ = config.at("gripper_finger_offset").get<float>();
   }
   if (gripper_finger_offset_ != 0.0f) {
     try {
       auto end_effector_props = driver_->get_end_effector();
-      end_effector_props.offset_finger_left += gripper_finger_offset_;
+      end_effector_props.offset_finger_left -= gripper_finger_offset_;
       end_effector_props.offset_finger_right += gripper_finger_offset_;
       driver_->set_end_effector(end_effector_props);
     } catch (const std::exception& e) {
