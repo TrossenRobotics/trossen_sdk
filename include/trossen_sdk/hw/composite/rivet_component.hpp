@@ -6,8 +6,10 @@
 #ifndef TROSSEN_SDK__HW__ARM__RIVET_COMPONENT_HPP_
 #define TROSSEN_SDK__HW__ARM__RIVET_COMPONENT_HPP_
 
+#include <atomic>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "libtrossen_arm/trossen_arm.hpp"
@@ -36,7 +38,7 @@ public:
    * @param identifier Component identifier
    */
   explicit RivetComponent(std::string identifier) : HardwareComponent(identifier) {}
-  ~RivetComponent() override = default;
+  ~RivetComponent() override;
 
   // Non-copyable, non-movable: the nested adapter views hold raw back-
   // pointers to `this` that would dangle after a copy or move.
@@ -97,10 +99,13 @@ public:
   /**
    * @brief Get the underlying hardware driver instances
    *
-   * @return Vector of {left, right} driver shared pointers
+   * @return Vector of {left, right, base} driver shared pointers
    */
-  std::vector<std::shared_ptr<trossen_arm::TrossenArmDriver>> get_hardware() {
+  std::vector<std::shared_ptr<trossen_arm::TrossenArmDriver>> get_arm_hardware() {
     return {left_driver_, right_driver_};
+  }
+  std::vector<std::shared_ptr<trossen_base::TrossenBase>> get_base_hardware() {
+    return {base_driver_};
   }
 
   // ── TeleopCapable: space-view accessor ───────────────────────────────────
@@ -136,6 +141,10 @@ private:
    */
   std::vector<float> read_gripper_effort();
 
+  /**
+   * @brief Background loop that ticks the base driver at BASE_UPDATE_HZ
+   */
+  void base_update_loop();
 
   // Adapter views: implement the space child classes and forward to the
   // private helpers above. See the class-level docstring for why this
@@ -155,7 +164,7 @@ private:
     }
     /**
      * @brief Write the arm joint positions, base velocities, and lift velocities
-     * @param cmd Vector ()  [left_q0, left_q1, left_q2, left_q3, left_q4, left_q5, left_q6,
+     * @param cmd Vector (18)  [left_q0, left_q1, left_q2, left_q3, left_q4, left_q5, left_q6,
      *         right_q0, right_q1, right_q2, right_q3, right_q4, right_q5, right_q6,
      *         base_vx, base_vy, base_rz, base_lift_v]
      */
@@ -185,7 +194,7 @@ private:
     explicit CartView(RivetComponent* s) : self(s) {}
     /**
      * @brief Read the arm cartesian positions, base velocities, and lift positions
-     * @return Vector (25) [left_x, left_y, left_z, left_rx, left_ry, left_rz, left_gripper_m,
+     * @return Vector (18) [left_x, left_y, left_z, left_rx, left_ry, left_rz, left_gripper_m,
      *         right_x, right_y, right_z, right_rx, right_ry, right_rz, right_gripper_m,
      *         base_vx, base_vy, base_rz, base_lift]
      */
@@ -193,7 +202,7 @@ private:
       return self->read_cartesian();
     }
     /** @brief Write arm cartesian positions, base velocities, and lift velocities
-     *  @param cmd Vector (25)  [left_x, left_y, left_z, left_rx, left_ry, left_rz, left_gripper_m
+     *  @param cmd Vector (18)  [left_x, left_y, left_z, left_rx, left_ry, left_rz, left_gripper_m
      *         right_x, right_y, right_z, right_rx, right_ry, right_rz, right_gripper_m
      *         base_vx, base_vy, base_rz, base_lift_v]
     */
@@ -208,6 +217,17 @@ private:
 
   std::shared_ptr<trossen_arm::TrossenArmDriver> left_driver_;
   std::shared_ptr<trossen_arm::TrossenArmDriver> right_driver_;
+  std::shared_ptr<trossen_base::TrossenBase> base_driver_;
+
+  /// @brief Rate at which base_update_loop() ticks base_driver_->update_base()
+  static constexpr double BASE_UPDATE_HZ = 15.0;
+
+  /// @brief Dedicated thread running base_update_loop()
+  std::thread base_update_thread_;
+
+  /// @brief Running flag for base_update_thread_ (atomic for thread-safe stop)
+  std::atomic<bool> base_update_running_{false};
+
   std::string left_model_str_;
   std::string left_ip_address_;
   std::string right_model_str_;
@@ -251,6 +271,12 @@ private:
   std::vector<float> position_tolerance_;
   std::vector<float> velocity_tolerance_;
   std::vector<float> effort_tolerance_;
+
+  // Hack for exposing data (@schromya update once trossen_base exposes these)
+  double last_base_vx_{0.0};
+  double last_base_vy_{0.0};
+  double last_base_rz_{0.0};
+  double last_base_lift_{0.0};
 };
 
 }  // namespace trossen::hw::rivet

@@ -7,6 +7,7 @@
 #include "trossen_sdk/hw/hardware_registry.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
@@ -15,24 +16,31 @@
 
 namespace trossen::hw::rivet {
 
+RivetComponent::~RivetComponent() {
+  base_update_running_ = false;
+  if (base_update_thread_.joinable()) {
+    base_update_thread_.join();
+  }
+}
+
 void RivetComponent::configure(const nlohmann::json& config) {
   // Parse IP address
   if (!config.contains("left_ip_address")) {
-    throw std::runtime_error("TrossenArmComponent: 'left_ip_address' is required in config");
+    throw std::runtime_error("RivetComponent: 'left_ip_address' is required in config");
   }
   left_ip_address_ = config.at("left_ip_address").get<std::string>();
   if (!config.contains("right_ip_address")) {
-    throw std::runtime_error("TrossenArmComponent: 'right_ip_address' is required in config");
+    throw std::runtime_error("RivetComponent: 'right_ip_address' is required in config");
   }
   right_ip_address_ = config.at("right_ip_address").get<std::string>();
 
   // Parse model
   if (!config.contains("left_model")) {
-    throw std::runtime_error("TrossenArmComponent: 'left_model' is required in config");
+    throw std::runtime_error("RivetComponent: 'left_model' is required in config");
   }
   left_model_str_ = config.at("left_model").get<std::string>();
   if (!config.contains("right_model")) {
-    throw std::runtime_error("TrossenArmComponent: 'right_model' is required in config");
+    throw std::runtime_error("RivetComponent: 'right_model' is required in config");
   }
   right_model_str_ = config.at("right_model").get<std::string>();
 
@@ -40,30 +48,31 @@ void RivetComponent::configure(const nlohmann::json& config) {
   if (left_model_str_ == "pro") {
     left_model = trossen_arm::Model::pro;
   } else {
-    throw std::runtime_error("TrossenArmComponent: Unknown model: " + left_model_str_);
+    throw std::runtime_error("RivetComponent: Unknown model: " + left_model_str_);
   }
   trossen_arm::Model right_model;
   if (right_model_str_ == "pro") {
     right_model = trossen_arm::Model::pro;
   } else {
-    throw std::runtime_error("TrossenArmComponent: Unknown model: " + right_model_str_);
+    throw std::runtime_error("RivetComponent: Unknown model: " + right_model_str_);
   }
 
   // Parse end effector
   if (!config.contains("end_effector")) {
-    throw std::runtime_error("TrossenArmComponent: 'end_effector' is required in config");
+    throw std::runtime_error("RivetComponent: 'end_effector' is required in config");
   }
   trossen_arm::EndEffector end_effector;
   end_effector_str_ = config.at("end_effector").get<std::string>();
   if (end_effector_str_ == "wxai_v0_follower") {
     end_effector = trossen_arm::StandardEndEffector::wxai_v0_follower;
   } else {
-    throw std::runtime_error("TrossenArmComponent: Unknown end_effector: " + end_effector_str_);
+    throw std::runtime_error("RivetComponent: Unknown end_effector: " + end_effector_str_);
   }
 
   // Create and configure driver
   left_driver_ = std::make_shared<trossen_arm::TrossenArmDriver>();
   right_driver_ = std::make_shared<trossen_arm::TrossenArmDriver>();
+  base_driver_ = std::make_shared<trossen_base::TrossenBase>();
 
   try {
     left_driver_->configure(left_model, trossen_arm::StandardEndEffector::wxai_v0_leader,
@@ -72,12 +81,21 @@ void RivetComponent::configure(const nlohmann::json& config) {
       right_ip_address_, true);
   } catch (const std::exception& e) {
     throw std::runtime_error(
-      "TrossenArmComponent: Failed to configure driver: " + std::string(e.what()));
+      "RivetComponent: Failed to configure driver: " + std::string(e.what()));
   }
+
+  if (!base_driver_->wait_until_ready()) {
+      throw std::runtime_error( "RivetComponent: Base failed to become ready.");
+  }
+
+  // TODO: @schromya See if this can be done in producer
+  base_update_running_ = true;
+  base_update_thread_ = std::thread(&RivetComponent::base_update_loop, this);
+
 
   if(left_driver_->get_num_joints() != right_driver_->get_num_joints()) {
     throw std::runtime_error(
-      "TrossenArmComponent: Left and right arms must have the same number of joints. (LEFT: "
+      "RivetComponent: Left and right arms must have the same number of joints. (LEFT: "
       + std::to_string(left_driver_->get_num_joints()) + ", RIGHT: "
       + std::to_string(right_driver_->get_num_joints()) + ")");
   }
@@ -93,7 +111,7 @@ void RivetComponent::configure(const nlohmann::json& config) {
     auto pos = config.at("staged_position").get<std::vector<float>>();
     if (pos.size() != njoints_) {
       throw std::runtime_error(
-        "TrossenArmComponent: 'staged_position' length (" +
+        "RivetComponent: 'staged_position' length (" +
         std::to_string(pos.size()) + ") must match joint count (" + std::to_string(njoints_) + ")");
     }
     staged_position_ = std::move(pos);
@@ -102,7 +120,7 @@ void RivetComponent::configure(const nlohmann::json& config) {
     staging_time_s_ = config.at("staging_time_s").get<float>();
     if (staging_time_s_ < 0.0f || !std::isfinite(staging_time_s_)) {
       throw std::runtime_error(
-        "TrossenArmComponent: 'staging_time_s' must be non-negative and finite");
+        "RivetComponent: 'staging_time_s' must be non-negative and finite");
     }
   }
   if (config.contains("episode_lifecycle_enabled")) {
@@ -112,7 +130,7 @@ void RivetComponent::configure(const nlohmann::json& config) {
     write_moving_time_s_ = config.at("write_moving_time_s").get<float>();
     if (write_moving_time_s_ < 0.0f || !std::isfinite(write_moving_time_s_)) {
       throw std::runtime_error(
-        "TrossenArmComponent: 'write_moving_time_s' must be non-negative and finite");
+        "RivetComponent: 'write_moving_time_s' must be non-negative and finite");
     }
   }
 
@@ -127,7 +145,7 @@ void RivetComponent::configure(const nlohmann::json& config) {
       dst = config.at(key).get<std::vector<float>>();
       if (!dst.empty() && dst.size() != njoints_) {
         throw std::runtime_error(
-          std::string("TrossenArmComponent: '") + key + "' length (" +
+          std::string("RivetComponent: '") + key + "' length (" +
           std::to_string(dst.size()) + ") must match joint count (" +
           std::to_string(njoints_) + ")");
       }
@@ -172,7 +190,6 @@ void RivetComponent::configure(const nlohmann::json& config) {
   right_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
   left_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
 
-  // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
 }
 
 nlohmann::json RivetComponent::get_info() const {
@@ -183,8 +200,6 @@ nlohmann::json RivetComponent::get_info() const {
     {"right_ip_address", right_ip_address_},
     {"right_model", right_model_str_}
   };
-
-  trossen_base::TrossenBase base; // TODO: @schromya
 
 
   return info;
@@ -204,8 +219,11 @@ std::vector<float> RivetComponent::read_joint() {
 
   std::vector<float> positions(left_out.begin(), left_out.end());
   positions.insert(positions.end(), right_out.begin(), right_out.end());
+  positions.push_back(static_cast<float>(last_base_vx_));
+  positions.push_back(static_cast<float>(last_base_vy_));
+  positions.push_back(static_cast<float>(last_base_rz_));
+  positions.push_back(static_cast<float>(last_base_lift_));
 
-  // TODO: @schromya add base support
   return positions;
 }
 
@@ -213,11 +231,12 @@ std::vector<float> RivetComponent::read_joint() {
 void RivetComponent::write_joint(const std::vector<float>& cmd)
 {
   if (!left_driver_ || !right_driver_) return;
-  size_t expected_cmd_size = static_cast<size_t>(njoints_*2);
+  const size_t BASE_COMMAND_COUNT = 4;
+  size_t expected_cmd_size = static_cast<size_t>(njoints_*2 + BASE_COMMAND_COUNT);
 
   if (cmd.size() != expected_cmd_size) {
     throw std::runtime_error(
-      "TrossenArmComponent::write_joint: expected " + std::to_string(expected_cmd_size)
+      "RivetComponent::write_joint: expected " + std::to_string(expected_cmd_size)
       + " joints, got " + std::to_string(cmd.size()));
   }
 
@@ -227,7 +246,17 @@ void RivetComponent::write_joint(const std::vector<float>& cmd)
   left_driver_->set_all_positions(left_pos, write_moving_time_s_, false);
   right_driver_->set_all_positions(right_pos, write_moving_time_s_, false);
 
-  // TODO: @schromya add base support
+  const double base_vx = cmd[14];
+  const double base_vy = cmd[15];
+  const double base_rz = cmd[16];
+  const double base_lift = cmd[17];
+  base_driver_->set_cmd_vels(base_vx, base_vy, base_rz);
+  base_driver_->set_actuator_velocity(base_lift);
+
+  last_base_vx_ = base_vx;
+  last_base_vy_ = base_vy;
+  last_base_rz_ = base_rz;
+  last_base_lift_ = base_lift;
 }
 
 std::vector<float> RivetComponent::read_gripper_effort() {
@@ -236,13 +265,23 @@ std::vector<float> RivetComponent::read_gripper_effort() {
     static_cast<float>(right_driver_->get_gripper_effort())});
 }
 
+void RivetComponent::base_update_loop() {
+  const auto period = std::chrono::duration<double>(1.0 / BASE_UPDATE_HZ);
+  auto next_tick = std::chrono::steady_clock::now();
+  while (base_update_running_.load(std::memory_order_relaxed)) {
+    base_driver_->update_base();
+    next_tick += std::chrono::duration_cast<std::chrono::steady_clock::duration>(period);
+    std::this_thread::sleep_until(next_tick);
+  }
+}
+
 void RivetComponent::summon_joint(const std::vector<float>& cmd) {
   if (!left_driver_ || !right_driver_) return;
   size_t expected_cmd_size = static_cast<size_t>(njoints_*2);
 
   if (cmd.size() != expected_cmd_size) {
     throw std::runtime_error(
-      "TrossenArmComponent::write_joint: expected " + std::to_string(expected_cmd_size)
+      "RivetComponent::write_joint: expected " + std::to_string(expected_cmd_size)
       + " joints, got " + std::to_string(cmd.size()));
   }
 
@@ -279,15 +318,18 @@ std::vector<float> RivetComponent::read_cartesian() {
   sample.insert(sample.end(), right_out.cartesian.positions.begin(),
     right_out.cartesian.positions.end());
   sample.push_back(static_cast<float>(right_out.joint.gripper.position));
+  sample.push_back(static_cast<float>(last_base_vx_));
+  sample.push_back(static_cast<float>(last_base_vy_));
+  sample.push_back(static_cast<float>(last_base_rz_));
+  sample.push_back(static_cast<float>(last_base_lift_));
 
-  //TODO: @schromya add base support
   return sample;
 
 }
 
 void RivetComponent::write_cartesian(const std::vector<float>& cmd) {
   if (!left_driver_ || !right_driver_) return;
-  const int EXPECTED_LEN = 14; // (4 cart + 3 rotation vector + 1 gripper) * 2
+  const int EXPECTED_LEN = 18; // (3 cart + 3 rotation vector + 1 gripper) * 2 + 4 base
   const int CART_LEN = 6;
   if (EXPECTED_LEN != cmd.size()) return;
   std::array<double, CART_LEN> left_cartesian_goal, right_cartesian_goal;
@@ -301,6 +343,19 @@ void RivetComponent::write_cartesian(const std::vector<float>& cmd) {
 
   left_driver_->set_gripper_position(static_cast<double>(cmd[CART_LEN]), 0.0, false);
   right_driver_->set_gripper_position(static_cast<double>(cmd[EXPECTED_LEN-1]), 0.0, false);
+
+
+  const double base_vx = cmd[14];
+  const double base_vy = cmd[15];
+  const double base_rz = cmd[16];
+  const double base_lift = cmd[17];
+  base_driver_->set_cmd_vels(base_vx, base_vy, base_rz);
+  base_driver_->set_actuator_velocity(base_lift);
+
+  last_base_vx_ = base_vx;
+  last_base_vy_ = base_vy;
+  last_base_rz_ = base_rz;
+  last_base_lift_ = base_lift;
 }
 
 // ── Shared lifecycle ─────────────────────────────────────────────────────
@@ -316,14 +371,11 @@ void RivetComponent::prepare_for_teleop() {
   left_driver_->set_gripper_mode(trossen_arm::Mode::position);
   right_driver_->set_all_modes(trossen_arm::Mode::position);
   right_driver_->set_gripper_mode(trossen_arm::Mode::position);
-
-  // TODO: @schromya add base support
 }
 
 void RivetComponent::end_teleop() {
   if (!left_driver_ || !right_driver_) return;
 
-  // TODO: @schromya add base support
 
   std::cout << "  [end_teleop] " << get_identifier()
             << ": holding pose, then returning to rest over "
@@ -345,6 +397,8 @@ void RivetComponent::end_teleop() {
   left_driver_->cleanup();
   left_driver_.reset();
 
+  base_driver_->set_cmd_vels(0.0, 0.0, 0.0);
+  base_driver_->set_actuator_velocity(0);
 
   const std::vector<float> right_current = read_joint();
   right_driver_->set_all_modes(trossen_arm::Mode::position);
