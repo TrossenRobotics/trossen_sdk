@@ -14,11 +14,17 @@
  */
 
 #include <algorithm>
+#include <atomic>
+#include <condition_variable>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <map>
+#include <mutex>
 #include <regex>
+#include <semaphore>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "trossen_sdk/utils/app_utils.hpp"
@@ -41,6 +47,10 @@ static void print_usage(const char* program) {
             << "(default: scripts/trossen_mcap_to_lerobot_v3/config.json)\n";
   std::cerr << "  --set KEY=VALUE              Override a config value (repeatable)\n";
   std::cerr << "                               e.g. --set lerobot_v3_backend.dataset_id=my_ds\n";
+  std::cerr << "  --jobs N                     Worker threads for decode/extract/encode\n";
+  std::cerr << "                               (default: min(cores, 8); the writer stays\n";
+  std::cerr << "                               single-threaded and ordered). Lower this when\n";
+  std::cerr << "                               running several datasets concurrently.\n";
   std::cerr << "  --dump-config                Print resolved config and exit\n";
   std::cerr << "  --help                       Show this help message\n";
   std::cerr << "\nProduces a LeRobot v3.0 dataset (aggregated parquet + concatenated video).\n";
@@ -143,70 +153,102 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  // Worker-thread count for the parallelizable decode/extract/encode stage.
+  // The default balances against SVT-AV1's own internal threading; lower it via
+  // --jobs when running several dataset conversions at once (e.g. a NAS sweep).
+  const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+  int jobs = cli.get_int("jobs", static_cast<int>(std::min(hw, 8u)));
+  if (jobs < 1) jobs = 1;
+  if (static_cast<size_t>(jobs) > mcap_files.size()) jobs = static_cast<int>(mcap_files.size());
+  std::cout << "Worker threads (decode/extract/encode): " << jobs
+            << " (writer stays single-threaded, ordered)\n";
+
   fs::path tmp_root = dataset_root / ".tmp_convert";
+  const size_t num_files = mcap_files.size();
+
+  // Producer/consumer pipeline. Workers prepare episodes (decode + align +
+  // extract + per-episode video encode) concurrently; the main thread folds
+  // them into the aggregated dataset strictly in episode order (0..N-1), which
+  // the v3 layout requires. A counting semaphore bounds how far the workers may
+  // run ahead of the consumer, capping prepared-episode memory to ~window.
+  using Writer = trossen::convert::LeRobotV3DatasetWriter;
+  std::vector<Writer::PreparedEpisode> slots(num_files);
+  std::vector<uint8_t> ready(num_files, 0);
+  std::mutex mtx;
+  std::condition_variable ready_cv;
+  std::atomic<size_t> next_index{0};
+
+  // window >= jobs guarantees deadlock-free progress: indices are handed out
+  // monotonically, so whichever episode the consumer is waiting for is always
+  // already in flight on some worker (which holds its permit until done).
+  const std::ptrdiff_t window = static_cast<std::ptrdiff_t>(jobs) + 2;
+  std::counting_semaphore<> slots_free(window);
+
+  auto worker = [&]() {
+    while (true) {
+      slots_free.acquire();
+      size_t i = next_index.fetch_add(1);
+      if (i >= num_files) {
+        slots_free.release();  // nothing to do with this permit
+        break;
+      }
+      // Episode index is the sequential output position (0..N-1).
+      auto prepared =
+          writer.prepare_episode(mcap_files[i], static_cast<int>(i), cfg->task_name, tmp_root);
+      {
+        std::lock_guard<std::mutex> lk(mtx);
+        slots[i] = std::move(prepared);
+        ready[i] = 1;
+      }
+      ready_cv.notify_all();
+    }
+  };
+
+  std::vector<std::thread> pool;
+  pool.reserve(static_cast<size_t>(jobs));
+  for (int t = 0; t < jobs; ++t) pool.emplace_back(worker);
+
   int converted = 0;
   int failed = 0;
 
-  // Episode index is the sequential output position (0..N-1), required by the loader.
-  for (size_t i = 0; i < mcap_files.size(); ++i) {
-    const auto& mcap_path = mcap_files[i];
-    int episode_index = static_cast<int>(i);
+  for (size_t i = 0; i < num_files; ++i) {
+    Writer::PreparedEpisode pe;
+    {
+      std::unique_lock<std::mutex> lk(mtx);
+      ready_cv.wait(lk, [&] { return ready[i] != 0; });
+      pe = std::move(slots[i]);
+    }
 
     std::cout << "\n" << std::string(70, '-') << "\n";
-    std::cout << "[" << (i + 1) << "/" << mcap_files.size() << "] " << mcap_path.filename().string()
-              << " -> episode " << episode_index << "\n";
+    std::cout << "[" << (i + 1) << "/" << num_files << "] " << mcap_files[i].filename().string()
+              << " -> episode " << i << "\n";
     std::cout << std::string(70, '-') << "\n";
 
-    trossen::convert::AlignedEpisode ep;
-    trossen::convert::McapChannelMap channels;
-    if (!trossen::convert::load_aligned_episode(mcap_path.string(), episode_index, ep, channels)) {
-      std::cerr << "[FAILED] Could not load " << mcap_path.string() << "\n";
-      ++failed;
-      continue;
-    }
-    if (ep.frames.empty()) {
-      std::cerr << "[FAILED] No aligned frames in " << mcap_path.string() << "\n";
-      ++failed;
-      continue;
-    }
-
-    // Extract camera frames to a per-episode temp dir (only needed to encode video).
-    fs::path ep_tmp = tmp_root / ("episode_" + std::to_string(episode_index));
-    std::map<std::string, fs::path> camera_dirs;
-    std::map<std::string, size_t> camera_counts;
-    if (!channels.camera_channels.empty()) {
-      trossen::convert::extract_camera_images(
-          mcap_path.string(), channels,
-          [&](const std::string& camera_name) -> fs::path {
-            fs::path dir = ep_tmp / camera_name;
-            fs::create_directories(dir);
-            camera_dirs[camera_name] = dir;
-            return dir;
-          },
-          camera_counts);
+    bool ok = false;
+    if (!pe.ok) {
+      std::cerr << "[FAILED] Could not prepare " << mcap_files[i].string() << "\n";
+    } else {
+      // The per-episode task (embedded in the MCAP, else the config default) is
+      // what makes the output a multi-task dataset — the writer de-dupes tasks
+      // into meta/tasks.parquet and stamps task_index onto every frame.
+      std::cout << "  Task: " << pe.task_name << "\n";
+      ok = writer.consume_episode(pe);
+      if (!ok) std::cerr << "[FAILED] Writer rejected episode " << i << "\n";
     }
 
-    // Prefer the task embedded in this episode's MCAP (dataset_info.task);
-    // fall back to the config's task_name when the recording carried none.
-    // Distinct per-episode tasks here are what make the output a multi-task
-    // dataset — LeRobotV3DatasetWriter de-dupes them into meta/tasks.parquet
-    // and stamps the right task_index onto every frame.
-    const std::string& episode_task =
-        ep.task_name.empty() ? cfg->task_name : ep.task_name;
-    std::cout << "  Task: " << episode_task << "\n";
-    bool ok = writer.add_episode(ep, channels, camera_dirs, camera_counts, episode_task);
-
-    // Clean up the per-episode temp images regardless of outcome.
+    // Clean up this episode's temp dir regardless of outcome, then free the slot.
     std::error_code ec;
-    fs::remove_all(ep_tmp, ec);
+    fs::remove_all(pe.tmp_dir, ec);
+    slots_free.release();
 
     if (ok) {
       ++converted;
     } else {
-      std::cerr << "[FAILED] Writer rejected episode " << episode_index << "\n";
       ++failed;
     }
   }
+
+  for (auto& th : pool) th.join();
 
   std::error_code ec;
   fs::remove_all(tmp_root, ec);

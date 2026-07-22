@@ -383,13 +383,87 @@ int LeRobotV3DatasetWriter::task_index_for(const std::string& task_name) {
   return idx;
 }
 
-bool LeRobotV3DatasetWriter::add_episode(
-  const AlignedEpisode& ep,
-  const McapChannelMap& channels,
-  const std::map<std::string, fs::path>& camera_dirs,
-  const std::map<std::string, size_t>& camera_counts,
-  const std::string& task_name)
+LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
+  const fs::path& mcap_path,
+  int episode_index,
+  const std::string& fallback_task,
+  const fs::path& tmp_root) const
 {
+  PreparedEpisode out;
+  out.ep.episode_index = episode_index;
+
+  // ── Decode + align (independent per file: safe to run on a worker thread) ──
+  if (!load_aligned_episode(mcap_path.string(), episode_index, out.ep, out.channels)) {
+    std::cerr << "[FAILED] Could not load " << mcap_path.string() << "\n";
+    return out;  // ok == false
+  }
+  if (out.ep.frames.empty()) {
+    std::cerr << "[FAILED] No aligned frames in " << mcap_path.string() << "\n";
+    return out;
+  }
+  // Prefer the task embedded in this episode's MCAP; fall back to the config's.
+  out.task_name = out.ep.task_name.empty() ? fallback_task : out.ep.task_name;
+
+  out.tmp_dir = tmp_root / ("episode_" + std::to_string(episode_index));
+
+  // ── Camera video: extract frames, encode a per-episode mp4, sample stats ──
+  if (opts_.encode_videos && !out.channels.camera_channels.empty()) {
+    std::map<std::string, fs::path> camera_dirs;
+    std::map<std::string, size_t> camera_counts;
+    extract_camera_images(
+      mcap_path.string(), out.channels,
+      [&](const std::string& camera_name) -> fs::path {
+        fs::path dir = out.tmp_dir / camera_name;
+        fs::create_directories(dir);
+        camera_dirs[camera_name] = dir;
+        return dir;
+      },
+      camera_counts);
+
+    for (const auto& cam : out.ep.cameras) {
+      auto dir_it = camera_dirs.find(cam.name);
+      auto cnt_it = camera_counts.find(cam.name);
+      if (dir_it == camera_dirs.end() || cnt_it == camera_counts.end() || cnt_it->second == 0) {
+        continue;
+      }
+
+      PreparedEpisode::PreparedVideo pv;
+      pv.obs_key = cam.obs_key;
+      pv.episode_mp4 = out.tmp_dir / (cam.name + "_episode.mp4");
+      if (!encode_episode_video(dir_it->second, cnt_it->second, pv.episode_mp4)) {
+        std::error_code ec;
+        fs::remove_all(out.tmp_dir, ec);
+        return out;  // ok == false: an encode failure fails the whole episode
+      }
+      pv.duration_s = static_cast<double>(cnt_it->second) / static_cast<double>(opts_.fps);
+
+      // Sample frames for image stats before dropping the raw JPEGs. The global
+      // per-key cap is enforced later in consume_episode(); sampling here is
+      // bounded per episode by sample_images().
+      std::vector<fs::path> paths;
+      for (const auto& entry : fs::directory_iterator(dir_it->second)) {
+        if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+          paths.push_back(entry.path());
+        }
+      }
+      std::sort(paths.begin(), paths.end());
+      pv.samples = trossen::io::backends::sample_images(paths);
+
+      out.videos.push_back(std::move(pv));
+
+      // Raw JPEGs are no longer needed; free the disk now, keep the encoded mp4.
+      std::error_code ec;
+      fs::remove_all(dir_it->second, ec);
+    }
+  }
+
+  out.ok = true;
+  return out;
+}
+
+bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
+{
+  const AlignedEpisode& ep = pe.ep;
   if (ep.frames.empty()) {
     std::cerr << "Warning: episode " << ep.episode_index << " has no frames; skipping.\n";
     return true;
@@ -400,14 +474,14 @@ bool LeRobotV3DatasetWriter::add_episode(
     action_dim_ = ep.action_dim;
     obs_dim_ = ep.obs_dim;
     data_schema_ = make_data_schema();
-    features_ = build_features(ep, channels);
+    features_ = build_features(ep, pe.channels);
     trossen::io::backends::add_standard_metadata_features(features_);
     action_values_.assign(action_dim_, {});
     obs_values_.assign(obs_dim_, {});
     schema_fixed_ = true;
   }
 
-  const int task_index = task_index_for(task_name);
+  const int task_index = task_index_for(pe.task_name);
   const int64_t ep_frames = static_cast<int64_t>(ep.frames.size());
 
   // ── Data parquet: roll if needed, then write this episode as one row group ──
@@ -415,7 +489,7 @@ bool LeRobotV3DatasetWriter::add_episode(
 
   EpisodeMeta meta;
   meta.episode_index = ep.episode_index;
-  meta.tasks = {task_name};
+  meta.tasks = {pe.task_name};
   meta.length = ep_frames;
   meta.data_chunk_index = data_.chunk_index;
   meta.data_file_index = data_.file_index;
@@ -443,41 +517,22 @@ bool LeRobotV3DatasetWriter::add_episode(
     ts_values_.push_back(f.timestamp_s);
   }
 
-  // ── Videos: encode per-episode mp4, then place/concat into the shared file ──
+  // ── Videos: place/concat each pre-encoded episode mp4 into the shared file ──
   if (opts_.encode_videos) {
-    for (const auto& cam : ep.cameras) {
-      auto dir_it = camera_dirs.find(cam.name);
-      auto cnt_it = camera_counts.find(cam.name);
-      if (dir_it == camera_dirs.end() || cnt_it == camera_counts.end() || cnt_it->second == 0) {
-        continue;
-      }
-      if (std::find(video_keys_.begin(), video_keys_.end(), cam.obs_key) == video_keys_.end()) {
-        video_keys_.push_back(cam.obs_key);
+    for (auto& pv : pe.videos) {
+      if (std::find(video_keys_.begin(), video_keys_.end(), pv.obs_key) == video_keys_.end()) {
+        video_keys_.push_back(pv.obs_key);
       }
 
-      fs::path episode_mp4 = dir_it->second.parent_path() / (cam.name + "_episode.mp4");
-      if (!encode_episode_video(dir_it->second, cnt_it->second, episode_mp4)) return false;
-
-      double ep_duration_s = static_cast<double>(cnt_it->second) / static_cast<double>(opts_.fps);
       std::array<double, 4> slot{};
-      if (!place_or_concat_video(cam.obs_key, episode_mp4, ep_duration_s, slot)) return false;
-      meta.videos[cam.obs_key] = slot;
+      if (!place_or_concat_video(pv.obs_key, pv.episode_mp4, pv.duration_s, slot)) return false;
+      meta.videos[pv.obs_key] = slot;
 
-      // Sample frames for image stats (cap total per key).
-      auto& bucket = image_samples_[cam.obs_key];
-      if (bucket.size() < kMaxImageSamplesPerKey) {
-        std::vector<fs::path> paths;
-        for (const auto& entry : fs::directory_iterator(dir_it->second)) {
-          if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
-            paths.push_back(entry.path());
-          }
-        }
-        std::sort(paths.begin(), paths.end());
-        auto sampled = trossen::io::backends::sample_images(paths);
-        for (auto& img : sampled) {
-          if (bucket.size() >= kMaxImageSamplesPerKey) break;
-          if (!img.empty()) bucket.push_back(img);
-        }
+      // Accumulate sampled frames for image stats (cap total per key).
+      auto& bucket = image_samples_[pv.obs_key];
+      for (auto& img : pv.samples) {
+        if (bucket.size() >= kMaxImageSamplesPerKey) break;
+        if (!img.empty()) bucket.push_back(std::move(img));
       }
     }
   }

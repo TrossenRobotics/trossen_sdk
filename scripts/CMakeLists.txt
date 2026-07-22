@@ -48,6 +48,9 @@ target_include_directories(trossen_mcap_to_lerobot_v2 PRIVATE ${CMAKE_BINARY_DIR
 target_link_libraries(trossen_mcap_to_lerobot_v2 lerobot_convert_common arrow parquet ${OpenCV_LIBS})
 
 # TrossenMCAP → LeRobotV3 conversion tool
+# Threads: the v3 converter prepares episodes (decode/extract/encode) on a
+# worker pool while the writer aggregates them single-threaded and in order.
+find_package(Threads REQUIRED)
 add_executable(trossen_mcap_to_lerobot_v3 trossen_mcap_to_lerobot_v3/trossen_mcap_to_lerobot_v3.cpp)
 target_include_directories(trossen_mcap_to_lerobot_v3 PRIVATE ${CMAKE_BINARY_DIR})
-target_link_libraries(trossen_mcap_to_lerobot_v3 lerobot_convert_common arrow parquet ${OpenCV_LIBS})
+target_link_libraries(trossen_mcap_to_lerobot_v3 lerobot_convert_common arrow parquet ${OpenCV_LIBS} Threads::Threads)

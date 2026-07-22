@@ -23,7 +23,26 @@ Run from the repository root so the default config path resolves:
 ./build/scripts/trossen_mcap_to_lerobot_v3 ~/recordings/ \
   --set lerobot_v3_backend.dataset_id=my_dataset \
   --set lerobot_v3_backend.overwrite_existing=true
+
+# Use N worker threads for the decode/extract/encode stage
+./build/scripts/trossen_mcap_to_lerobot_v3 ~/recordings/ --jobs 8
 ```
+
+## Parallelism (`--jobs N`)
+
+The expensive per-episode work — MCAP decode + stream alignment, camera-frame
+extraction, and SVT-AV1 video encoding — runs on a pool of `N` worker threads.
+The aggregating writer (shared parquet stream, video concatenation, running
+stats) stays **single-threaded and processes episodes strictly in order**, so
+the output is byte-for-byte identical regardless of `--jobs` (verified).
+
+- Default: `min(cores, 8)`. Override with `--jobs N`.
+- SVT-AV1 is itself multi-threaded, so each worker already uses several cores.
+  When running **multiple dataset conversions concurrently** (e.g. a NAS sweep
+  that launches one process per dataset), lower `--jobs` per process (often
+  `--jobs 1` or `2`) so the machine isn't oversubscribed.
+- Peak memory scales with the number of in-flight (prepared but not yet written)
+  episodes, which is bounded to roughly `N + 2`.
 
 ## Output layout (`root/repository_id/dataset_id/`)
 
