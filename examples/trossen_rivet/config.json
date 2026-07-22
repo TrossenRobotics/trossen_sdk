@@ -10,7 +10,8 @@
         "right_model": "glide_right",
         "write_moving_time_s": 0.2,
         "joint_signs": [1,1,1,-1,-1,1,1],
-        "joint_offsets": [0,0,0,0,0,-0.7854,0]
+        "left_joint_offsets": [0,0,0,0,0,-0.7854,0],
+        "right_joint_offsets": [0,0,0,0,0,0.7854,0]
       }
     },
     "mobile_rivet": {

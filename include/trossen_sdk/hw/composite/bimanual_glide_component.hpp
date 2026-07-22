@@ -56,7 +56,8 @@ public:
    *   "write_moving_time_s": 0.2,
    *   "episode_lifecycle_enabled": true,
    *   "joint_signs": [1, 1, ...],
-   *   "joint_offsets": [0, 0, ...],
+   *   "left_joint_offsets": [0, 0, ...],
+   *   "right_joint_offsets": [0, 0, ...],
    *   "position_min": [...],
    *   "position_max": [...],
    *   "velocity_max": [...],
@@ -126,21 +127,24 @@ public:
   /**
    * @brief Apply this arm's affine joint remap in place.
    *
-   * Transforms a joint-space vector into the follower's frame using the same
-   * signs/offsets as read_joint(): v[j] = joint_signs_[j]*v[j] + joint_offsets_[j].
-   * Empty arrays (the follower, or any 1:1 leader) leave the vector unchanged.
+   * Transforms a joint-space vector into the follower's frame:
+   * v[j] = joint_signs_[j]*v[j] + offsets[j]. Empty arrays (the follower, or
+   * any 1:1 leader) leave the vector unchanged.
    *
    * Exposed publicly so the recording producer can store the *processed*
    * leader stream (the value actually commanded to the follower) rather than
    * raw driver positions — keeping one source of truth for the formula.
    *
    * @param v         Joint-space vector, modified in place.
+   * @param offsets   Per-joint offsets for this arm (joint_offsets_left_ or
+   *                  joint_offsets_right_). Empty = no offset.
    * @param derivative When true, the constant offset is dropped and only the
    *                   sign is applied. Correct for velocities and efforts,
    *                   whose frame flips with a joint reversal but which carry
    *                   no positional offset.
    */
-  void apply_joint_remap(std::vector<float>& v, bool derivative = false) const;
+  void apply_joint_remap(
+    std::vector<float>& v, const std::vector<float>& offsets, bool derivative = false) const;
 
 
 private:
@@ -242,10 +246,12 @@ private:
   float write_moving_time_s_{0.2f};
 
   /// Optional affine remap applied in read_joint(): out[j] = joint_signs_[j] *
-  /// raw[j] + joint_offsets_[j]. Empty = identity. Used when a leader's joint
-  /// frame doesn't map 1:1 onto the follower (e.g. inverted/offset joints).
+  /// raw[j] + joint_offsets_{left,right}_[j]. Empty = identity. Used when a
+  /// leader's joint frame doesn't map 1:1 onto the follower (e.g.
+  /// inverted/offset joints). Signs are shared across arms; offsets are per-arm
   std::vector<float> joint_signs_;
-  std::vector<float> joint_offsets_;
+  std::vector<float> joint_offsets_left_;
+  std::vector<float> joint_offsets_right_;
 
   /// Leader-only gripper force feedback. When gripper_force_feedback_ is set,
   /// the leader's gripper runs in external-effort mode and the teleop loop

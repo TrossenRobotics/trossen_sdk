@@ -24,8 +24,9 @@ namespace trossen::configuration {
  *   "right_model": "glide",
  *   "write_moving_time_s": 0.2,            // optional, default 0.0
  *   "episode_lifecycle_enabled": true,     // optional, default false
- *   "joint_signs":   [1,1,1,-1,-1,1,1],     // optional, default identity
- *   "joint_offsets": [0,0,0,0,0,-0.7854,0], // optional, default identity
+ *   "joint_signs":         [1,1,1,-1,-1,1,1],     // optional, default identity
+ *   "left_joint_offsets":  [0,0,0,0,0,-0.7854,0], // optional, default identity
+ *   "right_joint_offsets": [0,0,0,0,0,0.7854,0],  // optional, default identity
  *   "position_min": [...], "position_max": [...],
  *   "velocity_max": [...], "effort_max": [...],
  *   "position_tolerance": [...], "velocity_tolerance": [...], "effort_tolerance": [...],
@@ -55,10 +56,12 @@ struct BimanualGlideConfig {
   /// lifecycle. Opt-in; defaults to false.
   bool episode_lifecycle_enabled{false};
 
-  /// @brief Optional affine joint remap applied to both arms' read positions:
-  /// out[j] = joint_signs[j] * raw[j] + joint_offsets[j]. Empty = identity.
+  /// @brief Optional affine joint remap applied to each arm's read positions:
+  /// out[j] = joint_signs[j] * raw[j] + joint_offsets_{left,right}[j]. Empty =
+  /// identity. Signs are shared across arms; offsets are per-arm.
   std::vector<float> joint_signs{};
-  std::vector<float> joint_offsets{};
+  std::vector<float> joint_offsets_left{};
+  std::vector<float> joint_offsets_right{};
 
   /// @brief Optional per-joint operating limits pushed to both controllers on
   /// connect. Each array, when non-empty, must have one entry per joint. Empty
@@ -95,7 +98,12 @@ struct BimanualGlideConfig {
       j.at("episode_lifecycle_enabled").get_to(c.episode_lifecycle_enabled);
     }
     if (j.contains("joint_signs")) j.at("joint_signs").get_to(c.joint_signs);
-    if (j.contains("joint_offsets")) j.at("joint_offsets").get_to(c.joint_offsets);
+    if (j.contains("left_joint_offsets")) {
+      j.at("left_joint_offsets").get_to(c.joint_offsets_left);
+    }
+    if (j.contains("right_joint_offsets")) {
+      j.at("right_joint_offsets").get_to(c.joint_offsets_right);
+    }
     if (j.contains("position_min")) j.at("position_min").get_to(c.position_min);
     if (j.contains("position_max")) j.at("position_max").get_to(c.position_max);
     if (j.contains("velocity_max")) j.at("velocity_max").get_to(c.velocity_max);
@@ -132,7 +140,8 @@ struct BimanualGlideConfig {
     };
     // Emit the remap only when set, to keep ordinary configs clean.
     if (!joint_signs.empty()) j["joint_signs"] = joint_signs;
-    if (!joint_offsets.empty()) j["joint_offsets"] = joint_offsets;
+    if (!joint_offsets_left.empty()) j["left_joint_offsets"] = joint_offsets_left;
+    if (!joint_offsets_right.empty()) j["right_joint_offsets"] = joint_offsets_right;
     // Emit per-joint limits only when set.
     if (!position_min.empty()) j["position_min"] = position_min;
     if (!position_max.empty()) j["position_max"] = position_max;

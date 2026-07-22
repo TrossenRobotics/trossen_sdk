@@ -65,6 +65,21 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
       "TrossenArmComponent: Failed to configure driver: " + std::string(e.what()));
   }
 
+  // TODO: @schromya Resolve this hack when max gripper position error is fixed in driver
+  for (auto& driver : {left_driver_, right_driver_}) {
+    auto limits = driver->get_joint_limits();
+    if (!limits.empty()) {
+      limits.back().position_max = 0.05f;
+      try {
+        driver->set_joint_limits(limits);
+      } catch (const std::exception& e) {
+        throw std::runtime_error(
+          "BimanualGlideComponent: Failed to set leader gripper position_max: "
+          + std::string(e.what()));
+      }
+    }
+  }
+
   if(left_driver_->get_num_joints() != right_driver_->get_num_joints()) {
     throw std::runtime_error(
       "TrossenArmComponent: Left and right arms must have the same number of joints. (LEFT: "
@@ -91,12 +106,21 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
         std::to_string(njoints_) + ")");
     }
   }
-  if (config.contains("joint_offsets")) {
-    joint_offsets_ = config.at("joint_offsets").get<std::vector<float>>();
-    if (!joint_offsets_.empty() && joint_offsets_.size() != njoints_) {
+  if (config.contains("left_joint_offsets")) {
+    joint_offsets_left_ = config.at("left_joint_offsets").get<std::vector<float>>();
+    if (!joint_offsets_left_.empty() && joint_offsets_left_.size() != njoints_) {
       throw std::runtime_error(
-        "TrossenArmComponent: 'joint_offsets' length (" +
-        std::to_string(joint_offsets_.size()) + ") must match joint count (" +
+        "TrossenArmComponent: 'left_joint_offsets' length (" +
+        std::to_string(joint_offsets_left_.size()) + ") must match joint count (" +
+        std::to_string(njoints_) + ")");
+    }
+  }
+  if (config.contains("right_joint_offsets")) {
+    joint_offsets_right_ = config.at("right_joint_offsets").get<std::vector<float>>();
+    if (!joint_offsets_right_.empty() && joint_offsets_right_.size() != njoints_) {
+      throw std::runtime_error(
+        "TrossenArmComponent: 'right_joint_offsets' length (" +
+        std::to_string(joint_offsets_right_.size()) + ") must match joint count (" +
         std::to_string(njoints_) + ")");
     }
   }
@@ -181,10 +205,11 @@ nlohmann::json BimanualGlideComponent::get_info() const {
 }
 
 // ── Space-specific IO ────────────────────────────────────────────────────
-void BimanualGlideComponent::apply_joint_remap(std::vector<float>& v, bool derivative) const {
+void BimanualGlideComponent::apply_joint_remap(
+  std::vector<float>& v, const std::vector<float>& offsets, bool derivative) const {
   for (size_t i = 0; i < v.size(); ++i) {
     const float sign = (i < joint_signs_.size()) ? joint_signs_[i] : 1.0f;
-    const float offset = (i < joint_offsets_.size()) ? joint_offsets_[i] : 0.0f;
+    const float offset = (i < offsets.size()) ? offsets[i] : 0.0f;
     // Positions are a full affine map; velocities/efforts flip sign with a
     // joint reversal but carry no positional offset.
     v[i] = derivative ? sign * v[i] : sign * v[i] + offset;
@@ -195,11 +220,11 @@ std::vector<float> BimanualGlideComponent::read_joint() {
   if (!left_driver_ || !right_driver_) return {};
   const auto& left_positions = left_driver_->get_robot_output().joint.all.positions;
   std::vector<float> left_out(left_positions.begin(), left_positions.end());
-  apply_joint_remap(left_out, false);
+  apply_joint_remap(left_out, joint_offsets_left_, false);
 
   const auto& right_positions = right_driver_->get_robot_output().joint.all.positions;
   std::vector<float> right_out(right_positions.begin(), right_positions.end());
-  apply_joint_remap(right_out, false);
+  apply_joint_remap(right_out, joint_offsets_right_, false);
 
   std::vector<float> positions(left_out.begin(), left_out.end());
   positions.insert(positions.end(), right_out.begin(), right_out.end());
