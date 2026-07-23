@@ -278,7 +278,7 @@ private:
   /// the cubic curve. The leader's arm joints can still be passive.
   float gripper_feedback_leader_max_{27.0f};
   float gripper_feedback_follower_max_{87.5f};
-  float gripper_feedback_offset_{8.0f};
+  float gripper_feedback_offset_{5.0f};
 
   /// Optional per-joint operating limits applied to the controller in
   /// configure() (right after driver_->configure). Each, when non-empty, has

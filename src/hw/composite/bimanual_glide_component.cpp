@@ -280,8 +280,8 @@ void BimanualGlideComponent::apply_gripper_feedback(const std::vector<float>& fo
   const double right_effort = gripper_feedback_leader_max_ * std::pow(right_norm, 3)
     + gripper_feedback_offset_;
 
-  left_driver_->set_gripper_external_effort(left_effort, write_moving_time_s_, false);
-  right_driver_->set_gripper_external_effort(right_effort, write_moving_time_s_, false);
+  left_driver_->set_gripper_effort(left_effort, write_moving_time_s_, false);
+  right_driver_->set_gripper_effort(right_effort, write_moving_time_s_, false);
 
 }
 
@@ -324,10 +324,10 @@ void BimanualGlideComponent::on_pre_episode() {
 }
 void BimanualGlideComponent::prepare_for_teleop(){
   // Configure mode
-  right_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
-  left_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
-  right_driver_->set_all_modes(trossen_arm::Mode::external_effort);
-  left_driver_->set_all_modes(trossen_arm::Mode::external_effort);
+  right_driver_->set_gripper_mode(trossen_arm::Mode::effort);
+  left_driver_->set_gripper_mode(trossen_arm::Mode::effort);
+  right_driver_->set_all_modes(trossen_arm::Mode::effort);
+  left_driver_->set_all_modes(trossen_arm::Mode::effort);
 }
 void BimanualGlideComponent::end_teleop(){}
 void BimanualGlideComponent::stage(){}

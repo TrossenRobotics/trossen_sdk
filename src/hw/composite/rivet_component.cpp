@@ -249,8 +249,8 @@ void RivetComponent::write_joint(const std::vector<float>& cmd)
     right_pos[4], right_pos[5]}, write_moving_time_s_, false);
 
   
-  left_driver_->set_gripper_position(static_cast<double>(cmd[7]));
-  right_driver_->set_gripper_position(static_cast<double>(cmd[13]));
+  left_driver_->set_gripper_position(static_cast<double>(cmd[6]), write_moving_time_s_, false);
+  right_driver_->set_gripper_position(static_cast<double>(cmd[13]), write_moving_time_s_, false);
 
   const double base_vx = static_cast<double>(cmd[14]);
   const double base_vy = static_cast<double>(cmd[15]);
@@ -341,7 +341,7 @@ void RivetComponent::write_cartesian(const std::vector<float>& cmd) {
   if (EXPECTED_LEN != cmd.size()) return;
   std::array<double, CART_LEN> left_cartesian_goal, right_cartesian_goal;
   std::copy_n(cmd.begin(), CART_LEN, left_cartesian_goal.begin());
-  std::copy_n(cmd.begin() + CART_LEN, CART_LEN, right_cartesian_goal.begin());
+  std::copy_n(cmd.begin() + CART_LEN + 1, CART_LEN, right_cartesian_goal.begin());
 
   left_driver_->set_cartesian_positions(left_cartesian_goal,
     trossen_arm::InterpolationSpace::cartesian, 0.0, false);
@@ -349,7 +349,7 @@ void RivetComponent::write_cartesian(const std::vector<float>& cmd) {
     trossen_arm::InterpolationSpace::cartesian, 0.0, false);
 
   left_driver_->set_gripper_position(static_cast<double>(cmd[CART_LEN]), 0.0, false);
-  right_driver_->set_gripper_position(static_cast<double>(cmd[EXPECTED_LEN-1]), 0.0, false);
+  right_driver_->set_gripper_position(static_cast<double>(cmd[2 * CART_LEN + 1]), 0.0, false);
 
 
   const double base_vx = cmd[14];
