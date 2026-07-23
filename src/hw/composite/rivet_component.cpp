@@ -233,7 +233,6 @@ void RivetComponent::write_joint(const std::vector<float>& cmd)
   // TODO: @schromya: Don't hard code?
   if (!left_driver_ || !right_driver_) return;
   const size_t EXPECTED_CMD_SIZE = 18; // 14 joint positions + 4 base commands
-  std::cout << "njoints_ =  " << njoints_ << std::endl; // TODO: @schromya remove
 
   if (cmd.size() != EXPECTED_CMD_SIZE) {
     throw std::runtime_error(
