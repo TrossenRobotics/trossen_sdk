@@ -230,25 +230,32 @@ std::vector<float> RivetComponent::read_joint() {
 
 void RivetComponent::write_joint(const std::vector<float>& cmd)
 {
+  // TODO: @schromya: Don't hard code?
   if (!left_driver_ || !right_driver_) return;
-  const size_t BASE_COMMAND_COUNT = 4;
-  size_t expected_cmd_size = static_cast<size_t>(njoints_*2 + BASE_COMMAND_COUNT);
+  const size_t EXPECTED_CMD_SIZE = 18; // 14 joint positions + 4 base commands
+  std::cout << "njoints_ =  " << njoints_ << std::endl; // TODO: @schromya remove
 
-  if (cmd.size() != expected_cmd_size) {
+  if (cmd.size() != EXPECTED_CMD_SIZE) {
     throw std::runtime_error(
-      "RivetComponent::write_joint: expected " + std::to_string(expected_cmd_size)
+      "RivetComponent::write_joint: expected " + std::to_string(EXPECTED_CMD_SIZE)
       + " joints, got " + std::to_string(cmd.size()));
   }
 
-  std::vector<double> left_pos(cmd.begin(), cmd.end()-njoints_);
-  std::vector<double> right_pos(cmd.begin()+njoints_, cmd.end());
+  std::vector<double> left_pos(cmd.begin(), cmd.begin()+njoints_);
+  std::vector<double> right_pos(cmd.begin()+njoints_, cmd.begin()+njoints_*2);
 
-  left_driver_->set_all_positions(left_pos, write_moving_time_s_, false);
-  right_driver_->set_all_positions(right_pos, write_moving_time_s_, false);
+  left_driver_->set_arm_positions({left_pos[0], left_pos[1], left_pos[2], left_pos[3], left_pos[4], 
+    left_pos[5]}, write_moving_time_s_, false);
+  right_driver_->set_arm_positions({right_pos[0], right_pos[1], right_pos[2], right_pos[3], 
+    right_pos[4], right_pos[5]}, write_moving_time_s_, false);
 
-  const double base_vx = cmd[14];
-  const double base_vy = cmd[15];
-  const double base_vr = cmd[16];
+  
+  left_driver_->set_gripper_position(static_cast<double>(cmd[7]));
+  right_driver_->set_gripper_position(static_cast<double>(cmd[13]));
+
+  const double base_vx = static_cast<double>(cmd[14]);
+  const double base_vy = static_cast<double>(cmd[15]);
+  const double base_vr = static_cast<double>(cmd[16]);
   const double base_vlift = cmd[17];
   base_driver_->set_cmd_vels(base_vx, base_vy, base_vr);
   base_driver_->set_actuator_velocity(base_vlift);
@@ -277,11 +284,12 @@ void RivetComponent::base_update_loop() {
 
 void RivetComponent::summon_joint(const std::vector<float>& cmd) {
   if (!left_driver_ || !right_driver_) return;
-  size_t expected_cmd_size = static_cast<size_t>(njoints_*2);
+  const size_t BASE_CMD_SIZE = 4;
+  size_t expected_cmd_size = njoints_*2 + BASE_CMD_SIZE;
 
   if (cmd.size() != expected_cmd_size) {
     throw std::runtime_error(
-      "RivetComponent::write_joint: expected " + std::to_string(expected_cmd_size)
+      "RivetComponent::summon_joint: expected " + std::to_string(expected_cmd_size)
       + " joints, got " + std::to_string(cmd.size()));
   }
 
@@ -290,8 +298,8 @@ void RivetComponent::summon_joint(const std::vector<float>& cmd) {
   right_driver_->set_all_modes(trossen_arm::Mode::position);
 
 
-  std::vector<double> left_pos(cmd.begin(), cmd.end()-njoints_);
-  std::vector<double> right_pos(cmd.begin()+njoints_, cmd.end());
+  std::vector<double> left_pos(cmd.begin(), cmd.begin()+njoints_);
+  std::vector<double> right_pos(cmd.begin()+njoints_, cmd.begin()+njoints_*2);
 
   // Blocking, time-parameterised move so the follower eases onto the target
   // (the leader's current pose) over staging_time_s_ before the high-rate
