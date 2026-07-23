@@ -99,13 +99,52 @@ public:
   /**
    * @brief Get the underlying hardware driver instances
    *
-   * @return Vector of {left, right, base} driver shared pointers
+   * @return Left, right, base driver shared pointers
    */
-  std::vector<std::shared_ptr<trossen_arm::TrossenArmDriver>> get_arm_hardware() {
-    return {left_driver_, right_driver_};
+  // std::vector<std::shared_ptr<trossen_arm::TrossenArmDriver>> get_arm_hardware() {
+  //   return {left_driver_, right_driver_};
+  // } // TODO: @schromya remove
+  std::shared_ptr<trossen_arm::TrossenArmDriver> get_left_arm_hardware() {
+    return left_driver_;
   }
-  std::vector<std::shared_ptr<trossen_base::TrossenBase>> get_base_hardware() {
-    return {base_driver_};
+  std::shared_ptr<trossen_arm::TrossenArmDriver> get_right_arm_hardware() {
+    return right_driver_;
+  }
+  std::shared_ptr<trossen_base::TrossenBase> get_base_hardware() {
+    return base_driver_;
+  }
+
+  /**
+   * @brief Get the number of arm joints (per arm, gripper excluded)
+   *
+   * @return Joint count
+   */
+  size_t get_num_joints() const { return njoints_; }
+
+  /* @brief Last commanded base velocities, tracked from write_joint()/write_cartesian() */
+  // @schromya: RENAME?? AS WELL AS OTHERS??
+  struct BaseVelocities {
+    /// @brief Linear velocity along x (m/s)
+    double vx{0.0};
+    /// @brief Linear velocity along y (m/s)
+    double vy{0.0};
+    /// @brief Angular velocity around z (rad/s)
+    double vr{0.0};
+    /// @brief Lift actuator velocity
+    double lift{0.0};
+  };
+
+  /**
+   * @brief Get the base's last commanded velocities
+   *
+   * trossen_base does not expose measured velocity feedback, so this reports
+   * the same command last written via write_joint()/write_cartesian() rather
+   * than a sensor reading.
+   *
+   * @return Last commanded base velocities
+   */
+  BaseVelocities get_base_velocities() const {
+    return {last_base_vx_, last_base_vy_, last_base_vr_, last_base_lift_};
   }
 
   // ── TeleopCapable: space-view accessor ───────────────────────────────────

@@ -21,8 +21,10 @@
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/composite/bimanual_glide_component.hpp"
 #include "trossen_sdk/hw/composite/rivet_component.hpp"
+#include "trossen_sdk/hw/composite/rivet_producer.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/hw/teleop/teleop_factory.hpp"
+#include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
 #include "trossen_sdk/utils/app_utils.hpp"
@@ -189,45 +191,46 @@ int main(int argc, char** argv) {
   //             << cam_cfg.serial_number << ")\n";
   // }
 
-  // std::cout << "Creating producers...\n";
+  std::cout << "Creating producers...\n";
 
-  // // One producer per entry in the producers list
-  // for (const auto& prod_cfg : cfg.producers) {
-  //   const auto period =
-  //     std::chrono::milliseconds(static_cast<int>(1000.0f / prod_cfg.poll_rate_hz));
+  // One producer per entry in the producers list
+  for (const auto& prod_cfg : cfg.producers) {
+    const auto period =
+      std::chrono::milliseconds(static_cast<int>(1000.0f / prod_cfg.poll_rate_hz));
 
-  //   if (prod_cfg.type == "trossen_arm") {
-  //     auto prod = trossen::runtime::ProducerRegistry::create(
-  //       "trossen_arm",
-  //       arm_components.at(prod_cfg.hardware_id),
-  //       prod_cfg.to_registry_json());
-  //     mgr.add_producer(prod, period);
-  //     std::cout << "  [ok] Arm producer [" << prod_cfg.stream_id << "] ("
-  //               << prod_cfg.poll_rate_hz << " Hz)\n";
-  //   } else if (camera_components.count(prod_cfg.hardware_id)) {
-  //     const auto* cam = camera_cfg_map.at(prod_cfg.hardware_id);
-  //     if (trossen::runtime::PushProducerRegistry::is_registered(prod_cfg.type)) {
-  //       auto prod = trossen::runtime::PushProducerRegistry::create(
-  //         prod_cfg.type,
-  //         camera_components.at(prod_cfg.hardware_id),
-  //         prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
-  //       mgr.add_push_producer(prod);
-  //       std::cout << "  [ok] Camera producer (push) [" << prod_cfg.stream_id << "] ("
-  //                 << cam->width << "x" << cam->height << ")\n";
-  //     } else {
-  //       auto prod = trossen::runtime::ProducerRegistry::create(
-  //         prod_cfg.type,
-  //         camera_components.at(prod_cfg.hardware_id),
-  //         prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
-  //       mgr.add_producer(prod, period);
-  //       std::cout << "  [ok] Camera producer [" << prod_cfg.stream_id << "] ("
-  //                 << prod_cfg.poll_rate_hz << " Hz, "
-  //                 << cam->width << "x" << cam->height << ")\n";
-  //     }
-  //   }
-  // }
+    if (prod_cfg.type == "rivet" && rivet_components.count(prod_cfg.hardware_id)) {
+      auto prod = trossen::runtime::ProducerRegistry::create(
+        "rivet",
+        rivet_components.at(prod_cfg.hardware_id),
+        prod_cfg.to_registry_json());
+      mgr.add_producer(prod, period);
+      std::cout << "  [ok] Rivet producer [" << prod_cfg.stream_id << "] ("
+                << prod_cfg.poll_rate_hz << " Hz)\n";
+    }
+    // } else if (camera_components.count(prod_cfg.hardware_id)) {
+    //   const auto* cam = camera_cfg_map.at(prod_cfg.hardware_id);
+    //   if (trossen::runtime::PushProducerRegistry::is_registered(prod_cfg.type)) {
+    //     auto prod = trossen::runtime::PushProducerRegistry::create(
+    //       prod_cfg.type,
+    //       camera_components.at(prod_cfg.hardware_id),
+    //       prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
+    //     mgr.add_push_producer(prod);
+    //     std::cout << "  [ok] Camera producer (push) [" << prod_cfg.stream_id << "] ("
+    //               << cam->width << "x" << cam->height << ")\n";
+    //   } else {
+    //     auto prod = trossen::runtime::ProducerRegistry::create(
+    //       prod_cfg.type,
+    //       camera_components.at(prod_cfg.hardware_id),
+    //       prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
+    //     mgr.add_producer(prod, period);
+    //     std::cout << "  [ok] Camera producer [" << prod_cfg.stream_id << "] ("
+    //               << prod_cfg.poll_rate_hz << " Hz, "
+    //               << cam->width << "x" << cam->height << ")\n";
+    //   }
+    // }
+  }
 
-  // std::cout << "\nProducers registered. Ready to record.\n";
+  std::cout << "\nProducers registered. Ready to record.\n";
 
   // ──────────────────────────────────────────────────────────
   // Observers: registered once, started lazily on first episode, persist across episodes.

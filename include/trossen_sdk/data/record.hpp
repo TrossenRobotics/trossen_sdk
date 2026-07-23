@@ -111,6 +111,42 @@ struct JointStateRecord : public RecordBase {
 
 
 /**
+ * @brief Bimanual joint state (left/right arm) plus mobile base velocities, as
+ * produced by the Rivet composite (two arms + base).
+ */
+struct RivetRecord : public RecordBase {
+  /// @brief Left arm joint positions (rad or m, gripper included)
+  std::vector<float> left_positions;
+
+  /// @brief Left arm joint velocities (rad/s or m/s, gripper included)
+  std::vector<float> left_velocities;
+
+  /// @brief Left arm joint efforts (Nm or N, gripper included)
+  std::vector<float> left_efforts;
+
+  /// @brief Right arm joint positions (rad or m, gripper included)
+  std::vector<float> right_positions;
+
+  /// @brief Right arm joint velocities (rad/s or m/s, gripper included)
+  std::vector<float> right_velocities;
+
+  /// @brief Right arm joint efforts (Nm or N, gripper included)
+  std::vector<float> right_efforts;
+
+  /// @brief Base linear velocity along x (m/s)
+  float linear_x_velocity{0.f};
+
+  /// @brief Base linear velocity along y (m/s)
+  float linear_y_velocity{0.f};
+
+  /// @brief Base angular velocity around z (rad/s)
+  float angualar_z_velocity{0.f};
+
+  /// @brief Lift actuator velocity
+  float lift_velocity{0.f};
+};
+
+/**
  * @brief 2D odometry state (pose + velocity), mirroring nav_msgs/Odometry.
  */
 struct Odometry2DRecord : public RecordBase {
