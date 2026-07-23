@@ -44,7 +44,7 @@
     }
   ],
 
-  "mcap_backend": {
+  "backend": {
     "root": "~/sdk_output",
     "dataset_id": "rivet_dataset"
   }

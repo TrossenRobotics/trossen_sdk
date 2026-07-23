@@ -393,13 +393,16 @@ void RivetComponent::end_teleop() {
   // displacement, since the arm is already there) to seed the position
   // setpoint to where the arm actually is, so it holds. Then drive it to rest
   // over the configured trajectory time.
-  const std::vector<float> left_current = read_joint();
+  //
+  // Read directly from each arm's own driver (not read_joint(), which returns
+  // the whole composite [left + right + base] vector) so the size matches
+  // what that single driver's set_all_positions() expects.
+  const auto left_current = left_driver_->get_robot_output().joint.all.positions;
   left_driver_->set_all_modes(trossen_arm::Mode::position);
   if (!left_current.empty()) {
-    left_driver_->set_all_positions( std::vector<double>(left_current.begin(), left_current.end()),
-      0.0, true);
+    left_driver_->set_all_positions(left_current, 0.0, true);
   }
-  left_driver_->set_all_positions(std::vector<double>(left_driver_->get_num_joints(), 0.0),
+  left_driver_->set_all_positions(std::vector<double>(left_current.size(), 0.0),
     staging_time_s_, true);
   left_driver_->cleanup();
   left_driver_.reset();
@@ -407,13 +410,12 @@ void RivetComponent::end_teleop() {
   base_driver_->set_cmd_vels(0.0, 0.0, 0.0);
   base_driver_->set_actuator_velocity(0);
 
-  const std::vector<float> right_current = read_joint();
+  const auto right_current = right_driver_->get_robot_output().joint.all.positions;
   right_driver_->set_all_modes(trossen_arm::Mode::position);
   if (!right_current.empty()) {
-    right_driver_->set_all_positions( std::vector<double>(right_current.begin(),
-    right_current.end()), 0.0, true);
+    right_driver_->set_all_positions(right_current, 0.0, true);
   }
-  right_driver_->set_all_positions(std::vector<double>(right_driver_->get_num_joints(), 0.0),
+  right_driver_->set_all_positions(std::vector<double>(right_current.size(), 0.0),
     staging_time_s_, true);
   right_driver_->cleanup();
   right_driver_.reset();

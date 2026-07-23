@@ -106,12 +106,12 @@ int main(int argc, char** argv) {
   //   }
   // }
 
-  // std::vector<std::string> config_lines = {
-  //   "Config file:          " + config_path,
-  //   "Root directory:       " + root,
-  //   "Backend:              " + cfg.session.backend_type,
-  //   "Robot name:           " + cfg.robot_name
-  // };
+  std::vector<std::string> config_lines = {
+    "Config file:          " + config_path,
+    "Root directory:       " + root,
+    "Backend:              " + cfg.session.backend_type,
+    "Robot name:           " + cfg.robot_name
+  };
   // for (const auto& [id, arm] : cfg.hardware.arms) {
   //   config_lines.push_back(
   //     "Arm [" + id + "]:  " + arm.ip_address + " (" + arm.end_effector + ")");
@@ -128,10 +128,10 @@ int main(int argc, char** argv) {
   //   std::string(cfg.teleop.enabled ? "enabled" : "disabled") +
   //   " (" + std::to_string(cfg.teleop.pairs.size()) + " pairs)");
 
-  // trossen::utils::print_config_banner("Trossen Solo AI Kit Demo Usage", config_lines);
+  trossen::utils::print_config_banner("Trossen Rivet Demo Usage", config_lines);
 
-  // trossen::utils::install_signal_handler();
-  // std::filesystem::create_directories(root);
+  trossen::utils::install_signal_handler();
+  std::filesystem::create_directories(root);
 
   // ──────────────────────────────────────────────────────────
   // Initialize arm hardware from config
