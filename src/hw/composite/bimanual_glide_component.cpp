@@ -218,6 +218,7 @@ void BimanualGlideComponent::apply_joint_remap(
 
 std::vector<float> BimanualGlideComponent::read_joint() {
   if (!left_driver_ || !right_driver_) return {};
+  const int LEN = 18; // (7 joints) * 2 + 4 base
   const auto& left_positions = left_driver_->get_robot_output().joint.all.positions;
   std::vector<float> left_out(left_positions.begin(), left_positions.end());
   apply_joint_remap(left_out, joint_offsets_left_, false);
@@ -226,11 +227,27 @@ std::vector<float> BimanualGlideComponent::read_joint() {
   std::vector<float> right_out(right_positions.begin(), right_positions.end());
   apply_joint_remap(right_out, joint_offsets_right_, false);
 
-  std::vector<float> positions(left_out.begin(), left_out.end());
-  positions.insert(positions.end(), right_out.begin(), right_out.end());
+  std::vector<float> sample;
+  sample.reserve(LEN);
+  sample.assign(left_out.begin(), left_out.end());
+  sample.insert(sample.end(), right_out.begin(), right_out.end());
 
-  // TODO: @schromya add base button support
-  return positions;
+  trossen_arm::RobotOutput::InputReport right_input = right_driver_->get_input_report();
+  trossen_arm::RobotOutput::InputReport left_input = left_driver_ ->get_input_report();
+  double base_vx = scale(left_input.joystick_x, MIN_JOYSTICK_, MAX_JOYSTICK_,
+                                BASE_MIN_, BASE_MAX_, BASE_DEADZONE_);
+  double base_vy = -scale(left_input.joystick_y, MIN_JOYSTICK_, MAX_JOYSTICK_,
+                              BASE_MIN_, BASE_MAX_, BASE_DEADZONE_);
+  double base_vr = -scale(right_input.joystick_x, MIN_JOYSTICK_, MAX_JOYSTICK_,
+                                BASE_MIN_, BASE_MAX_, BASE_DEADZONE_);
+  int right_up_btn = int(right_input.buttons & (1 << 0));
+  int right_down_btn = int(right_input.buttons & (1 << 2));
+  double base_vlift = double(right_up_btn - right_down_btn) * BASE_LIFT_MAX_;
+  sample.push_back(static_cast<float>(base_vx));
+  sample.push_back(static_cast<float>(base_vy));
+  sample.push_back(static_cast<float>(base_vr));
+  sample.push_back(static_cast<float>(base_vlift));
+  return sample;
 }
 
 std::vector<float> BimanualGlideComponent::read_gripper_effort() {
@@ -270,14 +287,10 @@ void BimanualGlideComponent::apply_gripper_feedback(const std::vector<float>& fo
 
 std::vector<float> BimanualGlideComponent::read_cartesian() {
   if (!left_driver_ || !right_driver_) return {};
-  const int LEN = 14; // (4 cart + 3 rotation vector + 1 gripper) * 2
+  const int LEN = 18; // (4 cart + 3 rotation vector + 1 gripper) * 2 + 4 base
   const auto& left_out = left_driver_->get_robot_output();
   const auto& right_out = right_driver_->get_robot_output();
 
-  // Layout: [left_x, left_y, left_z, left_rx, left_ry, left_rz,
-  //         left_gripper_m, right_x, right_y, ...]. The first 6 cartesian come from the
-  // driver's 6-DoF cartesian pose (translation + rotation vector); the
-  // gripper opening is tracked in joint space and appended as a scalar.
   std::vector<float> sample;
   sample.reserve(LEN);
   sample.assign(left_out.cartesian.positions.begin(), left_out.cartesian.positions.end());
@@ -285,8 +298,21 @@ std::vector<float> BimanualGlideComponent::read_cartesian() {
   sample.insert(sample.end(), right_out.cartesian.positions.begin(),
     right_out.cartesian.positions.end());
   sample.push_back(static_cast<float>(right_out.joint.gripper.position));
-
-  // TODO: @schromya add base support
+  trossen_arm::RobotOutput::InputReport right_input = right_driver_->get_input_report();
+  trossen_arm::RobotOutput::InputReport left_input = left_driver_ ->get_input_report();
+  double base_vx = scale(left_input.joystick_x, MIN_JOYSTICK_, MAX_JOYSTICK_,
+                                BASE_MIN_, BASE_MAX_, BASE_DEADZONE_);
+  double base_vy = -scale(left_input.joystick_y, MIN_JOYSTICK_, MAX_JOYSTICK_,
+                              BASE_MIN_, BASE_MAX_, BASE_DEADZONE_);
+  double base_vr = -scale(right_input.joystick_x, MIN_JOYSTICK_, MAX_JOYSTICK_,
+                                BASE_MIN_, BASE_MAX_, BASE_DEADZONE_);
+  int right_up_btn = int(right_input.buttons & (1 << 0));
+  int right_down_btn = int(right_input.buttons & (1 << 2));
+  double base_vlift = double(right_up_btn - right_down_btn) * BASE_LIFT_MAX_;
+  sample.push_back(static_cast<float>(base_vx));
+  sample.push_back(static_cast<float>(base_vy));
+  sample.push_back(static_cast<float>(base_vr));
+  sample.push_back(static_cast<float>(base_vlift));
   return sample;
 }
 
@@ -305,6 +331,16 @@ void BimanualGlideComponent::prepare_for_teleop(){
 void BimanualGlideComponent::end_teleop(){}
 void BimanualGlideComponent::stage(){}
 
+
+double BimanualGlideComponent::scale(double val, double val_min, double val_max, double scaled_min,
+  double scaled_max, double scaled_deadzone) {
+    double scaled_val = (val - val_min) / (val_max - val_min) * (scaled_max - scaled_min)
+      + scaled_min;
+
+    if (scaled_deadzone && std::abs(scaled_val) < scaled_deadzone) return 0;
+
+    return scaled_val;
+  }
 
 
 REGISTER_HARDWARE(BimanualGlideComponent,"bimanual_glide")

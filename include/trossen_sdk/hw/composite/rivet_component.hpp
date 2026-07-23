@@ -154,10 +154,10 @@ private:
     explicit JointView(RivetComponent* s) : self(s) {}
 
     /**
-     * @brief Read the arm joint positions, base velocities, and lift positions
+     * @brief Read the arm joint positions, base velocities, and lift velocities
      * @return Vector ()  [left_q0, left_q1, left_q2, left_q3, left_q4, left_q5, left_q6,
      *         right_q0, right_q1, right_q2, right_q3, right_q4, right_q5, right_q6,
-     *         base_vx, base_vy, base_rz, base_lift]
+     *         base_vx, base_vy, base_vr, base_vlift]
      */
     std::vector<float> read() override {
       return self->read_joint();
@@ -166,7 +166,7 @@ private:
      * @brief Write the arm joint positions, base velocities, and lift velocities
      * @param cmd Vector (18)  [left_q0, left_q1, left_q2, left_q3, left_q4, left_q5, left_q6,
      *         right_q0, right_q1, right_q2, right_q3, right_q4, right_q5, right_q6,
-     *         base_vx, base_vy, base_rz, base_lift_v]
+     *         base_vx, base_vy, base_vr, base_vlift]
      */
     void write(const std::vector<float>& cmd) override {
       self->write_joint(cmd);
@@ -193,10 +193,10 @@ private:
     RivetComponent* self;
     explicit CartView(RivetComponent* s) : self(s) {}
     /**
-     * @brief Read the arm cartesian positions, base velocities, and lift positions
+     * @brief Read the arm cartesian positions, base velocities, and lift velocities
      * @return Vector (18) [left_x, left_y, left_z, left_rx, left_ry, left_rz, left_gripper_m,
      *         right_x, right_y, right_z, right_rx, right_ry, right_rz, right_gripper_m,
-     *         base_vx, base_vy, base_rz, base_lift]
+     *         base_vx, base_vy, base_vr, base_vlift]
      */
     std::vector<float> read() override {
       return self->read_cartesian();
@@ -204,7 +204,7 @@ private:
     /** @brief Write arm cartesian positions, base velocities, and lift velocities
      *  @param cmd Vector (18)  [left_x, left_y, left_z, left_rx, left_ry, left_rz, left_gripper_m
      *         right_x, right_y, right_z, right_rx, right_ry, right_rz, right_gripper_m
-     *         base_vx, base_vy, base_rz, base_lift_v]
+     *         base_vx, base_vy, base_vr, base_vlift]
     */
     void write(const std::vector<float>& cmd) override {
       self->write_cartesian(cmd);
@@ -275,7 +275,7 @@ private:
   // Hack for exposing data (@schromya update once trossen_base exposes these)
   double last_base_vx_{0.0};
   double last_base_vy_{0.0};
-  double last_base_rz_{0.0};
+  double last_base_vr_{0.0};
   double last_base_lift_{0.0};
 };
 

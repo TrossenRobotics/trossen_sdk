@@ -221,7 +221,7 @@ std::vector<float> RivetComponent::read_joint() {
   positions.insert(positions.end(), right_out.begin(), right_out.end());
   positions.push_back(static_cast<float>(last_base_vx_));
   positions.push_back(static_cast<float>(last_base_vy_));
-  positions.push_back(static_cast<float>(last_base_rz_));
+  positions.push_back(static_cast<float>(last_base_vr_));
   positions.push_back(static_cast<float>(last_base_lift_));
 
   return positions;
@@ -248,15 +248,15 @@ void RivetComponent::write_joint(const std::vector<float>& cmd)
 
   const double base_vx = cmd[14];
   const double base_vy = cmd[15];
-  const double base_rz = cmd[16];
-  const double base_lift = cmd[17];
-  base_driver_->set_cmd_vels(base_vx, base_vy, base_rz);
-  base_driver_->set_actuator_velocity(base_lift);
+  const double base_vr = cmd[16];
+  const double base_vlift = cmd[17];
+  base_driver_->set_cmd_vels(base_vx, base_vy, base_vr);
+  base_driver_->set_actuator_velocity(base_vlift);
 
   last_base_vx_ = base_vx;
   last_base_vy_ = base_vy;
-  last_base_rz_ = base_rz;
-  last_base_lift_ = base_lift;
+  last_base_vr_ = base_vr;
+  last_base_lift_ = base_vlift;
 }
 
 std::vector<float> RivetComponent::read_gripper_effort() {
@@ -320,7 +320,7 @@ std::vector<float> RivetComponent::read_cartesian() {
   sample.push_back(static_cast<float>(right_out.joint.gripper.position));
   sample.push_back(static_cast<float>(last_base_vx_));
   sample.push_back(static_cast<float>(last_base_vy_));
-  sample.push_back(static_cast<float>(last_base_rz_));
+  sample.push_back(static_cast<float>(last_base_vr_));
   sample.push_back(static_cast<float>(last_base_lift_));
 
   return sample;
@@ -347,15 +347,15 @@ void RivetComponent::write_cartesian(const std::vector<float>& cmd) {
 
   const double base_vx = cmd[14];
   const double base_vy = cmd[15];
-  const double base_rz = cmd[16];
-  const double base_lift = cmd[17];
-  base_driver_->set_cmd_vels(base_vx, base_vy, base_rz);
-  base_driver_->set_actuator_velocity(base_lift);
+  const double base_vr = cmd[16];
+  const double base_vlift = cmd[17];
+  base_driver_->set_cmd_vels(base_vx, base_vy, base_vr);
+  base_driver_->set_actuator_velocity(base_vlift);
 
   last_base_vx_ = base_vx;
   last_base_vy_ = base_vy;
-  last_base_rz_ = base_rz;
-  last_base_lift_ = base_lift;
+  last_base_vr_ = base_vr;
+  last_base_lift_ = base_vlift;
 }
 
 // ── Shared lifecycle ─────────────────────────────────────────────────────

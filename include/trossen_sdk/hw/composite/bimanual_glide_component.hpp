@@ -148,6 +148,14 @@ public:
 
 
 private:
+  const double BASE_MIN_ = -1;          // Min translational/rotational velocity (units/s and rad/s)
+  const double BASE_MAX_ = 1;           // Max translational/rotational velocity (units/s and rad/s)
+  const double BASE_DEADZONE_ = 0.1;    // Base set to 0 velocity if less than this value
+  const double BASE_LIFT_MAX_ = 8000;   // Max lift velocity (motor units/s)
+
+  const int MIN_JOYSTICK_ = 0;       // Joystick min value
+  const int MAX_JOYSTICK_ = 4095;    // Joystick max value
+
   // Space-specific IO helpers. Called by the nested adapter views.
   std::vector<float> read_joint();
   std::vector<float> read_cartesian();
@@ -174,8 +182,10 @@ private:
     explicit JointView(BimanualGlideComponent* s) : self(s) {}
 
     /**
-     * @brief Read the joint positions from both arms
-     * @return Vector () of joint positions [left_q0, left_q1, ..., right_q0, right_q1, ...]
+     * @brief Read the joint positions from both arms and scaled joystick/button values as velocities
+     * @return Vector ()  [left_q0, left_q1, left_q2, left_q3, left_q4, left_q5, left_q6,
+     *         right_q0, right_q1, right_q2, right_q3, right_q4, right_q5, right_q6,
+     *         base_vx, base_vy, base_vr, base_vlift]
      */
     std::vector<float> read() override {
       return self->read_joint();
@@ -210,9 +220,10 @@ private:
     BimanualGlideComponent* self;
     explicit CartView(BimanualGlideComponent* s) : self(s) {}
     /**
-     * @brief Read the cartesian positions from both arms
-     * @return Vector (14) of joint positions [left_x, left_y, left_z, left_rx, left_ry, left_rz,
-     *         left_gripper_m, right_x, right_y, ...]
+     * @brief  Read the joint positions from both arms and scaled joystick/button values as velocities
+     * @return Vector (18) [left_x, left_y, left_z, left_rx, left_ry, left_rz, left_gripper_m,
+     *         right_x, right_y, right_z, right_rx, right_ry, right_rz, right_gripper_m,
+     *         base_vx, base_vy, base_vr, base_vlift]
      */
     std::vector<float> read() override {
       return self->read_cartesian();
@@ -222,6 +233,14 @@ private:
       // Do nothing
     }
   };
+
+  /**
+   * Scale a value linearly from val_min..val_max to scaled_min..scaled_max. Deadzone applied to
+   * scaled value (-scaled_deadzone->scaled_deadzone)
+   */
+  double scale(double val, double val_min, double val_max, double scaled_min, double scaled_max,
+    double scaled_deadzone);
+
 
   JointView joint_view_{this};
   CartView  cart_view_{this};
@@ -277,6 +296,8 @@ private:
   std::vector<float> position_tolerance_;
   std::vector<float> velocity_tolerance_;
   std::vector<float> effort_tolerance_;
+
+
 
 };
 
