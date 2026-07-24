@@ -327,7 +327,7 @@ void emit_numpy_uint8_array(
     throw std::runtime_error("lerobot_codec: numpy array data size != product(shape)");
   }
 
-  // ① empty shell: numpy._core.multiarray._reconstruct(numpy.ndarray, (0,), b'b')
+  // 1. empty shell: numpy._core.multiarray._reconstruct(numpy.ndarray, (0,), b'b')
   // "numpy._core" is the numpy >= 2.0 module path (renamed from numpy.core in
   // 2.0); the unpickling server must run numpy >= 2.0.
   emit_global(w, "numpy._core.multiarray", "_reconstruct");
@@ -339,7 +339,7 @@ void emit_numpy_uint8_array(
   emit_tuple3(w);                       // (ndarray, (0,), b'b')
   emit_reduce(w);                       // -> empty ndarray
 
-  // ② BUILD state tuple: (version=1, shape, dtype, fortran_order=False, raw)
+  // 2. BUILD state tuple: (version=1, shape, dtype, fortran_order=False, raw)
   emit_mark(w);
   emit_int(w, 1);                       // ndarray pickle version
   emit_mark(w);                         // shape tuple (any rank)
@@ -825,7 +825,7 @@ StoragePtr load_storage_from_bytes(const std::vector<uint8_t> & blob)
 {
   ByteReader r(blob.data(), blob.size());
 
-  // ① magic number: 0x1950a86a20f9469cfc6c as a 10-byte LONG1 (kept as raw
+  // 1. magic number: 0x1950a86a20f9469cfc6c as a 10-byte LONG1 (kept as raw
   // little-endian bytes by the VM since it exceeds int64).
   static constexpr uint8_t kMagic[10] =
   {0x6c, 0xfc, 0x9c, 0x46, 0xf9, 0x20, 0x6a, 0xa8, 0x50, 0x19};
@@ -837,13 +837,13 @@ StoragePtr load_storage_from_bytes(const std::vector<uint8_t> & blob)
     }
   }
 
-  // ② serialization protocol version.
+  // 2. serialization protocol version.
   if (const int64_t v = expect<int64_t>(Unpickler(r).run(), "torch protocol version"); v != 1001) {
     throw std::runtime_error(
             "lerobot_codec: unsupported torch legacy protocol version " + std::to_string(v));
   }
 
-  // ③ sysinfo: the writer's byte order. Raw float reads below assume
+  // 3. sysinfo: the writer's byte order. Raw float reads below assume
   // little-endian; big-endian data would decode to plausible garbage.
   {
     const ValuePtr sysinfo_v = Unpickler(r).run();  // named: keeps the Value alive
@@ -854,7 +854,7 @@ StoragePtr load_storage_from_bytes(const std::vector<uint8_t> & blob)
     }
   }
 
-  // ④ storage descriptor: ends in BINPERSID with the persistent-id tuple
+  // 4. storage descriptor: ends in BINPERSID with the persistent-id tuple
   // ('storage', <type global>, <key>, <location>, <numel>). The lambda hook
   // validates it and captures key/numel into our locals.
   std::string key;
@@ -882,7 +882,7 @@ StoragePtr load_storage_from_bytes(const std::vector<uint8_t> & blob)
     throw std::runtime_error("lerobot_codec: storage descriptor carried no persistent id");
   }
 
-  // ⑤ key list: data-block order in the raw section. Pinned payloads carry
+  // 5. key list: data-block order in the raw section. Pinned payloads carry
   // exactly one storage per blob; anything else is an untested layout.
   {
     const ValuePtr keys_v = Unpickler(r).run();  // named: keeps the Value alive
@@ -892,7 +892,7 @@ StoragePtr load_storage_from_bytes(const std::vector<uint8_t> & blob)
     }
   }
 
-  // ⑥ raw payload: int64 element count, then count * 4 bytes of float32.
+  // 6. raw payload: int64 element count, then count * 4 bytes of float32.
   const int64_t count = r.i64le();
   if (count != numel) {
     throw std::runtime_error(
@@ -1155,9 +1155,15 @@ DecodedActions decode_actions(const uint8_t * data, std::size_t size)
       throw std::runtime_error("lerobot_codec: action tensor is not 1-D with stride >= 1");
     }
     const int64_t n = t.shape[0];
-    // Reject a lying offset/shape before any element is read.
-    const int64_t last = t.offset + (n - 1) * t.stride[0];
-    if (n < 1 || t.offset < 0 || last >= static_cast<int64_t>(t.storage->data.size())) {
+    const int64_t stride = t.stride[0];
+    const int64_t storage_size = static_cast<int64_t>(t.storage->data.size());
+    // Reject a lying offset/shape before any element is read. The largest index
+    // touched below is offset + (n - 1) * stride; test the bound by division so
+    // a crafted n/stride cannot overflow int64 before the guard runs.
+    if (n < 1 || t.offset < 0 || t.offset >= storage_size) {
+      throw std::runtime_error("lerobot_codec: tensor view exceeds its storage");
+    }
+    if (n > 1 && stride > (storage_size - 1 - t.offset) / (n - 1)) {
       throw std::runtime_error("lerobot_codec: tensor view exceeds its storage");
     }
 
@@ -1177,7 +1183,7 @@ DecodedActions decode_actions(const uint8_t * data, std::size_t size)
     }
 
     for (int64_t i = 0; i < n; ++i) {  // the view gather (offset + stride)
-      out.data.push_back(t.storage->data[static_cast<std::size_t>(t.offset + i * t.stride[0])]);
+      out.data.push_back(t.storage->data[static_cast<std::size_t>(t.offset + i * stride)]);
     }
   }
 

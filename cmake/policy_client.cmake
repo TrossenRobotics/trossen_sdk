@@ -24,7 +24,7 @@ set(MSGPACK_BUILD_EXAMPLES OFF CACHE BOOL "Skip msgpack-cxx examples" FORCE)
 FetchContent_Declare(
   msgpack-cxx
   GIT_REPOSITORY https://github.com/msgpack/msgpack-c.git
-  # Immutable commit for tag cpp-6.1.1 (a tag can be re-pointed; a SHA cannot).
+  # Tag cpp-6.1.1.
   GIT_TAG 44c0f705c9a60217d7e07de844fb13ce4c1c1e6e
 )
 FetchContent_MakeAvailable(msgpack-cxx)

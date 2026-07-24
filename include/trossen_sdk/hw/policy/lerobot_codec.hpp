@@ -1,7 +1,6 @@
 /**
  * @file lerobot_codec.hpp
- * @brief Minimal, version-pinned decoder for LeRobot async_inference replies
- *        (no libtorch, no embedded Python).
+ * @brief Minimal, version-pinned decoder for LeRobot async_inference replies.
  *
  * A LeRobot policy server answers ``GetActions`` with ``pickle.dumps(list[TimedAction])``,
  * where each ``TimedAction`` carries a ``torch.Tensor`` of joint targets. This
