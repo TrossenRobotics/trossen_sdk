@@ -213,7 +213,7 @@ private:
   /// at entry, or until ``cfg_.freshness_timeout_ms`` elapses. Guarantees that
   /// every record in the next observation snapshot was produced after this
   /// call began — and therefore within one producer period of every other
-  /// record in the snapshot. Subsumes the legacy first-arrival prime: at
+  /// record in the snapshot. At
   /// startup/resume the baseline counters are zero, so the wait reduces to
   /// "every subscription has delivered at least once". On timeout, logs the
   /// stale record_ids (one-shot) and returns; the caller proceeds with the

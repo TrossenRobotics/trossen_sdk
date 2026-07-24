@@ -660,7 +660,7 @@ TEST_F(PolicyClientTest, ObservationMatchesNeutralContract) {
   ASSERT_EQ(obs.state[1].values.size(), 7u);
   for (float v : obs.state[0].values) EXPECT_FLOAT_EQ(v, 0.5f);
   for (float v : obs.state[1].values) EXPECT_FLOAT_EQ(v, 0.25f);
-  // joint_names: deliberately empty in L2 (no config/record source yet).
+  // joint_names: deliberately empty (no config/record source in this path).
   EXPECT_TRUE(obs.state[0].joint_names.empty());
 
   // images: the configured camera, resized per the subscription, HWC RGB.
@@ -671,7 +671,7 @@ TEST_F(PolicyClientTest, ObservationMatchesNeutralContract) {
   EXPECT_EQ(obs.images[0].rgb.size(), 16u * 16u * 3u);
 
   EXPECT_EQ(obs.task, "test");
-  // L5: timestep is stamped from the Timestep Clock (non-negative ticks since
+  // timestep is stamped from the Timestep Clock (non-negative ticks since
   // the active-window epoch). At the default theta=0 cadence each observation is
   // packed at end-of-chunk, so the action buffer is empty and must_go is set.
   EXPECT_GE(obs.timestep, 0);

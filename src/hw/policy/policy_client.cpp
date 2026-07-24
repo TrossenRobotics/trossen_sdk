@@ -205,8 +205,7 @@ void PolicyClient::init_(configuration::PolicyClientConfig cfg,
     const std::string record_id = sub.record_id;
     // Initialize the generation counter to 0 so the freshness barrier's
     // baseline lookup never falls through to an inserted-default and so the
-    // first wait reduces to "every subscription has delivered at least once"
-    // (the legacy prime behavior).
+    // first wait reduces to "every subscription has delivered at least once".
     cache_gen_[record_id] = 0;
     add_subscription(
       record_id, sub.throttle_hz,
@@ -469,8 +468,8 @@ void PolicyClient::inference_loop_() {
     if (!inference_active_.load(std::memory_order_acquire)) continue;
 
     // Wait for a fresh delivery from every subscription before packing.
-    // Subsumes the legacy first-arrival prime: at startup/resume the
-    // generation counters are all zero and this reduces to "wait for one
+    // At startup/resume the generation counters are all zero and this
+    // reduces to "wait for one
     // record per sub". Steady state: ensures every observation snapshot is
     // co-temporal (all records produced within one producer period).
     ObservationDiagnostics diag;
@@ -528,7 +527,7 @@ void PolicyClient::inference_loop_() {
       transport_->push_observation(*obs);
 
       // Poll for the reply chunk (theta=0 cadence: the cycle re-synchronizes on
-      // arrival, exactly like the old blocking round_trip). The 1 ms tick is
+      // arrival). The 1 ms tick is
       // noise against ~1 s inference, and using inference_cv_ keeps the wait
       // shutdown-interruptible. Exits: chunk, shutdown, or transport gone
       // unhealthy (a disconnected transport polls nullopt forever). NOT on
@@ -572,7 +571,6 @@ void PolicyClient::inference_loop_() {
       if (chunk) {
         const auto t_recv = clock::now();
         // Push-to-arrival latency: true round trip plus up to one poll tick.
-        // Same field name as the old blocking measurement (paired logs).
         const auto rt_ms =
           std::chrono::duration<double, std::milli>(t_recv - t_send).count();
         std::cerr << "[policy_client:" << name() << "] req#" << req_seq
