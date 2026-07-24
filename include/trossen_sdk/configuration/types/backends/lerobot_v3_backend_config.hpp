@@ -46,6 +46,13 @@ struct LeRobotV3BackendConfig : public BaseConfig {
   int data_files_size_in_mb{trossen::io::backends::lerobot_v3::DEFAULT_DATA_FILE_SIZE_IN_MB};
   int video_files_size_in_mb{trossen::io::backends::lerobot_v3::DEFAULT_VIDEO_FILE_SIZE_IN_MB};
 
+  // When true, emit the native lerobot_trossen bimanual WidowX AI schema:
+  //   * joint feature names as `<side>_joint_<i>.pos` / `<side>_left_carriage_joint.pos`
+  //   * camera keys `cam_*` (instead of `camera_*`)
+  //   * depth cameras encoded as lerobot-0.6.0-native HEVC `gray12le` (12-bit log-quant)
+  // Off by default so other robots/converters keep their positional naming + av1 output.
+  bool native_widowxai_schema{false};
+
   std::string type() const override { return "lerobot_v3_backend"; }
 
   static LeRobotV3BackendConfig from_json(const nlohmann::json& j) {
@@ -73,6 +80,8 @@ struct LeRobotV3BackendConfig : public BaseConfig {
       j.at("data_files_size_in_mb").get_to(c.data_files_size_in_mb);
     if (j.contains("video_files_size_in_mb"))
       j.at("video_files_size_in_mb").get_to(c.video_files_size_in_mb);
+    if (j.contains("native_widowxai_schema"))
+      j.at("native_widowxai_schema").get_to(c.native_widowxai_schema);
 
     return c;
   }

@@ -64,6 +64,8 @@ public:
     int data_files_size_in_mb{100};
     int video_files_size_in_mb{200};
     bool encode_videos{true};
+    /// @brief Emit the native lerobot_trossen schema (joint/camera naming + gray12le depth).
+    bool native_schema{false};
   };
 
   explicit LeRobotV3DatasetWriter(Options opts);
@@ -184,6 +186,10 @@ private:
 
   // Video helpers (defined in the .cpp; shell out to ffmpeg/ffprobe).
   bool encode_episode_video(
+    const std::filesystem::path& image_dir, size_t frame_count,
+    const std::filesystem::path& out_mp4) const;
+  /// @brief Encode 16-bit depth PNGs as lerobot-0.6.0-native HEVC gray12le (12-bit log-quant).
+  bool encode_depth_video(
     const std::filesystem::path& image_dir, size_t frame_count,
     const std::filesystem::path& out_mp4) const;
   bool place_or_concat_video(

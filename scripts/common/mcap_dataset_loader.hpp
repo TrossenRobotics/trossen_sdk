@@ -124,7 +124,8 @@ bool load_aligned_episode(
   const std::string& mcap_file,
   int episode_index,
   AlignedEpisode& out,
-  McapChannelMap& channels);
+  McapChannelMap& channels,
+  bool native_schema = false);
 
 /**
  * @brief Decode camera frames from an MCAP file into caller-chosen directories.
@@ -143,7 +144,8 @@ bool extract_camera_images(
   const std::string& mcap_file,
   const McapChannelMap& channels,
   const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
-  std::map<std::string, size_t>& out_counts);
+  std::map<std::string, size_t>& out_counts,
+  bool native_schema = false);
 
 /**
  * @brief Build the LeRobot `features` schema for an episode.
@@ -156,7 +158,8 @@ bool extract_camera_images(
  * @param channels Channel maps (provides the camera list).
  * @return The `features` object for info.json.
  */
-nlohmann::ordered_json build_features(const AlignedEpisode& ep, const McapChannelMap& channels);
+nlohmann::ordered_json build_features(
+  const AlignedEpisode& ep, const McapChannelMap& channels, bool native_schema = false);
 
 }  // namespace trossen::convert
 

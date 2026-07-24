@@ -146,6 +146,7 @@ int main(int argc, char** argv) {
   opts.data_files_size_in_mb = cfg->data_files_size_in_mb;
   opts.video_files_size_in_mb = cfg->video_files_size_in_mb;
   opts.encode_videos = cfg->encode_videos;
+  opts.native_schema = cfg->native_widowxai_schema;
 
   trossen::convert::LeRobotV3DatasetWriter writer(opts);
   if (!writer.open()) {

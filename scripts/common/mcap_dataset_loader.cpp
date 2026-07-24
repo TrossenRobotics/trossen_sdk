@@ -16,6 +16,7 @@
 #include <iostream>
 #include <limits>
 #include <regex>
+#include <string_view>
 
 #include <opencv2/opencv.hpp>
 
@@ -37,13 +38,43 @@ void on_problem(const mcap::Status& problem) {
   std::cerr << "Warning: MCAP parsing issue: " << problem.message << "\n";
 }
 
+/// @brief Native lerobot_trossen camera key: replace the `camera_` prefix with `cam_`.
+std::string native_camera_key(const std::string& name) {
+  constexpr std::string_view kPrefix = "camera_";
+  if (name.rfind(kPrefix, 0) == 0) {
+    return "cam_" + name.substr(kPrefix.size());
+  }
+  return name;
+}
+
+/// @brief Arm side of a joint stream: `follower_left`/`leader_left` → `left`. Empty if no side.
+std::string stream_side(const std::string& stream_id) {
+  for (std::string_view p : {"follower_", "leader_"}) {
+    if (stream_id.rfind(p, 0) == 0) return stream_id.substr(p.size());
+  }
+  return stream_id;
+}
+
+/// @brief True if a camera is a depth map (dataset_info flag or a `_depth` name suffix).
+bool camera_is_depth(const std::string& camera_name, const nlohmann::json& dataset_info) {
+  if (!dataset_info.empty() && dataset_info.contains("cameras") &&
+      dataset_info["cameras"].contains(camera_name) &&
+      dataset_info["cameras"][camera_name].value("is_depth_map", false)) {
+    return true;
+  }
+  constexpr std::string_view kSuffix = "_depth";
+  return camera_name.size() >= kSuffix.size() &&
+         camera_name.compare(camera_name.size() - kSuffix.size(), kSuffix.size(), kSuffix) == 0;
+}
+
 }  // namespace
 
 bool load_aligned_episode(
   const std::string& mcap_file,
   int episode_index,
   AlignedEpisode& out,
-  McapChannelMap& channels)
+  McapChannelMap& channels,
+  bool native_schema)
 {
   out = AlignedEpisode{};
   channels = McapChannelMap{};
@@ -419,8 +450,9 @@ bool load_aligned_episode(
   // Record the cameras present (frame counts filled by extract_camera_images()).
   for (const auto& [channel_id, camera_name] : channels.camera_channels) {
     CameraInfo cam;
-    cam.name = camera_name;
-    cam.obs_key = "observation.images." + camera_name;
+    cam.name = camera_name;  // original name; used for extraction dirs + dataset_info lookups
+    const std::string out_name = native_schema ? native_camera_key(camera_name) : camera_name;
+    cam.obs_key = "observation.images." + out_name;
     out.cameras.push_back(cam);
   }
 
@@ -431,7 +463,8 @@ bool extract_camera_images(
   const std::string& mcap_file,
   const McapChannelMap& channels,
   const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
-  std::map<std::string, size_t>& out_counts)
+  std::map<std::string, size_t>& out_counts,
+  bool native_schema)
 {
   namespace fs = std::filesystem;
   out_counts.clear();
@@ -515,11 +548,18 @@ bool extract_camera_images(
       continue;
     }
 
+    // Native schema preserves 16-bit depth losslessly as PNG (JPEG is 8-bit and would
+    // destroy the depth). RGB/8-bit stays JPEG. The writer picks its encode path by the
+    // frame extension it finds (.png → gray12le HEVC depth, .jpg → av1 RGB).
+    const bool depth_png = native_schema && cv_type == CV_16UC1;
     char namebuf[32];
-    std::snprintf(namebuf, sizeof(namebuf), "image_%06zu.jpg", frame_idx);
+    std::snprintf(namebuf, sizeof(namebuf), depth_png ? "image_%06zu.png" : "image_%06zu.jpg",
+                  frame_idx);
     fs::path image_path = camera_dirs[camera_name] / namebuf;
 
-    std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 95};
+    std::vector<int> compression_params =
+      depth_png ? std::vector<int>{cv::IMWRITE_PNG_COMPRESSION, 1}
+                : std::vector<int>{cv::IMWRITE_JPEG_QUALITY, 95};
     if (cv::imwrite(image_path.string(), image_copy, compression_params)) {
       ++images_saved;
       out_counts[camera_name]++;
@@ -536,13 +576,26 @@ bool extract_camera_images(
   return true;
 }
 
-nlohmann::ordered_json build_features(const AlignedEpisode& ep, const McapChannelMap& channels) {
+nlohmann::ordered_json build_features(
+  const AlignedEpisode& ep, const McapChannelMap& channels, bool native_schema) {
   nlohmann::ordered_json features;
 
   int joints_per_stream = ep.joints_per_stream > 0 ? ep.joints_per_stream : 7;
 
   // Joint names come from dataset_info when present, else positional fallbacks.
   auto get_joint_names = [&](const std::string& stream_id, int n) -> nlohmann::json {
+    // Native lerobot_trossen naming: `<side>_joint_<i>.pos`, with the gripper
+    // (last joint) named `<side>_left_carriage_joint.pos`.
+    if (native_schema) {
+      nlohmann::json names = nlohmann::json::array();
+      const std::string side = stream_side(stream_id);
+      const std::string prefix = side.empty() ? "" : side + "_";
+      for (int i = 0; i < n; ++i) {
+        names.push_back(i == n - 1 ? prefix + "left_carriage_joint.pos"
+                                   : prefix + "joint_" + std::to_string(i) + ".pos");
+      }
+      return names;
+    }
     if (!ep.mcap_dataset_info.empty() && ep.mcap_dataset_info.contains("streams") &&
         ep.mcap_dataset_info["streams"].contains(stream_id) &&
         ep.mcap_dataset_info["streams"][stream_id].contains("joint_names")) {
@@ -599,35 +652,47 @@ nlohmann::ordered_json build_features(const AlignedEpisode& ep, const McapChanne
 
   // observation.images.<camera> video features
   for (const auto& [channel_id, camera_name] : channels.camera_channels) {
-    std::string obs_key = "observation.images." + camera_name;
+    // Feature key uses the native `cam_*` name; dataset_info is still keyed by the original name.
+    const std::string out_name = native_schema ? native_camera_key(camera_name) : camera_name;
+    const std::string obs_key = "observation.images." + out_name;
+    const bool is_depth = native_schema && camera_is_depth(camera_name, ep.mcap_dataset_info);
+
     features[obs_key]["dtype"] = "video";
     features[obs_key]["names"] = nlohmann::json::array({"height", "width", "channels"});
 
+    int h = 480, w = 640, ch = is_depth ? 1 : 3;
+    int fps = 30;
     if (!ep.mcap_dataset_info.empty() && ep.mcap_dataset_info.contains("cameras") &&
         ep.mcap_dataset_info["cameras"].contains(camera_name)) {
       const auto& cam = ep.mcap_dataset_info["cameras"][camera_name];
-      int h = cam.value("height", 480);
-      int w = cam.value("width", 640);
-      int ch = cam.value("channels", 3);
-      features[obs_key]["shape"] = nlohmann::json::array({h, w, ch});
-      features[obs_key]["info"]["video.fps"] = cam.value("fps", 30);
-      features[obs_key]["info"]["video.height"] = h;
-      features[obs_key]["info"]["video.width"] = w;
-      features[obs_key]["info"]["video.channels"] = ch;
-      features[obs_key]["info"]["video.codec"] = cam.value("codec", "av1");
-      features[obs_key]["info"]["video.pix_fmt"] = cam.value("pix_fmt", "yuv420p");
-      features[obs_key]["info"]["video.is_depth_map"] = cam.value("is_depth_map", false);
+      h = cam.value("height", h);
+      w = cam.value("width", w);
+      ch = cam.value("channels", ch);
+      fps = cam.value("fps", fps);
       features[obs_key]["info"]["has_audio"] = cam.value("has_audio", false);
     } else {
-      features[obs_key]["shape"] = nlohmann::json::array({480, 640, 3});
-      features[obs_key]["info"]["video.fps"] = 30.0;
-      features[obs_key]["info"]["video.height"] = 480;
-      features[obs_key]["info"]["video.width"] = 640;
-      features[obs_key]["info"]["video.channels"] = 3;
+      features[obs_key]["info"]["has_audio"] = false;
+    }
+    features[obs_key]["shape"] = nlohmann::json::array({h, w, ch});
+    features[obs_key]["info"]["video.fps"] = fps;
+    features[obs_key]["info"]["video.height"] = h;
+    features[obs_key]["info"]["video.width"] = w;
+    features[obs_key]["info"]["video.channels"] = ch;
+    features[obs_key]["info"]["video.is_depth_map"] = is_depth;
+
+    if (is_depth) {
+      // Match lerobot 0.6.0 DepthEncoderConfig: HEVC Main 12 / gray12le, 12-bit log-quant.
+      features[obs_key]["info"]["video.codec"] = "hevc";
+      features[obs_key]["info"]["video.pix_fmt"] = "gray12le";
+      features[obs_key]["info"]["video.depth_min"] = 0.01;   // metres, quantum 0
+      features[obs_key]["info"]["video.depth_max"] = 10.0;   // metres, quantum DEPTH_QMAX
+      features[obs_key]["info"]["video.shift"] = 3.5;        // metres, pre-log offset
+      features[obs_key]["info"]["video.use_log"] = true;
+      // lerobot reads the stored unit as info["depth_unit"] (no "video." prefix).
+      features[obs_key]["info"]["depth_unit"] = "mm";  // raw mono16 depth is millimetres
+    } else {
       features[obs_key]["info"]["video.codec"] = "av1";
       features[obs_key]["info"]["video.pix_fmt"] = "yuv420p";
-      features[obs_key]["info"]["video.is_depth_map"] = false;
-      features[obs_key]["info"]["has_audio"] = false;
     }
   }
 

@@ -7,12 +7,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdint>
 #include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <sstream>
+#include <vector>
 
 #include <arrow/io/api.h>
+#include <opencv2/opencv.hpp>
 #include <parquet/arrow/writer.h>
 
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_constants.hpp"
@@ -30,6 +33,14 @@ const std::vector<double> kQuantiles = {0.01, 0.10, 0.50, 0.90, 0.99};
 const std::vector<std::string> kQuantileKeys = {"q01", "q10", "q50", "q90", "q99"};
 
 using v3::update_chunk_file_indices;
+
+/// @brief True if the directory holds any `.png` frame (depth cams; RGB cams use `.jpg`).
+bool dir_has_png(const fs::path& dir) {
+  for (const auto& entry : fs::directory_iterator(dir)) {
+    if (entry.is_regular_file() && entry.path().extension() == ".png") return true;
+  }
+  return false;
+}
 
 /// @brief Linear-interpolated quantile of an unsorted sample (numpy default method).
 float quantile_of(std::vector<float>& sorted, double q) {
@@ -296,6 +307,79 @@ bool LeRobotV3DatasetWriter::encode_episode_video(
   return true;
 }
 
+bool LeRobotV3DatasetWriter::encode_depth_video(
+  const fs::path& image_dir, size_t frame_count, const fs::path& out_mp4) const
+{
+  // 16-bit depth (mm) → 12-bit log-quantized codes → lossless HEVC gray12le, matching
+  // lerobot 0.6.0 DepthEncoderConfig. depth_min/max/shift are in metres in lerobot; the
+  // raw depth here is millimetres, so the quant params are scaled to mm (× 1000).
+  constexpr double kShiftMm = 3.5 * 1000.0;
+  constexpr double kDepthMinMm = 0.01 * 1000.0;
+  constexpr double kDepthMaxMm = 10.0 * 1000.0;
+  constexpr int kQMax = 4095;  // (1 << 12) - 1
+  const double log_min = std::log(kDepthMinMm + kShiftMm);
+  const double inv_range = 1.0 / (std::log(kDepthMaxMm + kShiftMm) - log_min);
+
+  // Precompute the mm → 12-bit-code map once (raw depth is uint16, so 65536 entries).
+  std::vector<uint16_t> lut(65536);
+  for (int d = 0; d < 65536; ++d) {
+    const double norm = (std::log(static_cast<double>(d) + kShiftMm) - log_min) * inv_range;
+    const int64_t code = std::llround(norm * kQMax);
+    lut[d] = static_cast<uint16_t>(std::clamp<int64_t>(code, 0, kQMax));
+  }
+
+  int width = 0, height = 0;
+  const fs::path raw_path = fs::path(out_mp4.string() + ".gray12.raw");
+  {
+    std::ofstream raw(raw_path, std::ios::binary);
+    if (!raw) {
+      std::cerr << "Error: cannot open depth raw temp: " << raw_path.string() << "\n";
+      return false;
+    }
+    std::vector<uint16_t> codes;
+    for (size_t f = 0; f < frame_count; ++f) {
+      char namebuf[32];
+      std::snprintf(namebuf, sizeof(namebuf), "image_%06zu.png", f);
+      cv::Mat img = cv::imread((image_dir / namebuf).string(), cv::IMREAD_UNCHANGED);
+      if (img.empty() || img.type() != CV_16UC1) {
+        std::cerr << "Error: depth frame missing or not 16-bit mono: " << namebuf << "\n";
+        return false;
+      }
+      if (width == 0) {
+        width = img.cols;
+        height = img.rows;
+      }
+      codes.resize(static_cast<size_t>(img.rows) * static_cast<size_t>(img.cols));
+      size_t k = 0;
+      for (int y = 0; y < img.rows; ++y) {
+        const uint16_t* row = img.ptr<uint16_t>(y);
+        for (int x = 0; x < img.cols; ++x) codes[k++] = lut[row[x]];
+      }
+      raw.write(reinterpret_cast<const char*>(codes.data()), codes.size() * sizeof(uint16_t));
+    }
+  }
+  if (width == 0 || height == 0) {
+    std::cerr << "Error: no depth frames read from " << image_dir.string() << "\n";
+    std::error_code ec;
+    fs::remove(raw_path, ec);
+    return false;
+  }
+
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -f rawvideo -pix_fmt gray12le -s " << width << "x" << height
+      << " -framerate " << opts_.fps << " -i " << raw_path.string() << " -frames:v " << frame_count
+      << " -c:v libx265 -x265-params lossless=1:log-level=error -pix_fmt gray12le -r 30 "
+      << out_mp4.string();
+  int ret = std::system(cmd.str().c_str());
+  std::error_code ec;
+  fs::remove(raw_path, ec);
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg depth encode failed (exit " << ret << "): " << cmd.str() << "\n";
+    return false;
+  }
+  return true;
+}
+
 bool LeRobotV3DatasetWriter::place_or_concat_video(
   const std::string& video_key, const fs::path& episode_mp4, double ep_duration_s,
   std::array<double, 4>& out_slot)
@@ -393,7 +477,8 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
   out.ep.episode_index = episode_index;
 
   // ── Decode + align (independent per file: safe to run on a worker thread) ──
-  if (!load_aligned_episode(mcap_path.string(), episode_index, out.ep, out.channels)) {
+  if (!load_aligned_episode(mcap_path.string(), episode_index, out.ep, out.channels,
+                            opts_.native_schema)) {
     std::cerr << "[FAILED] Could not load " << mcap_path.string() << "\n";
     return out;  // ok == false
   }
@@ -418,7 +503,7 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
         camera_dirs[camera_name] = dir;
         return dir;
       },
-      camera_counts);
+      camera_counts, opts_.native_schema);
 
     for (const auto& cam : out.ep.cameras) {
       auto dir_it = camera_dirs.find(cam.name);
@@ -427,26 +512,34 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
         continue;
       }
 
+      // Depth cams were extracted as 16-bit PNG (native schema); RGB as JPEG. The
+      // extension picks the encode path: gray12le HEVC for depth, av1 for RGB.
+      const bool is_depth = dir_has_png(dir_it->second);
+
       PreparedEpisode::PreparedVideo pv;
       pv.obs_key = cam.obs_key;
       pv.episode_mp4 = out.tmp_dir / (cam.name + "_episode.mp4");
-      if (!encode_episode_video(dir_it->second, cnt_it->second, pv.episode_mp4)) {
+      const bool encoded = is_depth
+        ? encode_depth_video(dir_it->second, cnt_it->second, pv.episode_mp4)
+        : encode_episode_video(dir_it->second, cnt_it->second, pv.episode_mp4);
+      if (!encoded) {
         std::error_code ec;
         fs::remove_all(out.tmp_dir, ec);
         return out;  // ok == false: an encode failure fails the whole episode
       }
       pv.duration_s = static_cast<double>(cnt_it->second) / static_cast<double>(opts_.fps);
 
-      // Sample frames for image stats before dropping the raw JPEGs. The global
-      // per-key cap is enforced later in consume_episode(); sampling here is
-      // bounded per episode by sample_images().
+      // Sample RGB frames for image stats before dropping the raw JPEGs. Depth frames
+      // are 12-bit codes, not RGB, so they are not sampled for [0,1] image stats.
       std::vector<fs::path> paths;
-      for (const auto& entry : fs::directory_iterator(dir_it->second)) {
-        if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
-          paths.push_back(entry.path());
+      if (!is_depth) {
+        for (const auto& entry : fs::directory_iterator(dir_it->second)) {
+          if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+            paths.push_back(entry.path());
+          }
         }
+        std::sort(paths.begin(), paths.end());
       }
-      std::sort(paths.begin(), paths.end());
       pv.samples = trossen::io::backends::sample_images(paths);
 
       out.videos.push_back(std::move(pv));
@@ -474,7 +567,7 @@ bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
     action_dim_ = ep.action_dim;
     obs_dim_ = ep.obs_dim;
     data_schema_ = make_data_schema();
-    features_ = build_features(ep, pe.channels);
+    features_ = build_features(ep, pe.channels, opts_.native_schema);
     trossen::io::backends::add_standard_metadata_features(features_);
     action_values_.assign(action_dim_, {});
     obs_values_.assign(obs_dim_, {});
