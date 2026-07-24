@@ -175,6 +175,9 @@ export function DatasetDetailsPage() {
     dataset_id: '', robot_name: '', fps: '30', encoder_threads: '2', chunk_size: '1000',
     encode_videos: true, overwrite_existing: false,
     lerobot_version: 'v3', data_files_size_in_mb: '100', video_files_size_in_mb: '200',
+    // v3-only. jobs '' => let the binary default to min(cores, 8). native schema
+    // on by default (native joint naming + bi_widowxai_follower_robot + depth).
+    jobs: '', native_widowxai_schema: true,
   });
 
   // Seed convertForm from whichever variant arrives first. `robot_name`
@@ -303,6 +306,9 @@ export function DatasetDetailsPage() {
           lerobot_version: convertForm.lerobot_version,
           data_files_size_in_mb: parseInt(convertForm.data_files_size_in_mb),
           video_files_size_in_mb: parseInt(convertForm.video_files_size_in_mb),
+          // Blank jobs => omit so the binary keeps its min(cores, 8) default.
+          jobs: convertForm.jobs.trim() === '' ? null : parseInt(convertForm.jobs),
+          native_widowxai_schema: convertForm.native_widowxai_schema,
         }),
       });
       if (!res.ok) {
@@ -724,10 +730,16 @@ export function DatasetDetailsPage() {
                   <div><label className="block text-ink text-xs mb-1">Chunk Size ({convertForm.lerobot_version === 'v3' ? 'files' : 'episodes'})</label><input type="number" value={convertForm.chunk_size} onChange={e => setConvertForm({...convertForm, chunk_size: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
                 </div>
                 {convertForm.lerobot_version === 'v3' && (
+                  <>
                   <div className="grid grid-cols-2 gap-4">
                     <div><label className="block text-ink text-xs mb-1">Data File Size (MB)</label><input type="number" value={convertForm.data_files_size_in_mb} onChange={e => setConvertForm({...convertForm, data_files_size_in_mb: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
                     <div><label className="block text-ink text-xs mb-1">Video File Size (MB)</label><input type="number" value={convertForm.video_files_size_in_mb} onChange={e => setConvertForm({...convertForm, video_files_size_in_mb: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
                   </div>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div><label className="block text-ink text-xs mb-1">Worker Threads (jobs)</label><input type="number" min="1" placeholder="auto (min cores, 8)" value={convertForm.jobs} onChange={e => setConvertForm({...convertForm, jobs: e.target.value})} className="w-full bg-app border border-edge text-ink placeholder:text-dim px-3 py-2 text-sm focus:outline-none focus:border-brand" /><div className="text-dim text-[10px] mt-1">Parallel episode decode/encode. Blank = auto; lower it to spare CPU while recording.</div></div>
+                    <div className="flex items-start pt-6"><label className="flex items-center gap-2 text-sm text-ink cursor-pointer"><input type="checkbox" checked={convertForm.native_widowxai_schema} onChange={e => setConvertForm({...convertForm, native_widowxai_schema: e.target.checked})} className="accent-brand" />Native WidowX AI schema</label></div>
+                  </div>
+                  </>
                 )}
                 <div className="grid grid-cols-2 gap-4">
                   <div><label className="block text-ink text-xs mb-1">Encoder Threads</label><input type="number" value={convertForm.encoder_threads} onChange={e => setConvertForm({...convertForm, encoder_threads: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>

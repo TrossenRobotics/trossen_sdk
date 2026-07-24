@@ -104,6 +104,14 @@ class ConvertBody(BaseModel):
     # v3-only aggregation thresholds; ignored for v2.
     data_files_size_in_mb: int = 100
     video_files_size_in_mb: int = 200
+    # v3-only: worker threads for the parallel decode/extract/encode pipeline.
+    # None => let the binary pick its default (min(cores, 8)). Set a lower value
+    # to cap CPU while the machine is also recording / serving the live viewer.
+    jobs: int | None = None
+    # v3-only: emit the native lerobot_trossen schema (native joint naming,
+    # bi_widowxai_follower_robot, 12-bit native depth video). Defaults to the
+    # config.json value when omitted; sent explicitly so the UI can toggle it.
+    native_widowxai_schema: bool = True
 
 
 # Encoder log lines that the converter can't suppress at source but
@@ -161,6 +169,11 @@ def _build_args(body: ConvertBody, mcap_path: Path, output_root: Path) -> list[s
         overrides["chunks_size"] = str(body.chunk_size)
         overrides["data_files_size_in_mb"] = str(body.data_files_size_in_mb)
         overrides["video_files_size_in_mb"] = str(body.video_files_size_in_mb)
+        # Native lerobot_trossen schema + 12-bit native depth. A config key, so
+        # it rides the same --set path as the rest of the v3 overrides.
+        overrides["native_widowxai_schema"] = (
+            "true" if body.native_widowxai_schema else "false"
+        )
     else:
         # v2 chunk_size is episodes-per-chunk-directory.
         overrides["chunk_size"] = str(body.chunk_size)
@@ -172,6 +185,11 @@ def _build_args(body: ConvertBody, mcap_path: Path, output_root: Path) -> list[s
     ]
     for key, value in overrides.items():
         args += ["--set", f"{namespace}.{key}={value}"]
+    # --jobs is a bare CLI flag on the v3 binary (not a backend config key), so
+    # it's appended outside the --set loop. Omitted entirely when None so the
+    # binary keeps its own min(cores, 8) default.
+    if body.lerobot_version == "v3" and body.jobs is not None:
+        args += ["--jobs", str(body.jobs)]
     return args
 
 
