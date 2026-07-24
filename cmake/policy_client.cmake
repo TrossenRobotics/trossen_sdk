@@ -21,7 +21,7 @@ set(USE_ZLIB OFF CACHE BOOL "Disable zlib in IXWebSocket build" FORCE)
 FetchContent_Declare(
   ixwebsocket
   GIT_REPOSITORY https://github.com/machinezone/IXWebSocket.git
-  # Immutable commit for tag v11.4.5 (a tag can be re-pointed; a SHA cannot).
+  # Tag v11.4.5.
   GIT_TAG c5a02f1066fb0fde48f80f51178429a27f689a39
 )
 FetchContent_MakeAvailable(ixwebsocket)
@@ -91,8 +91,8 @@ target_compile_definitions(trossen_sdk PRIVATE TROSSEN_SDK_ENABLE_POLICY_CLIENT)
 # them through the same path when they exercise the fake server.
 target_include_directories(trossen_sdk PRIVATE ${_lerobot_proto_out})
 
-# msgpack-cxx is consumed only inside the .cpp files; keep it PRIVATE so downstream
-# (PR 04 PolicyClient TU) is not forced to pull msgpack headers.
+# msgpack-cxx is consumed only inside the .cpp files; keep it PRIVATE so the
+# public headers and downstream targets are not forced to pull msgpack headers.
 target_link_libraries(trossen_sdk PRIVATE
   ixwebsocket::ixwebsocket msgpack-cxx ${GRPCPP_LIBRARIES})
 target_link_directories(trossen_sdk PRIVATE ${GRPCPP_LIBRARY_DIRS})

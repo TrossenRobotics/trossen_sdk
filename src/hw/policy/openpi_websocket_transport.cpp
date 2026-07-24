@@ -667,7 +667,9 @@ void OpenpiWebsocketTransport::worker_loop_() {
       reply = round_trip_(packed);
     } catch (const std::exception& e) {
       record_failure_(std::string("round trip failed: ") + e.what());
-      connected_.store(false);  // die-on-disconnect parity with the old API
+      // A failed round trip means the socket is broken (unlike a pack failure
+      // above); mark disconnected so the reconnect path takes over.
+      connected_.store(false);
       continue;
     } catch (...) {
       record_failure_("round trip failed (unknown)");
