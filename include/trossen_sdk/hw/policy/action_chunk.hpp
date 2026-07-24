@@ -215,7 +215,7 @@ class ChunkSlot {
     std::chrono::steady_clock::time_point now,
     int total_n,
     double control_rate_hz) const noexcept {
-    // TODO(shantanuparab-tr): fill-into-buffer overload if RT profiling shows alloc jitter
+    // Returns a freshly allocated row; a fill-into-buffer overload could avoid the alloc.
     try {
       std::lock_guard<std::mutex> lk(mu_);
 
@@ -344,7 +344,7 @@ class ChunkSlot {
     std::chrono::steady_clock::time_point now,
     int total_n,
     double control_rate_hz) const noexcept {
-    // TODO(shantanuparab-tr): fill-into-buffer overload if RT profiling shows alloc jitter
+    // Returns a freshly allocated row; a fill-into-buffer overload could avoid the alloc.
     SampleInfo info;
     try {
       std::lock_guard<std::mutex> lk(mu_);

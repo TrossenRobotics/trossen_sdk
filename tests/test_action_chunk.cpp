@@ -448,7 +448,7 @@ TEST(ChunkSlotTest, BoundaryBlendSkipsConfiguredGripperIndices) {
   EXPECT_FLOAT_EQ(r_post[3], 0.99f);
 }
 
-// ── Aligned take-over (L5) ──────────────────────────────────────────────────
+// ── Aligned take-over ──────────────────────────────────────────────────────
 
 TEST(ChunkSlotTest, AlignedTakeOverSkipsPastRows) {
   // make_chunk sets row t, col 0 = base + t. Anchor row 0 at 0.3 s in the past
