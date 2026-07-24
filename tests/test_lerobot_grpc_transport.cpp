@@ -28,7 +28,7 @@
 #include "lerobot_transport_services.grpc.pb.h"
 #include "lerobot_transport_services_mock.grpc.pb.h"
 
-#include "lerobot_grpc_transport.hpp"
+#include "trossen_sdk/hw/policy/lerobot_grpc_transport.hpp"
 
 #include "trossen_sdk/hw/policy/policy_transport.hpp"
 #include "trossen_sdk/hw/policy/transport_registry.hpp"

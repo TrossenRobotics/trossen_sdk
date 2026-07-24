@@ -5,7 +5,7 @@
  *        payload path. See the header for each method's contract.
  */
 
-#include "lerobot_grpc_transport.hpp"
+#include "trossen_sdk/hw/policy/lerobot_grpc_transport.hpp"
 
 #include <algorithm>
 #include <chrono>

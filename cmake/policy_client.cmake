@@ -87,9 +87,11 @@ target_sources(trossen_sdk PRIVATE
   ${_lerobot_proto_out}/lerobot_transport_services.grpc.pb.cc
 )
 target_compile_definitions(trossen_sdk PRIVATE TROSSEN_SDK_ENABLE_POLICY_CLIENT)
-# Generated proto headers are consumed only by policy .cpp files; tests reach
-# them through the same path when they exercise the fake server.
-target_include_directories(trossen_sdk PRIVATE ${_lerobot_proto_out})
+# The public LerobotGrpcTransport header includes the generated proto stub, so
+# the generated dir and gRPC headers are PUBLIC. Build tree only: the SDK's
+# headers are consumed in-tree (examples/tests/bindings), never installed.
+target_include_directories(trossen_sdk PUBLIC $<BUILD_INTERFACE:${_lerobot_proto_out}>)
+target_include_directories(trossen_sdk SYSTEM PUBLIC ${GRPCPP_INCLUDE_DIRS})
 
 # msgpack-cxx is consumed only inside the .cpp files; keep it PRIVATE so the
 # public headers and downstream targets are not forced to pull msgpack headers.

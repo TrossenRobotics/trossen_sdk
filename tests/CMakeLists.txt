@@ -132,9 +132,8 @@ if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
     trossen_sdk GTest::gtest_main GTest::gmock ${GRPCPP_LIBRARIES} ${Protobuf_LIBRARIES})
   target_link_directories(test_lerobot_grpc_transport PRIVATE ${GRPCPP_LIBRARY_DIRS})
   target_include_directories(test_lerobot_grpc_transport PRIVATE
-    ${CMAKE_BINARY_DIR}/lerobot_proto
-    # PRIVATE transport header (src/), so the test can inject a mock stub.
-    ${CMAKE_CURRENT_SOURCE_DIR}/../src/hw/policy)
+    # Generated mock-stub header lives in the build tree.
+    ${CMAKE_BINARY_DIR}/lerobot_proto)
   # Replays a pinned pickled action chunk through the mock stub's GetActions.
   target_compile_definitions(test_lerobot_grpc_transport PRIVATE
     LEROBOT_CODEC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/lerobot_codec")
