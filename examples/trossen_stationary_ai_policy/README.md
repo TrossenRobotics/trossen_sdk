@@ -50,10 +50,6 @@ Both build only when the SDK is configured with
 ./build/examples/trossen_stationary_ai_openpi --set session.max_duration=30
 ```
 
-> **Flag names are exact.** The CLI parser silently ignores unknown flags, so a
-> typo like `--dump_config` (underscore) is dropped and the binary proceeds to
-> connect to real hardware. Use `--dump-config` (hyphen).
-
 > **`--set` limitation.** `--set` walks JSON *map* keys only; it cannot index
 > into `hardware.policy_clients[]`. Edit the prompt, server URL, inference rate,
 > transport, and joint layout **directly in the config file**.
@@ -124,9 +120,10 @@ rejects a scheme). See <https://github.com/huggingface/lerobot>
 
 ### Target model
 
-The shipped config targets **`TrossenRoboticsCommunity/pi05-block-transfer-lerobot`**
+The shipped config targets
+[**`TrossenRoboticsCommunity/pi05-block-transfer-lerobot`**](https://huggingface.co/TrossenRoboticsCommunity/pi05-block-transfer-lerobot)
 (a π₀.₅ policy), trained on
-**`TrossenRoboticsCommunity/stationary-block-transfer-lerobot-v3`**:
+[**`TrossenRoboticsCommunity/stationary-block-transfer-lerobot-v3`**](https://huggingface.co/datasets/TrossenRoboticsCommunity/stationary-block-transfer-lerobot-v3):
 
 - `policy_type: pi05`, `actions_per_chunk: 50`, `device: cuda`, prompt
   **"Grab and handover the red cube to the other arm"**.
@@ -147,10 +144,15 @@ the codec implements exactly the opcode/torch subset the pinned server emits and
 **fails loudly** on anything else. The stack used to capture/verify the codec
 fixtures is recorded in `tests/fixtures/lerobot_codec/versions.json`.
 
-> **Forward incompatibility.** LeRobot releases *after* v0.6.0 replace the
-> pickle transport with safetensors + JSON (the CVE-2026-25874 fix). That is a
-> breaking wire change this codec does **not** support — supporting a newer
-> LeRobot is a separate, larger update, not a config tweak.
+> **Pin the server to v0.6.0.** Launch it with the version pinned so a newer
+> LeRobot is never pulled in, e.g.:
+>
+> ```
+> uv run --with lerobot==0.6.0 <your policy-server command>
+> ```
+>
+> Releases after v0.6.0 switch the pickle transport to safetensors + JSON (the
+> CVE-2026-25874 fix), which this codec does not speak.
 
 ### The `transport_config` block
 
