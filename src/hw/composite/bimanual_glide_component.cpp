@@ -44,9 +44,6 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
     throw std::runtime_error("TrossenArmComponent: Unknown model: " + right_model_str_);
   }
 
-  fprintf(stderr, "DEBUG left_model=%d right_model=%d\n",
-    static_cast<int>(left_model), static_cast<int>(right_model));
-
   if (config.contains("write_moving_time_s")) {
     write_moving_time_s_ = config.at("write_moving_time_s").get<double>();
   }

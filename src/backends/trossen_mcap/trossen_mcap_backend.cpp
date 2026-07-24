@@ -13,6 +13,7 @@
 
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
+#include "Rivet.pb.h"
 #include "nlohmann/json.hpp"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
@@ -175,6 +176,9 @@ void TrossenMCAPBackend::close_resources() {
   for (auto& [stream_id, channel] : odometry_2d_channels_) {
     channel.close();
   }
+  for (auto& [stream_id, channel] : rivet_channels_) {
+    channel.close();
+  }
   for (auto& [name, channel] : image_channels_) {
     channel.close();
   }
@@ -187,6 +191,7 @@ void TrossenMCAPBackend::close_resources() {
   joint_channels_.clear();
   image_channels_.clear();
   odometry_2d_channels_.clear();
+  rivet_channels_.clear();
   opened_ = false;
 }
 
@@ -238,6 +243,11 @@ void TrossenMCAPBackend::write(const data::RecordBase& record) {
     write_odometry_2d_record(*mb);
     return;
   }
+
+  if (auto rv = dynamic_cast<const data::RivetRecord*>(&record)) {
+    write_rivet_record(*rv);
+    return;
+  }
 }
 
 void TrossenMCAPBackend::write_batch(std::span<const data::RecordBase* const> records) {
@@ -255,6 +265,10 @@ void TrossenMCAPBackend::write_batch(std::span<const data::RecordBase* const> re
     }
     if (auto mb = dynamic_cast<const data::Odometry2DRecord*>(r)) {
       write_odometry_2d_record(*mb);
+      continue;
+    }
+    if (auto rv = dynamic_cast<const data::RivetRecord*>(r)) {
+      write_rivet_record(*rv);
       continue;
     }
   }
@@ -444,6 +458,89 @@ void TrossenMCAPBackend::write_odometry_2d_record(const data::Odometry2DRecord& 
   }
 }
 
+foxglove::RawChannel* TrossenMCAPBackend::ensure_rivet_channel(const std::string& stream_id) {
+  auto it = rivet_channels_.find(stream_id);
+  if (it != rivet_channels_.end()) {
+    return &it->second;
+  }
+
+  foxglove::Schema schema;
+  schema.name = "trossen_sdk.msg.Rivet";
+  schema.encoding = "protobuf";
+  schema.data = reinterpret_cast<const std::byte*>(schema_data_rivet_.data());
+  schema.data_len = schema_data_rivet_.size();
+
+  auto channel_result = foxglove::RawChannel::create(
+    trossen_mcap_defs::rivet_topic(stream_id),
+    "protobuf",
+    schema,
+    context_,
+    std::nullopt);
+
+  if (!channel_result.has_value()) {
+    std::cerr << "Failed to create rivet channel for " << stream_id << ": "
+              << foxglove::strerror(channel_result.error()) << "\n";
+    return nullptr;
+  }
+
+  auto [inserted_it, _] = rivet_channels_.emplace(stream_id, std::move(channel_result.value()));
+  return &inserted_it->second;
+}
+
+void TrossenMCAPBackend::write_rivet_record(const data::RivetRecord& rivet) {
+  auto* channel = ensure_rivet_channel(rivet.id);
+  if (!channel) {
+    return;
+  }
+
+  trossen_sdk::msg::Rivet out;
+  auto* ts = out.mutable_ts();
+
+  auto* mono = ts->mutable_monotonic();
+  mono->set_seconds(rivet.ts.monotonic.sec);
+  mono->set_nanos(rivet.ts.monotonic.nsec);
+
+  auto* real = ts->mutable_realtime();
+  real->set_seconds(rivet.ts.realtime.sec);
+  real->set_nanos(rivet.ts.realtime.nsec);
+
+  out.set_seq(rivet.seq);
+
+  out.mutable_left_positions()->Reserve(rivet.left_positions.size());
+  for (auto v : rivet.left_positions) out.add_left_positions(v);
+  out.mutable_left_velocities()->Reserve(rivet.left_velocities.size());
+  for (auto v : rivet.left_velocities) out.add_left_velocities(v);
+  out.mutable_left_efforts()->Reserve(rivet.left_efforts.size());
+  for (auto v : rivet.left_efforts) out.add_left_efforts(v);
+
+  out.mutable_right_positions()->Reserve(rivet.right_positions.size());
+  for (auto v : rivet.right_positions) out.add_right_positions(v);
+  out.mutable_right_velocities()->Reserve(rivet.right_velocities.size());
+  for (auto v : rivet.right_velocities) out.add_right_velocities(v);
+  out.mutable_right_efforts()->Reserve(rivet.right_efforts.size());
+  for (auto v : rivet.right_efforts) out.add_right_efforts(v);
+
+  out.set_linear_x_velocity(rivet.linear_x_velocity);
+  out.set_linear_y_velocity(rivet.linear_y_velocity);
+  out.set_angualar_z_velocity(rivet.angualar_z_velocity);
+  out.set_lift_velocity(rivet.lift_velocity);
+
+  std::string payload;
+  out.SerializeToString(&payload);
+
+  auto st = channel->log(
+    reinterpret_cast<const std::byte*>(payload.data()),
+    payload.size(),
+    rivet.ts.realtime.to_ns());
+
+  if (st != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to write rivet record for " << rivet.id << ": "
+              << foxglove::strerror(st) << "\n";
+  } else {
+    ++stats_.rivet_records_written;
+  }
+}
+
 void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
   // Determine if this is a depth frame based on encoding or topic
   const bool depth =
@@ -612,6 +709,8 @@ void TrossenMCAPBackend::register_schemas_once() {
     "trossen_sdk/io/backends/trossen_mcap/proto/JointState.proto");
   schema_data_odom2d_ = build_schema_blob(
     "trossen_sdk/io/backends/trossen_mcap/proto/Odometry2D.proto");
+  schema_data_rivet_ = build_schema_blob(
+    "trossen_sdk/io/backends/trossen_mcap/proto/Rivet.proto");
 }
 
 bool TrossenMCAPBackend::is_depth_topic(const std::string& topic) {

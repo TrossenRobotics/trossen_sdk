@@ -51,6 +51,9 @@ public:
 
     /// @brief Number of depth images written
     uint64_t depth_images_written{0};
+
+    /// @brief Number of Rivet (bimanual + base) records written
+    uint64_t rivet_records_written{0};
   };
 
   /**
@@ -171,6 +174,14 @@ private:
   foxglove::RawChannel* ensure_odometry_2d_channel(const std::string& stream_id);
 
   /**
+   * @brief Ensure the Rivet channel exists for a given stream ID
+   *
+   * @param stream_id Stream identifier (e.g., "rivet")
+   * @return Pointer to the channel, or nullptr on failure
+   */
+  foxglove::RawChannel* ensure_rivet_channel(const std::string& stream_id);
+
+  /**
    * @brief Write an image record
    *
    * @param img Image record to write
@@ -192,6 +203,13 @@ private:
   void write_odometry_2d_record(const data::Odometry2DRecord& odom);
 
   /**
+   * @brief Write a Rivet (bimanual + base) record
+   *
+   * @param rivet Rivet record to write
+   */
+  void write_rivet_record(const data::RivetRecord& rivet);
+
+  /**
    * @brief Register protobuf schemas once
    */
   void register_schemas_once();
@@ -207,6 +225,9 @@ private:
 
   /// @brief Serialised FileDescriptorSet for the Odometry2D protobuf schema
   std::string schema_data_odom2d_;
+
+  /// @brief Serialised FileDescriptorSet for the Rivet protobuf schema
+  std::string schema_data_rivet_;
 
   /// @brief Output file path
   std::filesystem::path path_;
@@ -231,6 +252,9 @@ private:
 
   /// @brief Map of 2D odometry channels by stream ID
   std::unordered_map<std::string, foxglove::RawChannel> odometry_2d_channels_;
+
+  /// @brief Map of Rivet channels by stream ID
+  std::unordered_map<std::string, foxglove::RawChannel> rivet_channels_;
 
   /// @brief Statistics about written records
   Stats stats_{};

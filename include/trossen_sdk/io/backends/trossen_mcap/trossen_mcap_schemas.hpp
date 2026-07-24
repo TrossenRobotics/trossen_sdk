@@ -55,6 +55,16 @@ inline std::string odometry_2d_topic(const std::string& stream_id) {
   return stream_id + "/odom/state";
 }
 
+/**
+ * @brief Get topic name for the Rivet bimanual + base stream
+ *
+ * @param stream_id Stream identifier (e.g., "rivet")
+ * @return Topic name for the Rivet stream
+ */
+inline std::string rivet_topic(const std::string& stream_id) {
+  return stream_id + "/rivet/state";
+}
+
 }  // namespace trossen::trossen_mcap_defs
 
 #endif  // TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__TROSSEN_MCAP_SCHEMAS_HPP_
