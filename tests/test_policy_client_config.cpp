@@ -252,7 +252,7 @@ TEST(PolicyClientConfigTest, AcceptsWssScheme) {
 
 TEST(PolicyClientConfigTest, AcceptsNonWebsocketUrl) {
   // URL format is transport-specific (a gRPC transport takes host:port), so
-  // the shared config no longer enforces a scheme - the selected transport's
+  // the shared config does not enforce a scheme - the selected transport's
   // factory does (openpi_ws rejection is pinned in the transport tests).
   auto j = nlohmann::json::parse(kCanonicalConfig);
   j["server_url"] = "10.0.0.5:50051";
@@ -445,8 +445,8 @@ TEST(HardwareConfigPolicyClientsTest, ReportsIndexOnParseFailure) {
   nlohmann::json hw_j = nlohmann::json::object();
   hw_j["policy_clients"] = nlohmann::json::array();
   hw_j["policy_clients"].push_back(nlohmann::json::parse(kCanonicalConfig));
-  // Empty server_url is a parse-level error (scheme checks moved into the
-  // transport factories, so a bad scheme no longer throws here).
+  // Empty server_url is a parse-level error (scheme validation lives in the
+  // transport factories, not here).
   auto bad = nlohmann::json::parse(kCanonicalConfig);
   bad["server_url"] = "";
   hw_j["policy_clients"].push_back(bad);
