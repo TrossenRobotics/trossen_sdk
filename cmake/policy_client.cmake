@@ -42,9 +42,9 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ${_TROSSEN_POLICY_PREV_PIC})
 
 # --- LeRobot async_inference gRPC wiring -------------------------------------
 # The proto is vendored byte-identical from the pinned LeRobot version the
-# codec targets — v0.6.0, commit 30da8e68, src/lerobot/transport/services.proto
-# (renamed here, which does not affect wire identity: gRPC method paths come
-# from the proto package "transport", not the filename). C++ sources are
+# codec targets — v0.6.0, commit 30da8e68, src/lerobot/transport/services.proto.
+# The local filename does not affect wire identity: gRPC method paths come from
+# the proto package "transport", not the filename. C++ sources are
 # generated at build time so they always match the system protobuf/grpc
 # versions; committing generated code would pin the wrong thing.
 pkg_check_modules(GRPCPP REQUIRED grpc++)

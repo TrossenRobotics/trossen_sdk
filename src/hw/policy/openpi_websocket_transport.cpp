@@ -369,7 +369,7 @@ void OpenpiWebsocketTransport::close() noexcept {
   //  1. flag + notify  -> an idle worker exits its work_cv_ wait;
   //  2. socket stop    -> a worker blocked in round_trip_ gets the Close
   //                       callback (reply_closed_), throws, loops, sees the
-  //                       flag (close-before-join, as in the old client);
+  //                       flag (close-before-join);
   //  3. join           -> safe only once 1+2 guarantee worker exit.
   connected_.store(false);
   {
