@@ -55,8 +55,11 @@ export default defineConfig({
   },
   server: {
     proxy: {
+      // Defaults to the same-machine backend; override with BACKEND_URL when
+      // running the frontend on a separate device from the backend, e.g.
+      // BACKEND_URL=http://192.168.1.50:8000 npm run dev.
       '/api': {
-        target: 'http://localhost:8000',
+        target: process.env.BACKEND_URL ?? 'http://localhost:8000',
         changeOrigin: true,
         ws: true,
       },

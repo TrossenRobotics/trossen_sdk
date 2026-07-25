@@ -23,7 +23,25 @@
         "write_moving_time_s": 0.2,
         "staging_time_s": 2.0
       }
-    }
+    },
+    "cameras": [
+      {
+        "id":            "camera_left",
+        "type":          "zed_camera",
+        "serial_number": "95483555",
+        "resolution":    "HD720",
+        "fps":           30,
+        "use_depth":     false
+      },
+      {
+        "id":            "camera_right",
+        "type":          "zed_camera",
+        "serial_number": "97389637",
+        "resolution":    "HD720",
+        "fps":           30,
+        "use_depth":     false
+      }
+    ]
   },
 
   "teleop": {
@@ -41,6 +59,36 @@
       "stream_id": "rivet",
       "poll_rate_hz": 30.0,
       "use_device_time": false
+    },
+    {
+      "type":            "zed_camera",
+      "hardware_id":     "camera_left",
+      "stream_id":       "camera_left",
+      "poll_rate_hz":    30.0,
+      "encoding":        "bgr8",
+      "use_device_time": true
+    },
+    {
+      "type":            "zed_camera",
+      "hardware_id":     "camera_right",
+      "stream_id":       "camera_right",
+      "poll_rate_hz":    30.0,
+      "encoding":        "bgr8",
+      "use_device_time": true
+    }
+  ],
+
+  "observers": [
+    {
+      "type":      "rerun",
+      "id":        "live_viewer",
+      "app_id":    "trossen_rivet",
+      "spawn":     true,
+      "enabled":   true,
+      "subscriptions": [
+        { "record_id": "camera_left",  "throttle_hz": 15.0 },
+        { "record_id": "camera_right", "throttle_hz": 15.0 }
+      ]
     }
   ],
 

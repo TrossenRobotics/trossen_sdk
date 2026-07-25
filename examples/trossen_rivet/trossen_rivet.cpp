@@ -24,7 +24,9 @@
 #include "trossen_sdk/hw/composite/rivet_producer.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/hw/teleop/teleop_factory.hpp"
+#include "trossen_sdk/observer/observer_registry.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
+#include "trossen_sdk/runtime/push_producer_registry.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
 #include "trossen_sdk/utils/app_utils.hpp"
@@ -91,20 +93,14 @@ int main(int argc, char** argv) {
 
   // Derive per-type rates from the producer list
   float joint_rate_hz = 30.0f;
-  // float camera_fps = 30.0f;
-  // for (const auto& p : cfg.producers) {
-  //   if (p.type == "trossen_arm") {
-  //     joint_rate_hz = p.poll_rate_hz;
-  //     break;
-  //   }
-  // }
-  // for (const auto& p : cfg.producers) {
-  //   if (p.type == "zed_camera" || p.type == "realsense_camera" ||
-  //       p.type == "opencv_camera") {
-  //     camera_fps = p.poll_rate_hz;
-  //     break;
-  //   }
-  // }
+  float camera_fps = 30.0f;
+  for (const auto& p : cfg.producers) {
+    if (p.type == "zed_camera" || p.type == "realsense_camera" ||
+        p.type == "opencv_camera") {
+      camera_fps = p.poll_rate_hz;
+      break;
+    }
+  }
 
   std::vector<std::string> config_lines = {
     "Config file:          " + config_path,
@@ -112,21 +108,7 @@ int main(int argc, char** argv) {
     "Backend:              " + cfg.session.backend_type,
     "Robot name:           " + cfg.robot_name
   };
-  // for (const auto& [id, arm] : cfg.hardware.arms) {
-  //   config_lines.push_back(
-  //     "Arm [" + id + "]:  " + arm.ip_address + " (" + arm.end_effector + ")");
-  // }
-  // config_lines.push_back("Joint rate:           " + std::to_string(joint_rate_hz) + " Hz");
-  // for (const auto& cam : cfg.hardware.cameras) {
-  //   config_lines.push_back(
-  //     "Camera [" + cam.id + "]:  " + cam.serial_number + "  " +
-  //     std::to_string(cam.width) + "x" + std::to_string(cam.height) +
-  //     " @ " + std::to_string(cam.fps) + " fps");
-  // }
-  // config_lines.push_back(
-  //   "Teleop:               " +
-  //   std::string(cfg.teleop.enabled ? "enabled" : "disabled") +
-  //   " (" + std::to_string(cfg.teleop.pairs.size()) + " pairs)");
+
 
   trossen::utils::print_config_banner("Trossen Rivet Demo Usage", config_lines);
 
@@ -177,19 +159,19 @@ int main(int argc, char** argv) {
   }
   std::cout << "\n";
 
-  // // Pre-initialize camera hardware (keyed by camera id for producer lookup)
-  // std::unordered_map<std::string,
-  //   std::shared_ptr<trossen::hw::HardwareComponent>> camera_components;
-  // std::unordered_map<std::string,
-  //   const trossen::configuration::CameraConfig*> camera_cfg_map;
-  // for (const auto& cam_cfg : cfg.hardware.cameras) {
-  //   auto cam_component = trossen::hw::HardwareRegistry::create(
-  //     cam_cfg.type, cam_cfg.id, cam_cfg.to_json());
-  //   camera_components[cam_cfg.id] = cam_component;
-  //   camera_cfg_map[cam_cfg.id] = &cam_cfg;
-  //   std::cout << "  [ok] Camera [" << cam_cfg.id << "] initialized ("
-  //             << cam_cfg.serial_number << ")\n";
-  // }
+  // Pre-initialize camera hardware (keyed by camera id for producer lookup)
+  std::unordered_map<std::string,
+    std::shared_ptr<trossen::hw::HardwareComponent>> camera_components;
+  std::unordered_map<std::string,
+    const trossen::configuration::CameraConfig*> camera_cfg_map;
+  for (const auto& cam_cfg : cfg.hardware.cameras) {
+    auto cam_component = trossen::hw::HardwareRegistry::create(
+      cam_cfg.type, cam_cfg.id, cam_cfg.to_json());
+    camera_components[cam_cfg.id] = cam_component;
+    camera_cfg_map[cam_cfg.id] = &cam_cfg;
+    std::cout << "  [ok] Camera [" << cam_cfg.id << "] initialized ("
+              << cam_cfg.serial_number << ")\n";
+  }
 
   std::cout << "Creating producers...\n";
 
@@ -206,28 +188,27 @@ int main(int argc, char** argv) {
       mgr.add_producer(prod, period);
       std::cout << "  [ok] Rivet producer [" << prod_cfg.stream_id << "] ("
                 << prod_cfg.poll_rate_hz << " Hz)\n";
+    } else if (camera_components.count(prod_cfg.hardware_id)) {
+      const auto* cam = camera_cfg_map.at(prod_cfg.hardware_id);
+      if (trossen::runtime::PushProducerRegistry::is_registered(prod_cfg.type)) {
+        auto prod = trossen::runtime::PushProducerRegistry::create(
+          prod_cfg.type,
+          camera_components.at(prod_cfg.hardware_id),
+          prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
+        mgr.add_push_producer(prod);
+        std::cout << "  [ok] Camera producer (push) [" << prod_cfg.stream_id << "] ("
+                  << cam->width << "x" << cam->height << ")\n";
+      } else {
+        auto prod = trossen::runtime::ProducerRegistry::create(
+          prod_cfg.type,
+          camera_components.at(prod_cfg.hardware_id),
+          prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
+        mgr.add_producer(prod, period);
+        std::cout << "  [ok] Camera producer [" << prod_cfg.stream_id << "] ("
+                  << prod_cfg.poll_rate_hz << " Hz, "
+                  << cam->width << "x" << cam->height << ")\n";
+      }
     }
-    // } else if (camera_components.count(prod_cfg.hardware_id)) {
-    //   const auto* cam = camera_cfg_map.at(prod_cfg.hardware_id);
-    //   if (trossen::runtime::PushProducerRegistry::is_registered(prod_cfg.type)) {
-    //     auto prod = trossen::runtime::PushProducerRegistry::create(
-    //       prod_cfg.type,
-    //       camera_components.at(prod_cfg.hardware_id),
-    //       prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
-    //     mgr.add_push_producer(prod);
-    //     std::cout << "  [ok] Camera producer (push) [" << prod_cfg.stream_id << "] ("
-    //               << cam->width << "x" << cam->height << ")\n";
-    //   } else {
-    //     auto prod = trossen::runtime::ProducerRegistry::create(
-    //       prod_cfg.type,
-    //       camera_components.at(prod_cfg.hardware_id),
-    //       prod_cfg.to_registry_json(cam->width, cam->height, cam->fps));
-    //     mgr.add_producer(prod, period);
-    //     std::cout << "  [ok] Camera producer [" << prod_cfg.stream_id << "] ("
-    //               << prod_cfg.poll_rate_hz << " Hz, "
-    //               << cam->width << "x" << cam->height << ")\n";
-    //   }
-    // }
   }
 
   std::cout << "\nProducers registered. Ready to record.\n";
@@ -236,47 +217,47 @@ int main(int argc, char** argv) {
   // Observers: registered once, started lazily on first episode, persist across episodes.
   // ──────────────────────────────────────────────────────────
 
-  // if (!cfg.observers.empty()) {
-  //   std::cout << "Creating observers...\n";
-  //   // Fail loud on construction errors so a typo'd observer type or missing build flag
-  //   // does not silently leave the operator with an empty viewer. On failure we print a
-  //   // diagnostic hint (registered types + rerun build flag) and `return 1`. Returning
-  //   // (rather than rethrowing) keeps `mgr` in scope so its destructor runs ~SessionManager
-  //   // -> shutdown(), which joins producer threads cleanly; an exception escaping main()
-  //   // would invoke std::terminate before unwinding on most GCC builds.
-  //   for (const auto& obs_cfg : cfg.observers) {
-  //     if (!obs_cfg.enabled) {
-  //       std::cout << "  [disabled] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
-  //                 << " (skipped: enabled=false)\n";
-  //       continue;
-  //     }
-  //     try {
-  //       auto obs = trossen::observer::ObserverRegistry::create(
-  //         obs_cfg.type, obs_cfg.raw_json);
-  //       mgr.add_observer(obs);
-  //       std::cout << "  [ok] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
-  //                 << " subscriptions=" << obs_cfg.subscriptions.size() << "\n";
-  //     } catch (const std::exception& e) {
-  //       // Observers are non-essential by design: a missing/misconfigured one logs and
-  //       // is skipped, so recording continues without the visual stream. The hint below
-  //       // points at the build flag for the common "type not registered" case.
-  //       std::cerr << "  [skip] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
-  //                 << " failed to construct: " << e.what() << "\n";
-  //       const auto types =
-  //         trossen::observer::ObserverRegistry::get_registered_types();
-  //       std::cerr << "         Registered observer types:";
-  //       for (const auto& t : types) std::cerr << " " << t;
-  //       std::cerr << "\n";
-  //       if (!trossen::observer::ObserverRegistry::is_registered(obs_cfg.type)) {
-  //         std::cerr << "         Hint: type '" << obs_cfg.type
-  //                   << "' is not registered. Rebuild with the matching CMake option "
-  //                   << "(e.g. -DTROSSEN_ENABLE_RERUN_OBSERVER=ON for the 'rerun' type) "
-  //                   << "or set 'enabled': false on this observer to silence the warning.\n";
-  //       }
-  //       continue;
-  //     }
-  //   }
-  // }
+  if (!cfg.observers.empty()) {
+    std::cout << "Creating observers...\n";
+    // Fail loud on construction errors so a typo'd observer type or missing build flag
+    // does not silently leave the operator with an empty viewer. On failure we print a
+    // diagnostic hint (registered types + rerun build flag) and `return 1`. Returning
+    // (rather than rethrowing) keeps `mgr` in scope so its destructor runs ~SessionManager
+    // -> shutdown(), which joins producer threads cleanly; an exception escaping main()
+    // would invoke std::terminate before unwinding on most GCC builds.
+    for (const auto& obs_cfg : cfg.observers) {
+      if (!obs_cfg.enabled) {
+        std::cout << "  [disabled] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
+                  << " (skipped: enabled=false)\n";
+        continue;
+      }
+      try {
+        auto obs = trossen::observer::ObserverRegistry::create(
+          obs_cfg.type, obs_cfg.raw_json);
+        mgr.add_observer(obs);
+        std::cout << "  [ok] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
+                  << " subscriptions=" << obs_cfg.subscriptions.size() << "\n";
+      } catch (const std::exception& e) {
+        // Observers are non-essential by design: a missing/misconfigured one logs and
+        // is skipped, so recording continues without the visual stream. The hint below
+        // points at the build flag for the common "type not registered" case.
+        std::cerr << "  [skip] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type
+                  << " failed to construct: " << e.what() << "\n";
+        const auto types =
+          trossen::observer::ObserverRegistry::get_registered_types();
+        std::cerr << "         Registered observer types:";
+        for (const auto& t : types) std::cerr << " " << t;
+        std::cerr << "\n";
+        if (!trossen::observer::ObserverRegistry::is_registered(obs_cfg.type)) {
+          std::cerr << "         Hint: type '" << obs_cfg.type
+                    << "' is not registered. Rebuild with the matching CMake option "
+                    << "(e.g. -DTROSSEN_ENABLE_RERUN_OBSERVER=ON for the 'rerun' type) "
+                    << "or set 'enabled': false on this observer to silence the warning.\n";
+        }
+        continue;
+      }
+    }
+  }
 
   // ──────────────────────────────────────────────────────────
   // Teleop controllers
@@ -296,30 +277,30 @@ int main(int argc, char** argv) {
   // Register lifecycle callbacks
   // ──────────────────────────────────────────────────────────
 
-  // // Count depth-capable cameras once for sanity checks
-  // int depth_cameras = 0;
-  // for (const auto& cam : cfg.hardware.cameras) {
-  //   if (cam.use_depth) ++depth_cameras;
-  // }
+  // Count depth-capable cameras once for sanity checks
+  int depth_cameras = 0;
+  for (const auto& cam : cfg.hardware.cameras) {
+    if (cam.use_depth) ++depth_cameras;
+  }
 
-  // // After each episode: print a summary and run sanity checks. (Teleop reset and
-  // // arm re-homing are owned by the SessionManager.)
-  // mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
-  //   const std::string file_path =
-  //     trossen::utils::generate_episode_path(root, stats.current_episode_index);
-  //   trossen::utils::print_episode_summary(file_path, stats);
+  // After each episode: print a summary and run sanity checks. (Teleop reset and
+  // arm re-homing are owned by the SessionManager.)
+  mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
+    const std::string file_path =
+      trossen::utils::generate_episode_path(root, stats.current_episode_index);
+    trossen::utils::print_episode_summary(file_path, stats);
 
-  //   trossen::utils::SanityCheckConfig sanity_cfg{
-  //     stats.elapsed.count(),
-  //     static_cast<int>(cfg.hardware.arms.size()),
-  //     joint_rate_hz,
-  //     static_cast<int>(cfg.hardware.cameras.size()),
-  //     static_cast<int>(camera_fps),
-  //     5.0,
-  //     depth_cameras
-  //   };
-  //   perform_sanity_check(stats.current_episode_index, stats.records_written_current, sanity_cfg);
-  // });
+    trossen::utils::SanityCheckConfig sanity_cfg{
+      stats.elapsed.count(),
+      static_cast<int>(cfg.hardware.arms.size()),
+      joint_rate_hz,
+      static_cast<int>(cfg.hardware.cameras.size()),
+      static_cast<int>(camera_fps),
+      5.0,
+      depth_cameras
+    };
+    perform_sanity_check(stats.current_episode_index, stats.records_written_current, sanity_cfg);
+  });
 
   // Shutdown: the SessionManager stops teleop and returns those arms to rest.
   // If teleop is disabled (no controllers), return each arm to rest directly so

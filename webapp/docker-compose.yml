@@ -118,10 +118,15 @@ services:
       dockerfile: Dockerfile
     image: trossen-sdk-webapp-frontend:dev
     container_name: trossen_webapp_frontend
-    network_mode: host                 # so Vite's /api proxy hits localhost:8000
+    network_mode: host                 # so Vite's /api proxy hits localhost:8000 by default
     volumes:
       - ./frontend:/app/webapp/frontend
       - frontend_node_modules:/app/webapp/frontend/node_modules
+    environment:
+      # Set to the backend machine's LAN IP (e.g. http://192.168.1.50:8000)
+      # when running this frontend container on a separate device from the
+      # backend. Defaults to localhost:8000 for the same-machine setup.
+      BACKEND_URL: ${BACKEND_URL:-http://localhost:8000}
     depends_on:
       - backend
     restart: unless-stopped
