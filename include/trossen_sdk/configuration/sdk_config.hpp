@@ -75,6 +75,7 @@
 #include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/camera_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/mobile_base_config.hpp"
+#include "trossen_sdk/configuration/types/hardware/policy_client_config.hpp"
 #include "trossen_sdk/configuration/types/observers/observer_config.hpp"
 #include "trossen_sdk/configuration/types/producers/producer_config.hpp"
 #include "trossen_sdk/configuration/types/teleop_config.hpp"
@@ -95,6 +96,9 @@ struct HardwareConfig {
 
   /// @brief Mobile base config (present only for mobile robots)
   std::optional<MobileBaseConfig> mobile_base;
+
+  /// @brief Policy-client hardware configs (zero or more)
+  std::vector<PolicyClientConfig> policy_clients;
 
   static HardwareConfig from_json(const nlohmann::json& j);
 };

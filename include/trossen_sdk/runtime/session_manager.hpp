@@ -113,7 +113,7 @@ public:
    * Once registered, the manager owns the controller's per-episode choreography: it
    * pauses the mirror and re-arms around staging in the pre-episode phase, starts
    * mirroring when recording goes live, resets between episodes, and stops teleop at
-   * shutdown. Applications no longer wire these steps by hand.
+   * shutdown, so applications do not wire these steps by hand.
    *
    * Must be called before start_episode().
    *
