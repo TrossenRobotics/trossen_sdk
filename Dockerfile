@@ -2,8 +2,8 @@ FROM ubuntu:24.04
 
 ARG DEBIAN_FRONTEND=noninteractive
 
-# Set the version of the Trossen Arm driver to install
-ENV TROSSEN_ARM_VERSION=1.9.0
+# Trossen Arm driver version; must match the arm controller firmware major.minor.
+ARG TROSSEN_ARM_VERSION=1.10.0
 
 # Install build tools and system dependencies
 RUN \
@@ -37,6 +37,21 @@ RUN \
   rm -rf /var/lib/apt/lists/* && \
   rm apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 
+# Install RealSense, required by the default TROSSEN_ENABLE_REALSENSE=ON build
+RUN \
+  mkdir -p /etc/apt/keyrings && \
+  curl -sSf https://librealsense.realsenseai.com/Debian/librealsenseai.asc | \
+    gpg --dearmor > /etc/apt/keyrings/librealsenseai.gpg && \
+  chmod 0644 /etc/apt/keyrings/librealsenseai.gpg && \
+  echo "deb [signed-by=/etc/apt/keyrings/librealsenseai.gpg] https://librealsense.realsenseai.com/Debian/apt-repo $(lsb_release -cs) main" \
+    > /etc/apt/sources.list.d/librealsense.list && \
+  apt-get update && \
+  apt-get install -yqq --no-install-recommends \
+    libfastcdr-dev \
+    libfastrtps-dev \
+    librealsense2-dev \
+  && rm -rf /var/lib/apt/lists/*
+
 # Install libtrossen-arm
 RUN \
   curl -L https://github.com/TrossenRobotics/trossen_arm/archive/refs/tags/v$TROSSEN_ARM_VERSION.tar.gz -o trossen_arm.tar.gz && \
@@ -58,8 +73,8 @@ RUN make
 # Create data directory for recordings
 RUN mkdir -p /data
 
-# Set the entrypoint to run demos from the build directory
-WORKDIR /app/build/examples/trossen_solo_ai
+# Example binaries are built directly into this directory
+WORKDIR /app/build/examples
 
 # Default command
 CMD ["./trossen_solo_ai", "--help"]

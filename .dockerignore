@@ -1,4 +1,4 @@
-build/
+build*/
 bin/
 obj/
 *.o
@@ -32,3 +32,5 @@ docker-compose.yml
 *.log
 tmp/
 temp/
+
+.claude/
