@@ -23,7 +23,8 @@ namespace trossen::configuration {
  *   "end_effector": "wxai_v0_leader",
  *   "staged_position": [0.0, 1.04, 0.52, 0.63, 0.0, 0.0, 0.0],  // optional
  *   "staging_time_s": 2.0,                                // optional
- *   "episode_lifecycle_enabled": true                     // optional, default false
+ *   "episode_lifecycle_enabled": true,                    // optional, default false
+ *   "write_moving_time_s": 0.1                            // optional, default 0.0
  * }
  */
 struct ArmConfig {
@@ -53,6 +54,20 @@ struct ArmConfig {
   /// false so an arm is only re-homed between episodes when explicitly enabled.
   bool episode_lifecycle_enabled{false};
 
+  /// @brief Per-tick trajectory time (seconds) passed to set_all_positions in
+  /// TrossenArmComponent::write_joint(). Applies to every write on this arm,
+  /// regardless of who issues it (teleop, replay, or policy playback), not just
+  /// the policy-client path. Zero applies the goal immediately (libtrossen_arm
+  /// treats goal_time < 0.001s as no-interpolation); non-zero smooths the
+  /// per-tick motion between successive writes. Opt-in; defaults to 0.0 to
+  /// preserve prior immediate-apply behavior byte-for-byte. Validated as
+  /// non-negative and finite by TrossenArmComponent::configure().
+  /// Tuning trap: keep this below the session's control period. A per-tick
+  /// trajectory time longer than the interval to the next write means each goal
+  /// is superseded before it is reached, so the arm perpetually chases a moving
+  /// target and never settles.
+  float write_moving_time_s{0.0f};
+
   static ArmConfig from_json(const nlohmann::json& j) {
     ArmConfig c;
     if (j.contains("ip_address")) j.at("ip_address").get_to(c.ip_address);
@@ -67,6 +82,9 @@ struct ArmConfig {
     if (j.contains("episode_lifecycle_enabled")) {
       j.at("episode_lifecycle_enabled").get_to(c.episode_lifecycle_enabled);
     }
+    if (j.contains("write_moving_time_s")) {
+      j.at("write_moving_time_s").get_to(c.write_moving_time_s);
+    }
     return c;
   }
 
@@ -76,7 +94,8 @@ struct ArmConfig {
       {"model", model},
       {"end_effector", end_effector},
       {"staging_time_s", staging_time_s},
-      {"episode_lifecycle_enabled", episode_lifecycle_enabled}
+      {"episode_lifecycle_enabled", episode_lifecycle_enabled},
+      {"write_moving_time_s", write_moving_time_s}
     };
     // Emit staging only when configured. TrossenArmComponent::configure()
     // rejects a present-but-wrong-length staged_position, so an empty array

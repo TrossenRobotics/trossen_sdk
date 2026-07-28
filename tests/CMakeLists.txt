@@ -103,25 +103,12 @@ if(TROSSEN_ENABLE_RERUN_OBSERVER)
   target_link_libraries(test_rerun_observer PRIVATE trossen_sdk rerun_sdk GTest::gtest_main)
 endif()
 
-# PolicyClient config parsing — header-only schema, no transport deps, so it
-# builds regardless of TROSSEN_SDK_ENABLE_POLICY_CLIENT.
 add_executable(test_policy_client_config test_policy_client_config.cpp)
 target_link_libraries(test_policy_client_config PRIVATE trossen_sdk GTest::gtest_main)
-
-# Neutral types (Observation / ActionChunk / ChunkSlot / TransportStatus) are
-# header-only, so the chunk-slot test is ungated too.
-add_executable(test_action_chunk test_action_chunk.cpp)
-target_link_libraries(test_action_chunk PRIVATE trossen_sdk GTest::gtest_main)
 
 if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
   add_executable(test_msgpack_ndarray test_msgpack_ndarray.cpp)
   target_link_libraries(test_msgpack_ndarray PRIVATE trossen_sdk GTest::gtest_main msgpack-cxx)
-
-  add_executable(test_lerobot_codec test_lerobot_codec.cpp)
-  target_link_libraries(test_lerobot_codec PRIVATE trossen_sdk GTest::gtest_main)
-  # Absolute fixture path baked in: the test must pass regardless of ctest's cwd.
-  target_compile_definitions(test_lerobot_codec PRIVATE
-    LEROBOT_CODEC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/lerobot_codec")
 
   add_executable(test_openpi_websocket_transport test_openpi_websocket_transport.cpp)
   target_link_libraries(test_openpi_websocket_transport PRIVATE
@@ -129,6 +116,15 @@ if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
 
   add_executable(test_policy_client test_policy_client.cpp)
   target_link_libraries(test_policy_client PRIVATE trossen_sdk GTest::gtest_main)
+
+  add_executable(test_policy_client_producer test_policy_client_producer.cpp)
+  target_link_libraries(test_policy_client_producer PRIVATE trossen_sdk GTest::gtest_main)
+
+  add_executable(test_lerobot_codec test_lerobot_codec.cpp)
+  target_link_libraries(test_lerobot_codec PRIVATE trossen_sdk GTest::gtest_main)
+  # Absolute fixture path baked in: the test must pass regardless of ctest's cwd.
+  target_compile_definitions(test_lerobot_codec PRIVATE
+    LEROBOT_CODEC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/lerobot_codec")
 
   # Drives LerobotGrpcTransport against a gmock MockAsyncInferenceStub (no real
   # channel/server, so no gRPC teardown race). Needs the generated proto + mock
@@ -144,6 +140,9 @@ if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
   target_compile_definitions(test_lerobot_grpc_transport PRIVATE
     LEROBOT_CODEC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/lerobot_codec")
 endif()
+
+add_executable(test_action_chunk test_action_chunk.cpp)
+target_link_libraries(test_action_chunk PRIVATE trossen_sdk GTest::gtest_main)
 
 # Enable CTest integration
 include(GoogleTest)
@@ -183,9 +182,14 @@ endif()
 gtest_discover_tests(test_policy_client_config)
 gtest_discover_tests(test_action_chunk)
 if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
+  # Every add_executable() under the TROSSEN_SDK_ENABLE_POLICY_CLIENT guard must
+  # have a matching gtest_discover_tests() line here: without it the target still
+  # compiles but ctest never runs it (test_msgpack_ndarray and
+  # test_openpi_websocket_transport were silently undiscovered this way).
   gtest_discover_tests(test_msgpack_ndarray)
-  gtest_discover_tests(test_lerobot_codec)
   gtest_discover_tests(test_openpi_websocket_transport)
-  gtest_discover_tests(test_lerobot_grpc_transport)
   gtest_discover_tests(test_policy_client)
+  gtest_discover_tests(test_policy_client_producer)
+  gtest_discover_tests(test_lerobot_codec)
+  gtest_discover_tests(test_lerobot_grpc_transport)
 endif()

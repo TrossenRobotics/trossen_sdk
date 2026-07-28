@@ -79,6 +79,13 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
   if (config.contains("episode_lifecycle_enabled")) {
     episode_lifecycle_enabled_ = config.at("episode_lifecycle_enabled").get<bool>();
   }
+  if (config.contains("write_moving_time_s")) {
+    write_moving_time_s_ = config.at("write_moving_time_s").get<float>();
+    if (write_moving_time_s_ < 0.0f || !std::isfinite(write_moving_time_s_)) {
+      throw std::runtime_error(
+        "TrossenArmComponent: 'write_moving_time_s' must be non-negative and finite");
+    }
+  }
 
   // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
 }
@@ -111,7 +118,7 @@ void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
       std::to_string(cmd.size()));
   }
   std::vector<double> pos_d(cmd.begin(), cmd.end());
-  driver_->set_all_positions(pos_d, 0.0, false);
+  driver_->set_all_positions(pos_d, write_moving_time_s_, false);
 }
 
 std::vector<float> TrossenArmComponent::read_cartesian() {
