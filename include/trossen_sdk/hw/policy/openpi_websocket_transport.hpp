@@ -44,7 +44,7 @@ namespace trossen::hw::policy {
  * ``failure_count`` and (matching the previous die-on-disconnect behavior)
  * the transport reports kDisconnected until close()/connect() cycles it.
  *
- * Wire protocol (see ADR-004 §5.1):
+ * Wire protocol:
  *  - On connect, the server immediately pushes one msgpack-encoded
  *    ``server_metadata`` dict that ``connect()`` recv's once and stores.
  *  - Each request sends ``msgpack(obs_json)`` as one binary frame and blocks

@@ -23,6 +23,9 @@ target_link_libraries(test_backend_registry PRIVATE trossen_sdk GTest::gtest_mai
 add_executable(test_trossen_mcap_backend test_trossen_mcap_backend.cpp)
 target_link_libraries(test_trossen_mcap_backend PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_active_hardware_registry test_active_hardware_registry.cpp)
+target_link_libraries(test_active_hardware_registry PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_push_producer_registry test_push_producer_registry.cpp)
 target_link_libraries(test_push_producer_registry PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -124,6 +127,9 @@ if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
   target_link_libraries(test_openpi_websocket_transport PRIVATE
     trossen_sdk GTest::gtest_main msgpack-cxx ixwebsocket::ixwebsocket)
 
+  add_executable(test_policy_client test_policy_client.cpp)
+  target_link_libraries(test_policy_client PRIVATE trossen_sdk GTest::gtest_main)
+
   # Drives LerobotGrpcTransport against a gmock MockAsyncInferenceStub (no real
   # channel/server, so no gRPC teardown race). Needs the generated proto + mock
   # headers, gmock, and a direct gRPC/protobuf link (PRIVATE on trossen_sdk).
@@ -146,6 +152,7 @@ gtest_discover_tests(test_record)
 gtest_discover_tests(test_null_backend)
 gtest_discover_tests(test_backend_registry)
 gtest_discover_tests(test_trossen_mcap_backend)
+gtest_discover_tests(test_active_hardware_registry)
 gtest_discover_tests(test_push_producer_registry)
 gtest_discover_tests(test_push_producer_base)
 gtest_discover_tests(test_session_manager_push_producer)
@@ -180,4 +187,5 @@ if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
   gtest_discover_tests(test_lerobot_codec)
   gtest_discover_tests(test_openpi_websocket_transport)
   gtest_discover_tests(test_lerobot_grpc_transport)
+  gtest_discover_tests(test_policy_client)
 endif()
