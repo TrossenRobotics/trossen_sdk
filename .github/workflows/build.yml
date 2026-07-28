@@ -3,15 +3,54 @@ name: Build and Test
 on:
   push:
     branches: [ main ]
+  # Any base branch.
   pull_request:
-    branches: [ main ]
+  # Mondays 10:37 UTC.
+  schedule:
+    - cron: '37 10 * * 1'
   workflow_dispatch:
 
+# Supersede in-progress runs for the same branch.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  build-and-test:
+  # Emits the build configurations from .github/ci-configs.json: those marked "pr" for
+  # pull requests, all of them for every other event.
+  select-configs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
+    outputs:
+      include: ${{ steps.select.outputs.include }}
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Select build configurations
+      id: select
+      run: |
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          include=$(jq -c '[.[] | select(.pr)]' .github/ci-configs.json)
+        else
+          include=$(jq -c '.' .github/ci-configs.json)
+        fi
+        echo "Selected configs: $(echo "$include" | jq -r 'map(.name) | join(", ")')"
+        echo "include=$include" >> "$GITHUB_OUTPUT"
+
+  build-and-test:
+    needs: select-configs
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.select-configs.outputs.include) }}
+
+    name: build-and-test (${{ matrix.name }})
 
     steps:
     - name: Checkout code
@@ -28,7 +67,10 @@ jobs:
           protobuf-compiler \
           pkg-config \
           libbz2-dev \
-          zlib1g-dev
+          zlib1g-dev \
+          libgrpc++-dev \
+          protobuf-compiler-grpc \
+          python3-dev
 
     - name: Install Parquet dependencies
       run: |
@@ -77,12 +119,12 @@ jobs:
           libfastrtps-dev \
           librealsense2-dev
 
+    - name: Configure
+      run: cmake -B build ${{ matrix.flags }}
+
     - name: Build SDK
-      run: |
-        mkdir -p build
-        cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON .. && make -j$(nproc)
+      run: cmake --build build -j$(nproc)
 
     - name: Run Tests
-      run: |
-        mkdir -p build
-        cd build && cmake -DTROSSEN_ENABLE_REALSENSE=ON -DBUILD_TESTING=ON .. && ctest --output-on-failure
+      if: ${{ !matrix.skip_tests }}
+      run: ctest --test-dir build --output-on-failure

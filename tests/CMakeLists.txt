@@ -19,6 +19,9 @@ target_link_libraries(test_null_backend PRIVATE trossen_sdk GTest::gtest_main)
 
 add_executable(test_backend_registry test_backend_registry.cpp)
 target_link_libraries(test_backend_registry PRIVATE trossen_sdk GTest::gtest_main)
+# Absolute path to the config fixture the test loads.
+target_compile_definitions(test_backend_registry PRIVATE
+  TROSSEN_TEST_CONFIG_PATH="${CMAKE_CURRENT_SOURCE_DIR}/test_config.json")
 
 add_executable(test_trossen_mcap_backend test_trossen_mcap_backend.cpp)
 target_link_libraries(test_trossen_mcap_backend PRIVATE trossen_sdk GTest::gtest_main)
