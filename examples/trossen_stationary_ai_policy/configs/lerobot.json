@@ -1,0 +1,206 @@
+{
+  "robot_name": "trossen_stationary_ai_lerobot",
+
+  "hardware": {
+    "arms": {
+      "follower_left": {
+        "ip_address":      "192.168.1.5",
+        "model":           "wxai_v0",
+        "end_effector":    "wxai_v0_follower",
+        "staged_position": [0.0, 1.0471975511965976, 0.5235987755982988, 0.6283185307179586, 0.0, 0.0, 0.0],
+        "slew_time_s": 3.0,
+        "episode_lifecycle_enabled": true,
+        "write_moving_time_s": 0.15
+      },
+      "follower_right": {
+        "ip_address":      "192.168.1.4",
+        "model":           "wxai_v0",
+        "end_effector":    "wxai_v0_follower",
+        "staged_position": [0.0, 1.0471975511965976, 0.5235987755982988, 0.6283185307179586, 0.0, 0.0, 0.0],
+        "slew_time_s": 3.0,
+        "episode_lifecycle_enabled": true,
+        "write_moving_time_s": 0.15
+      }
+    },
+    "cameras": [
+      {
+        "id":            "camera_high",
+        "serial_number": "218622270304",
+        "width":         640,
+        "height":        480,
+        "fps":           30,
+        "use_depth":     false
+      },
+      {
+        "id":            "camera_low",
+        "serial_number": "130322272628",
+        "width":         640,
+        "height":        480,
+        "fps":           30,
+        "use_depth":     false
+      },
+      {
+        "id":            "camera_left_wrist",
+        "serial_number": "218622274938",
+        "width":         640,
+        "height":        480,
+        "fps":           30,
+        "use_depth":     false
+      },
+      {
+        "id":            "camera_right_wrist",
+        "serial_number": "128422271347",
+        "width":         640,
+        "height":        480,
+        "fps":           30,
+        "use_depth":     false
+      }
+    ],
+    "policy_clients": [
+      {
+        "id":           "policy_main",
+        "transport":    "lerobot_grpc",
+        "server_url":   "localhost:8080",
+        "inference_hz": 10.0,
+        "drain_threshold": 0.0,
+        "prompt":       "Grab and handover the red cube to the other arm",
+        "log_path":     "~/.trossen_sdk/policy_logs/sdk_run.jsonl",
+        "chunk_boundary_blend_s": 0.15,
+        "freshness_timeout_ms": 200,
+        "output_ema_alpha": 0.4,
+        "transport_config": {
+          "policy_type":              "pi05",
+          "pretrained_name_or_path":  "TrossenRoboticsCommunity/pi05-block-transfer-lerobot",
+          "actions_per_chunk":        50,
+          "device":                   "cuda",
+          "connect_timeout_s":        180.0,
+          "lerobot_features": {
+            "observation.state":                  { "dtype": "float32", "shape": [14] },
+            "observation.images.cam_high":        { "dtype": "image",   "shape": [480, 640, 3] },
+            "observation.images.cam_low":         { "dtype": "image",   "shape": [480, 640, 3] },
+            "observation.images.cam_left_wrist":  { "dtype": "image",   "shape": [480, 640, 3] },
+            "observation.images.cam_right_wrist": { "dtype": "image",   "shape": [480, 640, 3] }
+          },
+          "rename_map": {}
+        },
+        "subscriptions": [
+          { "record_id": "follower_left",      "throttle_hz": 30.0, "obs_key": "state.left" },
+          { "record_id": "follower_right",     "throttle_hz": 30.0, "obs_key": "state.right" },
+          { "record_id": "camera_high",        "throttle_hz": 30.0, "obs_key": "images.cam_high" },
+          { "record_id": "camera_low",         "throttle_hz": 30.0, "obs_key": "images.cam_low" },
+          { "record_id": "camera_left_wrist",  "throttle_hz": 30.0, "obs_key": "images.cam_left_wrist" },
+          { "record_id": "camera_right_wrist", "throttle_hz": 30.0, "obs_key": "images.cam_right_wrist" }
+        ],
+        "joint_layout": [
+          {
+            "leader_id": "policy_left", "joint_offset": 0, "joint_count": 7,
+            "joint_names": ["left_joint_0", "left_joint_1", "left_joint_2", "left_joint_3", "left_joint_4", "left_joint_5", "left_left_carriage_joint"]
+          },
+          {
+            "leader_id": "policy_right", "joint_offset": 7, "joint_count": 7,
+            "joint_names": ["right_joint_0", "right_joint_1", "right_joint_2", "right_joint_3", "right_joint_4", "right_joint_5", "right_left_carriage_joint"]
+          }
+        ]
+      }
+    ]
+  },
+
+  "producers": [
+    {
+      "type":            "trossen_arm",
+      "hardware_id":     "follower_left",
+      "stream_id":       "follower_left",
+      "poll_rate_hz":    30.0,
+      "use_device_time": false
+    },
+    {
+      "type":            "trossen_arm",
+      "hardware_id":     "follower_right",
+      "stream_id":       "follower_right",
+      "poll_rate_hz":    30.0,
+      "use_device_time": false
+    },
+    {
+      "type":            "realsense_camera",
+      "hardware_id":     "camera_high",
+      "stream_id":       "camera_high",
+      "poll_rate_hz":    30.0,
+      "encoding":        "bgr8",
+      "use_device_time": true
+    },
+    {
+      "type":            "realsense_camera",
+      "hardware_id":     "camera_low",
+      "stream_id":       "camera_low",
+      "poll_rate_hz":    30.0,
+      "encoding":        "bgr8",
+      "use_device_time": true
+    },
+    {
+      "type":            "realsense_camera",
+      "hardware_id":     "camera_left_wrist",
+      "stream_id":       "camera_left_wrist",
+      "poll_rate_hz":    30.0,
+      "encoding":        "bgr8",
+      "use_device_time": true
+    },
+    {
+      "type":            "realsense_camera",
+      "hardware_id":     "camera_right_wrist",
+      "stream_id":       "camera_right_wrist",
+      "poll_rate_hz":    30.0,
+      "encoding":        "bgr8",
+      "use_device_time": true
+    },
+    {
+      "type":            "policy_client",
+      "hardware_id":     "policy_main",
+      "stream_id":       "policy_action",
+      "poll_rate_hz":    30.0,
+      "use_device_time": false
+    }
+  ],
+
+  "observers": [
+    {
+      "type":      "rerun",
+      "id":        "live_viewer",
+      "rerun_url": "rerun+http://127.0.0.1:9876/proxy",
+      "app_id":    "trossen_stationary_ai_lerobot",
+      "spawn":     true,
+      "enabled":   false,
+      "subscriptions": [
+        { "record_id": "follower_left",      "throttle_hz": 30.0 },
+        { "record_id": "follower_right",     "throttle_hz": 30.0 },
+        { "record_id": "policy_action",      "throttle_hz": 30.0 },
+        { "record_id": "camera_high",        "throttle_hz": 15.0 },
+        { "record_id": "camera_low",         "throttle_hz": 15.0 },
+        { "record_id": "camera_left_wrist",  "throttle_hz": 15.0 },
+        { "record_id": "camera_right_wrist", "throttle_hz": 15.0 }
+      ]
+    }
+  ],
+
+  "teleop": {
+    "enabled": true,
+    "rate_hz": 30.0,
+    "pairs": [
+      { "leader": "policy_left",  "follower": "follower_left",  "space": "joint" },
+      { "leader": "policy_right", "follower": "follower_right", "space": "joint" }
+    ]
+  },
+
+  "backend": {
+    "root":             "~/.trossen_sdk",
+    "dataset_id":       "stationary_lerobot_dataset",
+    "compression":      "",
+    "chunk_size_bytes": 4194304
+  },
+
+  "session": {
+    "max_duration":  60.0,
+    "max_episodes":  1,
+    "backend_type":  "trossen_mcap",
+    "reset_duration": 5.0
+  }
+}
