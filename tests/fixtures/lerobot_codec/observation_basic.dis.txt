@@ -1,0 +1,111 @@
+    0: \x80 PROTO      4
+    2: \x95 FRAME      447
+   11: \x8c SHORT_BINUNICODE 'lerobot.async_inference.helpers'
+   44: \x94 MEMOIZE    (as 0)
+   45: \x8c SHORT_BINUNICODE 'TimedObservation'
+   63: \x94 MEMOIZE    (as 1)
+   64: \x93 STACK_GLOBAL
+   65: \x94 MEMOIZE    (as 2)
+   66: )    EMPTY_TUPLE
+   67: \x81 NEWOBJ
+   68: \x94 MEMOIZE    (as 3)
+   69: }    EMPTY_DICT
+   70: \x94 MEMOIZE    (as 4)
+   71: (    MARK
+   72: \x8c     SHORT_BINUNICODE 'timestamp'
+   83: \x94     MEMOIZE    (as 5)
+   84: G        BINFLOAT   123.5
+   93: \x8c     SHORT_BINUNICODE 'timestep'
+  103: \x94     MEMOIZE    (as 6)
+  104: K        BININT1    100
+  106: \x8c     SHORT_BINUNICODE 'observation'
+  119: \x94     MEMOIZE    (as 7)
+  120: }        EMPTY_DICT
+  121: \x94     MEMOIZE    (as 8)
+  122: (        MARK
+  123: \x8c         SHORT_BINUNICODE 'left_waist.pos'
+  139: \x94         MEMOIZE    (as 9)
+  140: G            BINFLOAT   0.0
+  149: \x8c         SHORT_BINUNICODE 'left_shoulder.pos'
+  168: \x94         MEMOIZE    (as 10)
+  169: G            BINFLOAT   1.5
+  178: \x8c         SHORT_BINUNICODE 'right_waist.pos'
+  195: \x94         MEMOIZE    (as 11)
+  196: G            BINFLOAT   -2.25
+  205: \x8c         SHORT_BINUNICODE 'right_shoulder.pos'
+  225: \x94         MEMOIZE    (as 12)
+  226: G            BINFLOAT   3.75
+  235: \x8c         SHORT_BINUNICODE 'observation.images.cam_high'
+  264: \x94         MEMOIZE    (as 13)
+  265: \x8c         SHORT_BINUNICODE 'numpy._core.multiarray'
+  289: \x94         MEMOIZE    (as 14)
+  290: \x8c         SHORT_BINUNICODE '_reconstruct'
+  304: \x94         MEMOIZE    (as 15)
+  305: \x93         STACK_GLOBAL
+  306: \x94         MEMOIZE    (as 16)
+  307: \x8c         SHORT_BINUNICODE 'numpy'
+  314: \x94         MEMOIZE    (as 17)
+  315: \x8c         SHORT_BINUNICODE 'ndarray'
+  324: \x94         MEMOIZE    (as 18)
+  325: \x93         STACK_GLOBAL
+  326: \x94         MEMOIZE    (as 19)
+  327: K            BININT1    0
+  329: \x85         TUPLE1
+  330: \x94         MEMOIZE    (as 20)
+  331: C            SHORT_BINBYTES b'b'
+  334: \x94         MEMOIZE    (as 21)
+  335: \x87         TUPLE3
+  336: \x94         MEMOIZE    (as 22)
+  337: R            REDUCE
+  338: \x94         MEMOIZE    (as 23)
+  339: (            MARK
+  340: K                BININT1    1
+  342: K                BININT1    2
+  344: K                BININT1    2
+  346: K                BININT1    3
+  348: \x87             TUPLE3
+  349: \x94             MEMOIZE    (as 24)
+  350: h                BINGET     17
+  352: \x8c             SHORT_BINUNICODE 'dtype'
+  359: \x94             MEMOIZE    (as 25)
+  360: \x93             STACK_GLOBAL
+  361: \x94             MEMOIZE    (as 26)
+  362: \x8c             SHORT_BINUNICODE 'u1'
+  366: \x94             MEMOIZE    (as 27)
+  367: \x89             NEWFALSE
+  368: \x88             NEWTRUE
+  369: \x87             TUPLE3
+  370: \x94             MEMOIZE    (as 28)
+  371: R                REDUCE
+  372: \x94             MEMOIZE    (as 29)
+  373: (                MARK
+  374: K                    BININT1    3
+  376: \x8c                 SHORT_BINUNICODE '|'
+  379: \x94                 MEMOIZE    (as 30)
+  380: N                    NONE
+  381: N                    NONE
+  382: N                    NONE
+  383: J                    BININT     -1
+  388: J                    BININT     -1
+  393: K                    BININT1    0
+  395: t                    TUPLE      (MARK at 373)
+  396: \x94             MEMOIZE    (as 31)
+  397: b                BUILD
+  398: \x89             NEWFALSE
+  399: C                SHORT_BINBYTES b'\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b'
+  413: \x94             MEMOIZE    (as 32)
+  414: t                TUPLE      (MARK at 339)
+  415: \x94         MEMOIZE    (as 33)
+  416: b            BUILD
+  417: \x8c         SHORT_BINUNICODE 'task'
+  423: \x94         MEMOIZE    (as 34)
+  424: \x8c         SHORT_BINUNICODE 'pick up the cube'
+  442: \x94         MEMOIZE    (as 35)
+  443: u            SETITEMS   (MARK at 122)
+  444: \x8c     SHORT_BINUNICODE 'must_go'
+  453: \x94     MEMOIZE    (as 36)
+  454: \x89     NEWFALSE
+  455: u        SETITEMS   (MARK at 71)
+  456: b    BUILD
+  457: .    STOP
+highest protocol among opcodes = 4

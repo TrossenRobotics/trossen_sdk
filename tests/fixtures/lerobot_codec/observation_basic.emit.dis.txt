@@ -1,0 +1,75 @@
+    0: \x80 PROTO      4
+    2: \x95 FRAME      416
+   11: \x8c SHORT_BINUNICODE 'lerobot.async_inference.helpers'
+   44: \x8c SHORT_BINUNICODE 'TimedObservation'
+   62: \x93 STACK_GLOBAL
+   63: )    EMPTY_TUPLE
+   64: \x81 NEWOBJ
+   65: }    EMPTY_DICT
+   66: (    MARK
+   67: \x8c     SHORT_BINUNICODE 'timestamp'
+   78: G        BINFLOAT   123.5
+   87: \x8c     SHORT_BINUNICODE 'timestep'
+   97: K        BININT1    100
+   99: \x8c     SHORT_BINUNICODE 'observation'
+  112: }        EMPTY_DICT
+  113: (        MARK
+  114: \x8c         SHORT_BINUNICODE 'left_waist.pos'
+  130: G            BINFLOAT   0.0
+  139: \x8c         SHORT_BINUNICODE 'left_shoulder.pos'
+  158: G            BINFLOAT   1.5
+  167: \x8c         SHORT_BINUNICODE 'right_waist.pos'
+  184: G            BINFLOAT   -2.25
+  193: \x8c         SHORT_BINUNICODE 'right_shoulder.pos'
+  213: G            BINFLOAT   3.75
+  222: \x8c         SHORT_BINUNICODE 'observation.images.cam_high'
+  251: \x8c         SHORT_BINUNICODE 'numpy._core.multiarray'
+  275: \x8c         SHORT_BINUNICODE '_reconstruct'
+  289: \x93         STACK_GLOBAL
+  290: \x8c         SHORT_BINUNICODE 'numpy'
+  297: \x8c         SHORT_BINUNICODE 'ndarray'
+  306: \x93         STACK_GLOBAL
+  307: K            BININT1    0
+  309: \x85         TUPLE1
+  310: C            SHORT_BINBYTES b'b'
+  313: \x87         TUPLE3
+  314: R            REDUCE
+  315: (            MARK
+  316: K                BININT1    1
+  318: (                MARK
+  319: K                    BININT1    2
+  321: K                    BININT1    2
+  323: K                    BININT1    3
+  325: t                    TUPLE      (MARK at 318)
+  326: \x8c             SHORT_BINUNICODE 'numpy'
+  333: \x8c             SHORT_BINUNICODE 'dtype'
+  340: \x93             STACK_GLOBAL
+  341: \x8c             SHORT_BINUNICODE 'u1'
+  345: \x89             NEWFALSE
+  346: \x88             NEWTRUE
+  347: \x87             TUPLE3
+  348: R                REDUCE
+  349: (                MARK
+  350: K                    BININT1    3
+  352: \x8c                 SHORT_BINUNICODE '|'
+  355: N                    NONE
+  356: N                    NONE
+  357: N                    NONE
+  358: J                    BININT     -1
+  363: J                    BININT     -1
+  368: K                    BININT1    0
+  370: t                    TUPLE      (MARK at 349)
+  371: b                BUILD
+  372: \x89             NEWFALSE
+  373: C                SHORT_BINBYTES b'\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b'
+  387: t                TUPLE      (MARK at 315)
+  388: b            BUILD
+  389: \x8c         SHORT_BINUNICODE 'task'
+  395: \x8c         SHORT_BINUNICODE 'pick up the cube'
+  413: u            SETITEMS   (MARK at 113)
+  414: \x8c     SHORT_BINUNICODE 'must_go'
+  423: \x89     NEWFALSE
+  424: u        SETITEMS   (MARK at 66)
+  425: b    BUILD
+  426: .    STOP
+highest protocol among opcodes = 4
