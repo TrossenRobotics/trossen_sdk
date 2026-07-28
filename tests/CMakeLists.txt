@@ -119,6 +119,24 @@ if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
   # Absolute fixture path baked in: the test must pass regardless of ctest's cwd.
   target_compile_definitions(test_lerobot_codec PRIVATE
     LEROBOT_CODEC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/lerobot_codec")
+
+  add_executable(test_openpi_websocket_transport test_openpi_websocket_transport.cpp)
+  target_link_libraries(test_openpi_websocket_transport PRIVATE
+    trossen_sdk GTest::gtest_main msgpack-cxx ixwebsocket::ixwebsocket)
+
+  # Drives LerobotGrpcTransport against a gmock MockAsyncInferenceStub (no real
+  # channel/server, so no gRPC teardown race). Needs the generated proto + mock
+  # headers, gmock, and a direct gRPC/protobuf link (PRIVATE on trossen_sdk).
+  add_executable(test_lerobot_grpc_transport test_lerobot_grpc_transport.cpp)
+  target_link_libraries(test_lerobot_grpc_transport PRIVATE
+    trossen_sdk GTest::gtest_main GTest::gmock ${GRPCPP_LIBRARIES} ${Protobuf_LIBRARIES})
+  target_link_directories(test_lerobot_grpc_transport PRIVATE ${GRPCPP_LIBRARY_DIRS})
+  target_include_directories(test_lerobot_grpc_transport PRIVATE
+    # Generated mock-stub header lives in the build tree.
+    ${CMAKE_BINARY_DIR}/lerobot_proto)
+  # Replays a pinned pickled action chunk through the mock stub's GetActions.
+  target_compile_definitions(test_lerobot_grpc_transport PRIVATE
+    LEROBOT_CODEC_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures/lerobot_codec")
 endif()
 
 # Enable CTest integration
@@ -160,4 +178,6 @@ gtest_discover_tests(test_action_chunk)
 if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
   gtest_discover_tests(test_msgpack_ndarray)
   gtest_discover_tests(test_lerobot_codec)
+  gtest_discover_tests(test_openpi_websocket_transport)
+  gtest_discover_tests(test_lerobot_grpc_transport)
 endif()
