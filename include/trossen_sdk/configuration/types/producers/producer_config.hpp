@@ -31,12 +31,9 @@ namespace trossen::configuration {
  * }
  * @endcode
  *
- * Known types:
- *  - "trossen_arm"      - arm joint-state producer
- *  - "zed_camera"       - StereoLabs ZED stereo camera producer
- *  - "realsense_camera" - RealSense image producer
- *  - "opencv_camera"    - OpenCV/V4L2 image producer
- *  - "slate_base"       - SLATE mobile base velocity producer
+ * The set of valid `type` strings is determined at runtime by the
+ * ProducerRegistry; see the Supported Hardware section of the README for
+ * the currently registered producers.
  */
 struct ProducerConfig {
   /// @brief Producer/hardware registry key (e.g. "trossen_arm", "realsense_camera")

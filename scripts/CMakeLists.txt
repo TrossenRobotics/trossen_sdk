@@ -26,3 +26,13 @@ target_include_directories(trossen_mcap_to_lerobot_v2 PRIVATE
 )
 target_compile_definitions(trossen_mcap_to_lerobot_v2 PRIVATE MCAP_IMPLEMENTATION)
 target_link_libraries(trossen_mcap_to_lerobot_v2 trossen_sdk arrow parquet zstd lz4 protobuf ${OpenCV_LIBS})
+
+# Hardware discovery tool
+#
+# Thin CLI over trossen::hw::DiscoveryRegistry. Each hardware component that
+# supports enumeration self-registers a find() function inside libtrossen_sdk;
+# this binary just dispatches to the registry, so no per-vendor #ifdefs or link
+# flags are needed here.
+add_executable(tr_sdk_find_hardware find_hardware/find_hardware.cpp)
+target_link_libraries(tr_sdk_find_hardware trossen_sdk)
+install(TARGETS tr_sdk_find_hardware DESTINATION bin)

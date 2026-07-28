@@ -11,7 +11,10 @@
 #include <stdexcept>
 #include <string>
 
+#include "opencv2/opencv.hpp"
+
 #include "trossen_sdk/hw/camera/zed_camera_component.hpp"
+#include "trossen_sdk/hw/discovery_registry.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
 
 namespace trossen::hw::camera {
@@ -150,6 +153,14 @@ bool ZedCameraComponent::is_opened() const {
   return camera_ && camera_->isOpened();
 }
 
+std::vector<DiscoveredHardware> ZedCameraComponent::find(
+  const std::filesystem::path& /*output_dir*/)
+{
+  std::cout << "[ZedCameraComponent::find] not yet implemented\n";
+  return {};
+}
+
 REGISTER_HARDWARE(ZedCameraComponent, "zed_camera")
+REGISTER_HARDWARE_DISCOVERY(ZedCameraComponent, "zed_camera")
 
 }  // namespace trossen::hw::camera
