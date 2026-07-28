@@ -4,9 +4,9 @@
   "hardware": {
     "bimanual_arms": {
       "bimanual_glide": {
-        "left_ip_address": "192.168.8.3",
+        "left_ip_address": "192.168.0.3",
         "left_model": "glide_left",
-        "right_ip_address": "192.168.8.2",
+        "right_ip_address": "192.168.0.2",
         "right_model": "glide_right",
         "write_moving_time_s": 0.2,
         "joint_signs": [1,1,1,-1,-1,1,1],
@@ -28,7 +28,7 @@
       {
         "id":            "camera_left",
         "type":          "zed_camera",
-        "serial_number": "95483555",
+        "serial_number": "97900849",
         "resolution":    "HD1200",
         "fps":           30,
         "use_depth":     false
@@ -36,7 +36,7 @@
       {
         "id":            "camera_right",
         "type":          "zed_camera",
-        "serial_number": "97389637",
+        "serial_number": "97525506",
         "resolution":    "HD1200",
         "fps":           30,
         "use_depth":     false
