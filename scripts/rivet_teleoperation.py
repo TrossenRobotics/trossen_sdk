@@ -129,8 +129,9 @@ if __name__ == "__main__":
         )
 
         right_leader_joint_limits = driver_right_leader.get_joint_limits()
-        right_leader_joint_limits[-1].position_max = 0.05
+
         driver_right_leader.set_joint_limits(right_leader_joint_limits)
+
 
         if ENABLE_FOLLOWER:
             driver_right_follower.configure(
@@ -203,23 +204,24 @@ if __name__ == "__main__":
         driver_left_follower.set_motor_parameters(motor_parameters)
 
     if ENABLE_RIGHT:
-        driver_right_leader.set_all_modes(trossen_arm.Mode.external_effort)
+        driver_right_leader.set_all_modes(trossen_arm.Mode.effort)
         driver_right_leader.set_gripper_mode(trossen_arm.Mode.effort)
+        driver_right_leader.set_gripper_effort(LEADER_OFFSET, 0.2, False)
 
         if ENABLE_FOLLOWER:
             driver_right_follower.set_all_modes(trossen_arm.Mode.position)
             driver_right_follower.set_gripper_mode(trossen_arm.Mode.position)
 
     if ENABLE_LEFT:
-        driver_left_leader.set_all_modes(trossen_arm.Mode.external_effort)
+        driver_left_leader.set_all_modes(trossen_arm.Mode.effort)
         driver_left_leader.set_gripper_mode(trossen_arm.Mode.effort)
+        driver_left_leader.set_gripper_effort(LEADER_OFFSET, 0.2, False)
 
         if ENABLE_FOLLOWER:
             driver_left_follower.set_all_modes(trossen_arm.Mode.position)
             driver_left_follower.set_gripper_mode(trossen_arm.Mode.position)
 
     print("Moving to home positions...")
-
 
     if ENABLE_BASE:
         if not base.wait_until_ready():
@@ -258,7 +260,7 @@ if __name__ == "__main__":
                 right_positions = driver_right_leader.get_all_positions()
                 right_input = driver_right_leader.get_input_report()
                 if ENABLE_FOLLOWER:
-                    right_efforts = driver_right_follower.get_all_external_efforts()
+                    right_efforts = driver_right_follower.get_all_efforts()
                 # Scale to -1 to 1 velocity (rad/s)
                 base_velocity_angular_z = -scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
                                 BASE_MIN, BASE_MAX, BASE_DEADZONE)
@@ -279,7 +281,7 @@ if __name__ == "__main__":
                 left_input = driver_left_leader.get_input_report()
 
                 if ENABLE_FOLLOWER:
-                    left_efforts = driver_left_follower.get_all_external_efforts()
+                    left_efforts = driver_left_follower.get_all_efforts()
 
                 #Scale to -1 to 1 velocity (m/s)
                 base_velocity_linear_x = scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
@@ -300,7 +302,7 @@ if __name__ == "__main__":
             if ENABLE_RIGHT and ENABLE_FOLLOWER:
                 # Feed the external efforts from the follower robot to the leader robot
                 # TODO: REVERT THIS???
-                driver_right_leader.set_arm_external_efforts(
+                driver_right_leader.set_arm_efforts(
                     np.array(
                         [
                             right_efforts[0],
@@ -335,7 +337,7 @@ if __name__ == "__main__":
                 # Read the leader's gripper position and follower's gripper effort
                 leader_right_position = driver_right_leader.get_gripper_position()
                 follower_right_position = driver_right_follower.get_gripper_position()
-                follower_right_effort = driver_right_follower.get_gripper_external_effort()
+                follower_right_effort = driver_right_follower.get_gripper_effort()
 
                 leader_right_effort = right_gripper_feedback.update(follower_right_effort)
 
@@ -356,7 +358,7 @@ if __name__ == "__main__":
             # LEFT ARM
             if ENABLE_LEFT and ENABLE_FOLLOWER:
                 # Feed the external efforts from the follower robot to the leader robot
-                driver_left_leader.set_arm_external_efforts(
+                driver_left_leader.set_arm_efforts(
                     np.array(
                         [
                             left_efforts[0],
@@ -391,7 +393,7 @@ if __name__ == "__main__":
                 # LEFT ARM GRIPPER
                 leader_left_position = driver_left_leader.get_gripper_position()
                 follower_left_position = driver_left_follower.get_gripper_position()
-                follower_left_effort = driver_left_follower.get_gripper_external_effort()
+                follower_left_effort = driver_left_follower.get_gripper_effort()
 
                 leader_left_effort = left_gripper_feedback.update(follower_left_effort)
 
@@ -402,7 +404,7 @@ if __name__ == "__main__":
 
                 # Set the follower's gripper position to match the leader's position
                 driver_left_follower.set_gripper_position(
-                    leader_left_position + 0.002, 0.0, False
+                    leader_left_position, 0.0, False
                 )
 
                 # Read the follower's gripper position for logging
