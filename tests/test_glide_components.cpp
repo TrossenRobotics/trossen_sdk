@@ -172,6 +172,184 @@ TEST_F(GlideComponentTest, BothLiftButtonsHeldCancels) {
   EXPECT_FLOAT_EQ(base.read()[ba::kLift], 0.0f);
 }
 
+// ── Swerve base: right stick translation, left stick yaw ─────────────────
+
+/// The real Rivet mapping: left handle rotates, right handle translates in 2D,
+/// right handle buttons drive the lift.
+nlohmann::json swerve_config(float max = 0.6f, float deadzone = 0.06f) {
+  return {
+    {"translation", {
+      {"arm_id", "glide_right"},
+      {"forward_source", "joystick_y"},
+      {"lateral_source", "joystick_x"},
+      {"max", max},
+      {"deadzone", deadzone},
+    }},
+    {"axes", {
+      {"angular", {{"arm_id", "glide_left"}, {"source", "joystick_x"},
+                   {"max", 1.2f}, {"deadzone", 0.1f}}},
+      {"lift", {{"arm_id", "glide_right"}, {"source", "buttons"},
+                {"up_bit", 0}, {"down_bit", 2}, {"max", 8000.0f}}},
+    }},
+  };
+}
+
+TEST_F(GlideComponentTest, SwerveReadsTranslationAndYawFromDifferentHandles) {
+  GlideBaseComponent base("base_leader");
+  base.configure(swerve_config());
+
+  set_handle("glide_right", kStickCentre, kStickMax);  // full forward
+  set_handle("glide_left",  kStickMax, kStickCentre);  // full yaw
+
+  const auto cmd = base.read();
+  EXPECT_NEAR(cmd[ba::kLinear], 0.6f, 1e-3f);
+  EXPECT_NEAR(cmd[ba::kAngular], 1.2f, 1e-3f);
+  EXPECT_NEAR(cmd[ba::kLateral], 0.0f, 1e-3f);
+}
+
+TEST_F(GlideComponentTest, SwerveDiagonalIsNotFasterThanStraight) {
+  GlideBaseComponent base("base_leader");
+  base.configure(swerve_config(0.6f, 0.0f));
+
+  set_handle("glide_right", kStickCentre, kStickMax);
+  const auto straight = base.read();
+  const float straight_mag =
+    std::hypot(straight[ba::kLinear], straight[ba::kLateral]);
+
+  set_handle("glide_right", kStickMax, kStickMax);  // full diagonal
+  const auto diagonal = base.read();
+  const float diagonal_mag =
+    std::hypot(diagonal[ba::kLinear], diagonal[ba::kLateral]);
+
+  // Per-axis scaling would give 0.6*sqrt(2) = 0.85 here. The magnitude clamp is
+  // what keeps a diagonal from being 41% faster than straight ahead.
+  EXPECT_NEAR(diagonal_mag, straight_mag, 1e-3f);
+  EXPECT_NEAR(diagonal_mag, 0.6f, 1e-3f);
+}
+
+TEST_F(GlideComponentTest, SwerveDiagonalPreservesDirection) {
+  GlideBaseComponent base("base_leader");
+  base.configure(swerve_config(0.6f, 0.0f));
+
+  set_handle("glide_right", kStickMax, kStickMax);
+  const auto cmd = base.read();
+
+  // Equal deflection on both stick axes must come out as an equal split, so the
+  // base actually travels at 45 degrees rather than favouring one component.
+  EXPECT_NEAR(cmd[ba::kLinear], cmd[ba::kLateral], 1e-3f);
+  EXPECT_GT(cmd[ba::kLinear], 0.0f);
+}
+
+TEST_F(GlideComponentTest, SwerveDeadzoneIsRadialNotSquare) {
+  // deadzone 0.30 of max 1.0 => any vector shorter than 0.30 is dead.
+  GlideBaseComponent base("base_leader");
+  base.configure(swerve_config(1.0f, 0.30f));
+
+  // A diagonal nudge of 0.25 per axis has magnitude 0.354 — outside a radial
+  // deadzone, but inside a square one. A square deadzone would wrongly zero it.
+  const auto at = [](float frac) {
+    return static_cast<std::uint16_t>(kStickCentre + frac * (kStickMax - kStickCentre));
+  };
+  set_handle("glide_right", at(0.25f), at(0.25f));
+  const auto diagonal = base.read();
+  EXPECT_GT(std::hypot(diagonal[ba::kLinear], diagonal[ba::kLateral]), 0.0f);
+
+  // Straight push of the same per-axis size has magnitude 0.25 — inside the
+  // radial deadzone, so it must be zero. Same threshold in every direction.
+  set_handle("glide_right", kStickCentre, at(0.25f));
+  const auto straight = base.read();
+  EXPECT_FLOAT_EQ(straight[ba::kLinear], 0.0f);
+  EXPECT_FLOAT_EQ(straight[ba::kLateral], 0.0f);
+}
+
+TEST_F(GlideComponentTest, SwerveOutputIsContinuousAtDeadzoneEdge) {
+  GlideBaseComponent base("base_leader");
+  base.configure(swerve_config(1.0f, 0.30f));
+
+  const auto at = [](float frac) {
+    return static_cast<std::uint16_t>(kStickCentre + frac * (kStickMax - kStickCentre));
+  };
+  // Just past the deadzone the output must start near zero, not jump to 0.30 —
+  // the surviving range is rescaled onto 0..max.
+  set_handle("glide_right", kStickCentre, at(0.32f));
+  EXPECT_LT(base.read()[ba::kLinear], 0.1f);
+
+  set_handle("glide_right", kStickCentre, kStickMax);
+  EXPECT_NEAR(base.read()[ba::kLinear], 1.0f, 1e-3f);
+}
+
+TEST_F(GlideComponentTest, SwerveCentredStickIsZero) {
+  GlideBaseComponent base("base_leader");
+  base.configure(swerve_config());
+
+  set_handle("glide_right", kStickCentre, kStickCentre);
+  const auto cmd = base.read();
+  EXPECT_FLOAT_EQ(cmd[ba::kLinear], 0.0f);
+  EXPECT_FLOAT_EQ(cmd[ba::kLateral], 0.0f);
+}
+
+TEST_F(GlideComponentTest, SwerveLosesOnlyTheMissingHandlesAxes) {
+  GlideBaseComponent base("base_leader");
+  base.configure(swerve_config());
+
+  // Right handle present, left handle silent: translation keeps working and yaw
+  // falls to zero. Per-axis fail-to-stop, so a dropped handle cannot leave a
+  // stale rotation command running.
+  set_handle("glide_right", kStickCentre, kStickMax);
+  const auto cmd = base.read();
+  EXPECT_NEAR(cmd[ba::kLinear], 0.6f, 1e-3f);
+  EXPECT_FLOAT_EQ(cmd[ba::kAngular], 0.0f);
+}
+
+TEST_F(GlideComponentTest, SwerveLiftSharesTheTranslationHandle) {
+  GlideBaseComponent base("base_leader");
+  base.configure(swerve_config());
+
+  // The right handle supplies both the translation stick and the lift buttons —
+  // one component, so the joystick and button claims coexist.
+  set_handle("glide_right", kStickCentre, kStickMax, 1u << 0);
+  const auto cmd = base.read();
+  EXPECT_NEAR(cmd[ba::kLinear], 0.6f, 1e-3f);
+  EXPECT_NEAR(cmd[ba::kLift], 8000.0f, 1e-2f);
+}
+
+TEST_F(GlideComponentTest, TranslationAndExplicitLinearAxisConflict) {
+  GlideBaseComponent base("base_leader");
+  nlohmann::json config = swerve_config();
+  config["axes"]["linear"] = {{"arm_id", "glide_left"}, {"source", "joystick_y"}};
+
+  // Two sources for one axis is always a config mistake, not a precedence
+  // question.
+  EXPECT_THROW(base.configure(config), std::invalid_argument);
+}
+
+TEST_F(GlideComponentTest, TranslationWithOneStickAxisTwiceIsRejected) {
+  GlideBaseComponent base("base_leader");
+  nlohmann::json config = {{"translation", {
+    {"arm_id", "glide_right"},
+    {"forward_source", "joystick_x"},
+    {"lateral_source", "joystick_x"},
+    {"max", 0.6f},
+  }}};
+  EXPECT_THROW(base.configure(config), std::invalid_argument);
+}
+
+TEST_F(GlideComponentTest, TranslationFromButtonsIsRejected) {
+  GlideBaseComponent base("base_leader");
+  nlohmann::json config = {{"translation", {
+    {"arm_id", "glide_right"},
+    {"forward_source", "buttons"},
+    {"lateral_source", "joystick_x"},
+    {"max", 0.6f},
+  }}};
+  EXPECT_THROW(base.configure(config), std::invalid_argument);
+}
+
+TEST_F(GlideComponentTest, TranslationDeadzoneAtOrAboveMaxIsRejected) {
+  GlideBaseComponent base("base_leader");
+  EXPECT_THROW(base.configure(swerve_config(0.6f, 0.6f)), std::invalid_argument);
+}
+
 // ── GlideBaseComponent: config validation ────────────────────────────────
 
 TEST_F(GlideComponentTest, ConfigWithoutAxesIsRejected) {
