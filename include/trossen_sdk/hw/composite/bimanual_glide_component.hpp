@@ -262,7 +262,7 @@ private:
   /// Zero means apply the goal immediately (libtrossen_arm interprets
   /// goal_time < 0.001s as no-interpolation). Non-zero values smooth the
   /// per-tick motion between successive write_joint() calls.
-  float write_moving_time_s_{0.2f};
+  float write_moving_time_s_{0.1f};
 
   /// Optional affine remap applied in read_joint(): out[j] = joint_signs_[j] *
   /// raw[j] + joint_offsets_{left,right}_[j]. Empty = identity. Used when a
@@ -276,9 +276,9 @@ private:
   /// the leader's gripper runs in external-effort mode and the teleop loop
   /// renders a reflected force from the follower's measured gripper effort via
   /// the cubic curve. The leader's arm joints can still be passive.
-  float gripper_feedback_leader_max_{27.0f};
-  float gripper_feedback_follower_max_{87.5f};
-  float gripper_feedback_offset_{5.0f};
+  float gripper_feedback_leader_max_{20.0f};
+  float gripper_feedback_follower_max_{100.0f};
+  float gripper_feedback_offset_{6.5f};
 
   /// Optional per-joint operating limits applied to the controller in
   /// configure() (right after driver_->configure). Each, when non-empty, has

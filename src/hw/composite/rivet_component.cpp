@@ -88,6 +88,22 @@ void RivetComponent::configure(const nlohmann::json& config) {
       throw std::runtime_error( "RivetComponent: Base failed to become ready.");
   }
 
+
+    // TODO: @schromya Resolve this hack when max gripper position error is fixed in driver
+  for (auto& driver : {left_driver_, right_driver_}) {
+    auto limits = driver->get_joint_limits();
+    if (!limits.empty()) {
+      limits.back().position_max = 0.05f;
+      try {
+        driver->set_joint_limits(limits);
+      } catch (const std::exception& e) {
+        throw std::runtime_error(
+          "BimanualGlideComponent: Failed to set leader gripper position_max: "
+          + std::string(e.what()));
+      }
+    }
+  }
+  
   // TODO: @schromya See if this can be done in producer
   base_update_running_ = true;
   base_update_thread_ = std::thread(&RivetComponent::base_update_loop, this);

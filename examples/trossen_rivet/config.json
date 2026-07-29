@@ -25,22 +25,6 @@
       }
     },
     "cameras": [
-      {
-        "id":            "camera_left",
-        "type":          "zed_camera",
-        "serial_number": "97900849",
-        "resolution":    "HD1200",
-        "fps":           30,
-        "use_depth":     false
-      },
-      {
-        "id":            "camera_right",
-        "type":          "zed_camera",
-        "serial_number": "97525506",
-        "resolution":    "HD1200",
-        "fps":           30,
-        "use_depth":     false
-      }
     ]
   },
 
@@ -59,22 +43,6 @@
       "stream_id": "rivet",
       "poll_rate_hz": 30.0,
       "use_device_time": false
-    },
-    {
-      "type":            "zed_camera",
-      "hardware_id":     "camera_left",
-      "stream_id":       "camera_left",
-      "poll_rate_hz":    30.0,
-      "encoding":        "bgr8",
-      "use_device_time": true
-    },
-    {
-      "type":            "zed_camera",
-      "hardware_id":     "camera_right",
-      "stream_id":       "camera_right",
-      "poll_rate_hz":    30.0,
-      "encoding":        "bgr8",
-      "use_device_time": true
     }
   ],
 
