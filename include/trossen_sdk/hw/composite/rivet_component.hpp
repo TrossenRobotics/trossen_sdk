@@ -319,7 +319,7 @@ private:
   /// One-Euro filter tuning, shared by every joint/gripper filter below.
   /// See utils::OneEuroFilter for parameter semantics.
   float smoothing_min_cutoff_hz_{1.0f};
-  float smoothing_beta_{0.7f};
+  float smoothing_beta_{0.3f};
   float smoothing_d_cutoff_hz_{1.0f};
 
   /// Per-arm joint filters (size njoints_) and scalar gripper filters, applied
