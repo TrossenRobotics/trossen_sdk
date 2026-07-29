@@ -2,7 +2,6 @@
 Temporary script to demonstration teleopration of Rivet with the Bimanual Glides.
 
 Requirements:
--  `uv pip install OneEuroFilter` or `pip install OneEuroFilter` (in venv)
 - trossen_base (dev branch): https://github.com/TrossenRobotics/trossen_base/tree/dev
     1. Python installation
     2. Start CAN interface (using README)
@@ -16,15 +15,9 @@ https://github.com/TrossenRobotics/input_controller/blob/8f73ef4d04a1b6d466649ae
 
 """
 
-
-import time
-from collections import deque
-
 import numpy as np
 import trossen_arm
 import trossen_base
-
-
 
 ENABLE_LEFT = True
 ENABLE_RIGHT = True
@@ -37,14 +30,11 @@ IP_LEFT_FOLLOWER = "192.168.1.4"
 IP_RIGHT_LEADER = "192.168.0.2"
 IP_RIGHT_FOLLOWER = "192.168.1.5"
 
-# Gripper force feedback parameters
-LEADER_MAX = 27.0       # N - leader effort at full grip (not including offset)
-FOLLOWER_MAX = 87.5     # N - follower effort at full grip
-LEADER_OFFSET = 5.0      # N - leader opening offset
-GRIPPER_CURVE_EXPONENT = 0.9  # <1 = front-loaded (fast rise then flattens), >1 = back-loaded
-CONTACT_EFFORT_SLEW_RATE = 10.0  # N/s - max leader_effort rate of change while in contact
-NORM_CONTACT_THRESHOLD = -0.1  # Normalized effort threshold for detecting contact TODO: unormalize
 
+# Gripper force feedback parameters
+LEADER_MAX = 20.0       # N - leader effort at full grip (not including offset)
+FOLLOWER_MAX = 100.0     # N - follower effort at full grip
+LEADER_OFFSET = 6.5     # N - leader opening offset
 
 BASE_MIN = -1           # Min translational/rotational velocity (units/s and rad/s)
 BASE_MAX = 1            # Max translational/rotational velocity (units/s and rad/s)
@@ -53,6 +43,10 @@ BASE_LIFT_MAX = 8000    # Max lift velocity (motor units/s)
 
 MIN_JOYSTICK = 0        # Joystick min value
 MAX_JOYSTICK = 4095     # Joystick max value
+
+# Gripper home offset (rad) so the follower gripper matches the leader's at home
+GRIPPER_HOME_OFFSET_RIGHT = np.pi / 4
+GRIPPER_HOME_OFFSET_LEFT = -np.pi / 4
 
 
 def scale(value, val_min, val_max, scaled_min, scaled_max, scaled_deadzone=None):
@@ -67,41 +61,100 @@ def scale(value, val_min, val_max, scaled_min, scaled_max, scaled_deadzone=None)
     return scaled_val
 
 
-class GripperForceFeedback:
-    """Contact state machine: effort gates contact, trigger depth renders force."""
+def configure_leader(ip, model):
+    """Configure a leader arm and cap its gripper's open position."""
+    driver = trossen_arm.TrossenArmDriver()
+    driver.configure(model, trossen_arm.StandardEndEffector.wxai_v0_leader, ip, True)
 
-    def __init__(self):
+    joint_limits = driver.get_joint_limits()
+    joint_limits[-1].position_max = 0.05
+    driver.set_joint_limits(joint_limits)
 
-        # Slew-rate state for smoothing repeated large swings while in contact
-        self._prev_leader_effort = LEADER_OFFSET
-        self._prev_slew_time = None
+    return driver
 
 
+def configure_follower(ip):
+    """Configure a follower arm and tune its position-mode gains."""
+    driver = trossen_arm.TrossenArmDriver()
+    driver.configure(trossen_arm.Model.pro, trossen_arm.StandardEndEffector.pro_base, ip, True)
 
-    def update(self, follower_effort):
+    motor_parameters = driver.get_motor_parameters()
+    for i in range(7):
+        motor_parameters[i][trossen_arm.Mode.position].velocity.ki = 0.0
+        motor_parameters[i][trossen_arm.Mode.position].velocity.imax = 0.0
+    for i in range(3):
+        motor_parameters[i][trossen_arm.Mode.position].position.kp = 16.0
+    driver.set_motor_parameters(motor_parameters)
 
-        effort_norm = scale(follower_effort, -FOLLOWER_MAX, FOLLOWER_MAX, -1, 1) # -1 to 1 (below 1 is contact)
+    return driver
 
-        now = time.time()
 
-        if effort_norm < NORM_CONTACT_THRESHOLD:
-            target_effort = LEADER_MAX * (abs(effort_norm)**GRIPPER_CURVE_EXPONENT) + LEADER_OFFSET
+def init_leader_modes(driver):
+    driver.set_all_modes(trossen_arm.Mode.effort)
+    driver.set_gripper_mode(trossen_arm.Mode.effort)
+    driver.set_gripper_effort(LEADER_OFFSET, 0.2, False)
 
-            # Slew-limit while in contact so repeated large swings get damped,
-            # instead of following every oscillation at full speed
-            if self._prev_slew_time is not None:
-                max_delta = CONTACT_EFFORT_SLEW_RATE * (now - self._prev_slew_time)
-                delta = max(-max_delta, min(max_delta, target_effort - self._prev_leader_effort))
-                leader_effort = self._prev_leader_effort + delta
-            else:
-                leader_effort = target_effort
-        else:
-            leader_effort = LEADER_OFFSET
 
-        self._prev_leader_effort = leader_effort
-        self._prev_slew_time = now
+def init_follower_modes(driver):
+    driver.set_all_modes(trossen_arm.Mode.position)
+    driver.set_gripper_mode(trossen_arm.Mode.position)
 
-        return leader_effort
+
+def home_follower(driver, gripper_home_offset):
+    # Follower gripper is offset to match the leader's gripper position at home
+    driver.set_all_positions(
+        np.array([0.0, 0.0, 0.0, 0.0, 0.0, gripper_home_offset, 0.0]), 1.0, True
+    )
+
+
+def stop_follower(driver):
+    driver.set_all_modes(trossen_arm.Mode.position)
+    driver.set_all_positions(np.zeros(driver.get_num_joints()), 2.0, True)
+
+
+def scaled_leader_gripper_effort(follower_effort):
+    """Cubic curve for more resistance at higher efforts and less at lower efforts,
+    with an offset to keep the gripper open when not gripping."""
+    effort_norm = min(abs(follower_effort) / FOLLOWER_MAX, 1.0)
+    return LEADER_MAX * (effort_norm**3) + LEADER_OFFSET
+
+
+def teleop_arm_step(leader, follower, gripper_home_offset):
+    """Mirror one leader/follower arm pair for a single control loop iteration.
+
+    Feeds follower efforts back to the leader, leader positions forward to the
+    follower, and drives the follower gripper from the leader's gripper position
+    while feeding the follower's gripper effort back as leader resistance.
+    """
+    positions = leader.get_all_positions()
+    efforts = follower.get_all_efforts()
+
+    # Feed the external efforts from the follower robot to the leader robot
+    leader.set_arm_efforts(
+        np.array([efforts[0], efforts[1], efforts[2], -efforts[3], -efforts[4], efforts[5]]),
+        0.0,
+        False,
+    )
+
+    # Feed the positions from the leader robot to the follower robot
+    follower.set_arm_positions(
+        np.array([positions[0], positions[1], positions[2], -positions[3], -positions[4],
+                positions[5] + gripper_home_offset]),
+        0.0,
+        False,
+    )
+
+    # Read the leader's gripper position and follower's gripper effort
+    leader_gripper_position = leader.get_gripper_position()
+    follower_gripper_effort = follower.get_gripper_effort()
+
+    # Set the leader's gripper effort based on the follower's gripper effort
+    leader.set_gripper_effort(
+        scaled_leader_gripper_effort(follower_gripper_effort), 0.1, False
+    )
+
+    # Set the follower's gripper position to match the leader's position
+    follower.set_gripper_position(leader_gripper_position, 0.0, False)
 
 
 if __name__ == "__main__":
@@ -109,117 +162,25 @@ if __name__ == "__main__":
 
     print("Initializing the drivers...")
     if ENABLE_RIGHT:
-        driver_right_leader = trossen_arm.TrossenArmDriver()
+        driver_right_leader = configure_leader(IP_RIGHT_LEADER, trossen_arm.Model.glide_right)
         if ENABLE_FOLLOWER:
-            driver_right_follower = trossen_arm.TrossenArmDriver()
+            driver_right_follower = configure_follower(IP_RIGHT_FOLLOWER)
     if ENABLE_LEFT:
-        driver_left_leader = trossen_arm.TrossenArmDriver()
+        driver_left_leader = configure_leader(IP_LEFT_LEADER, trossen_arm.Model.glide_left)
         if ENABLE_FOLLOWER:
-            driver_left_follower = trossen_arm.TrossenArmDriver()
+            driver_left_follower = configure_follower(IP_LEFT_FOLLOWER)
     if ENABLE_BASE:
         base = trossen_base.TrossenBase()
 
-
     if ENABLE_RIGHT:
-        driver_right_leader.configure(
-            trossen_arm.Model.glide_right,
-            trossen_arm.StandardEndEffector.wxai_v0_leader,
-            IP_RIGHT_LEADER,
-            True,
-        )
-
-        right_leader_joint_limits = driver_right_leader.get_joint_limits()
-
-        driver_right_leader.set_joint_limits(right_leader_joint_limits)
-
-
+        init_leader_modes(driver_right_leader)
         if ENABLE_FOLLOWER:
-            driver_right_follower.configure(
-                trossen_arm.Model.pro,
-                trossen_arm.StandardEndEffector.pro_base,
-                IP_RIGHT_FOLLOWER,
-                True,
-            )
+            init_follower_modes(driver_right_follower)
 
     if ENABLE_LEFT:
-        driver_left_leader.configure(
-            trossen_arm.Model.glide_left,
-            trossen_arm.StandardEndEffector.wxai_v0_leader,
-            IP_LEFT_LEADER,
-            True,
-        )
-
-        left_leader_joint_limits = driver_left_leader.get_joint_limits()
-        left_leader_joint_limits[-1].position_max = 0.05
-        driver_left_leader.set_joint_limits(left_leader_joint_limits)
-
+        init_leader_modes(driver_left_leader)
         if ENABLE_FOLLOWER:
-            driver_left_follower.configure(
-                trossen_arm.Model.pro,
-                trossen_arm.StandardEndEffector.pro_base,
-                IP_LEFT_FOLLOWER,
-                True,
-            )
-
-    if ENABLE_RIGHT and ENABLE_FOLLOWER:
-        motor_parameters = driver_right_follower.get_motor_parameters()
-        motor_parameters[0][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[0][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[0][trossen_arm.Mode.position].position.kp = 16.0
-        motor_parameters[1][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[1][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[1][trossen_arm.Mode.position].position.kp = 16.0
-        motor_parameters[2][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[2][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[2][trossen_arm.Mode.position].position.kp = 16.0
-        motor_parameters[3][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[3][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[4][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[4][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[5][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[5][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[6][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[6][trossen_arm.Mode.position].velocity.ki = 0.0
-        driver_right_follower.set_motor_parameters(motor_parameters)
-
-    if ENABLE_LEFT and ENABLE_FOLLOWER:
-        motor_parameters = driver_left_follower.get_motor_parameters()
-        motor_parameters[0][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[0][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[0][trossen_arm.Mode.position].position.kp = 16.0
-        motor_parameters[1][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[1][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[1][trossen_arm.Mode.position].position.kp = 16.0
-        motor_parameters[2][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[2][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[2][trossen_arm.Mode.position].position.kp = 16.0
-        motor_parameters[3][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[3][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[4][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[4][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[5][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[5][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[6][trossen_arm.Mode.position].velocity.imax = 0.0
-        motor_parameters[6][trossen_arm.Mode.position].velocity.ki = 0.0
-        driver_left_follower.set_motor_parameters(motor_parameters)
-
-    if ENABLE_RIGHT:
-        driver_right_leader.set_all_modes(trossen_arm.Mode.effort)
-        driver_right_leader.set_gripper_mode(trossen_arm.Mode.effort)
-        driver_right_leader.set_gripper_effort(LEADER_OFFSET, 0.2, False)
-
-        if ENABLE_FOLLOWER:
-            driver_right_follower.set_all_modes(trossen_arm.Mode.position)
-            driver_right_follower.set_gripper_mode(trossen_arm.Mode.position)
-
-    if ENABLE_LEFT:
-        driver_left_leader.set_all_modes(trossen_arm.Mode.effort)
-        driver_left_leader.set_gripper_mode(trossen_arm.Mode.effort)
-        driver_left_leader.set_gripper_effort(LEADER_OFFSET, 0.2, False)
-
-        if ENABLE_FOLLOWER:
-            driver_left_follower.set_all_modes(trossen_arm.Mode.position)
-            driver_left_follower.set_gripper_mode(trossen_arm.Mode.position)
+            init_follower_modes(driver_left_follower)
 
     print("Moving to home positions...")
 
@@ -227,69 +188,43 @@ if __name__ == "__main__":
         if not base.wait_until_ready():
             raise RuntimeError("Base failed to become ready")
 
-
-    # Follower gripper is offset by -pi/4 to match the leader's gripper position at home
     if ENABLE_RIGHT and ENABLE_FOLLOWER:
-        driver_right_follower.set_all_positions(
-            np.array([0.0, 0.0, 0.0, 0.0, 0.0, np.pi / 4, 0.0]), 1.0, True
-        )
+        home_follower(driver_right_follower, GRIPPER_HOME_OFFSET_RIGHT)
 
     if ENABLE_LEFT and ENABLE_FOLLOWER:
-        driver_left_follower.set_all_positions(
-            np.array([0.0, 0.0, 0.0, 0.0, 0.0, -np.pi / 4, 0.0]), 1.0, True
-        )
-
-
+        home_follower(driver_left_follower, GRIPPER_HOME_OFFSET_LEFT)
 
     print("Starting to teleoperate the robots...")
-
-    right_gripper_feedback = GripperForceFeedback()
-    left_gripper_feedback = GripperForceFeedback()
 
     try:
         base_velocity_linear_x = 0.0
         base_velocity_linear_y = 0.0
         base_velocity_angular_z = 0.0
-        base_velocity_lift = 0  # MUST BE INT
+        base_velocity_lift = 0      # MUST BE INT
         while True:
-
-
 
             ################################### LEADER COMMANDS ####################################
             if ENABLE_RIGHT:
-                right_positions = driver_right_leader.get_all_positions()
                 right_input = driver_right_leader.get_input_report()
-                if ENABLE_FOLLOWER:
-                    right_efforts = driver_right_follower.get_all_efforts()
                 # Scale to -1 to 1 velocity (rad/s)
                 base_velocity_angular_z = -scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
                                 BASE_MIN, BASE_MAX, BASE_DEADZONE)
-
 
                 # Button bitmap: bit n is SEL_(n+1), 1 is pressed:
                 #   [SEL_1, SEL_2, SEL_3, SEL_4, SEL_5]
                 right_up_btn = int(right_input.buttons & (1 << 0))
                 right_down_btn = int(right_input.buttons & (1 << 2))
-                right_left_btn = int(right_input.buttons & (1 << 1))
-                right_right_btn = int(right_input.buttons & (1 << 3))
 
                 base_velocity_lift = int(right_up_btn - right_down_btn) * BASE_LIFT_MAX
 
-
             if ENABLE_LEFT:
-                left_positions = driver_left_leader.get_all_positions()
                 left_input = driver_left_leader.get_input_report()
-
-                if ENABLE_FOLLOWER:
-                    left_efforts = driver_left_follower.get_all_efforts()
 
                 #Scale to -1 to 1 velocity (m/s)
                 base_velocity_linear_x = scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
                                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
                 base_velocity_linear_y = -scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
                                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
-
-
 
             ###################################### FOLLOWERS #######################################
             if ENABLE_BASE:
@@ -298,132 +233,20 @@ if __name__ == "__main__":
                                          base_velocity_angular_z)
                 base.set_actuator_velocity(base_velocity_lift)
 
-            # RIGHT ARM
             if ENABLE_RIGHT and ENABLE_FOLLOWER:
-                # Feed the external efforts from the follower robot to the leader robot
-                # TODO: REVERT THIS???
-                driver_right_leader.set_arm_efforts(
-                    np.array(
-                        [
-                            right_efforts[0],
-                            right_efforts[1],
-                            right_efforts[2],
-                            -right_efforts[3],
-                            -right_efforts[4],
-                            right_efforts[5],
-                        ]
-                    ),
-                    0.0,
-                    False,
-                )
+                teleop_arm_step(driver_right_leader, driver_right_follower, GRIPPER_HOME_OFFSET_RIGHT)
 
-                # Feed the positions from the leader robot to the follower robot
-                driver_right_follower.set_arm_positions(
-                    np.array(
-                        [
-                            right_positions[0],
-                            right_positions[1],
-                            right_positions[2],
-                            -right_positions[3],
-                            -right_positions[4],
-                            right_positions[5] + np.pi / 4.0,
-                        ]
-                    ),
-                    0.0,
-                    False,
-                )
-
-                # RIGHT ARM GRIPPER
-                # Read the leader's gripper position and follower's gripper effort
-                leader_right_position = driver_right_leader.get_gripper_position()
-                follower_right_position = driver_right_follower.get_gripper_position()
-                follower_right_effort = driver_right_follower.get_gripper_effort()
-
-                leader_right_effort = right_gripper_feedback.update(follower_right_effort)
-
-                # Set the leader's gripper effort based on the follower's gripper effort
-                driver_right_leader.set_gripper_effort(
-                    leader_right_effort, 0.2, False
-                )
-
-
-                # Set the follower's gripper position to match the leader's position
-                driver_right_follower.set_gripper_position(
-                    leader_right_position, 0.0, False
-                )
-
-                # Read the follower's gripper position for logging
-                follower_right_position = driver_right_follower.get_gripper_position()
-
-            # LEFT ARM
             if ENABLE_LEFT and ENABLE_FOLLOWER:
-                # Feed the external efforts from the follower robot to the leader robot
-                driver_left_leader.set_arm_efforts(
-                    np.array(
-                        [
-                            left_efforts[0],
-                            left_efforts[1],
-                            left_efforts[2],
-                            -left_efforts[3],
-                            -left_efforts[4],
-                            left_efforts[5],
-                        ]
-                    ),
-                    0.0,
-                    False,
-                )
-
-
-                # Feed the positions from the leader robot to the follower robot
-                driver_left_follower.set_arm_positions(
-                    np.array(
-                        [
-                            left_positions[0],
-                            left_positions[1],
-                            left_positions[2],
-                            -left_positions[3],
-                            -left_positions[4],
-                            left_positions[5] - np.pi / 4.0,
-                        ]
-                    ),
-                    0.0,
-                    False,
-                )
-
-                # LEFT ARM GRIPPER
-                leader_left_position = driver_left_leader.get_gripper_position()
-                follower_left_position = driver_left_follower.get_gripper_position()
-                follower_left_effort = driver_left_follower.get_gripper_effort()
-
-                leader_left_effort = left_gripper_feedback.update(follower_left_effort)
-
-                # Set the leader's gripper effort based on the follower's gripper effort
-                driver_left_leader.set_gripper_effort(
-                    leader_left_effort, 0.2, False
-                )
-
-                # Set the follower's gripper position to match the leader's position
-                driver_left_follower.set_gripper_position(
-                    leader_left_position, 0.0, False
-                )
-
-                # Read the follower's gripper position for logging
-                follower_left_position = driver_left_follower.get_gripper_position()
+                teleop_arm_step(driver_left_leader, driver_left_follower, GRIPPER_HOME_OFFSET_LEFT)
 
     except KeyboardInterrupt:
         print("Moving to stop positions...")
         if ENABLE_RIGHT and ENABLE_FOLLOWER:
-
-            driver_right_follower.set_all_modes(trossen_arm.Mode.position)
-            driver_right_follower.set_all_positions(
-                np.zeros(driver_right_follower.get_num_joints()), 2.0, True
-            )
+            stop_follower(driver_right_follower)
 
         if ENABLE_LEFT and ENABLE_FOLLOWER:
-            driver_left_follower.set_all_modes(trossen_arm.Mode.position)
-            driver_left_follower.set_all_positions(
-                np.zeros(driver_left_follower.get_num_joints()), 2.0, True
-            )
+            stop_follower(driver_left_follower)
+
         if ENABLE_BASE:
             base.set_cmd_vels(0.0, 0.0, 0.0)
             base.set_actuator_velocity(0)
