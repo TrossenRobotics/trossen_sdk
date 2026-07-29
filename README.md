@@ -156,6 +156,18 @@ Required for RealSense cameras. Install the RealSense SDK 2.0 by following the [
 
 > **Note:** The two important packages from the RealSense repository are `librealsense2-dev` and `librealsense2-utils`. `realsense-viewer` only needs `librealsense2-utils`, but `find_package(realsense2)` in CMake needs the headers and CMake config from `librealsense2-dev`. If `realsense-viewer` works but the SDK build fails to find RealSense, it means the runtime is installed but the dev package is missing.
 
+### PolicyClient (optional)
+
+Required only when building with `-DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON`. The gRPC transport is generated from a vendored proto at build time, so the build needs the gRPC development headers and the C++ `protoc` plugin:
+
+```bash
+sudo apt-get install -y \
+    libgrpc++-dev \
+    protobuf-compiler-grpc
+```
+
+> **Note:** As with RealSense, the gRPC *runtime* package (`libgrpc++1.x`) is not sufficient. `pkg_check_modules(grpc++)` needs the `grpc++.pc` file that ships only in `libgrpc++-dev`. `libgrpc-dev` does not need to be installed explicitly; `libgrpc++-dev` depends on it.
+
 ---
 
 ## Building

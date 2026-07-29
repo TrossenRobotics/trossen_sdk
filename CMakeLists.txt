@@ -7,6 +7,10 @@ project(trossen_sdk
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# SCServo (2.8.3) and msgpack-cxx (3.1) declare a cmake_minimum_required below the 3.5
+# floor that CMake 4.x enforces. Raising the floor here covers both fetched dependencies.
+set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+
 # TODO: Discuss build options - do we want RealSense ON by default? What about other
 # optional hardware (e.g., Zed cameras)? Where do we draw the line between mandatory
 # and opt-in dependencies?
@@ -268,8 +272,6 @@ FetchContent_Declare(
   SYSTEM
   GIT_REPOSITORY https://github.com/ftservo/FTServo_Linux.git
   GIT_TAG 064a6dbf814477b970959b5b01b2fc9bc594afa3
-  CMAKE_ARGS
-    -D CMAKE_POLICY_VERSION_MINIMUM=3.5
   PATCH_COMMAND ${CMAKE_COMMAND} -E chdir <SOURCE_DIR> bash -c "git apply --check ${CMAKE_SOURCE_DIR}/cmake/patches/SCServo.patch && git apply ${CMAKE_SOURCE_DIR}/cmake/patches/SCServo.patch || echo 'Patch already applied'"
 
 )
@@ -296,6 +298,10 @@ set(BUILD_WITH_ROS OFF CACHE BOOL "Build trossen_slate without ROS" FORCE)
 set(BUILD_DEMOS OFF CACHE BOOL "Skip trossen_slate demo executables" FORCE)
 set(TROSSEN_SLATE_BUILD_PYTHON_BINDINGS OFF CACHE BOOL
   "Skip trossen_slate's pybind module; trossen_sdk provides its own" FORCE)
+# trossen_slate probes for ament_cmake regardless of BUILD_WITH_ROS, and its ament_package()
+# path parses package.xml through Python catkin_pkg. Keep it off so a sourced ROS 2
+# environment does not pull ament into this build.
+set(CMAKE_DISABLE_FIND_PACKAGE_ament_cmake ON)
 
 FetchContent_MakeAvailable(trossen_slate)
 
