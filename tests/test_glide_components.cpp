@@ -16,6 +16,7 @@
 
 #include "nlohmann/json.hpp"
 
+#include "trossen_sdk/hw/glide/glide_arm_input_component.hpp"
 #include "trossen_sdk/hw/glide/glide_base_component.hpp"
 #include "trossen_sdk/hw/glide/glide_session.hpp"
 #include "trossen_sdk/hw/glide/glide_session_control_component.hpp"
@@ -559,6 +560,46 @@ TEST_F(GlideComponentTest, StartAndStopAreIdempotent) {
   EXPECT_NO_THROW(control.start());
   control.stop();
   EXPECT_NO_THROW(control.stop());
+}
+
+// ── GlideArmInputComponent ───────────────────────────────────────────────
+//
+// Only the driver-independent half is exercised here. Registering a real reader
+// needs a live arm, and the branch that does it is compiled out entirely unless
+// the driver exposes an input report — so tests that assert a *specific* failure
+// message would pass or fail depending on which driver the machine has installed.
+// What is asserted below holds either way.
+
+TEST_F(GlideComponentTest, ArmInputRejectsAMissingArmsList) {
+  trossen::hw::glide::GlideArmInputComponent input("glide_inputs");
+  EXPECT_THROW(input.configure(nlohmann::json::object()), std::runtime_error);
+}
+
+TEST_F(GlideComponentTest, ArmInputRejectsAnEmptyArmsList) {
+  trossen::hw::glide::GlideArmInputComponent input("glide_inputs");
+  nlohmann::json config = {{"arms", nlohmann::json::array()}};
+  EXPECT_THROW(input.configure(config), std::runtime_error);
+}
+
+TEST_F(GlideComponentTest, ArmInputRejectsAnUnresolvableArm) {
+  // Throws either "no active trossen_arm named …" (driver has the API) or
+  // "built against a libtrossen_arm with no input-report API" (it does not).
+  // Both are runtime_error, and in neither case may a reader be left behind.
+  trossen::hw::glide::GlideArmInputComponent input("glide_inputs");
+  nlohmann::json config = {{"arms", {"no_such_arm"}}};
+  EXPECT_THROW(input.configure(config), std::runtime_error);
+  EXPECT_FALSE(GlideSession::instance().read_inputs("no_such_arm").has_value());
+  EXPECT_TRUE(input.arm_ids().empty());
+}
+
+TEST_F(GlideComponentTest, ArmInputReportsItsConfiguredHandlesInInfo) {
+  trossen::hw::glide::GlideArmInputComponent input("glide_inputs");
+  const auto info = input.get_info();
+  EXPECT_EQ(info.at("type").get<std::string>(), "glide_arm_input");
+  EXPECT_EQ(info.at("id").get<std::string>(), "glide_inputs");
+  // Whether live input is available is a property of the driver this was built
+  // against, so assert only that the field is reported.
+  EXPECT_TRUE(info.contains("driver_input_report"));
 }
 
 }  // namespace

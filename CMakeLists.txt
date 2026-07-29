@@ -58,6 +58,7 @@ add_library(trossen_sdk SHARED
   src/hw/glide/glide_session.cpp
   src/hw/glide/glide_base_component.cpp
   src/hw/glide/glide_session_control_component.cpp
+  src/hw/glide/glide_arm_input_component.cpp
   src/observer/observer_registry.cpp
   src/runtime/session_manager.cpp
   src/runtime/producer_registry.cpp
@@ -193,6 +194,33 @@ find_package(BZip2 REQUIRED)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(libtrossen_arm REQUIRED)
+
+# Glide handles report their joystick and buttons through the arm driver's input
+# report, an API present on some driver builds and not others. Detect it instead
+# of asking the builder to assert it: with the API, glide_arm_input publishes live
+# handle input; without it, that one component throws a message naming the fix and
+# everything else — including the whole Glide mapping layer and its tests — builds
+# and runs unchanged.
+include(CheckCXXSourceCompiles)
+get_target_property(_trossen_arm_includes libtrossen_arm INTERFACE_INCLUDE_DIRECTORIES)
+set(CMAKE_REQUIRED_INCLUDES "${_trossen_arm_includes}")
+check_cxx_source_compiles("
+#include \"libtrossen_arm/trossen_arm.hpp\"
+int main() {
+  trossen_arm::TrossenArmDriver driver;
+  trossen_arm::RobotOutput::InputReport report = driver.get_input_report();
+  return report.joystick_x + report.joystick_y + report.buttons;
+}
+" TROSSEN_HAVE_ARM_INPUT_REPORT)
+unset(CMAKE_REQUIRED_INCLUDES)
+if(TROSSEN_HAVE_ARM_INPUT_REPORT)
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_HAVE_ARM_INPUT_REPORT)
+else()
+  message(STATUS
+    "libtrossen_arm has no input-report API — Glide handle joystick/button input "
+    "will be unavailable at runtime (build against a driver providing "
+    "TrossenArmDriver::get_input_report() to enable it)")
+endif()
 
 include(FetchContent)
 
