@@ -495,11 +495,16 @@ TEST_F(GlideComponentTest, DistinctButtonsMapToDistinctEvents) {
 }
 
 TEST_F(GlideComponentTest, StopButtonEmitsStopSessionLikeTheWebappStopButton) {
-  // The webapp's Stop button calls stop_recording() with discard_in_flight
-  // false: it finalizes the in-flight episode, pauses the session so it can be
-  // resumed, and shuts the SDK down with the arms back at rest. kStopSession is
-  // the intent that produces exactly that, so the Glide button and the webapp
-  // button stay behaviourally identical.
+  // Mirrors the webapp's Stop button, which DISCARDS the in-flight episode:
+  // recorder_runner sees the stop signal mid-episode and calls
+  // discard_current_episode() before breaking out of its loop, then pauses the
+  // session so Resume works and shuts the SDK down with the arms back at rest.
+  //
+  // This test pins only the intent that leaves this component — kStopSession.
+  // The discard itself is the host's job, and the standalone example loop does
+  // NOT do it yet: it calls stop_episode(), which finalizes the partial. Until
+  // that is reconciled, a Glide stop keeps the partial episode while a webapp
+  // stop throws it away. See the note in the Rivet example TODO.
   GlideSessionControlComponent control("session_control");
   control.configure(control_config());
 
