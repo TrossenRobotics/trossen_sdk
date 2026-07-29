@@ -46,6 +46,8 @@ namespace {
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/hw/active_hardware_registry.hpp"
+#include "trossen_sdk/hw/glide/glide_session_control_component.hpp"
+#include "trossen_sdk/hw/session_control/session_control_capable.hpp"
 
 // Producers
 #include "trossen_sdk/hw/producer_base.hpp"
@@ -351,6 +353,85 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def("get_identifier", &HardwareComponent::get_identifier)
     .def("get_type", &HardwareComponent::get_type)
     .def("get_info", &HardwareComponent::get_info);
+
+  // ── Glide handle input ───────────────────────────────────────────────────
+  // Read-side only. Registering a reader stays in C++ (glide_arm_input owns the
+  // arm driver); what Python gets is the ability to see what the handles are
+  // reporting, which is what a "press each button" hardware check needs, and the
+  // snapshot-injection seam so that check can be exercised without hardware.
+  py::class_<glide::GlideInputSnapshot>(m, "GlideInputSnapshot")
+    .def(py::init<>())
+    .def_readwrite("joystick_x", &glide::GlideInputSnapshot::joystick_x)
+    .def_readwrite("joystick_y", &glide::GlideInputSnapshot::joystick_y)
+    .def_readwrite("buttons", &glide::GlideInputSnapshot::buttons)
+    .def("button", &glide::GlideInputSnapshot::button, py::arg("bit"),
+         "True while button `bit` is held. Out-of-range bits read False.");
+
+  py::class_<glide::GlideSession, std::unique_ptr<glide::GlideSession, py::nodelete>>(
+      m, "GlideSession")
+    .def_static("instance", &glide::GlideSession::instance,
+                py::return_value_policy::reference,
+                "The process-global session.")
+    .def("read_inputs", &glide::GlideSession::read_inputs, py::arg("arm_id"),
+         "Current inputs for a handle, or None if no reader is registered.")
+    // Flattened: Python passes the input and bit directly rather than building a
+    // GlideClaim, which has no other use from this side.
+    .def("claim_holder",
+         [](const glide::GlideSession& self, const std::string& arm_id,
+            glide::GlideInput input, int bit) {
+           return self.claim_holder(arm_id, glide::GlideClaim{input, bit});
+         },
+         py::arg("arm_id"), py::arg("input"), py::arg("bit") = -1,
+         "Id of the component holding an input, or None if unclaimed.")
+    .def("set_test_snapshot", &glide::GlideSession::set_test_snapshot,
+         py::arg("arm_id"), py::arg("snapshot"),
+         "Override a handle's inputs, bypassing any registered reader.")
+    .def("clear_test_snapshots", &glide::GlideSession::clear_test_snapshots)
+    .def("reset_for_test", &glide::GlideSession::reset_for_test);
+
+  py::enum_<glide::GlideInput>(m, "GlideInput")
+    .value("kJoystick", glide::GlideInput::kJoystick)
+    .value("kButton", glide::GlideInput::kButton)
+    .value("kTrigger", glide::GlideInput::kTrigger);
+
+  // ── Session control ──────────────────────────────────────────────────────
+  // Lets a Python host take user intent from a hardware button source (the Glide
+  // handles) alongside whatever channel it already has. The webapp needs exactly
+  // this: its recorder drives episodes from its own signal events, and these
+  // callbacks make the buttons a second producer of those same events rather
+  // than a competing controller of the SessionManager.
+  py::enum_<session_control::SessionControlEvent>(m, "SessionControlEvent")
+    .value("kNone", session_control::SessionControlEvent::kNone)
+    .value("kStart", session_control::SessionControlEvent::kStart)
+    .value("kStopEarly", session_control::SessionControlEvent::kStopEarly)
+    .value("kRerecord", session_control::SessionControlEvent::kRerecord)
+    .value("kStopSession", session_control::SessionControlEvent::kStopSession);
+
+  py::class_<session_control::SessionControlCapable,
+             std::shared_ptr<session_control::SessionControlCapable>>(
+      m, "SessionControlCapable")
+    // Callbacks fire on the source's own reader thread, not the caller's.
+    // pybind acquires the GIL to invoke them; the callback must be quick and
+    // must not call this component's stop() (that would join the reader thread
+    // from within itself). Setting an Event or queueing is the intended shape.
+    .def("set_callbacks", &session_control::SessionControlCapable::set_callbacks,
+         py::arg("on_event"), py::arg("on_disconnect"),
+         "Install event/disconnect callbacks. Call before start().")
+    .def("start", &session_control::SessionControlCapable::start,
+         py::call_guard<py::gil_scoped_release>(),
+         "Begin producing events. Idempotent.")
+    .def("stop", &session_control::SessionControlCapable::stop,
+         py::call_guard<py::gil_scoped_release>(),
+         "Stop producing events and join the reader thread. Idempotent.");
+
+  // Registered so HardwareRegistry.create() returns an object Python can see as
+  // SessionControlCapable — pybind resolves the most-derived *registered* type,
+  // so without this the component arrives as a plain HardwareComponent and the
+  // callbacks are unreachable.
+  py::class_<glide::GlideSessionControlComponent, HardwareComponent,
+             session_control::SessionControlCapable,
+             std::shared_ptr<glide::GlideSessionControlComponent>>(
+      m, "GlideSessionControlComponent");
 
   py::class_<HardwareRegistry>(m, "HardwareRegistry")
     .def_static("create", &HardwareRegistry::create,

@@ -86,16 +86,28 @@ cd webapp && docker compose up -d --build
 
 Then pick the **Trossen Rivet** system in the UI.
 
-Two things to know:
+Only one webapp stack can run at a time on a machine — port 8000. Stop any other
+checkout's containers first.
 
-- Only one webapp stack can run at a time on a machine — port 8000. Stop any
-  other checkout's containers first.
-- The Glide **session buttons do not work through the webapp** yet. They are
-  constructed (so they still claim their inputs, and collide loudly with anything
-  else wanting the same button) but not attached: this path drives episodes from
-  backend control signals rather than SessionManager state, so a button firing
-  `kStart` directly would desync the two. Use the on-screen controls, or step 2
-  for the buttons. The base and both arms work normally here.
+**The Glide buttons and the on-screen controls both work, at the same time.**
+Neither is authoritative: the buttons set the same three signal events the
+frontend's controls do, so the episode loop cannot tell them apart. In loop
+terms the mapping is:
+
+| Button intent | Loop signal | Effect |
+|---|---|---|
+| start | `next` | End this episode and advance |
+| re-record | `rerecord` | Discard and redo |
+| stop session | `stop` | End the session, discarding the in-flight episode — same as the webapp's Stop |
+
+Worth confirming both directions once: press a button, watch the frontend
+update; then click in the frontend and confirm the loop responds. The recorder
+logs each button press as `session control '<id>' -> <signal>`.
+
+If a handle drops out mid-session you get a `disconnected` log line and lose the
+buttons, not the episode — the on-screen controls keep working. That is
+deliberate; ending a good recording over a dropped input link is the worse
+failure.
 
 If the components appear to be ignored — no base, no handle input, but recording
 otherwise fine — the backend venv volume is carrying a stale compiled extension.

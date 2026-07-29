@@ -814,9 +814,9 @@ def _create_arm_component(arm_id: str, arm_json: dict[str, Any]) -> Any:
 
 def _build_session_manager(
     config: dict[str, Any],
-) -> tuple[ts.SessionManager, list, str]:
+) -> tuple[ts.SessionManager, list, list, str]:
     """Run the canonical SDK bootstrap from `trossen_solo_ai.py` and return
-    `(manager, controllers, mcap_root)`.
+    `(manager, controllers, session_controls, mcap_root)`.
 
     Steps mirror the previous in-process implementation:
       1. SdkConfig.from_json(config) → cfg.populate_global_config()
@@ -850,19 +850,21 @@ def _build_session_manager(
     # After the arms and in declared order, both deliberately: glide_arm_input
     # resolves the handle arms above out of the active registry, and a base
     # follower has to exist before the teleop factory builds pairs against it.
-    # Note on the Glide session-control buttons: they are constructed here (so
-    # they claim their inputs and conflict loudly with anything else wanting the
-    # same button) but NOT attached to the SessionManager. This loop drives
-    # episodes from control signals sent by the backend, not from SessionManager
-    # state, so a button firing kStart directly would desync the two. The
-    # standalone example attaches them; wiring them into this loop means routing
-    # their events out to the backend, which is a separate change.
+    # Session-control sources (the Glide handle buttons) are collected by
+    # interface, not by type, so another button source needs no change here.
+    # They are NOT attached to the SessionManager: this loop drives episodes from
+    # signal events, so the buttons are wired to those same events in main()
+    # instead — see _attach_session_controls. Attaching them to the
+    # SessionManager as well would give two independent drivers of one session.
     component_components: dict[str, Any] = {}
+    session_controls: list[Any] = []
     for comp_cfg in cfg.hardware.components:
         component = ts.HardwareRegistry.create(
             comp_cfg.type, comp_cfg.id, comp_cfg.raw, True
         )
         component_components[comp_cfg.id] = component
+        if isinstance(component, ts.SessionControlCapable):
+            session_controls.append(component)
         print(f"component '{comp_cfg.id}' ({comp_cfg.type}) configured", flush=True)
 
     camera_components = {}
@@ -933,7 +935,7 @@ def _build_session_manager(
     # empty-episode cleanup must use this path — passing the bare root made
     # _episode_file_is_empty() look in the wrong directory and silently never
     # fire, letting ghost episodes accumulate and inflate the scan count.
-    return mgr, controllers, os.path.join(
+    return mgr, controllers, session_controls, os.path.join(
         cfg.mcap_backend.root, cfg.mcap_backend.dataset_id)
 
 
@@ -1047,6 +1049,76 @@ def _stdin_reader(
             next_event.set()
         elif signal == "rerecord":
             rerecord_event.set()
+
+
+def _attach_session_controls(
+    session_controls: list,
+    stop_event: threading.Event,
+    next_event: threading.Event,
+    rerecord_event: threading.Event,
+) -> None:
+    """Wire hardware button sources to the same signal events stdin drives.
+
+    The Glide handle buttons and the webapp's on-screen controls end up as two
+    producers of one set of events, which is what lets both work at once without
+    either being authoritative — the episode loop cannot tell them apart, and does
+    not need to. That is also why these are not attached to the SessionManager:
+    driving the loop's events and the manager's own state machine from two places
+    would be two independent drivers of one session.
+
+    Event mapping, in the loop's vocabulary:
+      kStart       -> next        (end this episode and advance; the loop is
+                                   always already recording here, so the SDK's
+                                   phase-dependent "start" only ever means next)
+      kStopEarly   -> next        (closest available; nothing binds it today)
+      kRerecord    -> rerecord    (discard and redo)
+      kStopSession -> stop        (end the session; the loop discards the
+                                   in-flight episode, matching the webapp's own
+                                   Stop button)
+
+    Callbacks fire on each component's poll thread, so they only set an Event —
+    the episode loop does the work. Setting an Event is atomic and idempotent,
+    which makes a double-press harmless.
+    """
+    if not session_controls:
+        return
+
+    event_map = {
+        ts.SessionControlEvent.kStart: ("next", next_event),
+        ts.SessionControlEvent.kStopEarly: ("next", next_event),
+        ts.SessionControlEvent.kRerecord: ("rerecord", rerecord_event),
+        ts.SessionControlEvent.kStopSession: ("stop", stop_event),
+    }
+
+    def make_handler(component_id: str):
+        def on_event(event) -> None:
+            mapped = event_map.get(event)
+            if mapped is None:
+                return
+            name, flag = mapped
+            print(f"session control '{component_id}' -> {name}", flush=True)
+            flag.set()
+        return on_event
+
+    def make_disconnect(component_id: str):
+        def on_disconnect() -> None:
+            # Deliberately does not stop the session. A handle that stops
+            # reporting costs the operator their buttons, not their episode —
+            # the on-screen controls still work, and killing a good recording
+            # over a dropped input link would be the worse failure.
+            print(
+                f"session control '{component_id}' disconnected; "
+                "use the on-screen controls",
+                flush=True,
+            )
+        return on_disconnect
+
+    for component in session_controls:
+        component_id = component.get_identifier()
+        component.set_callbacks(make_handler(component_id),
+                                make_disconnect(component_id))
+        component.start()
+        print(f"session control '{component_id}' live", flush=True)
 
 
 def _wait_for_signal(
@@ -1395,7 +1467,8 @@ def main() -> int:
         # must inherit a fully-blocked signal mask. See
         # _block_signals_on_this_thread for the EINTR-abort rationale.
         with _block_signals_on_this_thread():
-            mgr, _controllers, mcap_root = _build_session_manager(config)
+            mgr, _controllers, _session_controls, mcap_root = (
+                _build_session_manager(config))
             # Clear ghost/header-only episode files from a prior aborted run
             # before start_episode() scans the dataset, so they don't inflate
             # the SDK's filename-based episode count and wedge resume at
@@ -1437,6 +1510,12 @@ def main() -> int:
     )
     stdin_thread.start()
 
+    # Hardware buttons become a second producer of the events above. After the
+    # events exist and after the first episode is live, so an early press cannot
+    # set a flag the loop has not started watching for yet.
+    _attach_session_controls(
+        _session_controls, stop_event, next_event, rerecord_event)
+
     try:
         _run_episode_loop(
             mgr,
@@ -1470,6 +1549,21 @@ def main() -> int:
         return 2
     finally:
         shutdown_event.set()
+        # Join each button source's poll thread before the interpreter tears down,
+        # so a callback cannot fire into a half-finalized Python state. Idempotent
+        # and safe if start() was never reached.
+        #
+        # Then drop the callbacks. These components outlive this scope — the
+        # process-global ActiveHardwareRegistry holds them — so without this the
+        # Python callables stay owned by a C++ global and are destroyed during
+        # static teardown, after the interpreter has finalized. That is a crash at
+        # normal exit, which the parent would report as a recording failure.
+        for component in _session_controls:
+            try:
+                component.stop()
+                component.set_callbacks(None, None)
+            except Exception:
+                pass
 
     print(f"{_SUCCESS_PREFIX} session completed", flush=True)
     return 0
