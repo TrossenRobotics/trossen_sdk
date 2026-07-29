@@ -23,7 +23,7 @@ namespace trossen::configuration {
  *   "right_ip_address": "192.168.1.4",
  *   "right_model": "pro",
  *   "end_effector": "pro_base",
- *   "write_moving_time_s": 0.2,          // optional, default 0.0
+ *   "write_moving_time_s": 0.0,          // optional, default 0.0
  *   "staging_time_s": 2.0,               // optional, default 2.0
  *   "staged_position": [...],            // optional, default none (no staging)
  *   "episode_lifecycle_enabled": true,   // optional, default false
