@@ -142,6 +142,9 @@ if(TROSSEN_ENABLE_RIVET)
   else()
     message(STATUS "  system trossen_base not found, fetching")
     include(FetchContent)
+    # trossen_base builds a gamepad demo by default, which hard-requires SDL2 and
+    # fails configuration on hosts without it. We only need the library.
+    set(BUILD_CONTROLLER_DEMO OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(
       trossen_base
       SYSTEM

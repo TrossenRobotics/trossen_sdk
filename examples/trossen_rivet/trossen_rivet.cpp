@@ -19,10 +19,9 @@
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/configuration/sdk_config.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
-#include "trossen_sdk/hw/composite/bimanual_glide_component.hpp"
-#include "trossen_sdk/hw/composite/rivet_component.hpp"
-#include "trossen_sdk/hw/composite/rivet_producer.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/hw/session_control/session_control_capable.hpp"
+#include "trossen_sdk/hw/teleop/teleop_capable.hpp"
 #include "trossen_sdk/hw/teleop/teleop_factory.hpp"
 #include "trossen_sdk/observer/observer_registry.hpp"
 #include "trossen_sdk/runtime/producer_registry.hpp"
@@ -121,29 +120,46 @@ int main(int argc, char** argv) {
 
   std::cout << "Initializing hardware...\n";
 
+  // Arms first. Every one is a plain trossen_arm: the two Glide handles are
+  // passive leaders (has_actuators=false) and the two `pro` arms are followers,
+  // a distinction that lives entirely in their config rather than in their type.
   std::unordered_map<std::string,
-    std::shared_ptr<trossen::hw::bimanual_glide::BimanualGlideComponent>> bimanual_components;
+    std::shared_ptr<trossen::hw::arm::TrossenArmComponent>> arm_components;
 
-  for (const auto& [id, bimanual_cfg] : cfg.hardware.bimanual_arms) {
+  for (const auto& [id, arm_cfg] : cfg.hardware.arms) {
     auto component = trossen::hw::HardwareRegistry::create(
-      "bimanual_glide", id, bimanual_cfg.to_json(), true);
-    bimanual_components[id] =
-      std::dynamic_pointer_cast<trossen::hw::bimanual_glide::BimanualGlideComponent>(component);
-    std::cout << "  [ok] Bimanual arm [" << id << "] configured ("
-              << bimanual_cfg.left_ip_address << ", " << bimanual_cfg.right_ip_address << ")\n";
+      "trossen_arm", id, arm_cfg.to_json(), true);
+    arm_components[id] =
+      std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(component);
+    std::cout << "  [ok] Arm [" << id << "] configured (" << arm_cfg.ip_address
+              << ", " << arm_cfg.model
+              << (arm_cfg.actuated ? "" : ", passive leader") << ")\n";
   }
 
-
+  // Then the components list, in declared order — order matters here, because
+  // glide_arm_input resolves the handle arms above by id, and the base leader
+  // resolves nothing but must exist before teleop pairs are built.
   std::unordered_map<std::string,
-  std::shared_ptr<trossen::hw::rivet::RivetComponent>> rivet_components;
+    std::shared_ptr<trossen::hw::HardwareComponent>> components;
 
-  for (const auto& [id, rivet_cfg] : cfg.hardware.mobile_rivet) {
+  // Anything that can drive session transitions gets attached to the manager
+  // below. Collected by interface rather than by type so a different button
+  // source needs no change here.
+  std::vector<std::shared_ptr<trossen::hw::session_control::SessionControlCapable>>
+    session_ctrls;
+
+  for (const auto& comp_cfg : cfg.hardware.components) {
     auto component = trossen::hw::HardwareRegistry::create(
-      "rivet", id, rivet_cfg.to_json(), true);
-    rivet_components[id] =
-      std::dynamic_pointer_cast<trossen::hw::rivet::RivetComponent>(component);
-    std::cout << "  [ok] Rivet [" << id << "] configured ("
-              << rivet_cfg.left_ip_address << ", " << rivet_cfg.right_ip_address << ")\n";
+      comp_cfg.type, comp_cfg.id, comp_cfg.raw, true);
+    components[comp_cfg.id] = component;
+
+    if (auto sc = std::dynamic_pointer_cast<
+          trossen::hw::session_control::SessionControlCapable>(component)) {
+      session_ctrls.push_back(sc);
+    }
+
+    std::cout << "  [ok] Component [" << comp_cfg.id << "] configured (type="
+              << comp_cfg.type << ")\n";
   }
 
 
@@ -180,14 +196,22 @@ int main(int argc, char** argv) {
     const auto period =
       std::chrono::milliseconds(static_cast<int>(1000.0f / prod_cfg.poll_rate_hz));
 
-    if (prod_cfg.type == "rivet" && rivet_components.count(prod_cfg.hardware_id)) {
+    if (arm_components.count(prod_cfg.hardware_id)) {
       auto prod = trossen::runtime::ProducerRegistry::create(
-        "rivet",
-        rivet_components.at(prod_cfg.hardware_id),
+        prod_cfg.type,
+        arm_components.at(prod_cfg.hardware_id),
         prod_cfg.to_registry_json());
       mgr.add_producer(prod, period);
-      std::cout << "  [ok] Rivet producer [" << prod_cfg.stream_id << "] ("
+      std::cout << "  [ok] Arm producer [" << prod_cfg.stream_id << "] ("
                 << prod_cfg.poll_rate_hz << " Hz)\n";
+    } else if (components.count(prod_cfg.hardware_id)) {
+      auto prod = trossen::runtime::ProducerRegistry::create(
+        prod_cfg.type,
+        components.at(prod_cfg.hardware_id),
+        prod_cfg.to_registry_json());
+      mgr.add_producer(prod, period);
+      std::cout << "  [ok] Component producer [" << prod_cfg.stream_id << "] (type="
+                << prod_cfg.type << ", " << prod_cfg.poll_rate_hz << " Hz)\n";
     } else if (camera_components.count(prod_cfg.hardware_id)) {
       const auto* cam = camera_cfg_map.at(prod_cfg.hardware_id);
       if (trossen::runtime::PushProducerRegistry::is_registered(prod_cfg.type)) {
@@ -274,6 +298,21 @@ int main(int argc, char** argv) {
   for (auto& ctrl : controllers) mgr.add_teleop(std::move(ctrl));
 
   // ──────────────────────────────────────────────────────────
+  // Session control from the Glide handle buttons
+  // ──────────────────────────────────────────────────────────
+
+  // attach_control installs the callbacks, so it must precede start() — after
+  // start() the poll thread reads them without locking.
+  for (auto& sc : session_ctrls) {
+    mgr.attach_control(*sc);
+    sc->start();
+  }
+  if (!session_ctrls.empty()) {
+    std::cout << "\nSession control live on the Glide buttons: start/next, "
+                 "stop session, re-record.\n";
+  }
+
+  // ──────────────────────────────────────────────────────────
   // Register lifecycle callbacks
   // ──────────────────────────────────────────────────────────
 
@@ -307,8 +346,15 @@ int main(int argc, char** argv) {
   // they don't stay in their last commanded pose.
   mgr.on_pre_shutdown([&]() {
     if (!has_teleop) {
-      for (auto& [id, arm] : bimanual_components) arm->end_teleop();
-      for (auto& [id, rivet] : rivet_components) rivet->end_teleop();
+      for (auto& [id, arm] : arm_components) arm->end_teleop();
+      // Reaches the base through the teleop interface rather than its concrete
+      // type, so this stays correct for any base follower declared in components.
+      for (auto& [id, component] : components) {
+        if (auto base = trossen::hw::teleop::as_capable<
+              trossen::hw::teleop::BaseSpaceTeleop>(component)) {
+          base->end_teleop();
+        }
+      }
     }
   });
 
@@ -357,9 +403,9 @@ int main(int argc, char** argv) {
 
   const auto final_stats = mgr.stats();
   std::vector<std::string> extra_info = {
-    "Data streams:         " +
-      std::to_string(cfg.hardware.arms.size() + 2 * cfg.hardware.bimanual_arms.size()) +
-      " arms + " + std::to_string(cfg.hardware.cameras.size()) + " cameras"
+    "Data streams:         " + std::to_string(cfg.hardware.arms.size()) + " arms + " +
+      std::to_string(cfg.hardware.cameras.size()) + " cameras + " +
+      std::to_string(cfg.hardware.components.size()) + " components"
   };
   trossen::utils::print_final_summary(
     final_stats.total_episodes_completed, root, extra_info);

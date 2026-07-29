@@ -178,6 +178,27 @@ struct Odometry2DRecord : public RecordBase {
     /// @brief Angular velocity around z (rad/s)
     float angular_z{0.f};
   } twist;
+
+  /// @brief Vertical lift velocity, in the actuator's own units per second.
+  ///
+  /// Outside the 2D twist above because a lift is not planar motion. Zero on
+  /// bases without one, so a consumer may read it unconditionally.
+  float lift_velocity{0.f};
+
+  /// @brief Battery telemetry, for bases that report it.
+  ///
+  /// Recorded per timestep rather than once per episode because it is most
+  /// useful as dataset QA — a base browning out mid-session shows up here as
+  /// sagging charge against degrading motion. All zero on bases that do not
+  /// report it.
+  struct Battery {
+    /// @brief State of charge (%)
+    float percent{0.f};
+    /// @brief Temperature (deg C)
+    float temp{0.f};
+    /// @brief 0=stationary, 1=charging, 2=discharging
+    std::uint8_t charging_state{0};
+  } battery;
 };
 
 /**

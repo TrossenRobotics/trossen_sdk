@@ -40,4 +40,16 @@ message Odometry2D {
 
   // Body-frame twist
   Twist2D twist = 4;
+
+  // Vertical lift velocity in actuator units per second (0 on bases with no lift)
+  float lift_velocity = 5;
+
+  // Battery state of charge (%)
+  float battery_percent = 6;
+
+  // Battery temperature (deg C)
+  float battery_temp = 7;
+
+  // Battery charging state (0=stationary, 1=charging, 2=discharging)
+  uint32 battery_charging_state = 8;
 }

@@ -1,68 +1,266 @@
 {
   "robot_name": "trossen_rivet",
-
   "hardware": {
-    "bimanual_arms": {
-      "bimanual_glide": {
-        "left_ip_address": "192.168.0.3",
-        "left_model": "glide_left",
-        "right_ip_address": "192.168.0.2",
-        "right_model": "glide_right",
+    "arms": {
+      "glide_left": {
+        "ip_address": "192.168.1.3",
+        "model": "wxai_v0",
+        "end_effector": "wxai_v0_leader",
+        "joint_signs": [
+          1,
+          1,
+          1,
+          -1,
+          -1,
+          1,
+          1
+        ],
+        "joint_offsets": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          -0.7854,
+          0
+        ],
+        "gripper_feedback_leader_max": 27.0,
+        "gripper_feedback_follower_max": 87.5,
+        "gripper_feedback_offset": 5.0,
+        "actuated": false,
+        "gripper_force_feedback": true
+      },
+      "glide_right": {
+        "ip_address": "192.168.1.2",
+        "model": "wxai_v0",
+        "end_effector": "wxai_v0_leader",
+        "joint_signs": [
+          1,
+          1,
+          1,
+          -1,
+          -1,
+          1,
+          1
+        ],
+        "joint_offsets": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0.7854,
+          0
+        ],
+        "gripper_feedback_leader_max": 27.0,
+        "gripper_feedback_follower_max": 87.5,
+        "gripper_feedback_offset": 5.0,
+        "actuated": false,
+        "gripper_force_feedback": true
+      },
+      "follower_left": {
+        "ip_address": "192.168.1.5",
+        "model": "pro",
+        "end_effector": "wxai_v0_follower",
         "write_moving_time_s": 0.2,
-        "joint_signs": [1,1,1,-1,-1,1,1],
-        "left_joint_offsets": [0,0,0,0,0,-0.7854,0],
-        "right_joint_offsets": [0,0,0,0,0,0.7854,0]
-      }
-    },
-    "mobile_rivet": {
-      "rivet": {
-        "left_ip_address": "192.168.1.4",
-        "left_model": "pro",
-        "right_ip_address": "192.168.1.5",
-        "right_model": "pro",
+        "staging_time_s": 2.0
+      },
+      "follower_right": {
+        "ip_address": "192.168.1.4",
+        "model": "pro",
+        "end_effector": "wxai_v0_follower",
         "write_moving_time_s": 0.2,
         "staging_time_s": 2.0
       }
     },
+    "components": [
+      {
+        "id": "glide_inputs",
+        "type": "glide_arm_input",
+        "arms": [
+          "glide_left",
+          "glide_right"
+        ]
+      },
+      {
+        "id": "rivet_base",
+        "type": "trossen_base",
+        "max_linear_mps": 0.6,
+        "max_angular_rps": 1.2,
+        "max_lift_units_per_s": 8000.0
+      },
+      {
+        "id": "base_leader",
+        "type": "glide_base",
+        "translation": {
+          "arm_id": "glide_left",
+          "forward_source": "joystick_y",
+          "forward_invert": false,
+          "lateral_source": "joystick_x",
+          "lateral_invert": false,
+          "max": 0.6,
+          "deadzone": 0.05
+        },
+        "axes": {
+          "angular": {
+            "arm_id": "glide_right",
+            "source": "joystick_x",
+            "invert": false,
+            "max": 1.2,
+            "deadzone": 0.08
+          },
+          "lift": {
+            "arm_id": "glide_right",
+            "source": "buttons",
+            "up_bit": 0,
+            "down_bit": 2,
+            "max": 8000.0
+          }
+        }
+      },
+      {
+        "id": "session_control",
+        "type": "glide_session_control",
+        "poll_rate_hz": 50.0,
+        "debounce_ms": 40,
+        "buttons": [
+          {
+            "arm_id": "glide_left",
+            "bit": 0,
+            "event": "start"
+          },
+          {
+            "arm_id": "glide_left",
+            "bit": 1,
+            "event": "stop_session"
+          },
+          {
+            "arm_id": "glide_left",
+            "bit": 2,
+            "event": "rerecord"
+          }
+        ]
+      }
+    ],
     "cameras": [
+      {
+        "id": "camera_main",
+        "type": "zed_camera",
+        "serial_number": "51287468",
+        "resolution": "HD1200",
+        "fps": 30,
+        "use_depth": false
+      },
+      {
+        "id": "camera_left",
+        "type": "zed_camera",
+        "serial_number": "97900849",
+        "resolution": "HD1200",
+        "fps": 30,
+        "use_depth": false
+      },
+      {
+        "id": "camera_right",
+        "type": "zed_camera",
+        "serial_number": "97525506",
+        "resolution": "HD1200",
+        "fps": 30,
+        "use_depth": false
+      }
     ]
   },
-
   "teleop": {
     "enabled": true,
     "rate_hz": 1000.0,
     "pairs": [
-      { "leader": "bimanual_glide",  "follower": "rivet"  }
+      {
+        "leader": "glide_left",
+        "follower": "follower_left",
+        "space": "joint"
+      },
+      {
+        "leader": "glide_right",
+        "follower": "follower_right",
+        "space": "joint"
+      },
+      {
+        "leader": "base_leader",
+        "follower": "rivet_base",
+        "space": "base"
+      }
     ]
   },
-
   "producers": [
     {
-      "type": "rivet",
-      "hardware_id": "rivet",
-      "stream_id": "rivet",
+      "type": "trossen_arm",
+      "hardware_id": "follower_left",
+      "stream_id": "follower_left",
       "poll_rate_hz": 30.0,
       "use_device_time": false
-    }
-  ],
-
-  "observers": [
+    },
     {
-      "type":      "rerun",
-      "id":        "live_viewer",
-      "app_id":    "trossen_rivet",
-      "spawn":     true,
-      "enabled":   true,
-      "subscriptions": [
-        { "record_id": "camera_left",  "throttle_hz": 15.0 },
-        { "record_id": "camera_right", "throttle_hz": 15.0 }
-      ]
+      "type": "trossen_arm",
+      "hardware_id": "follower_right",
+      "stream_id": "follower_right",
+      "poll_rate_hz": 30.0,
+      "use_device_time": false
+    },
+    {
+      "type": "trossen_arm",
+      "hardware_id": "glide_left",
+      "stream_id": "glide_left",
+      "poll_rate_hz": 30.0,
+      "use_device_time": false
+    },
+    {
+      "type": "trossen_arm",
+      "hardware_id": "glide_right",
+      "stream_id": "glide_right",
+      "poll_rate_hz": 30.0,
+      "use_device_time": false
+    },
+    {
+      "type": "trossen_base",
+      "hardware_id": "rivet_base",
+      "stream_id": "rivet_base",
+      "poll_rate_hz": 30.0,
+      "use_device_time": false
+    },
+    {
+      "type": "zed_camera",
+      "hardware_id": "camera_main",
+      "stream_id": "camera_main",
+      "poll_rate_hz": 30.0,
+      "encoding": "bgr8",
+      "use_device_time": true
+    },
+    {
+      "type": "zed_camera",
+      "hardware_id": "camera_left",
+      "stream_id": "camera_left",
+      "poll_rate_hz": 30.0,
+      "encoding": "bgr8",
+      "use_device_time": true
+    },
+    {
+      "type": "zed_camera",
+      "hardware_id": "camera_right",
+      "stream_id": "camera_right",
+      "poll_rate_hz": 30.0,
+      "encoding": "bgr8",
+      "use_device_time": true
     }
   ],
-
   "backend": {
-    "root": "~/sdk_output",
-    "dataset_id": "rivet_dataset"
+    "root": "~/trossen_data",
+    "dataset_id": "rivet_dataset",
+    "compression": "",
+    "chunk_size_bytes": 4194304
+  },
+  "session": {
+    "max_duration": 50.0,
+    "max_episodes": 40,
+    "backend_type": "trossen_mcap",
+    "reset_duration": 5.0
   }
-
 }

@@ -442,6 +442,11 @@ void TrossenMCAPBackend::write_odometry_2d_record(const data::Odometry2DRecord& 
   twist->set_linear_y(odom.twist.linear_y);
   twist->set_angular_z(odom.twist.angular_z);
 
+  out.set_lift_velocity(odom.lift_velocity);
+  out.set_battery_percent(odom.battery.percent);
+  out.set_battery_temp(odom.battery.temp);
+  out.set_battery_charging_state(odom.battery.charging_state);
+
   std::string payload;
   out.SerializeToString(&payload);
 
