@@ -68,6 +68,9 @@ def configure_leader(ip, model):
 
     joint_limits = driver.get_joint_limits()
     joint_limits[-1].position_max = 0.05
+    for i in range (6):
+        joint_limits[i].velocity_tolerance = joint_limits[i].velocity_max
+        joint_limits[i].effort_tolerance = joint_limits[i].effort_max  
     driver.set_joint_limits(joint_limits)
 
     return driver
@@ -78,13 +81,12 @@ def configure_follower(ip):
     driver = trossen_arm.TrossenArmDriver()
     driver.configure(trossen_arm.Model.pro, trossen_arm.StandardEndEffector.pro_base, ip, True)
 
-    motor_parameters = driver.get_motor_parameters()
-    for i in range(7):
-        motor_parameters[i][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[i][trossen_arm.Mode.position].velocity.imax = 0.0
-    for i in range(3):
-        motor_parameters[i][trossen_arm.Mode.position].position.kp = 16.0
-    driver.set_motor_parameters(motor_parameters)
+    joint_limits = driver.get_joint_limits()
+    for i in range (6):
+        joint_limits[i].velocity_tolerance = joint_limits[i].velocity_max
+        joint_limits[i].effort_tolerance = joint_limits[i].effort_max  
+    driver.set_joint_limits(joint_limits)
+
 
     return driver
 
