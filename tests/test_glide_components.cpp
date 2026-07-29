@@ -172,21 +172,24 @@ TEST_F(GlideComponentTest, BothLiftButtonsHeldCancels) {
   EXPECT_FLOAT_EQ(base.read()[ba::kLift], 0.0f);
 }
 
-// ── Swerve base: right stick translation, left stick yaw ─────────────────
+// ── Swerve base: LEFT stick translates in 2D, RIGHT stick yaws ───────────
 
-/// The real Rivet mapping: left handle rotates, right handle translates in 2D,
-/// right handle buttons drive the lift.
+/// The real Rivet mapping.
+///
+/// LEFT handle stick is a 2D translation vector — forward/back on Y, strafe on
+/// X — so it is the `translation` pair. RIGHT handle stick is yaw alone, and the
+/// right handle's buttons drive the lift.
 nlohmann::json swerve_config(float max = 0.6f, float deadzone = 0.06f) {
   return {
     {"translation", {
-      {"arm_id", "glide_right"},
+      {"arm_id", "glide_left"},
       {"forward_source", "joystick_y"},
       {"lateral_source", "joystick_x"},
       {"max", max},
       {"deadzone", deadzone},
     }},
     {"axes", {
-      {"angular", {{"arm_id", "glide_left"}, {"source", "joystick_x"},
+      {"angular", {{"arm_id", "glide_right"}, {"source", "joystick_x"},
                    {"max", 1.2f}, {"deadzone", 0.1f}}},
       {"lift", {{"arm_id", "glide_right"}, {"source", "buttons"},
                 {"up_bit", 0}, {"down_bit", 2}, {"max", 8000.0f}}},
@@ -198,8 +201,8 @@ TEST_F(GlideComponentTest, SwerveReadsTranslationAndYawFromDifferentHandles) {
   GlideBaseComponent base("base_leader");
   base.configure(swerve_config());
 
-  set_handle("glide_right", kStickCentre, kStickMax);  // full forward
-  set_handle("glide_left",  kStickMax, kStickCentre);  // full yaw
+  set_handle("glide_left",  kStickCentre, kStickMax);  // left stick: full forward
+  set_handle("glide_right", kStickMax, kStickCentre);  // right stick: full yaw
 
   const auto cmd = base.read();
   EXPECT_NEAR(cmd[ba::kLinear], 0.6f, 1e-3f);
@@ -211,12 +214,12 @@ TEST_F(GlideComponentTest, SwerveDiagonalIsNotFasterThanStraight) {
   GlideBaseComponent base("base_leader");
   base.configure(swerve_config(0.6f, 0.0f));
 
-  set_handle("glide_right", kStickCentre, kStickMax);
+  set_handle("glide_left", kStickCentre, kStickMax);
   const auto straight = base.read();
   const float straight_mag =
     std::hypot(straight[ba::kLinear], straight[ba::kLateral]);
 
-  set_handle("glide_right", kStickMax, kStickMax);  // full diagonal
+  set_handle("glide_left", kStickMax, kStickMax);  // full diagonal
   const auto diagonal = base.read();
   const float diagonal_mag =
     std::hypot(diagonal[ba::kLinear], diagonal[ba::kLateral]);
@@ -231,7 +234,7 @@ TEST_F(GlideComponentTest, SwerveDiagonalPreservesDirection) {
   GlideBaseComponent base("base_leader");
   base.configure(swerve_config(0.6f, 0.0f));
 
-  set_handle("glide_right", kStickMax, kStickMax);
+  set_handle("glide_left", kStickMax, kStickMax);
   const auto cmd = base.read();
 
   // Equal deflection on both stick axes must come out as an equal split, so the
@@ -250,13 +253,13 @@ TEST_F(GlideComponentTest, SwerveDeadzoneIsRadialNotSquare) {
   const auto at = [](float frac) {
     return static_cast<std::uint16_t>(kStickCentre + frac * (kStickMax - kStickCentre));
   };
-  set_handle("glide_right", at(0.25f), at(0.25f));
+  set_handle("glide_left", at(0.25f), at(0.25f));
   const auto diagonal = base.read();
   EXPECT_GT(std::hypot(diagonal[ba::kLinear], diagonal[ba::kLateral]), 0.0f);
 
   // Straight push of the same per-axis size has magnitude 0.25 — inside the
   // radial deadzone, so it must be zero. Same threshold in every direction.
-  set_handle("glide_right", kStickCentre, at(0.25f));
+  set_handle("glide_left", kStickCentre, at(0.25f));
   const auto straight = base.read();
   EXPECT_FLOAT_EQ(straight[ba::kLinear], 0.0f);
   EXPECT_FLOAT_EQ(straight[ba::kLateral], 0.0f);
@@ -271,10 +274,10 @@ TEST_F(GlideComponentTest, SwerveOutputIsContinuousAtDeadzoneEdge) {
   };
   // Just past the deadzone the output must start near zero, not jump to 0.30 —
   // the surviving range is rescaled onto 0..max.
-  set_handle("glide_right", kStickCentre, at(0.32f));
+  set_handle("glide_left", kStickCentre, at(0.32f));
   EXPECT_LT(base.read()[ba::kLinear], 0.1f);
 
-  set_handle("glide_right", kStickCentre, kStickMax);
+  set_handle("glide_left", kStickCentre, kStickMax);
   EXPECT_NEAR(base.read()[ba::kLinear], 1.0f, 1e-3f);
 }
 
@@ -282,7 +285,7 @@ TEST_F(GlideComponentTest, SwerveCentredStickIsZero) {
   GlideBaseComponent base("base_leader");
   base.configure(swerve_config());
 
-  set_handle("glide_right", kStickCentre, kStickCentre);
+  set_handle("glide_left", kStickCentre, kStickCentre);
   const auto cmd = base.read();
   EXPECT_FLOAT_EQ(cmd[ba::kLinear], 0.0f);
   EXPECT_FLOAT_EQ(cmd[ba::kLateral], 0.0f);
@@ -295,19 +298,21 @@ TEST_F(GlideComponentTest, SwerveLosesOnlyTheMissingHandlesAxes) {
   // Right handle present, left handle silent: translation keeps working and yaw
   // falls to zero. Per-axis fail-to-stop, so a dropped handle cannot leave a
   // stale rotation command running.
-  set_handle("glide_right", kStickCentre, kStickMax);
+  set_handle("glide_left", kStickCentre, kStickMax);
   const auto cmd = base.read();
   EXPECT_NEAR(cmd[ba::kLinear], 0.6f, 1e-3f);
   EXPECT_FLOAT_EQ(cmd[ba::kAngular], 0.0f);
 }
 
-TEST_F(GlideComponentTest, SwerveLiftSharesTheTranslationHandle) {
+TEST_F(GlideComponentTest, SwerveLiftSharesTheYawHandle) {
   GlideBaseComponent base("base_leader");
   base.configure(swerve_config());
 
-  // The right handle supplies both the translation stick and the lift buttons —
-  // one component, so the joystick and button claims coexist.
-  set_handle("glide_right", kStickCentre, kStickMax, 1u << 0);
+  // The right handle supplies both the yaw stick and the lift buttons, and the
+  // left handle the translation stick — all claimed by one component, so the
+  // joystick and button reservations coexist across both handles.
+  set_handle("glide_right", kStickCentre, kStickCentre, 1u << 0);
+  set_handle("glide_left",  kStickCentre, kStickMax);
   const auto cmd = base.read();
   EXPECT_NEAR(cmd[ba::kLinear], 0.6f, 1e-3f);
   EXPECT_NEAR(cmd[ba::kLift], 8000.0f, 1e-2f);
@@ -401,14 +406,22 @@ TEST_F(GlideComponentTest, TwoAxesMayShareOneHandleJoystick) {
 
 // ── GlideSessionControlComponent ─────────────────────────────────────────
 
+/// The real Rivet session map: all three intents on the LEFT handle, since the
+/// right handle carries yaw plus the lift buttons.
+///
+/// `stop_session` is what the webapp's Stop button does — it finalizes the
+/// in-flight episode, pauses the session so it can be resumed, and shuts the SDK
+/// down with the arms returned to rest. `stop_early` is deliberately unbound:
+/// `start` already covers it, because kStart means "advance" during recording.
+///
 /// Debounce is zeroed so poll_once() is a single deterministic step.
 nlohmann::json control_config() {
   return {
     {"debounce_ms", 0},
     {"buttons", {
-      {{"arm_id", "glide_right"}, {"bit", 1}, {"event", "start"}},
-      {{"arm_id", "glide_right"}, {"bit", 3}, {"event", "rerecord"}},
-      {{"arm_id", "glide_left"},  {"bit", 1}, {"event", "stop_early"}},
+      {{"arm_id", "glide_left"}, {"bit", 1}, {"event", "start"}},
+      {{"arm_id", "glide_left"}, {"bit", 2}, {"event", "stop_session"}},
+      {{"arm_id", "glide_left"}, {"bit", 3}, {"event", "rerecord"}},
     }},
   };
 }
@@ -420,11 +433,11 @@ TEST_F(GlideComponentTest, ButtonPressEmitsMappedEvent) {
   std::vector<SessionControlEvent> events;
   control.set_callbacks([&](SessionControlEvent e) { events.push_back(e); }, [] {});
 
-  set_handle("glide_right", kStickCentre, kStickCentre, 0);
+  set_handle("glide_left", kStickCentre, kStickCentre, 0);
   control.poll_once();
   EXPECT_TRUE(events.empty());
 
-  set_handle("glide_right", kStickCentre, kStickCentre, 1u << 1);
+  set_handle("glide_left", kStickCentre, kStickCentre, 1u << 1);
   control.poll_once();
   ASSERT_EQ(events.size(), 1u);
   EXPECT_EQ(events[0], SessionControlEvent::kStart);
@@ -437,7 +450,7 @@ TEST_F(GlideComponentTest, HeldButtonEmitsOnceNotPerPoll) {
   std::vector<SessionControlEvent> events;
   control.set_callbacks([&](SessionControlEvent e) { events.push_back(e); }, [] {});
 
-  set_handle("glide_right", kStickCentre, kStickCentre, 1u << 1);
+  set_handle("glide_left", kStickCentre, kStickCentre, 1u << 1);
   for (int i = 0; i < 10; ++i) control.poll_once();
 
   // Rising-edge only: holding "start" through ten polls is one intent, not ten
@@ -452,11 +465,11 @@ TEST_F(GlideComponentTest, ReleaseThenPressEmitsAgain) {
   std::vector<SessionControlEvent> events;
   control.set_callbacks([&](SessionControlEvent e) { events.push_back(e); }, [] {});
 
-  set_handle("glide_right", kStickCentre, kStickCentre, 1u << 1);
+  set_handle("glide_left", kStickCentre, kStickCentre, 1u << 1);
   control.poll_once();
-  set_handle("glide_right", kStickCentre, kStickCentre, 0);
+  set_handle("glide_left", kStickCentre, kStickCentre, 0);
   control.poll_once();
-  set_handle("glide_right", kStickCentre, kStickCentre, 1u << 1);
+  set_handle("glide_left", kStickCentre, kStickCentre, 1u << 1);
   control.poll_once();
 
   EXPECT_EQ(events.size(), 2u);
@@ -469,8 +482,7 @@ TEST_F(GlideComponentTest, DistinctButtonsMapToDistinctEvents) {
   std::vector<SessionControlEvent> events;
   control.set_callbacks([&](SessionControlEvent e) { events.push_back(e); }, [] {});
 
-  set_handle("glide_right", kStickCentre, kStickCentre, 1u << 3);
-  set_handle("glide_left", kStickCentre, kStickCentre, 1u << 1);
+  set_handle("glide_left", kStickCentre, kStickCentre, (1u << 3) | (1u << 2));
   control.poll_once();
 
   ASSERT_EQ(events.size(), 2u);
@@ -478,8 +490,27 @@ TEST_F(GlideComponentTest, DistinctButtonsMapToDistinctEvents) {
   // assertion checks membership rather than a fixed index.
   EXPECT_NE(std::find(events.begin(), events.end(), SessionControlEvent::kRerecord),
             events.end());
-  EXPECT_NE(std::find(events.begin(), events.end(), SessionControlEvent::kStopEarly),
+  EXPECT_NE(std::find(events.begin(), events.end(), SessionControlEvent::kStopSession),
             events.end());
+}
+
+TEST_F(GlideComponentTest, StopButtonEmitsStopSessionLikeTheWebappStopButton) {
+  // The webapp's Stop button calls stop_recording() with discard_in_flight
+  // false: it finalizes the in-flight episode, pauses the session so it can be
+  // resumed, and shuts the SDK down with the arms back at rest. kStopSession is
+  // the intent that produces exactly that, so the Glide button and the webapp
+  // button stay behaviourally identical.
+  GlideSessionControlComponent control("session_control");
+  control.configure(control_config());
+
+  std::vector<SessionControlEvent> events;
+  control.set_callbacks([&](SessionControlEvent e) { events.push_back(e); }, [] {});
+
+  set_handle("glide_left", kStickCentre, kStickCentre, 1u << 2);
+  control.poll_once();
+
+  ASSERT_EQ(events.size(), 1u);
+  EXPECT_EQ(events[0], SessionControlEvent::kStopSession);
 }
 
 TEST_F(GlideComponentTest, UnknownEventNameIsRejected) {
