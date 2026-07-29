@@ -325,6 +325,9 @@ void BimanualGlideComponent::prepare_for_teleop(){
   left_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
   right_driver_->set_all_modes(trossen_arm::Mode::external_effort);
   left_driver_->set_all_modes(trossen_arm::Mode::external_effort);
+  
+  left_driver_->set_gripper_external_effort(gripper_feedback_offset_, write_moving_time_s_, false);
+  right_driver_->set_gripper_external_effort(gripper_feedback_offset_, write_moving_time_s_, false);
 }
 void BimanualGlideComponent::end_teleop(){}
 void BimanualGlideComponent::stage(){}
