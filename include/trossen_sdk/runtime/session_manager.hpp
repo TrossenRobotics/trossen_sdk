@@ -675,6 +675,36 @@ private:
   void discard_partial_on_stop();
 
   /**
+   * @brief Discard the in-flight episode and return kReRecord.
+   *
+   * Used on the re-record paths out of monitor_episode(), where an episode is
+   * still recording. discard_current_episode() is a no-op when nothing is
+   * active, so this is safe even if a caller also discards.
+   */
+  UserAction rerecord_discarding_current();
+
+  /**
+   * @brief Discard the last finalized episode and return kReRecord.
+   *
+   * Used on the re-record paths out of wait_for_reset(), where the episode has
+   * already been finalized and the operator wants that recording thrown away.
+   * Relies on discard_last_episode()'s idempotency latch, since a duplicate
+   * call would otherwise reach one episode further back.
+   */
+  UserAction rerecord_discarding_last();
+
+  /**
+   * @brief True once discard_last_episode() has run, until the next
+   * start_episode().
+   *
+   * discard_last_episode() is destructive on every call — it targets
+   * next_episode_index_ - 1 and decrements — so it needs a latch that a
+   * duplicate request can be rejected against. discard_current_episode() needs
+   * no equivalent because it is naturally a no-op with no episode active.
+   */
+  bool last_episode_discarded_{false};
+
+  /**
    * @brief Background monitoring loop for auto-stop
    * Checks elapsed time and calls stop_episode() when max_duration reached
    */

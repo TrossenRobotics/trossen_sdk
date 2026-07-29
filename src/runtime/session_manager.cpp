@@ -108,10 +108,10 @@ void SessionManager::discard_partial_on_stop() {
   // mid-episode and it calls discard_current_episode() before winding down. The
   // two hosts have to agree, because the same Glide button drives both.
   //
-  // Note this is asymmetric with kReRecord, where the caller does its own
-  // discard. Stop is handled here instead so the policy cannot be forgotten by
-  // a new example — nine example loops share the finalize-on-exit shape, and
-  // getting this wrong destroys or pollutes data silently.
+  // Handled here rather than in each example loop so the policy cannot be
+  // forgotten by a new one — nine examples share the same shape, and getting
+  // this wrong destroys or pollutes data silently. The re-record paths discard
+  // in SessionManager for the same reason.
   std::cout << "  [session] stop requested mid-episode, discarding the partial "
                "recording\n";
   try {
@@ -270,6 +270,10 @@ bool SessionManager::start_episode() {
               << "SessionManager is terminal." << std::endl;
     return false;
   }
+  // A fresh episode means there is once again a distinct "last episode" to
+  // discard, so re-arm the idempotency latch in discard_last_episode().
+  last_episode_discarded_ = false;
+
   // Guard: already active
   if (episode_active_) {
     std::cerr << "Episode already active. Call stop_episode() first." << std::endl;
@@ -690,6 +694,18 @@ void SessionManager::discard_last_episode() {
     return;
   }
 
+  // Idempotency guard. Unlike discard_current_episode(), this is destructive on
+  // every call: it targets next_episode_index_ - 1 and decrements, so a second
+  // call reaches one episode further back and deletes a good recording. Since
+  // the re-record discard now lives in SessionManager while example loops may
+  // still carry their own call, a duplicate has to be inert rather than
+  // silently eating the previous episode.
+  if (last_episode_discarded_) {
+    std::cout << "Last episode already discarded; ignoring duplicate request."
+              << std::endl;
+    return;
+  }
+
   uint32_t discard_index = next_episode_index_ - 1;
   std::cout << "Discarding last episode " << discard_index << "..." << std::endl;
 
@@ -722,8 +738,22 @@ void SessionManager::discard_last_episode() {
     --total_episodes_completed_;
   }
 
+  // Latch until the next episode starts, so a duplicate call cannot reach past
+  // this one into an episode the operator wanted to keep.
+  last_episode_discarded_ = true;
+
   std::cout << "Episode " << discard_index
             << " discarded. Will re-record at same index." << std::endl;
+}
+
+UserAction SessionManager::rerecord_discarding_current() {
+  discard_current_episode();
+  return UserAction::kReRecord;
+}
+
+UserAction SessionManager::rerecord_discarding_last() {
+  discard_last_episode();
+  return UserAction::kReRecord;
 }
 
 void SessionManager::request_rerecord() {
@@ -973,7 +1003,7 @@ UserAction SessionManager::wait_for_reset() {
   auto poll_keys = [this]() -> UserAction {
     // Apply any queued control-source events (VR buttons, etc.) on this thread.
     drain_control_events(ControlPhase::kReset);
-    if (rerecord_requested_.load()) return UserAction::kReRecord;
+    if (rerecord_requested_.load()) return rerecord_discarding_last();
 
     auto key = trossen::utils::poll_keypress();
     if (key == trossen::utils::KeyPress::kRightArrow) {
@@ -982,7 +1012,7 @@ UserAction SessionManager::wait_for_reset() {
     }
     if (key == trossen::utils::KeyPress::kLeftArrow) {
       rerecord_requested_.store(true);
-      return UserAction::kReRecord;
+      return rerecord_discarding_last();
     }
     return UserAction::kContinue;
   };
@@ -1004,13 +1034,13 @@ UserAction SessionManager::wait_for_reset() {
 
     for (int i = total_seconds; i > 0; --i) {
       if (trossen::utils::g_stop_requested || reset_signaled_.load()) break;
-      if (rerecord_requested_.load()) return UserAction::kReRecord;
+      if (rerecord_requested_.load()) return rerecord_discarding_last();
       std::cout << "  " << i << "...\n";
       for (int ms = 0; ms < 10; ++ms) {
         if (trossen::utils::g_stop_requested || reset_signaled_.load()) break;
-        if (rerecord_requested_.load()) return UserAction::kReRecord;
+        if (rerecord_requested_.load()) return rerecord_discarding_last();
         auto action = poll_keys();
-        if (action == UserAction::kReRecord) return UserAction::kReRecord;
+        if (action == UserAction::kReRecord) return rerecord_discarding_last();
         wait_or_signal();
       }
     }
@@ -1024,13 +1054,13 @@ UserAction SessionManager::wait_for_reset() {
            !reset_signaled_.load() &&
            !rerecord_requested_.load()) {
       auto action = poll_keys();
-      if (action == UserAction::kReRecord) return UserAction::kReRecord;
+      if (action == UserAction::kReRecord) return rerecord_discarding_last();
       wait_or_signal();
     }
   }
 
   if (trossen::utils::g_stop_requested) return UserAction::kStop;
-  if (rerecord_requested_.load()) return UserAction::kReRecord;
+  if (rerecord_requested_.load()) return rerecord_discarding_last();
   return UserAction::kContinue;
 }
 
@@ -1132,7 +1162,7 @@ UserAction SessionManager::monitor_episode(
 
     // Check for re-record request
     if (rerecord_requested_.load()) {
-      return UserAction::kReRecord;
+      return rerecord_discarding_current();
     }
 
     // A control source asked to end the episode (kStart advances, kStopEarly
@@ -1145,7 +1175,7 @@ UserAction SessionManager::monitor_episode(
     auto key = trossen::utils::poll_keypress();
     if (key == trossen::utils::KeyPress::kLeftArrow) {
       rerecord_requested_.store(true);
-      return UserAction::kReRecord;
+      return rerecord_discarding_current();
     }
     if (key == trossen::utils::KeyPress::kRightArrow) {
       return UserAction::kContinue;

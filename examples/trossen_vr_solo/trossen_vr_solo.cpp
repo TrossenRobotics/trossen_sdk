@@ -408,7 +408,6 @@ int main(int argc, char** argv) {
 
     auto action = mgr.monitor_episode();
     if (action == trossen::runtime::UserAction::kReRecord) {
-      mgr.discard_current_episode();
       continue;
     }
 
@@ -422,7 +421,6 @@ int main(int argc, char** argv) {
     action = mgr.wait_for_reset();
     if (action == trossen::runtime::UserAction::kStop) break;
     if (action == trossen::runtime::UserAction::kReRecord) {
-      mgr.discard_last_episode();
       continue;
     }
   }

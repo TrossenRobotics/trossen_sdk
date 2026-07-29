@@ -291,3 +291,59 @@ TEST_F(SessionManagerDiscardTest, NoStopRequest_AtShutdown_FinalizesNormally) {
   EXPECT_FALSE(sm.is_episode_active());
   EXPECT_EQ(sm.stats().total_episodes_completed, before.total_episodes_completed + 1);
 }
+
+// ── discard_last_episode() idempotency ───────────────────────────────────
+//
+// Unlike discard_current_episode(), this one is destructive on every call: it
+// targets next_episode_index_ - 1 and decrements, so a second call reaches one
+// episode further back. The re-record discard now lives in SessionManager while
+// an out-of-tree caller may still have its own call, so a duplicate has to be
+// inert rather than silently eating a good recording.
+
+// SD-13: a duplicate discard_last_episode() must not eat the previous episode
+TEST_F(SessionManagerDiscardTest, DiscardLastEpisode_DuplicateCallIsInert) {
+  SessionManager sm;
+
+  // Two completed episodes.
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  sm.stop_episode();
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  sm.stop_episode();
+
+  const auto two_done = sm.stats();
+  ASSERT_EQ(two_done.total_episodes_completed, 2u);
+
+  sm.discard_last_episode();
+  const auto after_first = sm.stats();
+  EXPECT_EQ(after_first.total_episodes_completed, 1u);
+
+  // The duplicate is the dangerous one — without the latch this would drop the
+  // count to 0, destroying an episode the operator asked to keep.
+  sm.discard_last_episode();
+  EXPECT_EQ(sm.stats().total_episodes_completed, 1u);
+}
+
+// SD-14: starting a new episode re-arms the latch
+TEST_F(SessionManagerDiscardTest, DiscardLastEpisode_LatchRearmsOnNewEpisode) {
+  SessionManager sm;
+
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  sm.stop_episode();
+  sm.discard_last_episode();
+  const auto after_discard = sm.stats();
+
+  // A fresh episode means there is once again a distinct "last episode", so a
+  // second re-record in the same session must still work.
+  ASSERT_TRUE(sm.start_episode());
+  std::this_thread::sleep_for(std::chrono::milliseconds(60));
+  sm.stop_episode();
+  EXPECT_EQ(sm.stats().total_episodes_completed,
+            after_discard.total_episodes_completed + 1);
+
+  sm.discard_last_episode();
+  EXPECT_EQ(sm.stats().total_episodes_completed,
+            after_discard.total_episodes_completed);
+}
