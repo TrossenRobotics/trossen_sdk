@@ -144,6 +144,15 @@ struct RivetRecord : public RecordBase {
 
   /// @brief Lift actuator velocity
   float lift_velocity{0.f};
+
+  /// @brief Battery state of charge (%)
+  float battery_percent{0.f};
+
+  /// @brief Battery temperature (deg C)
+  float battery_temp{0.f};
+
+  /// @brief Battery charging state (0=stationary, 1=charging, 2=discharging)
+  uint8_t battery_charging_state{0};
 };
 
 /**
