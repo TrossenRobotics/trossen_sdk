@@ -32,9 +32,9 @@ ENABLE_FOLLOWER = True
 ENABLE_BASE = True
 
 # IP addresses for the leader and follower
-IP_LEFT_LEADER = "192.168.1.3"
+IP_LEFT_LEADER = "192.168.0.3"
 IP_LEFT_FOLLOWER = "192.168.1.4"
-IP_RIGHT_LEADER = "192.168.1.2"
+IP_RIGHT_LEADER = "192.168.0.2"
 IP_RIGHT_FOLLOWER = "192.168.1.5"
 
 # Gripper force feedback parameters
@@ -335,7 +335,7 @@ if __name__ == "__main__":
                 # Read the leader's gripper position and follower's gripper effort
                 leader_right_position = driver_right_leader.get_gripper_position()
                 follower_right_position = driver_right_follower.get_gripper_position()
-                follower_right_effort = driver_right_follower.get_gripper_effort()
+                follower_right_effort = driver_right_follower.get_gripper_external_effort()
 
                 leader_right_effort = right_gripper_feedback.update(follower_right_effort)
 
@@ -391,7 +391,7 @@ if __name__ == "__main__":
                 # LEFT ARM GRIPPER
                 leader_left_position = driver_left_leader.get_gripper_position()
                 follower_left_position = driver_left_follower.get_gripper_position()
-                follower_left_effort = driver_left_follower.get_gripper_effort()
+                follower_left_effort = driver_left_follower.get_gripper_external_effort()
 
                 leader_left_effort = left_gripper_feedback.update(follower_left_effort)
 
