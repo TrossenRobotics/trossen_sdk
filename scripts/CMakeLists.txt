@@ -1,13 +1,15 @@
 # ──────────────────────────────────────────────────────────────────────────────
 # Scripts — offline data-processing tools
 #
-# These executables are NOT robot control programs. They process recorded
-# MCAP data and do not require a connected robot to run.
+# Mostly offline: these process recorded MCAP data and need no connected robot.
+# glide_input_probe is the exception — it reads live handles — but it only reads,
+# and commands nothing.
 #
 # Run all tools from the repository root so relative config paths resolve:
 #   ./build/scripts/replay_trossen_mcap_jointstate <mcap_file>
 #   ./build/scripts/trossen_mcap_to_lerobot_v2 <mcap_file_or_folder>
 #   ./build/scripts/trossen_mcap_to_lerobot_v3 <mcap_file_or_folder>
+#   ./build/scripts/glide_input_probe [--left IP] [--right IP]
 # ──────────────────────────────────────────────────────────────────────────────
 
 # TrossenMCAP joint-state replay tool
@@ -18,6 +20,17 @@ target_include_directories(replay_trossen_mcap_jointstate PRIVATE
 )
 target_compile_definitions(replay_trossen_mcap_jointstate PRIVATE MCAP_IMPLEMENTATION)
 target_link_libraries(replay_trossen_mcap_jointstate trossen_sdk libtrossen_arm zstd lz4)
+
+# Glide handle input probe — bring-up tool for button bits and stick signs.
+# Needs the driver's input-report API, detected at the top level; skipped rather
+# than failing the build on a driver without it, since nothing else here needs it.
+if(TROSSEN_HAVE_ARM_INPUT_REPORT)
+  add_executable(glide_input_probe glide_input_probe/glide_input_probe.cpp)
+  target_link_libraries(glide_input_probe libtrossen_arm)
+else()
+  message(STATUS
+    "skipping glide_input_probe — libtrossen_arm has no input-report API")
+endif()
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Shared converter core: MCAP decode + stream alignment + feature schema.
