@@ -843,6 +843,28 @@ def _build_session_manager(
     for arm_id, arm_cfg in cfg.hardware.arms.items():
         arm_components[arm_id] = _create_arm_component(arm_id, arm_cfg.to_json())
 
+    # Components declared generically by registry type — the Glide input reader
+    # and base leader, session control, the Rivet base. Each parses its own JSON
+    # in configure(), so a new REGISTER_HARDWARE type needs no change here.
+    #
+    # After the arms and in declared order, both deliberately: glide_arm_input
+    # resolves the handle arms above out of the active registry, and a base
+    # follower has to exist before the teleop factory builds pairs against it.
+    # Note on the Glide session-control buttons: they are constructed here (so
+    # they claim their inputs and conflict loudly with anything else wanting the
+    # same button) but NOT attached to the SessionManager. This loop drives
+    # episodes from control signals sent by the backend, not from SessionManager
+    # state, so a button firing kStart directly would desync the two. The
+    # standalone example attaches them; wiring them into this loop means routing
+    # their events out to the backend, which is a separate change.
+    component_components: dict[str, Any] = {}
+    for comp_cfg in cfg.hardware.components:
+        component = ts.HardwareRegistry.create(
+            comp_cfg.type, comp_cfg.id, comp_cfg.raw, True
+        )
+        component_components[comp_cfg.id] = component
+        print(f"component '{comp_cfg.id}' ({comp_cfg.type}) configured", flush=True)
+
     camera_components = {}
     camera_cfg_map = {}
     for cam_cfg in cfg.hardware.cameras:
@@ -869,6 +891,15 @@ def _build_session_manager(
             prod = ts.ProducerRegistry.create(
                 "trossen_arm",
                 arm_components[prod_cfg.hardware_id],
+                prod_cfg.to_registry_json(),
+            )
+            mgr.add_producer(prod, period_ms)
+        elif prod_cfg.hardware_id in component_components:
+            # Any producer whose hardware is a generic component — the Rivet base
+            # emitting odometry, and whatever else gets registered later.
+            prod = ts.ProducerRegistry.create(
+                prod_cfg.type,
+                component_components[prod_cfg.hardware_id],
                 prod_cfg.to_registry_json(),
             )
             mgr.add_producer(prod, period_ms)

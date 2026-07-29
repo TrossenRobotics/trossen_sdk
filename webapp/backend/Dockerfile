@@ -26,12 +26,18 @@ FROM base-${ENABLE_ZED} AS runtime
 # Re-declare inside the stage so the conditional ZED step below can read it.
 ARG ENABLE_ZED=0
 
+# Rivet support is opt-in: it pulls in trossen_base and builds the swerve-base
+# follower, which only the mobile robot needs.
+ARG ENABLE_RIVET=0
+
 ARG DEBIAN_FRONTEND=noninteractive
-# libtrossen_arm is pinned to the released tag matching the controller
-# firmware. The library enforces at configure() time that the driver and
-# controller firmware share major.minor versions, so this needs to track
-# whatever firmware the arms in the field are running.
+# libtrossen_arm version, which must share major.minor with the controller
+# firmware — the library enforces that at configure() time, so this needs to
+# track whatever firmware the arms in the field are running.
 ENV TROSSEN_ARM_VERSION=1.11.0
+# Commit on TrossenRobotics/trossen_arm-source built below. See the build step
+# for why source rather than the released tarball.
+ENV TROSSEN_ARM_SOURCE_REF=17ce96632b31170b8fb8a9da20aa5c34f472d19d
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -70,22 +76,23 @@ RUN wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --shor
     && rm -rf /var/lib/apt/lists/* \
     && rm apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 
-# libtrossen-arm (TCP driver for the arms).
-# --http1.1 + --max-time + --retry guard against the GitHub CDN holding the
-# connection open after the body is delivered (observed inside BuildKit).
-# GitHub's archive-by-tag endpoint strips the leading `v` from the tag in
-# the top-level directory name (tag `v1.10.0` -> dir `trossen_arm-1.10.0`),
-# so the cd target uses the bare version.
-RUN curl -fSL --http1.1 \
-        --connect-timeout 30 --max-time 300 \
-        --retry 3 --retry-delay 5 --retry-max-time 600 \
-        https://github.com/TrossenRobotics/trossen_arm/archive/refs/tags/v$TROSSEN_ARM_VERSION.tar.gz \
-        -o trossen_arm.tar.gz \
-    && tar -xzf trossen_arm.tar.gz \
-    && cd trossen_arm-$TROSSEN_ARM_VERSION \
-    && make install \
+# libtrossen-arm (TCP driver for the arms), built from source rather than the
+# released tarball. The release does not expose
+# TrossenArmDriver::get_input_report(), and without it the Glide handles' own
+# joysticks and buttons are unreadable — so the Rivet cockpit cannot drive the
+# base or the session at all. VERSION on this branch is still $TROSSEN_ARM_VERSION,
+# so the driver/firmware major.minor compatibility check is unaffected.
+#
+# Pinned to a commit, not the branch, so an image rebuild cannot silently pick up
+# a different driver. This is the tip of `actuate-demo` as of 2026-07-29; bump it
+# deliberately.
+RUN git clone --filter=blob:none https://github.com/TrossenRobotics/trossen_arm-source.git \
+    && cd trossen_arm-source \
+    && git checkout $TROSSEN_ARM_SOURCE_REF \
+    && make install/cpp/system JOBS="$(nproc)" \
+    && ldconfig \
     && cd .. \
-    && rm -rf trossen_arm-$TROSSEN_ARM_VERSION trossen_arm.tar.gz
+    && rm -rf trossen_arm-source
 
 # librealsense2 from realsenseai's Debian apt repo. Required by
 # `find_package(realsense2)` in the SDK's CMakeLists.txt when the default
@@ -131,6 +138,11 @@ RUN if [ "$ENABLE_ZED" = "1" ]; then \
 # Tell the entrypoint's `uv sync` compile to build ZED support in. Empty/0 on a
 # default build, so the editable trossen_sdk extension stays ZED-free.
 ENV TROSSEN_ENABLE_ZED=${ENABLE_ZED}
+
+# Same for Rivet: the entrypoint adds TROSSEN_ENABLE_RIVET=ON to the extension
+# build when this is 1, which is what pulls in trossen_base and the swerve-base
+# follower. Off by default so stationary machines don't build either.
+ENV TROSSEN_ENABLE_RIVET=${ENABLE_RIVET}
 
 # uv for fast Python dependency management.
 RUN curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR=/usr/local/bin sh

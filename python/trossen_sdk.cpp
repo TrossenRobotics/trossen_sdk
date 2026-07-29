@@ -559,6 +559,17 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_static("from_json", &CameraConfig::from_json, py::arg("json"))
     .def("to_json", &CameraConfig::to_json);
 
+  py::class_<ComponentConfig>(m, "ComponentConfig")
+    .def(py::init<>())
+    .def_readwrite("id", &ComponentConfig::id)
+    .def_readwrite("type", &ComponentConfig::type)
+    // The entry verbatim, as a dict. What gets handed to the component's own
+    // configure(), so a new registry type is usable from Python with no binding
+    // work at all.
+    .def_readwrite("raw", &ComponentConfig::raw)
+    .def_static("from_json", &ComponentConfig::from_json, py::arg("json"))
+    .def("to_json", &ComponentConfig::to_json);
+
   py::class_<MobileBaseConfig>(m, "MobileBaseConfig")
     .def(py::init<>())
     .def_readwrite("reset_odometry", &MobileBaseConfig::reset_odometry)
@@ -663,6 +674,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def(py::init<>())
     .def_readwrite("arms", &HardwareConfig::arms)
     .def_readwrite("cameras", &HardwareConfig::cameras)
+    .def_readwrite("components", &HardwareConfig::components)
     .def_property("mobile_base",
       [](const HardwareConfig& c) -> py::object {
         if (c.mobile_base.has_value()) return py::cast(c.mobile_base.value());

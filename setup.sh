@@ -35,6 +35,10 @@ set -uo pipefail
 # Configuration (can be overridden with environment variables)
 # ---------------------------------------------------------------------------
 TROSSEN_ARM_VERSION="${TROSSEN_ARM_VERSION:-1.11.0}"   # matches webapp/backend/Dockerfile
+# Driver commit built from source. The released tarball omits
+# TrossenArmDriver::get_input_report(), without which Glide handle joysticks and
+# buttons cannot be read at all. Tip of `actuate-demo` as of 2026-07-29.
+TROSSEN_ARM_SOURCE_REF="${TROSSEN_ARM_SOURCE_REF:-17ce96632b31170b8fb8a9da20aa5c34f472d19d}"
 NODE_MAJOR="${NODE_MAJOR:-20}"                          # matches webapp/frontend/Dockerfile
 ENABLE_REALSENSE=1
 SETUP_WEBAPP=1
@@ -304,32 +308,41 @@ phase_realsense() {
 }
 
 # ===========================================================================
-# Phase 4 — Trossen arm driver (libtrossen_arm), built from the GitHub release
+# Phase 4 — Trossen arm driver (libtrossen_arm), built from source
 # ===========================================================================
 phase_trossen_arm() {
   banner "Step 6 of 8: Installing the Trossen arm driver (v$TROSSEN_ARM_VERSION)"
 
   if [[ "$CRITICAL_FAILED" -eq 1 ]]; then skip "Trossen arm driver (earlier step failed)"; return; fi
 
-  # Idempotency: skip if the driver's CMake package is already installed.
-  if find /usr/local /usr -name '*trossen_arm*onfig.cmake' 2>/dev/null | grep -q .; then
-    ok "Trossen arm driver already installed"
+  # Idempotency keys off the input-report API rather than the mere presence of a
+  # driver. A machine set up before this change has a working driver installed
+  # that simply cannot read Glide joysticks or buttons, and "some driver is here"
+  # would skip the upgrade and leave the cockpit dead with nothing to point at.
+  local arm_header
+  arm_header="$(find /usr/local/include /usr/include -name trossen_arm_type.hpp 2>/dev/null | head -1)"
+  if [[ -n "$arm_header" ]] && grep -q "InputReport" "$arm_header" 2>/dev/null; then
+    ok "Trossen arm driver already installed (with input-report support)"
     return
+  fi
+  if [[ -n "$arm_header" ]]; then
+    step "Replacing an installed driver that lacks the input-report API"
   fi
 
   local tmp; tmp="$(mktemp -d)"
-  step "Downloading libtrossen_arm v$TROSSEN_ARM_VERSION"
-  if ! curl -fSL --http1.1 --connect-timeout 30 --max-time 300 --retry 3 --retry-delay 5 \
-        "https://github.com/TrossenRobotics/trossen_arm/archive/refs/tags/v${TROSSEN_ARM_VERSION}.tar.gz" \
-        -o "$tmp/trossen_arm.tar.gz"; then
-    fail "Could not download libtrossen_arm v$TROSSEN_ARM_VERSION"
+  step "Cloning libtrossen_arm source at ${TROSSEN_ARM_SOURCE_REF:0:12}"
+  if ! git clone --filter=blob:none \
+        https://github.com/TrossenRobotics/trossen_arm-source.git \
+        "$tmp/trossen_arm-source" >/dev/null 2>&1 \
+     || ! git -C "$tmp/trossen_arm-source" checkout \
+        "$TROSSEN_ARM_SOURCE_REF" >/dev/null 2>&1; then
+    fail "Could not fetch libtrossen_arm source at $TROSSEN_ARM_SOURCE_REF"
     rm -rf "$tmp"; CRITICAL_FAILED=1; return
   fi
 
-  step "Installing libtrossen_arm"
-  # GitHub strips the leading 'v' from the extracted top-level directory name.
-  if tar -xzf "$tmp/trossen_arm.tar.gz" -C "$tmp" \
-     && $SUDO make -C "$tmp/trossen_arm-${TROSSEN_ARM_VERSION}" install \
+  # Compiles a vendored pinocchio, so it is by far the slowest step here.
+  step "Building and installing libtrossen_arm (this takes several minutes)"
+  if $SUDO make -C "$tmp/trossen_arm-source" install/cpp/system JOBS="$(nproc)" \
      && $SUDO ldconfig; then
     ok "Trossen arm driver installed"
   else

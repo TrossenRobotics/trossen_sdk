@@ -28,9 +28,21 @@ CONVERTER_BIN_V3="${TROSSEN_CONVERTER_BIN_V3:-${BUILD_DIR}/scripts/trossen_mcap_
 # compiled with ZED in. scikit-build-core reads SKBUILD_CMAKE_DEFINE (a ';'-
 # separated list of -D defines) at build time, so both the initial `uv sync`
 # and the stale-extension self-heal rebuild below pick it up.
+CMAKE_DEFINES=()
 if [[ "${TROSSEN_ENABLE_ZED:-0}" == "1" ]]; then
-    export SKBUILD_CMAKE_DEFINE="TROSSEN_ENABLE_ZED=ON;ZED_DIR=${ZED_DIR:-/usr/local/zed}"
-    echo "[entrypoint] ZED enabled — building trossen_sdk with ${SKBUILD_CMAKE_DEFINE}"
+    CMAKE_DEFINES+=("TROSSEN_ENABLE_ZED=ON" "ZED_DIR=${ZED_DIR:-/usr/local/zed}")
+fi
+# Rivet: builds the trossen_base-backed swerve follower. trossen_base is fetched
+# by CMake when not installed, with its SDL2-dependent gamepad demo disabled.
+if [[ "${TROSSEN_ENABLE_RIVET:-0}" == "1" ]]; then
+    CMAKE_DEFINES+=("TROSSEN_ENABLE_RIVET=ON")
+fi
+if [[ ${#CMAKE_DEFINES[@]} -gt 0 ]]; then
+    # scikit-build-core reads this as a ';'-separated list of -D defines, at both
+    # the initial `uv sync` and the self-heal rebuild below.
+    SKBUILD_CMAKE_DEFINE=$(IFS=';'; echo "${CMAKE_DEFINES[*]}")
+    export SKBUILD_CMAKE_DEFINE
+    echo "[entrypoint] building trossen_sdk with ${SKBUILD_CMAKE_DEFINE}"
 fi
 
 # --no-dev: install runtime deps only. The `dev` group (pytest, ruff) is
@@ -46,10 +58,23 @@ uv sync --no-dev
 # predates the observer subsystem (no ObserverBase) — which silently breaks the
 # live Rerun camera feeds (empty viewer) even though the rest of the app runs.
 # `uv sync` treats the editable install as up-to-date and won't recompile the
-# C++ on its own, so detect the stale state via a canary symbol and force a
-# rebuild of just that package when it's missing. No-op on a current build.
+# C++ on its own, so detect the stale state via canary symbols and force a
+# rebuild of just that package when any is missing. No-op on a current build.
+#
+# Each canary stands for a change whose absence fails silently rather than
+# loudly, which is the only kind worth checking here:
+#   ObserverBase                      — empty Rerun camera feeds
+#   HardwareConfig.components         — Rivet's components list ignored entirely,
+#                                       so no base, no Glide input, no session
+#                                       buttons, and a recording that looks fine
+stale_reason=""
 if ! uv run --no-dev python -c "import trossen_sdk as ts; raise SystemExit(0 if hasattr(ts, 'ObserverBase') else 1)" >/dev/null 2>&1; then
-    echo "[entrypoint] trossen_sdk extension is stale (no ObserverBase) — rebuilding it"
+    stale_reason="no ObserverBase"
+elif ! uv run --no-dev python -c "import trossen_sdk as ts; raise SystemExit(0 if hasattr(ts.HardwareConfig(), 'components') else 1)" >/dev/null 2>&1; then
+    stale_reason="HardwareConfig has no components"
+fi
+if [[ -n "${stale_reason}" ]]; then
+    echo "[entrypoint] trossen_sdk extension is stale (${stale_reason}) — rebuilding it"
     uv sync --no-dev --reinstall-package trossen-sdk
 fi
 
