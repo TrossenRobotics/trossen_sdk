@@ -17,6 +17,7 @@
 
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/teleop/teleop_capable.hpp"
+#include "trossen_sdk/utils/one_euro_filter.hpp"
 
 namespace trossen::hw::rivet {
 
@@ -310,6 +311,28 @@ private:
   std::vector<float> position_tolerance_;
   std::vector<float> velocity_tolerance_;
   std::vector<float> effort_tolerance_;
+
+  /// Whether write_joint() runs teleop position commands through a one-Euro
+  /// low-pass filter before writing them to the followers. Smooths jitter
+  /// from a noisy/laggy command source (e.g. teleop over a wireless link)
+  /// while adding minimal lag during fast motion. Parsed from
+  /// "smoothing_enabled" in configure(); defaults to on.
+  bool smoothing_enabled_{true};
+
+  /// One-Euro filter tuning, shared by every joint/gripper filter below.
+  /// See utils::OneEuroFilter for parameter semantics.
+  float smoothing_min_cutoff_hz_{1.0f};
+  float smoothing_beta_{0.7f};
+  float smoothing_d_cutoff_hz_{1.0f};
+
+  /// Per-arm joint filters (size njoints_) and scalar gripper filters, applied
+  /// in write_joint() ahead of set_arm_positions()/set_gripper_position().
+  /// Reset in prepare_for_teleop() so filter history never bridges across a
+  /// stopped/restarted teleop session.
+  utils::VecOneEuroFilter left_arm_filt_;
+  utils::VecOneEuroFilter right_arm_filt_;
+  utils::OneEuroFilter left_grip_filt_;
+  utils::OneEuroFilter right_grip_filt_;
 
   // Hack for exposing data (@schromya update once trossen_base exposes these)
   double last_base_vx_{0.0};

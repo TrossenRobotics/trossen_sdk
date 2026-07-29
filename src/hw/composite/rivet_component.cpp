@@ -16,6 +16,13 @@
 
 namespace trossen::hw::rivet {
 
+namespace {
+double now_seconds() {
+  using namespace std::chrono;
+  return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
+}  // namespace
+
 RivetComponent::~RivetComponent() {
   base_update_running_ = false;
   if (base_update_thread_.joinable()) {
@@ -117,6 +124,14 @@ void RivetComponent::configure(const nlohmann::json& config) {
   }
   njoints_ = static_cast<size_t>(left_driver_->get_num_joints());
 
+  left_arm_filt_ = utils::VecOneEuroFilter(
+    njoints_, smoothing_min_cutoff_hz_, smoothing_beta_, smoothing_d_cutoff_hz_);
+  right_arm_filt_ = utils::VecOneEuroFilter(
+    njoints_, smoothing_min_cutoff_hz_, smoothing_beta_, smoothing_d_cutoff_hz_);
+  left_grip_filt_ = utils::OneEuroFilter(
+    smoothing_min_cutoff_hz_, smoothing_beta_, smoothing_d_cutoff_hz_);
+  right_grip_filt_ = utils::OneEuroFilter(
+    smoothing_min_cutoff_hz_, smoothing_beta_, smoothing_d_cutoff_hz_);
 
   if (config.contains("episode_lifecycle_enabled")) {
     episode_lifecycle_enabled_ = config.at("episode_lifecycle_enabled").get<bool>();
@@ -258,15 +273,25 @@ void RivetComponent::write_joint(const std::vector<float>& cmd)
 
   std::vector<double> left_pos(cmd.begin(), cmd.begin()+njoints_);
   std::vector<double> right_pos(cmd.begin()+njoints_, cmd.begin()+njoints_*2);
+  double left_grip = static_cast<double>(cmd[6]);
+  double right_grip = static_cast<double>(cmd[13]);
 
-  left_driver_->set_arm_positions({left_pos[0], left_pos[1], left_pos[2], left_pos[3], left_pos[4], 
+  if (smoothing_enabled_) {
+    const double t = now_seconds();
+    left_arm_filt_.filter(left_pos, t);
+    right_arm_filt_.filter(right_pos, t);
+    left_grip = left_grip_filt_.filter(left_grip, t);
+    right_grip = right_grip_filt_.filter(right_grip, t);
+  }
+
+  left_driver_->set_arm_positions({left_pos[0], left_pos[1], left_pos[2], left_pos[3], left_pos[4],
     left_pos[5]}, write_moving_time_s_, false);
-  right_driver_->set_arm_positions({right_pos[0], right_pos[1], right_pos[2], right_pos[3], 
+  right_driver_->set_arm_positions({right_pos[0], right_pos[1], right_pos[2], right_pos[3],
     right_pos[4], right_pos[5]}, write_moving_time_s_, false);
 
-  
-  left_driver_->set_gripper_position(static_cast<double>(cmd[6]), write_moving_time_s_, false);
-  right_driver_->set_gripper_position(static_cast<double>(cmd[13]), write_moving_time_s_, false);
+
+  left_driver_->set_gripper_position(left_grip, write_moving_time_s_, false);
+  right_driver_->set_gripper_position(right_grip, write_moving_time_s_, false);
 
   const double base_vx = static_cast<double>(cmd[14]);
   const double base_vy = static_cast<double>(cmd[15]);
@@ -385,6 +410,13 @@ void RivetComponent::write_cartesian(const std::vector<float>& cmd) {
 
 void RivetComponent::prepare_for_teleop() {
   if (!left_driver_ || !right_driver_) return;
+
+  // Drop smoothing history so a stopped/restarted session doesn't carry a
+  // stale derivative estimate into the first ticks of the new one.
+  left_arm_filt_.reset();
+  right_arm_filt_.reset();
+  left_grip_filt_.reset();
+  right_grip_filt_.reset();
 
   // Follower: arm joints and gripper in position mode (the mirror loop drives
   // them). set_gripper_mode is called explicitly because relying on
