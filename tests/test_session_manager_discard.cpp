@@ -21,6 +21,7 @@
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
+#include "trossen_sdk/utils/app_utils.hpp"
 
 using trossen::data::JointStateRecord;
 using trossen::data::RecordBase;
@@ -225,4 +226,68 @@ TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_WithProducer) {
   // Should be able to start another episode after discard
   ASSERT_TRUE(sm.start_episode());
   sm.stop_episode();
+}
+
+// ── Stop discards the in-flight episode ──────────────────────────────────
+//
+// A stop lands wherever the operator interrupted, so finalizing would file a
+// truncated demonstration indistinguishable from a complete one. These pin the
+// discard policy in SessionManager rather than in each example loop, because
+// nine examples share the finalize-on-exit shape and a new one must not have to
+// remember.
+
+// SD-10: Ctrl+C (g_stop_requested) during an episode discards rather than finalizes
+TEST_F(SessionManagerDiscardTest, StopRequest_DuringEpisode_DiscardsPartial) {
+  SessionManager sm;
+
+  const auto before = sm.stats();
+  ASSERT_TRUE(sm.start_episode());
+  ASSERT_TRUE(sm.is_episode_active());
+
+  // Simulate Ctrl+C / a kStopSession event from a control source.
+  trossen::utils::g_stop_requested = true;
+  const auto action = sm.monitor_episode();
+  trossen::utils::g_stop_requested = false;
+
+  EXPECT_EQ(action, UserAction::kStop);
+
+  // The episode is gone, not filed: no longer active, and the completed count
+  // did not advance the way a finalize would have advanced it.
+  EXPECT_FALSE(sm.is_episode_active());
+  EXPECT_EQ(sm.stats().total_episodes_completed, before.total_episodes_completed);
+}
+
+// SD-11: shutdown() also discards, for a stop raised outside monitor_episode()
+TEST_F(SessionManagerDiscardTest, StopRequest_AtShutdown_DiscardsPartial) {
+  SessionManager sm;
+
+  const auto before = sm.stats();
+  ASSERT_TRUE(sm.start_episode());
+  ASSERT_TRUE(sm.is_episode_active());
+
+  // Stop noticed between episodes rather than inside monitoring — shutdown() is
+  // the belt-and-braces path that must still not keep the partial.
+  trossen::utils::g_stop_requested = true;
+  sm.shutdown();
+  trossen::utils::g_stop_requested = false;
+
+  EXPECT_FALSE(sm.is_episode_active());
+  EXPECT_EQ(sm.stats().total_episodes_completed, before.total_episodes_completed);
+}
+
+// SD-12: with no stop pending, shutdown still finalizes normally
+TEST_F(SessionManagerDiscardTest, NoStopRequest_AtShutdown_FinalizesNormally) {
+  SessionManager sm;
+
+  const auto before = sm.stats();
+  ASSERT_TRUE(sm.start_episode());
+  ASSERT_TRUE(sm.is_episode_active());
+
+  // Natural completion must be unaffected — the discard is gated on an actual
+  // stop request, not on shutdown happening.
+  ASSERT_FALSE(trossen::utils::g_stop_requested);
+  sm.shutdown();
+
+  EXPECT_FALSE(sm.is_episode_active());
+  EXPECT_EQ(sm.stats().total_episodes_completed, before.total_episodes_completed + 1);
 }

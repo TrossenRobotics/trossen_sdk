@@ -94,6 +94,35 @@ SessionManager::~SessionManager() {
   shutdown();
 }
 
+void SessionManager::discard_partial_on_stop() {
+  if (!trossen::utils::g_stop_requested) return;
+  if (!is_episode_active()) return;
+
+  // An operator asking to stop — Ctrl+C, or a kStopSession from a control
+  // source such as a Glide handle button — leaves a truncated episode that ends
+  // wherever they happened to interrupt. Finalizing it would put a partial
+  // demonstration into the dataset looking exactly like a complete one, which
+  // is worse than losing it: nothing downstream can tell the difference.
+  //
+  // This matches the webapp, where the stop signal reaches recorder_runner
+  // mid-episode and it calls discard_current_episode() before winding down. The
+  // two hosts have to agree, because the same Glide button drives both.
+  //
+  // Note this is asymmetric with kReRecord, where the caller does its own
+  // discard. Stop is handled here instead so the policy cannot be forgotten by
+  // a new example — nine example loops share the finalize-on-exit shape, and
+  // getting this wrong destroys or pollutes data silently.
+  std::cout << "  [session] stop requested mid-episode, discarding the partial "
+               "recording\n";
+  try {
+    discard_current_episode();
+  } catch (const std::exception& e) {
+    // Never let a discard failure block the shutdown that safes the hardware.
+    std::cerr << "  [session] discarding the partial episode failed: " << e.what()
+              << "\n";
+  }
+}
+
 void SessionManager::shutdown() {
   // Stop attached control sources first (joins their reader threads) so no
   // queued event can drive the session while it is being torn down.
@@ -101,6 +130,11 @@ void SessionManager::shutdown() {
     if (source) source->stop();
   }
   control_sources_.clear();
+
+  // Belt-and-braces for a stop raised outside monitor_episode() — between
+  // episodes, or during start_episode(). monitor_episode() already discards the
+  // partial on its own stop path, so this is normally a no-op.
+  discard_partial_on_stop();
 
   // stop_episode() runs first so episode-ended callbacks fire against a still-non-
   // terminal SessionManager; shutdown_called_ latches afterwards and gates start_episode().
@@ -1092,6 +1126,7 @@ UserAction SessionManager::monitor_episode(
     // End-session takes priority over any episode-level action queued in the
     // same drain.
     if (trossen::utils::g_stop_requested) {
+      discard_partial_on_stop();
       return UserAction::kStop;
     }
 

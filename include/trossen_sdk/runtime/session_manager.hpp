@@ -658,6 +658,23 @@ private:
   void teardown_episode(bool discard);
 
   /**
+   * @brief Throw away the in-flight episode when the operator asked to stop.
+   *
+   * No-op unless a stop has been requested (Ctrl+C, or a kStopSession event
+   * from a control source) AND an episode is currently recording.
+   *
+   * A stop lands wherever the operator happened to interrupt, so finalizing
+   * would file a truncated demonstration that looks identical to a complete one
+   * — nothing downstream can distinguish them. Discarding matches the webapp
+   * recorder, which does the same on its stop signal; both hosts must agree
+   * because the same Glide button drives each.
+   *
+   * Called from monitor_episode() on the stop path and again from shutdown()
+   * for a stop raised outside monitoring. Safe to call repeatedly.
+   */
+  void discard_partial_on_stop();
+
+  /**
    * @brief Background monitoring loop for auto-stop
    * Checks elapsed time and calls stop_episode() when max_duration reached
    */
