@@ -10,7 +10,9 @@
         "right_model": "glide_right",
         "joint_signs": [1,1,1,-1,-1,1,1],
         "left_joint_offsets": [0,0,0,0,0,-0.7854,0],
-        "right_joint_offsets": [0,0,0,0,0,0.7854,0]
+        "right_joint_offsets": [0,0,0,0,0,0.7854,0],
+        "velocity_tolerance": [9.42, 9.42, 9.42, 9.42, 9.42, 9.42, 0.0],
+        "effort_tolerance": [7.0, 7.0, 7.0, 7.0, 7.0, 7.0, 300.0]
       }
     },
     "mobile_rivet": {
@@ -18,7 +20,9 @@
         "left_ip_address": "192.168.1.4",
         "left_model": "pro",
         "right_ip_address": "192.168.1.5",
-        "right_model": "pro"
+        "right_model": "pro",
+        "velocity_tolerance": [6.28, 6.28, 6.28, 9.42, 9.42, 9.42, 0.0],
+        "effort_tolerance": [27.0, 97.0, 27.0, 7.0, 7.0, 7.0, 300.0]
       }
     },
     "cameras": [
