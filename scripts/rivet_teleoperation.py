@@ -33,12 +33,12 @@ IP_RIGHT_FOLLOWER = "192.168.1.5"
 
 # Gripper force feedback parameters
 LEADER_MAX = 20.0       # N - leader effort at full grip (not including offset)
-FOLLOWER_MAX = 100.0     # N - follower effort at full grip
+FOLLOWER_MAX = 100.0    # N - follower effort at full grip
 LEADER_OFFSET = 6.5     # N - leader opening offset
 
 BASE_MIN = -1           # Min translational/rotational velocity (units/s and rad/s)
 BASE_MAX = 1            # Max translational/rotational velocity (units/s and rad/s)
-BASE_DEADZONE = 0.1    # Base set to 0 velocity if less than this value
+BASE_DEADZONE = 0.1     # Base set to 0 velocity if less than this value
 BASE_LIFT_MAX = 8000    # Max lift velocity (motor units/s)
 
 MIN_JOYSTICK = 0        # Joystick min value
@@ -200,18 +200,15 @@ if __name__ == "__main__":
         base_velocity_linear_x = 0.0
         base_velocity_linear_y = 0.0
         base_velocity_angular_z = 0.0
-        base_velocity_lift = 0      # MUST BE INT
+        base_velocity_lift = 0          # MUST BE INT
         while True:
 
             ################################### LEADER COMMANDS ####################################
             if ENABLE_RIGHT:
                 right_input = driver_right_leader.get_input_report()
-                # Scale to -1 to 1 velocity (rad/s)
                 base_velocity_angular_z = -scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
                                 BASE_MIN, BASE_MAX, BASE_DEADZONE)
 
-                # Button bitmap: bit n is SEL_(n+1), 1 is pressed:
-                #   [SEL_1, SEL_2, SEL_3, SEL_4, SEL_5]
                 right_up_btn = int(right_input.buttons & (1 << 0))
                 right_down_btn = int(right_input.buttons & (1 << 2))
 
@@ -219,8 +216,6 @@ if __name__ == "__main__":
 
             if ENABLE_LEFT:
                 left_input = driver_left_leader.get_input_report()
-
-                #Scale to -1 to 1 velocity (m/s)
                 base_velocity_linear_x = scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
                                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
                 base_velocity_linear_y = -scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
@@ -234,7 +229,8 @@ if __name__ == "__main__":
                 base.set_actuator_velocity(base_velocity_lift)
 
             if ENABLE_RIGHT and ENABLE_FOLLOWER:
-                teleop_arm_step(driver_right_leader, driver_right_follower, GRIPPER_HOME_OFFSET_RIGHT)
+                teleop_arm_step(driver_right_leader, driver_right_follower,
+                                GRIPPER_HOME_OFFSET_RIGHT)
 
             if ENABLE_LEFT and ENABLE_FOLLOWER:
                 teleop_arm_step(driver_left_leader, driver_left_follower, GRIPPER_HOME_OFFSET_LEFT)
