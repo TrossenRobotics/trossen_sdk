@@ -25,6 +25,11 @@ option(TROSSEN_SDK_ENABLE_POLICY_CLIENT
 # to build the VR hardware components and demos: cmake -DTROSSEN_ENABLE_VR=ON ...
 option(TROSSEN_ENABLE_VR "Enable VR teleoperation support (requires trossen_vr)" OFF)
 
+# OFF by default: the Rivet mobile bimanual robot depends on the external trossen_base
+# library (wheeled drivetrain + vertical lift over CAN). Enable explicitly to build the
+# Rivet hardware components and demo: cmake -DTROSSEN_ENABLE_RIVET=ON ...
+option(TROSSEN_ENABLE_RIVET "Enable Rivet mobile bimanual support (requires trossen_base)" OFF)
+
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
@@ -50,9 +55,9 @@ add_library(trossen_sdk SHARED
   src/hw/camera/opencv_producer.cpp
   src/hw/camera/mock_producer.cpp
   src/hw/camera/mock_synced_producer.cpp
-  src/hw/composite/bimanual_glide_component.cpp
-  src/hw/composite/rivet_component.cpp
-  src/hw/composite/rivet_producer.cpp
+  src/hw/glide/glide_session.cpp
+  src/hw/glide/glide_base_component.cpp
+  src/hw/glide/glide_session_control_component.cpp
   src/observer/observer_registry.cpp
   src/runtime/session_manager.cpp
   src/runtime/producer_registry.cpp
@@ -116,6 +121,38 @@ if(TROSSEN_ENABLE_VR)
   target_link_libraries(trossen_sdk PUBLIC trossen_vr_lib)
 endif()
 
+if(TROSSEN_ENABLE_RIVET)
+  message(STATUS "Rivet mobile bimanual support enabled")
+  # Only the trossen_base-backed follower needs the gate. The Glide input layer
+  # (src/hw/glide/*) depends on libtrossen_arm alone and is built unconditionally
+  # above, so it stays compiled and tested in the default configuration.
+  target_sources(trossen_sdk PRIVATE
+    src/hw/base/trossen_base_component.cpp
+    src/hw/base/trossen_base_producer.cpp
+  )
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_RIVET)
+
+  # trossen_base is preferred from a system install (its CAN drivetrain build has
+  # host-specific setup); fall back to FetchContent so a bare clone still configures.
+  find_package(trossen_base QUIET)
+  if(trossen_base_FOUND)
+    message(STATUS "  using system trossen_base")
+    target_link_libraries(trossen_sdk PUBLIC trossen_base)
+  else()
+    message(STATUS "  system trossen_base not found, fetching")
+    include(FetchContent)
+    FetchContent_Declare(
+      trossen_base
+      SYSTEM
+      GIT_REPOSITORY https://github.com/TrossenRobotics/trossen_base.git
+      GIT_TAG dev
+      EXCLUDE_FROM_ALL
+    )
+    FetchContent_MakeAvailable(trossen_base)
+    target_link_libraries(trossen_sdk PUBLIC trossen_base)
+  endif()
+endif()
+
 # RerunObserver wiring is deferred until after Arrow is found below: rerun-cpp needs
 # Arrow::arrow_shared to satisfy its RERUN_ARROW_LINK_SHARED=ON build mode, and we reuse
 # the same Arrow trossen_sdk already links against to avoid pulling in a second build.
@@ -156,7 +193,6 @@ find_package(BZip2 REQUIRED)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(libtrossen_arm REQUIRED)
-find_package(trossen_base REQUIRED)
 
 include(FetchContent)
 
@@ -340,7 +376,6 @@ target_link_libraries(
   Arrow::arrow_shared
   Parquet::parquet_shared
   libtrossen_arm
-  trossen_base
   SCServo
   trossen_slate
 )

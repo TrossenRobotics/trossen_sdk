@@ -49,6 +49,15 @@ if(TROSSEN_ENABLE_VR)
   target_link_libraries(test_vr_session_control_component PRIVATE trossen_sdk GTest::gtest_main)
 endif()
 
+# Glide input layer. Unconditional: it reaches hardware only through
+# GlideSession's reader seam, so it builds and runs with no handle attached and
+# no lightweight-leader driver installed.
+add_executable(test_glide_session test_glide_session.cpp)
+target_link_libraries(test_glide_session PRIVATE trossen_sdk GTest::gtest_main)
+
+add_executable(test_glide_components test_glide_components.cpp)
+target_link_libraries(test_glide_components PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_lerobot_depth_utils test_lerobot_depth_utils.cpp)
 target_link_libraries(test_lerobot_depth_utils PRIVATE trossen_sdk GTest::gtest_main)
 

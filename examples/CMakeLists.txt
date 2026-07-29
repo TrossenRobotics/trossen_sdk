@@ -12,9 +12,12 @@ target_link_libraries(trossen_stationary_ai trossen_sdk libtrossen_arm)
 add_executable(trossen_mobile_ai trossen_mobile_ai/trossen_mobile_ai.cpp)
 target_link_libraries(trossen_mobile_ai trossen_sdk libtrossen_arm)
 
-# Trossen Rivet - bimanual + mobile base + 3 cameras
-add_executable(trossen_rivet trossen_rivet/trossen_rivet.cpp)
-target_link_libraries(trossen_rivet trossen_sdk libtrossen_arm)
+# Trossen Rivet — 2 Glide leaders + 2 follower arms + mobile base with lift + 3 cameras.
+# Requires the Rivet hardware layer (TROSSEN_ENABLE_RIVET, pulls trossen_base).
+if(TROSSEN_ENABLE_RIVET)
+  add_executable(trossen_rivet trossen_rivet/trossen_rivet.cpp)
+  target_link_libraries(trossen_rivet trossen_sdk libtrossen_arm)
+endif()
 
 # Trossen Stationary AI Policy — 2 followers + 4 cameras, policy-driven leaders.
 # Requires the PolicyClient gate (FetchContent of IXWebSocket + msgpack-cxx).

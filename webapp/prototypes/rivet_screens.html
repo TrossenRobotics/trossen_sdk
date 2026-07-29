@@ -1,0 +1,463 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rivet — two-screen console prototype</title>
+<style>
+  /*
+   * Design prototype for the two Rivet displays. Mock data only — nothing here
+   * talks to the backend. The point is to settle layout, hierarchy, and what
+   * each screen is FOR before any of it is built in React.
+   *
+   * Committed to a single dark theme on purpose: both screens live in a lab or
+   * on a shop floor, one is read at 1-2 m and the other sits behind a pair of
+   * leader arms. A light mode would be a liability in both places.
+   */
+  :root {
+    --ground:   #0b1114;
+    --panel:    #121b1f;
+    --panel-2:  #18242a;
+    --rule:     #24353c;
+    --ink:      #e6eef0;
+    --ink-dim:  #8fa3a9;
+    --ink-faint:#5d7178;
+
+    --ok:    #3fd6c4;
+    --warn:  #e8b04b;
+    --crit:  #f0655c;
+    --live:  #f0655c;
+
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", "DejaVu Sans Mono", Menlo, monospace;
+    --sans: "Helvetica Neue", Helvetica, Arial, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { height: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--mono);
+    -webkit-font-smoothing: antialiased;
+    font-variant-numeric: tabular-nums;
+    overflow: hidden;
+  }
+
+  /* ── screen switcher (prototype only, not part of either design) ─────── */
+  #switcher {
+    position: fixed; top: 0; right: 0; z-index: 100;
+    display: flex; gap: 1px; background: var(--rule);
+    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  #switcher button {
+    background: var(--panel); color: var(--ink-dim); border: 0;
+    padding: 7px 12px; cursor: pointer; font-family: var(--mono);
+    font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase;
+  }
+  #switcher button[aria-pressed="true"] { background: var(--ok); color: #04231f; font-weight: 700; }
+  #switcher button:focus-visible { outline: 2px solid var(--ok); outline-offset: -2px; }
+
+  .screen { display: none; height: 100vh; padding: 20px; }
+  .screen.active { display: flex; flex-direction: column; gap: 14px; }
+
+  /* ── shared bits ──────────────────────────────────────────────────────── */
+  .label {
+    font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+  .panel {
+    background: var(--panel); border: 1px solid var(--rule);
+    padding: 14px 16px; min-width: 0;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 auto; }
+  .dot.ok { background: var(--ok); }
+  .dot.warn { background: var(--warn); }
+  .dot.crit { background: var(--crit); }
+
+  @keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.25 } }
+  .pulse { animation: pulse 1.4s ease-in-out infinite; }
+  @media (prefers-reduced-motion: reduce) { .pulse { animation: none; } }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     RIVET SCREEN — mounted on the robot, read standing next to it at 1-2 m.
+     A status board, not a control surface: the operator is at the cockpit.
+     Everything here answers "is this thing healthy and is it recording".
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  #rivet .topbar {
+    display: flex; align-items: center; gap: 20px;
+    border-bottom: 2px solid var(--rule); padding-bottom: 14px;
+  }
+  #rivet .robotname { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; }
+  #rivet .recstate {
+    margin-left: auto; display: flex; align-items: center; gap: 12px;
+    font-size: 30px; font-weight: 700; letter-spacing: 0.02em;
+  }
+  #rivet .recstate .bulb { width: 18px; height: 18px; border-radius: 50%; background: var(--live); }
+
+  #rivet .grid {
+    flex: 1; display: grid; gap: 14px;
+    grid-template-columns: repeat(4, 1fr);
+    grid-template-rows: auto 1fr auto;
+    min-height: 0;
+  }
+
+  /* Health tiles: state is encoded in the stripe and the dot as well as the
+     text, so it reads at a distance and without relying on colour alone. */
+  .tile {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-left: 5px solid var(--ok);
+    padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;
+  }
+  .tile.warn { border-left-color: var(--warn); }
+  .tile.crit { border-left-color: var(--crit); }
+  .tile .name { font-size: 13px; font-weight: 700; letter-spacing: 0.04em; }
+  .tile .row { display: flex; align-items: center; gap: 8px; }
+  .tile .state { font-size: 11px; color: var(--ink-dim); letter-spacing: 0.06em; text-transform: uppercase; }
+  .tile .metric { font-size: 22px; font-weight: 700; margin-top: auto; }
+  .tile .metric small { font-size: 11px; color: var(--ink-faint); font-weight: 400; }
+
+  #rivet .cams { grid-column: 1 / -1; display: grid; gap: 14px; grid-template-columns: repeat(3, 1fr); }
+  .camtile {
+    background: var(--panel-2); border: 1px solid var(--rule);
+    position: relative; display: flex; align-items: flex-end;
+    padding: 10px 12px; min-height: 0;
+    /* Stand-in for video: a faint diagonal weave so an empty tile is visibly
+       "no signal" rather than looking like a black frame that might be live. */
+    background-image: repeating-linear-gradient(45deg,
+      rgba(255,255,255,0.022) 0 1px, transparent 1px 7px);
+  }
+  .camtile .cname { font-size: 12px; font-weight: 700; letter-spacing: 0.05em; }
+  .camtile .cmeta { position: absolute; top: 10px; right: 12px; font-size: 10px; color: var(--ink-faint); }
+  .camtile .badge {
+    position: absolute; top: 10px; left: 12px; display: flex; align-items: center; gap: 6px;
+    font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase;
+  }
+  .camtile.dead { border-color: var(--crit); }
+  .camtile.dead .cname { color: var(--crit); }
+
+  #rivet .footer {
+    grid-column: 1 / -1; display: flex; gap: 28px; align-items: center;
+    border-top: 1px solid var(--rule); padding-top: 12px;
+    font-size: 12px; color: var(--ink-dim);
+  }
+  #rivet .footer b { color: var(--ink); font-weight: 700; }
+  #rivet .footer .spacer { margin-left: auto; }
+
+  /* ═══════════════════════════════════════════════════════════════════════
+     COCKPIT SCREEN — behind the two Glide handles. The operator's hands are
+     busy, and session control now lives on the handle buttons, so this is a
+     heads-up display: feeds dominant, state unmissable, nothing to click.
+     ═══════════════════════════════════════════════════════════════════════ */
+
+  #cockpit { padding: 16px; }
+  #cockpit .hud { flex: 1; display: grid; gap: 14px; grid-template-columns: 1fr 260px; min-height: 0; }
+  #cockpit .feeds { display: grid; gap: 12px; grid-template-rows: 2fr 1fr; min-height: 0; }
+  #cockpit .feedmain { min-height: 0; }
+  #cockpit .feedrow { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; min-height: 0; }
+
+  #cockpit .side { display: flex; flex-direction: column; gap: 12px; min-height: 0; }
+
+  /* The one thing that must be readable from the corner of the eye. */
+  .statecard {
+    background: var(--panel); border: 1px solid var(--rule);
+    border-top: 4px solid var(--live); padding: 14px 16px;
+  }
+  .statecard .big {
+    font-size: 34px; font-weight: 700; letter-spacing: 0.01em; line-height: 1.1;
+    display: flex; align-items: center; gap: 11px;
+  }
+  .statecard .big .bulb { width: 15px; height: 15px; border-radius: 50%; background: var(--live); }
+  .statecard.reset { border-top-color: var(--warn); }
+  .statecard.reset .big .bulb { background: var(--warn); }
+
+  .counter { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; }
+  .counter .n { font-size: 30px; font-weight: 700; }
+  .counter .of { font-size: 14px; color: var(--ink-faint); }
+
+  .bar { height: 5px; background: var(--panel-2); margin-top: 12px; overflow: hidden; }
+  .bar > i { display: block; height: 100%; background: var(--ok); transition: width 0.25s linear; }
+  .statecard.reset .bar > i { background: var(--warn); }
+
+  .task { background: var(--panel); border: 1px solid var(--rule); padding: 14px 16px; }
+  .task p {
+    margin: 8px 0 0; font-family: var(--sans); font-size: 16px; line-height: 1.4;
+    color: var(--ink);
+  }
+
+  /* Button legend: the operator's actual control surface is the handles, so
+     the screen's job is to say which button does what. */
+  .legend { background: var(--panel); border: 1px solid var(--rule); padding: 14px 16px; flex: 1; min-height: 0; overflow-y: auto; }
+  .legend table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 12px; }
+  .legend td { padding: 5px 0; border-bottom: 1px solid var(--rule); vertical-align: middle; }
+  .legend tr:last-child td { border-bottom: 0; }
+  .legend .key {
+    display: inline-block; min-width: 62px; text-align: center;
+    background: var(--panel-2); border: 1px solid var(--rule);
+    padding: 3px 7px; font-size: 10px; letter-spacing: 0.06em;
+    color: var(--ink); white-space: nowrap;
+  }
+  .legend .act { color: var(--ink-dim); padding-left: 10px; }
+  .legend .hand { color: var(--ink-faint); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; padding-top: 12px; }
+
+  .feed {
+    background: var(--panel-2); border: 1px solid var(--rule);
+    position: relative; min-height: 0;
+    background-image: repeating-linear-gradient(45deg,
+      rgba(255,255,255,0.022) 0 1px, transparent 1px 7px);
+  }
+  .feed .fname {
+    position: absolute; bottom: 10px; left: 12px;
+    font-size: 12px; font-weight: 700; letter-spacing: 0.05em;
+  }
+  .feed .fmeta { position: absolute; bottom: 10px; right: 12px; font-size: 10px; color: var(--ink-faint); }
+  .feed.primary .fname { font-size: 14px; }
+
+  /* Base + lift telemetry, mirrored from what the joysticks are commanding —
+     so the operator can see the base is being told to move even when the view
+     makes it ambiguous. */
+  .telemetry { background: var(--panel); border: 1px solid var(--rule); padding: 12px 16px; display: flex; gap: 22px; align-items: center; }
+  .telemetry .ax { flex: 1; min-width: 0; }
+  .telemetry .axname { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); }
+  .telemetry .axval { font-size: 17px; font-weight: 700; margin-top: 3px; }
+  .telemetry .track { height: 4px; background: var(--panel-2); margin-top: 6px; position: relative; }
+  .telemetry .track > i { position: absolute; top: 0; bottom: 0; background: var(--ok); left: 50%; width: 0; }
+</style>
+</head>
+<body>
+
+<div id="switcher" role="group" aria-label="Prototype screen switcher">
+  <button id="btn-rivet" aria-pressed="true">Rivet screen</button>
+  <button id="btn-cockpit" aria-pressed="false">Cockpit screen</button>
+</div>
+
+<!-- ══════════════════ RIVET SCREEN ══════════════════ -->
+<section class="screen active" id="rivet">
+  <div class="topbar">
+    <div>
+      <div class="label">Robot</div>
+      <div class="robotname">rivet-01</div>
+    </div>
+    <div>
+      <div class="label">Dataset</div>
+      <div style="font-size:15px;margin-top:4px">rivet_pick_place_v3</div>
+    </div>
+    <div>
+      <div class="label">Operator</div>
+      <div style="font-size:15px;margin-top:4px">cockpit-a</div>
+    </div>
+    <div class="recstate" id="r-recstate">
+      <span class="bulb pulse"></span><span>RECORDING</span>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="tile" id="t-fl">
+      <div class="name">FOLLOWER LEFT</div>
+      <div class="row"><span class="dot ok"></span><span class="state">position mode</span></div>
+      <div class="metric">38.2<small> °C max joint</small></div>
+    </div>
+    <div class="tile" id="t-fr">
+      <div class="name">FOLLOWER RIGHT</div>
+      <div class="row"><span class="dot ok"></span><span class="state">position mode</span></div>
+      <div class="metric">41.7<small> °C max joint</small></div>
+    </div>
+    <div class="tile warn" id="t-base">
+      <div class="name">BASE</div>
+      <div class="row"><span class="dot warn"></span><span class="state">CAN retries</span></div>
+      <div class="metric">0.42<small> m/s commanded</small></div>
+    </div>
+    <div class="tile" id="t-lift">
+      <div class="name">LIFT</div>
+      <div class="row"><span class="dot ok"></span><span class="state">holding</span></div>
+      <div class="metric">312<small> mm</small></div>
+    </div>
+
+    <div class="cams">
+      <div class="camtile">
+        <div class="badge"><span class="dot ok"></span>live</div>
+        <div class="cmeta">1920×1200 · 30.0 fps</div>
+        <div class="cname">camera_main</div>
+      </div>
+      <div class="camtile">
+        <div class="badge"><span class="dot ok"></span>live</div>
+        <div class="cmeta">1920×1200 · 29.8 fps</div>
+        <div class="cname">camera_left</div>
+      </div>
+      <div class="camtile dead">
+        <div class="badge"><span class="dot crit"></span>no signal</div>
+        <div class="cmeta">— </div>
+        <div class="cname">camera_right</div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <span>Episode <b id="r-ep">14</b> / 40</span>
+      <span>Disk <b>612 GB</b> free</span>
+      <span>Battery <b>78%</b></span>
+      <span>Cockpit link <b style="color:var(--ok)">up</b> · 4 ms</span>
+      <span class="spacer">Uptime <b>2h 41m</b></span>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════ COCKPIT SCREEN ══════════════════ -->
+<section class="screen" id="cockpit">
+  <div class="hud">
+    <div class="feeds">
+      <div class="feed primary feedmain">
+        <div class="fname">camera_main</div>
+        <div class="fmeta">1920×1200 · 30.0 fps</div>
+      </div>
+      <div class="feedrow">
+        <div class="feed">
+          <div class="fname">camera_left</div>
+          <div class="fmeta">29.8 fps</div>
+        </div>
+        <div class="feed">
+          <div class="fname">camera_right</div>
+          <div class="fmeta" style="color:var(--crit)">no signal</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="statecard" id="c-state">
+        <div class="label">Session</div>
+        <div class="big" id="c-big"><span class="bulb pulse"></span><span>REC</span></div>
+        <div class="counter"><span class="n" id="c-ep">14</span><span class="of">of 40 episodes</span></div>
+        <div class="bar"><i id="c-bar" style="width:38%"></i></div>
+        <div class="label" style="margin-top:8px" id="c-sub">18.9 s elapsed · 50 s max</div>
+      </div>
+
+      <div class="task">
+        <div class="label">Task</div>
+        <p>Pick the red block from the left table and place it in the bin on the mobile base.</p>
+      </div>
+
+      <div class="legend">
+        <div class="label">Glide controls</div>
+        <table>
+          <tr><td class="hand" colspan="2">Right handle</td></tr>
+          <tr><td><span class="key">BTN 1</span></td><td class="act">Start / next episode</td></tr>
+          <tr><td><span class="key">BTN 3</span></td><td class="act">Re-record</td></tr>
+          <tr><td><span class="key">D-PAD ↑↓</span></td><td class="act">Lift up / down</td></tr>
+          <tr><td><span class="key">STICK</span></td><td class="act">Rotate base</td></tr>
+          <tr><td class="hand" colspan="2">Left handle</td></tr>
+          <tr><td><span class="key">BTN 1</span></td><td class="act">Stop early</td></tr>
+          <tr><td><span class="key">BTN 3</span></td><td class="act">End session</td></tr>
+          <tr><td><span class="key">STICK</span></td><td class="act">Drive base</td></tr>
+          <tr><td class="hand" colspan="2">Both</td></tr>
+          <tr><td><span class="key">TRIGGER</span></td><td class="act">Gripper (force fed back)</td></tr>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div class="telemetry">
+    <div class="ax">
+      <div class="axname">Base forward</div>
+      <div class="axval" id="tel-lin">+0.42 <span style="font-size:10px;color:var(--ink-faint)">m/s</span></div>
+      <div class="track"><i id="trk-lin"></i></div>
+    </div>
+    <div class="ax">
+      <div class="axname">Base yaw</div>
+      <div class="axval" id="tel-ang">−0.18 <span style="font-size:10px;color:var(--ink-faint)">rad/s</span></div>
+      <div class="track"><i id="trk-ang"></i></div>
+    </div>
+    <div class="ax">
+      <div class="axname">Base strafe</div>
+      <div class="axval" id="tel-lat">0.00 <span style="font-size:10px;color:var(--ink-faint)">m/s</span></div>
+      <div class="track"><i id="trk-lat"></i></div>
+    </div>
+    <div class="ax">
+      <div class="axname">Lift</div>
+      <div class="axval" id="tel-lift">0 <span style="font-size:10px;color:var(--ink-faint)">u/s</span></div>
+      <div class="track"><i id="trk-lift"></i></div>
+    </div>
+  </div>
+</section>
+
+<script>
+// ── Prototype screen switching ────────────────────────────────────────────
+const screens = { rivet: document.getElementById('rivet'), cockpit: document.getElementById('cockpit') };
+const buttons = { rivet: document.getElementById('btn-rivet'), cockpit: document.getElementById('btn-cockpit') };
+
+function show(which) {
+  for (const key of Object.keys(screens)) {
+    screens[key].classList.toggle('active', key === which);
+    buttons[key].setAttribute('aria-pressed', String(key === which));
+  }
+  history.replaceState(null, '', '?screen=' + which);
+}
+buttons.rivet.onclick = () => show('rivet');
+buttons.cockpit.onclick = () => show('cockpit');
+
+// In production each device pins its own view; here it comes off the query
+// string so both are reachable from one served file.
+const initial = new URLSearchParams(location.search).get('screen');
+show(initial === 'cockpit' ? 'cockpit' : 'rivet');
+
+// ── Mock telemetry ───────────────────────────────────────────────────────
+// Animated so the layout can be judged with values in motion rather than a
+// single frozen frame — a static mock hides which numbers jitter distractingly.
+let t = 0;
+const RECORD_SECONDS = 50;
+
+function setTrack(el, value, max) {
+  // Centre-anchored bar: a signed velocity reads as a deflection from centre,
+  // which matches how the stick that produced it feels.
+  const frac = Math.max(-1, Math.min(1, value / max));
+  const pct = Math.abs(frac) * 50;
+  el.style.width = pct + '%';
+  el.style.left = frac >= 0 ? '50%' : (50 - pct) + '%';
+}
+
+setInterval(() => {
+  t += 0.25;
+
+  const lin  = 0.45 * Math.sin(t / 3.1);
+  const ang  = 0.30 * Math.sin(t / 2.2 + 1);
+  const lat  = 0.20 * Math.sin(t / 5.0 + 2);
+  const lift = (Math.sin(t / 7.0) > 0.75) ? 8000 : 0;
+
+  document.getElementById('tel-lin').innerHTML =
+    fmt(lin, 2) + ' <span style="font-size:10px;color:var(--ink-faint)">m/s</span>';
+  document.getElementById('tel-ang').innerHTML =
+    fmt(ang, 2) + ' <span style="font-size:10px;color:var(--ink-faint)">rad/s</span>';
+  document.getElementById('tel-lat').innerHTML =
+    fmt(lat, 2) + ' <span style="font-size:10px;color:var(--ink-faint)">m/s</span>';
+  document.getElementById('tel-lift').innerHTML =
+    fmt(lift, 0) + ' <span style="font-size:10px;color:var(--ink-faint)">u/s</span>';
+
+  setTrack(document.getElementById('trk-lin'), lin, 0.5);
+  setTrack(document.getElementById('trk-ang'), ang, 0.5);
+  setTrack(document.getElementById('trk-lat'), lat, 0.5);
+  setTrack(document.getElementById('trk-lift'), lift, 8000);
+
+  // Rivet screen: base tile mirrors the commanded forward velocity.
+  const baseMetric = document.querySelector('#t-base .metric');
+  if (baseMetric) {
+    baseMetric.innerHTML = Math.abs(lin).toFixed(2) +
+      '<small> m/s commanded</small>';
+  }
+
+  // Episode clock, shared by both screens.
+  const elapsed = (t % RECORD_SECONDS);
+  const pct = (elapsed / RECORD_SECONDS) * 100;
+  document.getElementById('c-bar').style.width = pct.toFixed(1) + '%';
+  document.getElementById('c-sub').textContent =
+    elapsed.toFixed(1) + ' s elapsed · ' + RECORD_SECONDS + ' s max';
+}, 250);
+
+function fmt(v, digits) {
+  const s = Math.abs(v).toFixed(digits);
+  if (Math.abs(v) < Math.pow(10, -digits) / 2) return s;
+  // Real minus sign rather than a hyphen: at a glance on a dark panel a hyphen
+  // is easy to lose against the digits.
+  return (v < 0 ? '−' : '+') + s;
+}
+</script>
+</body>
+</html>

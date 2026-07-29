@@ -53,6 +53,7 @@
 #define TROSSEN_SDK__HW__TELEOP__TELEOP_CAPABLE_HPP_
 
 #include <array>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -278,13 +279,67 @@ public:
   }
 };
 
+// ── Base-space axis layout ───────────────────────────────────────────────
+//
+// Base commands are a variable-length vector whose axes are positional and
+// APPEND-ONLY. The first two are required and their meaning is frozen: a
+// differential-drive base (SLATE) and a holonomic base with a lift (Rivet)
+// both start `[linear, angular, ...]`, so a 2-element leader can drive a
+// 4-axis follower and vice versa — each side reads the axes it understands
+// and ignores the rest.
+//
+// Axes are NOT reordered to group "translation" together, even though
+// `lateral` would sit more naturally beside `linear`: index 1 already means
+// angular in shipped SLATE and VR code, and renumbering would silently swap
+// yaw for strafe on hardware that is working today.
+namespace base_axis {
+
+/// Forward translational velocity along the base heading (m/s). Required.
+inline constexpr std::size_t kLinear = 0;
+
+/// Yaw rate about the vertical axis (rad/s). Required.
+inline constexpr std::size_t kAngular = 1;
+
+/// Vertical lift / linear-actuator velocity, in the actuator's own units per
+/// second. Optional — absent on bases without a lift (SLATE).
+inline constexpr std::size_t kLift = 2;
+
+/// Lateral (strafe) velocity, positive left (m/s). Optional — meaningful only
+/// on holonomic bases; a differential-drive base cannot honour it.
+inline constexpr std::size_t kLateral = 3;
+
+/// Smallest valid base command: linear + angular.
+inline constexpr std::size_t kMinSize = 2;
+
+/// Largest layout currently defined. Longer vectors are not an error — a
+/// follower ignores axes past what its hardware supports — but nothing in the
+/// SDK produces them yet.
+inline constexpr std::size_t kMaxSize = 4;
+
+/// Read `axis` from `cmd`, or `fallback` if the vector is too short to carry
+/// it. The safe way to consume optional axes: a follower asks for kLift and
+/// gets 0 from a 2-element differential-drive leader instead of reading past
+/// the end.
+inline float get(const std::vector<float>& cmd, std::size_t axis,
+                 float fallback = 0.0f) {
+  return axis < cmd.size() ? cmd[axis] : fallback;
+}
+
+}  // namespace base_axis
+
 /**
  * @brief Mobile-base velocity teleop interface.
  *
- * Commands carry a 2-element vector `[linear_mps, angular_rps]`: forward
- * translational velocity (m/s) along the base's heading and yaw rate (rad/s)
- * about the vertical axis. This is the natural command space for
- * differential-drive / non-holonomic bases such as the SLATE.
+ * Commands carry `[linear_mps, angular_rps]` plus optional trailing axes —
+ * see the `base_axis` constants above for the layout and why it is
+ * append-only. Index by those names rather than by literal, and read optional
+ * axes through `base_axis::get()` so a short vector degrades to zero instead
+ * of reading out of bounds.
+ *
+ * Implementations advertise their own length from `read()` and tolerate any
+ * length in `write()`; there is deliberately no fixed size on this interface,
+ * because a 2-axis SLATE and a 4-axis Rivet base are both valid followers for
+ * the same leader.
  */
 class BaseSpaceTeleop : public virtual TeleopCapable, public TeleopTypeIO {
 public:
