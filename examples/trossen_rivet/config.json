@@ -8,7 +8,6 @@
         "left_model": "glide_left",
         "right_ip_address": "192.168.0.2",
         "right_model": "glide_right",
-        "write_moving_time_s": 0.2,
         "joint_signs": [1,1,1,-1,-1,1,1],
         "left_joint_offsets": [0,0,0,0,0,-0.7854,0],
         "right_joint_offsets": [0,0,0,0,0,0.7854,0]
@@ -19,9 +18,7 @@
         "left_ip_address": "192.168.1.4",
         "left_model": "pro",
         "right_ip_address": "192.168.1.5",
-        "right_model": "pro",
-        "write_moving_time_s": 0.2,
-        "staging_time_s": 2.0
+        "right_model": "pro"
       }
     },
     "cameras": [

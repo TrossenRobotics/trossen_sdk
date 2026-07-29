@@ -53,7 +53,7 @@ public:
    *   "left_model": "glide_right",
    *   "right_ip_address": "192.168.1.101",
    *   "right_model": "glide_left",
-   *   "write_moving_time_s": 0.2,
+   *   "write_moving_time_s": 0.1,
    *   "episode_lifecycle_enabled": true,
    *   "joint_signs": [1, 1, ...],
    *   "left_joint_offsets": [0, 0, ...],

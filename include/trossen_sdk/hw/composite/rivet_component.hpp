@@ -57,7 +57,7 @@ public:
    *   "left_model": "pro",
    *   "right_ip_address": "192.168.1.4",
    *   "right_model": "pro",
-   *   "write_moving_time_s": 0.2,
+   *   "write_moving_time_s": 0.0,
    *   "staging_time_s": 2.0
    *   "end_effector": "pro_base",
    *   "episode_lifecycle_enabled": true,
@@ -313,10 +313,7 @@ private:
   std::vector<float> effort_tolerance_;
 
   /// Whether write_joint() runs teleop position commands through a one-Euro
-  /// low-pass filter before writing them to the followers. Smooths jitter
-  /// from a noisy/laggy command source (e.g. teleop over a wireless link)
-  /// while adding minimal lag during fast motion. Parsed from
-  /// "smoothing_enabled" in configure(); defaults to on.
+  /// low-pass filter before writing them to the followers to smooth jitter.
   bool smoothing_enabled_{true};
 
   /// One-Euro filter tuning, shared by every joint/gripper filter below.
