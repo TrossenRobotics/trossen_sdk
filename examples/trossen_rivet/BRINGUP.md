@@ -5,6 +5,25 @@ thing, instead of arriving as "the robot doesn't work".
 
 ## 0. Prerequisites
 
+**Both dependencies are private repos**, so every step below needs git
+credentials that can read them:
+
+```bash
+git ls-remote https://github.com/TrossenRobotics/trossen_arm-source.git
+git ls-remote https://github.com/TrossenRobotics/trossen_base.git
+```
+
+If either prompts for a username, run `gh auth login` first. Two consequences
+worth knowing before you hit them:
+
+- **`sudo ./setup.sh` runs as root, and root has none of your credentials** — not
+  the `gh` helper, not your SSH keys. The script handles this by cloning as the
+  invoking user (`SUDO_USER`) and keeping root for the install only.
+- **The webapp image build needs your SSH agent forwarded.** `docker compose
+  build` passes it (`ssh: default` in the compose file); confirm `ssh-add -l`
+  lists a key that can read both repos. Building directly needs
+  `docker build --ssh default`.
+
 The Glide handles' joysticks and buttons come from
 `TrossenArmDriver::get_input_report()`, which the **released** driver does not
 have. Check what is installed:

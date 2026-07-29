@@ -133,14 +133,21 @@ if(TROSSEN_ENABLE_RIVET)
   )
   target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_RIVET)
 
-  # trossen_base is preferred from a system install (its CAN drivetrain build has
-  # host-specific setup); fall back to FetchContent so a bare clone still configures.
+  # trossen_base is preferred from a system install, and the webapp image installs
+  # it for exactly that reason: the fallback below clones a PRIVATE repo, so it
+  # only works where git has credentials for it. It will not work in a container
+  # build, in CI, or as root under sudo. Override the URL if you mirror it.
+  set(TROSSEN_BASE_GIT_REPOSITORY
+    "https://github.com/TrossenRobotics/trossen_base.git"
+    CACHE STRING "Where to fetch trossen_base when it is not installed")
   find_package(trossen_base QUIET)
   if(trossen_base_FOUND)
     message(STATUS "  using system trossen_base")
     target_link_libraries(trossen_sdk PUBLIC trossen_base)
   else()
-    message(STATUS "  system trossen_base not found, fetching")
+    message(STATUS
+      "  system trossen_base not found, fetching from "
+      "${TROSSEN_BASE_GIT_REPOSITORY} (private — needs git credentials)")
     include(FetchContent)
     # trossen_base builds a gamepad demo by default, which hard-requires SDL2 and
     # fails configuration on hosts without it. We only need the library.
@@ -148,7 +155,7 @@ if(TROSSEN_ENABLE_RIVET)
     FetchContent_Declare(
       trossen_base
       SYSTEM
-      GIT_REPOSITORY https://github.com/TrossenRobotics/trossen_base.git
+      GIT_REPOSITORY ${TROSSEN_BASE_GIT_REPOSITORY}
       GIT_TAG dev
       EXCLUDE_FROM_ALL
     )

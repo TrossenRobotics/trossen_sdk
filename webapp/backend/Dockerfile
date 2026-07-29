@@ -58,6 +58,7 @@ RUN apt-get update && apt-get install -yqq --no-install-recommends \
       libusb-1.0-0 \
       libusb-1.0-0-dev \
       lsb-release \
+      openssh-client \
       pkg-config \
       protobuf-compiler \
       python3 \
@@ -86,13 +87,44 @@ RUN wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --shor
 # Pinned to a commit, not the branch, so an image rebuild cannot silently pick up
 # a different driver. This is the tip of `actuate-demo` as of 2026-07-29; bump it
 # deliberately.
-RUN git clone --filter=blob:none https://github.com/TrossenRobotics/trossen_arm-source.git \
+# trossen_arm-source is PRIVATE, so this needs credentials at build time. It uses
+# an SSH agent mount rather than baking a token into a layer, which means the
+# build must be run with the agent forwarded:
+#     docker compose build            # compose passes ssh: default (see compose file)
+#     docker build --ssh default ...  # if building directly
+# Without it the clone fails with "Repository not found" / "Host key verification".
+RUN --mount=type=ssh \
+    mkdir -p -m 0700 ~/.ssh \
+    && ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null \
+    && git clone --filter=blob:none \
+        git@github.com:TrossenRobotics/trossen_arm-source.git \
     && cd trossen_arm-source \
     && git checkout $TROSSEN_ARM_SOURCE_REF \
     && make install/cpp/system JOBS="$(nproc)" \
     && ldconfig \
     && cd .. \
     && rm -rf trossen_arm-source
+
+# trossen_base, likewise private, and likewise installed at *image build* time —
+# not left to CMake's FetchContent. The entrypoint compiles the SDK extension at
+# container start, where no SSH agent exists, so a fetch there would fail every
+# time. Installing it here means find_package(trossen_base) succeeds and CMake
+# never reaches the fetch path. Its gamepad demo needs SDL2, so it is disabled.
+RUN --mount=type=ssh \
+    if [ "$ENABLE_RIVET" = "1" ]; then \
+        mkdir -p -m 0700 ~/.ssh && \
+        ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null && \
+        git clone --filter=blob:none --branch dev \
+            git@github.com:TrossenRobotics/trossen_base.git && \
+        cmake -S trossen_base -B trossen_base/build \
+            -DCMAKE_BUILD_TYPE=Release -DBUILD_CONTROLLER_DEMO=OFF && \
+        cmake --build trossen_base/build --parallel "$(nproc)" && \
+        cmake --install trossen_base/build && \
+        ldconfig && \
+        rm -rf trossen_base ; \
+    else \
+        echo "ENABLE_RIVET=$ENABLE_RIVET — skipping trossen_base" ; \
+    fi
 
 # librealsense2 from realsenseai's Debian apt repo. Required by
 # `find_package(realsense2)` in the SDK's CMakeLists.txt when the default

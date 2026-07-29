@@ -330,13 +330,31 @@ phase_trossen_arm() {
   fi
 
   local tmp; tmp="$(mktemp -d)"
+
+  # trossen_arm-source is a private repo, so the clone needs credentials. When
+  # this script is run with sudo we are root, and root has none of them — the gh
+  # credential helper, stored tokens and SSH keys all belong to the invoking
+  # user. So clone as that user and keep root for the install only. Without this
+  # the clone stops on an interactive username prompt.
+  local -a as_user=()
+  if [[ "$(id -u)" -eq 0 && -n "${SUDO_USER:-}" ]]; then
+    as_user=(sudo -u "$SUDO_USER" -H)
+    chown "$SUDO_USER" "$tmp"
+    info "Cloning as $SUDO_USER (private repo; root has no credentials)"
+  fi
+
   step "Cloning libtrossen_arm source at ${TROSSEN_ARM_SOURCE_REF:0:12}"
-  if ! git clone --filter=blob:none \
+  # GIT_TERMINAL_PROMPT=0 turns a missing credential into an immediate failure
+  # with a message, instead of a prompt that hangs an unattended run forever.
+  if ! "${as_user[@]}" env GIT_TERMINAL_PROMPT=0 git clone --filter=blob:none \
         https://github.com/TrossenRobotics/trossen_arm-source.git \
         "$tmp/trossen_arm-source" >/dev/null 2>&1 \
-     || ! git -C "$tmp/trossen_arm-source" checkout \
+     || ! "${as_user[@]}" git -C "$tmp/trossen_arm-source" checkout \
         "$TROSSEN_ARM_SOURCE_REF" >/dev/null 2>&1; then
-    fail "Could not fetch libtrossen_arm source at $TROSSEN_ARM_SOURCE_REF"
+    fail "Could not fetch libtrossen_arm source at ${TROSSEN_ARM_SOURCE_REF:0:12}"
+    info "This is a private repository. Check you can reach it:"
+    info "    git ls-remote https://github.com/TrossenRobotics/trossen_arm-source.git"
+    info "If that prompts for a username, authenticate first with: gh auth login"
     rm -rf "$tmp"; CRITICAL_FAILED=1; return
   fi
 

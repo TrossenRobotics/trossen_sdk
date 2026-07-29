@@ -28,6 +28,11 @@ services:
         # in trossen_base and builds the base follower, which stationary machines
         # have no use for. Export ENABLE_RIVET=1 on the Rivet.
         ENABLE_RIVET: ${ENABLE_RIVET:-0}
+      # libtrossen_arm and trossen_base are private repos cloned during the image
+      # build, so the build needs the host's SSH agent forwarded. Requires an
+      # agent with a key that can read them: `ssh-add -l` should list one.
+      ssh:
+        - default
     image: trossen-sdk-webapp-backend:dev
     container_name: trossen_webapp_backend
     network_mode: host                 # host Ethernet (arm subnet) + localhost wiring
