@@ -96,6 +96,24 @@ Install the RealSense SDK 2.0 by following the `librealsense distribution guide 
     RealSense depth capture is supported alongside RGB, but enabling it significantly increases USB bandwidth.
     When running multiple cameras, prefer short, high-quality USB 3.0 cables and distribute cameras across independent USB host controllers.
 
+PolicyClient (Optional)
+-----------------------
+
+The PolicyClient is off by default and is built with ``-DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON``.
+Its gRPC transport is generated from a vendored proto at build time, so the build requires the gRPC development headers and the C++ ``protoc`` plugin.
+
+.. code-block:: bash
+
+    sudo apt-get install -y \
+        libgrpc++-dev \
+        protobuf-compiler-grpc
+
+.. note::
+
+    As with RealSense, the gRPC *runtime* package (``libgrpc++1.x``) is not sufficient.
+    ``pkg_check_modules(grpc++)`` needs the ``grpc++.pc`` file that ships only in ``libgrpc++-dev``.
+    ``libgrpc-dev`` does not need to be installed explicitly; ``libgrpc++-dev`` depends on it.
+
 Audio Announcements (Optional)
 ------------------------------
 
