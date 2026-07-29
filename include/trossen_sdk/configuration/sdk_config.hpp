@@ -80,6 +80,7 @@
 #include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/bimanual_glide_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/camera_config.hpp"
+#include "trossen_sdk/configuration/types/hardware/component_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/mobile_base_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/policy_client_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/rivet_config.hpp"
@@ -110,6 +111,16 @@ struct HardwareConfig {
 
   /// @brief Ordered list of camera configs
   std::vector<CameraConfig> cameras;
+
+  /// @brief Components resolved generically through HardwareRegistry by type.
+  ///
+  /// The escape hatch from adding a typed map per component. Anything the SDK
+  /// does not need to read fields off directly — the Glide input layer, a base
+  /// follower — is declared here and configures itself from its own JSON, so a
+  /// new REGISTER_HARDWARE type costs no schema change. Order is preserved
+  /// because construction order can matter: a component that resolves another by
+  /// id needs that one to exist first.
+  std::vector<ComponentConfig> components;
 
   /// @brief Mobile base config (present only for mobile robots)
   std::optional<MobileBaseConfig> mobile_base;

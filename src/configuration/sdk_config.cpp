@@ -5,6 +5,7 @@
 
 #include "trossen_sdk/configuration/sdk_config.hpp"
 
+#include <algorithm>
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -46,6 +47,27 @@ HardwareConfig HardwareConfig::from_json(const nlohmann::json& j) {
           "since teleop pairs and the active hardware registry resolve by id alone");
       }
       c.mobile_rivet[id] = RivetConfig::from_json(arm_j);
+    }
+  }
+
+  if (j.contains("components") && j.at("components").is_array()) {
+    for (const auto& comp_j : j.at("components")) {
+      auto comp = ComponentConfig::from_json(comp_j);
+      // Ids must be unique across every hardware map, since teleop pairs and
+      // the active hardware registry resolve by id alone — a collision would
+      // silently point a pair at the wrong device.
+      const bool taken =
+        c.arms.count(comp.id) || c.bimanual_arms.count(comp.id) ||
+        c.mobile_rivet.count(comp.id) ||
+        std::any_of(c.components.begin(), c.components.end(),
+                    [&](const ComponentConfig& other) { return other.id == comp.id; });
+      if (taken) {
+        throw std::runtime_error(
+          "HardwareConfig: component id '" + comp.id +
+          "' is already used by another hardware entry — ids must be unique "
+          "across arms, bimanual_arms, mobile_rivet, and components");
+      }
+      c.components.push_back(std::move(comp));
     }
   }
 

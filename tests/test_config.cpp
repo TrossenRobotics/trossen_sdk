@@ -241,3 +241,93 @@ TEST(ArmConfigTest, ToJson_OmitsEmptyStagedPosition) {
   EXPECT_TRUE(j.contains("staging_time_s"));
   EXPECT_FLOAT_EQ(j.at("staging_time_s").get<float>(), 2.0f);
 }
+
+// ── hardware.components: registry-resolved generic components ─────────────
+//
+// The escape hatch from a typed config map per component type. Anything the SDK
+// does not read fields off directly is declared here and configures itself, so a
+// new REGISTER_HARDWARE type costs no schema change.
+
+TEST(HardwareComponentsConfigTest, ParsesIdAndTypeAndKeepsRawJson) {
+  const auto j = nlohmann::json::parse(R"({
+    "components": [
+      { "id": "base_leader", "type": "glide_base",
+        "translation": { "arm_id": "glide_left", "max": 0.6 } }
+    ]
+  })");
+
+  const auto hw = trossen::configuration::HardwareConfig::from_json(j);
+  ASSERT_EQ(hw.components.size(), 1u);
+  EXPECT_EQ(hw.components[0].id, "base_leader");
+  EXPECT_EQ(hw.components[0].type, "glide_base");
+
+  // The component's own fields must survive untouched — the config layer has no
+  // business knowing what "translation" means.
+  EXPECT_EQ(hw.components[0].raw["translation"]["arm_id"], "glide_left");
+  EXPECT_DOUBLE_EQ(hw.components[0].raw["translation"]["max"].get<double>(), 0.6);
+}
+
+TEST(HardwareComponentsConfigTest, PreservesDeclarationOrder) {
+  const auto j = nlohmann::json::parse(R"({
+    "components": [
+      { "id": "first",  "type": "glide_base" },
+      { "id": "second", "type": "glide_session_control" },
+      { "id": "third",  "type": "trossen_base" }
+    ]
+  })");
+
+  // Order matters: a component that resolves another by id needs that one built
+  // first, so the list must not be reordered into a map.
+  const auto hw = trossen::configuration::HardwareConfig::from_json(j);
+  ASSERT_EQ(hw.components.size(), 3u);
+  EXPECT_EQ(hw.components[0].id, "first");
+  EXPECT_EQ(hw.components[1].id, "second");
+  EXPECT_EQ(hw.components[2].id, "third");
+}
+
+TEST(HardwareComponentsConfigTest, MissingIdOrTypeIsRejected) {
+  EXPECT_THROW(
+    trossen::configuration::HardwareConfig::from_json(
+      nlohmann::json::parse(R"({"components":[{"type":"glide_base"}]})")),
+    std::runtime_error);
+
+  EXPECT_THROW(
+    trossen::configuration::HardwareConfig::from_json(
+      nlohmann::json::parse(R"({"components":[{"id":"x"}]})")),
+    std::runtime_error);
+
+  // Empty strings are rejected too: an empty id can never be referenced by a
+  // teleop pair, and an empty type names no registered hardware.
+  EXPECT_THROW(
+    trossen::configuration::HardwareConfig::from_json(
+      nlohmann::json::parse(R"({"components":[{"id":"","type":"glide_base"}]})")),
+    std::runtime_error);
+}
+
+TEST(HardwareComponentsConfigTest, DuplicateIdWithinComponentsIsRejected) {
+  EXPECT_THROW(
+    trossen::configuration::HardwareConfig::from_json(nlohmann::json::parse(R"({
+      "components": [
+        { "id": "dup", "type": "glide_base" },
+        { "id": "dup", "type": "trossen_base" }
+      ]
+    })")),
+    std::runtime_error);
+}
+
+TEST(HardwareComponentsConfigTest, IdCollidingWithAnArmIsRejected) {
+  // Teleop pairs and ActiveHardwareRegistry resolve by id alone, so a collision
+  // across maps would silently point a pair at the wrong device.
+  EXPECT_THROW(
+    trossen::configuration::HardwareConfig::from_json(nlohmann::json::parse(R"({
+      "arms": { "shared_name": { "ip_address": "192.168.1.2" } },
+      "components": [ { "id": "shared_name", "type": "glide_base" } ]
+    })")),
+    std::runtime_error);
+}
+
+TEST(HardwareComponentsConfigTest, AbsentSectionYieldsNoComponents) {
+  const auto hw = trossen::configuration::HardwareConfig::from_json(
+    nlohmann::json::parse(R"({"arms":{}})"));
+  EXPECT_TRUE(hw.components.empty());
+}
