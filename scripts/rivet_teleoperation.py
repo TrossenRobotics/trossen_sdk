@@ -6,7 +6,7 @@ Requirements:
     1. Python installation
     2. Start CAN interface (using README)
 - trossen_arm-source (lightweight-leader branch):
-    https://github.com/TrossenRobotics/trossen_arm-source/tree/lightweight-leader
+    https://github.com/TrossenRobotics/trossen_arm-source/tree/actuate-demo
     1. Python installation
 
 
@@ -129,7 +129,7 @@ def teleop_arm_step(leader, follower, gripper_home_offset):
     positions = leader.get_all_positions()
     efforts = follower.get_all_efforts()
 
-    # Feed the external efforts from the follower robot to the leader robot
+    # Feed the efforts from the follower robot to the leader robot
     leader.set_arm_efforts(
         np.array([efforts[0], efforts[1], efforts[2], -efforts[3], -efforts[4], efforts[5]]),
         0.0,
