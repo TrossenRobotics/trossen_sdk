@@ -70,8 +70,8 @@ void RivetComponent::configure(const nlohmann::json& config) {
   }
   trossen_arm::EndEffector end_effector;
   end_effector_str_ = config.at("end_effector").get<std::string>();
-  if (end_effector_str_ == "wxai_v0_follower") {
-    end_effector = trossen_arm::StandardEndEffector::wxai_v0_follower;
+  if (end_effector_str_ == "pro_base") {
+    end_effector = trossen_arm::StandardEndEffector::pro_base;
   } else {
     throw std::runtime_error("RivetComponent: Unknown end_effector: " + end_effector_str_);
   }
@@ -82,10 +82,8 @@ void RivetComponent::configure(const nlohmann::json& config) {
   base_driver_ = std::make_shared<trossen_base::TrossenBase>();
 
   try {
-    left_driver_->configure(left_model, trossen_arm::StandardEndEffector::wxai_v0_leader,
-      left_ip_address_, true);
-    right_driver_->configure(right_model, trossen_arm::StandardEndEffector::wxai_v0_leader,
-      right_ip_address_, true);
+    left_driver_->configure(left_model, end_effector, left_ip_address_, true);
+    right_driver_->configure(right_model, end_effector, right_ip_address_, true);
   } catch (const std::exception& e) {
     throw std::runtime_error(
       "RivetComponent: Failed to configure driver: " + std::string(e.what()));
@@ -218,8 +216,8 @@ void RivetComponent::configure(const nlohmann::json& config) {
   }
 
   // Configure mode
-  right_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
-  left_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
+  right_driver_->set_gripper_mode(trossen_arm::Mode::effort);
+  left_driver_->set_gripper_mode(trossen_arm::Mode::effort);
 
 }
 

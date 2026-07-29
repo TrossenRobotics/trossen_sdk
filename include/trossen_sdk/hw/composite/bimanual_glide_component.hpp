@@ -273,9 +273,9 @@ private:
   std::vector<float> joint_offsets_right_;
 
   /// Leader-only gripper force feedback. When gripper_force_feedback_ is set,
-  /// the leader's gripper runs in external-effort mode and the teleop loop
-  /// renders a reflected force from the follower's measured gripper effort via
-  /// the cubic curve. The leader's arm joints can still be passive.
+  /// the leader's gripper runs in effort mode and the teleop loop renders a
+  /// reflected force from the follower's measured gripper effort via the
+  /// cubic curve. The leader's arm joints can still be passive.
   float gripper_feedback_leader_max_{20.0f};
   float gripper_feedback_follower_max_{100.0f};
   float gripper_feedback_offset_{6.5f};

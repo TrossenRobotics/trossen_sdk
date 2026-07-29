@@ -22,7 +22,7 @@ namespace trossen::configuration {
  *   "left_model": "pro",
  *   "right_ip_address": "192.168.1.4",
  *   "right_model": "pro",
- *   "end_effector": "wxai_v0_follower",
+ *   "end_effector": "pro_base",
  *   "write_moving_time_s": 0.2,          // optional, default 0.0
  *   "staging_time_s": 2.0,               // optional, default 2.0
  *   "staged_position": [...],            // optional, default none (no staging)
@@ -45,8 +45,8 @@ struct RivetConfig {
   /// @brief Right arm model identifier (e.g. "pro")
   std::string right_model{"pro"};
 
-  /// @brief End effector type shared by both arms (e.g. "wxai_v0_follower")
-  std::string end_effector{"wxai_v0_follower"};
+  /// @brief End effector type shared by both arms (e.g. "pro_base")
+  std::string end_effector{"pro_base"};
 
   /// @brief Per-tick trajectory time (seconds) passed to set_all_positions in
   /// write_joint(). Zero applies the goal immediately.

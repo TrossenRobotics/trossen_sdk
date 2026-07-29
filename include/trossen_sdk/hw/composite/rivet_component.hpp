@@ -59,7 +59,7 @@ public:
    *   "right_model": "pro",
    *   "write_moving_time_s": 0.2,
    *   "staging_time_s": 2.0
-   *   "end_effector": "wxai_v0_follower",
+   *   "end_effector": "pro_base",
    *   "episode_lifecycle_enabled": true,
    *   "position_min": [...],
    *   "position_max": [...],

@@ -49,7 +49,7 @@ struct BimanualGlideConfig {
   std::string right_model{"glide"};
 
   /// @brief Per-tick trajectory time (seconds) passed to set_all_positions /
-  /// set_gripper_external_effort. Zero applies the goal immediately.
+  /// set_gripper_effort. Zero applies the goal immediately.
   double write_moving_time_s{0.0};
 
   /// @brief Whether this pair participates in the SessionManager's per-episode
