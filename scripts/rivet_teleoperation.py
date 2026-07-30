@@ -83,7 +83,7 @@ def configure_follower(ip):
 
     joint_limits = driver.get_joint_limits()
     for i in range (6):
-        C[i].velocity_tolerance = joint_limits[i].velocity_max
+        joint_limits[i].velocity_tolerance = joint_limits[i].velocity_max
         joint_limits[i].effort_tolerance = joint_limits[i].effort_max  
     driver.set_joint_limits(joint_limits)
 
