@@ -19,11 +19,16 @@
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <parquet/arrow/reader.h>
+#include <parquet/statistics.h>
 #include <parquet/arrow/writer.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
+#include <condition_variable>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -31,9 +36,16 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <opencv2/opencv.hpp>
 #include <regex>
+#include <spawn.h>
 #include <string>
+#include <sys/wait.h>
+#include <thread>
+#include <unistd.h>
+extern char** environ;  // POSIX environ — not guaranteed by C++ standard headers
 #include <vector>
 
 #include "trossen_sdk/utils/app_utils.hpp"
@@ -63,6 +75,26 @@ struct Odometry2DMessage {
   double vel_theta{0.0};
 };
 
+// Counting semaphore for GPU encoder session limit (shared across all episode threads).
+struct GpuSemaphore {
+  std::mutex mtx;
+  std::condition_variable cv;
+  unsigned int available;
+  explicit GpuSemaphore(unsigned int n) : available(n) {}
+  void acquire() {
+    std::unique_lock<std::mutex> lock(mtx);
+    cv.wait(lock, [this] { return available > 0; });
+    --available;
+  }
+  void release() {
+    {
+      std::lock_guard<std::mutex> lock(mtx);
+      ++available;
+    }
+    cv.notify_one();
+  }
+};
+
 /**
  * @brief Configuration for LeRobotV2 dataset conversion
  *
@@ -89,9 +121,9 @@ struct ParquetConfig {
   bool create_videos = true;
 };
 
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 // Statistics computation functions
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 
 /**
  * @brief Compute statistics for a single episode
@@ -219,29 +251,25 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
   return stats;
 }
 
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 // MCAP to Parquet conversion
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 
-/// @brief Convert a single MCAP file to a LeRobotV2 dataset episode
-/// @param mcap_file Path to the input MCAP file
-/// @param dataset_root_dir Root directory for all datasets
-/// @param episode_index Zero-based episode index
-/// @param repository_id HuggingFace-style repository ID for the folder structure
-/// @param dataset_id Dataset name within the repository
-/// @param chunk_size Number of episodes per chunk directory
-/// @param global_index_offset In/out parameter tracking the next available
-///   global row index across episodes. Pass 0 for a fresh conversion; on
-///   successful return the value is advanced by the number of rows written.
-/// @return 0 on success, non-zero on failure
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
-                      int64_t& global_index_offset);
+                      const std::string& video_encoder, const std::string& encoder_flags,
+                      unsigned int cam_encode_threads,
+                      GpuSemaphore* ep_encode_sem,
+                      int64_t starting_index,
+                      std::ostringstream& log,
+                      const std::string& task_name, const std::string& robot_name,
+                      float fps, bool create_videos,
+                      std::mutex& meta_mutex);
 
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 // Main entry point
-// ──────────────────────────────────────────────────────────
+// ──────────────────────────────────────────
 
 static void print_usage(const char* program) {
   std::cerr << "Usage: " << program << " <mcap_file_or_folder> [options]\n";
@@ -254,6 +282,10 @@ static void print_usage(const char* program) {
             << "(default: scripts/trossen_mcap_to_lerobot_v2/config.json)\n";
   std::cerr << "  --set KEY=VALUE              Override a config value (repeatable)\n";
   std::cerr << "                               e.g. --set lerobot_v2_backend.dataset_id=my_ds\n";
+  std::cerr << "  --threads <N>                Number of parallel episode cores\n";
+  std::cerr << "                               (default: 70% of hardware_concurrency)\n";
+  std::cerr << "  --encoder <mode>             Video encoder: auto, gpu, cpu\n";
+  std::cerr << "                               (default: auto, prefers GPU over CPU)\n";
   std::cerr << "  --dump-config                Print resolved config and exit\n";
   std::cerr << "  --help                       Show this help message\n";
   std::cerr << "\nExamples:\n";
@@ -275,7 +307,14 @@ static void print_usage(const char* program) {
   std::cerr << "\nNote: Video encoding requires FFmpeg with libsvtav1 codec.\n";
 }
 
+
+// ════════════════════════════════════════════════════
+// PROGRAM ENTRY POINT
+// ════════════════════════════════════════════════════
+
 int main(int argc, char** argv) {
+  // Reset terminal settings on exit in case FFmpeg corrupts them mid-encode
+  std::atexit([]() { std::system("stty sane 2>/dev/null"); });
   namespace fs = std::filesystem;
 
   trossen::configuration::CliParser cli(argc, argv);
@@ -285,7 +324,6 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  // Load config before positional check so --dump-config works without an input path
   const std::string config_path =
       cli.get_string("config", "scripts/trossen_mcap_to_lerobot_v2/config.json");
 
@@ -295,7 +333,15 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  auto j = trossen::configuration::JsonLoader::load(config_path);
+  nlohmann::json j;
+  try {
+    j = trossen::configuration::JsonLoader::load(config_path);
+  } catch (const std::exception& e) {
+    std::cerr << "Error: failed to parse config file: " << config_path << "\n";
+    std::cerr << "  " << e.what() << "\n";
+    return 1;
+  }
+
   const auto overrides = cli.get_set_overrides();
   if (!overrides.empty()) {
     j = trossen::configuration::merge_overrides(j, overrides);
@@ -316,7 +362,6 @@ int main(int argc, char** argv) {
 
   trossen::configuration::GlobalConfig::instance().load_from_json(j);
 
-  // Get LeRobotV2 backend config
   auto lerobot_config =
       trossen::configuration::GlobalConfig::instance()
           .get_as<trossen::configuration::LeRobotV2BackendConfig>(
@@ -327,8 +372,11 @@ int main(int argc, char** argv) {
   const std::string dataset_id = lerobot_config->dataset_id;
   const int chunk_size = lerobot_config->chunk_size;
   const std::string license = lerobot_config->license;
+  const std::string config_task_name = lerobot_config->task_name;
+  const std::string config_robot_name = lerobot_config->robot_name;
+  const float config_fps = lerobot_config->fps;
+  const bool encode_videos = lerobot_config->encode_videos;
 
-  // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
   std::cout << "Configuration (loaded from " << config_path << ")\n";
   std::cout << std::string(70, '=') << "\n";
@@ -351,6 +399,7 @@ int main(int argc, char** argv) {
       }
     }
 
+    // sort alphabetically so episode_000000 is processed before episode_000001
     std::sort(mcap_files.begin(), mcap_files.end());
 
     if (mcap_files.empty()) {
@@ -367,39 +416,208 @@ int main(int argc, char** argv) {
     return 1;
   }
 
+  unsigned int hw_threads = std::thread::hardware_concurrency();
+  if (hw_threads == 0) {
+    std::cerr << "Error: Could not detect CPU core count.\n";
+    return 1;
+  }
+
+  // Thread count resolution — priority: CLI > config > auto 70%
+  // If the requested value exceeds hardware concurrency, warn and fall back to auto.
+  unsigned int default_threads = std::max(1u, static_cast<unsigned int>(hw_threads * 0.7));
+  int cli_threads = cli.get_int("threads", -1);
+  int config_threads = lerobot_config->threads;
+  unsigned int num_threads;
+  std::string threads_source;
+
+  if (cli_threads > 0) {
+    if (static_cast<unsigned int>(cli_threads) > hw_threads) {
+      std::cout << "[WARNING] --threads " << cli_threads
+                << " exceeds hardware concurrency (" << hw_threads
+                << "). Clamping to " << hw_threads << ".\n";
+      num_threads = hw_threads;
+      threads_source = "--threads " + std::to_string(hw_threads) + " (clamped from " +
+                       std::to_string(cli_threads) + ")";
+    } else {
+      num_threads = static_cast<unsigned int>(cli_threads);
+      threads_source = "--threads " + std::to_string(num_threads);
+    }
+  } else if (config_threads > 0) {
+    if (static_cast<unsigned int>(config_threads) > hw_threads) {
+      std::cout << "[WARNING] config threads=" << config_threads
+                << " exceeds hardware concurrency (" << hw_threads
+                << "). Clamping to " << hw_threads << ".\n";
+      num_threads = hw_threads;
+      threads_source = "config: threads=" + std::to_string(hw_threads) + " (clamped from " +
+                       std::to_string(config_threads) + ")";
+    } else {
+      num_threads = static_cast<unsigned int>(config_threads);
+      threads_source = "config: threads=" + std::to_string(num_threads);
+    }
+  } else {
+    num_threads = default_threads;
+    threads_source = "auto: 70% of " + std::to_string(hw_threads);
+  }
+  std::cout << "Using " << num_threads << " core(s) of " << hw_threads
+            << " available  (" << threads_source << ")\n\n";
+
+  std::string video_encoder;
+  std::string encoder_flags;
+
+  bool has_ffmpeg = (std::system("which ffmpeg > /dev/null 2>&1") == 0);
+  if (!has_ffmpeg) {
+    std::cerr << "Error: ffmpeg is not installed. Video encoding requires ffmpeg.\n";
+    return 1;
+  }
+
+  // Encoder mode resolution — priority: CLI --encoder > config encoder > "auto"
+  // CLI uses empty string sentinel so "not passed" is distinguishable from "auto".
+  std::string cli_encoder = cli.get_string("encoder", "");
+  std::string config_encoder = lerobot_config->encoder;
+  std::string encoder_mode;
+  std::string encoder_label;
+
+  if (!cli_encoder.empty()) {
+    encoder_mode = cli_encoder;
+    encoder_label = "--encoder " + cli_encoder;
+  } else if (config_encoder != "auto" && !config_encoder.empty()) {
+    encoder_mode = config_encoder;
+    encoder_label = "config: encoder=" + config_encoder;
+  } else {
+    encoder_mode = "auto";
+    encoder_label = "auto-detected";
+  }
+
+  if (encoder_mode != "auto" && encoder_mode != "gpu" && encoder_mode != "cpu") {
+    std::cerr << "Error: encoder must be 'auto', 'gpu', or 'cpu' (got '"
+              << encoder_mode << "').\n";
+    return 1;
+  }
+
+  if (encoder_mode == "cpu") {
+    if (std::system("ffmpeg -encoders 2>/dev/null | grep -q libsvtav1") == 0) {
+      video_encoder = "libsvtav1";
+      encoder_flags = "-crf 30 -g 30 -preset 6";
+      std::cout << "Video encoder: CPU (libsvtav1)  [" << encoder_label << "]\n";
+    } else {
+      std::cerr << "Error: libsvtav1 not found. Install ffmpeg with libsvtav1 support.\n";
+      return 1;
+    }
+  } else if (encoder_mode == "gpu") {
+    if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_nvenc") == 0) {
+      video_encoder = "av1_nvenc";
+      encoder_flags = "-cq 30 -preset p6";
+      std::cout << "Video encoder: NVIDIA GPU (av1_nvenc)  [" << encoder_label << "]\n";
+    } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_amf") == 0) {
+      video_encoder = "av1_amf";
+      encoder_flags = "-rc cqp -qp 30";
+      std::cout << "Video encoder: AMD GPU (av1_amf)  [" << encoder_label << "]\n";
+    } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_qsv") == 0) {
+      video_encoder = "av1_qsv";
+      encoder_flags = "-global_quality 30";
+      std::cout << "Video encoder: Intel GPU (av1_qsv)  [" << encoder_label << "]\n";
+    } else {
+      std::cerr << "Error: GPU encoder requested but no GPU AV1 encoder found.\n";
+      std::cerr << "       Try av1_nvenc (NVIDIA), av1_amf (AMD), or use encoder=auto.\n";
+      return 1;
+    }
+  } else {
+    // auto: probe GPU encoders in priority order, fall back to CPU
+    if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_nvenc") == 0) {
+      video_encoder = "av1_nvenc";
+      encoder_flags = "-cq 30 -preset p6";
+      std::cout << "Video encoder: NVIDIA GPU (av1_nvenc)  [" << encoder_label << "]\n";
+    } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_amf") == 0) {
+      video_encoder = "av1_amf";
+      encoder_flags = "-rc cqp -qp 30";
+      std::cout << "Video encoder: AMD GPU (av1_amf)  [" << encoder_label << "]\n";
+    } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q av1_qsv") == 0) {
+      video_encoder = "av1_qsv";
+      encoder_flags = "-global_quality 30";
+      std::cout << "Video encoder: Intel GPU (av1_qsv)  [" << encoder_label << "]\n";
+    } else if (std::system("ffmpeg -encoders 2>/dev/null | grep -q libsvtav1") == 0) {
+      video_encoder = "libsvtav1";
+      encoder_flags = "-crf 30 -g 30 -preset 6";
+      std::cout << "Video encoder: CPU (libsvtav1)  [" << encoder_label << "]\n";
+    } else {
+      std::cerr << "Error: No AV1 encoder found. Install ffmpeg with libsvtav1 or GPU.\n";
+      return 1;
+    }
+  }
+
+  // Camera encode parallelism:
+  //   GPU encoder → all cameras within an episode encode simultaneously.
+  //              An episode-level semaphore controls how many episodes are in
+  //              the encoding phase at once, preventing NVENC session overflow.
+  //   CPU encoder → share cores fairly: floor(hw_cores / episode_slots).
+  //              Prevents oversubscribing the CPU when many episodes run in parallel.
+  unsigned int cam_encode_threads;
+  if (video_encoder == "libsvtav1") {
+    cam_encode_threads = std::max(1u, hw_threads / num_threads);
+    std::cout << "Camera encode: " << cam_encode_threads
+              << " thread(s) per episode"
+              << "  (CPU: " << hw_threads << " cores / "
+              << num_threads << " episodes)\n\n";
+  } else {
+    cam_encode_threads = std::numeric_limits<unsigned int>::max();
+    std::cout << "Camera encode: all cameras in parallel  (GPU)\n\n";
+  }
+
+  // Episode-level encode semaphore — limits how many episodes are in the video
+  // encoding phase simultaneously. Each episode holds one slot while ALL of its
+  // cameras encode in parallel, then releases the slot when they all finish.
+  // With ep_encode_slots=1: episodes take turns encoding, each gets full GPU
+  // bandwidth for its 8 cameras (~1.7s per episode vs 13.8s sequential).
+  // Raise to 2 if the GPU can sustain 2×cameras_per_episode concurrent sessions.
+  // nullptr for CPU encoder — cam_encode_threads already limits CPU load.
+  const unsigned int ep_encode_slots = 1;
+  std::unique_ptr<GpuSemaphore> ep_encode_sem_owner;
+  GpuSemaphore* ep_encode_sem = nullptr;
+  if (video_encoder != "libsvtav1") {
+    ep_encode_sem_owner = std::make_unique<GpuSemaphore>(ep_encode_slots);
+    ep_encode_sem = ep_encode_sem_owner.get();
+    std::cout << "Episode encode slots: " << ep_encode_slots
+              << "  (all cameras per episode in parallel)\n\n";
+  }
+
   // Process all MCAP files
-  int successful = 0;
-  int skipped = 0;
-  int failed = 0;
-  int64_t global_index_offset = 0;
+  std::atomic<int> successful{0};  // episodes converted successfully
+  std::atomic<int> skipped{0};    // episodes already converted, skipped
+  std::atomic<int> failed{0};     // episodes that threw or returned non-zero
 
   fs::path full_dataset_path_check = fs::path(dataset_root_dir) / repository_id / dataset_id;
 
+  struct EpisodeTask {
+    fs::path mcap_path;
+    int episode_index;
+    size_t display_idx;      // 1-based index for progress display
+    int64_t starting_index;  // first global row index for this episode
+  };
+  std::vector<EpisodeTask> tasks;
+
   for (size_t i = 0; i < mcap_files.size(); ++i) {
     const auto& mcap_path = mcap_files[i];
-
     std::string filename = mcap_path.stem().string();
     std::regex episode_pattern(R"(episode_(\d{6}))");
     std::smatch match;
-    int episode_index = i;
-
+    int episode_index = static_cast<int>(i);
     if (std::regex_search(filename, match, episode_pattern)) {
       episode_index = std::stoi(match[1].str());
     }
 
-    // Idempotent: skip episodes whose parquet already exists
     int ep_chunk = episode_index / chunk_size;
     fs::path expected_parquet = full_dataset_path_check / "data" /
                                 trossen::io::backends::format_chunk_dir(ep_chunk) /
                                 trossen::io::backends::format_episode_parquet(episode_index);
 
+    // Check if this episode was already converted. If the output parquet exists
+    // and is valid (can be opened and has rows), skip it. If it exists but is corrupt
+    // (throws on open), delete it and re-add to the task list for re-conversion.
+    // This makes re-runs safe — kill the script and restart without losing progress.
     if (fs::exists(expected_parquet)) {
-      // Advance global index past the skipped episode's rows.
-      // If the parquet is corrupt / unreadable, delete it and fall through
-      // to re-convert so we don't end up with overlapping indices.
       try {
         auto reader = parquet::ParquetFileReader::OpenFile(expected_parquet.string(), false);
-        global_index_offset += reader->metadata()->num_rows();
+        reader->metadata()->num_rows();  // liveness probe: throws if corrupt
         std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
                   << episode_index << " (already converted): "
                   << mcap_path.filename().string() << "\n";
@@ -413,24 +631,260 @@ int main(int argc, char** argv) {
       }
     }
 
-    std::cout << "\n" << std::string(70, '=') << "\n";
-    std::cout << "Processing file " << (i + 1) << "/" << mcap_files.size() << ": "
-              << mcap_path.filename().string() << "\n";
-    std::cout << std::string(70, '=') << "\n";
+    tasks.push_back({mcap_path, episode_index, i + 1, 0});
+  }
 
-    int result = process_mcap_file(mcap_path.string(), dataset_root_dir, episode_index,
-                                    repository_id, dataset_id, chunk_size,
-                                    global_index_offset);
+  // Pre-scan each MCAP using readSummary (reads footer only, fast) to estimate
+  // row count per episode. Used to assign contiguous starting_index per episode
+  // so global indices are contiguous even when episodes run in parallel.
+  auto estimate_episode_rows = [](const fs::path& mcap_path) -> int64_t {
+    mcap::McapReader probe;
+    if (!probe.open(mcap_path.string()).ok()) return 0;
+    auto summary_status = probe.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+    if (!summary_status.ok()) return 0;
+    const auto& stats = probe.statistics();
+    if (!stats.has_value()) return 0;
+    const auto& channels = probe.channels();
+    int64_t min_joint = std::numeric_limits<int64_t>::max();
+    int64_t min_camera = std::numeric_limits<int64_t>::max();
+    for (const auto& [ch_id, count] : stats->channelMessageCounts) {
+      auto it = channels.find(ch_id);
+      if (it == channels.end()) continue;
+      const std::string& topic = it->second->topic;
+      if (topic.find("joints/state") != std::string::npos)
+        min_joint = std::min(min_joint, static_cast<int64_t>(count));
+      if (topic.find("/cameras/") != std::string::npos)
+        min_camera = std::min(min_camera, static_cast<int64_t>(count));
+    }
+    int64_t rows = (min_joint != std::numeric_limits<int64_t>::max()) ? min_joint : 0;
+    if (min_camera != std::numeric_limits<int64_t>::max())
+      rows = std::min(rows, min_camera);
+    return std::max(int64_t{0}, rows);
+  };
+  // Pre-create all chunk directories before spawning workers to avoid
+  // concurrent fs::create_directories calls on overlapping paths.
+  // Using std::error_code overload means already-existing dirs are silently ignored.
+  for (const auto& task : tasks) {
+    int ep_chunk = task.episode_index / chunk_size;
+    fs::path chunk_data = fs::path(dataset_root_dir) / repository_id / dataset_id / "data" /
+                          trossen::io::backends::format_chunk_dir(ep_chunk);
+    fs::path chunk_images = fs::path(dataset_root_dir) / repository_id / dataset_id / "images" /
+                            trossen::io::backends::format_chunk_dir(ep_chunk);
+    fs::path chunk_videos = fs::path(dataset_root_dir) / repository_id / dataset_id / "videos" /
+                            trossen::io::backends::format_chunk_dir(ep_chunk);
+    fs::path meta_dir = fs::path(dataset_root_dir) / repository_id / dataset_id / "meta";
+    std::error_code ec;
+    fs::create_directories(chunk_data, ec);
+    if (ec) {
+      std::cerr << "Error: failed to create " << chunk_data << ": " << ec.message() << "\n";
+      return 1;
+    }
+    fs::create_directories(chunk_images, ec);
+    if (ec) {
+      std::cerr << "Error: failed to create " << chunk_images << ": " << ec.message() << "\n";
+      return 1;
+    }
+    fs::create_directories(chunk_videos, ec);
+    if (ec) {
+      std::cerr << "Error: failed to create " << chunk_videos << ": " << ec.message() << "\n";
+      return 1;
+    }
+    fs::create_directories(meta_dir, ec);
+    if (ec) {
+      std::cerr << "Error: failed to create " << meta_dir << ": " << ec.message() << "\n";
+      return 1;
+    }
+  }
+  // Scan existing parquet files to find the max stored index value.
+  // On resume/re-run, new episodes must continue from max+1 to avoid
+  // duplicate indices with already-converted (skipped) episodes.
+  auto initialize_global_index_counter = [](const fs::path& data_root) -> int64_t {
+    std::error_code ec;
+    if (!fs::exists(data_root, ec)) {
+      return 0;
+    }
+    int64_t next_index = 0;
+    for (fs::recursive_directory_iterator it(data_root, ec), end; it != end; it.increment(ec)) {
+      if (ec) {
+        std::cerr << "Warning: failed while scanning existing parquet files under "
+                  << data_root << ": " << ec.message() << std::endl;
+        break;
+      }
+      if (!it->is_regular_file(ec) || it->path().extension() != ".parquet") {
+        continue;
+      }
+      auto input_result = arrow::io::ReadableFile::Open(it->path().string());
+      if (!input_result.ok()) {
+        std::cerr << "Warning: failed to open parquet file " << it->path()
+                  << " to recover global index state: "
+                  << input_result.status().ToString() << std::endl;
+        continue;
+      }
+      auto open_result = parquet::arrow::OpenFile(
+        input_result.ValueOrDie(), arrow::default_memory_pool());
+      if (!open_result.ok()) {
+        std::cerr << "Warning: failed to read parquet metadata from " << it->path()
+                  << " to recover global index state: "
+                  << open_result.status().ToString() << std::endl;
+        continue;
+      }
+      auto reader = open_result.MoveValueUnsafe();
+      std::shared_ptr<arrow::Schema> schema;
+      auto schema_status = reader->GetSchema(&schema);
+      if (!schema_status.ok() || !schema) {
+        continue;
+      }
+      int index_column = schema->GetFieldIndex("index");
+      if (index_column < 0) {
+        continue;
+      }
+      // Use row group statistics (min/max in footer) instead of reading
+      // the full column — O(1) vs O(total_rows), much faster at scale.
+      auto parquet_reader = reader->parquet_reader();
+      if (!parquet_reader) {
+        continue;
+      }
+      auto metadata = parquet_reader->metadata();
+      if (!metadata || metadata->num_row_groups() <= 0) {
+        continue;
+      }
+      int64_t file_max_index = -1;
+      for (int rg = 0; rg < metadata->num_row_groups(); ++rg) {
+        auto rg_meta = metadata->RowGroup(rg);
+        if (!rg_meta) continue;
+        auto col_meta = rg_meta->ColumnChunk(index_column);
+        if (!col_meta) continue;
+        auto stats = col_meta->statistics();
+        if (!stats || !stats->HasMinMax()) continue;
+        // Extract max as int64 regardless of physical type
+        auto typed = std::dynamic_pointer_cast<parquet::Int64Statistics>(stats);
+        if (typed) {
+          file_max_index = std::max(file_max_index, typed->max());
+        }
+      }
+      if (file_max_index >= 0) {
+        next_index = std::max(next_index, file_max_index + 1);
+      }
+    }
+    return next_index;
+  };
+  // Globally unique row index shared across all worker threads.
+  // Each parquet row calls fetch_add(1) atomically — guarantees unique indices
+  // across all episodes even when they complete out of order, including resumed
+  // runs that skip already-converted episodes.
+  fs::path data_root = fs::path(dataset_root_dir) / repository_id / dataset_id / "data";
+  // Compute per-episode starting indices using pre-scan row estimates.
+  // This ensures each episode writes a contiguous block of global indices
+  // even when multiple episodes run in parallel.
+  {
+    int64_t offset = initialize_global_index_counter(data_root);
+    for (auto& task : tasks) {
+      task.starting_index = offset;
+      offset += estimate_episode_rows(task.mcap_path);
+    }
+  }
+  auto total_start = std::chrono::steady_clock::now();
 
-    if (result == 0) {
-      successful++;
-    } else {
-      failed++;
-      std::cerr << "\n[FAILED] Failed to process: " << mcap_path.string() << "\n";
+  if (!tasks.empty()) {
+    // serializes terminal output — without this, lines from different episodes interleave
+    std::mutex cout_mutex;
+    // serializes metadata writes — info.json, episodes.jsonl, tasks.jsonl, episodes_stats.jsonl
+    // are shared across all episodes and must not be written concurrently
+    std::mutex meta_mutex;
+    // protects task_index — without this two workers could grab the same episode
+    std::mutex queue_mutex;
+    size_t task_index = 0;  // next task to claim — incremented under queue_mutex
+
+    // Worker lambda: tasks are fully populated before workers spawn,
+    // When all tasks are claimed and done==true, the worker returns and the thread exits.
+    auto worker = [&]() {
+      while (true) {
+        EpisodeTask task;
+        {
+          std::lock_guard<std::mutex> lock(queue_mutex);
+          if (task_index >= tasks.size()) return;  // queue exhausted — exit thread
+          task = tasks[task_index++];
+        }
+        auto ep_start = std::chrono::steady_clock::now();
+        int result = 1;
+        try {
+          {
+            std::lock_guard<std::mutex> lk(cout_mutex);
+            std::cout << "\n" << std::string(70, '=') << "\n";
+            std::cout << "Processing file " << task.display_idx << "/" << mcap_files.size()
+                      << ": " << task.mcap_path.filename().string() << "\n";
+            std::cout << std::string(70, '=') << "\n";
+          }
+          // per-episode output buffer — flushed atomically under cout_mutex when done
+          std::ostringstream ep_log;
+          // episode pipeline: read MCAP -> write parquet -> extract images -> encode videos ->
+          // write metadata
+          result = process_mcap_file(task.mcap_path.string(), dataset_root_dir,
+                                     task.episode_index, repository_id, dataset_id, chunk_size,
+                                     video_encoder, encoder_flags,
+                                     cam_encode_threads, ep_encode_sem,
+                                     task.starting_index, ep_log,
+                                     config_task_name, config_robot_name,
+                                     config_fps, encode_videos, meta_mutex);
+          {
+            std::lock_guard<std::mutex> lk(cout_mutex);
+            // flush entire episode log atomically — no interleaving with other episodes
+            std::cout << ep_log.str();
+            auto ep_end = std::chrono::steady_clock::now();
+            double ep_secs = std::chrono::duration<double>(ep_end - ep_start).count();
+            std::cout << "[TIMING] Episode " << task.episode_index << " took " << std::fixed
+                      << std::setprecision(2) << ep_secs << "s\n";
+            if (result != 0) {
+              std::cerr << "\n[FAILED] Failed to process: " << task.mcap_path.string() << "\n";
+            }
+          }
+        // Catch all exceptions from process_mcap_file. Without this, an uncaught
+        // exception kills the worker thread silently, leaving other workers waiting
+        // forever (deadlock). Catching here marks the episode failed
+        // and lets the worker continue to the next task.
+        } catch (const std::exception& e) {
+          std::lock_guard<std::mutex> lk(cout_mutex);
+          std::cerr << "\n[EXCEPTION] Episode " << task.episode_index
+                    << " threw: " << e.what() << "\n";
+          result = 1;
+        } catch (...) {
+          std::lock_guard<std::mutex> lk(cout_mutex);
+          std::cerr << "\n[EXCEPTION] Episode " << task.episode_index
+                    << " threw unknown exception\n";
+          result = 1;
+        }
+        if (result == 0) {
+          ++successful;
+        } else {
+          ++failed;
+        }
+      }
+    };
+
+    // spawn exactly num_threads persistent workers — not one per episode
+    std::vector<std::thread> workers;
+    workers.reserve(num_threads);
+    for (unsigned int i = 0; i < num_threads; ++i) {
+      workers.emplace_back(worker);
+    }
+    for (auto& w : workers) {
+      w.join();
     }
   }
 
-  // Update dataset statistics
+  auto total_end = std::chrono::steady_clock::now();
+  double total_secs = std::chrono::duration<double>(total_end - total_start).count();
+  int processed = successful.load() + failed.load();
+  std::cout << "\n[TIMING] Total episode processing: " << std::fixed << std::setprecision(2)
+            << total_secs << "s for " << processed << " episode(s) processed\n"
+            << "[TIMING] Average per episode: "
+            << (processed > 0 ? total_secs / processed : 0.0) << "s\n";
+
+  // ── PHASE 2: DATASET STATISTICS ──
+  // After all episodes are converted, compute min/max/mean statistics for every
+  // column in every parquet file. This runs sequentially in the main thread —
+  // it is fast enough (~1s per episode) that parallelizing it is not worthwhile.
+  // Results are written to meta/episodes_stats.jsonl.
   std::cout << "\n" << std::string(70, '=') << "\n";
   std::cout << "Computing Dataset Statistics\n";
   std::cout << std::string(70, '=') << "\n";
@@ -520,6 +974,8 @@ int main(int argc, char** argv) {
     }
   }
 
+  // Generate README.md required for HuggingFace Hub upload.
+  // This file describes the dataset schema, robot, and task for the Hub UI.
   // Generate HuggingFace Hub compatibility files
   if (trossen::io::backends::generate_dataset_readme(full_dataset_path, license)) {
     std::cout << "  [ok] Generated README.md\n";
@@ -532,24 +988,56 @@ int main(int argc, char** argv) {
   std::cout << "Processing Complete\n";
   std::cout << std::string(70, '=') << "\n";
   std::cout << "  Total files:      " << mcap_files.size() << "\n";
-  std::cout << "  Successful:       " << successful << "\n";
-  std::cout << "  Skipped:          " << skipped << " (already converted)\n";
-  std::cout << "  Failed:           " << failed << "\n";
+  std::cout << "  Successful:       " << successful.load() << "\n";
+  std::cout << "  Skipped:          " << skipped.load() << " (already converted)\n";
+  std::cout << "  Failed:           " << failed.load() << "\n";
+  std::cout << "  Cores used:       " << num_threads << "\n";
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
   std::cout << std::string(70, '=') << "\n";
 
-  return (failed > 0) ? 1 : 0;
+  // Exit 1 if any episodes failed — lets CI/scripts detect partial failures.
+  // Exit 0 only if all episodes succeeded (or were skipped as already-converted).
+
+  return (failed.load() > 0) ? 1 : 0;
 }
+
+
+// ════════════════════════════════════════════════════
+// EPISODE CONVERSION PIPELINE
+// ════════════════════════════════════════════════════
+// RAII guard for ep_encode_sem — guarantees release on every exit path
+// (normal return, exception, early return). Mirrors std::lock_guard pattern.
+struct EpEncodeGuard {
+  GpuSemaphore* sem;
+  explicit EpEncodeGuard(GpuSemaphore* s) : sem(s) { if (sem) sem->acquire(); }
+  ~EpEncodeGuard() { if (sem) sem->release(); }
+  EpEncodeGuard(const EpEncodeGuard&) = delete;
+  EpEncodeGuard& operator=(const EpEncodeGuard&) = delete;
+};
 
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
-                      int64_t& global_index_offset) {
+                      const std::string& video_encoder, const std::string& encoder_flags,
+                      unsigned int cam_encode_threads,
+                      GpuSemaphore* ep_encode_sem,
+                      int64_t starting_index,
+                      std::ostringstream& log,
+                      const std::string& task_name, const std::string& robot_name,
+                      float fps, bool create_videos,
+                      std::mutex& meta_mutex) {
+  // Local row counter starting at pre-assigned offset — guarantees contiguous
+  // indices per episode even when multiple episodes run in parallel.
+  std::atomic<int64_t> global_index_counter{starting_index};
   ParquetConfig cfg;
   cfg.mcap_file = mcap_file;
   cfg.dataset_root = dataset_root_dir;
   cfg.repository_id = repository_id;
   cfg.dataset_id = dataset_id;
+  cfg.task_name = task_name;
+  cfg.robot_name = robot_name;
+  cfg.fps = fps;
+  cfg.create_videos = create_videos;
   cfg.chunk_size = chunk_size;
 
   namespace fs = std::filesystem;
@@ -568,7 +1056,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   cfg.output_file = (full_dataset_path / "data" / chunk_dir_name / parquet_filename).string();
 
   if (!fs::exists(cfg.mcap_file)) {
-    std::cerr << "Error: MCAP file not found: " << cfg.mcap_file << std::endl;
+    log << "Error: MCAP file not found: " << cfg.mcap_file << std::endl;
     return 1;
   }
 
@@ -586,63 +1074,49 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       "Output Parquet:   " + cfg.output_file,
       "Arms/Cameras:     Auto-detect from MCAP"};
 
-  trossen::utils::print_config_banner("TrossenMCAP to LeRobotV2 Converter", config_lines);
+  const std::size_t banner_width = 59;
+  log << "\n" << std::string(banner_width, '=') << "\n";
+  log << "  TrossenMCAP to LeRobotV2 Converter\n";
+  log << std::string(banner_width, '=') << "\n";
+  log << "Configuration:\n";
+  for (const auto& line : config_lines) {
+    log << "  " << line << "\n";
+  }
+  log << std::string(banner_width, '=') << "\n";
 
-  std::cout << "\nCreating LeRobotV2 dataset structure...\n";
+  log << "\nCreating LeRobotV2 dataset structure...\n";
 
   fs::path data_dir = full_dataset_path / trossen::io::backends::DATA_PATH_DIR / chunk_dir_name;
   fs::path images_dir = full_dataset_path / trossen::io::backends::IMAGES_DIR / chunk_dir_name;
   fs::path videos_dir = full_dataset_path / trossen::io::backends::VIDEO_DIR / chunk_dir_name;
   fs::path meta_dir = full_dataset_path / trossen::io::backends::METADATA_DIR;
 
-  try {
-    fs::create_directories(data_dir);
-    fs::create_directories(images_dir);
-    fs::create_directories(videos_dir);
-    fs::create_directories(meta_dir);
-
-    std::cout << "  [ok] Created data directory:   " << data_dir.string() << "\n";
-    std::cout << "  [ok] Created images directory: " << images_dir.string() << "\n";
-    std::cout << "  [ok] Created videos directory: " << videos_dir.string() << "\n";
-    std::cout << "  [ok] Created meta directory:   " << meta_dir.string() << "\n";
-  } catch (const std::exception& e) {
-    std::cerr << "Error: Failed to create directories: " << e.what() << "\n";
-    return 1;
-  }
-
-  std::cout << "\nReading MCAP file...\n";
+  auto stage_start = std::chrono::steady_clock::now();
+  log << "\nReading MCAP file...\n";
 
   std::ifstream input(cfg.mcap_file, std::ios::binary);
   if (!input.is_open()) {
-    std::cerr << "Error: Failed to open MCAP file\n";
+    log << "Error: Failed to open MCAP file\n";
     return 1;
   }
 
   mcap::McapReader reader;
   auto status = reader.open(input);
   if (!status.ok()) {
-    std::cerr << "Error: Failed to parse MCAP file: " << status.message << "\n";
+    log << "Error: Failed to parse MCAP file: " << status.message << "\n";
     return 1;
   }
 
   auto summary_status = reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
   if (!summary_status.ok()) {
-    std::cerr << "Error: Failed to read MCAP summary: " << summary_status.message << "\n";
+    log << "Error: Failed to read MCAP summary: " << summary_status.message << "\n";
     return 1;
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
   // PHASE 1: Extract embedded metadata from MCAP file
-  // ────────────────────────────────────────────────────────────────────────────
-  // The MCAP file may contain a "trossen_sdk_recording" metadata record with a
-  // "dataset_info" JSON blob. This includes:
-  //   - robot_name: e.g., "trossen_solo_ai", "trossen_mobile_ai"
-  //   - streams: per-stream joint names (e.g., streams.leader_left.joint_names)
-  //   - cameras: per-camera specs (height, width, fps, codec)
-  //   - base_velocity_names: names for mobile base velocity dimensions
-  // If present, this metadata is used to populate info.json with accurate names
-  // instead of generic placeholders like "joint_0", "joint_1", etc.
-  // ────────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
+
   nlohmann::json mcap_dataset_info;
   auto* data_source = reader.dataSource();
   const auto& meta_indexes = reader.metadataIndexes();
@@ -666,27 +1140,21 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       try {
         // Parse the JSON string into our mcap_dataset_info object
         mcap_dataset_info = nlohmann::json::parse(info_it->second);
-        std::cout << "  [ok] Found MCAP dataset_info metadata\n";
+        log << "  [ok] Found MCAP dataset_info metadata\n";
         if (mcap_dataset_info.contains("robot_name")) {
           cfg.robot_name = mcap_dataset_info["robot_name"].get<std::string>();
-          std::cout << "    Robot name from MCAP: " << cfg.robot_name << "\n";
+          log << "    Robot name from MCAP: " << cfg.robot_name << "\n";
         }
       } catch (const std::exception& e) {
-        std::cerr << "  Warning: Failed to parse dataset_info metadata: " << e.what() << "\n";
+        log << "  Warning: Failed to parse dataset_info metadata: " << e.what() << "\n";
       }
     }
   }
 
-  // ────────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
   // PHASE 2: Initialize channel tracking maps for message routing
-  // ────────────────────────────────────────────────────────────────────────────
-  // These maps associate MCAP channel IDs with semantic stream identifiers:
-  //   - channel_id_to_stream: Joint state channels → stream names (e.g., "leader_left")
-  //   - camera_channels: Image channels → camera names (e.g., "cam_high")
-  //   - slate_base_channel_id: Mobile base odometry channel (if present)
-  // The leader/follower vectors accumulate detected arm streams for later use
-  // in determining which streams provide actions vs. observations.
-  // ────────────────────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
+  // ────────────────────────────────────────────────────────────
   std::map<mcap::ChannelId, std::string> channel_id_to_stream;  // Joint channels
   std::map<mcap::ChannelId, std::string> camera_channels;       // Camera channels
   mcap::ChannelId slate_base_channel_id = 0;                    // Mobile base channel
@@ -694,10 +1162,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   std::vector<std::string> detected_leader_streams;             // Teleoperation input arms
   std::vector<std::string> detected_follower_streams;           // Robot output arms
 
-  std::cout << "  Available channels:\n";
+  log << "  Available channels:\n";
   for (const auto& [channel_id, channel_ptr] : reader.channels()) {
     std::string topic = channel_ptr->topic;
-    std::cout << "    - Topic: '" << topic << "'\n";
+    log << "    - Topic: '" << topic << "'\n";
 
     size_t odom_pos = topic.find("/odom/state");
     if (odom_pos != std::string::npos) {
@@ -707,7 +1175,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
       slate_base_channel_id = channel_id;
       has_slate_base = true;
-      std::cout << "    [ok] Found odometry stream for mobile robot: " << stream_id << "\n";
+      log << "    [ok] Found odometry stream for mobile robot: " << stream_id << "\n";
       continue;
     }
 
@@ -722,10 +1190,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
       if (stream_id.find("leader") != std::string::npos) {
         detected_leader_streams.push_back(stream_id);
-        std::cout << "    [ok] Detected leader stream: " << stream_id << "\n";
+        log << "    [ok] Detected leader stream: " << stream_id << "\n";
       } else if (stream_id.find("follower") != std::string::npos) {
         detected_follower_streams.push_back(stream_id);
-        std::cout << "    [ok] Detected follower stream: " << stream_id << "\n";
+        log << "    [ok] Detected follower stream: " << stream_id << "\n";
       }
     }
 
@@ -740,7 +1208,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   if (channel_id_to_stream.empty()) {
-    std::cerr << "Error: No joint state channels found in MCAP file\n";
+    log << "Error: No joint state channels found in MCAP file\n";
     return 1;
   }
 
@@ -751,12 +1219,12 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     std::sort(detected_follower_streams.begin(), detected_follower_streams.end());
     cfg.leader_streams = detected_leader_streams;
     cfg.follower_streams = detected_follower_streams;
-    std::cout << "\n  [ok] Auto-detected configuration:\n";
-    std::cout << "    Leader streams (" << cfg.leader_streams.size() << "): ";
-    for (const auto& s : cfg.leader_streams) std::cout << s << " ";
-    std::cout << "\n    Follower streams (" << cfg.follower_streams.size() << "): ";
-    for (const auto& s : cfg.follower_streams) std::cout << s << " ";
-    std::cout << "\n";
+    log << "\n  [ok] Auto-detected configuration:\n";
+    log << "    Leader streams (" << cfg.leader_streams.size() << "): ";
+    for (const auto& s : cfg.leader_streams) log << s << " ";
+    log << "\n    Follower streams (" << cfg.follower_streams.size() << "): ";
+    for (const auto& s : cfg.follower_streams) log << s << " ";
+    log << "\n";
   } else {
     // Fallback: treat all non-slate_base streams as both leader and follower (single robot mode)
     std::vector<std::string> all_streams;
@@ -771,28 +1239,28 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     if (!all_streams.empty()) {
       cfg.leader_streams = all_streams;
       cfg.follower_streams = all_streams;
-      std::cout << "\n  [ok] Single robot mode detected " << all_streams.size()
+      log << "\n  [ok] Single robot mode detected " << all_streams.size()
                 << " stream(s):\n    ";
-      for (const auto& s : all_streams) std::cout << s << " ";
-      std::cout << "\n";
+      for (const auto& s : all_streams) log << s << " ";
+      log << "\n";
     } else {
-      std::cerr << "Error: No usable joint state streams found\n";
+      log << "Error: No usable joint state streams found\n";
       return 1;
     }
   }
 
   if (!camera_channels.empty()) {
-    std::cout << "  Found " << camera_channels.size() << " camera channel(s)\n";
+    log << "  Found " << camera_channels.size() << " camera channel(s)\n";
   }
 
-  std::cout << "\nParsing joint state messages...\n";
+  log << "\nParsing joint state messages...\n";
   std::map<std::string, std::vector<JointStateMessage>> messages_by_stream;
   std::vector<Odometry2DMessage> slate_base_messages;
   std::map<std::string, size_t> camera_image_counts;
   std::map<std::string, std::vector<uint64_t>> camera_timestamps;
 
-  auto onProblem = [](const mcap::Status& problem) {
-    std::cerr << "Warning: MCAP parsing issue: " << problem.message << "\n";
+  auto onProblem = [&log](const mcap::Status& problem) {
+    log << "Warning: MCAP parsing issue: " << problem.message << "\n";
   };
 
   size_t total_messages = 0;
@@ -803,7 +1271,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       trossen_sdk::msg::Odometry2D odom_msg;
       if (!odom_msg.ParseFromArray(reinterpret_cast<const char*>(messageView.message.data),
                                    messageView.message.dataSize)) {
-        std::cerr << "Warning: Failed to parse Odometry2D message\n";
+        log << "Warning: Failed to parse Odometry2D message\n";
         continue;
       }
       Odometry2DMessage msg;
@@ -822,7 +1290,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       trossen_sdk::msg::JointState js_msg;
       if (!js_msg.ParseFromArray(reinterpret_cast<const char*>(messageView.message.data),
                                  messageView.message.dataSize)) {
-        std::cerr << "Warning: Failed to parse message for " << stream_id << "\n";
+        log << "Warning: Failed to parse message for " << stream_id << "\n";
         continue;
       }
 
@@ -849,18 +1317,18 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
   }
 
-  std::cout << "  [ok] Parsed " << total_messages << " joint state messages\n";
+  log << "  [ok] Parsed " << total_messages << " joint state messages\n";
   for (const auto& [stream_id, messages] : messages_by_stream) {
-    std::cout << "    - " << stream_id << ": " << messages.size() << " messages\n";
+    log << "    - " << stream_id << ": " << messages.size() << " messages\n";
   }
   if (has_slate_base) {
-    std::cout << "    - slate_base: " << slate_base_messages.size() << " messages (velocities)\n";
+    log << "    - slate_base: " << slate_base_messages.size() << " messages (velocities)\n";
   }
 
   if (total_images > 0) {
-    std::cout << "  [ok] Found " << total_images << " camera images\n";
+    log << "  [ok] Found " << total_images << " camera images\n";
     for (const auto& [camera_name, count] : camera_image_counts) {
-      std::cout << "    - " << camera_name << ": " << count << " images\n";
+      log << "    - " << camera_name << ": " << count << " images\n";
     }
   }
 
@@ -875,7 +1343,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       uint64_t last_ts = first_stream_messages.back().timestamp_ns;
       double duration_s = (last_ts - first_ts) / 1e9;
       double actual_fps = (first_stream_messages.size() - 1) / duration_s;
-      std::cout << "  [ok] Detected joint state frequency: " << std::fixed << std::setprecision(1)
+      log << "  [ok] Detected joint state frequency: " << std::fixed << std::setprecision(1)
                 << actual_fps << " Hz (using 30.0 Hz for sync)\n";
     }
   }
@@ -887,12 +1355,15 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       uint64_t last_ts = first_camera_timestamps.back();
       double duration_s = (last_ts - first_ts) / 1e9;
       double actual_camera_fps = (first_camera_timestamps.size() - 1) / duration_s;
-      std::cout << "  [ok] Detected camera frequency: " << std::fixed << std::setprecision(1)
+      log << "  [ok] Detected camera frequency: " << std::fixed << std::setprecision(1)
                 << actual_camera_fps << " fps (using 30.0 fps for sync)\n";
     }
   }
 
-  std::cout << "\nCreating Parquet file...\n";
+  auto mcap_read_end = std::chrono::steady_clock::now();
+  double mcap_read_s = std::chrono::duration<double>(mcap_read_end - stage_start).count();
+  stage_start = std::chrono::steady_clock::now();
+  log << "\nCreating Parquet file...\n";
 
   // Calculate dimensions based on detected streams
   int joints_per_stream = 0;
@@ -912,15 +1383,15 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     obs_dim += 2;
   }
 
-  std::cout << "  Joint dimensions per stream: " << joints_per_stream << "\n";
-  std::cout << "  Action dimension: " << action_dim << " (" << cfg.leader_streams.size()
+  log << "  Joint dimensions per stream: " << joints_per_stream << "\n";
+  log << "  Action dimension: " << action_dim << " (" << cfg.leader_streams.size()
             << " stream(s) x " << joints_per_stream;
-  if (has_slate_base) std::cout << " + 2 base velocities";
-  std::cout << ")\n";
-  std::cout << "  Observation dimension: " << obs_dim << " (" << cfg.follower_streams.size()
+  if (has_slate_base) log << " + 2 base velocities";
+  log << ")\n";
+  log << "  Observation dimension: " << obs_dim << " (" << cfg.follower_streams.size()
             << " stream(s) x " << joints_per_stream;
-  if (has_slate_base) std::cout << " + 2 base velocities";
-  std::cout << ")\n";
+  if (has_slate_base) log << " + 2 base velocities";
+  log << ")\n";
 
   auto schema = arrow::schema({
       arrow::field("action", arrow::fixed_size_list(arrow::float32(), action_dim)),
@@ -934,7 +1405,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
   auto outfile_result = arrow::io::FileOutputStream::Open(cfg.output_file);
   if (!outfile_result.ok()) {
-    std::cerr << "Error: Failed to create output file: " << cfg.output_file << "\n";
+    log << "Error: Failed to create output file: " << cfg.output_file << "\n";
     return 1;
   }
   auto outfile = *outfile_result;
@@ -949,13 +1420,13 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
                                                         outfile, writer_props, arrow_props);
 
   if (!writer_result.ok()) {
-    std::cerr << "Error: Failed to create Parquet writer: " << writer_result.status().ToString()
+    log << "Error: Failed to create Parquet writer: " << writer_result.status().ToString()
               << "\n";
     return 1;
   }
   auto writer = std::move(writer_result).ValueUnsafe();
 
-  std::cout << "Writing data to Parquet...\n";
+  log << "Writing data to Parquet...\n";
 
   std::string reference_stream;
   for (const auto& stream : cfg.follower_streams) {
@@ -970,7 +1441,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     for (const auto& [stream_id, msgs] : messages_by_stream) {
       if (!msgs.empty()) {
         reference_stream = stream_id;
-        std::cout << "  Note: Using single-robot mode with stream: " << stream_id << "\n";
+        log << "  Note: Using single-robot mode with stream: " << stream_id << "\n";
         cfg.leader_streams = {stream_id};
         cfg.follower_streams = {stream_id};
         break;
@@ -979,12 +1450,12 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   if (reference_stream.empty()) {
-    std::cerr << "Error: No joint state streams found in MCAP file\n";
+    log << "Error: No joint state streams found in MCAP file\n";
     return 1;
   }
 
   const auto& reference_messages = messages_by_stream[reference_stream];
-  std::cout << "  Using " << reference_stream << " as reference (" << reference_messages.size()
+  log << "  Using " << reference_stream << " as reference (" << reference_messages.size()
             << " messages)\n";
 
   // Determine the maximum number of rows to write based on available camera frames
@@ -996,7 +1467,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       min_camera_frames = std::min(min_camera_frames, count);
     }
     max_rows = std::min(max_rows, min_camera_frames);
-    std::cout << "  Limiting to " << max_rows << " rows to match camera frame count\n";
+    log << "  Limiting to " << max_rows << " rows to match camera frame count\n";
   }
 
   std::map<std::string, size_t> stream_indices;
@@ -1005,7 +1476,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   int64_t frame_index = 0;
-  int64_t global_index = global_index_offset;
+  // global_index assigned atomically per row across all parallel episodes
   size_t rows_written = 0;
   size_t rows_skipped = 0;
 
@@ -1124,36 +1595,37 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     float timestamp_s = static_cast<float>(static_cast<double>(frame_index) * frame_duration_s);
 
     if (!ts_builder.Append(timestamp_s).ok()) {
-      std::cerr << "Error: Failed to append timestamp\n";
+      log << "Error: Failed to append timestamp\n";
       return 1;
     }
 
     if (!obs_builder.Append().ok()) {
-      std::cerr << "Error: Failed to append observation list\n";
+      log << "Error: Failed to append observation list\n";
       return 1;
     }
     for (auto v : observations) {
       if (!obs_val->Append(v).ok()) {
-        std::cerr << "Error: Failed to append observation value\n";
+        log << "Error: Failed to append observation value\n";
         return 1;
       }
     }
 
     if (!act_builder.Append().ok()) {
-      std::cerr << "Error: Failed to append action list\n";
+      log << "Error: Failed to append action list\n";
       return 1;
     }
     for (auto v : actions) {
       if (!act_val->Append(v).ok()) {
-        std::cerr << "Error: Failed to append action value\n";
+        log << "Error: Failed to append action value\n";
         return 1;
       }
     }
 
     if (!epi_idx_builder.Append(cfg.episode_index).ok() ||
-        !frame_idx_builder.Append(frame_index).ok() || !index_builder.Append(global_index).ok() ||
+        !frame_idx_builder.Append(frame_index).ok() ||
+        !index_builder.Append(global_index_counter.fetch_add(1)).ok() ||
         !task_idx_builder.Append(0).ok()) {
-      std::cerr << "Error: Failed to append scalar values\n";
+      log << "Error: Failed to append scalar values\n";
       return 1;
     }
 
@@ -1163,7 +1635,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
         !act_builder.Finish(&act_arr).ok() || !epi_idx_builder.Finish(&epi_arr).ok() ||
         !frame_idx_builder.Finish(&frame_arr).ok() || !index_builder.Finish(&idx_arr).ok() ||
         !task_idx_builder.Finish(&task_arr).ok()) {
-      std::cerr << "Error: Failed to finish builders\n";
+      log << "Error: Failed to finish builders\n";
       return 1;
     }
 
@@ -1171,51 +1643,45 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
         schema, 1, {act_arr, obs_arr, ts_arr, frame_arr, epi_arr, idx_arr, task_arr});
 
     if (!writer->WriteRecordBatch(*batch).ok()) {
-      std::cerr << "Error: Failed to write record batch\n";
+      log << "Error: Failed to write record batch\n";
       return 1;
     }
 
     ++frame_index;
-    ++global_index;
     ++rows_written;
 
     if (rows_written % 100 == 0) {
-      std::cout << "\r  Progress: " << rows_written << " rows written    " << std::flush;
+      log << "\r  Progress: " << rows_written << " rows written    " << std::flush;
     }
   }
 
-  std::cout << "\r  [ok] Wrote " << rows_written << " rows";
+  log << "\r  [ok] Wrote " << rows_written << " rows";
   if (rows_skipped > 0) {
-    std::cout << " (skipped " << rows_skipped << " misaligned)";
+    log << " (skipped " << rows_skipped << " misaligned)";
   }
-  std::cout << "                    \n";
+  log << "                    \n";
 
   if (!writer->Close().ok()) {
-    std::cerr << "Error: Failed to close Parquet writer\n";
+    log << "Error: Failed to close Parquet writer\n";
     return 1;
   }
 
   if (!outfile->Close().ok()) {
-    std::cerr << "Error: Failed to close output file\n";
+    log << "Error: Failed to close output file\n";
     return 1;
   }
 
   // Validate that we actually wrote some data
   if (rows_written == 0) {
-    std::cerr << "\nError: No data rows were written to Parquet file!\n";
-    std::cerr << "This usually means joint state streams were misaligned or missing.\n";
+    log << "\nError: No data rows were written to Parquet file!\n";
+    log << "This usually means joint state streams were misaligned or missing.\n";
     return 1;
   }
 
-  // Advance the global index offset now that parquet is committed to disk.
-  // This ensures post-parquet failures (image extraction, metadata) don't
-  // cause overlapping indices in subsequent episodes.
-  global_index_offset += rows_written;
-
-  std::cout << "\n[ok] Successfully created Parquet file: " << cfg.output_file << "\n";
-  std::cout << "\nSummary:\n";
-  std::cout << "  Total frames:      " << rows_written << "\n";
-  std::cout << "  Episode index:     " << cfg.episode_index << "\n";
+  log << "\n[ok] Successfully created Parquet file: " << cfg.output_file << "\n";
+  log << "\nSummary:\n";
+  log << "  Total frames:      " << rows_written << "\n";
+  log << "  Episode index:     " << cfg.episode_index << "\n";
   if (rows_written > 0) {
     size_t actions_per_row = 0;
     size_t obs_per_row = 0;
@@ -1235,24 +1701,27 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       actions_per_row += 2;  // Add base velocities
       obs_per_row += 2;      // Add base velocities
     }
-    std::cout << "  Actions per row:   " << actions_per_row;
-    if (has_slate_base) std::cout << " (incl. 2 base velocities)";
-    std::cout << "\n";
-    std::cout << "  Observations/row:  " << obs_per_row;
-    if (has_slate_base) std::cout << " (incl. 2 base velocities)";
-    std::cout << "\n";
+    log << "  Actions per row:   " << actions_per_row;
+    if (has_slate_base) log << " (incl. 2 base velocities)";
+    log << "\n";
+    log << "  Observations/row:  " << obs_per_row;
+    if (has_slate_base) log << " (incl. 2 base velocities)";
+    log << "\n";
   }
 
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
   // Extract camera images
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
 
   std::map<std::string, size_t> camera_frame_indices;
   std::map<std::string, fs::path> camera_dirs;
 
-  if (cfg.extract_images && !camera_channels.empty()) {
-    std::cout << "\nExtracting camera images...\n";
+  auto parquet_end = std::chrono::steady_clock::now();
+  double parquet_write_s = std::chrono::duration<double>(parquet_end - stage_start).count();
+  stage_start = std::chrono::steady_clock::now();
 
+  if (cfg.extract_images && !camera_channels.empty()) {
+    log << "\nExtracting camera images...\n";
     fs::path images_root = images_dir;
 
     std::string episode_name = trossen::io::backends::format_episode_folder(cfg.episode_index);
@@ -1264,9 +1733,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
         fs::create_directories(camera_episode_dir);
         camera_dirs[camera_name] = camera_episode_dir;
         camera_frame_indices[camera_name] = 0;
-        std::cout << "  Created directory: " << camera_episode_dir.string() << "\n";
+        log << "  Created directory: " << camera_episode_dir.string() << "\n";
       } catch (const std::exception& e) {
-        std::cerr << "  Error creating directory for " << camera_name << ": " << e.what() << "\n";
+        log << "  Error creating directory for " << camera_name << ": " << e.what() << "\n";
       }
     }
 
@@ -1274,111 +1743,196 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     mcap::McapReader image_reader;
     auto img_status = image_reader.open(image_input);
     if (!img_status.ok()) {
-      std::cerr << "Error: Failed to reopen MCAP file for images: " << img_status.message << "\n";
+      log << "Error: Failed to reopen MCAP file for images: " << img_status.message << "\n";
       return 1;
     }
 
     auto img_summary_status = image_reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
     if (!img_summary_status.ok()) {
-      std::cerr << "Error: Failed to read MCAP summary for images: " << img_summary_status.message
+      log << "Error: Failed to read MCAP summary for images: " << img_summary_status.message
                 << "\n";
       return 1;
     }
 
-    size_t images_saved = 0;
-    for (const auto& messageView : image_reader.readMessages(onProblem)) {
-      auto it = camera_channels.find(messageView.channel->id);
-      if (it == camera_channels.end()) {
-        continue;
-      }
+    // Per-camera worker threads decode and write JPEGs in parallel.
+    // Producer reads MCAP sequentially (required for stream integrity) and
+    // dispatches raw bytes into each camera's bounded queue. Workers decode,
+    // color-convert, and imwrite in parallel. Encoding starts only after all
+    // workers join, so camera_frame_indices is fully populated beforehand.
+    struct CamExtractState {
+      std::queue<std::pair<size_t, std::vector<char>>> queue;
+      std::mutex mtx;
+      std::condition_variable cv;
+      bool producer_done{false};
+      std::atomic<size_t> saved{0};
+    };
+    const size_t max_queue_depth = 30;
 
-      const std::string& camera_name = it->second;
-      size_t frame_idx = camera_frame_indices[camera_name];
-
-      foxglove::RawImage raw_image;
-      if (!raw_image.ParseFromArray(messageView.message.data,
-                                    static_cast<int>(messageView.message.dataSize))) {
-        std::cerr << "Warning: Failed to parse RawImage message for " << camera_name << " frame "
-                  << frame_idx << "\n";
-        camera_frame_indices[camera_name]++;
-        continue;
-      }
-
-      int cv_type = -1;
-      if (raw_image.encoding() == "bgr8" || raw_image.encoding() == "8UC3") {
-        cv_type = CV_8UC3;
-      } else if (raw_image.encoding() == "rgb8") {
-        cv_type = CV_8UC3;
-      } else if (raw_image.encoding() == "rgba8") {
-        cv_type = CV_8UC4;
-      } else if (raw_image.encoding() == "bgra8") {
-        cv_type = CV_8UC4;
-      } else if (raw_image.encoding() == "mono8" || raw_image.encoding() == "8UC1") {
-        cv_type = CV_8UC1;
-      } else if (raw_image.encoding() == "mono16" || raw_image.encoding() == "16UC1") {
-        cv_type = CV_16UC1;
-      } else if (raw_image.encoding() == "32FC1") {
-        cv_type = CV_32FC1;
-      } else {
-        std::cerr << "Warning: Unsupported encoding '" << raw_image.encoding() << "' for "
-                  << camera_name << " frame " << frame_idx << "\n";
-        camera_frame_indices[camera_name]++;
-        continue;
-      }
-
-      cv::Mat image(raw_image.height(), raw_image.width(), cv_type,
-                    const_cast<char*>(raw_image.data().data()), raw_image.step());
-
-      if (raw_image.encoding() == "rgb8") {
-        cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
-      } else if (raw_image.encoding() == "rgba8") {
-        cv::cvtColor(image, image, cv::COLOR_RGBA2BGR);
-      } else if (raw_image.encoding() == "bgra8") {
-        cv::cvtColor(image, image, cv::COLOR_BGRA2BGR);
-      }
-
-      cv::Mat image_copy = image.clone();
-
-      if (image_copy.empty()) {
-        std::cerr << "Warning: Empty image for " << camera_name << " frame " << frame_idx << "\n";
-        camera_frame_indices[camera_name]++;
-        continue;
-      }
-
-      fs::path image_path = camera_dirs[camera_name] /
-                            trossen::io::backends::format_image_filename(frame_idx);
-
-      std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 95};
-      if (cv::imwrite(image_path.string(), image_copy, compression_params)) {
-        ++images_saved;
-        camera_frame_indices[camera_name]++;
-
-        if (images_saved % 50 == 0) {
-          std::cout << "\r  Progress: " << images_saved << " images saved    " << std::flush;
-        }
-      } else {
-        std::cerr << "Warning: Failed to save image: " << image_path.string() << "\n";
-        camera_frame_indices[camera_name]++;
+    std::map<std::string, std::unique_ptr<CamExtractState>> cam_states;
+    for (const auto& kv : camera_channels) {
+      if (camera_dirs.count(kv.second)) {
+        cam_states[kv.second] = std::make_unique<CamExtractState>();
       }
     }
 
-    std::cout << "\r  [ok] Saved " << images_saved << " images                    \n";
+    std::vector<std::thread> img_workers;
+    std::mutex img_log_mutex;
+
+    for (const auto& kv : cam_states) {
+      img_workers.emplace_back([&, cam_name = kv.first]() {
+        auto& cs = *cam_states.at(cam_name);
+        while (true) {
+          std::pair<size_t, std::vector<char>> item;
+          {
+            std::unique_lock<std::mutex> lock(cs.mtx);
+            cs.cv.wait(lock, [&] { return !cs.queue.empty() || cs.producer_done; });
+            if (cs.queue.empty()) return;
+            item = std::move(cs.queue.front());
+            cs.queue.pop();
+            cs.cv.notify_one();  // wake producer if blocked on a full queue
+          }
+
+          size_t frame_idx = item.first;
+          const auto& raw_bytes = item.second;
+
+          foxglove::RawImage raw_image;
+          if (!raw_image.ParseFromArray(raw_bytes.data(),
+                                        static_cast<int>(raw_bytes.size()))) {
+            std::lock_guard<std::mutex> lk(img_log_mutex);
+            log << "Warning: Failed to parse RawImage for "
+                << cam_name << " frame " << frame_idx << "\n";
+            continue;
+          }
+
+          int cv_type = -1;
+          if (raw_image.encoding() == "bgr8" || raw_image.encoding() == "8UC3") {
+            cv_type = CV_8UC3;
+          } else if (raw_image.encoding() == "rgb8") {
+            cv_type = CV_8UC3;
+          } else if (raw_image.encoding() == "rgba8") {
+            cv_type = CV_8UC4;
+          } else if (raw_image.encoding() == "bgra8") {
+            cv_type = CV_8UC4;
+          } else if (raw_image.encoding() == "mono8" || raw_image.encoding() == "8UC1") {
+            cv_type = CV_8UC1;
+          } else if (raw_image.encoding() == "mono16" ||
+                     raw_image.encoding() == "16UC1") {
+            cv_type = CV_16UC1;
+          } else if (raw_image.encoding() == "32FC1") {
+            cv_type = CV_32FC1;
+          } else {
+            std::lock_guard<std::mutex> lk(img_log_mutex);
+            log << "Warning: Unsupported encoding '" << raw_image.encoding()
+                << "' for " << cam_name << " frame " << frame_idx << "\n";
+            continue;
+          }
+
+          cv::Mat image(raw_image.height(), raw_image.width(), cv_type,
+                        const_cast<char*>(raw_image.data().data()),
+                        raw_image.step());
+          if (raw_image.encoding() == "rgb8") {
+            cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
+          } else if (raw_image.encoding() == "rgba8") {
+            cv::cvtColor(image, image, cv::COLOR_RGBA2BGR);
+          } else if (raw_image.encoding() == "bgra8") {
+            cv::cvtColor(image, image, cv::COLOR_BGRA2BGR);
+          }
+
+          cv::Mat image_copy = image.clone();
+          if (image_copy.empty()) {
+            std::lock_guard<std::mutex> lk(img_log_mutex);
+            log << "Warning: Empty image for " << cam_name
+                << " frame " << frame_idx << "\n";
+            continue;
+          }
+
+          fs::path image_path =
+              camera_dirs.at(cam_name) /
+              trossen::io::backends::format_image_filename(frame_idx);
+          std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 95};
+          if (!cv::imwrite(image_path.string(), image_copy, compression_params)) {
+            std::lock_guard<std::mutex> lk(img_log_mutex);
+            log << "Warning: Failed to save image: " << image_path.string() << "\n";
+          } else {
+            cs.saved.fetch_add(1);
+          }
+        }
+      });
+    }
+
+    // Producer: read MCAP sequentially, assign frame indices in order, push
+    // raw bytes to per-camera queues. Blocks when a queue is full (backpressure).
+    std::map<std::string, size_t> producer_frame_indices;
+    for (const auto& kv : cam_states) producer_frame_indices[kv.first] = 0;
+
+    for (const auto& messageView : image_reader.readMessages(onProblem)) {
+      auto it = camera_channels.find(messageView.channel->id);
+      if (it == camera_channels.end()) continue;
+      const std::string& cam_name = it->second;
+      if (!cam_states.count(cam_name)) continue;
+      size_t frame_idx = producer_frame_indices[cam_name]++;
+      std::vector<char> data(
+          reinterpret_cast<const char*>(messageView.message.data),
+          reinterpret_cast<const char*>(messageView.message.data) +
+              messageView.message.dataSize);
+      auto& cs = *cam_states.at(cam_name);
+      {
+        std::unique_lock<std::mutex> lock(cs.mtx);
+        cs.cv.wait(lock, [&] { return cs.queue.size() < max_queue_depth; });
+        cs.queue.push({frame_idx, std::move(data)});
+      }
+      cs.cv.notify_one();
+    }
+
+    // Signal workers that no more frames are coming, then wait for all to finish.
+    for (auto& kv : cam_states) {
+      std::lock_guard<std::mutex> lock(kv.second->mtx);
+      kv.second->producer_done = true;
+      kv.second->cv.notify_all();
+    }
+    for (auto& w : img_workers) w.join();
+
+    size_t total_saved = 0;
+    for (auto& kv : cam_states) {
+      camera_frame_indices[kv.first] = producer_frame_indices.at(kv.first);
+      total_saved += kv.second->saved.load();
+    }
+    log << "\r  [ok] Saved " << total_saved << " images                    \n";
     for (const auto& [camera_name, count] : camera_frame_indices) {
-      std::cout << "    - " << camera_name << ": " << count << " images\n";
+      log << "    - " << camera_name << ": " << count << " images\n";
     }
   }
 
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
   // Encode images to videos
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
 
-  if (cfg.create_videos && !camera_dirs.empty()) {
-    std::cout << "\nEncoding videos from images...\n";
+ auto images_end = std::chrono::steady_clock::now();
+  double image_extract_s = std::chrono::duration<double>(images_end - stage_start).count();
+  stage_start = std::chrono::steady_clock::now();
 
-    int videos_created = 0;
+ if (cfg.create_videos && !camera_dirs.empty()) {
+    log << "\nEncoding videos from images...\n";
+    // Acquire an episode encode slot before spawning any camera thread.
+    // While this episode holds the slot, ALL its cameras encode in parallel.
+    // Other episodes that reach this point will block until this one finishes,
+    // preventing NVENC session overflow from many episodes encoding at once.
+    EpEncodeGuard ep_guard(ep_encode_sem);  // released automatically on scope exit
+
+    std::atomic<int> videos_created{0};
+    std::vector<std::thread> cam_threads;
+    std::mutex cam_pool_mutex;
+    std::condition_variable cam_pool_cv;
+    std::mutex cam_log_mutex;  // serializes log writes from concurrent cam threads
+    unsigned int cam_active = 0;
+    // Clamp to actual camera count — UINT_MAX means "all cameras in parallel"
+    unsigned int max_cam_threads = std::min(
+        cam_encode_threads,
+        static_cast<unsigned int>(camera_dirs.size()));
+
     for (const auto& [camera_name, camera_dir] : camera_dirs) {
       if (camera_frame_indices[camera_name] == 0) {
-        std::cout << "  Skipping " << camera_name << " (no images)\n";
+        log << "  Skipping " << camera_name << " (no images)\n";
         continue;
       }
 
@@ -1392,50 +1946,122 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
       fs::path input_pattern = camera_dir / "image_%06d.jpg";
 
-      std::ostringstream ffmpeg_cmd;
-      // Force output to exactly 30fps for perfect timestamp alignment
-      ffmpeg_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps << " -start_number 0"
-                 << " -i " << input_pattern.string() << " -frames:v "
-                 << camera_frame_indices[camera_name]
-                 << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p -r 30 "
-                 << video_output.string();
-
-      std::cout << "  Encoding " << camera_name << "...";
-      std::cout.flush();
-
-      auto encode_start = std::chrono::steady_clock::now();
-      int ret = std::system(ffmpeg_cmd.str().c_str());
-      auto encode_end = std::chrono::steady_clock::now();
-
-      if (ret == 0) {
-        auto duration =
-            std::chrono::duration_cast<std::chrono::milliseconds>(encode_end - encode_start)
-                .count();
-        std::cout << " [ok] (" << (duration / 1000.0) << "s)\n";
-        videos_created++;
-      } else {
-        std::cout << " [FAILED] Failed (exit code " << ret << ")\n";
-        std::cerr << "    Command: " << ffmpeg_cmd.str() << "\n";
+      std::vector<std::string> flag_tokens;
+      {
+        std::istringstream iss(encoder_flags);
+        std::string tok;
+        while (iss >> tok) flag_tokens.push_back(tok);
       }
+      std::string fps_str = [&] { std::ostringstream o; o << cfg.camera_fps; return o.str(); }();
+      std::string frames_str = std::to_string(camera_frame_indices[camera_name]);
+
+      std::vector<std::string> gpu_args = {
+          "ffmpeg", "-y", "-loglevel", "error",
+          "-framerate", fps_str, "-start_number", "0",
+          "-i", input_pattern.string(), "-frames:v", frames_str,
+          "-c:v", video_encoder};
+      for (const auto& f : flag_tokens) gpu_args.push_back(f);
+      gpu_args.insert(gpu_args.end(),
+                      {"-pix_fmt", "yuv420p", "-r", "30", video_output.string()});
+
+      std::vector<std::string> cpu_args = {
+          "ffmpeg", "-y", "-loglevel", "error",
+          "-framerate", fps_str, "-start_number", "0",
+          "-i", input_pattern.string(), "-frames:v", frames_str,
+          "-c:v", "libsvtav1", "-crf", "30", "-g", "30", "-preset", "6",
+          "-pix_fmt", "yuv420p", "-r", "30", video_output.string()};
+
+      auto run_ffmpeg = [](const std::vector<std::string>& args) -> int {
+        std::vector<char*> argv;
+        for (const auto& a : args)
+          argv.push_back(const_cast<char*>(a.c_str()));
+        argv.push_back(nullptr);
+        posix_spawn_file_actions_t fa;
+        posix_spawn_file_actions_init(&fa);
+        posix_spawn_file_actions_addopen(&fa, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
+        pid_t pid;
+        int err = posix_spawnp(&pid, argv[0], &fa, nullptr, argv.data(), environ);
+        posix_spawn_file_actions_destroy(&fa);
+        if (err != 0) return -1;
+        int status;
+        int wp;
+        do {
+          wp = waitpid(pid, &status, 0);
+        } while (wp == -1 && errno == EINTR);
+        if (wp == -1) return -1;
+        return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+      };
+      std::string cam = camera_name;
+      bool is_gpu = (video_encoder != "libsvtav1");
+      {
+        std::unique_lock<std::mutex> lock(cam_pool_mutex);
+        cam_pool_cv.wait(lock, [&] { return cam_active < max_cam_threads; });
+        ++cam_active;
+      }
+      cam_threads.emplace_back(
+          [gpu_args, cpu_args, run_ffmpeg, cam, is_gpu, &log, &videos_created,
+           &cam_pool_mutex, &cam_pool_cv, &cam_active, &cam_log_mutex]() {
+        int ret = run_ffmpeg(gpu_args);
+
+        if (ret == 0) {
+          ++videos_created;
+        } else if (is_gpu && (ret == 187 || ret == 1)) {
+          // Exit 187 = NVENC session limit (47872 % 256 via WEXITSTATUS).
+          // Exit 1 = generic encoder init failure (also session-related).
+          // Other non-zero codes = real encoding errors — do not mask with CPU fallback.
+          {
+            std::lock_guard<std::mutex> lk(cam_log_mutex);
+            log << "  [WARNING] " << cam << " GPU encode failed (exit "
+                << ret << "), retrying with CPU\n";
+          }
+          ret = run_ffmpeg(cpu_args);
+          if (ret == 0) {
+            ++videos_created;
+            std::lock_guard<std::mutex> lk(cam_log_mutex);
+            log << "  [ok] " << cam << " CPU fallback succeeded\n";
+          } else {
+            std::lock_guard<std::mutex> lk(cam_log_mutex);
+            log << "  [FAILED] " << cam << " GPU and CPU both failed\n";
+          }
+        } else {
+          std::lock_guard<std::mutex> lk(cam_log_mutex);
+          log << "  [FAILED] " << cam << " (exit code " << ret << ")\n";
+        }
+        {
+          std::lock_guard<std::mutex> lock(cam_pool_mutex);
+          --cam_active;
+        }
+        cam_pool_cv.notify_one();
+      });
     }
 
-    if (videos_created > 0) {
-      std::cout << "  [ok] Created " << videos_created << " video(s)\n";
+    for (auto& t : cam_threads) {
+      t.join();
+    }
+    // All cameras finished — ep_guard destructor releases the encode slot
+    // automatically, allowing the next episode to start its camera encodes.
+
+    if (videos_created.load() > 0) {
+      log << "  [ok] Created " << videos_created.load() << " video(s)\n";
     } else {
-      std::cout << "  Warning: No videos were created\n";
+      log << "  Warning: No videos were created\n";
     }
   }
 
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
   // Generate LeRobotV2 metadata files
-  // ──────────────────────────────────────────────────────────
+  // ──────────────────────────────────────────
 
-  std::cout << "\nGenerating metadata files...\n";
+  auto video_end = std::chrono::steady_clock::now();
+  double video_encode_s = std::chrono::duration<double>(video_end - stage_start).count();
+  stage_start = std::chrono::steady_clock::now();
+  std::lock_guard<std::mutex> meta_lk(meta_mutex);  // serialize shared meta/ writes
+  log << "\nGenerating metadata files...\n";
 
   // Check if info.json exists, create if needed
   fs::path info_path = meta_dir / trossen::io::backends::JSON_INFO;
   if (!fs::exists(info_path)) {
-    std::cout << "  Creating initial info.json...\n";
+    log << "  Creating initial info.json...\n";
 
     nlohmann::ordered_json features;
 
@@ -1557,11 +2183,11 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     if (!trossen::io::backends::create_initial_info_json(
             meta_dir, cfg.robot_name, features, static_cast<int>(cfg.fps),
             trossen::io::backends::CODEBASE_VERSION, cfg.chunk_size)) {
-      std::cerr << "  Error: Failed to create " << info_path.string() << "\n";
+      log << "  Error: Failed to create " << info_path.string() << "\n";
       return 1;
     }
 
-    std::cout << "  [ok] Created " << info_path.string() << "\n";
+    log << "  [ok] Created " << info_path.string() << "\n";
   }
 
   // Use utility functions to write metadata
@@ -1569,21 +2195,32 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
   if (trossen::io::backends::write_episode_metadata(
           meta_dir, cfg.episode_index, cfg.task_name, 0, rows_written, num_cameras)) {
-    std::cout << "  [ok] Updated " << info_path.string() << "\n";
-    std::cout << "  [ok] Created/Updated "
+    log << "  [ok] Updated " << info_path.string() << "\n";
+    log << "  [ok] Created/Updated "
               << (meta_dir / trossen::io::backends::JSONL_TASKS).string() << "\n";
-    std::cout << "  [ok] Appended to "
+    log << "  [ok] Appended to "
               << (meta_dir / trossen::io::backends::JSONL_EPISODES).string() << "\n";
-    std::cout << "  [ok] Appended to "
+    log << "  [ok] Appended to "
               << (meta_dir / trossen::io::backends::JSONL_EPISODE_STATS).string()
               << "\n";
   } else {
-    std::cerr << "  Error: Failed to write metadata files\n";
+    log << "  Error: Failed to write metadata files\n";
     return 1;
   }
 
-  std::cout << "\n[ok] Successfully created LeRobotV2 dataset episode!\n";
-  std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
+  log << "\n[ok] Successfully created LeRobotV2 dataset episode!\n";
+  log << "  Dataset location: " << full_dataset_path.string() << "\n";
 
+  auto metadata_end = std::chrono::steady_clock::now();
+  double metadata_s = std::chrono::duration<double>(metadata_end - stage_start).count();
+  double total_ep_s = mcap_read_s + parquet_write_s + image_extract_s + video_encode_s + metadata_s;
+
+  log << "\n[TIMING] Episode " << cfg.episode_index << " breakdown:\n";
+  log << "  MCAP read:        " << std::fixed << std::setprecision(3) << mcap_read_s << "s\n";
+  log << "  Parquet write:    " << parquet_write_s << "s\n";
+  log << "  Image extraction: " << image_extract_s << "s\n";
+  log << "  Video encoding:   " << video_encode_s << "s\n";
+  log << "  Metadata:         " << metadata_s << "s\n";
+  log << "  Total:            " << total_ep_s << "s\n";
   return 0;
 }

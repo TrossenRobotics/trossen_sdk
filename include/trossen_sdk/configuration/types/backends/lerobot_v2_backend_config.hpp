@@ -23,6 +23,10 @@ inline constexpr int LEROBOT_V2_DEFAULT_EPISODE_INDEX = 0;
 // Number of episodes stored per chunk folder (chunk-000, chunk-001, ...)
 inline constexpr int LEROBOT_V2_DEFAULT_CHUNK_SIZE = 1000;
 inline constexpr char LEROBOT_V2_DEFAULT_LICENSE[] = "apache-2.0";
+// 0 = auto (70% of hardware_concurrency); positive = exact episode thread count
+inline constexpr int LEROBOT_V2_DEFAULT_THREADS = 0;
+// "auto" = GPU if available then CPU; "gpu" = force GPU; "cpu" = force CPU
+inline constexpr char LEROBOT_V2_DEFAULT_ENCODER[] = "auto";
 
 struct LeRobotV2BackendConfig : public BaseConfig {
   int encoder_threads{trossen::io::backends::DEFAULT_ENCODER_THREADS};
@@ -40,6 +44,8 @@ struct LeRobotV2BackendConfig : public BaseConfig {
   std::string robot_name{trossen::io::backends::DEFAULT_ROBOT_NAME};
   float fps{LEROBOT_V2_DEFAULT_FPS};
   std::string license{LEROBOT_V2_DEFAULT_LICENSE};
+  int threads{LEROBOT_V2_DEFAULT_THREADS};
+  std::string encoder{LEROBOT_V2_DEFAULT_ENCODER};
 
   std::string type() const override { return "lerobot_v2_backend"; }
 
@@ -66,6 +72,8 @@ struct LeRobotV2BackendConfig : public BaseConfig {
     if (j.contains("robot_name")) j.at("robot_name").get_to(c.robot_name);
     if (j.contains("fps")) j.at("fps").get_to(c.fps);
     if (j.contains("license")) j.at("license").get_to(c.license);
+    if (j.contains("threads")) j.at("threads").get_to(c.threads);
+    if (j.contains("encoder")) j.at("encoder").get_to(c.encoder);
 
     return c;
   }
