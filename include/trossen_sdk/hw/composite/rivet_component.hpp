@@ -314,7 +314,8 @@ private:
 
   /// Whether write_joint() runs teleop position commands through a one-Euro
   /// low-pass filter before writing them to the followers to smooth jitter.
-  bool smoothing_enabled_{true};
+  bool arm_smoothing_enabled_{true};
+  bool gripper_smoothing_enabled_{false};
 
   /// One-Euro filter tuning, shared by every joint/gripper filter below.
   /// See utils::OneEuroFilter for parameter semantics.

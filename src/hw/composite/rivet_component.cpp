@@ -274,10 +274,13 @@ void RivetComponent::write_joint(const std::vector<float>& cmd)
   double left_grip = static_cast<double>(cmd[6]);
   double right_grip = static_cast<double>(cmd[13]);
 
-  if (smoothing_enabled_) {
+  if (arm_smoothing_enabled_) {
     const double t = now_seconds();
     left_arm_filt_.filter(left_pos, t);
     right_arm_filt_.filter(right_pos, t);
+  }
+  if (gripper_smoothing_enabled_) {
+    const double t = now_seconds();
     left_grip = left_grip_filt_.filter(left_grip, t);
     right_grip = right_grip_filt_.filter(right_grip, t);
   }
