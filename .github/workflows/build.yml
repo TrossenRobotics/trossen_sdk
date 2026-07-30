@@ -11,7 +11,16 @@ jobs:
   build-and-test:
     permissions:
       contents: read
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-22.04
+          - ubuntu-24.04
+          - ubuntu-22.04-arm
+
+    name: build-and-test (${{ matrix.os }})
 
     steps:
     - name: Checkout code
