@@ -288,8 +288,8 @@ void RivetComponent::write_joint(const std::vector<float>& cmd)
     right_pos[4], right_pos[5]}, write_moving_time_s_, false);
 
 
-  left_driver_->set_gripper_position(left_grip, write_moving_time_s_, false);
-  right_driver_->set_gripper_position(right_grip, write_moving_time_s_, false);
+  left_driver_->set_gripper_position(left_grip, 0.0, false);
+  right_driver_->set_gripper_position(right_grip, 0.0, false);
 
   const double base_vx = static_cast<double>(cmd[14]);
   const double base_vy = static_cast<double>(cmd[15]);
