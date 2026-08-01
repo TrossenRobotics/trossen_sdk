@@ -226,6 +226,14 @@ if __name__ == "__main__":
             ###################################### FOLLOWERS #######################################
             if ENABLE_BASE:
                 base.update_base()
+
+                # On a new fault, print what failed, then clear and re-enable to resume
+                faulted = base.has_fault()
+                if faulted:
+                    for fault in base.get_faults():
+                        print(fault)
+                    raise RuntimeError("Base faults detected")
+
                 base.set_cmd_vels(base_velocity_linear_x, base_velocity_linear_y,
                                          base_velocity_angular_z)
                 base.set_actuator_velocity(base_velocity_lift)
