@@ -116,15 +116,28 @@ std::string generate_episode_path(
   uint32_t episode_index,
   const std::string& extension = "trossen_mcap");
 
+/// @brief Longest `announce(msg, block=true)` will wait before giving up and
+/// killing spd-say. A spoken cue is never worth stalling a recording session or
+/// a test for, and spd-say blocks indefinitely when it cannot reach a speech
+/// server — so the wait is bounded rather than trusting the child to exit.
+inline constexpr std::chrono::seconds kAnnounceBlockTimeout{10};
+
 /**
  * @brief Announce a message via text-to-speech (spd-say)
  *
  * Safe to call even if spd-say is not installed -- fails silently.
- * Message is passed directly to spd-say via posix_spawn (no shell involved),
- * so all characters are safe and no sanitization is needed.
+ * Message is passed directly to spd-say via posix_spawn/execvp (no shell
+ * involved), so all characters are safe and no sanitization is needed.
+ *
+ * Set `TROSSEN_NO_ANNOUNCE` to any value other than empty or "0" to make this a
+ * no-op. Intended for test suites, CI, and anything running as root: root has no
+ * session bus, so spd-say there can hang rather than fail.
+ *
+ * Leaves no zombie processes in either mode, and never waits unboundedly.
  *
  * @param message Text to speak; empty messages are ignored
- * @param block If true (default), blocks until speech finishes.
+ * @param block If true (default), waits until speech finishes or
+ *              `kAnnounceBlockTimeout` elapses, whichever comes first.
  *              If false, returns immediately while speech plays in background.
  */
 void announce(const std::string& message, bool block = true);
