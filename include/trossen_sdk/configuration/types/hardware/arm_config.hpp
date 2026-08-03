@@ -65,6 +65,36 @@ struct ArmConfig {
   /// commanded, so teleop staging / mode setup / rest moves are skipped.
   bool actuated{true};
 
+  /// @brief Opt-in one-Euro adaptive low-pass on the positions written by
+  /// write_joint(). Off by default: it adds lag, and every arm that is
+  /// commanded from a clean source (a policy, a staged move, an SDK-side
+  /// trajectory) is better off without it. Turn it on for an arm mirroring a
+  /// jittery leader — on the Rivet the Glide handles are hand-held and their
+  /// raw stream visibly shakes the followers.
+  ///
+  /// This is a filter on the COMMAND, and is independent of
+  /// write_moving_time_s (which asks the controller to interpolate toward the
+  /// commanded goal). The two compose: the filter removes jitter from the
+  /// target, the moving time softens the approach to it.
+  bool smoothing_enabled{false};
+
+  /// @brief Whether the gripper channel (the last joint) is smoothed too.
+  /// Separate from smoothing_enabled and off by default because filtering the
+  /// gripper was measured on Rivet hardware to make grasps feel mushy and
+  /// late — the operator wants the gripper to track their hand immediately
+  /// even when the arm joints are being smoothed.
+  bool smoothing_gripper{false};
+
+  /// @brief One-Euro tuning, shared by every per-joint filter instance.
+  /// min_cutoff is the cutoff (Hz) at zero speed — lower is smoother but
+  /// laggier when nearly still. beta relaxes the filter as the signal moves
+  /// faster — higher means less lag during fast motion. d_cutoff is the
+  /// derivative's own cutoff and rarely needs tuning. The defaults are the
+  /// values tuned on the Rivet Glide handles.
+  float smoothing_min_cutoff_hz{1.0f};
+  float smoothing_beta{0.9f};
+  float smoothing_d_cutoff_hz{1.0f};
+
   /// @brief Optional affine joint remap applied to this arm's read positions:
   /// out[j] = joint_signs[j] * raw[j] + joint_offsets[j]. Empty = identity.
   /// Used for a leader whose joint frame doesn't map 1:1 onto the follower.
@@ -138,6 +168,16 @@ struct ArmConfig {
       j.at("write_moving_time_s").get_to(c.write_moving_time_s);
     }
     if (j.contains("actuated")) j.at("actuated").get_to(c.actuated);
+    if (j.contains("smoothing_enabled"))
+      j.at("smoothing_enabled").get_to(c.smoothing_enabled);
+    if (j.contains("smoothing_gripper"))
+      j.at("smoothing_gripper").get_to(c.smoothing_gripper);
+    if (j.contains("smoothing_min_cutoff_hz"))
+      j.at("smoothing_min_cutoff_hz").get_to(c.smoothing_min_cutoff_hz);
+    if (j.contains("smoothing_beta"))
+      j.at("smoothing_beta").get_to(c.smoothing_beta);
+    if (j.contains("smoothing_d_cutoff_hz"))
+      j.at("smoothing_d_cutoff_hz").get_to(c.smoothing_d_cutoff_hz);
     if (j.contains("joint_signs")) j.at("joint_signs").get_to(c.joint_signs);
     if (j.contains("joint_offsets")) j.at("joint_offsets").get_to(c.joint_offsets);
     if (j.contains("gripper_force_feedback"))
@@ -189,6 +229,15 @@ struct ArmConfig {
       j["gripper_feedback_follower_max"] = gripper_feedback_follower_max;
       j["gripper_feedback_offset"] = gripper_feedback_offset;
       j["gripper_feedback_mode"] = gripper_feedback_mode;
+    }
+    // Emit smoothing tuning only when enabled, same reasoning as the gripper
+    // feedback block above — the constants are meaningless while it is off.
+    if (smoothing_enabled) {
+      j["smoothing_enabled"] = smoothing_enabled;
+      j["smoothing_gripper"] = smoothing_gripper;
+      j["smoothing_min_cutoff_hz"] = smoothing_min_cutoff_hz;
+      j["smoothing_beta"] = smoothing_beta;
+      j["smoothing_d_cutoff_hz"] = smoothing_d_cutoff_hz;
     }
     // Emit per-joint limits only when set, to keep ordinary arm configs clean.
     if (!position_min.empty()) j["position_min"] = position_min;

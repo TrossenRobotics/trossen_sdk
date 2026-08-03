@@ -15,6 +15,7 @@
 
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/teleop/teleop_capable.hpp"
+#include "trossen_sdk/utils/one_euro_filter.hpp"
 
 namespace trossen::hw::arm {
 
@@ -265,6 +266,25 @@ private:
   /// goal_time < 0.001s as no-interpolation). Non-zero values smooth the
   /// per-tick motion between successive write_joint() calls.
   float write_moving_time_s_{0.0f};
+
+  /// Opt-in one-Euro low-pass on the commands written by write_joint(), and
+  /// whether it extends to the gripper channel. Both off by default; see
+  /// configuration::ArmConfig for the rationale. Parsed in configure().
+  bool smoothing_enabled_{false};
+  bool smoothing_gripper_{false};
+
+  /// One-Euro tuning shared by every per-joint filter in cmd_filt_.
+  /// See utils::OneEuroFilter for parameter semantics.
+  float smoothing_min_cutoff_hz_{1.0f};
+  float smoothing_beta_{0.9f};
+  float smoothing_d_cutoff_hz_{1.0f};
+
+  /// Per-joint command filters, sized to the arm's joint count in configure()
+  /// and only constructed when smoothing is enabled. Reset in
+  /// prepare_for_teleop() so filter history never bridges a stopped/restarted
+  /// teleop session — stale history would otherwise make the first tick of a
+  /// new session compute a derivative against a pose from minutes ago.
+  utils::VecOneEuroFilter cmd_filt_;
 };
 
 }  // namespace trossen::hw::arm

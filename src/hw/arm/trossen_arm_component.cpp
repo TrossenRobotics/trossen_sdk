@@ -7,12 +7,24 @@
 #include "trossen_sdk/hw/hardware_registry.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 
 namespace trossen::hw::arm {
+
+namespace {
+/// Monotonic seconds for the one-Euro filter. Only successive differences
+/// matter, so the epoch is irrelevant; steady_clock is used because a wall
+/// clock stepping backwards would produce a negative dt.
+double now_seconds() {
+  using std::chrono::duration;
+  using std::chrono::steady_clock;
+  return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
+}  // namespace
 
 void TrossenArmComponent::configure(const nlohmann::json& config) {
   // Parse IP address
@@ -99,6 +111,40 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
   // every motion command when this is false.
   if (config.contains("actuated")) {
     actuated_ = config.at("actuated").get<bool>();
+  }
+
+  // Opt-in one-Euro low-pass on write_joint() commands. Off unless asked for:
+  // it trades lag for jitter rejection, which is only a good trade when the
+  // command source is genuinely noisy (a hand-held leader), not when it is an
+  // SDK-side trajectory or a policy.
+  if (config.contains("smoothing_enabled")) {
+    smoothing_enabled_ = config.at("smoothing_enabled").get<bool>();
+  }
+  if (config.contains("smoothing_gripper")) {
+    smoothing_gripper_ = config.at("smoothing_gripper").get<bool>();
+  }
+  {
+    // Validate the tuning whenever it is present, even if smoothing is
+    // currently off — a typo in a disabled block should still be reported
+    // rather than lying dormant until someone flips the feature on.
+    auto parse_positive = [&](const char* key, float& dst) {
+      if (!config.contains(key)) return;
+      dst = config.at(key).get<float>();
+      if (dst <= 0.0f || !std::isfinite(dst)) {
+        throw std::runtime_error(
+          std::string("TrossenArmComponent: '") + key + "' must be positive and finite");
+      }
+    };
+    parse_positive("smoothing_min_cutoff_hz", smoothing_min_cutoff_hz_);
+    parse_positive("smoothing_d_cutoff_hz", smoothing_d_cutoff_hz_);
+    // beta may legitimately be zero — that is a plain (non-adaptive) low-pass.
+    if (config.contains("smoothing_beta")) {
+      smoothing_beta_ = config.at("smoothing_beta").get<float>();
+      if (smoothing_beta_ < 0.0f || !std::isfinite(smoothing_beta_)) {
+        throw std::runtime_error(
+          "TrossenArmComponent: 'smoothing_beta' must be non-negative and finite");
+      }
+    }
   }
 
   // Optional affine joint remap applied in read_joint(): out[j] = signs[j] *
@@ -203,6 +249,21 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     }
   }
 
+  // Size the command filter to this arm's joint count. Built here rather than
+  // where the knobs are parsed because the joint count is only known once the
+  // driver is configured. Left default-constructed (size 0) when smoothing is
+  // off, so the disabled path allocates nothing.
+  //
+  // The gripper is excluded by sizing the filter one element short rather than
+  // by filtering and then discarding: VecOneEuroFilter only touches the first
+  // size() elements, so the gripper's raw command passes through untouched and
+  // no filter state is advanced for it.
+  if (smoothing_enabled_) {
+    const size_t nfilt = (smoothing_gripper_ || njoints == 0) ? njoints : njoints - 1;
+    cmd_filt_ = utils::VecOneEuroFilter(
+      nfilt, smoothing_min_cutoff_hz_, smoothing_beta_, smoothing_d_cutoff_hz_);
+  }
+
   // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
 }
 
@@ -248,6 +309,14 @@ void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
       std::to_string(cmd.size()));
   }
   std::vector<double> pos_d(cmd.begin(), cmd.end());
+  // Low-pass the commanded pose before handing it to the controller, so a
+  // jittery source (a hand-held leader) doesn't shake the arm. Adaptive: it
+  // filters hard while the operator holds still and backs off as they move, so
+  // fast motion stays responsive. Applied after the caller's remap and before
+  // the controller's own goal-time interpolation.
+  if (smoothing_enabled_) {
+    cmd_filt_.filter(pos_d, now_seconds());
+  }
   driver_->set_all_positions(pos_d, write_moving_time_s_, false);
 }
 
@@ -327,6 +396,11 @@ void TrossenArmComponent::write_cartesian(const std::vector<float>& cmd) {
 
 void TrossenArmComponent::prepare_for_teleop() {
   if (!driver_) return;
+  // Drop filter history so a new teleop session doesn't compute its first
+  // derivative against a pose left over from the previous one — which would
+  // otherwise show up as a large spurious velocity on the very first tick and
+  // briefly disable the smoothing exactly when it is most needed.
+  cmd_filt_.reset();
   if (!actuated_) {
     // Passive leader: arm joints stream positions in position mode (harmless —
     // they have no motors). The gripper, however, may be actuated for force

@@ -103,6 +103,11 @@
           "model": "pro",
           "end_effector": "pro_base",
           "write_moving_time_s": 0.3,
+          "smoothing_enabled": true,
+          "smoothing_gripper": false,
+          "smoothing_min_cutoff_hz": 1.0,
+          "smoothing_beta": 0.9,
+          "smoothing_d_cutoff_hz": 1.0,
           "staging_time_s": 2.0,
           "velocity_tolerance": [
             6.28,
@@ -128,6 +133,11 @@
           "model": "pro",
           "end_effector": "pro_base",
           "write_moving_time_s": 0.3,
+          "smoothing_enabled": true,
+          "smoothing_gripper": false,
+          "smoothing_min_cutoff_hz": 1.0,
+          "smoothing_beta": 0.9,
+          "smoothing_d_cutoff_hz": 1.0,
           "staging_time_s": 2.0,
           "velocity_tolerance": [
             6.28,

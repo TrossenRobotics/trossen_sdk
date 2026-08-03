@@ -242,6 +242,68 @@ TEST(ArmConfigTest, ToJson_OmitsEmptyStagedPosition) {
   EXPECT_FLOAT_EQ(j.at("staging_time_s").get<float>(), 2.0f);
 }
 
+// ============================================================================
+// CFG-11: ArmConfig command smoothing is off unless explicitly enabled
+// ============================================================================
+
+TEST(ArmConfigTest, Smoothing_DefaultsOffAndIsOmittedFromJson) {
+  ArmConfig cfg;
+
+  // Off by default: smoothing trades lag for jitter rejection, which is only
+  // worth it for an arm mirroring a hand-held leader.
+  EXPECT_FALSE(cfg.smoothing_enabled);
+  EXPECT_FALSE(cfg.smoothing_gripper);
+
+  // While disabled the tuning is meaningless, so it stays out of the JSON to
+  // keep ordinary arm configs clean (same rule as the gripper-feedback block).
+  nlohmann::json j = cfg.to_json();
+  EXPECT_FALSE(j.contains("smoothing_enabled"));
+  EXPECT_FALSE(j.contains("smoothing_beta"));
+}
+
+// ============================================================================
+// CFG-12: ArmConfig round-trips smoothing tuning when enabled
+// ============================================================================
+
+TEST(ArmConfigTest, Smoothing_RoundTripsWhenEnabled) {
+  ArmConfig original;
+  original.smoothing_enabled = true;
+  original.smoothing_gripper = true;
+  original.smoothing_min_cutoff_hz = 2.5f;
+  original.smoothing_beta = 0.4f;
+  original.smoothing_d_cutoff_hz = 1.5f;
+
+  ArmConfig restored = ArmConfig::from_json(original.to_json());
+
+  EXPECT_TRUE(restored.smoothing_enabled);
+  EXPECT_TRUE(restored.smoothing_gripper);
+  EXPECT_FLOAT_EQ(restored.smoothing_min_cutoff_hz, 2.5f);
+  EXPECT_FLOAT_EQ(restored.smoothing_beta, 0.4f);
+  EXPECT_FLOAT_EQ(restored.smoothing_d_cutoff_hz, 1.5f);
+}
+
+// ============================================================================
+// CFG-13: ArmConfig smoothing parses independently of the enable flag
+// ============================================================================
+
+TEST(ArmConfigTest, Smoothing_TuningParsesWhileDisabled) {
+  // Tuning present but the feature left off: the values must still land, so
+  // flipping smoothing_enabled on later does not silently fall back to
+  // defaults. Mirrors TrossenArmComponent::configure(), which validates the
+  // tuning whether or not smoothing is currently enabled.
+  nlohmann::json j = {
+    {"ip_address", "192.168.1.9"},
+    {"smoothing_beta", 0.75f},
+    {"smoothing_min_cutoff_hz", 3.0f}
+  };
+
+  ArmConfig cfg = ArmConfig::from_json(j);
+
+  EXPECT_FALSE(cfg.smoothing_enabled);
+  EXPECT_FLOAT_EQ(cfg.smoothing_beta, 0.75f);
+  EXPECT_FLOAT_EQ(cfg.smoothing_min_cutoff_hz, 3.0f);
+}
+
 // ── hardware.components: registry-resolved generic components ─────────────
 //
 // The escape hatch from a typed config map per component type. Anything the SDK
