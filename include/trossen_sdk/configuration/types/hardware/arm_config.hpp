@@ -87,6 +87,16 @@ struct ArmConfig {
   float gripper_feedback_follower_max{87.5f};
   float gripper_feedback_offset{8.0f};
 
+  /// @brief Which driver mode renders gripper feedback: "external_effort"
+  /// (default) or "effort".
+  ///
+  /// The Rivet's Glide handles were tuned on plain "effort" — on that hardware
+  /// external-effort mode fights the operator instead of yielding to them. Every
+  /// other robot in the SDK was tuned on external-effort, so this stays a
+  /// per-arm choice rather than a global switch; the default preserves the
+  /// existing behaviour everywhere it is not set.
+  std::string gripper_feedback_mode{"external_effort"};
+
   /// @brief Optional per-joint operating limits pushed to the controller on
   /// connect. Each array, when non-empty, must have one entry per joint (arm
   /// joints in rad / rad·s⁻¹ / N·m, gripper in m / m·s⁻¹ / N). Empty = leave
@@ -138,6 +148,8 @@ struct ArmConfig {
       j.at("gripper_feedback_follower_max").get_to(c.gripper_feedback_follower_max);
     if (j.contains("gripper_feedback_offset"))
       j.at("gripper_feedback_offset").get_to(c.gripper_feedback_offset);
+    if (j.contains("gripper_feedback_mode"))
+      j.at("gripper_feedback_mode").get_to(c.gripper_feedback_mode);
     if (j.contains("position_min")) j.at("position_min").get_to(c.position_min);
     if (j.contains("position_max")) j.at("position_max").get_to(c.position_max);
     if (j.contains("velocity_max")) j.at("velocity_max").get_to(c.velocity_max);
@@ -176,6 +188,7 @@ struct ArmConfig {
       j["gripper_feedback_leader_max"] = gripper_feedback_leader_max;
       j["gripper_feedback_follower_max"] = gripper_feedback_follower_max;
       j["gripper_feedback_offset"] = gripper_feedback_offset;
+      j["gripper_feedback_mode"] = gripper_feedback_mode;
     }
     // Emit per-joint limits only when set, to keep ordinary arm configs clean.
     if (!position_min.empty()) j["position_min"] = position_min;

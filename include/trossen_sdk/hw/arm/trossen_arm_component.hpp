@@ -208,13 +208,20 @@ private:
   std::vector<float> joint_offsets_;
 
   /// Leader-only gripper force feedback. When gripper_force_feedback_ is set,
-  /// the leader's gripper runs in external-effort mode and the teleop loop
-  /// renders a reflected force from the follower's measured gripper effort via
-  /// the cubic curve. The leader's arm joints can still be passive.
+  /// the leader's gripper runs in the mode named by gripper_feedback_mode_ and
+  /// the teleop loop renders a reflected force from the follower's measured
+  /// gripper effort via the cubic curve. The leader's arm joints can still be
+  /// passive.
   bool  gripper_force_feedback_{false};
   float gripper_feedback_leader_max_{27.0f};
   float gripper_feedback_follower_max_{87.5f};
   float gripper_feedback_offset_{8.0f};
+
+  /// True when feedback is rendered with plain effort rather than external
+  /// effort. The Rivet's Glide handles were tuned that way; everything else in
+  /// the SDK was tuned on external effort, so this defaults to false. Resolved
+  /// once in configure() from "gripper_feedback_mode".
+  bool  gripper_feedback_plain_effort_{false};
 
   /// True while the gripper is actually in external-effort mode for feedback
   /// (set by prepare_for_teleop, cleared by end_teleop). Guards end_teleop's

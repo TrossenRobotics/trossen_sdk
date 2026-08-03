@@ -45,6 +45,12 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
   } else if (end_effector_str_ == "wxai_v0_follower") {
     end_effector = trossen_arm::StandardEndEffector::wxai_v0_follower;
     is_leader_ = false;
+  } else if (end_effector_str_ == "pro_base") {
+    // What the Rivet's Pro followers actually carry. Using a wxai end effector
+    // here loads the wrong mass/inertia into gravity compensation, which the
+    // arm does not report as an error — it just holds position badly.
+    end_effector = trossen_arm::StandardEndEffector::pro_base;
+    is_leader_ = false;
   } else {
     throw std::runtime_error("TrossenArmComponent: Unknown end_effector: " + end_effector_str_);
   }
@@ -184,6 +190,18 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
   if (config.contains("gripper_feedback_offset")) {
     gripper_feedback_offset_ = config.at("gripper_feedback_offset").get<float>();
   }
+  if (config.contains("gripper_feedback_mode")) {
+    const auto mode = config.at("gripper_feedback_mode").get<std::string>();
+    if (mode == "effort") {
+      gripper_feedback_plain_effort_ = true;
+    } else if (mode == "external_effort") {
+      gripper_feedback_plain_effort_ = false;
+    } else {
+      throw std::runtime_error(
+        "TrossenArmComponent: gripper_feedback_mode must be \"effort\" or "
+        "\"external_effort\", got: " + mode);
+    }
+  }
 
   // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
 }
@@ -257,7 +275,11 @@ void TrossenArmComponent::apply_gripper_feedback(float follower_gripper_effort) 
   // leader instantly (goal_time 0) sets up a limit-cycle oscillation. The 0.2s
   // ramp acts as a rate limiter that damps the chatter — matching the bilateral
   // reference, which uses the same goal_time on this command.
-  driver_->set_gripper_external_effort(leader_effort, 0.2, false);
+  if (gripper_feedback_plain_effort_) {
+    driver_->set_gripper_effort(leader_effort, 0.2, false);
+  } else {
+    driver_->set_gripper_external_effort(leader_effort, 0.2, false);
+  }
 }
 
 void TrossenArmComponent::summon_joint(const std::vector<float>& cmd) {
@@ -313,9 +335,15 @@ void TrossenArmComponent::prepare_for_teleop() {
     // its opening is reported cleanly for the follower's passthrough.
     driver_->set_all_modes(trossen_arm::Mode::position);
     if (gripper_force_feedback_) {
-      driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
+      driver_->set_gripper_mode(
+        gripper_feedback_plain_effort_ ? trossen_arm::Mode::effort
+                                       : trossen_arm::Mode::external_effort);
       // Seed the resting offset so the gripper holds open before the first tick.
-      driver_->set_gripper_external_effort(gripper_feedback_offset_, 0.0, false);
+      if (gripper_feedback_plain_effort_) {
+        driver_->set_gripper_effort(gripper_feedback_offset_, 0.0, false);
+      } else {
+        driver_->set_gripper_external_effort(gripper_feedback_offset_, 0.0, false);
+      }
       // Record that the gripper is now in external-effort mode so end_teleop()
       // only releases it when it was actually engaged (the hardware-test path
       // calls end_teleop() without ever calling prepare_for_teleop()).
@@ -351,7 +379,13 @@ void TrossenArmComponent::end_teleop() {
     // step), and commanding external effort on a gripper still in idle mode is
     // a controller error.
     if (gripper_force_feedback_ && gripper_feedback_engaged_) {
-      driver_->set_gripper_external_effort(0.0, 0.0, false);
+      // Release through the same mode it was engaged in — commanding the other
+      // one here would itself be the controller error this guard exists to avoid.
+      if (gripper_feedback_plain_effort_) {
+        driver_->set_gripper_effort(0.0, 0.0, false);
+      } else {
+        driver_->set_gripper_external_effort(0.0, 0.0, false);
+      }
       driver_->set_gripper_mode(trossen_arm::Mode::idle);
       gripper_feedback_engaged_ = false;
     }
