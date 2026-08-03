@@ -7,6 +7,7 @@ import { DatasetsPage } from '@/app/pages/DatasetsPage';
 import { DatasetDetailsPage } from "@/app/pages/DatasetDetailsPage";
 import { MonitorEpisodePage } from '@/app/pages/MonitorEpisodePage';
 import { EmbeddedViewerPage } from '@/app/pages/EmbeddedViewerPage';
+import { SecondScreenPage } from '@/app/pages/SecondScreenPage';
 import { RouteError } from '@/app/components/RouteError';
 import { DatasetsProvider } from '@/lib/DatasetsContext';
 import { HwStatusProvider } from '@/lib/HwStatusContext';
@@ -19,6 +20,11 @@ const router = createBrowserRouter([
   // the Layout route so it has no nav and is a self-contained browsing context
   // the monitor can destroy/recreate per session (see EmbeddedViewerPage).
   { path: '/embed/viewer/:sessionId', element: <EmbeddedViewerPage /> },
+  // Fixed status display bolted to the robot. OUTSIDE the Layout for the same
+  // reason as the viewer above: no nav chrome, because the panel has nowhere to
+  // navigate to. Runs on every modality and is always reachable, so the robot's
+  // screen can be pointed at it once and left alone.
+  { path: '/second_screen', element: <SecondScreenPage /> },
   {
     path: '/',
     element: <Layout />,
