@@ -57,9 +57,9 @@ public:
    *   "left_model": "pro",
    *   "right_ip_address": "192.168.1.4",
    *   "right_model": "pro",
-   *   "write_moving_time_s": 0.2,
+   *   "write_moving_time_s": 0.0,
    *   "staging_time_s": 2.0
-   *   "end_effector": "wxai_v0_follower",
+   *   "end_effector": "pro_base",
    *   "episode_lifecycle_enabled": true,
    *   "position_min": [...],
    *   "position_max": [...],
@@ -90,7 +90,7 @@ public:
   nlohmann::json get_info() const override;
 
   // ── HardwareComponent: per-episode lifecycle ─────────────────────────────
-  // TODO: @schromya check what this does (if anything)
+  // TODO(schromya): @schromya check what this does (if anything)
   // Opt-in via "episode_lifecycle_enabled" in config. When enabled, the
   // SessionManager calls on_pre_episode() to re-home this arm before each
   // episode (it pauses any teleop mirror around the call, so stage() is safe).
@@ -104,7 +104,7 @@ public:
    */
   // std::vector<std::shared_ptr<trossen_arm::TrossenArmDriver>> get_arm_hardware() {
   //   return {left_driver_, right_driver_};
-  // } // TODO: @schromya remove
+  // } // TODO(schromya): @schromya remove
   std::shared_ptr<trossen_arm::TrossenArmDriver> get_left_arm_hardware() {
     return left_driver_;
   }
@@ -275,7 +275,7 @@ private:
   std::string end_effector_str_;
   size_t njoints_;  // Joints per arm
 
-  // TODO: @schromya complete/check
+  // TODO(schromya): @schromya complete/check
   /// Joint-space pose this arm moves to at session start (via stage()).
   /// Empty = no staging.
   std::vector<float> staged_position_;
@@ -313,16 +313,14 @@ private:
   std::vector<float> effort_tolerance_;
 
   /// Whether write_joint() runs teleop position commands through a one-Euro
-  /// low-pass filter before writing them to the followers. Smooths jitter
-  /// from a noisy/laggy command source (e.g. teleop over a wireless link)
-  /// while adding minimal lag during fast motion. Parsed from
-  /// "smoothing_enabled" in configure(); defaults to on.
-  bool smoothing_enabled_{true};
+  /// low-pass filter before writing them to the followers to smooth jitter.
+  bool arm_smoothing_enabled_{true};
+  bool gripper_smoothing_enabled_{false};
 
   /// One-Euro filter tuning, shared by every joint/gripper filter below.
   /// See utils::OneEuroFilter for parameter semantics.
   float smoothing_min_cutoff_hz_{1.0f};
-  float smoothing_beta_{0.7f};
+  float smoothing_beta_{0.9f};
   float smoothing_d_cutoff_hz_{1.0f};
 
   /// Per-arm joint filters (size njoints_) and scalar gripper filters, applied

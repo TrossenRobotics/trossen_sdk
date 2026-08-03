@@ -104,13 +104,16 @@ void RivetProducer::poll(const std::function<void(std::shared_ptr<data::RecordBa
   auto base_vel = rivet_component_->get_base_velocities();
   rec->linear_x_velocity = static_cast<float>(base_vel.vx);
   rec->linear_y_velocity = static_cast<float>(base_vel.vy);
-  rec->angualar_z_velocity = static_cast<float>(base_vel.vr);
+  rec->angular_z_velocity = static_cast<float>(base_vel.vr);
   rec->lift_velocity = static_cast<float>(base_vel.lift);
 
   auto base_driver = rivet_component_->get_base_hardware();
   rec->battery_percent = base_driver->get_percent();
   rec->battery_temp = base_driver->get_temp();
   rec->battery_charging_state = base_driver->get_charging_state();
+  rec->battery_voltage = base_driver->get_voltage();
+  rec->battery_has_critical_fault = base_driver->has_critical_fault();
+  rec->is_e_stopped = base_driver->is_e_stopped();
 
   emit(rec);
   ++stats_.produced;

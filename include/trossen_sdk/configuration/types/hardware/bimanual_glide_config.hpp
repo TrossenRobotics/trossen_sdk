@@ -22,7 +22,7 @@ namespace trossen::configuration {
  *   "left_model": "glide",
  *   "right_ip_address": "192.168.1.2",
  *   "right_model": "glide",
- *   "write_moving_time_s": 0.2,            // optional, default 0.0
+ *   "write_moving_time_s": 0.1,            // optional, default 0.1
  *   "episode_lifecycle_enabled": true,     // optional, default false
  *   "joint_signs":         [1,1,1,-1,-1,1,1],     // optional, default identity
  *   "left_joint_offsets":  [0,0,0,0,0,-0.7854,0], // optional, default identity
@@ -30,9 +30,9 @@ namespace trossen::configuration {
  *   "position_min": [...], "position_max": [...],
  *   "velocity_max": [...], "effort_max": [...],
  *   "position_tolerance": [...], "velocity_tolerance": [...], "effort_tolerance": [...],
- *   "gripper_feedback_leader_max": 27.0,
- *   "gripper_feedback_follower_max": 87.5,
- *   "gripper_feedback_offset": 8.0
+ *   "gripper_feedback_leader_max": 20.0,
+ *   "gripper_feedback_follower_max": 100.0,
+ *   "gripper_feedback_offset": 6.5
  * }
  */
 struct BimanualGlideConfig {
@@ -49,8 +49,8 @@ struct BimanualGlideConfig {
   std::string right_model{"glide"};
 
   /// @brief Per-tick trajectory time (seconds) passed to set_all_positions /
-  /// set_gripper_external_effort. Zero applies the goal immediately.
-  double write_moving_time_s{0.0};
+  /// set_gripper_effort. Zero applies the goal immediately.
+  double write_moving_time_s{0.1};
 
   /// @brief Whether this pair participates in the SessionManager's per-episode
   /// lifecycle. Opt-in; defaults to false.
@@ -81,9 +81,9 @@ struct BimanualGlideConfig {
   /// follower effort treated as full grip (the normalizer), and a baseline
   /// opening offset. leader = leader_max·norm^3 + offset, where
   /// norm = clamp(|follower_effort| / follower_max, 0, 1).
-  float gripper_feedback_leader_max{27.0f};
-  float gripper_feedback_follower_max{87.5f};
-  float gripper_feedback_offset{8.0f};
+  float gripper_feedback_leader_max{20.0f};
+  float gripper_feedback_follower_max{100.0f};
+  float gripper_feedback_offset{6.5f};
 
   static BimanualGlideConfig from_json(const nlohmann::json& j) {
     BimanualGlideConfig c;

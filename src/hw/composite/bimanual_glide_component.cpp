@@ -9,7 +9,6 @@
 
 
 namespace trossen::hw::bimanual_glide {
-
 void BimanualGlideComponent::configure(const nlohmann::json& config) {
   // Parse IP address
   if (!config.contains("left_ip_address")) {
@@ -62,7 +61,7 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
       "TrossenArmComponent: Failed to configure driver: " + std::string(e.what()));
   }
 
-  // TODO: @schromya Resolve this hack when max gripper position error is fixed in driver
+  // TODO(schromya): @schromya Resolve this hack when max gripper position error is fixed in driver
   for (auto& driver : {left_driver_, right_driver_}) {
     auto limits = driver->get_joint_limits();
     if (!limits.empty()) {
@@ -77,7 +76,7 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
     }
   }
 
-  if(left_driver_->get_num_joints() != right_driver_->get_num_joints()) {
+  if (left_driver_->get_num_joints() != right_driver_->get_num_joints()) {
     throw std::runtime_error(
       "TrossenArmComponent: Left and right arms must have the same number of joints. (LEFT: "
       + std::to_string(left_driver_->get_num_joints()) + ", RIGHT: "
@@ -186,7 +185,6 @@ void BimanualGlideComponent::configure(const nlohmann::json& config) {
   if (config.contains("gripper_feedback_offset")) {
     gripper_feedback_offset_ = config.at("gripper_feedback_offset").get<float>();
   }
-
 }
 
 nlohmann::json BimanualGlideComponent::get_info() const {
@@ -215,7 +213,7 @@ void BimanualGlideComponent::apply_joint_remap(
 
 std::vector<float> BimanualGlideComponent::read_joint() {
   if (!left_driver_ || !right_driver_) return {};
-  const int LEN = 18; // (7 joints) * 2 + 4 base
+  const int LEN = 18;  // (7 joints) * 2 + 4 base
   const auto& left_positions = left_driver_->get_robot_output().joint.all.positions;
   std::vector<float> left_out(left_positions.begin(), left_positions.end());
   apply_joint_remap(left_out, joint_offsets_left_, false);
@@ -237,9 +235,9 @@ std::vector<float> BimanualGlideComponent::read_joint() {
                               BASE_MIN_, BASE_MAX_, BASE_DEADZONE_);
   double base_vr = -scale(right_input.joystick_x, MIN_JOYSTICK_, MAX_JOYSTICK_,
                                 BASE_MIN_, BASE_MAX_, BASE_DEADZONE_);
-  int right_up_btn = int(right_input.buttons & (1 << 0));
-  int right_down_btn = int(right_input.buttons & (1 << 2));
-  double base_vlift = double(right_up_btn - right_down_btn) * BASE_LIFT_MAX_;
+  int right_up_btn = static_cast<int>(right_input.buttons & (1 << 0));
+  int right_down_btn = static_cast<int>(right_input.buttons & (1 << 2));
+  double base_vlift = static_cast<double>(right_up_btn - right_down_btn) * BASE_LIFT_MAX_;
   sample.push_back(static_cast<float>(base_vx));
   sample.push_back(static_cast<float>(base_vy));
   sample.push_back(static_cast<float>(base_vr));
@@ -253,7 +251,8 @@ std::vector<float> BimanualGlideComponent::read_gripper_effort() {
     static_cast<float>(right_driver_->get_gripper_effort())});
 }
 
-void BimanualGlideComponent::apply_gripper_feedback(const std::vector<float>& follower_gripper_effort) {
+void BimanualGlideComponent::apply_gripper_feedback(
+  const std::vector<float>& follower_gripper_effort) {
   if (!left_driver_ || !right_driver_) return;
 
   const size_t EXPECTED_SIZE = 2;  // left and right
@@ -277,14 +276,13 @@ void BimanualGlideComponent::apply_gripper_feedback(const std::vector<float>& fo
   const double right_effort = gripper_feedback_leader_max_ * std::pow(right_norm, 3)
     + gripper_feedback_offset_;
 
-  left_driver_->set_gripper_external_effort(left_effort, write_moving_time_s_, false);
-  right_driver_->set_gripper_external_effort(right_effort, write_moving_time_s_, false);
-
+  left_driver_->set_gripper_effort(left_effort, write_moving_time_s_, false);
+  right_driver_->set_gripper_effort(right_effort, write_moving_time_s_, false);
 }
 
 std::vector<float> BimanualGlideComponent::read_cartesian() {
   if (!left_driver_ || !right_driver_) return {};
-  const int LEN = 18; // (4 cart + 3 rotation vector + 1 gripper) * 2 + 4 base
+  const int LEN = 18;  // (4 cart + 3 rotation vector + 1 gripper) * 2 + 4 base
   const auto& left_out = left_driver_->get_robot_output();
   const auto& right_out = right_driver_->get_robot_output();
 
@@ -303,9 +301,9 @@ std::vector<float> BimanualGlideComponent::read_cartesian() {
                               BASE_MIN_, BASE_MAX_, BASE_DEADZONE_);
   double base_vr = -scale(right_input.joystick_x, MIN_JOYSTICK_, MAX_JOYSTICK_,
                                 BASE_MIN_, BASE_MAX_, BASE_DEADZONE_);
-  int right_up_btn = int(right_input.buttons & (1 << 0));
-  int right_down_btn = int(right_input.buttons & (1 << 2));
-  double base_vlift = double(right_up_btn - right_down_btn) * BASE_LIFT_MAX_;
+  int right_up_btn = static_cast<int>(right_input.buttons & (1 << 0));
+  int right_down_btn = static_cast<int>(right_input.buttons & (1 << 2));
+  double base_vlift = static_cast<double>(right_up_btn - right_down_btn) * BASE_LIFT_MAX_;
   sample.push_back(static_cast<float>(base_vx));
   sample.push_back(static_cast<float>(base_vy));
   sample.push_back(static_cast<float>(base_vr));
@@ -321,13 +319,13 @@ void BimanualGlideComponent::on_pre_episode() {
 }
 void BimanualGlideComponent::prepare_for_teleop(){
   // Configure mode
-  right_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
-  left_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
-  right_driver_->set_all_modes(trossen_arm::Mode::external_effort);
-  left_driver_->set_all_modes(trossen_arm::Mode::external_effort);
-  
-  left_driver_->set_gripper_external_effort(gripper_feedback_offset_, write_moving_time_s_, false);
-  right_driver_->set_gripper_external_effort(gripper_feedback_offset_, write_moving_time_s_, false);
+  right_driver_->set_gripper_mode(trossen_arm::Mode::effort);
+  left_driver_->set_gripper_mode(trossen_arm::Mode::effort);
+  right_driver_->set_all_modes(trossen_arm::Mode::effort);
+  left_driver_->set_all_modes(trossen_arm::Mode::effort);
+
+  left_driver_->set_gripper_effort(gripper_feedback_offset_, write_moving_time_s_, false);
+  right_driver_->set_gripper_effort(gripper_feedback_offset_, write_moving_time_s_, false);
 }
 void BimanualGlideComponent::end_teleop(){}
 void BimanualGlideComponent::stage(){}
@@ -344,8 +342,6 @@ double BimanualGlideComponent::scale(double val, double val_min, double val_max,
   }
 
 
-REGISTER_HARDWARE(BimanualGlideComponent,"bimanual_glide")
+REGISTER_HARDWARE(BimanualGlideComponent, "bimanual_glide")
 
 }  // namespace trossen::hw::bimanual_glide
-
-

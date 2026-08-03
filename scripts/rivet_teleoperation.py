@@ -6,7 +6,7 @@ Requirements:
     1. Python installation
     2. Start CAN interface (using README)
 - trossen_arm-source (lightweight-leader branch):
-    https://github.com/TrossenRobotics/trossen_arm-source/tree/lightweight-leader
+    https://github.com/TrossenRobotics/trossen_arm-source/tree/actuate-demo
     1. Python installation
 
 
@@ -33,12 +33,12 @@ IP_RIGHT_FOLLOWER = "192.168.1.5"
 
 # Gripper force feedback parameters
 LEADER_MAX = 20.0       # N - leader effort at full grip (not including offset)
-FOLLOWER_MAX = 100.0     # N - follower effort at full grip
+FOLLOWER_MAX = 100.0    # N - follower effort at full grip
 LEADER_OFFSET = 6.5     # N - leader opening offset
 
 BASE_MIN = -1           # Min translational/rotational velocity (units/s and rad/s)
 BASE_MAX = 1            # Max translational/rotational velocity (units/s and rad/s)
-BASE_DEADZONE = 0.1    # Base set to 0 velocity if less than this value
+BASE_DEADZONE = 0.1     # Base set to 0 velocity if less than this value
 BASE_LIFT_MAX = 8000    # Max lift velocity (motor units/s)
 
 MIN_JOYSTICK = 0        # Joystick min value
@@ -68,6 +68,9 @@ def configure_leader(ip, model):
 
     joint_limits = driver.get_joint_limits()
     joint_limits[-1].position_max = 0.05
+    for i in range (6):
+        joint_limits[i].velocity_tolerance = joint_limits[i].velocity_max
+        joint_limits[i].effort_tolerance = joint_limits[i].effort_max
     driver.set_joint_limits(joint_limits)
 
     return driver
@@ -78,13 +81,12 @@ def configure_follower(ip):
     driver = trossen_arm.TrossenArmDriver()
     driver.configure(trossen_arm.Model.pro, trossen_arm.StandardEndEffector.pro_base, ip, True)
 
-    motor_parameters = driver.get_motor_parameters()
-    for i in range(7):
-        motor_parameters[i][trossen_arm.Mode.position].velocity.ki = 0.0
-        motor_parameters[i][trossen_arm.Mode.position].velocity.imax = 0.0
-    for i in range(3):
-        motor_parameters[i][trossen_arm.Mode.position].position.kp = 16.0
-    driver.set_motor_parameters(motor_parameters)
+    joint_limits = driver.get_joint_limits()
+    for i in range (6):
+        joint_limits[i].velocity_tolerance = joint_limits[i].velocity_max
+        joint_limits[i].effort_tolerance = joint_limits[i].effort_max
+    driver.set_joint_limits(joint_limits)
+
 
     return driver
 
@@ -129,7 +131,7 @@ def teleop_arm_step(leader, follower, gripper_home_offset):
     positions = leader.get_all_positions()
     efforts = follower.get_all_efforts()
 
-    # Feed the external efforts from the follower robot to the leader robot
+    # Feed the efforts from the follower robot to the leader robot
     leader.set_arm_efforts(
         np.array([efforts[0], efforts[1], efforts[2], -efforts[3], -efforts[4], efforts[5]]),
         0.0,
@@ -200,18 +202,15 @@ if __name__ == "__main__":
         base_velocity_linear_x = 0.0
         base_velocity_linear_y = 0.0
         base_velocity_angular_z = 0.0
-        base_velocity_lift = 0      # MUST BE INT
+        base_velocity_lift = 0          # MUST BE INT
         while True:
 
             ################################### LEADER COMMANDS ####################################
             if ENABLE_RIGHT:
                 right_input = driver_right_leader.get_input_report()
-                # Scale to -1 to 1 velocity (rad/s)
                 base_velocity_angular_z = -scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
                                 BASE_MIN, BASE_MAX, BASE_DEADZONE)
 
-                # Button bitmap: bit n is SEL_(n+1), 1 is pressed:
-                #   [SEL_1, SEL_2, SEL_3, SEL_4, SEL_5]
                 right_up_btn = int(right_input.buttons & (1 << 0))
                 right_down_btn = int(right_input.buttons & (1 << 2))
 
@@ -219,8 +218,6 @@ if __name__ == "__main__":
 
             if ENABLE_LEFT:
                 left_input = driver_left_leader.get_input_report()
-
-                #Scale to -1 to 1 velocity (m/s)
                 base_velocity_linear_x = scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
                                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
                 base_velocity_linear_y = -scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
@@ -229,12 +226,21 @@ if __name__ == "__main__":
             ###################################### FOLLOWERS #######################################
             if ENABLE_BASE:
                 base.update_base()
+
+                # On a new fault, print what failed, then clear and re-enable to resume
+                faulted = base.has_fault()
+                if faulted:
+                    for fault in base.get_faults():
+                        print(fault)
+                    raise RuntimeError("Base faults detected")
+
                 base.set_cmd_vels(base_velocity_linear_x, base_velocity_linear_y,
                                          base_velocity_angular_z)
                 base.set_actuator_velocity(base_velocity_lift)
 
             if ENABLE_RIGHT and ENABLE_FOLLOWER:
-                teleop_arm_step(driver_right_leader, driver_right_follower, GRIPPER_HOME_OFFSET_RIGHT)
+                teleop_arm_step(driver_right_leader, driver_right_follower,
+                                GRIPPER_HOME_OFFSET_RIGHT)
 
             if ENABLE_LEFT and ENABLE_FOLLOWER:
                 teleop_arm_step(driver_left_leader, driver_left_follower, GRIPPER_HOME_OFFSET_LEFT)

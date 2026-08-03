@@ -16,7 +16,6 @@
 #include "trossen_sdk/hw/teleop/teleop_capable.hpp"
 
 namespace trossen::hw::bimanual_glide {
-
 /**
  * @brief Hardware component for Trossen Robotics robot arms.
  *
@@ -53,7 +52,7 @@ public:
    *   "left_model": "glide_right",
    *   "right_ip_address": "192.168.1.101",
    *   "right_model": "glide_left",
-   *   "write_moving_time_s": 0.2,
+   *   "write_moving_time_s": 0.1,
    *   "episode_lifecycle_enabled": true,
    *   "joint_signs": [1, 1, ...],
    *   "left_joint_offsets": [0, 0, ...],
@@ -90,7 +89,7 @@ public:
   nlohmann::json get_info() const override;
 
   // ── HardwareComponent: per-episode lifecycle ─────────────────────────────
-  // TODO: @schromya check what this does (if anything)
+  // TODO(schromya): @schromya check what this does (if anything)
   // Opt-in via "episode_lifecycle_enabled" in config. When enabled, the
   // SessionManager calls on_pre_episode() to re-home this arm before each
   // episode (it pauses any teleop mirror around the call, so stage() is safe).
@@ -273,9 +272,9 @@ private:
   std::vector<float> joint_offsets_right_;
 
   /// Leader-only gripper force feedback. When gripper_force_feedback_ is set,
-  /// the leader's gripper runs in external-effort mode and the teleop loop
-  /// renders a reflected force from the follower's measured gripper effort via
-  /// the cubic curve. The leader's arm joints can still be passive.
+  /// the leader's gripper runs in effort mode and the teleop loop renders a
+  /// reflected force from the follower's measured gripper effort via the
+  /// cubic curve. The leader's arm joints can still be passive.
   float gripper_feedback_leader_max_{20.0f};
   float gripper_feedback_follower_max_{100.0f};
   float gripper_feedback_offset_{6.5f};
@@ -296,9 +295,6 @@ private:
   std::vector<float> position_tolerance_;
   std::vector<float> velocity_tolerance_;
   std::vector<float> effort_tolerance_;
-
-
-
 };
 
 }  // namespace trossen::hw::bimanual_glide

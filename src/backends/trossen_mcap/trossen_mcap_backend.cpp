@@ -527,12 +527,15 @@ void TrossenMCAPBackend::write_rivet_record(const data::RivetRecord& rivet) {
 
   out.set_linear_x_velocity(rivet.linear_x_velocity);
   out.set_linear_y_velocity(rivet.linear_y_velocity);
-  out.set_angualar_z_velocity(rivet.angualar_z_velocity);
+  out.set_angular_z_velocity(rivet.angular_z_velocity);
   out.set_lift_velocity(rivet.lift_velocity);
 
   out.set_battery_percent(rivet.battery_percent);
   out.set_battery_temp(rivet.battery_temp);
   out.set_battery_charging_state(rivet.battery_charging_state);
+  out.set_battery_voltage(rivet.battery_voltage);
+  out.set_battery_has_critical_fault(rivet.battery_has_critical_fault);
+  out.set_is_e_stopped(rivet.is_e_stopped);
 
   std::string payload;
   out.SerializeToString(&payload);

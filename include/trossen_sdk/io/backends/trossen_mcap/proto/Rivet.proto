@@ -37,7 +37,7 @@ message Rivet {
   float linear_y_velocity = 10;
 
   // Base angular velocity around z (rad/s)
-  float angualar_z_velocity = 11;
+  float angular_z_velocity = 11;
 
   // Lift actuator velocity
   float lift_velocity = 12;
@@ -50,4 +50,13 @@ message Rivet {
 
   // Battery charging state (0=stationary, 1=charging, 2=discharging)
   uint32 battery_charging_state = 15;
+
+  // Battery voltage (V)
+  float battery_voltage = 16;
+
+  // Whether any active BMS fault is critical
+  bool battery_has_critical_fault = 17;
+
+  // Whether the mobile base is e-stopped
+  bool is_e_stopped = 18;
 }

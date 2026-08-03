@@ -140,7 +140,7 @@ struct RivetRecord : public RecordBase {
   float linear_y_velocity{0.f};
 
   /// @brief Base angular velocity around z (rad/s)
-  float angualar_z_velocity{0.f};
+  float angular_z_velocity{0.f};
 
   /// @brief Lift actuator velocity
   float lift_velocity{0.f};
@@ -153,6 +153,15 @@ struct RivetRecord : public RecordBase {
 
   /// @brief Battery charging state (0=stationary, 1=charging, 2=discharging)
   uint8_t battery_charging_state{0};
+
+  /// @brief Battery voltage (V)
+  float battery_voltage{0.f};
+
+  /// @brief Whether any active BMS fault is critical
+  bool battery_has_critical_fault{false};
+
+  /// @brief Whether the mobile base is e-stopped
+  bool is_e_stopped{false};
 };
 
 /**

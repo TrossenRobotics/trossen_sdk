@@ -15,10 +15,10 @@
 
 
 namespace trossen::hw::rivet {
-
 namespace {
 double now_seconds() {
-  using namespace std::chrono;
+  using std::chrono::duration;
+  using std::chrono::steady_clock;
   return duration<double>(steady_clock::now().time_since_epoch()).count();
 }
 }  // namespace
@@ -70,8 +70,8 @@ void RivetComponent::configure(const nlohmann::json& config) {
   }
   trossen_arm::EndEffector end_effector;
   end_effector_str_ = config.at("end_effector").get<std::string>();
-  if (end_effector_str_ == "wxai_v0_follower") {
-    end_effector = trossen_arm::StandardEndEffector::wxai_v0_follower;
+  if (end_effector_str_ == "pro_base") {
+    end_effector = trossen_arm::StandardEndEffector::pro_base;
   } else {
     throw std::runtime_error("RivetComponent: Unknown end_effector: " + end_effector_str_);
   }
@@ -82,21 +82,20 @@ void RivetComponent::configure(const nlohmann::json& config) {
   base_driver_ = std::make_shared<trossen_base::TrossenBase>();
 
   try {
-    left_driver_->configure(left_model, trossen_arm::StandardEndEffector::wxai_v0_leader,
-      left_ip_address_, true);
-    right_driver_->configure(right_model, trossen_arm::StandardEndEffector::wxai_v0_leader,
-      right_ip_address_, true);
+    left_driver_->configure(left_model, end_effector, left_ip_address_, true);
+    right_driver_->configure(right_model, end_effector, right_ip_address_, true);
   } catch (const std::exception& e) {
     throw std::runtime_error(
       "RivetComponent: Failed to configure driver: " + std::string(e.what()));
   }
 
   if (!base_driver_->wait_until_ready()) {
-      throw std::runtime_error( "RivetComponent: Base failed to become ready.");
+      throw std::runtime_error("RivetComponent: Base failed to become ready.");
   }
 
 
-    // TODO: @schromya Resolve this hack when max gripper position error is fixed in driver
+    // TODO(schromya): Resolve this hack when the driver's max gripper
+    // position error is fixed.
   for (auto& driver : {left_driver_, right_driver_}) {
     auto limits = driver->get_joint_limits();
     if (!limits.empty()) {
@@ -110,13 +109,13 @@ void RivetComponent::configure(const nlohmann::json& config) {
       }
     }
   }
-  
-  // TODO: @schromya See if this can be done in producer
+
+  // TODO(schromya): @schromya See if this can be done in producer
   base_update_running_ = true;
   base_update_thread_ = std::thread(&RivetComponent::base_update_loop, this);
 
 
-  if(left_driver_->get_num_joints() != right_driver_->get_num_joints()) {
+  if (left_driver_->get_num_joints() != right_driver_->get_num_joints()) {
     throw std::runtime_error(
       "RivetComponent: Left and right arms must have the same number of joints. (LEFT: "
       + std::to_string(left_driver_->get_num_joints()) + ", RIGHT: "
@@ -218,9 +217,8 @@ void RivetComponent::configure(const nlohmann::json& config) {
   }
 
   // Configure mode
-  right_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
-  left_driver_->set_gripper_mode(trossen_arm::Mode::external_effort);
-
+  right_driver_->set_gripper_mode(trossen_arm::Mode::effort);
+  left_driver_->set_gripper_mode(trossen_arm::Mode::effort);
 }
 
 nlohmann::json RivetComponent::get_info() const {
@@ -240,7 +238,6 @@ nlohmann::json RivetComponent::get_info() const {
 
 
 std::vector<float> RivetComponent::read_joint() {
-
   if (!left_driver_ || !right_driver_) return {};
   const auto& left_positions = left_driver_->get_robot_output().joint.all.positions;
   std::vector<float> left_out(left_positions.begin(), left_positions.end());
@@ -261,9 +258,9 @@ std::vector<float> RivetComponent::read_joint() {
 
 void RivetComponent::write_joint(const std::vector<float>& cmd)
 {
-  // TODO: @schromya: Don't hard code?
+  // TODO(schromya): @schromya: Don't hard code?
   if (!left_driver_ || !right_driver_) return;
-  const size_t EXPECTED_CMD_SIZE = 18; // 14 joint positions + 4 base commands
+  const size_t EXPECTED_CMD_SIZE = 18;  // 14 joint positions + 4 base commands
 
   if (cmd.size() != EXPECTED_CMD_SIZE) {
     throw std::runtime_error(
@@ -276,10 +273,13 @@ void RivetComponent::write_joint(const std::vector<float>& cmd)
   double left_grip = static_cast<double>(cmd[6]);
   double right_grip = static_cast<double>(cmd[13]);
 
-  if (smoothing_enabled_) {
+  if (arm_smoothing_enabled_) {
     const double t = now_seconds();
     left_arm_filt_.filter(left_pos, t);
     right_arm_filt_.filter(right_pos, t);
+  }
+  if (gripper_smoothing_enabled_) {
+    const double t = now_seconds();
     left_grip = left_grip_filt_.filter(left_grip, t);
     right_grip = right_grip_filt_.filter(right_grip, t);
   }
@@ -290,8 +290,8 @@ void RivetComponent::write_joint(const std::vector<float>& cmd)
     right_pos[4], right_pos[5]}, write_moving_time_s_, false);
 
 
-  left_driver_->set_gripper_position(left_grip, write_moving_time_s_, false);
-  right_driver_->set_gripper_position(right_grip, write_moving_time_s_, false);
+  left_driver_->set_gripper_position(left_grip, 0.0, false);
+  right_driver_->set_gripper_position(right_grip, 0.0, false);
 
   const double base_vx = static_cast<double>(cmd[14]);
   const double base_vy = static_cast<double>(cmd[15]);
@@ -346,12 +346,11 @@ void RivetComponent::summon_joint(const std::vector<float>& cmd) {
   // mirror loop takes over with instant writes.
   left_driver_->set_all_positions(left_pos, staging_time_s_, true);
   right_driver_->set_all_positions(right_pos, staging_time_s_, true);
-
 }
 
 std::vector<float> RivetComponent::read_cartesian() {
   if (!left_driver_ || !right_driver_) return {};
-  const int LEN = 14; // (4 cart + 3 rotation vector + 1 gripper) * 2
+  const int LEN = 14;  // (4 cart + 3 rotation vector + 1 gripper) * 2
   const auto& left_out = left_driver_->get_robot_output();
   const auto& right_out = right_driver_->get_robot_output();
 
@@ -372,12 +371,11 @@ std::vector<float> RivetComponent::read_cartesian() {
   sample.push_back(static_cast<float>(last_base_lift_));
 
   return sample;
-
 }
 
 void RivetComponent::write_cartesian(const std::vector<float>& cmd) {
   if (!left_driver_ || !right_driver_) return;
-  const int EXPECTED_LEN = 18; // (3 cart + 3 rotation vector + 1 gripper) * 2 + 4 base
+  const int EXPECTED_LEN = 18;  // (3 cart + 3 rotation vector + 1 gripper) * 2 + 4 base
   const int CART_LEN = 6;
   if (EXPECTED_LEN != cmd.size()) return;
   std::array<double, CART_LEN> left_cartesian_goal, right_cartesian_goal;
@@ -505,4 +503,5 @@ void RivetComponent::stage() {
 }
 
 REGISTER_HARDWARE(RivetComponent, "rivet")
-}
+
+}  // namespace trossen::hw::rivet
