@@ -47,6 +47,9 @@ namespace {
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/hw/active_hardware_registry.hpp"
 #include "trossen_sdk/hw/glide/glide_session_control_component.hpp"
+#ifdef TROSSEN_ENABLE_RIVET
+#include "trossen_sdk/hw/base/trossen_base_component.hpp"
+#endif
 #include "trossen_sdk/hw/session_control/session_control_capable.hpp"
 
 // Producers
@@ -432,6 +435,26 @@ PYBIND11_MODULE(trossen_sdk, m) {
              session_control::SessionControlCapable,
              std::shared_ptr<glide::GlideSessionControlComponent>>(
       m, "GlideSessionControlComponent");
+
+#ifdef TROSSEN_ENABLE_RIVET
+  // Registered for the same reason as the Glide component above: without it
+  // HardwareRegistry.create() hands Python a plain HardwareComponent and the
+  // e-stop is unreachable from the recorder.
+  py::class_<base::TrossenBaseComponent, HardwareComponent,
+             std::shared_ptr<base::TrossenBaseComponent>>(
+      m, "TrossenBaseComponent")
+    .def("emergency_stop", &base::TrossenBaseComponent::emergency_stop,
+         "Halt the base and latch its e-stop. Stops the BASE ONLY -- the arms "
+         "keep running and must be safed separately. Returns True if sent.")
+    .def("recover", &base::TrossenBaseComponent::recover,
+         "Clear latched faults if any, then re-enable after an e-stop. "
+         "Returns True if the re-enable was sent.")
+    .def("is_e_stopped", &base::TrossenBaseComponent::is_e_stopped,
+         "True while the base reports itself stopped. The physical e-stop sets "
+         "the same bit, so this does not identify which one fired.")
+    .def("telemetry", &base::TrossenBaseComponent::telemetry,
+         "Live battery / pose / fault / e-stop snapshot for operator displays.");
+#endif
 
   py::class_<HardwareRegistry>(m, "HardwareRegistry")
     .def_static("create", &HardwareRegistry::create,

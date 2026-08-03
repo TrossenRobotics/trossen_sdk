@@ -87,6 +87,51 @@ public:
   /// Command zero translation, rotation, and lift. Idempotent.
   void end_teleop() override;
 
+  // ── Emergency stop ───────────────────────────────────────────────────────
+
+  /**
+   * @brief Command the base's emergency stop.
+   *
+   * Zeroes the commanded velocity first, then latches the firmware e-stop, so
+   * releasing it later cannot hand the wheels a stale pre-stop velocity.
+   *
+   * Stops the BASE ONLY. The arms are driven through libtrossen_arm on a
+   * separate path and keep doing whatever they were doing; safing them is the
+   * caller's job. A caller that stops the base and leaves the arms running is
+   * the dangerous case this comment exists to prevent.
+   *
+   * Not a substitute for the physical e-stop, which cuts power. This one
+   * travels over the same link as everything else and cannot stop anything if
+   * that link is down.
+   *
+   * @return true if the command was sent.
+   */
+  bool emergency_stop();
+
+  /**
+   * @brief Clear latched faults and re-enable the base after an e-stop.
+   *
+   * Firmware blocks re-enable while a critical fault is latched, so faults are
+   * cleared first when one is present. Without this the base stays stopped for
+   * the rest of the process's life and the only way back is a restart.
+   *
+   * @return true if the re-enable command was sent.
+   */
+  bool recover();
+
+  /// @brief Whether the base currently reports itself emergency-stopped.
+  ///
+  /// Reads the heartbeat's e-stop bit, which the physical e-stop sets too — so
+  /// a true here does not mean *this* software stop is the cause. Present it as
+  /// "the base is stopped", not "the software stop fired".
+  bool is_e_stopped() const;
+
+  /// @brief Live values for an operator display: battery, pose, faults, e-stop.
+  ///
+  /// Separate from get_info(), which reports configuration. Safe to call while
+  /// the update thread is running.
+  nlohmann::json telemetry() const;
+
 private:
   /// Ticks `update_base()` until `update_running_` clears.
   void update_loop();
@@ -116,6 +161,16 @@ private:
   float max_angular_rps_{1.2f};
   float max_lift_units_per_s_{8000.0f};
   double ready_timeout_s_{60.0};
+
+  /// Battery percentage at or below which the host should emergency-stop.
+  /// Zero disables the check, which is the default: a robot that stops itself
+  /// is a surprise, so it is opted into per rig rather than assumed.
+  ///
+  /// Published through telemetry() rather than acted on here. The component can
+  /// halt the base but cannot stop the teleop mirror, home the arms, or end the
+  /// session, and a partial stop is worse than none — so the decision belongs to
+  /// whoever can carry out all of it.
+  float estop_battery_percent_{0.0f};
 };
 
 }  // namespace trossen::hw::base

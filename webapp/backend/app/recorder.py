@@ -489,8 +489,55 @@ def signal_rerecord(session_id: str) -> bool:
     return _signal(session_id, "rerecord")
 
 
+# Last telemetry sample per session, for the secondary screen. Bounded by the
+# number of live sessions (realistically one) and cleared when a recorder exits,
+# so this cannot grow. Guarded by `_lock` like `_runners`.
+_latest_telemetry: dict[str, dict[str, Any]] = {}
+
+
+def _set_latest_telemetry(session_id: str, payload: dict[str, Any]) -> None:
+    with _lock:
+        _latest_telemetry[session_id] = payload
+
+
+def get_latest_telemetry(session_id: str | None = None) -> dict[str, Any] | None:
+    """Most recent base telemetry, or None if nothing has reported.
+
+    With no session_id, returns the sample from whichever session is live —
+    the secondary screen is a fixed display that does not know or care which
+    session id is current.
+    """
+    with _lock:
+        if session_id is not None:
+            return _latest_telemetry.get(session_id)
+        for sid in _runners:
+            sample = _latest_telemetry.get(sid)
+            if sample is not None:
+                return sample
+        return None
+
+
+def _clear_latest_telemetry(session_id: str) -> None:
+    with _lock:
+        _latest_telemetry.pop(session_id, None)
+
+
+def signal_emergency_stop(session_id: str) -> bool:
+    """Trigger the software e-stop in the recorder child.
+
+    The child halts the base, stops teleop, homes the arms, then aborts the
+    session discarding the in-flight episode. Returns False if no recorder is
+    running for this session -- in which case nothing holds the hardware, so
+    there is also nothing this signal could have stopped.
+
+    Not the physical e-stop: this rides the same pipe as every other control
+    message and is only as available as the process on the other end.
+    """
+    return _signal(session_id, "estop")
+
+
 def _signal(session_id: str, signal: str) -> bool:
-    """Shared body for signal_next / signal_rerecord."""
+    """Shared body for signal_next / signal_rerecord / signal_emergency_stop."""
     with _lock:
         runner = _runners.get(session_id)
     if runner is None:
@@ -695,6 +742,14 @@ def _run_reader(session_id: str, runner: _Runner) -> None:
                     "type": "stats",
                     "data": payload.get("data", {}),
                 })
+            elif ptype == "telemetry":
+                # Cached for the secondary screen to poll, and pushed to any WS
+                # subscriber. Cached rather than WS-only because the secondary
+                # screen is a standalone display that may connect at any time
+                # and must show something immediately, not wait for the next
+                # sample.
+                _set_latest_telemetry(session_id, payload)
+                bus.publish(session_id, payload)
             elif ptype == "event":
                 _handle_event(runner, payload)
                 if payload.get("event") == "session_complete":
@@ -709,6 +764,10 @@ def _run_reader(session_id: str, runner: _Runner) -> None:
             runner.proc.wait()
         with _lock:
             _runners.pop(session_id, None)
+            # Drop the cached sample with the runner that produced it, so the
+            # secondary screen cannot keep showing a battery reading from a
+            # session that has ended.
+            _latest_telemetry.pop(session_id, None)
 
     rc = runner.proc.returncode
     clean_exit = (rc == 0 and success_seen and error_message is None)
@@ -766,6 +825,34 @@ def _handle_event(runner: _Runner, payload: dict[str, Any]) -> None:
         bus.publish(runner.session_id, {
             "type": "lifecycle",
             "data": {"event": event, "episode_index": episode_index},
+        })
+        return
+    if event == "emergency_stopped":
+        # Logged as well as published, deliberately: a stop that safed the
+        # hardware is the one event you want in the container log afterwards,
+        # and `detail` records what each step actually managed to do. Without
+        # the log line the whole sequence is invisible unless a WS client
+        # happened to be attached at the time.
+        detail = payload.get("detail")
+        # `reason` distinguishes the operator pressing the button from the
+        # low-battery watchdog tripping. Worth carrying through: "the robot
+        # stopped itself" and "someone stopped it" want different responses, and
+        # after the fact the log is the only place that difference survives.
+        reason = payload.get("reason", "manual")
+        extra = ""
+        if reason == "low_battery":
+            extra = (f" battery={payload.get('battery_percent')}% "
+                     f"threshold={payload.get('estop_battery_percent')}%")
+        print(f"[recorder {runner.session_id[:8]}] EMERGENCY STOP "
+              f"(reason={reason}){extra}: {detail}", flush=True)
+        bus.publish(runner.session_id, {
+            "type": "emergency_stopped",
+            "data": {
+                "reason": reason,
+                "battery_percent": payload.get("battery_percent"),
+                "estop_battery_percent": payload.get("estop_battery_percent"),
+                "detail": detail,
+            },
         })
         return
     # session_complete is intentionally not published here — see caller.

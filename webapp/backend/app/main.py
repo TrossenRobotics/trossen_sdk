@@ -38,6 +38,7 @@ from app.recorder import (
     clear_session_headless,
     mark_session_headless,
     set_preview,
+    signal_emergency_stop,
     signal_next,
     signal_rerecord,
     start_recording,
@@ -763,6 +764,83 @@ def next_episode(session_id: str) -> Session:
             detail=f"Cannot advance: session is in '{sess.status}', not 'active'",
         )
     if not signal_next(session_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No active recorder for session '{session_id}'",
+        )
+    return sess
+
+
+@app.get("/api/second-screen")
+def second_screen() -> dict[str, Any]:
+    """Everything the secondary screen shows, in one poll.
+
+    One endpoint rather than several because the consumer is a fixed display
+    that reconnects on its own and should never render half-populated: it either
+    has a snapshot or it does not.
+
+    Modality-agnostic by construction. Fields for hardware this robot does not
+    have are simply absent (`base` is null on a stationary rig), so the screen
+    runs unchanged on every system rather than needing to know which is fitted.
+
+    `base` telemetry only exists while a recorder is live, because only the
+    recorder child holds the base driver. A null `base` with a null
+    `active_session` means "nothing is running", not "the base is broken" — the
+    screen must render those differently.
+    """
+    from app.machine_report import _storage_status
+    from app.recorder import get_latest_telemetry
+
+    sessions = list_sessions()
+    active = next((s for s in sessions if s.status == "active"), None)
+
+    telemetry = get_latest_telemetry()
+    base = telemetry.get("data") if telemetry else None
+
+    return {
+        "storage": _storage_status(),
+        "active_session": (
+            {
+                "id": active.id,
+                "name": active.name,
+                "status": active.status,
+                "current_episode": active.current_episode,
+                "num_episodes": active.num_episodes,
+                "system_id": active.system_id,
+                "system_name": active.system_name,
+                "dry_run": active.dry_run,
+            }
+            if active
+            else None
+        ),
+        "base": base,
+    }
+
+
+@app.post("/api/sessions/{session_id}/emergency-stop")
+def emergency_stop(session_id: str) -> Session:
+    """Software emergency stop: halt the base, home the arms, end the session.
+
+    Distinct from Stop, which is about ending a session tidily. This is about
+    getting the hardware still: the base is halted first, the teleop mirror is
+    silenced, the arms are driven home, and only then is the session torn down
+    with the in-flight episode discarded.
+
+    Deliberately permissive about session status where `next`/`rerecord` are
+    strict. Refusing to stop a robot because a database row says the session is
+    not 'active' would be the wrong call every time; if a recorder is holding the
+    hardware, we want it stopped.
+
+    Returns 404 only when no recorder is running for this session -- nothing
+    holds the hardware then, so there is nothing this could have stopped.
+
+    This is not the physical e-stop. It shares the link with everything else and
+    cannot help when that link is down.
+    """
+    sess = get_session(session_id)
+    if sess is None:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found")
+    if not signal_emergency_stop(session_id):
         raise HTTPException(
             status_code=404,
             detail=f"No active recorder for session '{session_id}'",

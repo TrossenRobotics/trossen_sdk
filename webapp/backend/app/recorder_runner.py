@@ -49,6 +49,25 @@ import rerun as rr
 import trossen_sdk as ts
 
 _READY_PREFIX = "__READY__:"
+
+# Longest the software e-stop waits for one arm's homing move. Generous against
+# the arms' staging_time_s (0.3s in the Rivet config, but the move itself is a
+# full trajectory) while still bounded: the base is already halted by the time
+# we get here, so a wedged arm must not hold the whole stop open.
+_ESTOP_HOME_TIMEOUT_S = 15.0
+
+# How often base telemetry is sampled for the secondary screen. 2 Hz: it is a
+# status board read from across a room, so battery and pose do not need to be
+# smooth, and each sample is a CAN round trip competing with the control loop.
+_TELEMETRY_PERIOD_S = 0.5
+
+# Consecutive below-threshold battery samples before the auto e-stop fires. At
+# _TELEMETRY_PERIOD_S that is ~1.5s — long enough to ride out the voltage sag of
+# a hard acceleration or a single bad BMS frame, short enough that it still beats
+# the operator noticing. A constant rather than config: the tuning that matters
+# to a rig is the threshold, and a second knob here would mostly be a way to
+# accidentally disable the debounce.
+_BATTERY_TRIP_SAMPLES = 3
 _SUCCESS_PREFIX = "__SUCCESS__:"
 _ERROR_PREFIX = "__ERROR__:"
 
@@ -218,6 +237,18 @@ _RERUN_GRPC_PORT = 9876
 # what keeps the live preview alive for the whole session. None until
 # _start_rerun_server succeeds (or if it fails — preview simply disabled).
 _rr_stream: rr.RecordingStream | None = None
+
+# Teleop controllers and session-control sources for this run.
+#
+# Module scope for two reasons. The original one is lifetime: dropping a
+# controller stops its mirror thread, so something has to hold them for the
+# whole session. The second is that the software e-stop has to reach the
+# controllers from the stdin thread to silence the mirror before it moves the
+# arms, and it cannot see main()'s locals. Previously these were assigned as
+# bare `_controllers = ...` inside main(), which made them locals despite the
+# module-ish naming — `_emergency_stop` raised NameError on them.
+_controllers: list = []
+_session_controls: list = []
 
 # Kept alive for the process lifetime so the SDK's weak callback refs stay
 # valid (mirrors how _controllers is retained in main()).
@@ -993,6 +1024,186 @@ def _stop_controllers(controllers: list) -> None:
             ctrl.stop_teleop()
 
 
+def _components_of_type(type_name: str) -> dict[str, Any]:
+    """Active components whose `get_type()` matches, keyed by id.
+
+    Reads the active registry rather than threading component dicts down from
+    bootstrap: the registry already holds every component `mark_active=True`
+    created, and pybind hands back the most-derived *registered* type, so the
+    base arrives as a TrossenBaseComponent with its e-stop reachable.
+    """
+    try:
+        return {
+            comp_id: comp
+            for comp_id, comp in ts.ActiveHardwareRegistry.get_all().items()
+            if comp.get_type() == type_name
+        }
+    except Exception:
+        return {}
+
+
+def _emergency_stop() -> dict[str, Any]:
+    """Halt the base, stop teleop, home the arms. Returns a result summary.
+
+    Ordering is the whole point and is not interchangeable:
+
+      1. Latch the base e-stop FIRST. The base is the thing that can drive away,
+         and it is the only step whose delay is measured in metres. Once latched,
+         TrossenBaseComponent::write() commands zero on every subsequent mirror
+         tick, so a still-running teleop loop becomes harmless rather than a
+         race.
+      2. Stop the teleop mirror. Until this returns, the mirror is still writing
+         follower positions at the configured rate; commanding a home move under
+         it would have the two fighting over the same joints.
+      3. Home the arms, in parallel. end_teleop() seeds the position setpoint to
+         the measured pose (so the arm cannot sag once position mode engages),
+         drives to all-zeros over the arm's staging_time_s, then releases the
+         driver. Parallel so total wall-clock is one trajectory, not four.
+
+    This is NOT the physical e-stop. It travels over the same link as every
+    other command and cannot stop anything if that link is down; the physical
+    button cuts power and remains the real one.
+    """
+    result: dict[str, Any] = {"base": None, "teleop": None, "arms": {}}
+
+    # 1. Base first.
+    for base_id, base in _components_of_type("trossen_base").items():
+        try:
+            result["base"] = {base_id: bool(base.emergency_stop())}
+        except Exception as exc:
+            result["base"] = {base_id: f"failed: {exc}"}
+
+    # 2. Silence the mirror before touching the arms.
+    stopped = 0
+    for controller in _controllers or []:
+        try:
+            controller.stop_teleop()
+            stopped += 1
+        except Exception as exc:
+            result["teleop"] = f"failed: {exc}"
+    if result["teleop"] is None:
+        result["teleop"] = f"stopped {stopped} controller(s)"
+
+    # 3. Home the arms. Mirrors _park_arms_at_zero in hw_test_runner.
+    arms = _components_of_type("trossen_arm")
+    errors: dict[str, str] = {}
+
+    def home(arm_id: str, comp: Any) -> None:
+        try:
+            cap = ts.as_teleop_capable(comp)
+            if cap is None:
+                errors[arm_id] = "component is not TeleopCapable"
+                return
+            cap.end_teleop()
+        except Exception as exc:
+            errors[arm_id] = str(exc)
+
+    threads = [
+        threading.Thread(target=home, args=(arm_id, comp), daemon=True,
+                         name=f"estop-home-{arm_id}")
+        for arm_id, comp in arms.items()
+    ]
+    for t in threads:
+        t.start()
+    # Bounded: a wedged arm must not hold the e-stop open forever. The base is
+    # already stopped by here, so giving up on a join is a reporting problem
+    # rather than a safety one.
+    for t in threads:
+        t.join(timeout=_ESTOP_HOME_TIMEOUT_S)
+    for arm_id in arms:
+        result["arms"][arm_id] = errors.get(arm_id, "homed")
+
+    return result
+
+
+def _base_telemetry_sampler(
+    stop: threading.Event,
+    stop_event: threading.Event,
+    abort_event: threading.Event,
+) -> None:
+    """Emit base telemetry on stdout, and auto-e-stop on a flat battery.
+
+    Only the recorder child holds the hardware, so this is the only place the
+    base's battery / pose / fault state can be read while a session is live. The
+    parent caches the last sample for the secondary screen to poll.
+
+    Silent no-op on modalities with no trossen_base (stationary, solo, mobile):
+    the secondary screen has to work everywhere, so "no base" is a normal state
+    reported by absence rather than an error.
+
+    The low-battery trip runs the same `_emergency_stop()` the operator's button
+    does, deliberately — one stop path means one thing to reason about, one thing
+    to test, and no chance of the automatic route being the less-tested one.
+    """
+    bases = _components_of_type("trossen_base")
+    if not bases:
+        return
+
+    # Consecutive below-threshold samples per base. A BMS percentage sags under
+    # load and occasionally reports a bad frame, so one reading under the line
+    # is not evidence of a flat battery; `_BATTERY_TRIP_SAMPLES` at the sample
+    # period is. Reset on any sample at or above the line, so the count means
+    # "consecutive", not "cumulative".
+    below: dict[str, int] = {base_id: 0 for base_id in bases}
+    tripped = False
+
+    while not stop.is_set():
+        for base_id, base in bases.items():
+            try:
+                data = base.telemetry()
+            except Exception:
+                # Telemetry is a display nicety; never let a read failure take
+                # down a recording that is otherwise fine. Notably this also
+                # means a failing read cannot fake a flat battery.
+                continue
+
+            _emit({
+                "type": "telemetry",
+                "source": "trossen_base",
+                "id": base_id,
+                "data": data,
+            })
+
+            if tripped:
+                continue
+
+            # The validity guard lives in C++ alongside the threshold (see
+            # TrossenBaseComponent::telemetry): a base reports 0% until its
+            # first BMS frame, and 0 means "no reading yet", not "flat".
+            if not data.get("battery_below_estop_threshold"):
+                below[base_id] = 0
+                continue
+
+            below[base_id] += 1
+            if below[base_id] < _BATTERY_TRIP_SAMPLES:
+                continue
+
+            percent = (data.get("battery") or {}).get("percent")
+            threshold = data.get("estop_battery_percent")
+            print(f"[recorder-runner] battery {percent}% at or below "
+                  f"estop_battery_percent={threshold} for "
+                  f"{_BATTERY_TRIP_SAMPLES} consecutive samples — "
+                  f"emergency stopping", flush=True)
+            tripped = True
+            try:
+                outcome = _emergency_stop()
+            except Exception as exc:
+                outcome = {"error": str(exc)}
+            _emit({
+                "type": "event",
+                "event": "emergency_stopped",
+                "reason": "low_battery",
+                "battery_percent": percent,
+                "estop_battery_percent": threshold,
+                "detail": outcome,
+            })
+            # Same ending as the manual stop: discard the in-flight episode,
+            # because a recording that ends on a dying battery is not data.
+            abort_event.set()
+            stop_event.set()
+        stop.wait(_TELEMETRY_PERIOD_S)
+
+
 def _stdin_reader(
     stop_event: threading.Event,
     next_event: threading.Event,
@@ -1038,6 +1249,21 @@ def _stdin_reader(
         if mtype != "signal":
             continue
         signal = msg.get("signal")
+        if signal == "estop":
+            # Run the hardware sequence on this thread rather than flagging an
+            # event for the episode loop: the loop only notices flags when it
+            # next polls, and an emergency action must not wait a poll period.
+            # Then abort, so the in-flight episode is discarded rather than
+            # finalized -- whatever it captured ends mid-motion and is not data.
+            try:
+                outcome = _emergency_stop()
+            except Exception as exc:  # never let the reader die mid-stop
+                outcome = {"error": str(exc)}
+            _emit({"type": "event", "event": "emergency_stopped",
+                   "detail": outcome})
+            abort_event.set()
+            stop_event.set()
+            return
         if signal == "abort":
             abort_event.set()
             stop_event.set()
@@ -1179,6 +1405,16 @@ def _run_episode_loop(
         daemon=True,
     )
     sampler.start()
+
+    # Shares sampler_stop: both are display feeds with the same lifetime, and
+    # one Event means there is no way to stop one and leak the other.
+    telemetry = threading.Thread(
+        target=_base_telemetry_sampler,
+        args=(sampler_stop, stop_event, abort_event),
+        name="recorder-telemetry",
+        daemon=True,
+    )
+    telemetry.start()
 
     try:
         first_iteration_pending = True
@@ -1467,6 +1703,10 @@ def main() -> int:
         # must inherit a fully-blocked signal mask. See
         # _block_signals_on_this_thread for the EINTR-abort rationale.
         with _block_signals_on_this_thread():
+            # global, so the e-stop running on the stdin thread can reach the
+            # controllers; a bare assignment here would rebind main()'s locals
+            # and leave the module-level lists empty.
+            global _controllers, _session_controls
             mgr, _controllers, _session_controls, mcap_root = (
                 _build_session_manager(config))
             # Clear ghost/header-only episode files from a prior aborted run

@@ -74,6 +74,18 @@ void TrossenBaseComponent::configure(const nlohmann::json& config) {
     positive_limit(config, "max_lift_units_per_s", max_lift_units_per_s_, id);
   ready_timeout_s_ = config.value("ready_timeout_s", ready_timeout_s_);
 
+  // Not routed through positive_limit(): zero is the meaningful "disabled"
+  // value here, where for a velocity limit it would be nonsense. Negative is
+  // still rejected, since it could only be a typo and would silently disable
+  // a check the operator believed was armed.
+  estop_battery_percent_ =
+    config.value("estop_battery_percent", estop_battery_percent_);
+  if (estop_battery_percent_ < 0.0f || estop_battery_percent_ > 100.0f) {
+    throw std::runtime_error(
+      "TrossenBaseComponent '" + id + "': estop_battery_percent must be within "
+      "[0, 100] (0 disables), got " + std::to_string(estop_battery_percent_));
+  }
+
   driver_ = std::make_shared<trossen_base::TrossenBase>();
 
   if (!driver_->wait_until_ready(ready_timeout_s_)) {
@@ -168,6 +180,75 @@ void TrossenBaseComponent::write(const std::vector<float>& cmd) {
 void TrossenBaseComponent::end_teleop() {
   if (!driver_) return;
   send(0.0f, 0.0f, 0.0f, 0.0f);
+}
+
+bool TrossenBaseComponent::emergency_stop() {
+  if (!driver_) return false;
+  // Zero first, then latch. Doing it in this order means the last command the
+  // base holds is a standstill, so a later release cannot resume the velocity
+  // that was in flight when the operator hit stop.
+  send(0.0f, 0.0f, 0.0f, 0.0f);
+  return driver_->e_stop();
+}
+
+bool TrossenBaseComponent::recover() {
+  if (!driver_) return false;
+  // Firmware refuses re_enable() while a critical fault is latched, so clear
+  // that first — otherwise recovery silently does nothing and the base appears
+  // permanently dead.
+  if (driver_->has_critical_fault()) {
+    driver_->clear_faults();
+  }
+  return driver_->re_enable();
+}
+
+bool TrossenBaseComponent::is_e_stopped() const {
+  return driver_ ? driver_->is_e_stopped() : false;
+}
+
+nlohmann::json TrossenBaseComponent::telemetry() const {
+  nlohmann::json t = nlohmann::json::object();
+  t["id"] = get_identifier();
+  t["connected"] = static_cast<bool>(driver_);
+  if (!driver_) return t;
+
+  t["ready"] = driver_->is_ready();
+  t["e_stopped"] = driver_->is_e_stopped();
+
+  const float percent = driver_->get_percent();
+  t["battery"] = {
+    {"percent", percent},
+    {"voltage", driver_->get_voltage()},
+    {"current", driver_->get_current()},
+    {"temp", driver_->get_temp()},
+    {"charging_state", driver_->get_charging_state()},
+  };
+
+  // The configured auto-stop threshold, and whether this sample is under it.
+  //
+  // `percent > 0` is not redundant: the driver's Status struct initialises
+  // percent to 0.0 and get_percent() returns it raw, so a base reports 0% until
+  // its first BMS frame lands. Treating that as an empty battery would trip an
+  // emergency stop on every session start, before any battery data exists.
+  // Zero therefore means "no reading yet", not "flat".
+  t["estop_battery_percent"] = estop_battery_percent_;
+  t["battery_reading_valid"] = percent > 0.0f;
+  t["battery_below_estop_threshold"] =
+    estop_battery_percent_ > 0.0f && percent > 0.0f &&
+    percent <= estop_battery_percent_;
+
+  const auto pose = driver_->get_pose();
+  t["pose"] = {{"x", pose[0]}, {"y", pose[1]}, {"theta", pose[2]}};
+
+  t["has_fault"] = driver_->has_fault();
+  t["has_critical_fault"] = driver_->has_critical_fault();
+  auto faults = nlohmann::json::array();
+  for (const auto& f : driver_->get_faults()) {
+    faults.push_back({{"description", f.description}, {"critical", f.critical}});
+  }
+  t["faults"] = std::move(faults);
+
+  return t;
 }
 
 std::vector<float> TrossenBaseComponent::last_command() const {
