@@ -161,6 +161,14 @@ if(TROSSEN_ENABLE_RIVET)
     )
     FetchContent_MakeAvailable(trossen_base)
     target_link_libraries(trossen_sdk PUBLIC trossen_base)
+    # trossen_base's target exports only ${CMAKE_CURRENT_BINARY_DIR}/include,
+    # which holds nothing but a generated version.hpp — its real headers live in
+    # the source include/ dir, reachable there only through a directory-scoped
+    # include_directories() that does not propagate to consumers. So a fetched
+    # (as opposed to installed) trossen_base links but cannot be included. Add
+    # the source include dir ourselves until upstream exports it.
+    target_include_directories(trossen_sdk SYSTEM PUBLIC
+      "${trossen_base_SOURCE_DIR}/include")
   endif()
 endif()
 
@@ -214,14 +222,20 @@ find_package(libtrossen_arm REQUIRED)
 include(CheckCXXSourceCompiles)
 get_target_property(_trossen_arm_includes libtrossen_arm INTERFACE_INCLUDE_DIRECTORIES)
 set(CMAKE_REQUIRED_INCLUDES "${_trossen_arm_includes}")
+# Compile only — do NOT link. The driver is a static archive with a large set of
+# vendored transitive dependencies, so a link-based check fails with undefined
+# references on a machine whose driver is perfectly fine, and reports that as
+# "the API is missing". Whether the declaration exists is a header question; the
+# symbol resolves at real link time against libtrossen_arm.
+set(CMAKE_TRY_COMPILE_TARGET_TYPE STATIC_LIBRARY)
 check_cxx_source_compiles("
 #include \"libtrossen_arm/trossen_arm.hpp\"
-int main() {
-  trossen_arm::TrossenArmDriver driver;
+unsigned probe(trossen_arm::TrossenArmDriver& driver) {
   trossen_arm::RobotOutput::InputReport report = driver.get_input_report();
   return report.joystick_x + report.joystick_y + report.buttons;
 }
 " TROSSEN_HAVE_ARM_INPUT_REPORT)
+unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
 unset(CMAKE_REQUIRED_INCLUDES)
 if(TROSSEN_HAVE_ARM_INPUT_REPORT)
   target_compile_definitions(trossen_sdk PRIVATE TROSSEN_HAVE_ARM_INPUT_REPORT)
@@ -349,9 +363,10 @@ target_include_directories(trossen_sdk PUBLIC
 target_link_libraries(trossen_sdk PRIVATE ${foxglove_SOURCE_DIR}/lib/libfoxglove.a)
 
 # Required OpenCV dependency for camera producer
-# On Ubuntu/Debian, OpenCV 4.x is typically installed as opencv4
-# Add common installation paths to help CMake find it
-set(CMAKE_PREFIX_PATH ${CMAKE_PREFIX_PATH} /usr/lib/x86_64-linux-gnu/cmake)
+# On Ubuntu/Debian, OpenCV 4.x is typically installed as opencv4.
+# The architecture-conditional multiarch cmake dir was already appended near the
+# top of this file; re-adding a hardcoded x86_64 path here found nothing on
+# aarch64 (Jetson) and only worked on x86 by coincidence of duplication.
 find_package(OpenCV QUIET NAMES opencv4 OpenCV)
 if(NOT OpenCV_FOUND)
   # Fall back to pkg-config if CMake config isn't found
@@ -541,6 +556,9 @@ if(BUILD_PYTHON_BINDINGS OR DEFINED SKBUILD)
   endif()
   if(TROSSEN_ENABLE_ZED)
     target_compile_definitions(trossen_sdk_python PRIVATE TROSSEN_ENABLE_ZED)
+  endif()
+  if(TROSSEN_ENABLE_RIVET)
+    target_compile_definitions(trossen_sdk_python PRIVATE TROSSEN_ENABLE_RIVET)
   endif()
 
   # Copy the built module and dependency libraries into the Python package

@@ -36,8 +36,11 @@ ARG DEBIAN_FRONTEND=noninteractive
 # track whatever firmware the arms in the field are running.
 ENV TROSSEN_ARM_VERSION=1.11.0
 # Commit on TrossenRobotics/trossen_arm-source built below. See the build step
-# for why source rather than the released tarball.
-ENV TROSSEN_ARM_SOURCE_REF=17ce96632b31170b8fb8a9da20aa5c34f472d19d
+# for why source rather than the released tarball. Tip of the actuate-demo
+# branch: carries the input-report API the Glide handles need (absent from main)
+# and a 50ms UDP timeout, up from 1ms — the short one dropped teleop packets
+# under normal network jitter.
+ENV TROSSEN_ARM_SOURCE_REF=6cc9cc6c3a30c3ada159c3f1904db4bed763f3bf
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
@@ -49,6 +52,13 @@ RUN apt-get update && apt-get install -yqq --no-install-recommends \
       ffmpeg \
       git \
       gnupg \
+      # pinocchio, vendored by libtrossen_arm, hard-requires exactly these two
+      # Boost components (BOOST_REQUIRED_COMPONENTS in its CMakeLists). Without
+      # them its configure step fails with "Could NOT find Boost", which reads
+      # as the arm driver failing to build. Not libboost-all-dev: that is over a
+      # GB of image for two libraries.
+      libboost-filesystem-dev \
+      libboost-serialization-dev \
       libfastcdr-dev \
       libfastrtps-dev \
       libopencv-dev \
@@ -102,6 +112,33 @@ RUN --mount=type=ssh \
     && git checkout $TROSSEN_ARM_SOURCE_REF \
     && make install/cpp/system JOBS="$(nproc)" \
     && ldconfig \
+    # install/cpp/system installs the archive and headers but NOT a CMake package
+    # config — upstream only generates one in its release-packaging flow, from
+    # cmake/release/cmake/libtrossen_armConfig.cmake.in. Without it the SDK's
+    # find_package(libtrossen_arm REQUIRED) fails and the extension will not
+    # build, so write the equivalent here. Version comes from the repo's VERSION
+    # file rather than being hardcoded, so it cannot drift from the archive.
+    && mkdir -p /usr/local/lib/cmake/libtrossen_arm \
+    && printf '%s\n' \
+        'if(NOT TARGET libtrossen_arm)' \
+        '  add_library(libtrossen_arm STATIC IMPORTED)' \
+        '  set_target_properties(libtrossen_arm PROPERTIES' \
+        '    IMPORTED_LOCATION "/usr/local/lib/libtrossen_arm.a"' \
+        '    INTERFACE_INCLUDE_DIRECTORIES "/usr/local/include"' \
+        '  )' \
+        'endif()' \
+        > /usr/local/lib/cmake/libtrossen_arm/libtrossen_armConfig.cmake \
+    && printf '%s\n' \
+        "set(PACKAGE_VERSION \"$(cat VERSION)\")" \
+        'if(PACKAGE_VERSION VERSION_LESS PACKAGE_FIND_VERSION)' \
+        '  set(PACKAGE_VERSION_COMPATIBLE FALSE)' \
+        'else()' \
+        '  set(PACKAGE_VERSION_COMPATIBLE TRUE)' \
+        '  if(PACKAGE_FIND_VERSION STREQUAL PACKAGE_VERSION)' \
+        '    set(PACKAGE_VERSION_EXACT TRUE)' \
+        '  endif()' \
+        'endif()' \
+        > /usr/local/lib/cmake/libtrossen_arm/libtrossen_armConfigVersion.cmake \
     && cd .. \
     && rm -rf trossen_arm-source
 
