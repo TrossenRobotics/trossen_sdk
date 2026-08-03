@@ -4,9 +4,9 @@
   "hardware": {
     "bimanual_arms": {
       "bimanual_glide": {
-        "left_ip_address": "192.168.0.3",
+        "left_ip_address": "192.168.5.3",
         "left_model": "glide_left",
-        "right_ip_address": "192.168.0.2",
+        "right_ip_address": "192.168.5.2",
         "right_model": "glide_right",
         "joint_signs": [1,1,1,-1,-1,1,1],
         "left_joint_offsets": [0,0,0,0,0,-0.7854,0],
