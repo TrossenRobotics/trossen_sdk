@@ -80,15 +80,37 @@ interface ArmHardware {
   position_tolerance?: number[];
   velocity_tolerance?: number[];
   effort_tolerance?: number[];
+  // Optional One-Euro adaptive low-pass filter on outgoing position commands.
+  // Off by default. Cuts teleop jitter without the constant lag of a fixed
+  // low-pass: the cutoff rises with the command's rate of change, so slow
+  // motion is smoothed hard and fast motion is left alone.
+  smoothing_enabled?: boolean;
+  smoothing_gripper?: boolean;
+  smoothing_min_cutoff_hz?: number;
+  smoothing_beta?: number;
+  smoothing_d_cutoff_hz?: number;
   producers: Producer[];
 }
 
 interface BaseHardware {
   id: string;
   name: string;
-  type: 'slate_base';
+  // Two different bases, declared in two different places in the SDK config.
+  // `slate_base` is the SLATE, which lives in the legacy `hardware.mobile_base`
+  // slot. `trossen_base` is the Rivet's holonomic swerve base with a vertical
+  // lift, which lives in `hardware.components` like every other decomposed
+  // component.
+  type: 'slate_base' | 'trossen_base';
   reset_odometry: boolean;
   enable_torque: boolean;
+  // trossen_base only. Per-axis velocity ceilings the component clamps every
+  // command to, plus the battery percentage below which the SDK trips the
+  // software e-stop. The lift is the vertical rail, in driver units/s rather
+  // than m/s because the driver exposes it that way.
+  max_linear_mps?: number;
+  max_angular_rps?: number;
+  max_lift_units_per_s?: number;
+  estop_battery_percent?: number;
   producers: Producer[];
 }
 
@@ -198,6 +220,18 @@ const DEFAULT_JOINT_TOLERANCES: JointToleranceArrays = {
   velocity_tolerance: [0, 0, 0, 0, 0, 0, 0],
   effort_tolerance: [0, 0, 0, 0, 0, 0, 0],
 };
+// One-Euro command-smoothing defaults, kept in step with the member
+// initialisers in TrossenArmComponent (min cutoff 1.0 Hz, beta 0.9, derivative
+// cutoff 1.0 Hz). Enabling smoothing in the UI without touching the tuning must
+// produce the same behaviour as enabling it in a hand-written config.
+// Explicitly typed rather than `as const`: these seed editable form fields, and
+// literal types would make the form state un-writable.
+const SMOOTHING_DEFAULTS: { min_cutoff_hz: number; beta: number; d_cutoff_hz: number } = {
+  min_cutoff_hz: 1.0,
+  beta: 0.9,
+  d_cutoff_hz: 1.0,
+};
+
 // Same fallback semantics as armLimitOrDefault, for the tolerance arrays.
 function armToleranceOrDefault(stored: number[] | undefined, key: keyof JointToleranceArrays): number[] {
   return Array.isArray(stored) && stored.length === NUM_ARM_JOINTS
@@ -247,11 +281,21 @@ interface RawArmConfig {
   position_tolerance?: number[];
   velocity_tolerance?: number[];
   effort_tolerance?: number[];
+  smoothing_enabled?: boolean;
+  smoothing_gripper?: boolean;
+  smoothing_min_cutoff_hz?: number;
+  smoothing_beta?: number;
+  smoothing_d_cutoff_hz?: number;
   [key: string]: unknown;
 }
 
 interface RawCameraConfig {
   id?: string;
+  // The hardware registry key. This is what the SDK actually constructs the
+  // camera from, and CameraConfig defaults it to "realsense_camera" when
+  // absent — so it MUST be written back out on save. Omitting it silently
+  // turns every ZED into a RealSense.
+  type?: string;
   serial_number?: string | number;
   width?: number;
   height?: number;
@@ -270,10 +314,26 @@ interface RawMobileBaseConfig {
   [key: string]: unknown;
 }
 
+/**
+ * An entry in `hardware.components` — the decomposed-config slot for anything
+ * that is neither an arm nor a camera: the Rivet's base, the Glide input
+ * handles, the base leader, session control.
+ *
+ * Only `id` and `type` are interpreted here. Every other key is opaque to this
+ * page and is round-tripped byte-for-byte on save, because the page has no way
+ * to know what a component it does not model needs in order to work.
+ */
+interface RawComponentConfig {
+  id?: string;
+  type?: string;
+  [key: string]: unknown;
+}
+
 interface RawSdkHardware {
   arms?: Record<string, RawArmConfig>;
   cameras?: RawCameraConfig[];
   mobile_base?: RawMobileBaseConfig;
+  components?: RawComponentConfig[];
 }
 
 interface RawSdkConfig {
@@ -306,7 +366,7 @@ interface RawSystemResponse {
  * array keyed by `hardware_id`.  This function denormalises that structure
  * into a flat `Hardware[]` list where each item carries its own producers.
  */
-function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSystem {
+export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSystem {
   const config: RawSdkConfig = apiData.config ?? {};
   const hw: RawSdkHardware = config.hardware ?? {};
   const sdkProducers: RawProducer[] = config.producers ?? [];
@@ -361,6 +421,11 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
       position_tolerance: Array.isArray(armCfg.position_tolerance) ? armCfg.position_tolerance : undefined,
       velocity_tolerance: Array.isArray(armCfg.velocity_tolerance) ? armCfg.velocity_tolerance : undefined,
       effort_tolerance: Array.isArray(armCfg.effort_tolerance) ? armCfg.effort_tolerance : undefined,
+      smoothing_enabled: typeof armCfg.smoothing_enabled === 'boolean' ? armCfg.smoothing_enabled : undefined,
+      smoothing_gripper: typeof armCfg.smoothing_gripper === 'boolean' ? armCfg.smoothing_gripper : undefined,
+      smoothing_min_cutoff_hz: typeof armCfg.smoothing_min_cutoff_hz === 'number' ? armCfg.smoothing_min_cutoff_hz : undefined,
+      smoothing_beta: typeof armCfg.smoothing_beta === 'number' ? armCfg.smoothing_beta : undefined,
+      smoothing_d_cutoff_hz: typeof armCfg.smoothing_d_cutoff_hz === 'number' ? armCfg.smoothing_d_cutoff_hz : undefined,
       producers: armProducers,
     } as ArmHardware);
   }
@@ -370,13 +435,16 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
   for (const camCfg of cameras) {
     const camId = camCfg.id ?? `cam-${camCfg.serial_number ?? Date.now()}`;
 
-    // Infer camera type from the matching producer's type field.
-    // Fall back to realsense_camera if no producer found.
+    // Prefer the hardware entry's own `type`, since that is the field the SDK
+    // builds the camera from. Fall back to the matching producer's type for
+    // older configs that only carry it there, and to realsense_camera when
+    // neither says — matching CameraConfig's own default.
     const matchingProducer = sdkProducers.find((p) => p.hardware_id === camCfg.id);
+    const declaredType = camCfg.type ?? matchingProducer?.type;
     const cameraType: CameraHardware['type'] =
-      matchingProducer?.type === 'opencv_camera'
+      declaredType === 'opencv_camera'
         ? 'opencv_camera'
-        : matchingProducer?.type === 'zed_camera'
+        : declaredType === 'zed_camera'
           ? 'zed_camera'
           : 'realsense_camera';
 
@@ -449,10 +517,48 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
     } as BaseHardware);
   }
 
+  // --- Components: the Rivet's base ------------------------------------------
+  // Everything else under `hardware.components` (glide_arm_input, glide_base,
+  // glide_session_control) has no card on this page and is passed through
+  // untouched by systemToSdkConfig. The base is surfaced because its velocity
+  // ceilings and e-stop battery threshold are things an operator needs to see.
+  const components: RawComponentConfig[] = hw.components ?? [];
+  for (const comp of components) {
+    if (comp.type !== 'trossen_base') continue;
+    const baseId = comp.id ?? 'trossen_base';
+    const baseProducers: Producer[] = sdkProducers
+      .filter((p) => p.hardware_id === baseId)
+      .map((p) => ({
+        id: `prod-${baseId}-${p.stream_id}`,
+        type: 'base' as const,
+        hardware_id: baseId,
+        stream_id: p.stream_id ?? baseId,
+        mode: 'poll' as const,
+        poll_rate_hz: p.poll_rate_hz,
+        use_device_time: p.use_device_time ?? false,
+      }));
+
+    hardwareItems.push({
+      id: baseId,
+      name: baseId,
+      type: 'trossen_base',
+      // The Rivet base has no odometry-reset or torque-enable knob; those are
+      // SLATE concepts. Fixed false so the shared BaseHardware shape holds.
+      reset_odometry: false,
+      enable_torque: false,
+      max_linear_mps: typeof comp.max_linear_mps === 'number' ? comp.max_linear_mps : undefined,
+      max_angular_rps: typeof comp.max_angular_rps === 'number' ? comp.max_angular_rps : undefined,
+      max_lift_units_per_s: typeof comp.max_lift_units_per_s === 'number' ? comp.max_lift_units_per_s : undefined,
+      estop_battery_percent: typeof comp.estop_battery_percent === 'number' ? comp.estop_battery_percent : undefined,
+      producers: baseProducers,
+    } as BaseHardware);
+  }
+
   // --- Build description from hardware counts --------------------------------
   const armCount = Object.keys(arms).length;
   const camCount = cameras.length;
-  const baseCount = hw.mobile_base ? 1 : 0;
+  const baseCount =
+    (hw.mobile_base ? 1 : 0) + components.filter((c) => c.type === 'trossen_base').length;
   const parts: string[] = [];
   if (armCount > 0) parts.push(`${armCount} arm${armCount !== 1 ? 's' : ''}`);
   if (camCount > 0) parts.push(`${camCount} camera${camCount !== 1 ? 's' : ''}`);
@@ -473,10 +579,11 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
  * Sections not managed by the Configuration page (teleop, backend, session)
  * are preserved from the original config so they are not lost on save.
  */
-function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig | undefined): RawSdkConfig {
+export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig | undefined): RawSdkConfig {
   const armsObj: Record<string, RawArmConfig> = {};
   const camerasArr: RawCameraConfig[] = [];
   let mobileBase: RawMobileBaseConfig | undefined;
+  let trossenBase: BaseHardware | undefined;
   const allProducers: RawProducer[] = [];
 
   for (const hw of system.hardware) {
@@ -510,6 +617,16 @@ function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig 
       if (arm.position_tolerance && arm.position_tolerance.length) armEntry.position_tolerance = arm.position_tolerance;
       if (arm.velocity_tolerance && arm.velocity_tolerance.length) armEntry.velocity_tolerance = arm.velocity_tolerance;
       if (arm.effort_tolerance && arm.effort_tolerance.length) armEntry.effort_tolerance = arm.effort_tolerance;
+      // Command smoothing, same emit-only-when-on rule. The tuning rides along
+      // only when smoothing is enabled, so an arm that never asked for it stays
+      // clean in the config.
+      if (arm.smoothing_enabled) {
+        armEntry.smoothing_enabled = true;
+        if (arm.smoothing_gripper) armEntry.smoothing_gripper = true;
+        if (typeof arm.smoothing_min_cutoff_hz === 'number') armEntry.smoothing_min_cutoff_hz = arm.smoothing_min_cutoff_hz;
+        if (typeof arm.smoothing_beta === 'number') armEntry.smoothing_beta = arm.smoothing_beta;
+        if (typeof arm.smoothing_d_cutoff_hz === 'number') armEntry.smoothing_d_cutoff_hz = arm.smoothing_d_cutoff_hz;
+      }
       armsObj[arm.name] = armEntry;
 
       for (const p of arm.producers) {
@@ -537,11 +654,32 @@ function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig 
           use_device_time: p.use_device_time,
         });
       }
+    } else if (hw.type === 'trossen_base') {
+      // The base entry itself is merged back into hardware.components below,
+      // where the keys this page does not model are preserved. Here we only
+      // re-emit its producer.
+      const base = hw as BaseHardware;
+      trossenBase = base;
+
+      for (const p of base.producers) {
+        allProducers.push({
+          type: 'trossen_base',
+          hardware_id: base.id,
+          stream_id: p.stream_id,
+          poll_rate_hz: p.poll_rate_hz,
+          use_device_time: p.use_device_time,
+        });
+      }
     } else {
       // Camera types: realsense_camera, opencv_camera, zed_camera
       const cam = hw as CameraHardware;
       const camEntry: RawCameraConfig = {
         id: cam.name,
+        // Load-bearing: this is the field the SDK creates the camera from, and
+        // CameraConfig defaults it to "realsense_camera" when it is missing.
+        // Dropping it turns a ZED rig into a RealSense rig, which on a build
+        // without librealsense2 fails as "Unsupported hardware type".
+        type: cam.type,
         width: cam.width,
         height: cam.height,
         fps: cam.fps,
@@ -578,6 +716,43 @@ function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig 
   const hardware: RawSdkHardware = { arms: armsObj, cameras: camerasArr };
   if (mobileBase) {
     hardware.mobile_base = mobileBase;
+  }
+
+  // Preserve `hardware.components` verbatim, merging in only the base fields
+  // this page edits. Components are how the decomposed configs declare the
+  // Rivet's base, the Glide input handles, the base leader and session control
+  // — none of which this page models. Rebuilding the array from the UI would
+  // therefore delete them, so start from the original and patch.
+  const originalComponents = originalConfig?.hardware?.components;
+  if (originalComponents?.length) {
+    hardware.components = originalComponents.map((comp) => {
+      if (comp.type !== 'trossen_base' || !trossenBase || comp.id !== trossenBase.id) {
+        return comp;
+      }
+      const patched: RawComponentConfig = { ...comp };
+      if (typeof trossenBase.max_linear_mps === 'number') patched.max_linear_mps = trossenBase.max_linear_mps;
+      if (typeof trossenBase.max_angular_rps === 'number') patched.max_angular_rps = trossenBase.max_angular_rps;
+      if (typeof trossenBase.max_lift_units_per_s === 'number') patched.max_lift_units_per_s = trossenBase.max_lift_units_per_s;
+      if (typeof trossenBase.estop_battery_percent === 'number') patched.estop_battery_percent = trossenBase.estop_battery_percent;
+      return patched;
+    });
+  }
+
+  // `allProducers` is rebuilt from the UI's hardware list, so a producer
+  // belonging to a component this page does not model would vanish with it.
+  // Carry those across — but ONLY for ids that are still declared as
+  // components, so deleting an arm or camera in the UI really does drop its
+  // producer instead of resurrecting it from the original config.
+  const preservedComponentIds = new Set(
+    (hardware.components ?? [])
+      .filter((c) => c.type !== 'trossen_base' && typeof c.id === 'string')
+      .map((c) => c.id as string),
+  );
+  const emittedProducerIds = new Set(allProducers.map((p) => p.hardware_id));
+  for (const p of originalConfig?.producers ?? []) {
+    if (p.hardware_id && preservedComponentIds.has(p.hardware_id) && !emittedProducerIds.has(p.hardware_id)) {
+      allProducers.push(p);
+    }
   }
 
   // Preserve sections not managed by this page
@@ -651,6 +826,9 @@ export function ConfigurationPage() {
   const lockedTitle = mutationsLocked
     ? 'Hardware test in progress — wait for it to finish'
     : '';
+  // Shown on the disabled controls of hardware declared under
+  // `hardware.components`, which this page displays but cannot yet edit.
+  const viewOnlyTitle = 'Declared as a component — edit this system\'s config file to change it';
   // `success: null` means the test is still in flight — the banner
   // renders in a cyan "Testing…" style and the output panel updates
   // line-by-line as SSE progress events arrive. `true` / `false` flip
@@ -1012,6 +1190,14 @@ export function ConfigurationPage() {
     positionTolerance: [...DEFAULT_JOINT_TOLERANCES.position_tolerance],
     velocityTolerance: [...DEFAULT_JOINT_TOLERANCES.velocity_tolerance],
     effortTolerance: [...DEFAULT_JOINT_TOLERANCES.effort_tolerance],
+    // One-Euro command smoothing. Defaults mirror the SDK's own
+    // (TrossenArmComponent: min_cutoff 1.0 Hz, beta 0.9, d_cutoff 1.0 Hz) so
+    // ticking the box on and saving reproduces the SDK default exactly.
+    smoothingEnabled: false,
+    smoothingGripper: false,
+    smoothingMinCutoffHz: SMOOTHING_DEFAULTS.min_cutoff_hz,
+    smoothingBeta: SMOOTHING_DEFAULTS.beta,
+    smoothingDCutoffHz: SMOOTHING_DEFAULTS.d_cutoff_hz,
   });
 
   const [baseForm, setBaseForm] = useState({
@@ -1028,7 +1214,7 @@ export function ConfigurationPage() {
     if (hardwareType === 'realsense_camera' || hardwareType === 'zed_camera') {
       return 'push';
     }
-    // Poll mode: trossen_arm, opencv_camera, slate_base, teleop_arm
+    // Poll mode: trossen_arm, opencv_camera, slate_base, trossen_base, teleop_arm
     return 'poll';
   };
 
@@ -1082,7 +1268,11 @@ export function ConfigurationPage() {
 
     const producerData: Producer = {
       id: editingItem ? editingItem.id : `prod-${Date.now()}`,
-      type: hardware.type === 'trossen_arm' ? 'arm' : hardware.type === 'slate_base' ? 'base' : 'camera',
+      type: hardware.type === 'trossen_arm'
+        ? 'arm'
+        : hardware.type === 'slate_base' || hardware.type === 'trossen_base'
+          ? 'base'
+          : 'camera',
       hardware_id: currentParentHardwareId,
       stream_id: producerForm.stream_id,
       mode: getProducerMode(hardware.type),
@@ -1171,6 +1361,11 @@ export function ConfigurationPage() {
       positionTolerance: [...DEFAULT_JOINT_TOLERANCES.position_tolerance],
       velocityTolerance: [...DEFAULT_JOINT_TOLERANCES.velocity_tolerance],
       effortTolerance: [...DEFAULT_JOINT_TOLERANCES.effort_tolerance],
+      smoothingEnabled: false,
+      smoothingGripper: false,
+      smoothingMinCutoffHz: SMOOTHING_DEFAULTS.min_cutoff_hz,
+      smoothingBeta: SMOOTHING_DEFAULTS.beta,
+      smoothingDCutoffHz: SMOOTHING_DEFAULTS.d_cutoff_hz,
     });
     setBaseForm({
       name: '',
@@ -1224,6 +1419,11 @@ export function ConfigurationPage() {
         positionTolerance: armToleranceOrDefault(arm.position_tolerance, 'position_tolerance'),
         velocityTolerance: armToleranceOrDefault(arm.velocity_tolerance, 'velocity_tolerance'),
         effortTolerance: armToleranceOrDefault(arm.effort_tolerance, 'effort_tolerance'),
+        smoothingEnabled: arm.smoothing_enabled === true,
+        smoothingGripper: arm.smoothing_gripper === true,
+        smoothingMinCutoffHz: typeof arm.smoothing_min_cutoff_hz === 'number' ? arm.smoothing_min_cutoff_hz : SMOOTHING_DEFAULTS.min_cutoff_hz,
+        smoothingBeta: typeof arm.smoothing_beta === 'number' ? arm.smoothing_beta : SMOOTHING_DEFAULTS.beta,
+        smoothingDCutoffHz: typeof arm.smoothing_d_cutoff_hz === 'number' ? arm.smoothing_d_cutoff_hz : SMOOTHING_DEFAULTS.d_cutoff_hz,
       });
     } else if (hardware.type === 'slate_base') {
       const base = hardware as BaseHardware;
@@ -1370,6 +1570,11 @@ export function ConfigurationPage() {
       position_tolerance: armForm.tolerancesEnabled ? [...armForm.positionTolerance] : undefined,
       velocity_tolerance: armForm.tolerancesEnabled ? [...armForm.velocityTolerance] : undefined,
       effort_tolerance: armForm.tolerancesEnabled ? [...armForm.effortTolerance] : undefined,
+      smoothing_enabled: armForm.smoothingEnabled ? true : undefined,
+      smoothing_gripper: armForm.smoothingEnabled && armForm.smoothingGripper ? true : undefined,
+      smoothing_min_cutoff_hz: armForm.smoothingEnabled ? armForm.smoothingMinCutoffHz : undefined,
+      smoothing_beta: armForm.smoothingEnabled ? armForm.smoothingBeta : undefined,
+      smoothing_d_cutoff_hz: armForm.smoothingEnabled ? armForm.smoothingDCutoffHz : undefined,
       producers: []
     };
 
@@ -1448,7 +1653,7 @@ export function ConfigurationPage() {
   const getHardwareIcon = (hardware: Hardware) => {
     if (hardware.type.includes('camera')) return Camera;
     if (hardware.type === 'trossen_arm') return Bot;
-    if (hardware.type === 'slate_base') return Smartphone;
+    if (hardware.type === 'slate_base' || hardware.type === 'trossen_base') return Smartphone;
     return Server;
   };
 
@@ -1520,11 +1725,45 @@ export function ConfigurationPage() {
             {arm.role}
           </div>
         </div>
+        {arm.smoothing_enabled && (
+          <div className="col-span-2">
+            <div className="text-dim text-[9px] uppercase mb-[4px]">Command Smoothing</div>
+            <div className="text-ink">
+              {`${arm.smoothing_min_cutoff_hz ?? SMOOTHING_DEFAULTS.min_cutoff_hz} Hz · β ${arm.smoothing_beta ?? SMOOTHING_DEFAULTS.beta}`}
+              {arm.smoothing_gripper ? ' · incl. gripper' : ''}
+            </div>
+          </div>
+        )}
       </div>
     );
   };
 
   const renderBaseFields = (base: BaseHardware) => {
+    // The Rivet base (trossen_base) and the SLATE (slate_base) share nothing
+    // but the word "base": the Rivet exposes per-axis ceilings including the
+    // vertical lift, the SLATE exposes odometry and torque.
+    if (base.type === 'trossen_base') {
+      return (
+        <div className="grid grid-cols-2 portrait:grid-cols-1 gap-[12px] text-[12px]">
+          <div>
+            <div className="text-dim text-[9px] uppercase mb-[4px]">Max Linear</div>
+            <div className="text-ink">{base.max_linear_mps != null ? `${base.max_linear_mps} m/s` : '—'}</div>
+          </div>
+          <div>
+            <div className="text-dim text-[9px] uppercase mb-[4px]">Max Angular</div>
+            <div className="text-ink">{base.max_angular_rps != null ? `${base.max_angular_rps} rad/s` : '—'}</div>
+          </div>
+          <div>
+            <div className="text-dim text-[9px] uppercase mb-[4px]">Max Lift (Rail)</div>
+            <div className="text-ink">{base.max_lift_units_per_s != null ? `${base.max_lift_units_per_s} units/s` : '—'}</div>
+          </div>
+          <div>
+            <div className="text-dim text-[9px] uppercase mb-[4px]">E-Stop Battery</div>
+            <div className="text-ink">{base.estop_battery_percent != null ? `${base.estop_battery_percent} %` : '—'}</div>
+          </div>
+        </div>
+      );
+    }
     return (
       <div className="grid grid-cols-2 gap-[12px] text-[12px]">
         <div>
@@ -1915,12 +2154,7 @@ export function ConfigurationPage() {
               stationary:          { label: 'Stationary',          leaders: 2, followers: 2, cameras: 4, bases: 0 },
               mobile:              { label: 'Mobile',              leaders: 2, followers: 2, cameras: 3, bases: 1 },
               workbench:           { label: 'Workbench',           leaders: 2, followers: 2, cameras: 3, bases: 0 },
-              // Rivet's base is `bases: 0` on purpose. It is declared under
-              // `hardware.components` (type `trossen_base`), and this page only
-              // parses `hardware.arms` / `hardware.cameras` / `hardware.mobile_base`
-              // — so components are invisible here and counting them would warn
-              // on every correctly-configured Rivet.
-              rivet:               { label: 'Rivet',               leaders: 2, followers: 2, cameras: 3, bases: 0 },
+              rivet:               { label: 'Rivet',               leaders: 2, followers: 2, cameras: 3, bases: 1 },
             };
             const spec = layoutSpecs[selectedSystemData.id];
             if (!spec) return null;
@@ -1928,7 +2162,7 @@ export function ConfigurationPage() {
             const hw = selectedSystemData.hardware;
             const arms = hw.filter(h => h.type === 'trossen_arm');
             const cameras = hw.filter(h => h.type.includes('camera'));
-            const bases = hw.filter(h => h.type === 'slate_base');
+            const bases = hw.filter(h => h.type === 'slate_base' || h.type === 'trossen_base');
 
             const actualLeaders = arms.filter(a => (a as ArmHardware).role === 'leader').length;
             const actualFollowers = arms.filter(a => (a as ArmHardware).role === 'follower').length;
@@ -2010,12 +2244,16 @@ export function ConfigurationPage() {
                 if (hwFilter === 'all') return true;
                 if (hwFilter === 'camera') return hw.type.includes('camera');
                 if (hwFilter === 'arm') return hw.type === 'trossen_arm';
-                if (hwFilter === 'base') return hw.type === 'slate_base';
+                if (hwFilter === 'base') return hw.type === 'slate_base' || hw.type === 'trossen_base';
                 return true;
               }).map(hardware => {
                 const HardwareIcon = getHardwareIcon(hardware);
                 const isExpanded = expandedHardware.includes(hardware.id);
                 const hasProducers = hardware.producers.length > 0;
+                // The Rivet base is declared as a component, and this page has
+                // no form for component fields. Show it, but do not offer edits
+                // it cannot actually carry out.
+                const viewOnlyHardware = hardware.type === 'trossen_base';
 
                 // Color tints per hardware type
                 const tintClass = hardware.type.includes('camera')
@@ -2042,18 +2280,18 @@ export function ConfigurationPage() {
                         <div className="flex items-center gap-[4px]">
                           <button
                             onClick={() => openEditHardwareModal(hardware)}
-                            disabled={mutationsLocked}
+                            disabled={mutationsLocked || viewOnlyHardware}
                             aria-label={`Edit ${hardware.id}`}
-                            title={mutationsLocked ? lockedTitle : 'Edit'}
+                            title={mutationsLocked ? lockedTitle : viewOnlyHardware ? viewOnlyTitle : 'Edit'}
                             className="p-[5px] bg-surface hover:bg-brand text-dim hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-surface disabled:hover:text-dim transition-colors rounded"
                           >
                             <Edit className="w-[13px] h-[13px]" />
                           </button>
                           <button
                             onClick={() => handleDeleteHardware(hardware.id)}
-                            disabled={mutationsLocked}
+                            disabled={mutationsLocked || viewOnlyHardware}
                             aria-label={`Delete ${hardware.id}`}
-                            title={mutationsLocked ? lockedTitle : 'Delete'}
+                            title={mutationsLocked ? lockedTitle : viewOnlyHardware ? viewOnlyTitle : 'Delete'}
                             className="p-[5px] bg-surface hover:bg-red-600 text-dim hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-surface disabled:hover:text-dim transition-colors rounded"
                           >
                             <Trash2 className="w-[13px] h-[13px]" />
@@ -2084,7 +2322,7 @@ export function ConfigurationPage() {
                       <div className="mt-[8px]">
                         {hardware.type.includes('camera') && renderCameraFields(hardware as CameraHardware)}
                         {hardware.type === 'trossen_arm' && renderArmFields(hardware as ArmHardware)}
-                        {hardware.type === 'slate_base' && renderBaseFields(hardware as BaseHardware)}
+                        {(hardware.type === 'slate_base' || hardware.type === 'trossen_base') && renderBaseFields(hardware as BaseHardware)}
                       </div>
                     </div>
 
@@ -2594,6 +2832,67 @@ export function ConfigurationPage() {
                           </tr>
                         </tfoot>
                       </table>
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-[12px]">
+                  <div className="flex items-start gap-[8px]">
+                    <input type="checkbox" id="arm_smoothing" checked={armForm.smoothingEnabled} onChange={e => setArmForm({ ...armForm, smoothingEnabled: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
+                    <label htmlFor="arm_smoothing" className="text-ink text-[12px]">
+                      Smooth outgoing commands
+                      <span className="block text-dim text-[11px] mt-[2px]">One-Euro adaptive low-pass on the position commands sent to this arm. Unlike a fixed low-pass it raises its cutoff as the command speeds up, so slow motion is smoothed hard while fast motion keeps its response. Use it on a follower whose leader input is jittery. Off leaves commands untouched.</span>
+                    </label>
+                  </div>
+                  {armForm.smoothingEnabled && (
+                    <div className="pl-[24px] space-y-[12px]">
+                      <div className="grid grid-cols-3 portrait:grid-cols-1 gap-[12px]">
+                        <div>
+                          <label htmlFor="smoothing_min_cutoff" className="block text-dim text-[11px] mb-[4px]">Min cutoff (Hz)</label>
+                          <input
+                            id="smoothing_min_cutoff"
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={armForm.smoothingMinCutoffHz}
+                            onChange={e => setArmForm({ ...armForm, smoothingMinCutoffHz: parseFloat(e.target.value) })}
+                            className="w-full bg-app border border-edge text-ink px-[10px] py-[8px] text-[12px] focus:outline-none focus:border-brand"
+                          />
+                          <span className="block text-dim text-[10px] mt-[3px]">Cutoff at rest. Lower = smoother, more lag.</span>
+                        </div>
+                        <div>
+                          <label htmlFor="smoothing_beta" className="block text-dim text-[11px] mb-[4px]">Beta</label>
+                          <input
+                            id="smoothing_beta"
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={armForm.smoothingBeta}
+                            onChange={e => setArmForm({ ...armForm, smoothingBeta: parseFloat(e.target.value) })}
+                            className="w-full bg-app border border-edge text-ink px-[10px] py-[8px] text-[12px] focus:outline-none focus:border-brand"
+                          />
+                          <span className="block text-dim text-[10px] mt-[3px]">Speed coefficient. Higher = less lag when moving fast.</span>
+                        </div>
+                        <div>
+                          <label htmlFor="smoothing_d_cutoff" className="block text-dim text-[11px] mb-[4px]">Derivative cutoff (Hz)</label>
+                          <input
+                            id="smoothing_d_cutoff"
+                            type="number"
+                            step="any"
+                            min="0"
+                            value={armForm.smoothingDCutoffHz}
+                            onChange={e => setArmForm({ ...armForm, smoothingDCutoffHz: parseFloat(e.target.value) })}
+                            className="w-full bg-app border border-edge text-ink px-[10px] py-[8px] text-[12px] focus:outline-none focus:border-brand"
+                          />
+                          <span className="block text-dim text-[10px] mt-[3px]">Smoothing on the speed estimate itself.</span>
+                        </div>
+                      </div>
+                      <div className="flex items-start gap-[8px]">
+                        <input type="checkbox" id="arm_smoothing_gripper" checked={armForm.smoothingGripper} onChange={e => setArmForm({ ...armForm, smoothingGripper: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
+                        <label htmlFor="arm_smoothing_gripper" className="text-ink text-[12px]">
+                          Smooth the gripper too
+                          <span className="block text-dim text-[11px] mt-[2px]">Off by default: the gripper is filtered separately from the arm joints because lag on a grasp is felt directly by the operator.</span>
+                        </label>
+                      </div>
                     </div>
                   )}
                 </div>
