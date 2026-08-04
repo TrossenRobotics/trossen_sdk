@@ -45,11 +45,19 @@ realsense:
 # publish arm64. So these targets differ from a desktop build only in job count
 # and in defaulting the Rivet/ZED flags on.
 #
-# Prerequisites (see setup.sh, which installs all of these):
-#   - libtrossen_arm installed with the input-report API (Glide handles)
-#   - trossen_base installed, or reachable for FetchContent
-#   - libboost-filesystem-dev + libboost-serialization-dev (pinocchio needs them)
-#   - ZED SDK for Jetson under $(ZED_DIR), when building with ZED=1
+# Prerequisites (see setup.sh, which installs all of these). `orin-check`
+# verifies every one of them, at the severity CMake actually assigns it:
+#   - libtrossen_arm installed                     REQUIRED  -> hard error
+#   - ...with the input-report API (Glide handles)  optional  -> warning
+#   - trossen_base installed, when RIVET=1          optional  -> warning
+#   - libboost-filesystem-dev + libboost-serialization-dev    -> hard error
+#     (pinocchio, vendored by libtrossen_arm, needs them)
+#   - ZED SDK for Jetson under $(ZED_DIR), when ZED=1         -> hard error
+#
+# The two warnings are warnings on purpose: both configurations build and are
+# legitimate. Missing input-report costs Glide handle input at RUNTIME only, and
+# a missing trossen_base falls back to a FetchContent clone. Neither shows up as
+# a build failure, which is exactly why they are surfaced here instead.
 #
 # Job count is derived, not $(NPROC): a Jetson has 6-12 cores but as little as
 # 8 GB shared with the GPU, and Eigen/pinocchio translation units are measured
@@ -65,6 +73,16 @@ ZED ?= 1
 RIVET ?= 1
 REALSENSE ?= 1
 ORIN_BUILD_DIR ?= build
+
+# Where an installed CMake package config can land. find_package searches
+# <prefix>/lib/cmake/<name>, <prefix>/lib/<arch>/cmake/<name> and
+# <prefix>/share/cmake/<name>, so cover those three under CMAKE_PREFIX_PATH and
+# the two default prefixes rather than hardcoding the one path that happens to
+# work here. This is a pre-flight heuristic, not CMake's own resolution: an
+# install under an exotic prefix that is only reachable via -DCMAKE_PREFIX_PATH
+# on the cmake line can still be missed, which is why a miss on trossen_base
+# warns rather than fails.
+ORIN_PKG_PREFIXES = $(subst :, ,$(CMAKE_PREFIX_PATH)) /usr/local /usr
 
 # Fail early and legibly rather than part-way through a long compile.
 orin-check:
@@ -86,6 +104,55 @@ orin-check:
 			echo "       fails configure without it. sudo apt-get install -y $$pkg"; \
 			exit 1; }; \
 	done
+	@arm_prefix=""; \
+	for p in $(ORIN_PKG_PREFIXES); do \
+		for sub in lib/cmake lib/$$(uname -m)-linux-gnu/cmake share/cmake; do \
+			if [ -d "$$p/$$sub/libtrossen_arm" ]; then arm_prefix="$$p"; break 2; fi; \
+		done; \
+	done; \
+	if [ -z "$$arm_prefix" ]; then \
+		echo "ERROR: libtrossen_arm is not installed (no CMake package config found)."; \
+		echo "       The SDK does find_package(libtrossen_arm REQUIRED), so configure"; \
+		echo "       fails immediately without it. Install the driver (see setup.sh),"; \
+		echo "       then re-run. Note the driver and the arm firmware must agree on"; \
+		echo "       major.minor, so match the version already flashed on the arms."; \
+		echo "       Searched under: $(ORIN_PKG_PREFIXES)"; \
+		exit 1; \
+	fi; \
+	echo "orin-check: libtrossen_arm found under $$arm_prefix"; \
+	hdr="$$arm_prefix/include/libtrossen_arm/trossen_arm.hpp"; \
+	if [ ! -f "$$hdr" ]; then \
+		echo "WARNING: $$hdr is missing, so the input-report API could not be checked."; \
+		echo "         An install with a CMake config but no headers is broken; expect"; \
+		echo "         configure to fail on the first #include."; \
+	elif ! grep -q "get_input_report" "$$hdr"; then \
+		echo "WARNING: this libtrossen_arm has no input-report API."; \
+		echo "         The build SUCCEEDS -- CMake only logs a status line -- but Glide"; \
+		echo "         handle joystick and button input is unavailable AT RUNTIME, so on"; \
+		echo "         a Rivet or Workbench the handles read as permanently idle and a"; \
+		echo "         session never starts. Nothing about the build output says this,"; \
+		echo "         which is why it is checked here."; \
+		echo "         Fix: install a driver providing TrossenArmDriver::get_input_report()."; \
+	else \
+		echo "orin-check: libtrossen_arm has the input-report API (Glide handles OK)"; \
+	fi
+	@if [ "$(RIVET)" = "1" ]; then \
+		base_prefix=""; \
+		for p in $(ORIN_PKG_PREFIXES); do \
+			for sub in lib/cmake lib/$$(uname -m)-linux-gnu/cmake share/cmake; do \
+				if [ -d "$$p/$$sub/trossen_base" ]; then base_prefix="$$p"; break 2; fi; \
+			done; \
+		done; \
+		if [ -z "$$base_prefix" ]; then \
+			echo "WARNING: RIVET=1 but trossen_base is not installed."; \
+			echo "         CMake falls back to cloning it, and that repo is PRIVATE: the"; \
+			echo "         fetch needs git credentials on this machine, adds a long build"; \
+			echo "         to every fresh build dir, and does not work under sudo or CI."; \
+			echo "         Install trossen_base, or drop the base: make orin RIVET=0"; \
+		else \
+			echo "orin-check: trossen_base found under $$base_prefix"; \
+		fi; \
+	fi
 	@echo "orin-check OK: aarch64, $(ORIN_CORES) cores, $(ORIN_MEM_GB) GB RAM -> -j$(ORIN_JOBS)"
 .PHONY: orin-check
 
