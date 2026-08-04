@@ -43,7 +43,14 @@ realsense:
 # from source, trossen_slate ships an aarch64 prebuilt, the Foxglove SDK has an
 # aarch64 release asset, and both the Apache Arrow and RealSense apt repos
 # publish arm64. So these targets differ from a desktop build only in job count
-# and in defaulting the Rivet/ZED flags on.
+# and in their flag defaults: Rivet and ZED on, RealSense off.
+#
+# RealSense defaults OFF here while the SDK-wide default is ON, which is a
+# deliberate divergence. Every Orin we flash drives a Glide rig, and rivet and
+# workbench declare ZED cameras exclusively -- so the SDK default would make each
+# of these targets fail on a REQUIRED find_package for a camera backend the robot
+# never opens. Opt back in with `make orin REALSENSE=1` on a rig that does have
+# RealSense cameras.
 #
 # Prerequisites (see setup.sh, which installs all of these). `orin-check`
 # verifies every one of them, at the severity CMake actually assigns it:
@@ -53,18 +60,16 @@ realsense:
 #   - libboost-filesystem-dev + libboost-serialization-dev    -> hard error
 #     (pinocchio, vendored by libtrossen_arm, needs them)
 #   - ZED SDK for Jetson under $(ZED_DIR), when ZED=1         -> hard error
-#   - realsense2 + fastcdr + fastrtps, when REALSENSE=1       -> hard error
+#   - realsense2 + fastcdr + fastrtps, only if REALSENSE=1    -> hard error
+#     (not checked by default, since REALSENSE defaults 0 here)
 #
 # The two warnings are warnings on purpose: both configurations build and are
 # legitimate. Missing input-report costs Glide handle input at RUNTIME only, and
 # a missing trossen_base falls back to a FetchContent clone. Neither shows up as
 # a build failure, which is exactly why they are surfaced here instead.
 #
-# RealSense, by contrast, is a hard error because its find_package calls are
-# REQUIRED -- and note it defaults ON in CMakeLists.txt, so it is checked unless
-# you say REALSENSE=0. That default is the wrong one for a Rivet or a Workbench,
-# which are all ZED cameras: those rigs want REALSENSE=0 and should not be made
-# to install a camera backend they never open.
+# RealSense, when asked for, is a hard error instead: its find_package calls are
+# REQUIRED, so there is no degraded mode to warn about -- configure simply stops.
 #
 # Job count is derived, not $(NPROC): a Jetson has 6-12 cores but as little as
 # 8 GB shared with the GPU, and Eigen/pinocchio translation units are measured
@@ -78,7 +83,8 @@ ORIN_JOBS   ?= $(shell echo $$(( $(ORIN_MEM_GB) < $(ORIN_CORES) ? $(ORIN_MEM_GB)
 ZED_DIR ?= /usr/local/zed
 ZED ?= 1
 RIVET ?= 1
-REALSENSE ?= 1
+# OFF unlike the SDK-wide default; see the RealSense note in the header above.
+REALSENSE ?= 0
 ORIN_BUILD_DIR ?= build
 
 # Where an installed CMake package config can land. find_package searches
