@@ -2154,7 +2154,9 @@ export function ConfigurationPage() {
               stationary:          { label: 'Stationary',          leaders: 2, followers: 2, cameras: 4, bases: 0 },
               mobile:              { label: 'Mobile',              leaders: 2, followers: 2, cameras: 3, bases: 1 },
               workbench:           { label: 'Workbench',           leaders: 2, followers: 2, cameras: 3, bases: 0 },
-              rivet:               { label: 'Rivet',               leaders: 2, followers: 2, cameras: 3, bases: 1 },
+              // One camera, not three: the bring-up rig has a single ZED
+              // fitted. Raise this back to 3 when the side cameras go on.
+              rivet:               { label: 'Rivet',               leaders: 2, followers: 2, cameras: 1, bases: 1 },
             };
             const spec = layoutSpecs[selectedSystemData.id];
             if (!spec) return null;

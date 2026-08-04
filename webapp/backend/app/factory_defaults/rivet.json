@@ -5,7 +5,7 @@
     "hardware": {
       "arms": {
         "glide_left": {
-          "ip_address": "192.168.0.3",
+          "ip_address": "192.168.5.3",
           "model": "glide_left",
           "end_effector": "wxai_v0_leader",
           "joint_signs": [
@@ -52,7 +52,7 @@
           ]
         },
         "glide_right": {
-          "ip_address": "192.168.0.2",
+          "ip_address": "192.168.5.2",
           "model": "glide_right",
           "end_effector": "wxai_v0_leader",
           "joint_signs": [
@@ -99,7 +99,7 @@
           ]
         },
         "follower_left": {
-          "ip_address": "192.168.1.4",
+          "ip_address": "192.168.1.5",
           "model": "pro",
           "end_effector": "pro_base",
           "write_moving_time_s": 0.3,
@@ -129,7 +129,7 @@
           ]
         },
         "follower_right": {
-          "ip_address": "192.168.1.5",
+          "ip_address": "192.168.1.4",
           "model": "pro",
           "end_effector": "pro_base",
           "write_moving_time_s": 0.3,
@@ -233,23 +233,7 @@
         {
           "id": "camera_main",
           "type": "zed_camera",
-          "serial_number": "51287468",
-          "resolution": "HD1200",
-          "fps": 30,
-          "use_depth": false
-        },
-        {
-          "id": "camera_left",
-          "type": "zed_camera",
-          "serial_number": "95483555",
-          "resolution": "HD1200",
-          "fps": 30,
-          "use_depth": false
-        },
-        {
-          "id": "camera_right",
-          "type": "zed_camera",
-          "serial_number": "97389637",
+          "serial_number": "55325977",
           "resolution": "HD1200",
           "fps": 30,
           "use_depth": false
@@ -317,22 +301,6 @@
         "type": "zed_camera",
         "hardware_id": "camera_main",
         "stream_id": "camera_main",
-        "poll_rate_hz": 30.0,
-        "encoding": "bgr8",
-        "use_device_time": true
-      },
-      {
-        "type": "zed_camera",
-        "hardware_id": "camera_left",
-        "stream_id": "camera_left",
-        "poll_rate_hz": 30.0,
-        "encoding": "bgr8",
-        "use_device_time": true
-      },
-      {
-        "type": "zed_camera",
-        "hardware_id": "camera_right",
-        "stream_id": "camera_right",
         "poll_rate_hz": 30.0,
         "encoding": "bgr8",
         "use_device_time": true
