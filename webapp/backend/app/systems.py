@@ -32,6 +32,10 @@ from sqlmodel import select
 from app import hw_status
 from app.db import SessionLocal
 from app.io_utils import is_safe_id
+
+# Aliased: `Session` is also the name of the SQLModel DB session this module
+# opens everywhere, and shadowing that here would be a trap.
+from app.models import Session as SessionRow
 from app.models import System
 from app.paths import FACTORY_DEFAULTS_DIR
 
@@ -79,6 +83,25 @@ def _to_response(row: System) -> SystemResponse:
     )
 
 
+#: Preset ids we used to ship and no longer do. Deleting the
+#: `factory_defaults/*.json` file is not enough on its own: seeding only ever
+#: inserts, so a machine that already seeded a preset keeps its row — and its
+#: entry in the UI's system list — forever. Ids listed here are removed from the
+#: `system` table on every startup by `remove_retired_factory_systems()`.
+#:
+#: Only ever list ids that WE shipped as factory defaults. A user-created system
+#: can collide with one of these names, and this would delete it.
+RETIRED_FACTORY_IDS = frozenset(
+    {
+        # Lightweight-leader variants, superseded by the Glide-handle layouts.
+        "solo_portable",
+        "stationary_portable",
+        # Camera-only Rivet diagnostic, not a robot anyone records with.
+        "rivet_cameras",
+    }
+)
+
+
 def seed_missing_factory_systems() -> None:
     """Insert any shipped factory_defaults/*.json that has no row yet.
 
@@ -89,8 +112,9 @@ def seed_missing_factory_systems() -> None:
         presets never showed up on an already-seeded machine), and
       - existing rows are never touched, so user edits and prior seeds are
         preserved.
-    Safe against resurrecting deleted presets too: there is no system-delete
-    endpoint, so a row's absence always means "never seeded", not "removed".
+    Safe against resurrecting retired presets too: `RETIRED_FACTORY_IDS` is never
+    also present on disk (a test enforces it), so nothing re-seeds an id that
+    `remove_retired_factory_systems()` just dropped.
     """
     if not FACTORY_DEFAULTS_DIR.is_dir():
         return
@@ -118,11 +142,54 @@ def seed_missing_factory_systems() -> None:
             db.commit()
 
 
+def remove_retired_factory_systems() -> None:
+    """Drop rows for presets listed in `RETIRED_FACTORY_IDS`, where possible.
+
+    Deleting the row is only safe when nothing points at it: `Session.system_id`
+    is a foreign key into this table, so a preset that was ever recorded with
+    cannot be deleted without either cascading into that history or failing on
+    the constraint. Recording history outranks a tidy table, so a referenced row
+    is left alone — `list_systems()` filters retired ids out regardless, which is
+    what actually removes the preset from the UI. The delete here is housekeeping
+    for the common case where the preset was never used.
+
+    Deliberately unconditional about *edits*: a retired preset goes away even if
+    the operator changed its values, because the point is that the layout is gone,
+    not that the shipped numbers are. The JSON is recoverable from git history and
+    can be re-added as a new system under a different id.
+
+    Runs on every startup, before seeding, and is idempotent.
+    """
+    with SessionLocal() as db:
+        rows = db.exec(
+            select(System).where(System.id.in_(RETIRED_FACTORY_IDS))  # type: ignore[attr-defined]
+        ).all()
+        deleted = 0
+        for row in rows:
+            referenced = db.exec(
+                select(SessionRow.id).where(SessionRow.system_id == row.id).limit(1)
+            ).first()
+            if referenced is not None:
+                continue
+            db.delete(row)
+            hw_status.clear(row.id)
+            deleted += 1
+        if deleted:
+            db.commit()
+
+
 def list_systems() -> list[SystemResponse]:
-    """Return every saved system, ordered by id for stable UI sorting."""
+    """Return every saved system, ordered by id for stable UI sorting.
+
+    Retired presets are excluded even when their row survives (see
+    `remove_retired_factory_systems()` — a row referenced by a recording session
+    cannot be deleted). This is the filter that actually takes a withdrawn layout
+    out of the UI; `get_system()` stays unfiltered so those old sessions still
+    resolve the system they were recorded with.
+    """
     with SessionLocal() as db:
         rows = db.exec(select(System).order_by(System.id)).all()
-        return [_to_response(r) for r in rows]
+        return [_to_response(r) for r in rows if r.id not in RETIRED_FACTORY_IDS]
 
 
 def get_system(system_id: str) -> SystemResponse | None:

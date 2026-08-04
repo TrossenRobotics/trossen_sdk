@@ -105,7 +105,7 @@ interface HardwareSystem {
 // Systems that ship with a factory-default config the user can revert to.
 // Hoisted out of the component so the reset useCallback's dependency array
 // stays stable across renders.
-const RESETTABLE_SYSTEMS: readonly string[] = ['solo', 'solo_portable', 'stationary', 'stationary_portable', 'mobile'];
+const RESETTABLE_SYSTEMS: readonly string[] = ['solo', 'solo_glide', 'stationary', 'mobile', 'workbench', 'rivet'];
 
 // The lightweight (passive) Trossen leader has no actuators and its joints
 // don't map 1:1 onto the follower: J3/J4 are inverted and the wrist (J5)
@@ -316,9 +316,15 @@ function sdkConfigToSystem(id: string, apiData: RawSystemResponse): HardwareSyst
   const arms: Record<string, RawArmConfig> = hw.arms ?? {};
   for (const [key, armCfg] of Object.entries(arms)) {
     const armId = key; // The key IS the arm name/id in SDK config
-    const role: 'leader' | 'follower' = key.toLowerCase().includes('leader')
-      ? 'leader'
-      : 'follower';
+    // Role is derived from the arm's config key, which is the only place the
+    // SDK records it — there is no `role` field. `glide` counts because the
+    // Rivet/Workbench handles are leaders whose keys never say so
+    // (`glide_left`, not `leader_left`).
+    const keyLower = key.toLowerCase();
+    const role: 'leader' | 'follower' =
+      keyLower.includes('leader') || keyLower.includes('glide')
+        ? 'leader'
+        : 'follower';
 
     // Collect producers whose hardware_id matches this arm key
     const armProducers: Producer[] = sdkProducers
@@ -1650,7 +1656,9 @@ export function ConfigurationPage() {
 
         <div className="grid grid-cols-4 portrait:grid-cols-2 gap-[12px]">
           {[...systems].sort((a, b) => {
-            const order: Record<string, number> = { solo: 0, solo_portable: 1, stationary: 2, stationary_portable: 3, mobile: 4 };
+            // Shipped layouts first, smallest to largest; anything user-created
+            // sorts after them.
+            const order: Record<string, number> = { solo: 0, solo_glide: 1, stationary: 2, mobile: 3, workbench: 4, rivet: 5 };
             return (order[a.id] ?? 99) - (order[b.id] ?? 99);
           }).map(system => {
             const isConfigured = system.hardware.length > 0;
@@ -1903,10 +1911,16 @@ export function ConfigurationPage() {
           {(() => {
             const layoutSpecs: Record<string, { label: string; leaders: number; followers: number; cameras: number; bases: number }> = {
               solo:                { label: 'Solo',                leaders: 1, followers: 1, cameras: 2, bases: 0 },
+              solo_glide:          { label: 'Solo Glide',          leaders: 1, followers: 1, cameras: 2, bases: 0 },
               stationary:          { label: 'Stationary',          leaders: 2, followers: 2, cameras: 4, bases: 0 },
-              solo_portable:       { label: 'Solo Portable',       leaders: 1, followers: 1, cameras: 2, bases: 0 },
-              stationary_portable: { label: 'Stationary Portable', leaders: 2, followers: 2, cameras: 4, bases: 0 },
               mobile:              { label: 'Mobile',              leaders: 2, followers: 2, cameras: 3, bases: 1 },
+              workbench:           { label: 'Workbench',           leaders: 2, followers: 2, cameras: 3, bases: 0 },
+              // Rivet's base is `bases: 0` on purpose. It is declared under
+              // `hardware.components` (type `trossen_base`), and this page only
+              // parses `hardware.arms` / `hardware.cameras` / `hardware.mobile_base`
+              // — so components are invisible here and counting them would warn
+              // on every correctly-configured Rivet.
+              rivet:               { label: 'Rivet',               leaders: 2, followers: 2, cameras: 3, bases: 0 },
             };
             const spec = layoutSpecs[selectedSystemData.id];
             if (!spec) return null;

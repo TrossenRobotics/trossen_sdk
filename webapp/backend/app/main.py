@@ -68,6 +68,7 @@ from app.systems import (
     create_system,
     get_system,
     list_systems,
+    remove_retired_factory_systems,
     reset_system,
     seed_missing_factory_systems,
     update_system_config,
@@ -83,10 +84,13 @@ async def lifespan(_app: FastAPI):
     1. `apply_migrations()` runs pending Alembic migrations so a fresh
        install creates the SQLite schema and existing installs pick up
        new migrations on deploy.
-    2. `seed_missing_factory_systems()` inserts any `factory_defaults/*.json`
-       preset that has no row yet, so a fresh install gets the canonical
-       presets and an existing install picks up newly shipped presets on the
-       next restart (without clobbering user edits).
+    2. `remove_retired_factory_systems()` drops rows for presets we no longer
+       ship, then `seed_missing_factory_systems()` inserts any
+       `factory_defaults/*.json` preset that has no row yet — so a fresh install
+       gets the canonical presets and an existing install picks up newly shipped
+       ones (without clobbering user edits) and loses withdrawn ones on the next
+       restart. Retirement runs first so a leftover factory file cannot
+       re-insert an id that was just removed.
 
     3. `hub_client.start()` opens the persistent link to the fleet hub if
        `HUB_URL` is set; it is a no-op otherwise, so a standalone machine is
@@ -94,6 +98,7 @@ async def lifespan(_app: FastAPI):
        dangling connector task.
     """
     apply_migrations()
+    remove_retired_factory_systems()
     seed_missing_factory_systems()
     episodes.prune()  # bound episode_record growth (keeps a 90d window)
     hub_client.start()
