@@ -394,7 +394,12 @@ lerobot_datasets/
                     └── episode_000000.mp4
 ```
 
-For full conversion options and format details see the [Conversion Tool Guide](scripts/trossen_mcap_to_lerobot_v2/README.md).
+The layout above is LeRobot **v2**. For **v3** (the recommended format — episodes
+aggregated into shared, size-rolled files) and for an explanation of why the
+conversion step exists at all, start with the
+[MCAP → LeRobot Conversion Guide](scripts/README.md). Per-flag references:
+[v3](scripts/trossen_mcap_to_lerobot_v3/README.md) ·
+[v2](scripts/trossen_mcap_to_lerobot_v2/README.md).
 
 ---
 
@@ -506,9 +511,20 @@ See the example scripts in `examples/` for complete, working implementations of 
 
 ## Further Reading
 
+**Start here** if you are recording data rather than developing the SDK:
+
 | Document | Contents |
 |---|---|
-| [Conversion Tool Guide](scripts/trossen_mcap_to_lerobot_v2/README.md) | Conversion usage, TrossenMCAP channel/schema reference, LeRobot V2 Parquet/metadata schema |
+| **[Webapp User Guide](webapp/USER_GUIDE.md)** | **Recording from the browser — every feature, with screenshots** |
+| [Webapp Install & Reference](webapp/README.md) | Running the webapp under Docker, hardware access, troubleshooting |
+| **[MCAP → LeRobot Conversion Guide](scripts/README.md)** | **What the formats are, compression, and how to convert (webapp or CLI)** |
+
+Tool and example references:
+
+| Document | Contents |
+|---|---|
+| [v3 Converter Reference](scripts/trossen_mcap_to_lerobot_v3/README.md) | v3 flags, `--jobs` parallelism, output layout |
+| [v2 Converter Reference](scripts/trossen_mcap_to_lerobot_v2/README.md) | v2 usage, TrossenMCAP channel/schema reference, LeRobot V2 Parquet/metadata schema |
 | [Replay Tool Guide](scripts/replay_trossen_mcap_jointstate/README.md) | Replaying recorded episodes on hardware |
 | [Solo Example Guide](examples/trossen_solo_ai/README.md) | Hardware setup and recording for the solo AI kit |
 | [Stationary Example Guide](examples/trossen_stationary_ai/README.md) | Bimanual stationary setup |

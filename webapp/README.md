@@ -2,8 +2,16 @@
 
 A browser-based application for recording robot demonstrations on Trossen
 AI Kit arms (with RealSense or USB cameras and the SLATE mobile base).
-Episodes are saved in TrossenMCAP and can be converted to LeRobot V2 for
-training.
+Episodes are saved in TrossenMCAP and can be converted to LeRobot v3 (or
+v2) for training.
+
+> **Just want to use the app?** Read the
+> **[User Guide](USER_GUIDE.md)** instead — a plain-language, illustrated
+> tour of every feature and where to find it. This document is the
+> install and reference manual.
+>
+> For what conversion actually does to a recording, see the
+> **[conversion guide](../scripts/README.md)**.
 
 This document covers running the webapp via Docker, configuring hardware,
 and using the app day-to-day. For the underlying SDK (CLI tooling,
@@ -112,7 +120,16 @@ pages:
 
 - **Record** (default) — start recording sessions.
 - **Configuration** — view and edit the hardware *systems*.
-- **Datasets** — browse recordings and convert MCAP → LeRobot V2.
+- **Datasets** — browse recordings and convert MCAP → LeRobot.
+
+To the right of the nav sit the tools: hardware test, operator sign-in,
+in-app update, a version & status panel, the guided tour, a light/dark
+theme toggle, and a sound mute. All are covered in the
+[User Guide](USER_GUIDE.md#1-the-three-pages-and-the-toolbar).
+
+A one-minute **guided tour** runs on first visit and can be replayed any
+time from the **?** button. Press **?** on the keyboard for the shortcut
+cheatsheet.
 
 Open **Configuration** the first time you launch.
 
@@ -135,15 +152,29 @@ the host's home directory — see section 7.)
 
 ### Default systems
 
-The app ships with three pre-configured *systems*, one per Trossen AI
+The app ships with five pre-configured *systems*, one per Trossen AI
 Kit topology:
 
 - **Trossen Solo AI** — 1 leader arm + 1 follower arm + 2 RealSense
   cameras.
+- **Trossen Solo Portable** — Solo with a *passive lightweight leader*
+  (no actuators; hand-guided, with a fixed joint remap and optional
+  gripper force feedback).
 - **Trossen Stationary AI** — 2 leader + 2 follower arms (left/right) +
   4 RealSense cameras (high, low, left wrist, right wrist).
+- **Trossen Stationary Portable** — Stationary with passive lightweight
+  leaders.
 - **Trossen Mobile AI** — bimanual arms + RealSense cameras + a SLATE
   mobile base.
+
+Each system card carries a status badge — **Ready** (test passed),
+**Untested**, **Error** (last test failed), or **Active** (recording
+now) — so it is obvious whether a system is safe to record with.
+
+Per-arm tuning (velocity boost, gripper effort/velocity tolerances,
+gripper finger-closure offset, per-joint operating limits, and the
+passive leader's wrist-offset side) lives under **Hardware Devices** on
+the same page. Defaults are correct for a stock kit.
 
 ### Updating a system
 
@@ -183,15 +214,36 @@ session or continue an existing one.
 
 When you start a new session, you provide:
 
+- **Task** — the natural-language prompt (e.g. `pick up the red block`).
+  It is embedded into every episode's MCAP metadata as the LeRobot task
+  and seeds the Dataset ID. Changeable per-episode from the monitor,
+  which is how a **multi-task dataset** is recorded.
 - **Dataset ID** — the directory name under the MCAP root where
-  episodes for this session are written.
+  episodes for this session are written. Auto-generated from system +
+  task + date; naming an existing dataset appends episodes to it.
 - **Episode duration** — how long each episode records before the app
   finalises it and moves to the reset phase.
 - **Number of episodes** — how many episodes this session should
   capture in total.
+- **Reset time** — the pause between episodes. `0` waits for **Next**
+  instead of running a timer.
+
+Under **Advanced options**:
+
+- **Compression** — MCAP codec for this session: empty (none, the
+  default), `lz4`, or `zstd`. Lossless; `zstd` is roughly 2.5× smaller.
+  The field is unvalidated free text, and the literal string `none` is
+  *not* a valid value — it falls back to uncompressed with only a
+  warning in the log. Leave it **empty** for no compression.
+- **Chunk size (bytes)** — the MCAP compression block size. Default
+  `4194304` (4 MB).
 
 Other recording parameters (frame rates, camera resolutions, arm IPs)
 come from the *system* you picked — see section 4.
+
+**Edit Episodes** on a session row changes the target episode count,
+including mid-session — useful when a batch needs to run longer or be
+cut short.
 
 ### Session states
 
@@ -244,6 +296,25 @@ session with its current state.
 - **Stop / Pause** — exit the loop and save the session as `paused`.
   You can resume later from the same episode index. If pressed
   mid-episode, the partial episode is discarded.
+- **Change** (beside the task) — set a different task prompt for
+  subsequent episodes, building a multi-task dataset in one run.
+
+Keyboard equivalents: **Space** (start / resume / next), **S** (stop),
+**R** (re-record), **D** (dry run), **Esc** (leave the monitor).
+
+### Live view controls
+
+Three chips above the feed tune the **preview only** — the recording is
+always full rate and resolution:
+
+- **View** — `Rerun (3D)` for the embedded Rerun viewer, or `Lite (Pi)`
+  for a plain image stream that a Raspberry Pi or slow laptop can keep
+  up with.
+- **FPS** — 5 / 10 / 15 / 30.
+- **Res** — Full / Half / Quarter.
+
+Settings persist per browser, so a dedicated viewing machine keeps its
+own lighter profile.
 
 ### Dry run
 
@@ -262,11 +333,29 @@ LeRobot datasets under the LeRobot root.
 
 Each row is one dataset directory containing MCAP episode files. Click
 a row to see episode-level details: filenames, sizes, recorded
-durations.
+durations. Individual episodes can be previewed (**▷**) or deleted.
 
-To convert an MCAP dataset to LeRobot V2 format, click **Convert to
-LeRobot** on the detail page. The output goes to
-`<lerobot_root>/<dataset_id>/`.
+To convert an MCAP dataset, click **Convert to LeRobot** on the detail
+page. The output goes to `<lerobot_root>/<repository_id>/<dataset_id>/`.
+
+The modal offers **v3.0 (aggregated, recommended)** or v2.1. The v3 path
+adds:
+
+- **Worker Threads (jobs)** — parallel episode decode/encode. Blank uses
+  the binary's default of `min(cores, 8)`. Do not exceed 8: `--jobs 12`
+  segfaults on the video-concatenation path.
+- **Native WidowX AI schema** — on by default; emits native
+  `lerobot_trossen` feature naming.
+- **Data / Video File Size (MB)** — the size at which v3 rolls over to a
+  new shared parquet or video file.
+
+**Task Name** here is a *fallback* for episodes recorded without an
+embedded task; episodes that carry one keep it, which is what preserves a
+multi-task dataset. Conversion never modifies the source MCAP, so a
+dataset can be re-converted at will.
+
+Details on the formats, compression, and the batch/NAS wrappers:
+[scripts/README.md](../scripts/README.md).
 
 ### LeRobot datasets
 
@@ -286,7 +375,7 @@ container does not delete data.
 | Host path                                | What's there                               |
 |------------------------------------------|--------------------------------------------|
 | `~/.trossen_sdk/`                        | MCAP recordings (datasets + episodes)      |
-| `~/.cache/huggingface/lerobot/`          | LeRobot V2 datasets (converted + imported) |
+| `~/.cache/huggingface/lerobot/`          | LeRobot datasets, v3 or v2 (converted + imported) |
 | `~/.config/trossen_sdk_webapp/`          | System definitions JSON                    |
 | `~/.local/state/trossen_sdk_webapp/`     | SQLite DB (sessions, settings)             |
 
