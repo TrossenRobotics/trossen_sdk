@@ -38,12 +38,26 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     throw std::runtime_error("TrossenArmComponent: 'model' is required in config");
   }
   model_str_ = config.at("model").get<std::string>();
-  trossen_arm::Model model;
-  if (model_str_ == "wxai_v0") {
-    model = trossen_arm::Model::wxai_v0;
-  } else {
-    throw std::runtime_error("TrossenArmComponent: Unknown model: " + model_str_);
+  // Resolved against the driver's own Model <-> name map rather than an if-chain
+  // here. Every model the installed driver knows is therefore accepted, and the
+  // set cannot drift when the driver adds one. This component only understood
+  // "wxai_v0" while the retired composites each hardcoded their own subset
+  // (RivetComponent "pro", BimanualGlideComponent "glide_left"/"glide_right"), so
+  // decomposing onto plain trossen_arm components silently dropped support for
+  // the Pro followers and the Glide handles -- the configs name those models and
+  // were rejected before reaching the driver at all.
+  const auto model_it = std::find_if(
+    trossen_arm::MODEL_NAME.begin(), trossen_arm::MODEL_NAME.end(),
+    [this](const auto& entry) { return entry.second == model_str_; });
+  if (model_it == trossen_arm::MODEL_NAME.end()) {
+    std::string valid;
+    for (const auto& [_, name] : trossen_arm::MODEL_NAME) {
+      valid += (valid.empty() ? "" : ", ") + name;
+    }
+    throw std::runtime_error(
+      "TrossenArmComponent: Unknown model: " + model_str_ + " (valid: " + valid + ")");
   }
+  const trossen_arm::Model model = model_it->first;
 
   // Parse end effector
   if (!config.contains("end_effector")) {

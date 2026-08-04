@@ -4,7 +4,7 @@
     "arms": {
       "glide_left": {
         "ip_address": "192.168.0.3",
-        "model": "wxai_v0",
+        "model": "glide_left",
         "end_effector": "wxai_v0_leader",
         "joint_signs": [
           1,
@@ -51,7 +51,7 @@
       },
       "glide_right": {
         "ip_address": "192.168.0.2",
-        "model": "wxai_v0",
+        "model": "glide_right",
         "end_effector": "wxai_v0_leader",
         "joint_signs": [
           1,

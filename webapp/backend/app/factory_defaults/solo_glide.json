@@ -6,7 +6,7 @@
       "arms": {
         "glide": {
           "ip_address": "192.168.0.3",
-          "model": "wxai_v0",
+          "model": "glide_right",
           "end_effector": "wxai_v0_leader",
           "joint_signs": [
             1,
