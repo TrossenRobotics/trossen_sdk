@@ -18,6 +18,7 @@ from app.models import Session as SessionRow
 from app.models import System
 from app.systems import (
     RETIRED_FACTORY_IDS,
+    _carry_over_unmodelled_config,
     get_system,
     list_systems,
     remove_retired_factory_systems,
@@ -127,6 +128,106 @@ def test_seed_then_retire_leaves_the_current_lineup() -> None:
         "workbench",
         "rivet",
     }
+
+
+def test_no_shipped_arm_sets_joint_tolerances() -> None:
+    """Tolerances pad the controller's fault check and default to firmware.
+
+    A shipped tolerance is a value nobody tuned for the arm in front of the
+    operator, and getting it wrong faults the joint mid-session ("position limit
+    exceeded ... setting to idle"). Opt in per rig instead.
+    """
+    offenders: list[str] = []
+    for system_id, config in _shipped_configs().items():
+        for arm_id, arm in config.get("hardware", {}).get("arms", {}).items():
+            for key in arm:
+                if "tolerance" in key:
+                    offenders.append(f"{system_id}:{arm_id}:{key}")
+    assert not offenders, "shipped arms setting tolerances: " + ", ".join(offenders)
+
+
+class TestCarryOverUnmodelledConfig:
+    """An older UI bundle must not be able to delete config it cannot render.
+
+    `frontend/dist/` is gitignored, so a deployment that cannot rebuild the
+    bundle keeps PUTting the old shape indefinitely. The server fills the gaps.
+    """
+
+    def _stored(self) -> dict:
+        return {
+            "hardware": {
+                "arms": {
+                    "follower": {
+                        "ip_address": "192.168.1.4",
+                        "smoothing_enabled": True,
+                        "smoothing_beta": 0.4,
+                    }
+                },
+                "cameras": [{"id": "camera_main", "type": "zed_camera", "fps": 30}],
+                "components": [
+                    {"id": "rivet_base", "type": "trossen_base", "max_linear_mps": 0.6}
+                ],
+            }
+        }
+
+    def _old_client_put(self) -> dict:
+        """What the pre-fix page sends: no camera type, no components, no smoothing."""
+        return {
+            "hardware": {
+                "arms": {"follower": {"ip_address": "192.168.1.4"}},
+                "cameras": [{"id": "camera_main", "fps": 30}],
+            },
+            "producers": [],
+        }
+
+    def test_camera_type_is_restored(self) -> None:
+        merged = _carry_over_unmodelled_config(self._old_client_put(), self._stored())
+        assert merged["hardware"]["cameras"][0]["type"] == "zed_camera"
+
+    def test_components_are_restored(self) -> None:
+        merged = _carry_over_unmodelled_config(self._old_client_put(), self._stored())
+        assert merged["hardware"]["components"] == self._stored()["hardware"]["components"]
+
+    def test_smoothing_is_restored(self) -> None:
+        merged = _carry_over_unmodelled_config(self._old_client_put(), self._stored())
+        assert merged["hardware"]["arms"]["follower"]["smoothing_enabled"] is True
+        assert merged["hardware"]["arms"]["follower"]["smoothing_beta"] == 0.4
+
+    def test_producer_type_wins_over_the_stored_row(self) -> None:
+        """A save that changes the camera type must not be undone by this."""
+        incoming = self._old_client_put()
+        incoming["producers"] = [
+            {"hardware_id": "camera_main", "type": "opencv_camera"}
+        ]
+        merged = _carry_over_unmodelled_config(incoming, self._stored())
+        assert merged["hardware"]["cameras"][0]["type"] == "opencv_camera"
+
+    def test_an_explicit_incoming_value_always_wins(self) -> None:
+        incoming = self._old_client_put()
+        incoming["hardware"]["cameras"][0]["type"] = "realsense_camera"
+        merged = _carry_over_unmodelled_config(incoming, self._stored())
+        assert merged["hardware"]["cameras"][0]["type"] == "realsense_camera"
+
+    def test_a_current_client_can_turn_smoothing_off(self) -> None:
+        """Only a client that says nothing at all about smoothing gets it back."""
+        incoming = self._old_client_put()
+        incoming["hardware"]["arms"]["follower"]["smoothing_enabled"] = False
+        merged = _carry_over_unmodelled_config(incoming, self._stored())
+        assert merged["hardware"]["arms"]["follower"]["smoothing_enabled"] is False
+        assert "smoothing_beta" not in merged["hardware"]["arms"]["follower"]
+
+    def test_a_current_client_can_edit_components(self) -> None:
+        incoming = self._old_client_put()
+        incoming["hardware"]["components"] = [
+            {"id": "rivet_base", "type": "trossen_base", "max_linear_mps": 0.2}
+        ]
+        merged = _carry_over_unmodelled_config(incoming, self._stored())
+        assert merged["hardware"]["components"][0]["max_linear_mps"] == 0.2
+
+    def test_a_first_save_with_no_stored_row_is_untouched(self) -> None:
+        incoming = self._old_client_put()
+        assert _carry_over_unmodelled_config(incoming, None) == incoming
+        assert _carry_over_unmodelled_config(incoming, {}) == incoming
 
 
 def _shipped_configs() -> dict[str, dict]:

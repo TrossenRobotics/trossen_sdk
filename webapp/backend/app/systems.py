@@ -224,6 +224,86 @@ def create_system(system_id: str, name: str) -> SystemResponse | None:
         return _to_response(row)
 
 
+def _carry_over_unmodelled_config(
+    incoming: dict[str, Any], stored: dict[str, Any] | None
+) -> dict[str, Any]:
+    """Restore hardware config an older UI bundle drops on save.
+
+    The Configuration page rebuilds the config field by field from a flat UI
+    model, so anything it does not model is absent from what it PUTs and is
+    therefore deleted. That was fixed in the page itself, but `frontend/dist/`
+    is gitignored — a deployment that cannot rebuild the bundle (the Jetson has
+    no Node) keeps serving the old one indefinitely, and every save silently
+    destroys config the SDK needs.
+
+    So the server does not trust the client to be current. Three known-lossy
+    spots, each restored from the row being replaced:
+
+    * a camera's `type` — CameraConfig defaults it to "realsense_camera", so
+      losing it reassigns a ZED rig to RealSense. Fails as "Unsupported
+      hardware type" where librealsense2 is not compiled in, and silently opens
+      the wrong backend where it is.
+    * `hardware.components` — the decomposed slot holding the Rivet's base, the
+      Glide handles, the base leader and session control. The page has no card
+      for most of these, so a save used to delete the lot.
+    * an arm's `smoothing_*` block — reverts a tuned arm to unfiltered commands.
+
+    Only ever fills in what is MISSING; an explicit incoming value always wins,
+    so this cannot stop an operator changing something the UI does model.
+    """
+    if not stored:
+        return incoming
+    stored_hw = stored.get("hardware") or {}
+    incoming_hw = incoming.get("hardware")
+    if not isinstance(incoming_hw, dict):
+        return incoming
+
+    # --- camera type ---
+    stored_cam_types = {
+        cam.get("id"): cam.get("type")
+        for cam in stored_hw.get("cameras") or []
+        if isinstance(cam, dict) and cam.get("type")
+    }
+    producer_types = {
+        p.get("hardware_id"): p.get("type")
+        for p in incoming.get("producers") or []
+        if isinstance(p, dict) and p.get("type")
+    }
+    for cam in incoming_hw.get("cameras") or []:
+        if not isinstance(cam, dict) or cam.get("type"):
+            continue
+        # Prefer what this same save says the producer is, then what the row
+        # being replaced had. Either beats CameraConfig's RealSense default.
+        recovered = producer_types.get(cam.get("id")) or stored_cam_types.get(cam.get("id"))
+        if recovered:
+            cam["type"] = recovered
+
+    # --- components ---
+    if not incoming_hw.get("components") and stored_hw.get("components"):
+        incoming_hw["components"] = stored_hw["components"]
+
+    # --- arm command smoothing ---
+    _SMOOTHING_KEYS = (
+        "smoothing_enabled",
+        "smoothing_gripper",
+        "smoothing_min_cutoff_hz",
+        "smoothing_beta",
+        "smoothing_d_cutoff_hz",
+    )
+    stored_arms = stored_hw.get("arms") or {}
+    for arm_id, arm in (incoming_hw.get("arms") or {}).items():
+        stored_arm = stored_arms.get(arm_id)
+        if not isinstance(arm, dict) or not isinstance(stored_arm, dict):
+            continue
+        if any(key in arm for key in _SMOOTHING_KEYS):
+            continue  # this client understands smoothing; respect it verbatim
+        for key in _SMOOTHING_KEYS:
+            if key in stored_arm:
+                arm[key] = stored_arm[key]
+
+    return incoming
+
+
 def update_system_config(
     system_id: str, config: dict[str, Any]
 ) -> SystemResponse | None:
@@ -240,7 +320,7 @@ def update_system_config(
         row = db.get(System, system_id)
         if row is None:
             return None
-        row.config = config
+        row.config = _carry_over_unmodelled_config(config, row.config)
         row.updated_at = _utcnow()
         db.add(row)
         db.commit()
