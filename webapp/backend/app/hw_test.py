@@ -118,6 +118,9 @@ async def stream_system_hardware_test(
 
     captured: list[str] = []
     success_message: str | None = None
+    # Index into `captured` at which the runner declared success; None until it
+    # does. Bounds the failure-marker scan below to the work phase.
+    captured_at_success: int | None = None
     error_message: str | None = None
 
     try:
@@ -176,6 +179,10 @@ async def stream_system_hardware_test(
             # internal markers verbatim, which is just noise.
             if line.startswith(_SUCCESS_PREFIX):
                 success_message = line[len(_SUCCESS_PREFIX):]
+                # Remember where success was declared. Output after this point is
+                # process teardown, and a driver complaining on the way out must
+                # not retroactively fail a test in which every device connected.
+                captured_at_success = len(captured)
                 continue
             if line.startswith(_ERROR_PREFIX):
                 error_message = line[len(_ERROR_PREFIX):]
@@ -213,9 +220,16 @@ async def stream_system_hardware_test(
     # Even on a clean runner exit, scan for SDK-level failure markers
     # in the streamed progress — a background reader thread can log
     # `[critical]` after the foreground create() returned successfully.
+    #
+    # Bounded to the lines before the success marker. The runner releases every
+    # device before declaring success, so anything after that is teardown of an
+    # already-verified rig: CUDA winding down under a ZED's close, a driver
+    # grumbling as the process exits. Those used to flip a wholly successful test
+    # to "failed", reporting the teardown line as if it were the verdict.
+    scanned = captured if captured_at_success is None else captured[:captured_at_success]
     failure_lines = [
         line
-        for line in captured
+        for line in scanned
         if any(marker in line.lower() for marker in _FAILURE_MARKERS)
     ]
     if failure_lines:

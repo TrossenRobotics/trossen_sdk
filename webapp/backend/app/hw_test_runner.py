@@ -58,6 +58,13 @@ _PARK_AT_ZEROS_S = 2.0
 _ARM_CONNECT_RETRIES = 2
 _ARM_RETRY_BACKOFF_S = 1.0
 
+# Component types under `hardware.components` that talk to a real device and so
+# belong in a connectivity test. The rest of the components a decomposed config
+# declares — glide_arm_input, glide_base, glide_session_control — are teleop
+# wiring over hardware already created above, not devices of their own; creating
+# them here would test the config's plumbing, not whether anything is plugged in.
+_TESTABLE_COMPONENT_TYPES = frozenset({"trossen_base"})
+
 
 def _create_arm_component(arm_id: str, arm_json: dict) -> object:
     last_exc: Exception | None = None
@@ -122,6 +129,18 @@ def main() -> int:
                 "slate_base", "slate_base", cfg.hardware.mobile_base.to_json()
             )
 
+        # Device-backed entries under `hardware.components`. The Rivet declares
+        # its base here rather than in the legacy `mobile_base` slot, so without
+        # this the test reported success on a Rivet whose base was unreachable.
+        tested_components = 0
+        for comp_cfg in cfg.hardware.components:
+            if comp_cfg.type not in _TESTABLE_COMPONENT_TYPES:
+                continue
+            ts.HardwareRegistry.create(
+                comp_cfg.type, comp_cfg.id, comp_cfg.to_json()
+            )
+            tested_components += 1
+
         time.sleep(_ASYNC_FAILURE_GRACE_S)
 
         # Park every arm at all-zeros over _PARK_AT_ZEROS_S so the
@@ -139,14 +158,42 @@ def main() -> int:
                   flush=True)
             return 2
 
-        parts = [f"{len(arm_components)} arm(s)", f"{n_cameras} camera(s)"]
+        n_arms = len(arm_components)
+
+        # Release the hardware HERE, before declaring success — not by falling
+        # off the end of the process.
+        #
+        # `create(..., mark_active=True)` (the default) stores every component in
+        # the ActiveHardwareRegistry, a static map of shared_ptr. Nothing else
+        # holds the cameras, so that registry is their only owner and they stay
+        # open until static teardown at process exit — by which point CUDA has
+        # deinitialized. A ZED then fails its close with "cuCtxSetCurrent failed
+        # (error 4)", and because that line carries the SDK's `[error]` /
+        # `[critical]` markers, the parent's marker scan turns a test where every
+        # device connected into a reported failure.
+        #
+        # Closing while the runtime is still up avoids the error rather than
+        # filtering it. Anything that does go wrong during a close now lands
+        # before the success marker, where it correctly fails the test.
+        ts.ActiveHardwareRegistry.clear()
+        arm_components.clear()
+
+        parts = [f"{n_arms} arm(s)", f"{n_cameras} camera(s)"]
         if has_base:
             parts.append("1 mobile base")
+        if tested_components:
+            parts.append(f"{tested_components} base/component(s)")
         print(f"__SUCCESS__: Connected to {', '.join(parts)}", flush=True)
         return 0
     except Exception as exc:
         print(f"__ERROR__: {exc}", flush=True)
         return 2
+    finally:
+        # The failure path needs the same deterministic teardown.
+        try:
+            ts.ActiveHardwareRegistry.clear()
+        except Exception:
+            pass
 
 
 def _park_arms_at_zero(arm_components: dict[str, object]) -> list[str]:

@@ -1805,6 +1805,19 @@ def main() -> int:
             except Exception:
                 pass
 
+        # Same hazard, for the hardware itself. `create(..., mark_active=True)`
+        # stores every component in the process-global ActiveHardwareRegistry,
+        # which is a static map of shared_ptr — so without this, arms, cameras
+        # and the base are closed during static teardown, after CUDA and the
+        # interpreter have already been deinitialized. A ZED reports that as
+        # "cuCtxSetCurrent failed (error 4)"; librealsense corrupts the heap.
+        # Clearing here destroys them while the runtime they depend on is still
+        # alive.
+        try:
+            ts.ActiveHardwareRegistry.clear()
+        except Exception:
+            pass
+
     print(f"{_SUCCESS_PREFIX} session completed", flush=True)
     return 0
 
