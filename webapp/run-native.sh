@@ -47,6 +47,12 @@
 #     cd webapp/frontend && npm ci && npm run build
 #     rsync -a dist/ orin:/path/to/repo/webapp/frontend/dist/
 #
+# IMPORTANT: `frontend/dist/` is gitignored, so `git pull` NEVER updates the UI.
+# On a machine with no Node -- the Orin -- a pull brings the backend fix and
+# leaves the browser running the bundle that was copied there last time. That
+# reads as "the fix didn't work" rather than "the fix isn't deployed", so after
+# pulling any frontend change, copy a freshly built dist/ over as well.
+#
 # Then run this script there with no --build-ui. With no dist/ at all the
 # backend still serves the API on :8000; point a Vite dev server at it with
 # `BACKEND_URL=http://<host>:8000 npm run dev`.

@@ -99,7 +99,7 @@
           ]
         },
         "follower_left": {
-          "ip_address": "192.168.1.5",
+          "ip_address": "192.168.1.4",
           "model": "pro",
           "end_effector": "pro_base",
           "write_moving_time_s": 0.3,
@@ -129,7 +129,7 @@
           ]
         },
         "follower_right": {
-          "ip_address": "192.168.1.4",
+          "ip_address": "192.168.1.5",
           "model": "pro",
           "end_effector": "pro_base",
           "write_moving_time_s": 0.3,
