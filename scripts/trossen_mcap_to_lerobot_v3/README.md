@@ -180,9 +180,10 @@ but **nothing in the v3 pipeline reads them**:
 | `max_image_queue` | Not read. v3 extracts frames to disk rather than queueing them in memory. |
 | `png_compression_level` | Not read. Depth PNGs are written at a fixed level 1. |
 
-The webapp's Convert modal still sends `encoder_threads`, so its **Encoder
-Threads** field has no effect on a v3 conversion. Setting any of these is harmless
-but does nothing — use `--jobs` instead.
+`encoder_threads` is honoured by the *live* LeRobotV2 recording backend, which is
+a different code path — neither offline converter reads it. The webapp's Convert
+modal used to expose it; that field was removed, since `--jobs` is the real
+concurrency control. Setting any of these keys is harmless but does nothing.
 
 ---
 

@@ -172,7 +172,7 @@ export function DatasetDetailsPage() {
   const logsEndRef = useRef<HTMLDivElement>(null);
   const [convertForm, setConvertForm] = useState({
     root: '~/.cache/huggingface/lerobot', task_name: '', repository_id: 'TrossenRoboticsCommunity',
-    dataset_id: '', robot_name: '', fps: '30', encoder_threads: '2', chunk_size: '1000',
+    dataset_id: '', robot_name: '', fps: '30', chunk_size: '1000',
     encode_videos: true, overwrite_existing: false,
     lerobot_version: 'v3', data_files_size_in_mb: '100', video_files_size_in_mb: '200',
     // v3-only. jobs '' => let the binary default to min(cores, 8). native schema
@@ -300,7 +300,7 @@ export function DatasetDetailsPage() {
         body: JSON.stringify({
           root: convertForm.root, task_name: convertForm.task_name, repository_id: convertForm.repository_id,
           dataset_id: convertForm.dataset_id, robot_name: convertForm.robot_name,
-          fps: parseFloat(convertForm.fps), encoder_threads: parseInt(convertForm.encoder_threads),
+          fps: parseFloat(convertForm.fps),
           chunk_size: parseInt(convertForm.chunk_size), encode_videos: convertForm.encode_videos,
           overwrite_existing: convertForm.overwrite_existing,
           lerobot_version: convertForm.lerobot_version,
@@ -741,12 +741,12 @@ export function DatasetDetailsPage() {
                   </div>
                   </>
                 )}
-                <div className="grid grid-cols-2 gap-4">
-                  <div><label className="block text-ink text-xs mb-1">Encoder Threads</label><input type="number" value={convertForm.encoder_threads} onChange={e => setConvertForm({...convertForm, encoder_threads: e.target.value})} className="w-full bg-app border border-edge text-ink px-3 py-2 text-sm focus:outline-none focus:border-brand" /></div>
-                  <div className="flex items-end gap-6 pb-1">
-                    <label className="flex items-center gap-2 text-sm text-ink cursor-pointer"><input type="checkbox" checked={convertForm.encode_videos} onChange={e => setConvertForm({...convertForm, encode_videos: e.target.checked})} className="accent-brand" />Videos</label>
-                    <label className="flex items-center gap-2 text-sm text-ink cursor-pointer"><input type="checkbox" checked={convertForm.overwrite_existing} onChange={e => setConvertForm({...convertForm, overwrite_existing: e.target.checked})} className="accent-brand" />Overwrite</label>
-                  </div>
+                {/* No encoder-thread control: neither converter passes -threads to
+                    ffmpeg, so the encoders size themselves to the machine. Worker
+                    Threads (v3 --jobs) above is the real concurrency knob. */}
+                <div className="flex items-center gap-6">
+                  <label className="flex items-center gap-2 text-sm text-ink cursor-pointer"><input type="checkbox" checked={convertForm.encode_videos} onChange={e => setConvertForm({...convertForm, encode_videos: e.target.checked})} className="accent-brand" />Videos</label>
+                  <label className="flex items-center gap-2 text-sm text-ink cursor-pointer"><input type="checkbox" checked={convertForm.overwrite_existing} onChange={e => setConvertForm({...convertForm, overwrite_existing: e.target.checked})} className="accent-brand" />Overwrite</label>
                 </div>
                 <div className="flex justify-end gap-3 pt-3">
                   <button type="button" onClick={() => setShowConvertModal(false)} className="bg-app border border-edge text-dim px-5 py-2 text-sm hover:border-white hover:text-ink transition-colors">Cancel</button>

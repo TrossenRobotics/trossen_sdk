@@ -93,7 +93,11 @@ class ConvertBody(BaseModel):
     dataset_id: str
     robot_name: str
     fps: float
-    encoder_threads: int
+    # No `encoder_threads`: neither offline converter reads it (only the live
+    # LeRobotV2 recording backend does), so accepting it here just fed the
+    # binary a --set override it ignored. Older clients may still send the key;
+    # pydantic drops unknown fields, so those requests keep working. Use `jobs`
+    # to control converter concurrency.
     chunk_size: int
     encode_videos: bool
     overwrite_existing: bool
@@ -159,7 +163,6 @@ def _build_args(body: ConvertBody, mcap_path: Path, output_root: Path) -> list[s
         "dataset_id": body.dataset_id,
         "robot_name": body.robot_name,
         "fps": str(body.fps),
-        "encoder_threads": str(body.encoder_threads),
         "encode_videos": "true" if body.encode_videos else "false",
         "overwrite_existing": "true" if body.overwrite_existing else "false",
     }
