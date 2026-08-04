@@ -29,25 +29,7 @@
         "gripper_feedback_offset": 6.5,
         "gripper_feedback_mode": "effort",
         "actuated": false,
-        "gripper_force_feedback": true,
-        "velocity_tolerance": [
-          9.42,
-          9.42,
-          9.42,
-          9.42,
-          9.42,
-          9.42,
-          0.0
-        ],
-        "effort_tolerance": [
-          7.0,
-          7.0,
-          7.0,
-          7.0,
-          7.0,
-          7.0,
-          300.0
-        ]
+        "gripper_force_feedback": true
       },
       "follower": {
         "ip_address": "192.168.1.4",
@@ -59,25 +41,7 @@
         "smoothing_min_cutoff_hz": 1.0,
         "smoothing_beta": 0.9,
         "smoothing_d_cutoff_hz": 1.0,
-        "staging_time_s": 2.0,
-        "velocity_tolerance": [
-          6.28,
-          6.28,
-          6.28,
-          9.42,
-          9.42,
-          9.42,
-          0.0
-        ],
-        "effort_tolerance": [
-          27.0,
-          97.0,
-          27.0,
-          7.0,
-          7.0,
-          7.0,
-          300.0
-        ]
+        "staging_time_s": 2.0
       }
     },
     "components": [
