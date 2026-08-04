@@ -68,10 +68,8 @@ def nearest_point_on_circle(radius, x, y):
     dist = np.sqrt(x**2 + y**2)
     if dist == 0:
         return radius, 0
-
-    nearest_x = x / dist * radius
-    nearest_y = y / dist * radius
-    return nearest_x, nearest_y
+    scale = radius / dist
+    return x * scale, y * scale
 
 
 
