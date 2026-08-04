@@ -140,11 +140,23 @@ if [[ "${BUILD_UI}" == "1" ]]; then
 fi
 
 if [[ -d "${SCRIPT_DIR}/frontend/dist" ]]; then
-  echo "==> serving UI + API together on http://localhost:${PORT}"
+  echo "==> serving UI + API together"
 else
-  echo "==> no frontend/dist — API only on http://localhost:${PORT}"
+  echo "==> no frontend/dist — API only"
   echo "    build the UI with --build-ui, or copy a dist/ from another machine"
 fi
+
+# Print the LAN addresses, not just localhost. uvicorn binds 0.0.0.0 below, so the
+# app has always been reachable from other machines -- but it only ever announced
+# "localhost", which reads as "this machine only" and had people believe the robot
+# UI was unreachable from the floor. Vite prints Local + Network for the same
+# reason. Interface filter drops container bridges (docker0, br-*, veth*), which
+# are real addresses but never the one an operator wants.
+echo "      Local:   http://localhost:${PORT}"
+while read -r _ifname _addr; do
+  [[ "${_ifname}" =~ ^(docker|br-|veth) ]] && continue
+  echo "    Network:   http://${_addr}:${PORT}"
+done < <(ip -4 -o addr show scope global 2>/dev/null | awk '{split($4, a, "/"); print $2, a[1]}')
 
 RELOAD_FLAGS=()
 [[ "${RELOAD}" == "1" ]] && RELOAD_FLAGS=(--reload --reload-dir "${SCRIPT_DIR}/backend/app")
