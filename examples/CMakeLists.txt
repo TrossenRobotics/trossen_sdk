@@ -19,6 +19,13 @@ if(TROSSEN_ENABLE_RIVET)
   target_link_libraries(trossen_rivet trossen_sdk libtrossen_arm)
 endif()
 
+# Trossen Workbench — the Rivet layout on a fixed bench: 2 Glide leaders +
+# 2 follower arms + 3 cameras, no mobile base. Deliberately NOT behind
+# TROSSEN_ENABLE_RIVET: the Glide input layer needs only libtrossen_arm, so
+# dropping the base is what lets this build without the private trossen_base.
+add_executable(trossen_workbench trossen_workbench/trossen_workbench.cpp)
+target_link_libraries(trossen_workbench trossen_sdk libtrossen_arm)
+
 # Trossen Stationary AI Policy — 2 followers + 4 cameras, policy-driven leaders.
 # Requires the PolicyClient gate (FetchContent of IXWebSocket + msgpack-cxx).
 if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
