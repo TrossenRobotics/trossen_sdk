@@ -30,7 +30,9 @@
 // Arms
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_producer.hpp"
+#ifdef TROSSEN_ENABLE_SO101
 #include "trossen_sdk/hw/arm/so101_arm_component.hpp"
+#endif
 #include "trossen_sdk/hw/arm/mock_joint_producer.hpp"
 
 // Cameras

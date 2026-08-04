@@ -30,6 +30,20 @@ option(TROSSEN_ENABLE_VR "Enable VR teleoperation support (requires trossen_vr)"
 # Rivet hardware components and demo: cmake -DTROSSEN_ENABLE_RIVET=ON ...
 option(TROSSEN_ENABLE_RIVET "Enable Rivet mobile bimanual support (requires trossen_base)" OFF)
 
+# OFF by default: SO101 arms are not fully supported yet, and nothing else in the
+# project uses them -- no example, test, config preset or Python binding refers to
+# SO101. Their only dependency, the Feetech SCServo library, is fetched from
+# ftservo/FTServo_Linux, whose src/CMakeLists.txt declares
+# cmake_minimum_required(VERSION 2.8.3). CMake >= 4.0 removed compatibility with
+# anything below 3.5, so building it is a hard configure failure on any machine
+# with a CMake 4 toolchain (a pip-installed cmake, as scikit-build-core uses) --
+# for a servo bus no shipped robot drives. Turn it on to work on SO101 support:
+#   cmake -DTROSSEN_ENABLE_SO101=ON ...
+# That path is CMake 4-safe -- the add_subdirectory below raises the policy floor
+# for SCServo alone -- so this option is about not paying for the dependency, not
+# about the toolchain being unable to cope with it.
+option(TROSSEN_ENABLE_SO101 "Enable SO101 arm support (fetches the Feetech SCServo library)" OFF)
+
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
@@ -42,11 +56,8 @@ add_library(trossen_sdk SHARED
   src/hw/hardware_registry.cpp
   src/hw/active_hardware_registry.cpp
   src/hw/arm/trossen_arm_component.cpp
-  src/hw/arm/so101_arm_component.cpp
   src/hw/arm/trossen_arm_producer.cpp
   src/hw/arm/mock_joint_producer.cpp
-  src/hw/arm/so101_arm_driver.cpp
-  src/hw/arm/feetech_bus.cpp
   src/hw/base/slate_base_component.cpp
   src/hw/base/slate_base_producer.cpp
   src/hw/teleop/teleop_controller.cpp
@@ -66,6 +77,16 @@ add_library(trossen_sdk SHARED
   src/utils/app_utils.cpp
   src/utils/keyboard_input_utils.cpp
 )
+
+if(TROSSEN_ENABLE_SO101)
+  message(STATUS "SO101 arm support enabled")
+  target_sources(trossen_sdk PRIVATE
+    src/hw/arm/so101_arm_component.cpp
+    src/hw/arm/so101_arm_driver.cpp
+    src/hw/arm/feetech_bus.cpp
+  )
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_SO101)
+endif()
 
 if(TROSSEN_ENABLE_REALSENSE)
   message(STATUS "RealSense camera support enabled")
@@ -380,23 +401,32 @@ endif()
 message(STATUS "Found OpenCV: ${OpenCV_VERSION}")
 target_include_directories(trossen_sdk PUBLIC ${OpenCV_INCLUDE_DIRS})
 
-# # Feetech servo library for SO101 arms (SCServo library)
-# find_library(SCSERVO_LIBRARY NAMES SCServo PATHS /usr/local/lib /usr/lib)
-# find_path(SCSERVO_INCLUDE_DIR ftservo/ftservo.h PATHS /usr/local/include /usr/include)
-FetchContent_Declare(
-  SCServo
-  SYSTEM
-  GIT_REPOSITORY https://github.com/ftservo/FTServo_Linux.git
-  GIT_TAG 064a6dbf814477b970959b5b01b2fc9bc594afa3
-  CMAKE_ARGS
-    -D CMAKE_POLICY_VERSION_MINIMUM=3.5
-  PATCH_COMMAND ${CMAKE_COMMAND} -E chdir <SOURCE_DIR> bash -c "git apply --check ${CMAKE_SOURCE_DIR}/cmake/patches/SCServo.patch && git apply ${CMAKE_SOURCE_DIR}/cmake/patches/SCServo.patch || echo 'Patch already applied'"
+# Feetech servo library for SO101 arms. Gated with the arms themselves: this is the
+# only thing that pulls it in, and it does not survive a CMake 4 toolchain (see the
+# TROSSEN_ENABLE_SO101 option above for why).
+if(TROSSEN_ENABLE_SO101)
+  FetchContent_Declare(
+    SCServo
+    SYSTEM
+    GIT_REPOSITORY https://github.com/ftservo/FTServo_Linux.git
+    GIT_TAG 064a6dbf814477b970959b5b01b2fc9bc594afa3
+    PATCH_COMMAND ${CMAKE_COMMAND} -E chdir <SOURCE_DIR> bash -c "git apply --check ${CMAKE_SOURCE_DIR}/cmake/patches/SCServo.patch && git apply ${CMAKE_SOURCE_DIR}/cmake/patches/SCServo.patch || echo 'Patch already applied'"
+  )
+  FetchContent_MakeAvailable(SCServo)
 
-)
-FetchContent_MakeAvailable(SCServo)
-
-# Add SCServo src subdirectory to build the library
-add_subdirectory(${scservo_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/scservo-build)
+  # Add SCServo src subdirectory to build the library. Its cmake_minimum_required is
+  # 2.8.3, so raise the floor CMake will accept for the duration of this one
+  # add_subdirectory and put it back afterwards -- scoped, because every other
+  # fetched dependency is >= 3.13 and none of them should have the check relaxed.
+  # Note this must be a variable set here, NOT a CMAKE_ARGS entry on the
+  # FetchContent_Declare above (where it used to be, doing nothing): CMAKE_ARGS is an
+  # ExternalProject option, and FetchContent_MakeAvailable configures the dependency
+  # by add_subdirectory in THIS cmake run, so there is no sub-configure to receive it.
+  set(_trossen_saved_policy_min "${CMAKE_POLICY_VERSION_MINIMUM}")
+  set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+  add_subdirectory(${scservo_SOURCE_DIR}/src ${CMAKE_CURRENT_BINARY_DIR}/scservo-build)
+  set(CMAKE_POLICY_VERSION_MINIMUM "${_trossen_saved_policy_min}")
+endif()
 
 
 # Trossen Slate Package
@@ -420,7 +450,9 @@ set(TROSSEN_SLATE_BUILD_PYTHON_BINDINGS OFF CACHE BOOL
 FetchContent_MakeAvailable(trossen_slate)
 
 # Use the FetchContent source directory for include paths
-target_include_directories(trossen_sdk PUBLIC ${scservo_SOURCE_DIR}/src)
+if(TROSSEN_ENABLE_SO101)
+  target_include_directories(trossen_sdk PUBLIC ${scservo_SOURCE_DIR}/src)
+endif()
 target_include_directories(trossen_sdk PUBLIC ${trossen_slate_SOURCE_DIR}/include)
 
 target_link_libraries(
@@ -429,9 +461,12 @@ target_link_libraries(
   Arrow::arrow_shared
   Parquet::parquet_shared
   libtrossen_arm
-  SCServo
   trossen_slate
 )
+
+if(TROSSEN_ENABLE_SO101)
+  target_link_libraries(trossen_sdk PUBLIC SCServo)
+endif()
 
 if(TROSSEN_ENABLE_REALSENSE)
   target_link_libraries(trossen_sdk PUBLIC realsense2::realsense2)
@@ -567,9 +602,11 @@ if(BUILD_PYTHON_BINDINGS OR DEFINED SKBUILD)
   set(_PY_PKG_TARGETS
     trossen_sdk_python
     trossen_sdk
-    SCServo
     trossen_slate
   )
+  if(TROSSEN_ENABLE_SO101)
+    list(APPEND _PY_PKG_TARGETS SCServo)
+  endif()
   set(_PY_PKG_COPY_COMMANDS "")
   foreach(_tgt IN LISTS _PY_PKG_TARGETS)
     list(APPEND _PY_PKG_COPY_COMMANDS
@@ -615,7 +652,11 @@ if(BUILD_PYTHON_BINDINGS OR DEFINED SKBUILD)
     install(TARGETS trossen_sdk_python
       LIBRARY DESTINATION trossen_sdk)
     # Bundle the C++ shared libraries so the Python module can find them at runtime
-    install(TARGETS trossen_sdk SCServo trossen_slate
+    set(_TROSSEN_RUNTIME_LIBS trossen_sdk trossen_slate)
+    if(TROSSEN_ENABLE_SO101)
+      list(APPEND _TROSSEN_RUNTIME_LIBS SCServo)
+    endif()
+    install(TARGETS ${_TROSSEN_RUNTIME_LIBS}
       LIBRARY DESTINATION trossen_sdk)
     # Bundle trossen_slate's prebuilt chassis_driver library
     install(FILES ${TROSSEN_SLATE_CHASSIS_DRIVER_LIBRARY}
