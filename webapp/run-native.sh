@@ -85,6 +85,33 @@ if ! command -v uv >/dev/null; then
   exit 1
 fi
 
+# Checked HERE, next to the uv check, rather than where npm is actually called:
+# that call sits after `uv sync`, so on a fresh machine a missing npm surfaced
+# only after a multi-minute SDK compile had already succeeded. Fail before doing
+# any work instead. And do not offer "install Node" as the fix -- a Jetson has no
+# business carrying a Node toolchain to serve static files, which is the whole
+# reason the bundle is copyable.
+if [[ "${BUILD_UI}" == "1" ]]; then
+  NODE_MIN_MAJOR=20
+  if ! command -v npm >/dev/null || ! command -v node >/dev/null; then
+    echo "--build-ui needs Node and npm on this machine, and they are not here." >&2
+    echo "Build the bundle on a machine that has them and copy it over instead:" >&2
+    echo "    # on a dev machine, from webapp/frontend" >&2
+    echo "    npm ci && npm run build" >&2
+    echo "    rsync -a dist/ $(hostname):${SCRIPT_DIR}/frontend/dist/" >&2
+    echo "Then re-run this script with no --build-ui." >&2
+    exit 1
+  fi
+  # package.json declares no `engines`, so npm will not stop an old Node itself --
+  # it fails later, inside the build, saying something less obvious.
+  node_major="$(node -v | sed 's/^v\([0-9]*\).*/\1/')"
+  if [[ "${node_major}" -lt "${NODE_MIN_MAJOR}" ]]; then
+    echo "--build-ui needs Node >= ${NODE_MIN_MAJOR} (vite 8); this is $(node -v)." >&2
+    echo "Upgrade Node, or build the bundle elsewhere and copy dist/ over." >&2
+    exit 1
+  fi
+fi
+
 # The backend needs Python >=3.12; Ubuntu 22.04 (JetPack 6) ships 3.10. uv
 # downloads and manages a private 3.12 rather than touching the system Python.
 uv python install 3.12 >/dev/null 2>&1 || true
