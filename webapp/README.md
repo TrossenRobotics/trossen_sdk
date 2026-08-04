@@ -11,8 +11,19 @@ library integration, configuration reference), see the repo-root
 [README](../README.md).
 
 The webapp ships as two containers — a FastAPI backend and a Vite-served
-React frontend — orchestrated by Docker Compose. There is no native
-installer; the host needs Docker and a browser, nothing else.
+React frontend — orchestrated by Docker Compose. The host needs Docker and
+a browser, nothing else.
+
+Two setups sit outside that default and have their own guides:
+
+- **Docker-free, single process** — `./run-native.sh` builds the SDK
+  extension against libraries already installed on the host and serves the
+  UI from the backend, so one uvicorn process is the whole app and no Node
+  runtime is needed. Intended for a Jetson Orin, where rebuilding
+  libtrossen_arm and trossen_base inside a container is pure waste.
+  Run `./run-native.sh --help` for the options.
+- **Raspberry Pi display** — a Pi acting as a fixed viewer for a webapp
+  running on another machine: [PI_KIOSK.md](PI_KIOSK.md).
 
 ---
 
