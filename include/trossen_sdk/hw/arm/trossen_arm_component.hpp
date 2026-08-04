@@ -56,7 +56,15 @@ public:
    *   "end_effector": "wxai_v0_follower",
    *   "staged_position": [0, 1.0, 0.5, 0.6, 0, 0, 0],  // optional, joint-space
    *   "staging_time_s": 2.0,       // optional, default 2.0 (stage / rest move)
-   *   "write_moving_time_s": 0.1   // optional, default 0.0 (per-tick smoothing)
+   *   "write_moving_time_s": 0.1,  // optional, default 0.0 (per-tick smoothing)
+   *
+   *   // Optional One-Euro adaptive low-pass on outgoing position commands.
+   *   // All off / unused unless "smoothing_enabled" is true.
+   *   "smoothing_enabled": false,        // optional, default false
+   *   "smoothing_gripper": false,        // optional, default false (arm joints only)
+   *   "smoothing_min_cutoff_hz": 1.0,    // optional, default 1.0, must be > 0
+   *   "smoothing_beta": 0.9,             // optional, default 0.9, must be >= 0
+   *   "smoothing_d_cutoff_hz": 1.0       // optional, default 1.0, must be > 0
    * }
    *
    * @param config JSON configuration object
