@@ -33,6 +33,10 @@
 #                    there and it also saves compiling a camera backend the
 #                    robot will never open.
 #   --build-ui       run `npm run build` first (needs Node >=20 on THIS machine).
+#   --rebuild-sdk    force the trossen_sdk C++ extension to be rebuilt. Normally
+#                    unnecessary: a rebuild is triggered automatically when any
+#                    C++ source is newer than the installed extension. Use this
+#                    after changing a build flag, since flags leave no mtime.
 #   --port N         listen on N instead of 8000.
 #   --reload         uvicorn autoreload, for development.
 #
@@ -59,6 +63,7 @@ cd "${SCRIPT_DIR}/backend"
 
 PORT=8000
 BUILD_UI=0
+REBUILD_SDK=0
 RELOAD=0
 CMAKE_DEFINES=()
 
@@ -68,6 +73,7 @@ while [[ $# -gt 0 ]]; do
     --zed)       CMAKE_DEFINES+=("TROSSEN_ENABLE_ZED=ON" "ZED_DIR=${ZED_DIR:-/usr/local/zed}"); shift ;;
     --no-realsense) CMAKE_DEFINES+=("TROSSEN_ENABLE_REALSENSE=OFF"); shift ;;
     --build-ui)  BUILD_UI=1; shift ;;
+    --rebuild-sdk) REBUILD_SDK=1; shift ;;
     --reload)    RELOAD=1; shift ;;
     --port)      PORT="$2"; shift 2 ;;
     # Print the header comment block as the help text. Bounded by "where the
@@ -130,9 +136,34 @@ if [[ ${#CMAKE_DEFINES[@]} -gt 0 ]]; then
   echo "==> building trossen_sdk with ${SKBUILD_CMAKE_DEFINE}"
 fi
 
+# `uv sync` will NOT rebuild the extension when only C++ sources have changed. It
+# compares package versions, sees the same editable trossen-sdk, reports "Checked
+# N packages" and moves on -- so a C++ fix appears to deploy while the old .so
+# keeps running, with nothing in the output saying so. That failure mode is
+# expensive: the symptom is the code behaving exactly as it did before the fix.
+#
+# So detect it. If any C++ source is newer than the installed library, force the
+# rebuild. `--reinstall-package trossen-sdk` specifically -- a bare --reinstall
+# fails on this project's dynamic version metadata.
+SYNC_FLAGS=(--no-dev)
+_sdk_lib="$(find "${UV_PROJECT_ENVIRONMENT}" -name libtrossen_sdk.so -print -quit 2>/dev/null || true)"
+if [[ "${REBUILD_SDK}" == "1" ]]; then
+  echo "==> forcing SDK extension rebuild (--rebuild-sdk)"
+  SYNC_FLAGS+=(--reinstall-package trossen-sdk)
+elif [[ -n "${_sdk_lib}" ]]; then
+  # -print -quit stops at the first hit, so this stays cheap on a large tree.
+  _newer="$(find "${REPO_ROOT}/src" "${REPO_ROOT}/include" "${REPO_ROOT}/python" \
+              "${REPO_ROOT}/CMakeLists.txt" -newer "${_sdk_lib}" -print -quit 2>/dev/null || true)"
+  if [[ -n "${_newer}" ]]; then
+    echo "==> C++ sources changed since the extension was built (${_newer#"${REPO_ROOT}/"})"
+    echo "    rebuilding trossen_sdk; this takes a few minutes"
+    SYNC_FLAGS+=(--reinstall-package trossen-sdk)
+  fi
+fi
+
 echo "==> syncing Python environment (${UV_PROJECT_ENVIRONMENT})"
 echo "    first run compiles the SDK extension and takes several minutes"
-uv sync --no-dev
+uv sync "${SYNC_FLAGS[@]}"
 
 if [[ "${BUILD_UI}" == "1" ]]; then
   echo "==> building frontend bundle"
