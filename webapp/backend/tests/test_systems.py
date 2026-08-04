@@ -1,11 +1,17 @@
-"""Tests for factory-preset seeding and retirement.
+"""Tests for factory-preset seeding, retirement, and the shipped preset content.
 
 Seeding only ever inserts, so withdrawing a preset needs its own removal pass —
 otherwise a machine that seeded the preset once keeps it in the UI forever.
 These cover that pass and the guarantee that it does not touch anything else.
+
+The content tests exist because a preset's mistakes only surface on hardware:
+the SDK defaults a camera's type to RealSense and an arm's model is only checked
+against the controller once it is connected.
 """
 
 from __future__ import annotations
+
+import json
 
 from app.db import SessionLocal
 from app.models import Session as SessionRow
@@ -121,3 +127,65 @@ def test_seed_then_retire_leaves_the_current_lineup() -> None:
         "workbench",
         "rivet",
     }
+
+
+def _shipped_configs() -> dict[str, dict]:
+    from app.paths import FACTORY_DEFAULTS_DIR
+
+    return {
+        path.stem: json.loads(path.read_text())["config"]
+        for path in sorted(FACTORY_DEFAULTS_DIR.glob("*.json"))
+    }
+
+
+def test_every_shipped_camera_declares_its_type() -> None:
+    """`CameraConfig::type` defaults to "realsense_camera" in the SDK.
+
+    So a camera entry with no `type` is not a validation error — it silently
+    becomes a RealSense. On an all-ZED rig built without librealsense2 that
+    surfaces much later as "Unsupported hardware type: 'realsense_camera'",
+    and on a RealSense-enabled build it just opens the wrong backend.
+    """
+    known = {"realsense_camera", "opencv_camera", "zed_camera"}
+    missing: list[str] = []
+    for system_id, config in _shipped_configs().items():
+        for camera in config.get("hardware", {}).get("cameras", []):
+            declared = camera.get("type")
+            if declared is None:
+                missing.append(f"{system_id}:{camera.get('id')} has no type")
+            elif declared not in known:
+                missing.append(f"{system_id}:{camera.get('id')} type={declared!r}")
+    assert not missing, "cameras with a missing or unknown type: " + ", ".join(missing)
+
+
+def test_shipped_camera_hardware_and_producer_types_agree() -> None:
+    """The hardware entry decides; a disagreeing producer means one is a typo."""
+    mismatched: list[str] = []
+    for system_id, config in _shipped_configs().items():
+        producers = {
+            p.get("hardware_id"): p.get("type") for p in config.get("producers", [])
+        }
+        for camera in config.get("hardware", {}).get("cameras", []):
+            camera_id = camera.get("id")
+            producer_type = producers.get(camera_id)
+            if producer_type is not None and producer_type != camera.get("type"):
+                mismatched.append(
+                    f"{system_id}:{camera_id} hardware={camera.get('type')!r} "
+                    f"producer={producer_type!r}"
+                )
+    assert not mismatched, "camera type disagreements: " + ", ".join(mismatched)
+
+
+def test_every_shipped_component_and_producer_has_an_id() -> None:
+    """`hardware.components` entries are matched to producers by id.
+
+    An unnamed component cannot be paired with its producer, and the webapp's
+    config round-trip keys on the same id to preserve components it does not
+    model.
+    """
+    unnamed: list[str] = []
+    for system_id, config in _shipped_configs().items():
+        for component in config.get("hardware", {}).get("components", []):
+            if not component.get("id") or not component.get("type"):
+                unnamed.append(f"{system_id}:{component}")
+    assert not unnamed, "components missing id or type: " + ", ".join(unnamed)

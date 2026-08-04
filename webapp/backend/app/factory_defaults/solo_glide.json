@@ -117,6 +117,7 @@
       "cameras": [
         {
           "id": "camera_main",
+          "type": "realsense_camera",
           "serial_number": "128422271347",
           "width": 640,
           "height": 480,
@@ -124,6 +125,7 @@
         },
         {
           "id": "camera_wrist",
+          "type": "realsense_camera",
           "serial_number": "218622270304",
           "width": 640,
           "height": 480,
