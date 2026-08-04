@@ -36,3 +36,18 @@ DB_PATH = Path(os.environ.get("TROSSEN_WEBAPP_DB_PATH", str(STATE_ROOT / "app.db
 
 # Read-only factory defaults — ships with the webapp source
 FACTORY_DEFAULTS_DIR = Path(__file__).parent / "factory_defaults"
+
+# Built frontend bundle (`npm run build` in webapp/frontend). Optional: when the
+# directory exists the backend serves the UI itself, so one uvicorn process is
+# the whole app and no Node runtime is needed at all. When it does not exist the
+# backend is API-only and the UI comes from the Vite dev server, which is how the
+# Docker compose stack runs. Overridable so a deployment can build the bundle
+# somewhere else and point at it.
+#
+# `parents[2]` is webapp/ — this file is webapp/backend/app/paths.py.
+FRONTEND_DIST_DIR = Path(
+    os.environ.get(
+        "TROSSEN_WEBAPP_FRONTEND_DIST",
+        str(Path(__file__).resolve().parents[2] / "frontend" / "dist"),
+    )
+)

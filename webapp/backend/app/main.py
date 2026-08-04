@@ -8,7 +8,9 @@ from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import activity, assignments, episodes
 from app import faults as faults_mod
@@ -32,6 +34,7 @@ from app.datasets import (
 from app.db import apply_migrations
 from app.hw_test import stream_system_hardware_test
 from app.io_utils import is_safe_id
+from app.paths import FRONTEND_DIST_DIR
 from app.rerun_playback import build_rrd
 from app.recorder import (
     RecorderError,
@@ -1057,3 +1060,44 @@ def session_rerun_blueprint(session_id: str) -> Response:
         content=_build_camera_blueprint_rbl(camera_ids),
         media_type="application/octet-stream",
     )
+
+
+# ── Optional: serve the built frontend from this same process ────────────────
+#
+# Mounted LAST, after every /api route, because Starlette matches routes in
+# registration order — a mount at "/" registered earlier would swallow the API.
+#
+# This is what makes a Docker-free deployment a single process: `npm run build`
+# once (on any machine — the bundle is plain JS/CSS and architecture-independent),
+# drop the `dist/` next to the backend, and uvicorn serves both the UI and the
+# API on port 8000 with no Vite, no proxy, and no Node runtime on the target.
+# Absent a `dist/`, nothing is mounted and the backend stays API-only, which is
+# exactly how the compose stack runs it.
+if FRONTEND_DIST_DIR.is_dir():
+
+    class _SpaStaticFiles(StaticFiles):
+        """StaticFiles that falls back to index.html for unknown paths.
+
+        The UI uses client-side routing (`/record`, `/monitor/<id>`, ...), so
+        those paths have no file on disk. A plain StaticFiles 404s on them,
+        which breaks deep links and every page refresh. Falling back to
+        index.html hands the path to the router, which is what a dev server
+        does. Real missing assets still 404 — a request for a hashed bundle
+        that isn't there returns HTML, but nothing requests one except a stale
+        index, and that self-corrects on reload.
+        """
+
+        async def get_response(self, path: str, scope):
+            try:
+                return await super().get_response(path, scope)
+            except StarletteHTTPException as exc:
+                # An unmatched /api/* path is a bad API call, not a UI route.
+                # Without this it would fall through to index.html and answer a
+                # typo'd endpoint with 200 text/html, which the frontend then
+                # tries to parse as JSON — a confusing failure a long way from
+                # its cause. Let the 404 through instead.
+                if exc.status_code == 404 and not path.startswith("api/"):
+                    return await super().get_response("index.html", scope)
+                raise
+
+    app.mount("/", _SpaStaticFiles(directory=FRONTEND_DIST_DIR, html=True), name="frontend")
