@@ -35,6 +35,8 @@ IP_RIGHT_FOLLOWER = "192.168.1.5"
 LEADER_MAX = 20.0       # N - leader effort at full grip (not including offset)
 FOLLOWER_MAX = 100.0    # N - follower effort at full grip
 LEADER_OFFSET = 6.5     # N - leader opening offset
+Y_ARM_MOUNT_OFFSET_RIGHT = 0.28   # m - right arm mount offset in y direction
+Y_ARM_MOUNT_OFFSET_LEFT = -0.28   # m - left arm mount offset in y direction
 
 BASE_MIN = -1           # Min translational/rotational velocity (units/s and rad/s)
 BASE_MAX = 1            # Max translational/rotational velocity (units/s and rad/s)
@@ -61,6 +63,18 @@ def scale(value, val_min, val_max, scaled_min, scaled_max, scaled_deadzone=None)
     return scaled_val
 
 
+def nearest_point_on_circle(radius, x, y):
+    """Return the nearest point on a circle of given radius to the point (x, y)."""
+    dist = np.sqrt(x**2 + y**2)
+    if dist == 0:
+        return radius, 0
+
+    nearest_x = x / dist * radius
+    nearest_y = y / dist * radius
+    return nearest_x, nearest_y
+
+
+
 def configure_leader(ip, model):
     """Configure a leader arm and cap its gripper's open position."""
     driver = trossen_arm.TrossenArmDriver()
@@ -70,7 +84,7 @@ def configure_leader(ip, model):
     joint_limits[-1].position_max = 0.05
     for i in range (6):
         joint_limits[i].velocity_tolerance = joint_limits[i].velocity_max
-        joint_limits[i].effort_tolerance = joint_limits[i].effort_max  
+        joint_limits[i].effort_tolerance = joint_limits[i].effort_max
     driver.set_joint_limits(joint_limits)
 
     return driver
@@ -84,7 +98,7 @@ def configure_follower(ip):
     joint_limits = driver.get_joint_limits()
     for i in range (6):
         joint_limits[i].velocity_tolerance = joint_limits[i].velocity_max
-        joint_limits[i].effort_tolerance = joint_limits[i].effort_max  
+        joint_limits[i].effort_tolerance = joint_limits[i].effort_max
     driver.set_joint_limits(joint_limits)
 
 
@@ -121,30 +135,24 @@ def scaled_leader_gripper_effort(follower_effort):
     return LEADER_MAX * (effort_norm**3) + LEADER_OFFSET
 
 
-def teleop_arm_step(leader, follower, gripper_home_offset):
+def teleop_arm_step(leader, follower, gripper_home_offset, y_arm_mount_offset, temp_side):
     """Mirror one leader/follower arm pair for a single control loop iteration.
 
     Feeds follower efforts back to the leader, leader positions forward to the
     follower, and drives the follower gripper from the leader's gripper position
     while feeding the follower's gripper effort back as leader resistance.
     """
-    positions = leader.get_all_positions()
-    efforts = follower.get_all_efforts()
 
-    # Feed the efforts from the follower robot to the leader robot
-    leader.set_arm_efforts(
-        np.array([efforts[0], efforts[1], efforts[2], -efforts[3], -efforts[4], efforts[5]]),
-        0.0,
-        False,
-    )
+    # TODO: REMOVE
+    # efforts = follower.get_all_efforts()
 
-    # Feed the positions from the leader robot to the follower robot
-    follower.set_arm_positions(
-        np.array([positions[0], positions[1], positions[2], -positions[3], -positions[4],
-                positions[5] + gripper_home_offset]),
-        0.0,
-        False,
-    )
+    # # Feed the efforts from the follower robot to the leader robot
+    # leader.set_arm_efforts(
+    #     np.array([efforts[0], efforts[1], efforts[2], -efforts[3], -efforts[4], efforts[5]]),
+    #     0.0,
+    #     False,
+    # )
+
 
     # Read the leader's gripper position and follower's gripper effort
     leader_gripper_position = leader.get_gripper_position()
@@ -157,6 +165,30 @@ def teleop_arm_step(leader, follower, gripper_home_offset):
 
     # Set the follower's gripper position to match the leader's position
     follower.set_gripper_position(leader_gripper_position, 0.0, False)
+
+
+    # Safety check if arms could hit cameras
+    SAFETY_RADIUS_M =  0.3
+    x, y, z, rx, ry, rz = leader.get_cartesian_position()
+    y -= y_arm_mount_offset
+    if (x**2 + y**2) < SAFETY_RADIUS_M**2:
+        print(f"Safety limit reached, {temp_side}: x={x}, y={y}")
+
+        # nearest_x, nearest_y = nearest_point_on_circle(SAFETY_RADIUS_M, x, y)
+        # nearest_y += y_arm_mount_offset
+
+        # follower.set_cartesian_position(nearest_x, nearest_y, z, rx, ry, rz,
+        #     trossen_arm.InterpolationSpace.cartesian, 0.5, False)
+    # else:
+        # Feed the positions directly from the leader robot to the follower robot
+    positions = leader.get_all_positions()
+    follower.set_arm_positions(
+        np.array([positions[0], positions[1], positions[2], -positions[3], -positions[4],
+                positions[5] + gripper_home_offset]),
+        0.2,
+        False,
+    )
+
 
 
 if __name__ == "__main__":
@@ -240,10 +272,11 @@ if __name__ == "__main__":
 
             if ENABLE_RIGHT and ENABLE_FOLLOWER:
                 teleop_arm_step(driver_right_leader, driver_right_follower,
-                                GRIPPER_HOME_OFFSET_RIGHT)
+                                GRIPPER_HOME_OFFSET_RIGHT, Y_ARM_MOUNT_OFFSET_RIGHT, "right")
 
             if ENABLE_LEFT and ENABLE_FOLLOWER:
-                teleop_arm_step(driver_left_leader, driver_left_follower, GRIPPER_HOME_OFFSET_LEFT)
+                teleop_arm_step(driver_left_leader, driver_left_follower, GRIPPER_HOME_OFFSET_LEFT,
+                                Y_ARM_MOUNT_OFFSET_LEFT, "left")
 
     except KeyboardInterrupt:
         print("Moving to stop positions...")
