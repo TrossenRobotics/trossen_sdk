@@ -94,7 +94,11 @@ _ORPHAN_POLL_S = 2.0
 # error message when the child crashes without printing a sentinel
 # (e.g. C++ std::terminate prints "terminate called after throwing..."
 # directly to stderr but never reaches our Python __ERROR__ branch).
-_LAST_LINES_BUFFER = 50
+# Sized for the recorder_runner bootstrap path, which calls mgr.shutdown() BEFORE
+# printing its __ERROR__ sentinel. Shutdown is chatty (every producer, observer and
+# arm logs its teardown), so a buffer that only just covers a crash tail would evict
+# the earlier line that actually explains the failure before we get to read it.
+_LAST_LINES_BUFFER = 250
 
 # Sentinel prefixes the child uses to communicate its terminal verdict.
 # Kept in sync with `app/recorder_runner.py`.
@@ -149,6 +153,46 @@ def _extract_fault_detail(last_lines: deque) -> str:
             if not out or out[-1] != line:
                 out.append(line)
     return "\n".join(out)
+
+
+def _diagnostic_tail(last_lines: deque, limit: int = 15) -> str:
+    """SDK output worth attaching to an error message, best-effort.
+
+    Prefers the marker-tagged fault lines, which are the highest-signal thing we
+    ever get. Falls back to the last few free-form lines, because a great many of
+    the SDK's failure messages carry no marker at all: `SessionManager::
+    start_episode()` prints "Failed to open backend", "Backend creation failed:
+    ...", "Episode already active", "... Collection complete." as plain cerr text
+    and then simply returns false. Those untagged lines are precisely the ones
+    that explain an otherwise contentless "returned False", so a marker-only
+    filter drops the explanation for the most common class of failure.
+
+    Sentinel and JSON-event lines are excluded: the caller already has the
+    sentinel (it is what prompted the error) and the events are machine chatter.
+    """
+    detail = _extract_fault_detail(last_lines)
+    if detail:
+        return detail
+    out: list[str] = []
+    for raw in last_lines:
+        line = _ANSI_RE.sub("", raw).strip()
+        if not line or line.startswith("__") or line.startswith("{"):
+            continue
+        out.append(line)
+    return "\n".join(out[-limit:])
+
+
+def _with_diagnostics(message: str, last_lines: deque) -> str:
+    """Append the SDK's own output to a terminal error message.
+
+    The child's `__ERROR__` sentinel says *that* a step failed, almost never
+    *why* -- the why went to stderr from C++ moments earlier and is sitting in the
+    ring buffer. Raising the sentinel alone was throwing that away, leaving errors
+    like "SessionManager.start_episode() returned False" with nothing actionable
+    in them, while the no-sentinel path right below already attached a tail.
+    """
+    detail = _diagnostic_tail(last_lines)
+    return f"{message}\n\nSDK output:\n{detail}" if detail else message
 
 
 class RecorderError(RuntimeError):
@@ -658,7 +702,7 @@ def _wait_for_ready(
             f"{_BOOTSTRAP_TIMEOUT_S:.0f}s"
         )
     if error_message:
-        raise RecorderError(error_message)
+        raise RecorderError(_with_diagnostics(error_message, last_lines))
     tail = " | ".join(list(last_lines)[-5:])
     if tail:
         raise RecorderError(
