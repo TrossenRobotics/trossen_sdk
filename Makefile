@@ -53,11 +53,18 @@ realsense:
 #   - libboost-filesystem-dev + libboost-serialization-dev    -> hard error
 #     (pinocchio, vendored by libtrossen_arm, needs them)
 #   - ZED SDK for Jetson under $(ZED_DIR), when ZED=1         -> hard error
+#   - realsense2 + fastcdr + fastrtps, when REALSENSE=1       -> hard error
 #
 # The two warnings are warnings on purpose: both configurations build and are
 # legitimate. Missing input-report costs Glide handle input at RUNTIME only, and
 # a missing trossen_base falls back to a FetchContent clone. Neither shows up as
 # a build failure, which is exactly why they are surfaced here instead.
+#
+# RealSense, by contrast, is a hard error because its find_package calls are
+# REQUIRED -- and note it defaults ON in CMakeLists.txt, so it is checked unless
+# you say REALSENSE=0. That default is the wrong one for a Rivet or a Workbench,
+# which are all ZED cameras: those rigs want REALSENSE=0 and should not be made
+# to install a camera backend they never open.
 #
 # Job count is derived, not $(NPROC): a Jetson has 6-12 cores but as little as
 # 8 GB shared with the GPU, and Eigen/pinocchio translation units are measured
@@ -152,6 +159,27 @@ orin-check:
 		else \
 			echo "orin-check: trossen_base found under $$base_prefix"; \
 		fi; \
+	fi
+	@if [ "$(REALSENSE)" = "1" ]; then \
+		for pkgcfg in realsense2 fastcdr fastrtps; do \
+			found=""; \
+			for p in $(ORIN_PKG_PREFIXES); do \
+				for sub in lib/cmake lib/$$(uname -m)-linux-gnu/cmake share/cmake; do \
+					if [ -d "$$p/$$sub/$$pkgcfg" ]; then found="$$p"; break 2; fi; \
+				done; \
+			done; \
+			if [ -z "$$found" ]; then \
+				echo "ERROR: REALSENSE=1 but $$pkgcfg is not installed."; \
+				echo "       The RealSense block does find_package(realsense2/fastcdr/fastrtps"; \
+				echo "       REQUIRED), so configure fails before compiling anything."; \
+				echo "       Install librealsense2-dev (and the FastDDS packages) from the"; \
+				echo "       RealSense apt repo, which does publish arm64."; \
+				echo "       Or, if this rig has no RealSense cameras -- a Rivet and a"; \
+				echo "       Workbench are all ZED -- just drop it: make orin REALSENSE=0"; \
+				exit 1; \
+			fi; \
+		done; \
+		echo "orin-check: realsense2 + fastcdr + fastrtps found"; \
 	fi
 	@echo "orin-check OK: aarch64, $(ORIN_CORES) cores, $(ORIN_MEM_GB) GB RAM -> -j$(ORIN_JOBS)"
 .PHONY: orin-check

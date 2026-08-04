@@ -25,6 +25,13 @@
 #                    Omit on a Workbench / Solo Glide — the Glide handles need
 #                    only libtrossen_arm.
 #   --zed            build with ZED camera support.
+#   --no-realsense   build with TROSSEN_ENABLE_REALSENSE=OFF. RealSense is ON by
+#                    default in CMakeLists.txt, and its find_package calls are
+#                    REQUIRED, so configure FAILS on a machine without
+#                    librealsense2 even when nothing on the rig uses it. A Rivet
+#                    or Workbench is all ZED cameras, so this is the right flag
+#                    there and it also saves compiling a camera backend the
+#                    robot will never open.
 #   --build-ui       run `npm run build` first (needs Node >=20 on THIS machine).
 #   --port N         listen on N instead of 8000.
 #   --reload         uvicorn autoreload, for development.
@@ -44,6 +51,10 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+# Absolute self-reference, resolved BEFORE the cd below: --help reads this file,
+# and $BASH_SOURCE is whatever relative path the caller typed, which stops
+# resolving the moment the working directory changes.
+SELF="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 cd "${SCRIPT_DIR}/backend"
 
 PORT=8000
@@ -55,10 +66,15 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --rivet)     CMAKE_DEFINES+=("TROSSEN_ENABLE_RIVET=ON"); shift ;;
     --zed)       CMAKE_DEFINES+=("TROSSEN_ENABLE_ZED=ON" "ZED_DIR=${ZED_DIR:-/usr/local/zed}"); shift ;;
+    --no-realsense) CMAKE_DEFINES+=("TROSSEN_ENABLE_REALSENSE=OFF"); shift ;;
     --build-ui)  BUILD_UI=1; shift ;;
     --reload)    RELOAD=1; shift ;;
     --port)      PORT="$2"; shift 2 ;;
-    -h|--help)   sed -n '2,45p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    # Print the header comment block as the help text. Bounded by "where the
+    # comments stop" rather than a line number, which silently overran into the
+    # shell code below every time the header grew.
+    -h|--help)   awk 'NR==1{next} /^#/{sub(/^# ?/, ""); print; next} {exit}' "${SELF}"
+                 exit 0 ;;
     *)           echo "unknown option: $1" >&2; exit 2 ;;
   esac
 done
