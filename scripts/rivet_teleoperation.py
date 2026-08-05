@@ -175,7 +175,8 @@ def teleop_arm_step(leader, follower, gripper_home_offset, y_arm_mount_offset, t
         nearest_x, nearest_y = nearest_point_on_circle(SAFETY_RADIUS_M, x, y)
         nearest_y += y_arm_mount_offset
 
-        follower.set_cartesian_positions(nearest_x, nearest_y, z, rx, ry, rz,
+        follower.set_cartesian_positions(
+            np.array([nearest_x, nearest_y, z, rx, ry, rz]),
             trossen_arm.InterpolationSpace.cartesian, 0.5, False)
     else:
         # Feed the positions directly from the leader robot to the follower robot
