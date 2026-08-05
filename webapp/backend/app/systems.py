@@ -279,7 +279,14 @@ def _carry_over_unmodelled_config(
             cam["type"] = recovered
 
     # --- components ---
-    if not incoming_hw.get("components") and stored_hw.get("components"):
+    # Key PRESENCE, not truthiness. An old bundle omits the key entirely; a
+    # current one that means "this system has no components" sends `[]`. Testing
+    # `not incoming_hw.get("components")` conflates the two, so an explicit
+    # empty list was overwritten from the stored row and there was NO way to
+    # clear components at all — which strands a config whose components
+    # reference hardware that has since been deleted (a camera-only rig keeping
+    # `glide_inputs`, whose configure() then hard-fails on the missing arm).
+    if "components" not in incoming_hw and stored_hw.get("components"):
         incoming_hw["components"] = stored_hw["components"]
 
     # --- arm command smoothing ---

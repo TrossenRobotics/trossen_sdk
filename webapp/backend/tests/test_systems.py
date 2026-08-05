@@ -216,6 +216,19 @@ class TestCarryOverUnmodelledConfig:
         assert merged["hardware"]["arms"]["follower"]["smoothing_enabled"] is False
         assert "smoothing_beta" not in merged["hardware"]["arms"]["follower"]
 
+    def test_a_current_client_can_CLEAR_components(self) -> None:
+        """An explicit `[]` means "no components", and must not be refilled.
+
+        Distinct from an old bundle, which omits the key entirely. Conflating
+        the two made components unclearable: a rig whose arms were deleted kept
+        `glide_inputs`, and every recording died in configure() with "no active
+        trossen_arm named 'glide_left'" with no way to fix it from the UI.
+        """
+        incoming = self._old_client_put()
+        incoming["hardware"]["components"] = []
+        merged = _carry_over_unmodelled_config(incoming, self._stored())
+        assert merged["hardware"]["components"] == []
+
     def test_a_current_client_can_edit_components(self) -> None:
         incoming = self._old_client_put()
         incoming["hardware"]["components"] = [
@@ -275,6 +288,39 @@ def test_shipped_camera_hardware_and_producer_types_agree() -> None:
                     f"producer={producer_type!r}"
                 )
     assert not mismatched, "camera type disagreements: " + ", ".join(mismatched)
+
+
+def test_shipped_rail_ceilings_agree() -> None:
+    """The rail's speed ceiling is declared twice and applied in series.
+
+    A `trossen_base` clamps the lift command to `max_lift_units_per_s`, and the
+    `glide_base` leader that drives it scales the command by `axes.lift.max`
+    first. So the rail actually tops out at the LOWER of the two, and shipping a
+    config where they disagree means raising one of them silently does nothing.
+    """
+    disagreements: list[str] = []
+    for system_id, config in _shipped_configs().items():
+        components = config.get("hardware", {}).get("components", [])
+        bases = [c for c in components if c.get("type") == "trossen_base"]
+        leaders = [
+            c
+            for c in components
+            if c.get("type") == "glide_base"
+            and isinstance(c.get("axes"), dict)
+            and isinstance(c["axes"].get("lift"), dict)
+        ]
+        for base in bases:
+            base_max = base.get("max_lift_units_per_s")
+            if base_max is None:
+                continue
+            for leader in leaders:
+                leader_max = leader["axes"]["lift"].get("max")
+                if leader_max is not None and leader_max != base_max:
+                    disagreements.append(
+                        f"{system_id}: {base.get('id')}.max_lift_units_per_s={base_max} "
+                        f"vs {leader.get('id')}.axes.lift.max={leader_max}"
+                    )
+    assert not disagreements, "rail ceiling disagreements: " + ", ".join(disagreements)
 
 
 def test_every_shipped_component_and_producer_has_an_id() -> None:
