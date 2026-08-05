@@ -13,6 +13,8 @@ identically to monitoring:
   * JointState  -> `<topic>/positions|velocities|efforts` as `rr.Scalars`
                    (matches recorder_runner._log_joint_state_record).
   * Images      -> `<topic>` as `rr.EncodedImage` (best-effort; see below).
+  * Video       -> `<topic>` as `rr.VideoStream` samples, for recordings made
+                   with trossen_mcap_backend.image_encoding = "video".
 All messages share a single `time` timeline keyed on each message's log time,
 so scrubbing reflects real recording time.
 
@@ -46,6 +48,62 @@ def _log_joint_state(topic: str, proto: Any, stream: rr.RecordingStream) -> None
         rr.log(f"{topic}/efforts", rr.Scalars(list(proto.efforts)), recording=stream)
 
 
+# Maps a foxglove.CompressedVideo `format` string to a Rerun codec. Recordings
+# made with trossen_mcap_backend.image_encoding = "video" use h264 for colour
+# and h265 for depth; the others are here because the Foxglove schema permits
+# them and silently dropping a stream is worse than trying.
+_VIDEO_CODECS = {
+    "h264": rr.VideoCodec.H264,
+    "h265": rr.VideoCodec.H265,
+    "av1": rr.VideoCodec.AV1,
+    "vp9": rr.VideoCodec.VP9,
+}
+
+def _log_video_frame(
+    topic: str,
+    proto: Any,
+    stream: rr.RecordingStream,
+    declared: set[str],
+) -> bool:
+    """Log one CompressedVideo frame as a Rerun video sample.
+
+    Recordings that store cameras as compressed video cannot go through
+    `_try_log_image`: its `format` string is a codec name, not an image media
+    type, so it would build a bogus "image/h264" and log nothing usable. Rerun
+    has native support for streaming encoded samples, which is what this uses.
+
+    `declared` tracks which topics have had their codec logged; it is owned by
+    the caller and scoped to one recording, since each recording needs its own
+    static codec entry.
+
+    Returns True if the frame was logged.
+    """
+    try:
+        data = getattr(proto, "data", None)
+        fmt = getattr(proto, "format", None)
+        if not isinstance(data, (bytes, bytearray)) or not data:
+            return False
+        codec = _VIDEO_CODECS.get(str(fmt).lower())
+        if codec is None:
+            return False
+
+        if topic not in declared:
+            # Static: the codec describes the whole stream, not this frame.
+            rr.log(topic, rr.VideoStream(codec=codec), static=True, recording=stream)
+            declared.add(topic)
+
+        rr.log(
+            topic,
+            rr.VideoStream.from_fields(sample=bytes(data)),
+            recording=stream,
+        )
+        return True
+    except Exception:
+        # Never let a camera stream break joint playback, which is the path
+        # operators actually depend on for episode review.
+        return False
+
+
 def _try_log_image(topic: str, proto: Any, stream: rr.RecordingStream) -> bool:
     """Best-effort log of an image-like message. Returns True if something was
     logged. Recording image encodings vary, so this stays defensive: it only
@@ -77,6 +135,8 @@ def build_rrd(mcap_path: Path) -> bytes:
 
     with tempfile.NamedTemporaryFile(suffix=".rrd", delete=False) as tmp:
         rrd_path = Path(tmp.name)
+    # Per-recording, so every .rrd carries its own static codec declarations.
+    declared_video_topics: set[str] = set()
     try:
         with rr.RecordingStream(_APP_ID) as stream:
             stream.save(str(rrd_path))
@@ -88,6 +148,8 @@ def build_rrd(mcap_path: Path) -> bytes:
                     schema_name = schema.name if schema else ""
                     if schema_name.endswith("JointState"):
                         _log_joint_state(topic, proto, stream)
+                    elif schema_name.endswith("CompressedVideo"):
+                        _log_video_frame(topic, proto, stream, declared_video_topics)
                     else:
                         # Unknown schema: try images, otherwise skip quietly.
                         _try_log_image(topic, proto, stream)
