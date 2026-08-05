@@ -308,6 +308,12 @@ Inside the container these appear under `/root/...` instead of
 
 ## 8. Troubleshooting
 
+> Bringing up the **native** build on a Jetson Orin (`run-native.sh`) has its own
+> failure modes — a build that hangs forever on private-repo git credentials,
+> reusing CI's aarch64 `libtrossen_arm` instead of a 30–45 minute local compile,
+> missing Arrow/protobuf dev packages, and `no frontend/dist`. Those are
+> collected in [RIG_BRINGUP.md](RIG_BRINGUP.md).
+
 ### Hardware Test hangs or times out connecting to an arm
 
 Symptom: **Test** (or starting a recording) stalls on a line like
