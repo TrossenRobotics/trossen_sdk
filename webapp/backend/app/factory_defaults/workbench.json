@@ -124,7 +124,7 @@
         {
           "id": "camera_main",
           "type": "zed_camera",
-          "serial_number": "51287468",
+          "serial_number": "51550963",
           "resolution": "HD1200",
           "fps": 30,
           "use_depth": false
@@ -132,7 +132,7 @@
         {
           "id": "camera_left",
           "type": "zed_camera",
-          "serial_number": "95483555",
+          "serial_number": "90902792",
           "resolution": "HD1200",
           "fps": 30,
           "use_depth": false
@@ -140,7 +140,7 @@
         {
           "id": "camera_right",
           "type": "zed_camera",
-          "serial_number": "97389637",
+          "serial_number": "94032439",
           "resolution": "HD1200",
           "fps": 30,
           "use_depth": false

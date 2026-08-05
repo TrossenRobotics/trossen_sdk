@@ -101,15 +101,44 @@ Each entry accepts:
     * - ``id``
       - string
       - User-chosen label referenced by ``producers``
+    * - ``type``
+      - string
+      - ``"zed_camera"``, ``"realsense_camera"`` or ``"opencv_camera"``. Defaults to
+        ``"realsense_camera"`` when omitted, so a ZED entry must state it.
     * - ``serial_number``
       - string
-      - Camera serial (Stereolabs ZED or RealSense)
+      - Camera serial (Stereolabs ZED or RealSense). ZED serials are numeric;
+        a JSON number is accepted as well as a string.
     * - ``width`` / ``height``
       - int
-      - Frame resolution in pixels
+      - Frame resolution in pixels. **RealSense and OpenCV only** — a ZED
+        negotiates its frame size from ``resolution`` and ignores these.
     * - ``fps``
       - int
       - Capture frame rate
+    * - ``resolution``
+      - string
+      - **ZED only.** One of ``HD2K``, ``HD1200``, ``HD1080``, ``HD720``,
+        ``SVGA``, ``VGA``, ``AUTO``. Defaults to ``HD720``. This is the only
+        thing that sets a ZED's frame size.
+    * - ``use_depth``
+      - bool
+      - Record a depth stream alongside colour (RealSense and ZED). Defaults to
+        ``false``. On a ZED this gates depth entirely: ``depth_mode`` has no
+        effect while this is ``false``.
+    * - ``depth_mode``
+      - string
+      - **ZED only.** One of ``NEURAL_LIGHT``, ``NEURAL``, ``NEURAL_PLUS``
+        (cheapest first). Case-sensitive; an unrecognised value falls back to
+        ``NEURAL`` with a warning on stderr. The older ``PERFORMANCE`` /
+        ``QUALITY`` / ``ULTRA`` modes still parse but are deprecated by
+        Stereolabs — prefer the ``NEURAL`` family.
+
+.. note::
+
+    Each ZED runs its own depth pass on the GPU, so the cost multiplies across a
+    multi-camera rig. Start at ``NEURAL_LIGHT`` and escalate only as far as the
+    GPU sustains the configured frame rate.
 
 ``hardware.mobile_base`` (optional) accepts:
 
@@ -127,6 +156,57 @@ Each entry accepts:
     * - ``enable_torque``
       - bool
       - Enable base motors on startup
+
+``hardware.components`` is an array of everything that is neither an arm nor a
+camera. The Rivet's swerve base with its vertical rail is declared here as a
+``trossen_base`` entry, which accepts:
+
+.. list-table::
+    :align: center
+    :header-rows: 1
+    :class: centered-table
+
+    * - Field
+      - Type
+      - Description
+    * - ``id`` / ``type``
+      - string
+      - Component label and ``"trossen_base"``
+    * - ``max_linear_mps``
+      - float
+      - Translational velocity ceiling in m/s. Must be positive. Every command
+        is clamped to it.
+    * - ``max_angular_rps``
+      - float
+      - Rotational velocity ceiling in rad/s. Must be positive.
+    * - ``max_lift_units_per_s``
+      - float
+      - Vertical rail speed ceiling, in raw driver units per second rather than
+        m/s. Must be positive.
+    * - ``estop_battery_percent``
+      - float
+      - Battery percentage at or below which the host emergency-stops. Range
+        0–100; ``0`` disables the check, which is the default.
+    * - ``ready_timeout_s``
+      - float
+      - How long to wait for the base to report ready before failing startup.
+
+.. warning::
+
+    The rail's speed is capped by **two** values in series: the base's
+    ``max_lift_units_per_s`` above, and the leader's ``axes.lift.max`` on the
+    ``glide_base`` component that drives it. The leader scales the command
+    before the base clamps it, so raising only one leaves the rail limited by
+    the other. The webapp's base editor writes both together; hand-edited
+    configs must keep them in step.
+
+.. note::
+
+    ``estop_battery_percent`` is published as telemetry rather than acted on by
+    the component: the base can halt itself but cannot home the arms or end the
+    session, and a partial stop is worse than none. The webapp's recorder owns
+    the decision, tripping after three consecutive below-threshold samples
+    (~1.5 s) so a voltage sag under hard acceleration does not fire it.
 
 Producers
 ---------

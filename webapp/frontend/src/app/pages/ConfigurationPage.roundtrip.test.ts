@@ -37,7 +37,16 @@ function rivetConfig() {
         },
       },
       cameras: [
-        { id: 'camera_main', type: 'zed_camera', serial_number: '51287468', width: 1920, height: 1200, fps: 30 },
+        {
+          id: 'camera_main',
+          type: 'zed_camera',
+          serial_number: '51287468',
+          resolution: 'HD1200',
+          width: 1920,
+          height: 1200,
+          fps: 30,
+          use_depth: false,
+        },
       ],
       components: [
         { id: 'glide_inputs', type: 'glide_arm_input', arms: ['glide_left'] },
@@ -53,6 +62,12 @@ function rivetConfig() {
           id: 'base_leader',
           type: 'glide_base',
           translation: { arm_id: 'glide_left', forward_source: 'joystick_y', max: 0.6 },
+          // The rail's other ceiling. Applied in series with the base's
+          // max_lift_units_per_s, so the two have to move together.
+          axes: {
+            angular: { arm_id: 'glide_left', source: 'joystick_x', max: 1.2 },
+            lift: { arm_id: 'glide_left', source: 'buttons', up_bit: 0, down_bit: 2, max: 8000.0 },
+          },
         },
       ],
     },
@@ -98,6 +113,186 @@ describe('camera type', () => {
     delete (config.hardware.cameras[0] as { type?: string }).type;
     const { saved } = roundTrip(config);
     expect(saved.hardware?.cameras?.[0].type).toBe('zed_camera');
+  });
+});
+
+describe('ZED camera keys', () => {
+  it('keeps the resolution across a save', () => {
+    // `resolution` is the ONLY thing that sets a ZED's frame size — the
+    // component reads this named mode and ignores width/height entirely. Losing
+    // it does not fail; it silently reverts an HD1200 rig to the component's
+    // HD720 default, which is a quiet dataset regression rather than an error.
+    const { saved } = roundTrip(rivetConfig());
+    expect(saved.hardware?.cameras?.[0].resolution).toBe('HD1200');
+  });
+
+  it('keeps depth enabled across a save', () => {
+    // Depth is gated entirely on use_depth; depth_mode alone does nothing. When
+    // this key was dropped on save, depth could not be turned on from the
+    // webapp at all.
+    const config = rivetConfig();
+    config.hardware.cameras[0].use_depth = true;
+    const { saved } = roundTrip(config);
+    expect(saved.hardware?.cameras?.[0].use_depth).toBe(true);
+  });
+
+  it('keeps depth disabled across a save', () => {
+    // The false case matters just as much: silently dropping it would leave the
+    // SDK defaulting to false and look identical, hiding the bug.
+    const { saved } = roundTrip(rivetConfig());
+    expect(saved.hardware?.cameras?.[0].use_depth).toBe(false);
+  });
+
+  it('derives width and height from the resolution, not from the config', () => {
+    // The ZED negotiates its frame size from `resolution`, so width/height in
+    // the config are advisory at best and stale at worst. The UI must show what
+    // the camera will actually produce.
+    const config = rivetConfig();
+    config.hardware.cameras[0].width = 4;
+    config.hardware.cameras[0].height = 4;
+    const { system } = roundTrip(config);
+    const camera = system.hardware.find((h) => h.id === 'camera_main');
+    expect(camera).toMatchObject({ width: 1920, height: 1200 });
+  });
+
+  it('upgrades depth modes the SDK no longer recognises', () => {
+    // An older build of this page wrote lowercase 'performance' / 'quality' /
+    // 'ultra'. The component compares depth-mode strings exactly, so those fell
+    // through to its "unknown depth_mode" fallback with only a stderr warning —
+    // invisible from the webapp. Heal them on load instead.
+    const config = rivetConfig();
+    (config.hardware.cameras[0] as { depth_mode?: string }).depth_mode = 'ultra';
+    const { saved } = roundTrip(config);
+    expect(saved.hardware?.cameras?.[0].depth_mode).toBe('NEURAL_PLUS');
+  });
+
+  it('supplies a resolution for a ZED config that never had one', () => {
+    // Making the SDK's own HD720 fallback explicit, rather than leaving the
+    // frame size to an unstated default.
+    const config = rivetConfig();
+    delete (config.hardware.cameras[0] as { resolution?: string }).resolution;
+    const { saved } = roundTrip(config);
+    expect(saved.hardware?.cameras?.[0].resolution).toBe('HD720');
+  });
+});
+
+describe('the linear rail', () => {
+  it('reports the leader axis limit alongside the base ceiling', () => {
+    const { system } = roundTrip(rivetConfig());
+    const base = system.hardware.find((h) => h.id === 'rivet_base');
+    expect(base).toMatchObject({ max_lift_units_per_s: 8000, lift_leader_max: 8000, lift_leader_id: 'base_leader' });
+  });
+
+  it('writes a raised ceiling to BOTH the base and the leader axis', () => {
+    // The whole point of surfacing the rail as one control. The leader scales
+    // the lift command and the base clamps it, so raising only one leaves the
+    // rail capped by the other — the operator sees a changed number and no
+    // change in behaviour.
+    const original = rivetConfig();
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: original });
+    const raised = {
+      ...system,
+      hardware: system.hardware.map((h) =>
+        h.id === 'rivet_base' ? { ...h, max_lift_units_per_s: 12000 } : h,
+      ),
+    };
+
+    const saved = systemToSdkConfig(raised, original);
+    const base = saved.hardware?.components?.find((c) => c.id === 'rivet_base');
+    const leader = saved.hardware?.components?.find((c) => c.id === 'base_leader');
+
+    expect(base?.max_lift_units_per_s).toBe(12000);
+    expect((leader?.axes as { lift: { max: number } }).lift.max).toBe(12000);
+  });
+
+  it('leaves the rest of the leader axis untouched when syncing the ceiling', () => {
+    // The glide_base component is otherwise opaque to this page: its button
+    // bits and its other axes must survive the lift patch byte-for-byte.
+    const original = rivetConfig();
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: original });
+    const raised = {
+      ...system,
+      hardware: system.hardware.map((h) =>
+        h.id === 'rivet_base' ? { ...h, max_lift_units_per_s: 12000 } : h,
+      ),
+    };
+
+    const leader = systemToSdkConfig(raised, original).hardware?.components?.find(
+      (c) => c.id === 'base_leader',
+    );
+    expect(leader?.translation).toEqual(original.hardware.components[2].translation);
+    expect((leader?.axes as { angular: unknown }).angular).toEqual({
+      arm_id: 'glide_left',
+      source: 'joystick_x',
+      max: 1.2,
+    });
+    expect((leader?.axes as { lift: Record<string, unknown> }).lift).toMatchObject({
+      arm_id: 'glide_left',
+      source: 'buttons',
+      up_bit: 0,
+      down_bit: 2,
+    });
+  });
+
+  it('does not invent a lift axis on a leader that has none', () => {
+    const original = rivetConfig();
+    delete (original.hardware.components[2] as { axes?: unknown }).axes;
+    const { saved, system } = roundTrip(original);
+
+    const base = system.hardware.find((h) => h.id === 'rivet_base');
+    expect(base).toMatchObject({ lift_leader_max: undefined, lift_leader_id: undefined });
+    expect(saved.hardware?.components?.[2]).not.toHaveProperty('axes');
+  });
+});
+
+describe('the Rivet base', () => {
+  it('round-trips every ceiling it edits', () => {
+    const original = rivetConfig();
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: original });
+    const edited = {
+      ...system,
+      hardware: system.hardware.map((h) =>
+        h.id === 'rivet_base'
+          ? {
+              ...h,
+              max_linear_mps: 1.0,
+              max_angular_rps: 1.8,
+              estop_battery_percent: 22,
+              ready_timeout_s: 45,
+            }
+          : h,
+      ),
+    };
+
+    const base = systemToSdkConfig(edited, original).hardware?.components?.find(
+      (c) => c.id === 'rivet_base',
+    );
+    expect(base).toMatchObject({
+      type: 'trossen_base',
+      max_linear_mps: 1.0,
+      max_angular_rps: 1.8,
+      estop_battery_percent: 22,
+      ready_timeout_s: 45,
+    });
+  });
+
+  it('keeps a zero battery threshold rather than treating it as unset', () => {
+    // Zero is the component's own default and means "disabled" — a meaningful
+    // value, not a missing one. Dropping it as falsy would re-enable the
+    // previous threshold on the next save.
+    const original = rivetConfig();
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: original });
+    const disabled = {
+      ...system,
+      hardware: system.hardware.map((h) =>
+        h.id === 'rivet_base' ? { ...h, estop_battery_percent: 0 } : h,
+      ),
+    };
+
+    const base = systemToSdkConfig(disabled, original).hardware?.components?.find(
+      (c) => c.id === 'rivet_base',
+    );
+    expect(base?.estop_battery_percent).toBe(0);
   });
 });
 

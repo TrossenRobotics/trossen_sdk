@@ -21,6 +21,61 @@ interface Producer {
   encoding?: 'bgr8' | 'rgb8' | 'mono8'; // Camera producers only
 }
 
+// ZED capture modes, with the frame size each one negotiates to. The ZED
+// component sets its resolution from this named string and ignores `width` /
+// `height` in the config entirely, so the form offers the names and derives the
+// pixel dimensions from them rather than letting an operator type numbers the
+// camera will disregard. AUTO is resolved by the SDK at open time, so it has no
+// dimensions to derive.
+const ZED_RESOLUTIONS = {
+  HD2K: { width: 2208, height: 1242 },
+  HD1200: { width: 1920, height: 1200 },
+  HD1080: { width: 1920, height: 1080 },
+  HD720: { width: 1280, height: 720 },
+  SVGA: { width: 960, height: 600 },
+  VGA: { width: 672, height: 376 },
+  AUTO: null,
+} as const;
+type ZedResolution = keyof typeof ZED_RESOLUTIONS;
+const ZED_RESOLUTION_NAMES = Object.keys(ZED_RESOLUTIONS) as ZedResolution[];
+// Matches the ZED component's own fallback, so a config with no resolution key
+// keeps behaving the way it already did.
+const DEFAULT_ZED_RESOLUTION: ZedResolution = 'HD720';
+
+// Depth modes the ZED component recognises, cheapest first. The
+// PERFORMANCE / QUALITY / ULTRA family it still accepts is deprecated in ZED
+// SDK 5.x and deliberately not offered. Case matters: the component compares
+// these strings exactly and an unrecognised one falls back to NEURAL with only
+// a stderr warning, which is invisible from the webapp.
+const ZED_DEPTH_MODES = ['NEURAL_LIGHT', 'NEURAL', 'NEURAL_PLUS'] as const;
+type ZedDepthMode = (typeof ZED_DEPTH_MODES)[number];
+const DEFAULT_ZED_DEPTH_MODE: ZedDepthMode = 'NEURAL_LIGHT';
+
+// Depth-mode spellings written by older builds of this page (lowercase) or
+// deprecated by StereoLabs (uppercase), mapped onto the NEURAL family per the
+// component's own migration warnings. Read-only healing: a config carrying one
+// of these is upgraded on load rather than silently falling back at open time.
+const LEGACY_ZED_DEPTH_MODES: Readonly<Record<string, ZedDepthMode>> = {
+  performance: 'NEURAL_LIGHT',
+  PERFORMANCE: 'NEURAL_LIGHT',
+  quality: 'NEURAL',
+  QUALITY: 'NEURAL',
+  ultra: 'NEURAL_PLUS',
+  ULTRA: 'NEURAL_PLUS',
+};
+
+function asZedResolution(value: unknown): ZedResolution | undefined {
+  return typeof value === 'string' && value in ZED_RESOLUTIONS
+    ? (value as ZedResolution)
+    : undefined;
+}
+
+function asZedDepthMode(value: unknown): ZedDepthMode | undefined {
+  if (typeof value !== 'string') return undefined;
+  if ((ZED_DEPTH_MODES as readonly string[]).includes(value)) return value as ZedDepthMode;
+  return LEGACY_ZED_DEPTH_MODES[value];
+}
+
 // Level 2 - Hardware (physical devices)
 interface CameraHardware {
   id: string;
@@ -29,15 +84,18 @@ interface CameraHardware {
   width: number;
   height: number;
   fps: number;
-  // RealSense specific
+  // RealSense + ZED
   serial_number?: string;
   use_depth?: boolean;
   // OpenCV specific
   device_index?: string;
   backend?: string;
   warmup_frames?: number;
-  // ZED specific
-  depth_mode?: 'performance' | 'quality' | 'ultra';
+  // ZED specific. `resolution` is the only thing that sets a ZED's frame size,
+  // and `depth_mode` is consulted only when use_depth is on — depth is gated
+  // entirely on that flag, so a mode without it does nothing.
+  resolution?: ZedResolution;
+  depth_mode?: ZedDepthMode;
   producers: Producer[];
 }
 
@@ -111,6 +169,16 @@ interface BaseHardware {
   max_angular_rps?: number;
   max_lift_units_per_s?: number;
   estop_battery_percent?: number;
+  // How long configure() waits for the base to report ready before throwing.
+  ready_timeout_s?: number;
+  // The rail's ceiling is declared TWICE: as max_lift_units_per_s here, which
+  // the base clamps every command to, and as the glide_base leader's
+  // `axes.lift.max`, which scales the command before it ever reaches the base.
+  // Raising one alone changes nothing — you stay capped by the other. These two
+  // carry the leader's side so the form can show whether they agree and keep
+  // them in step on save. `lift_leader_id` is the component the value came from.
+  lift_leader_max?: number;
+  lift_leader_id?: string;
   producers: Producer[];
 }
 
@@ -239,10 +307,17 @@ function armToleranceOrDefault(stored: number[] | undefined, key: keyof JointTol
     : [...DEFAULT_JOINT_TOLERANCES[key]];
 }
 type ToleranceFormKey = 'positionTolerance' | 'velocityTolerance' | 'effortTolerance';
-const TOLERANCE_COLUMNS: readonly { formKey: ToleranceFormKey; label: string; armUnit: string; gripperUnit: string }[] = [
-  { formKey: 'positionTolerance', label: 'Pos tol', armUnit: 'rad', gripperUnit: 'm' },
-  { formKey: 'velocityTolerance', label: 'Vel tol', armUnit: 'rad/s', gripperUnit: 'm/s' },
-  { formKey: 'effortTolerance', label: 'Eff tol', armUnit: 'N·m', gripperUnit: 'N' },
+// Which tolerance columns the arm actually declares. Tracked per column because
+// the three are independent in the config — a rig that sets velocity and effort
+// tolerances but leaves position on the firmware default is normal, and saving
+// it must not invent `position_tolerance: [0, 0, ...]`. A zero tolerance is the
+// TIGHTEST possible feedback fault check, not a neutral placeholder, so
+// inventing one silently makes an arm more likely to fault mid-episode.
+type ToleranceSetKey = 'positionToleranceSet' | 'velocityToleranceSet' | 'effortToleranceSet';
+const TOLERANCE_COLUMNS: readonly { formKey: ToleranceFormKey; setKey: ToleranceSetKey; label: string; armUnit: string; gripperUnit: string }[] = [
+  { formKey: 'positionTolerance', setKey: 'positionToleranceSet', label: 'Pos tol', armUnit: 'rad', gripperUnit: 'm' },
+  { formKey: 'velocityTolerance', setKey: 'velocityToleranceSet', label: 'Vel tol', armUnit: 'rad/s', gripperUnit: 'm/s' },
+  { formKey: 'effortTolerance', setKey: 'effortToleranceSet', label: 'Eff tol', armUnit: 'N·m', gripperUnit: 'N' },
 ];
 
 // ---------------------------------------------------------------------------
@@ -327,6 +402,36 @@ interface RawComponentConfig {
   id?: string;
   type?: string;
   [key: string]: unknown;
+}
+
+/**
+ * Reads `axes.lift.max` off a glide_base leader component, or undefined when
+ * the component has no lift axis.
+ *
+ * The shape is opaque to this page (glide_base is round-tripped verbatim), so
+ * this walks it defensively rather than casting: a leader with no lift axis is
+ * a normal configuration, not an error.
+ */
+function readLiftAxisMax(comp: RawComponentConfig): number | undefined {
+  const axes = comp.axes;
+  if (typeof axes !== 'object' || axes === null) return undefined;
+  const lift = (axes as Record<string, unknown>).lift;
+  if (typeof lift !== 'object' || lift === null) return undefined;
+  const max = (lift as Record<string, unknown>).max;
+  return typeof max === 'number' ? max : undefined;
+}
+
+/**
+ * Returns a copy of a glide_base component with `axes.lift.max` set, preserving
+ * every other key at every level.
+ *
+ * Only called for a component `readLiftAxisMax` already accepted, so the nested
+ * objects are known to exist.
+ */
+function withLiftAxisMax(comp: RawComponentConfig, max: number): RawComponentConfig {
+  const axes = comp.axes as Record<string, unknown>;
+  const lift = axes.lift as Record<string, unknown>;
+  return { ...comp, axes: { ...axes, lift: { ...lift, max } } };
 }
 
 interface RawSdkHardware {
@@ -468,12 +573,22 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
         ...(p.encoding != null && { encoding: p.encoding as Producer['encoding'] }),
       }));
 
+    // A ZED negotiates its frame size from the named resolution and ignores any
+    // width/height in the config, so derive the dimensions from the resolution
+    // rather than surfacing numbers the camera never honoured. AUTO resolves at
+    // open time and yields none, so fall back to whatever the config carries.
+    const zedResolution =
+      cameraType === 'zed_camera'
+        ? (asZedResolution(camCfg.resolution) ?? DEFAULT_ZED_RESOLUTION)
+        : undefined;
+    const zedDims = zedResolution ? ZED_RESOLUTIONS[zedResolution] : null;
+
     hardwareItems.push({
       id: camId,
       name: camCfg.id ?? camId,
       type: cameraType,
-      width: camCfg.width ?? 640,
-      height: camCfg.height ?? 480,
+      width: zedDims?.width ?? camCfg.width ?? 640,
+      height: zedDims?.height ?? camCfg.height ?? 480,
       fps: camCfg.fps ?? 30,
       ...(cameraType === 'realsense_camera' && {
         serial_number: camCfg.serial_number,
@@ -485,8 +600,12 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
         warmup_frames: camCfg.warmup_frames,
       }),
       ...(cameraType === 'zed_camera' && {
-        serial_number: camCfg.serial_number,
-        depth_mode: camCfg.depth_mode,
+        // ZED serials are numeric and the SDK accepts them as JSON numbers, so
+        // normalise to a string for the form to edit.
+        serial_number: camCfg.serial_number != null ? String(camCfg.serial_number) : undefined,
+        resolution: zedResolution,
+        use_depth: camCfg.use_depth,
+        depth_mode: asZedDepthMode(camCfg.depth_mode),
       }),
       producers: camProducers,
     } as CameraHardware);
@@ -523,6 +642,14 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
   // untouched by systemToSdkConfig. The base is surfaced because its velocity
   // ceilings and e-stop battery threshold are things an operator needs to see.
   const components: RawComponentConfig[] = hw.components ?? [];
+
+  // The rail's other half. A glide_base leader declares `axes.lift.max`, which
+  // scales the lift command before the base ever clamps it to its own ceiling —
+  // so the base panel needs to see it to report whether the two agree.
+  const liftLeader = components.find(
+    (c) => c.type === 'glide_base' && readLiftAxisMax(c) !== undefined,
+  );
+
   for (const comp of components) {
     if (comp.type !== 'trossen_base') continue;
     const baseId = comp.id ?? 'trossen_base';
@@ -550,6 +677,9 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
       max_angular_rps: typeof comp.max_angular_rps === 'number' ? comp.max_angular_rps : undefined,
       max_lift_units_per_s: typeof comp.max_lift_units_per_s === 'number' ? comp.max_lift_units_per_s : undefined,
       estop_battery_percent: typeof comp.estop_battery_percent === 'number' ? comp.estop_battery_percent : undefined,
+      ready_timeout_s: typeof comp.ready_timeout_s === 'number' ? comp.ready_timeout_s : undefined,
+      lift_leader_max: liftLeader ? readLiftAxisMax(liftLeader) : undefined,
+      lift_leader_id: typeof liftLeader?.id === 'string' ? liftLeader.id : undefined,
       producers: baseProducers,
     } as BaseHardware);
   }
@@ -694,6 +824,14 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
         if (cam.warmup_frames != null) camEntry.warmup_frames = cam.warmup_frames;
       } else if (cam.type === 'zed_camera') {
         if (cam.serial_number) camEntry.serial_number = cam.serial_number;
+        // Both of these are load-bearing and both used to be dropped here.
+        // `resolution` is the ONLY thing that sets a ZED's frame size — losing
+        // it silently reverts an HD1200 rig to the component's HD720 default,
+        // and width/height (emitted above for every camera type) are ignored by
+        // the ZED, so nothing else carries the intent. Depth is gated entirely
+        // on `use_depth`, so without it depth_mode is inert.
+        camEntry.resolution = cam.resolution ?? DEFAULT_ZED_RESOLUTION;
+        if (cam.use_depth != null) camEntry.use_depth = cam.use_depth;
         if (cam.depth_mode) camEntry.depth_mode = cam.depth_mode;
       }
 
@@ -726,6 +864,19 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
   const originalComponents = originalConfig?.hardware?.components;
   if (originalComponents?.length) {
     hardware.components = originalComponents.map((comp) => {
+      // The rail's ceiling is edited in one place on the base panel but has to
+      // land in two: here on the leader, which scales the lift command, and on
+      // the base, which clamps it. Keeping them in step is the whole point —
+      // raising only one leaves the rail capped by the other.
+      if (
+        trossenBase &&
+        typeof trossenBase.max_lift_units_per_s === 'number' &&
+        comp.type === 'glide_base' &&
+        comp.id === trossenBase.lift_leader_id &&
+        readLiftAxisMax(comp) !== undefined
+      ) {
+        return withLiftAxisMax(comp, trossenBase.max_lift_units_per_s);
+      }
       if (comp.type !== 'trossen_base' || !trossenBase || comp.id !== trossenBase.id) {
         return comp;
       }
@@ -734,6 +885,7 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
       if (typeof trossenBase.max_angular_rps === 'number') patched.max_angular_rps = trossenBase.max_angular_rps;
       if (typeof trossenBase.max_lift_units_per_s === 'number') patched.max_lift_units_per_s = trossenBase.max_lift_units_per_s;
       if (typeof trossenBase.estop_battery_percent === 'number') patched.estop_battery_percent = trossenBase.estop_battery_percent;
+      if (typeof trossenBase.ready_timeout_s === 'number') patched.ready_timeout_s = trossenBase.ready_timeout_s;
       return patched;
     });
   }
@@ -828,7 +980,7 @@ export function ConfigurationPage() {
     : '';
   // Shown on the disabled controls of hardware declared under
   // `hardware.components`, which this page displays but cannot yet edit.
-  const viewOnlyTitle = 'Declared as a component — edit this system\'s config file to change it';
+  const viewOnlyTitle = 'Declared as a component — remove it from this system\'s config file to delete it';
   // `success: null` means the test is still in flight — the banner
   // renders in a cyan "Testing…" style and the output panel updates
   // line-by-line as SSE progress events arrive. `true` / `false` flip
@@ -1039,10 +1191,15 @@ export function ConfigurationPage() {
     setDryRunResult({ systemId, success: null, message: 'Running hardware test…', output: [] });
     const controller = new AbortController();
     // Last-resort net in case the backend hangs without ever sending a
-    // terminal event. The backend owns the real budget (it scales with
-    // device count, up to ~90s for a 4-arm rig, and emits its own timeout
-    // error), so this only needs to sit safely above that ceiling + grace.
-    const safetyTimeoutId = window.setTimeout(() => controller.abort(), 120000);
+    // terminal event. The backend owns the real budget — `compute_bringup_budget`
+    // in app/hw_test.py, which scales with device count and is capped at 300s
+    // (a depth-enabled ZED costs ~30s to open, so a 3-camera rig needs far more
+    // than the 90s this once assumed).
+    //
+    // Keep this in step with the identical timer in `useHardwareTest.ts`: both
+    // call POST /api/systems/{id}/test, so whichever one is lower is the real
+    // limit. This copy is the one the card's TEST button uses.
+    const safetyTimeoutId = window.setTimeout(() => controller.abort(), 330000);
     const collected: string[] = [];
     try {
       const res = await fetch(`/api/systems/${systemId}/test`, { method: 'POST', signal: controller.signal });
@@ -1157,8 +1314,10 @@ export function ConfigurationPage() {
     device_index: '/dev/video0',
     backend: 'v4l2',
     warmup_frames: 10,
-    // ZED
-    depth_mode: 'performance' as 'performance' | 'quality' | 'ultra'
+    // ZED. Width/height are derived from the resolution rather than typed,
+    // because the ZED negotiates its frame size from this name alone.
+    resolution: DEFAULT_ZED_RESOLUTION as ZedResolution,
+    depth_mode: DEFAULT_ZED_DEPTH_MODE as ZedDepthMode
   });
 
   const [armForm, setArmForm] = useState({
@@ -1190,6 +1349,9 @@ export function ConfigurationPage() {
     positionTolerance: [...DEFAULT_JOINT_TOLERANCES.position_tolerance],
     velocityTolerance: [...DEFAULT_JOINT_TOLERANCES.velocity_tolerance],
     effortTolerance: [...DEFAULT_JOINT_TOLERANCES.effort_tolerance],
+    positionToleranceSet: false,
+    velocityToleranceSet: false,
+    effortToleranceSet: false,
     // One-Euro command smoothing. Defaults mirror the SDK's own
     // (TrossenArmComponent: min_cutoff 1.0 Hz, beta 0.9, d_cutoff 1.0 Hz) so
     // ticking the box on and saving reproduces the SDK default exactly.
@@ -1200,11 +1362,28 @@ export function ConfigurationPage() {
     smoothingDCutoffHz: SMOOTHING_DEFAULTS.d_cutoff_hz,
   });
 
+  // Both bases share one form. Which half is shown is driven by the type of the
+  // base being edited, never by the form itself — see `editingBaseType`.
   const [baseForm, setBaseForm] = useState({
+    // SLATE (hardware.mobile_base)
     name: '',
     reset_odometry: false,
-    enable_torque: true
+    enable_torque: true,
+    // Rivet base (hardware.components, type trossen_base). Defaults mirror
+    // TrossenBaseComponent's own so the form never shows a value the SDK
+    // wouldn't have used anyway.
+    max_linear_mps: 0.6,
+    max_angular_rps: 1.2,
+    max_lift_units_per_s: 8000,
+    estop_battery_percent: 0,
+    ready_timeout_s: 60,
   });
+
+  // The type of the base currently open in the modal. A trossen_base can be
+  // edited but not created here: creating one means adding a
+  // `hardware.components` entry, and this page patches components rather than
+  // authoring them. Null while adding, which is always a SLATE.
+  const [editingBaseType, setEditingBaseType] = useState<BaseHardware['type'] | null>(null);
 
   const selectedSystemData = systems.find(s => s.id === selectedSystem);
 
@@ -1337,7 +1516,8 @@ export function ConfigurationPage() {
       device_index: '/dev/video0',
       backend: 'v4l2',
       warmup_frames: 10,
-      depth_mode: 'performance'
+      resolution: DEFAULT_ZED_RESOLUTION,
+      depth_mode: DEFAULT_ZED_DEPTH_MODE
     });
     setArmForm({
       name: '',
@@ -1361,6 +1541,9 @@ export function ConfigurationPage() {
       positionTolerance: [...DEFAULT_JOINT_TOLERANCES.position_tolerance],
       velocityTolerance: [...DEFAULT_JOINT_TOLERANCES.velocity_tolerance],
       effortTolerance: [...DEFAULT_JOINT_TOLERANCES.effort_tolerance],
+      positionToleranceSet: false,
+      velocityToleranceSet: false,
+      effortToleranceSet: false,
       smoothingEnabled: false,
       smoothingGripper: false,
       smoothingMinCutoffHz: SMOOTHING_DEFAULTS.min_cutoff_hz,
@@ -1370,8 +1553,14 @@ export function ConfigurationPage() {
     setBaseForm({
       name: '',
       reset_odometry: false,
-      enable_torque: true
+      enable_torque: true,
+      max_linear_mps: 0.6,
+      max_angular_rps: 1.2,
+      max_lift_units_per_s: 8000,
+      estop_battery_percent: 0,
+      ready_timeout_s: 60,
     });
+    setEditingBaseType(null);
     setShowAddHardwareModal(true);
   };
 
@@ -1392,7 +1581,8 @@ export function ConfigurationPage() {
         device_index: cam.device_index || '/dev/video0',
         backend: cam.backend || 'v4l2',
         warmup_frames: cam.warmup_frames || 10,
-        depth_mode: cam.depth_mode || 'performance'
+        resolution: cam.resolution || DEFAULT_ZED_RESOLUTION,
+        depth_mode: cam.depth_mode || DEFAULT_ZED_DEPTH_MODE
       });
     } else if (hardware.type === 'trossen_arm') {
       const arm = hardware as ArmHardware;
@@ -1419,19 +1609,36 @@ export function ConfigurationPage() {
         positionTolerance: armToleranceOrDefault(arm.position_tolerance, 'position_tolerance'),
         velocityTolerance: armToleranceOrDefault(arm.velocity_tolerance, 'velocity_tolerance'),
         effortTolerance: armToleranceOrDefault(arm.effort_tolerance, 'effort_tolerance'),
+        // Only the columns the arm already declares. Ticking one on is an
+        // explicit act, because an all-zero column is the tightest fault check
+        // the controller can run, not an absence of one.
+        positionToleranceSet: !!arm.position_tolerance,
+        velocityToleranceSet: !!arm.velocity_tolerance,
+        effortToleranceSet: !!arm.effort_tolerance,
         smoothingEnabled: arm.smoothing_enabled === true,
         smoothingGripper: arm.smoothing_gripper === true,
         smoothingMinCutoffHz: typeof arm.smoothing_min_cutoff_hz === 'number' ? arm.smoothing_min_cutoff_hz : SMOOTHING_DEFAULTS.min_cutoff_hz,
         smoothingBeta: typeof arm.smoothing_beta === 'number' ? arm.smoothing_beta : SMOOTHING_DEFAULTS.beta,
         smoothingDCutoffHz: typeof arm.smoothing_d_cutoff_hz === 'number' ? arm.smoothing_d_cutoff_hz : SMOOTHING_DEFAULTS.d_cutoff_hz,
       });
-    } else if (hardware.type === 'slate_base') {
+    } else if (hardware.type === 'slate_base' || hardware.type === 'trossen_base') {
       const base = hardware as BaseHardware;
       setSelectedHardwareType('base');
+      setEditingBaseType(base.type);
       setBaseForm({
         name: base.name,
         reset_odometry: base.reset_odometry,
-        enable_torque: base.enable_torque
+        enable_torque: base.enable_torque,
+        // Fall back to the component's own defaults for any ceiling the config
+        // leaves unset, so the form shows what the SDK would actually apply
+        // rather than a zero the operator might save by accident.
+        max_linear_mps: base.max_linear_mps ?? 0.6,
+        max_angular_rps: base.max_angular_rps ?? 1.2,
+        max_lift_units_per_s: base.max_lift_units_per_s ?? 8000,
+        // Zero is the component's default and means "disabled", so it is the
+        // correct fallback here — not a placeholder.
+        estop_battery_percent: base.estop_battery_percent ?? 0,
+        ready_timeout_s: base.ready_timeout_s ?? 60,
       });
     }
 
@@ -1487,12 +1694,20 @@ export function ConfigurationPage() {
     e.preventDefault();
     if (!selectedSystem) return;
 
+    // A ZED's frame size comes from its named resolution, so take the
+    // dimensions from the table rather than the width/height inputs, which the
+    // form does not even show for a ZED. AUTO has no dimensions until the
+    // camera is opened; keep whatever the form last held so the card shows
+    // something rather than zeros.
+    const zedDims =
+      selectedCameraType === 'zed_camera' ? ZED_RESOLUTIONS[cameraForm.resolution] : null;
+
     const cameraData: CameraHardware = {
       id: editingHardwareId || `cam-${Date.now()}`,
       name: cameraForm.name,
       type: selectedCameraType,
-      width: cameraForm.width,
-      height: cameraForm.height,
+      width: zedDims?.width ?? cameraForm.width,
+      height: zedDims?.height ?? cameraForm.height,
       fps: cameraForm.fps,
       producers: [],
       ...(selectedCameraType === 'realsense_camera' && {
@@ -1506,6 +1721,10 @@ export function ConfigurationPage() {
       }),
       ...(selectedCameraType === 'zed_camera' && {
         serial_number: cameraForm.serial_number,
+        resolution: cameraForm.resolution,
+        use_depth: cameraForm.use_depth,
+        // Carried even when depth is off so toggling it back on does not lose
+        // the operator's choice; the SDK ignores it while use_depth is false.
         depth_mode: cameraForm.depth_mode
       })
     };
@@ -1567,9 +1786,13 @@ export function ConfigurationPage() {
       position_max: armForm.limitsEnabled ? [...armForm.positionMax] : undefined,
       velocity_max: armForm.limitsEnabled ? [...armForm.velocityMax] : undefined,
       effort_max: armForm.limitsEnabled ? [...armForm.effortMax] : undefined,
-      position_tolerance: armForm.tolerancesEnabled ? [...armForm.positionTolerance] : undefined,
-      velocity_tolerance: armForm.tolerancesEnabled ? [...armForm.velocityTolerance] : undefined,
-      effort_tolerance: armForm.tolerancesEnabled ? [...armForm.effortTolerance] : undefined,
+      // Per column, not per section: an arm that declares velocity and effort
+      // tolerances but not position must keep position on the firmware default.
+      // Emitting a zero column here would silently TIGHTEN the fault check on a
+      // joint nobody asked to change.
+      position_tolerance: armForm.tolerancesEnabled && armForm.positionToleranceSet ? [...armForm.positionTolerance] : undefined,
+      velocity_tolerance: armForm.tolerancesEnabled && armForm.velocityToleranceSet ? [...armForm.velocityTolerance] : undefined,
+      effort_tolerance: armForm.tolerancesEnabled && armForm.effortToleranceSet ? [...armForm.effortTolerance] : undefined,
       smoothing_enabled: armForm.smoothingEnabled ? true : undefined,
       smoothing_gripper: armForm.smoothingEnabled && armForm.smoothingGripper ? true : undefined,
       smoothing_min_cutoff_hz: armForm.smoothingEnabled ? armForm.smoothingMinCutoffHz : undefined,
@@ -1606,37 +1829,83 @@ export function ConfigurationPage() {
     e.preventDefault();
     if (!selectedSystem) return;
 
-    const baseData: BaseHardware = {
-      id: editingHardwareId || `base-${Date.now()}`,
-      name: baseForm.name,
-      type: 'slate_base',
-      reset_odometry: baseForm.reset_odometry,
-      enable_torque: baseForm.enable_torque,
-      producers: []
-    };
+    // Mirror TrossenBaseComponent's own validation, which throws on a
+    // non-positive limit or an out-of-range battery threshold. Catching it here
+    // means a bad value never reaches a rig that has already energised its arms.
+    if (editingBaseType === 'trossen_base') {
+      const positive: [string, number][] = [
+        ['Max Linear', baseForm.max_linear_mps],
+        ['Max Angular', baseForm.max_angular_rps],
+        ['Max Lift', baseForm.max_lift_units_per_s],
+        ['Ready Timeout', baseForm.ready_timeout_s],
+      ];
+      const bad = positive.find(([, v]) => !Number.isFinite(v) || v <= 0);
+      if (bad) {
+        showAlert(`${bad[0]} must be greater than zero — the SDK refuses to start otherwise.`, 'Validation Error');
+        return;
+      }
+      const battery = baseForm.estop_battery_percent;
+      if (!Number.isFinite(battery) || battery < 0 || battery > 100) {
+        showAlert('E-Stop Battery must be between 0 and 100 percent (0 disables the check).', 'Validation Error');
+        return;
+      }
+    }
 
     setSystems(prev => prev.map(sys => {
       if (sys.id !== selectedSystem) return sys;
 
       if (editingHardwareId) {
-        // Edit existing
         return {
           ...sys,
-          hardware: sys.hardware.map(hw =>
-            hw.id === editingHardwareId
-              ? { ...baseData, producers: hw.producers }
-              : hw
-          )
+          hardware: sys.hardware.map(hw => {
+            if (hw.id !== editingHardwareId) return hw;
+            const existing = hw as BaseHardware;
+
+            // Preserve the base's declared type. Rewriting a trossen_base as a
+            // slate_base would move it out of hardware.components and drop
+            // every ceiling below it, so the type is never taken from the form.
+            if (existing.type === 'trossen_base') {
+              return {
+                ...existing,
+                // Name is deliberately not editable: for a component-declared
+                // base the name IS its component id, which this page patches by
+                // rather than rewrites. Renaming here would change the label
+                // without changing the config.
+                max_linear_mps: baseForm.max_linear_mps,
+                max_angular_rps: baseForm.max_angular_rps,
+                max_lift_units_per_s: baseForm.max_lift_units_per_s,
+                estop_battery_percent: baseForm.estop_battery_percent,
+                ready_timeout_s: baseForm.ready_timeout_s,
+              };
+            }
+            return {
+              ...existing,
+              name: baseForm.name,
+              reset_odometry: baseForm.reset_odometry,
+              enable_torque: baseForm.enable_torque,
+            };
+          })
         };
-      } else {
-        // Add new
-        return { ...sys, hardware: [...sys.hardware, baseData] };
       }
+
+      // Adding. Only the SLATE can be created from this page — a trossen_base
+      // is a `hardware.components` entry, and systemToSdkConfig patches
+      // existing components rather than authoring new ones.
+      const baseData: BaseHardware = {
+        id: `base-${Date.now()}`,
+        name: baseForm.name,
+        type: 'slate_base',
+        reset_odometry: baseForm.reset_odometry,
+        enable_torque: baseForm.enable_torque,
+        producers: []
+      };
+      return { ...sys, hardware: [...sys.hardware, baseData] };
     }));
     setHasUnsavedChanges(true);
 
     setShowAddHardwareModal(false);
     setEditingHardwareId(null);
+    setEditingBaseType(null);
   };
 
   const handleDeleteHardware = (hardwareId: string) => {
@@ -1662,7 +1931,20 @@ export function ConfigurationPage() {
       <div className="grid grid-cols-3 portrait:grid-cols-2 gap-[12px] text-[12px]">
         <div>
           <div className="text-dim text-[9px] uppercase mb-[4px]">Resolution</div>
-          <div className="text-ink">{camera.width}x{camera.height} @ {camera.fps}fps</div>
+          <div className="text-ink">
+            {/* A ZED is configured by resolution NAME, so lead with the name and
+                keep the pixels as the gloss. AUTO has no dimensions until the
+                camera opens. */}
+            {camera.type === 'zed_camera' ? (
+              <>
+                {camera.resolution ?? DEFAULT_ZED_RESOLUTION}
+                {camera.resolution !== 'AUTO' && ` (${camera.width}x${camera.height})`}
+                {` @ ${camera.fps}fps`}
+              </>
+            ) : (
+              `${camera.width}x${camera.height} @ ${camera.fps}fps`
+            )}
+          </div>
         </div>
         {camera.type === 'realsense_camera' && (
           <>
@@ -1695,8 +1977,12 @@ export function ConfigurationPage() {
               <div className="text-ink">{camera.serial_number}</div>
             </div>
             <div>
-              <div className="text-dim text-[9px] uppercase mb-[4px]">Depth Mode</div>
-              <div className="text-ink capitalize">{camera.depth_mode}</div>
+              <div className="text-dim text-[9px] uppercase mb-[4px]">Depth</div>
+              <div className="text-ink">
+                {camera.use_depth
+                  ? (camera.depth_mode ?? DEFAULT_ZED_DEPTH_MODE)
+                  : 'Off'}
+              </div>
             </div>
           </>
         )}
@@ -1743,23 +2029,79 @@ export function ConfigurationPage() {
     // but the word "base": the Rivet exposes per-axis ceilings including the
     // vertical lift, the SLATE exposes odometry and torque.
     if (base.type === 'trossen_base') {
+      // The rail's ceiling is declared on the base AND on the glide_base leader
+      // that drives it. They are applied in series, so a mismatch silently caps
+      // the rail at the lower of the two — worth surfacing rather than leaving
+      // an operator to wonder why raising one number changed nothing.
+      const railOutOfSync =
+        base.lift_leader_max != null &&
+        base.max_lift_units_per_s != null &&
+        base.lift_leader_max !== base.max_lift_units_per_s;
+
       return (
-        <div className="grid grid-cols-2 portrait:grid-cols-1 gap-[12px] text-[12px]">
+        <div className="flex flex-col gap-[12px]">
+          {/* Drive */}
           <div>
-            <div className="text-dim text-[9px] uppercase mb-[4px]">Max Linear</div>
-            <div className="text-ink">{base.max_linear_mps != null ? `${base.max_linear_mps} m/s` : '—'}</div>
+            <div className="text-dim text-[9px] uppercase mb-[6px] tracking-wide">Drive</div>
+            <div className="grid grid-cols-2 portrait:grid-cols-1 gap-[12px] text-[12px]">
+              <div>
+                <div className="text-dim text-[9px] uppercase mb-[4px]">Max Linear</div>
+                <div className="text-ink">{base.max_linear_mps != null ? `${base.max_linear_mps} m/s` : '—'}</div>
+              </div>
+              <div>
+                <div className="text-dim text-[9px] uppercase mb-[4px]">Max Angular</div>
+                <div className="text-ink">{base.max_angular_rps != null ? `${base.max_angular_rps} rad/s` : '—'}</div>
+              </div>
+            </div>
           </div>
-          <div>
-            <div className="text-dim text-[9px] uppercase mb-[4px]">Max Angular</div>
-            <div className="text-ink">{base.max_angular_rps != null ? `${base.max_angular_rps} rad/s` : '—'}</div>
+
+          {/* Linear rail — the base's vertical lift axis, surfaced on its own
+              because its speed is tuned separately from the drive. */}
+          <div className="border-t border-edge pt-[10px]">
+            <div className="text-dim text-[9px] uppercase mb-[6px] tracking-wide">Linear Rail</div>
+            <div className="grid grid-cols-2 portrait:grid-cols-1 gap-[12px] text-[12px]">
+              <div>
+                <div className="text-dim text-[9px] uppercase mb-[4px]">Max Speed</div>
+                <div className="text-ink">{base.max_lift_units_per_s != null ? `${base.max_lift_units_per_s} units/s` : '—'}</div>
+              </div>
+              <div>
+                <div className="text-dim text-[9px] uppercase mb-[4px]">Leader Axis Limit</div>
+                <div className={railOutOfSync ? 'text-yellow-500' : 'text-ink'}>
+                  {base.lift_leader_max != null ? `${base.lift_leader_max} units/s` : '—'}
+                </div>
+              </div>
+            </div>
+            {railOutOfSync && (
+              <div className="mt-[8px] flex items-start gap-[6px] text-yellow-500 text-[11px]">
+                <AlertTriangle className="w-[12px] h-[12px] shrink-0 mt-[2px]" />
+                <span>
+                  The leader scales the lift command before the base clamps it, so
+                  the rail is capped at {Math.min(base.lift_leader_max!, base.max_lift_units_per_s!)} units/s.
+                  Saving from the base editor sets both.
+                </span>
+              </div>
+            )}
           </div>
-          <div>
-            <div className="text-dim text-[9px] uppercase mb-[4px]">Max Lift (Rail)</div>
-            <div className="text-ink">{base.max_lift_units_per_s != null ? `${base.max_lift_units_per_s} units/s` : '—'}</div>
-          </div>
-          <div>
-            <div className="text-dim text-[9px] uppercase mb-[4px]">E-Stop Battery</div>
-            <div className="text-ink">{base.estop_battery_percent != null ? `${base.estop_battery_percent} %` : '—'}</div>
+
+          {/* Safety */}
+          <div className="border-t border-edge pt-[10px]">
+            <div className="text-dim text-[9px] uppercase mb-[6px] tracking-wide">Safety</div>
+            <div className="grid grid-cols-2 portrait:grid-cols-1 gap-[12px] text-[12px]">
+              <div>
+                <div className="text-dim text-[9px] uppercase mb-[4px]">E-Stop Battery</div>
+                <div className="text-ink">
+                  {base.estop_battery_percent == null
+                    ? '—'
+                    : base.estop_battery_percent === 0
+                      ? 'Disabled'
+                      : `${base.estop_battery_percent} %`}
+                </div>
+              </div>
+              <div>
+                <div className="text-dim text-[9px] uppercase mb-[4px]">Ready Timeout</div>
+                <div className="text-ink">{base.ready_timeout_s != null ? `${base.ready_timeout_s} s` : '—'}</div>
+              </div>
+            </div>
           </div>
         </div>
       );
@@ -2154,9 +2496,8 @@ export function ConfigurationPage() {
               stationary:          { label: 'Stationary',          leaders: 2, followers: 2, cameras: 4, bases: 0 },
               mobile:              { label: 'Mobile',              leaders: 2, followers: 2, cameras: 3, bases: 1 },
               workbench:           { label: 'Workbench',           leaders: 2, followers: 2, cameras: 3, bases: 0 },
-              // One camera, not three: the bring-up rig has a single ZED
-              // fitted. Raise this back to 3 when the side cameras go on.
-              rivet:               { label: 'Rivet',               leaders: 2, followers: 2, cameras: 1, bases: 1 },
+              // Three ZEDs: main plus the two side cameras, now fitted.
+              rivet:               { label: 'Rivet',               leaders: 2, followers: 2, cameras: 3, bases: 1 },
             };
             const spec = layoutSpecs[selectedSystemData.id];
             if (!spec) return null;
@@ -2252,10 +2593,11 @@ export function ConfigurationPage() {
                 const HardwareIcon = getHardwareIcon(hardware);
                 const isExpanded = expandedHardware.includes(hardware.id);
                 const hasProducers = hardware.producers.length > 0;
-                // The Rivet base is declared as a component, and this page has
-                // no form for component fields. Show it, but do not offer edits
-                // it cannot actually carry out.
-                const viewOnlyHardware = hardware.type === 'trossen_base';
+                // A component-declared base can be edited (the base form patches
+                // its fields in place) but not deleted: systemToSdkConfig patches
+                // hardware.components and never rebuilds it, so a delete here
+                // would drop the card while leaving the component in the config.
+                const undeletableHardware = hardware.type === 'trossen_base';
 
                 // Color tints per hardware type
                 const tintClass = hardware.type.includes('camera')
@@ -2282,18 +2624,18 @@ export function ConfigurationPage() {
                         <div className="flex items-center gap-[4px]">
                           <button
                             onClick={() => openEditHardwareModal(hardware)}
-                            disabled={mutationsLocked || viewOnlyHardware}
+                            disabled={mutationsLocked}
                             aria-label={`Edit ${hardware.id}`}
-                            title={mutationsLocked ? lockedTitle : viewOnlyHardware ? viewOnlyTitle : 'Edit'}
+                            title={mutationsLocked ? lockedTitle : 'Edit'}
                             className="p-[5px] bg-surface hover:bg-brand text-dim hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-surface disabled:hover:text-dim transition-colors rounded"
                           >
                             <Edit className="w-[13px] h-[13px]" />
                           </button>
                           <button
                             onClick={() => handleDeleteHardware(hardware.id)}
-                            disabled={mutationsLocked || viewOnlyHardware}
+                            disabled={mutationsLocked || undeletableHardware}
                             aria-label={`Delete ${hardware.id}`}
-                            title={mutationsLocked ? lockedTitle : viewOnlyHardware ? viewOnlyTitle : 'Delete'}
+                            title={mutationsLocked ? lockedTitle : undeletableHardware ? viewOnlyTitle : 'Delete'}
                             className="p-[5px] bg-surface hover:bg-red-600 text-dim hover:text-white disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-surface disabled:hover:text-dim transition-colors rounded"
                           >
                             <Trash2 className="w-[13px] h-[13px]" />
@@ -2568,20 +2910,51 @@ export function ConfigurationPage() {
                   <label className="block text-ink text-[12px] mb-[8px]">Name <span className="text-red-500">*</span></label>
                   <input type="text" value={cameraForm.name} onChange={e => setCameraForm({ ...cameraForm, name: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
                 </div>
-                <div className="grid grid-cols-3 gap-[12px]">
-                  <div>
-                    <label className="block text-ink text-[12px] mb-[8px]">Width</label>
-                    <input type="number" value={cameraForm.width} onChange={e => setCameraForm({ ...cameraForm, width: parseInt(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                {/* A ZED takes a named resolution and ignores width/height
+                    entirely, so it gets a picker instead of two inputs that
+                    would do nothing. Every other camera type is sized in
+                    pixels. */}
+                {selectedCameraType === 'zed_camera' ? (
+                  <div className="grid grid-cols-2 gap-[12px]">
+                    <div>
+                      <label htmlFor="zed_resolution" className="block text-ink text-[12px] mb-[8px]">Resolution</label>
+                      <select
+                        id="zed_resolution"
+                        value={cameraForm.resolution}
+                        onChange={e => setCameraForm({ ...cameraForm, resolution: e.target.value as ZedResolution })}
+                        className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand"
+                      >
+                        {ZED_RESOLUTION_NAMES.map(name => {
+                          const dims = ZED_RESOLUTIONS[name];
+                          return (
+                            <option key={name} value={name}>
+                              {dims ? `${name} — ${dims.width}x${dims.height}` : `${name} — negotiated at open`}
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </div>
+                    <div>
+                      <label htmlFor="zed_fps" className="block text-ink text-[12px] mb-[8px]">FPS</label>
+                      <input id="zed_fps" type="number" value={cameraForm.fps} onChange={e => setCameraForm({ ...cameraForm, fps: parseInt(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-ink text-[12px] mb-[8px]">Height</label>
-                    <input type="number" value={cameraForm.height} onChange={e => setCameraForm({ ...cameraForm, height: parseInt(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                ) : (
+                  <div className="grid grid-cols-3 gap-[12px]">
+                    <div>
+                      <label className="block text-ink text-[12px] mb-[8px]">Width</label>
+                      <input type="number" value={cameraForm.width} onChange={e => setCameraForm({ ...cameraForm, width: parseInt(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                    </div>
+                    <div>
+                      <label className="block text-ink text-[12px] mb-[8px]">Height</label>
+                      <input type="number" value={cameraForm.height} onChange={e => setCameraForm({ ...cameraForm, height: parseInt(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                    </div>
+                    <div>
+                      <label className="block text-ink text-[12px] mb-[8px]">FPS</label>
+                      <input type="number" value={cameraForm.fps} onChange={e => setCameraForm({ ...cameraForm, fps: parseInt(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                    </div>
                   </div>
-                  <div>
-                    <label className="block text-ink text-[12px] mb-[8px]">FPS</label>
-                    <input type="number" value={cameraForm.fps} onChange={e => setCameraForm({ ...cameraForm, fps: parseInt(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
-                  </div>
-                </div>
+                )}
 
                 {selectedCameraType === 'realsense_camera' && (
                   <>
@@ -2618,17 +2991,36 @@ export function ConfigurationPage() {
                 {selectedCameraType === 'zed_camera' && (
                   <>
                     <div>
-                      <label className="block text-ink text-[12px] mb-[8px]">Serial Number</label>
-                      <input type="text" value={cameraForm.serial_number} onChange={e => setCameraForm({ ...cameraForm, serial_number: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
+                      <label htmlFor="zed_serial" className="block text-ink text-[12px] mb-[8px]">Serial Number</label>
+                      <input id="zed_serial" type="text" inputMode="numeric" value={cameraForm.serial_number} onChange={e => setCameraForm({ ...cameraForm, serial_number: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
+                      <span className="block text-dim text-[10px] mt-[3px]">Numeric ZED serial. Required — the SDK opens the camera by serial, not by index.</span>
                     </div>
-                    <div>
-                      <label className="block text-ink text-[12px] mb-[8px]">Depth Mode</label>
-                      <select value={cameraForm.depth_mode} onChange={e => setCameraForm({ ...cameraForm, depth_mode: e.target.value as 'performance' | 'quality' | 'ultra' })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand">
-                        <option value="performance">Performance</option>
-                        <option value="quality">Quality</option>
-                        <option value="ultra">Ultra</option>
-                      </select>
+                    {/* Depth is gated entirely on this flag: a depth mode
+                        without it is inert, which is why the mode selector only
+                        appears once depth is on. */}
+                    <div className="flex items-start gap-[8px]">
+                      <input type="checkbox" id="zed_use_depth" checked={cameraForm.use_depth} onChange={e => setCameraForm({ ...cameraForm, use_depth: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
+                      <label htmlFor="zed_use_depth" className="text-ink text-[12px]">
+                        Record depth
+                        <span className="block text-dim text-[10px] mt-[3px]">Adds a 16-bit depth stream alongside colour. Costs GPU time and roughly doubles the write rate for this camera.</span>
+                      </label>
                     </div>
+                    {cameraForm.use_depth && (
+                      <div>
+                        <label htmlFor="zed_depth_mode" className="block text-ink text-[12px] mb-[8px]">Depth Mode</label>
+                        <select
+                          id="zed_depth_mode"
+                          value={cameraForm.depth_mode}
+                          onChange={e => setCameraForm({ ...cameraForm, depth_mode: e.target.value as ZedDepthMode })}
+                          className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand"
+                        >
+                          <option value="NEURAL_LIGHT">Neural Light — cheapest, start here</option>
+                          <option value="NEURAL">Neural — balanced</option>
+                          <option value="NEURAL_PLUS">Neural Plus — most accurate, most GPU</option>
+                        </select>
+                        <span className="block text-dim text-[10px] mt-[3px]">Every camera runs its own depth pass, so cost multiplies across a multi-ZED rig.</span>
+                      </div>
+                    )}
                   </>
                 )}
 
@@ -2782,7 +3174,7 @@ export function ConfigurationPage() {
                     <input type="checkbox" id="arm_tolerances" checked={armForm.tolerancesEnabled} onChange={e => setArmForm({ ...armForm, tolerancesEnabled: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
                     <label htmlFor="arm_tolerances" className="text-ink text-[12px]">
                       Set joint tolerances
-                      <span className="block text-dim text-[11px] mt-[2px]">Per-joint tolerances that PAD the limits above for the controller's feedback fault check — it errors if the measured position/velocity/effort exceeds the limit ± its tolerance. Also reset on power cycle, so re-applied every connect. Leave off for firmware defaults. Start at 0 (fault on any overshoot) and raise once tuned to avoid false-positive faults.</span>
+                      <span className="block text-dim text-[11px] mt-[2px]">Per-joint tolerances that PAD the limits above for the controller's feedback fault check — it errors if the measured position/velocity/effort exceeds the limit ± its tolerance. Also reset on power cycle, so re-applied every connect. Tick only the columns you mean to set; an unticked column keeps the controller's firmware default. Note that 0 is the <b className="text-ink">tightest</b> setting (fault on any overshoot), not a neutral one.</span>
                     </label>
                   </div>
                   {armForm.tolerancesEnabled && (
@@ -2792,7 +3184,18 @@ export function ConfigurationPage() {
                           <tr className="text-dim">
                             <th className="text-left font-normal py-[4px] pr-[8px]">Joint</th>
                             {TOLERANCE_COLUMNS.map(col => (
-                              <th key={col.formKey} className="text-left font-normal py-[4px] px-[4px]">{col.label}</th>
+                              <th key={col.formKey} className="text-left font-normal py-[4px] px-[4px]">
+                                <label className="flex items-center gap-[5px] cursor-pointer">
+                                  <input
+                                    type="checkbox"
+                                    checked={armForm[col.setKey]}
+                                    aria-label={`Set ${col.label}`}
+                                    onChange={e => setArmForm(prev => ({ ...prev, [col.setKey]: e.target.checked }))}
+                                    className="w-[12px] h-[12px]"
+                                  />
+                                  <span className={armForm[col.setKey] ? 'text-ink' : 'text-dim'}>{col.label}</span>
+                                </label>
+                              </th>
                             ))}
                           </tr>
                         </thead>
@@ -2802,25 +3205,33 @@ export function ConfigurationPage() {
                             return (
                               <tr key={jointLabel}>
                                 <td className="text-ink py-[3px] pr-[8px] whitespace-nowrap">{jointLabel}</td>
-                                {TOLERANCE_COLUMNS.map(col => (
-                                  <td key={col.formKey} className="py-[3px] px-[4px]">
-                                    <input
-                                      type="number"
-                                      step="any"
-                                      value={armForm[col.formKey][jointIdx]}
-                                      title={isGripper ? col.gripperUnit : col.armUnit}
-                                      onChange={e => {
-                                        const v = parseFloat(e.target.value);
-                                        setArmForm(prev => {
-                                          const next = [...prev[col.formKey]];
-                                          next[jointIdx] = Number.isNaN(v) ? 0 : v;
-                                          return { ...prev, [col.formKey]: next };
-                                        });
-                                      }}
-                                      className="w-[72px] bg-app border border-edge text-ink px-[6px] py-[4px] text-[12px] focus:outline-none focus:border-brand"
-                                    />
-                                  </td>
-                                ))}
+                                {TOLERANCE_COLUMNS.map(col => {
+                                  const isSet = armForm[col.setKey];
+                                  return (
+                                    <td key={col.formKey} className="py-[3px] px-[4px]">
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        // Blank rather than 0 when the column is
+                                        // off, so "firmware default" never reads
+                                        // as "zero tolerance".
+                                        value={isSet ? armForm[col.formKey][jointIdx] : ''}
+                                        placeholder="—"
+                                        disabled={!isSet}
+                                        title={isSet ? (isGripper ? col.gripperUnit : col.armUnit) : 'Firmware default — tick the column heading to set it'}
+                                        onChange={e => {
+                                          const v = parseFloat(e.target.value);
+                                          setArmForm(prev => {
+                                            const next = [...prev[col.formKey]];
+                                            next[jointIdx] = Number.isNaN(v) ? 0 : v;
+                                            return { ...prev, [col.formKey]: next };
+                                          });
+                                        }}
+                                        className="w-[72px] bg-app border border-edge text-ink px-[6px] py-[4px] text-[12px] focus:outline-none focus:border-brand disabled:opacity-40 disabled:cursor-not-allowed"
+                                      />
+                                    </td>
+                                  );
+                                })}
                               </tr>
                             );
                           })}
@@ -2907,21 +3318,93 @@ export function ConfigurationPage() {
 
             {selectedHardwareType === 'base' && (
               <form onSubmit={handleAddBase} className="p-[20px] space-y-[16px]">
-                <div>
-                  <label className="block text-ink text-[12px] mb-[8px]">Name <span className="text-red-500">*</span></label>
-                  <input type="text" value={baseForm.name} onChange={e => setBaseForm({ ...baseForm, name: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
-                </div>
-                <div className="flex items-center gap-[8px]">
-                  <input type="checkbox" id="reset_odometry" checked={baseForm.reset_odometry} onChange={e => setBaseForm({ ...baseForm, reset_odometry: e.target.checked })} className="w-[16px] h-[16px]" />
-                  <label htmlFor="reset_odometry" className="text-ink text-[12px]">Reset odometry</label>
-                </div>
-                <div className="flex items-center gap-[8px]">
-                  <input type="checkbox" id="enable_torque" checked={baseForm.enable_torque} onChange={e => setBaseForm({ ...baseForm, enable_torque: e.target.checked })} className="w-[16px] h-[16px]" />
-                  <label htmlFor="enable_torque" className="text-ink text-[12px]">Enable torque</label>
-                </div>
+                {editingBaseType === 'trossen_base' ? (
+                  <>
+                    {/* Identity is fixed: the Rivet base is declared as a
+                        hardware.components entry and this page patches that
+                        entry by id, so renaming here would relabel the card
+                        without changing anything the SDK reads. */}
+                    <div>
+                      <div className="block text-dim text-[10px] uppercase mb-[4px]">Component</div>
+                      <div className="text-ink text-[14px]">{baseForm.name} <span className="text-dim text-[12px]">· trossen_base</span></div>
+                    </div>
+
+                    {/* ── Drive ────────────────────────────────────────── */}
+                    <div className="border-t border-edge pt-[14px]">
+                      <div className="text-dim text-[10px] uppercase mb-[10px] tracking-wide">Drive</div>
+                      <div className="grid grid-cols-2 gap-[12px]">
+                        <div>
+                          <label htmlFor="base_max_linear" className="block text-ink text-[12px] mb-[8px]">Max Linear</label>
+                          <input id="base_max_linear" type="number" step="any" min="0" value={baseForm.max_linear_mps} onChange={e => setBaseForm({ ...baseForm, max_linear_mps: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                          <span className="block text-dim text-[10px] mt-[3px]">m/s. The base clamps every command to this.</span>
+                        </div>
+                        <div>
+                          <label htmlFor="base_max_angular" className="block text-ink text-[12px] mb-[8px]">Max Angular</label>
+                          <input id="base_max_angular" type="number" step="any" min="0" value={baseForm.max_angular_rps} onChange={e => setBaseForm({ ...baseForm, max_angular_rps: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                          <span className="block text-dim text-[10px] mt-[3px]">rad/s.</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* ── Linear rail ──────────────────────────────────── */}
+                    <div className="border-t border-edge pt-[14px]">
+                      <div className="text-dim text-[10px] uppercase mb-[10px] tracking-wide">Linear Rail</div>
+                      <div>
+                        <label htmlFor="base_max_lift" className="block text-ink text-[12px] mb-[8px]">Max Speed</label>
+                        <input id="base_max_lift" type="number" step="any" min="0" value={baseForm.max_lift_units_per_s} onChange={e => setBaseForm({ ...baseForm, max_lift_units_per_s: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                        <span className="block text-dim text-[10px] mt-[3px]">
+                          Driver units/s, not m/s — the base exposes the vertical axis that way.
+                        </span>
+                      </div>
+                      <div className="mt-[10px] flex items-start gap-[6px] border border-brand/40 bg-brand/[0.06] px-[10px] py-[8px]">
+                        <Radio className="w-[12px] h-[12px] text-brand shrink-0 mt-[3px]" />
+                        <span className="text-dim text-[11px] leading-[1.5]">
+                          This value is applied twice on save: as the base's own ceiling and as
+                          the leader handle's lift-axis limit. They act in series, so setting
+                          only one would leave the rail capped by the other.
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* ── Safety ───────────────────────────────────────── */}
+                    <div className="border-t border-edge pt-[14px]">
+                      <div className="text-dim text-[10px] uppercase mb-[10px] tracking-wide">Safety</div>
+                      <div className="grid grid-cols-2 gap-[12px]">
+                        <div>
+                          <label htmlFor="base_estop_battery" className="block text-ink text-[12px] mb-[8px]">E-Stop Battery</label>
+                          <input id="base_estop_battery" type="number" step="any" min="0" max="100" value={baseForm.estop_battery_percent} onChange={e => setBaseForm({ ...baseForm, estop_battery_percent: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                          <span className="block text-dim text-[10px] mt-[3px]">
+                            Percent. <b className="text-ink">0 disables the check.</b> Above zero, the
+                            recorder e-stops the base and homes the arms after ~1.5&nbsp;s below this level.
+                          </span>
+                        </div>
+                        <div>
+                          <label htmlFor="base_ready_timeout" className="block text-ink text-[12px] mb-[8px]">Ready Timeout</label>
+                          <input id="base_ready_timeout" type="number" step="any" min="0" value={baseForm.ready_timeout_s} onChange={e => setBaseForm({ ...baseForm, ready_timeout_s: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                          <span className="block text-dim text-[10px] mt-[3px]">Seconds to wait for the base to report ready before failing startup.</span>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : (
+                  <>
+                    <div>
+                      <label htmlFor="base_name" className="block text-ink text-[12px] mb-[8px]">Name <span className="text-red-500">*</span></label>
+                      <input id="base_name" type="text" value={baseForm.name} onChange={e => setBaseForm({ ...baseForm, name: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" required />
+                    </div>
+                    <div className="flex items-center gap-[8px]">
+                      <input type="checkbox" id="reset_odometry" checked={baseForm.reset_odometry} onChange={e => setBaseForm({ ...baseForm, reset_odometry: e.target.checked })} className="w-[16px] h-[16px]" />
+                      <label htmlFor="reset_odometry" className="text-ink text-[12px]">Reset odometry</label>
+                    </div>
+                    <div className="flex items-center gap-[8px]">
+                      <input type="checkbox" id="enable_torque" checked={baseForm.enable_torque} onChange={e => setBaseForm({ ...baseForm, enable_torque: e.target.checked })} className="w-[16px] h-[16px]" />
+                      <label htmlFor="enable_torque" className="text-ink text-[12px]">Enable torque</label>
+                    </div>
+                  </>
+                )}
                 <div className="flex justify-end gap-[12px] pt-[12px]">
                   <button type="button" onClick={() => setShowAddHardwareModal(false)} className="bg-app border border-edge text-dim px-[20px] py-[10px] text-[14px] hover:border-white hover:text-ink transition-colors">Cancel</button>
-                  <button type="submit" className="bg-brand text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">Add Base</button>
+                  <button type="submit" className="bg-brand text-white px-[20px] py-[10px] text-[14px] hover:bg-[#4aa8cc] transition-colors">{editingHardwareId ? 'Save Base' : 'Add Base'}</button>
                 </div>
               </form>
             )}
