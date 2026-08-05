@@ -37,6 +37,7 @@ FOLLOWER_MAX = 100.0    # N - follower effort at full grip
 LEADER_OFFSET = 6.5     # N - leader opening offset
 Y_ARM_MOUNT_OFFSET_RIGHT = 0.28   # m - right arm mount offset in y direction
 Y_ARM_MOUNT_OFFSET_LEFT = -0.28   # m - left arm mount offset in y direction
+SAFETY_RADIUS_M =  0.1
 
 BASE_MIN = -1           # Min translational/rotational velocity (units/s and rad/s)
 BASE_MAX = 1            # Max translational/rotational velocity (units/s and rad/s)
@@ -166,26 +167,25 @@ def teleop_arm_step(leader, follower, gripper_home_offset, y_arm_mount_offset, t
 
 
     # Safety check if arms could hit cameras
-    SAFETY_RADIUS_M =  0.3
-    x, y, z, rx, ry, rz = leader.get_cartesian_position()
+    x, y, z, rx, ry, rz = leader.get_cartesian_positions()
     y -= y_arm_mount_offset
     if (x**2 + y**2) < SAFETY_RADIUS_M**2:
         print(f"Safety limit reached, {temp_side}: x={x}, y={y}")
 
-        # nearest_x, nearest_y = nearest_point_on_circle(SAFETY_RADIUS_M, x, y)
-        # nearest_y += y_arm_mount_offset
+        nearest_x, nearest_y = nearest_point_on_circle(SAFETY_RADIUS_M, x, y)
+        nearest_y += y_arm_mount_offset
 
-        # follower.set_cartesian_position(nearest_x, nearest_y, z, rx, ry, rz,
-        #     trossen_arm.InterpolationSpace.cartesian, 0.5, False)
-    # else:
+        follower.set_cartesian_positions(nearest_x, nearest_y, z, rx, ry, rz,
+            trossen_arm.InterpolationSpace.cartesian, 0.5, False)
+    else:
         # Feed the positions directly from the leader robot to the follower robot
-    positions = leader.get_all_positions()
-    follower.set_arm_positions(
-        np.array([positions[0], positions[1], positions[2], -positions[3], -positions[4],
-                positions[5] + gripper_home_offset]),
-        0.2,
-        False,
-    )
+        positions = leader.get_all_positions()
+        follower.set_arm_positions(
+            np.array([positions[0], positions[1], positions[2], -positions[3], -positions[4],
+                    positions[5] + gripper_home_offset]),
+            0.2,
+            False,
+        )
 
 
 
