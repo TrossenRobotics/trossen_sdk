@@ -22,6 +22,7 @@
 
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
+#include "CompressedVideo.pb.h"
 #include "RawImage.pb.h"
 
 namespace trossen::convert {
@@ -496,6 +497,12 @@ bool extract_camera_images(
   for (const auto& messageView : image_reader.readMessages(on_problem)) {
     auto it = channels.camera_channels.find(messageView.channel->id);
     if (it == channels.camera_channels.end()) continue;
+    // A recording may store some cameras as compressed video; those are handled
+    // by extract_camera_video(). Skipping them by schema keeps this path from
+    // reporting a parse failure per frame on a perfectly good recording.
+    if (messageView.schema && messageView.schema->name == "foxglove.CompressedVideo") {
+      continue;
+    }
     const std::string& camera_name = it->second;
     size_t frame_idx = out_counts[camera_name];
 
@@ -572,6 +579,92 @@ bool extract_camera_images(
   std::cout << "  [ok] Saved " << images_saved << " images\n";
   for (const auto& [camera_name, count] : out_counts) {
     std::cout << "    - " << camera_name << ": " << count << " images\n";
+  }
+  return true;
+}
+
+bool extract_camera_video(
+  const std::string& mcap_file,
+  const McapChannelMap& channels,
+  const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
+  std::map<std::string, CameraVideoStream>& out_streams)
+{
+  namespace fs = std::filesystem;
+  out_streams.clear();
+  if (channels.camera_channels.empty()) {
+    return true;
+  }
+
+  std::ifstream input(mcap_file, std::ios::binary);
+  mcap::McapReader reader;
+  auto status = reader.open(input);
+  if (!status.ok()) {
+    std::cerr << "Error: Failed to reopen MCAP file for video: " << status.message << "\n";
+    return false;
+  }
+  auto summary_status = reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+  if (!summary_status.ok()) {
+    std::cerr << "Error: Failed to read MCAP summary for video: " << summary_status.message << "\n";
+    return false;
+  }
+
+  // Opened lazily so a recording with no video channels creates no files.
+  std::map<std::string, std::ofstream> outputs;
+
+  for (const auto& messageView : reader.readMessages(on_problem)) {
+    auto it = channels.camera_channels.find(messageView.channel->id);
+    if (it == channels.camera_channels.end()) continue;
+    // Only video channels here; RawImage cameras belong to extract_camera_images().
+    if (!messageView.schema || messageView.schema->name != "foxglove.CompressedVideo") {
+      continue;
+    }
+    const std::string& camera_name = it->second;
+
+    foxglove::CompressedVideo msg;
+    if (!msg.ParseFromArray(messageView.message.data,
+                            static_cast<int>(messageView.message.dataSize))) {
+      std::cerr << "Warning: Failed to parse CompressedVideo for " << camera_name << " frame "
+                << out_streams[camera_name].frame_count << "\n";
+      continue;
+    }
+
+    auto& stream = out_streams[camera_name];
+    if (stream.frame_count == 0) {
+      stream.format = msg.format();
+      // ffmpeg infers the demuxer from the extension for raw elementary streams.
+      const std::string ext = stream.format == "h265" ? ".hevc" : ".h264";
+      const fs::path dir = dir_for(camera_name);
+      stream.annexb_path = dir / (camera_name + ext);
+      outputs[camera_name].open(stream.annexb_path, std::ios::binary);
+      if (!outputs[camera_name]) {
+        std::cerr << "Error: cannot open " << stream.annexb_path.string() << " for writing\n";
+        return false;
+      }
+    } else if (msg.format() != stream.format) {
+      // A camera that changed codec mid-episode cannot be remuxed as one stream.
+      std::cerr << "Error: " << camera_name << " changed format from " << stream.format << " to "
+                << msg.format() << " mid-episode\n";
+      return false;
+    }
+
+    outputs[camera_name].write(msg.data().data(), static_cast<std::streamsize>(msg.data().size()));
+    ++stream.frame_count;
+  }
+
+  for (auto& [camera_name, out] : outputs) {
+    out.close();
+    if (!out) {
+      std::cerr << "Error: failed writing video stream for " << camera_name << "\n";
+      return false;
+    }
+  }
+
+  if (!out_streams.empty()) {
+    std::cout << "  [ok] Extracted " << out_streams.size() << " compressed video stream(s)";
+    for (const auto& [name, s] : out_streams) {
+      std::cout << " " << name << "(" << s.format << ", " << s.frame_count << "f)";
+    }
+    std::cout << "\n";
   }
   return true;
 }
@@ -691,7 +784,11 @@ nlohmann::ordered_json build_features(
       // lerobot reads the stored unit as info["depth_unit"] (no "video." prefix).
       features[obs_key]["info"]["depth_unit"] = "mm";  // raw mono16 depth is millimetres
     } else {
-      features[obs_key]["info"]["video.codec"] = "av1";
+      // "libsvtav1", not "av1": lerobot validates video.codec against
+      // VALID_VIDEO_CODECS, where the bare "av1" survives only through the
+      // legacy VIDEO_CODECS_ALIASES map. Overridden per camera by the writer
+      // when a recording's stream was remuxed rather than re-encoded.
+      features[obs_key]["info"]["video.codec"] = "libsvtav1";
       features[obs_key]["info"]["video.pix_fmt"] = "yuv420p";
     }
   }

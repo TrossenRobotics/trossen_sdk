@@ -48,9 +48,16 @@ static void print_usage(const char* program) {
   std::cerr << "  --set KEY=VALUE              Override a config value (repeatable)\n";
   std::cerr << "                               e.g. --set lerobot_v3_backend.dataset_id=my_ds\n";
   std::cerr << "  --jobs N                     Worker threads for decode/extract/encode\n";
+  std::cerr << "  --reencode-av1               Re-encode video-backed recordings to AV1\n";
+  std::cerr << "                               (default: stream-copy them, much faster)\n";
   std::cerr << "                               (default: min(cores, 8); the writer stays\n";
   std::cerr << "                               single-threaded and ordered). Lower this when\n";
   std::cerr << "                               running several datasets concurrently.\n";
+  std::cerr << "  --encoder-threads N          Parallelism cap per video encoder\n";
+  std::cerr << "                               (default: cores / jobs, so the workers together\n";
+  std::cerr << "                               fill the machine without oversubscribing it).\n";
+  std::cerr << "                               0 = uncapped: every encoder sizes itself to the\n";
+  std::cerr << "                               whole machine.\n";
   std::cerr << "  --dump-config                Print resolved config and exit\n";
   std::cerr << "  --help                       Show this help message\n";
   std::cerr << "\nProduces a LeRobot v3.0 dataset (aggregated parquet + concatenated video).\n";
@@ -137,6 +144,31 @@ int main(int argc, char** argv) {
               << "Set overwrite_existing=true for a clean conversion.\n";
   }
 
+  // ── Concurrency: worker count, then the per-encoder cap derived from it ──
+  //
+  // Worker-thread count for the parallelizable decode/extract/encode stage.
+  // Capped at 8 by default; lower it via --jobs when running several dataset
+  // conversions at once (e.g. a NAS sweep).
+  const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+  int jobs = cli.get_int("jobs", static_cast<int>(std::min(hw, 8u)));
+  if (jobs < 1) jobs = 1;
+  if (static_cast<size_t>(jobs) > mcap_files.size()) jobs = static_cast<int>(mcap_files.size());
+  std::cout << "Worker threads (decode/extract/encode): " << jobs
+            << " (writer stays single-threaded, ordered)\n";
+
+  // Per-encoder parallelism cap, applied by the writer as SVT-AV1 lp= / x265
+  // pools=. (ffmpeg's generic -threads is useless here: libsvtav1 ignores it
+  // outright and libx265 only honours it for frame threads.) The default splits
+  // the machine evenly across the workers — uncapped, every encoder sizes itself
+  // to every core, so `jobs` workers oversubscribe the box `jobs`-fold. Pass
+  // --encoder-threads 0 for the old uncapped behaviour.
+  int encoder_threads =
+      cli.get_int("encoder-threads", std::max(1, static_cast<int>(hw) / jobs));
+  if (encoder_threads < 0) encoder_threads = 0;
+  std::cout << "Encoder parallelism per episode: "
+            << (encoder_threads > 0 ? std::to_string(encoder_threads) : std::string("uncapped"))
+            << " (SVT-AV1 lp / x265 pools)\n";
+
   trossen::convert::LeRobotV3DatasetWriter::Options opts;
   opts.dataset_root = dataset_root;
   opts.robot_name = cfg->robot_name;
@@ -147,22 +179,17 @@ int main(int argc, char** argv) {
   opts.video_files_size_in_mb = cfg->video_files_size_in_mb;
   opts.encode_videos = cfg->encode_videos;
   opts.native_schema = cfg->native_widowxai_schema;
+  // Recordings that already hold compressed video are stream-copied by default;
+  // this forces the old decode-and-re-encode-to-AV1 path instead, for byte-format
+  // parity with datasets converted before in-MCAP video existed.
+  opts.reencode_av1 = cli.has_flag("reencode-av1");
+  opts.encoder_threads = encoder_threads;
 
   trossen::convert::LeRobotV3DatasetWriter writer(opts);
   if (!writer.open()) {
     std::cerr << "Error: Failed to open dataset writer\n";
     return 1;
   }
-
-  // Worker-thread count for the parallelizable decode/extract/encode stage.
-  // The default balances against SVT-AV1's own internal threading; lower it via
-  // --jobs when running several dataset conversions at once (e.g. a NAS sweep).
-  const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-  int jobs = cli.get_int("jobs", static_cast<int>(std::min(hw, 8u)));
-  if (jobs < 1) jobs = 1;
-  if (static_cast<size_t>(jobs) > mcap_files.size()) jobs = static_cast<int>(mcap_files.size());
-  std::cout << "Worker threads (decode/extract/encode): " << jobs
-            << " (writer stays single-threaded, ordered)\n";
 
   fs::path tmp_root = dataset_root / ".tmp_convert";
   const size_t num_files = mcap_files.size();

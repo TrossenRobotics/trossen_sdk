@@ -1,0 +1,37 @@
+// Foxglove's CompressedVideo schema, vendored for the *reader* side.
+//
+// The writer uses foxglove::schemas::CompressedVideo, which the Foxglove C++ SDK
+// compiles in; but the SDK ships no .proto files, and the MCAP dependency's
+// example protos include RawImage.proto and CompressedImage.proto without this
+// one. The offline converters need a generated C++ class to decode recorded
+// camera messages, hence this copy.
+//
+// Field numbers are verified against the FileDescriptorSet that the Foxglove SDK
+// actually embeds in recorded MCAP files (timestamp=1, frame_id=2, data=3,
+// format=4). They must not be changed: a mismatch decodes silently to garbage
+// rather than failing.
+//
+// Upstream: https://github.com/foxglove/foxglove-sdk
+//   schemas/proto/foxglove/CompressedVideo.proto
+
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package foxglove;
+
+// A single frame of a compressed video bitstream
+message CompressedVideo {
+  // Timestamp of video frame
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Frame of reference for the video.
+  string frame_id = 2;
+
+  // Compressed video frame data. Annex B for h264/h265, holding exactly enough
+  // packets to decode one frame, with parameter sets repeated on keyframes.
+  bytes data = 3;
+
+  // Video format. Supported values: `h264`, `h265`, `vp9`, `av1`.
+  string format = 4;
+}

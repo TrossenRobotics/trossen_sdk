@@ -66,6 +66,27 @@ public:
     bool encode_videos{true};
     /// @brief Emit the native lerobot_trossen schema (joint/camera naming + gray12le depth).
     bool native_schema{false};
+    /**
+     * @brief Decode and re-encode video-backed recordings to AV1 instead of remuxing.
+     *
+     * Recordings that already store compressed video are stream-copied by
+     * default: the frames were encoded once at capture time, and h264/hevc are
+     * both first-class LeRobot codecs, so a second pass would cost time and
+     * quality for nothing. Set this to reproduce the AV1 output byte-format of
+     * datasets converted before in-MCAP video existed. No effect on recordings
+     * that store raw images — those always encode.
+     */
+    bool reencode_av1{false};
+    /**
+     * @brief Per-encoder parallelism cap; 0 leaves each encoder to size itself.
+     *
+     * Applied as SVT-AV1 `lp=` (colour) and x265 `pools=` (depth) rather than
+     * ffmpeg's generic `-threads`, which libsvtav1 ignores outright and libx265
+     * only partly honours. Needed because several episodes encode concurrently:
+     * without a cap every encoder sizes itself to the whole machine, so N
+     * workers oversubscribe it N-fold.
+     */
+    int encoder_threads{0};
   };
 
   explicit LeRobotV3DatasetWriter(Options opts);
@@ -90,6 +111,16 @@ public:
       std::filesystem::path episode_mp4;    ///< encoded per-episode mp4 (consumed by concat)
       double duration_s{0.0};               ///< episode video duration (frame_count / fps)
       std::vector<cv::Mat> samples;         ///< frames sampled for global image stats
+      /**
+       * @brief Codec of `episode_mp4`, as LeRobot names it in info.json.
+       *
+       * One of "libsvtav1", "h264", "hevc". lerobot validates this against its
+       * VALID_VIDEO_CODECS and derives it from the stream itself, so it must be
+       * the canonical codec name and must agree with the actual bitstream.
+       */
+      std::string codec{"libsvtav1"};
+      /// @brief Pixel format of `episode_mp4`: "yuv420p" (colour) or "gray12le" (depth).
+      std::string pix_fmt{"yuv420p"};
     };
     AlignedEpisode ep;
     McapChannelMap channels;
@@ -192,6 +223,37 @@ private:
   bool encode_depth_video(
     const std::filesystem::path& image_dir, size_t frame_count,
     const std::filesystem::path& out_mp4) const;
+  /**
+   * @brief Wrap an already-compressed Annex B stream in mp4 without re-encoding.
+   *
+   * The bitstream is copied through verbatim (`-c copy`), so the recorded frames
+   * reach LeRobot exactly as captured. Timestamps are generated at the dataset
+   * fps because an elementary stream carries none.
+   *
+   * @param annexb Input elementary stream (`.h264` / `.hevc`).
+   * @param frame_count Expected frame count, checked against the muxed result.
+   * @param out_mp4 Output mp4.
+   * @return true on success.
+   */
+  bool remux_episode_video(
+    const std::filesystem::path& annexb, size_t frame_count,
+    const std::filesystem::path& out_mp4) const;
+
+  /**
+   * @brief Decode evenly spaced frames from an mp4 for global image statistics.
+   *
+   * Used on the remux path, where no decoded frames pass through the converter
+   * at all. Only a sample is decoded, not the whole stream.
+   *
+   * @param mp4 Video to sample.
+   * @param frame_count Total frames in the video.
+   * @param tmp_dir Scratch directory for the extracted stills.
+   * @return Sampled frames (empty on failure; stats degrade rather than fail).
+   */
+  std::vector<cv::Mat> sample_video_frames(
+    const std::filesystem::path& mp4, size_t frame_count,
+    const std::filesystem::path& tmp_dir) const;
+
   bool place_or_concat_video(
     const std::string& video_key, const std::filesystem::path& episode_mp4,
     double ep_duration_s, std::array<double, 4>& out_slot);

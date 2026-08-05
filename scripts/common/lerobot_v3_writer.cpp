@@ -384,6 +384,85 @@ bool LeRobotV3DatasetWriter::encode_depth_video(
   return true;
 }
 
+bool LeRobotV3DatasetWriter::remux_episode_video(
+  const fs::path& annexb, size_t frame_count, const fs::path& out_mp4) const
+{
+  // -c copy: the bitstream goes through untouched. An elementary stream has no
+  // container timestamps, so -r stamps them at the dataset rate and +genpts
+  // fills in the presentation timestamps the mp4 muxer needs.
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << opts_.fps
+      << " -i " << annexb.string()
+      << " -c copy -movflags +faststart " << out_mp4.string();
+  const int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg remux failed (exit " << ret << "): " << cmd.str() << "\n";
+    return false;
+  }
+
+  // A frame count that disagrees with the message count would silently shift
+  // image/state alignment for every later frame, so check rather than trust.
+  std::ostringstream probe;
+  probe << "ffprobe -v error -count_frames -select_streams v:0 "
+        << "-show_entries stream=nb_read_frames -of default=nw=1:nk=1 "
+        << out_mp4.string();
+  FILE* pipe = popen(probe.str().c_str(), "r");
+  if (!pipe) {
+    std::cerr << "Warning: could not probe remuxed video " << out_mp4.string() << "\n";
+    return true;
+  }
+  char buf[64] = {0};
+  const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
+  pclose(pipe);
+  if (read_ok) {
+    const int64_t muxed = std::strtoll(buf, nullptr, 10);
+    if (muxed > 0 && static_cast<size_t>(muxed) != frame_count) {
+      std::cerr << "Error: remuxed " << out_mp4.filename().string() << " has " << muxed
+                << " frames but the recording had " << frame_count
+                << " video messages; refusing to misalign frames against joint states\n";
+      return false;
+    }
+  }
+  return true;
+}
+
+std::vector<cv::Mat> LeRobotV3DatasetWriter::sample_video_frames(
+  const fs::path& mp4, size_t frame_count, const fs::path& tmp_dir) const
+{
+  if (frame_count == 0) return {};
+
+  const fs::path sample_dir = tmp_dir / "samples";
+  std::error_code ec;
+  fs::create_directories(sample_dir, ec);
+
+  // Decode roughly this many stills, evenly spread. Enough for stable global
+  // image statistics without decoding the whole stream.
+  constexpr size_t kTargetSamples = 30;
+  const size_t stride = std::max<size_t>(1, frame_count / kTargetSamples);
+
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -i " << mp4.string()
+      << " -vf \"select='not(mod(n\\," << stride << "))'\" -vsync 0 -q:v 2 "
+      << (sample_dir / "sample_%04d.jpg").string();
+  if (std::system(cmd.str().c_str()) != 0) {
+    std::cerr << "Warning: could not sample frames from " << mp4.string()
+              << "; image stats for this camera will be based on fewer frames\n";
+  }
+
+  std::vector<fs::path> paths;
+  if (fs::exists(sample_dir)) {
+    for (const auto& entry : fs::directory_iterator(sample_dir)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+        paths.push_back(entry.path());
+      }
+    }
+  }
+  std::sort(paths.begin(), paths.end());
+  std::vector<cv::Mat> samples = trossen::io::backends::sample_images(paths);
+  fs::remove_all(sample_dir, ec);
+  return samples;
+}
+
 bool LeRobotV3DatasetWriter::place_or_concat_video(
   const std::string& video_key, const fs::path& episode_mp4, double ep_duration_s,
   std::array<double, 4>& out_slot)
@@ -495,8 +574,63 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
 
   out.tmp_dir = tmp_root / ("episode_" + std::to_string(episode_index));
 
-  // ── Camera video: extract frames, encode a per-episode mp4, sample stats ──
-  if (opts_.encode_videos && !out.channels.camera_channels.empty()) {
+  // ── Camera video ──
+  //
+  // Recordings made with image_encoding="video" already hold compressed streams,
+  // so those are stream-copied into mp4 rather than decoded and re-encoded. A
+  // recording can legitimately mix the two (colour as video, depth as raw), and
+  // pre-video recordings have none at all, so both paths run and each camera
+  // takes whichever applies to it.
+  std::map<std::string, CameraVideoStream> video_streams;
+  if (opts_.encode_videos && !opts_.reencode_av1 && !out.channels.camera_channels.empty()) {
+    if (!extract_camera_video(
+          mcap_path.string(), out.channels,
+          [&](const std::string& camera_name) -> fs::path {
+            fs::path dir = out.tmp_dir / camera_name;
+            fs::create_directories(dir);
+            return dir;
+          },
+          video_streams)) {
+      std::error_code ec;
+      fs::remove_all(out.tmp_dir, ec);
+      return out;  // ok == false
+    }
+
+    for (const auto& cam : out.ep.cameras) {
+      auto vs_it = video_streams.find(cam.name);
+      if (vs_it == video_streams.end() || vs_it->second.frame_count == 0) continue;
+      const CameraVideoStream& vs = vs_it->second;
+
+      PreparedEpisode::PreparedVideo pv;
+      pv.obs_key = cam.obs_key;
+      pv.episode_mp4 = out.tmp_dir / (cam.name + "_episode.mp4");
+      if (!remux_episode_video(vs.annexb_path, vs.frame_count, pv.episode_mp4)) {
+        std::error_code ec;
+        fs::remove_all(out.tmp_dir, ec);
+        return out;  // ok == false
+      }
+      pv.duration_s = static_cast<double>(vs.frame_count) / static_cast<double>(opts_.fps);
+      // lerobot names these canonically and validates them; "h265" is "hevc" there.
+      pv.codec = vs.format == "h265" ? "hevc" : "h264";
+      pv.pix_fmt = vs.format == "h265" ? "gray12le" : "yuv420p";
+
+      // 12-bit depth codes are not [0,1] RGB, so they are not sampled for image
+      // stats — matching how the raw-image path treats depth.
+      if (vs.format != "h265") {
+        pv.samples = sample_video_frames(pv.episode_mp4, vs.frame_count, out.tmp_dir);
+      }
+
+      out.videos.push_back(std::move(pv));
+
+      // The elementary stream is now redundant; the mp4 is what gets consumed.
+      std::error_code ec;
+      fs::remove(vs.annexb_path, ec);
+    }
+  }
+
+  // ── Raw-image cameras: extract frames, encode a per-episode mp4, sample stats ──
+  if (opts_.encode_videos && !out.channels.camera_channels.empty() &&
+      video_streams.size() < out.ep.cameras.size()) {
     std::map<std::string, fs::path> camera_dirs;
     std::map<std::string, size_t> camera_counts;
     extract_camera_images(
@@ -510,6 +644,8 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
       camera_counts, opts_.native_schema);
 
     for (const auto& cam : out.ep.cameras) {
+      // Already remuxed from a compressed stream above.
+      if (video_streams.count(cam.name) > 0) continue;
       auto dir_it = camera_dirs.find(cam.name);
       auto cnt_it = camera_counts.find(cam.name);
       if (dir_it == camera_dirs.end() || cnt_it == camera_counts.end() || cnt_it->second == 0) {
@@ -572,6 +708,15 @@ bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
     obs_dim_ = ep.obs_dim;
     data_schema_ = make_data_schema();
     features_ = build_features(ep, pe.channels, opts_.native_schema);
+    // build_features() assumes this converter encoded the video, so it names the
+    // encoder defaults. Cameras whose stream was remuxed out of the recording
+    // carry whatever codec the recorder used, and lerobot derives video.codec
+    // from the stream itself -- a mismatch here is a dataset it rejects.
+    for (const auto& pv : pe.videos) {
+      if (!features_.contains(pv.obs_key)) continue;
+      features_[pv.obs_key]["info"]["video.codec"] = pv.codec;
+      features_[pv.obs_key]["info"]["video.pix_fmt"] = pv.pix_fmt;
+    }
     trossen::io::backends::add_standard_metadata_features(features_);
     action_values_.assign(action_dim_, {});
     obs_values_.assign(obs_dim_, {});

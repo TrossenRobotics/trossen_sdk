@@ -68,6 +68,24 @@ struct AlignedFrame {
   std::vector<double> observation;
 };
 
+/**
+ * @brief One camera's already-compressed video stream, taken straight from MCAP.
+ *
+ * Produced when a recording stores cameras as `foxglove.CompressedVideo` rather
+ * than `foxglove.RawImage`. The payloads are concatenated verbatim into an Annex
+ * B elementary stream, so the converter can remux (`ffmpeg -c copy`) instead of
+ * decoding and re-encoding — the frames were already encoded once at capture
+ * time, and a second pass would cost time and quality for nothing.
+ */
+struct CameraVideoStream {
+  /// @brief Annex B elementary stream on disk (`.h264` / `.hevc`).
+  std::filesystem::path annexb_path;
+  /// @brief Bitstream format as recorded: "h264" or "h265".
+  std::string format;
+  /// @brief Number of video messages, i.e. frames (one message per frame).
+  size_t frame_count{0};
+};
+
 /// @brief A camera present in the recording.
 struct CameraInfo {
   /// @brief Bare camera name, e.g. "cam_high".
@@ -146,6 +164,30 @@ bool extract_camera_images(
   const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
   std::map<std::string, size_t>& out_counts,
   bool native_schema = false);
+
+/**
+ * @brief Extract already-compressed camera video straight out of an MCAP.
+ *
+ * Handles camera channels whose schema is `foxglove.CompressedVideo`. Each
+ * camera's message payloads are appended, in log-time order, to a single Annex B
+ * elementary stream under `dir_for(camera_name)`. Nothing is decoded: the point
+ * is to let the caller remux with `ffmpeg -c copy`.
+ *
+ * Cameras stored as `foxglove.RawImage` are ignored here — use
+ * extract_camera_images() for those. A recording may legitimately mix the two
+ * (colour as video, depth as raw), so a caller should consult both.
+ *
+ * @param mcap_file Path to the input MCAP file.
+ * @param channels Channel maps from load_aligned_episode().
+ * @param dir_for Maps a camera name to a directory to write into (created by the callback).
+ * @param out_streams Output per-camera video streams; empty when the recording has none.
+ * @return true on success; false on a fatal read error (message logged to stderr).
+ */
+bool extract_camera_video(
+  const std::string& mcap_file,
+  const McapChannelMap& channels,
+  const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
+  std::map<std::string, CameraVideoStream>& out_streams);
 
 /**
  * @brief Build the LeRobot `features` schema for an episode.

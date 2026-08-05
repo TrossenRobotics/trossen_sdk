@@ -271,6 +271,10 @@ set(TROSSEN_PROTO_FILES
   ${TROSSEN_PROTO_PATH}/Odometry2D.proto
   ${TROSSEN_PROTO_PATH}/RobotDescription.proto
   ${TROSSEN_PROTO_PATH}/Timestamp.proto
+  # Reader-side only: the Foxglove SDK compiles its own CompressedVideo writer
+  # in, and the MCAP dependency's example protos do not include this schema, so
+  # the converters need a locally generated class to decode camera messages.
+  ${TROSSEN_PROTO_PATH}/CompressedVideo.proto
 )
 
 # Generate protobuf files with proper import paths
