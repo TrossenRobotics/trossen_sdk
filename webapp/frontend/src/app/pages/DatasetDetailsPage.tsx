@@ -169,6 +169,11 @@ export function DatasetDetailsPage() {
   const [convertLogs, setConvertLogs] = useState<string[]>([]);
   const [convertResult, setConvertResult] = useState<ConvertResult | null>(null);
   const [convertError, setConvertError] = useState('');
+  const [convertCancelled, setConvertCancelled] = useState(false);
+  // Aborting this controller closes the SSE response body, which cancels the
+  // backend's async generator — that is what triggers the server-side kill of
+  // the converter process group and the removal of the partial output.
+  const convertAbortRef = useRef<AbortController | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const [convertForm, setConvertForm] = useState({
     root: '~/.cache/huggingface/lerobot', task_name: '', repository_id: 'TrossenRoboticsCommunity',
@@ -294,9 +299,13 @@ export function DatasetDetailsPage() {
   async function handleConvert(e: React.FormEvent) {
     e.preventDefault();
     setConverting(true); setConvertError(''); setConvertResult(null); setConvertLogs([]);
+    setConvertCancelled(false);
+    const abort = new AbortController();
+    convertAbortRef.current = abort;
     try {
       const res = await fetch(`/api/datasets/${id}/convert-to-lerobot`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
+        signal: abort.signal,
         body: JSON.stringify({
           root: convertForm.root, task_name: convertForm.task_name, repository_id: convertForm.repository_id,
           dataset_id: convertForm.dataset_id, robot_name: convertForm.robot_name,
@@ -347,11 +356,29 @@ export function DatasetDetailsPage() {
         }
       }
     } catch (err) {
-      const msg = describeError(err);
-      setConvertError(msg);
-      toast.error(msg);
+      // An aborted fetch is a deliberate cancel, not a failure — the backend
+      // has already killed the converter and removed the partial output, so
+      // report it as cancelled rather than erroring.
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        setConvertCancelled(true);
+        toast.info('Conversion cancelled');
+      } else {
+        const msg = describeError(err);
+        setConvertError(msg);
+        toast.error(msg);
+      }
     }
-    finally { setConverting(false); }
+    finally { setConverting(false); convertAbortRef.current = null; }
+  }
+
+  // Cancel a running conversion. Aborting the fetch is the whole mechanism:
+  // the backend notices the dropped SSE consumer, kills the converter's
+  // process group, and deletes the half-written output tree.
+  function handleCancelConvert() {
+    if (!window.confirm(
+      'Cancel this conversion? The partially converted output dataset will be deleted.'
+    )) return;
+    convertAbortRef.current?.abort();
   }
 
   if (error) return (
@@ -624,9 +651,9 @@ export function DatasetDetailsPage() {
           <div className="bg-surface border border-edge w-full max-w-[750px] max-h-[90vh] overflow-y-auto font-['JetBrains_Mono',sans-serif]">
             <div className="flex items-center justify-between p-5 border-b border-edge">
               <h2 className="text-lg text-ink">Convert to LeRobot {convertForm.lerobot_version.toUpperCase()}</h2>
-              {/* Close hidden during conversion: there is no way to halt
-                  a running conversion from the UI by design, so the only
-                  exits are completion or failure. */}
+              {/* Close stays hidden while converting so the modal cannot be
+                  dismissed out from under a running job — use Cancel, which
+                  also tears the converter down. */}
               {!(converting && !convertResult) && (
                 <button onClick={() => setShowConvertModal(false)} className="text-2xl text-dim hover:text-ink leading-none">x</button>
               )}
@@ -697,9 +724,23 @@ export function DatasetDetailsPage() {
                   <div ref={logsEndRef} />
                 </div>
                 {convertError && <div className="bg-red-500/10 border border-red-500 text-red-400 text-sm p-3 rounded">{convertError}</div>}
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={handleCancelConvert}
+                    className="border border-edge text-dim hover:text-ink hover:border-red-500 px-4 py-2 text-sm"
+                  >
+                    Cancel Conversion
+                  </button>
+                </div>
               </div>
             ) : (
               <form onSubmit={handleConvert} className="p-5 space-y-4">
+                {convertCancelled && (
+                  <div className="bg-app border border-edge text-dim text-sm p-3 rounded">
+                    Conversion cancelled. The partially converted output dataset was removed.
+                  </div>
+                )}
                 {convertError && <div className="bg-red-500/10 border border-red-500 text-red-400 text-sm p-3 rounded whitespace-pre-wrap max-h-[200px] overflow-y-auto">{convertError}</div>}
                 <div className="grid grid-cols-2 gap-4 items-start">
                   <div>

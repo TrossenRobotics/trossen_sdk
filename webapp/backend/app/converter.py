@@ -13,11 +13,20 @@ A timing probe on a 2-episode / 700 MB dataset showed steady output
 with the longest silent window being per-camera SVT-AV1 video encoding
 (~3-4s on low-resolution data) — acceptable for a progress display.
 
-Disconnect: if the SSE consumer goes away, the async generator is
-cancelled. The finally block terminates the subprocess (with a 5s
-grace period before SIGKILL) and removes the partially-written output
-directory so the next dataset scan is not polluted by a half-converted
-LeRobot tree.
+Disconnect / cancel: if the SSE consumer goes away — either because the
+user hit Cancel (the frontend aborts the fetch) or because the tab
+died — the async generator is cancelled. The handler kills the whole
+process group and removes the partially-written output directory so the
+next dataset scan is not polluted by a half-converted LeRobot tree.
+
+Process group, not just the process: the converters shell out to
+ffmpeg/ffprobe, several concurrently at higher --jobs. Signalling only
+the converter would leave those encoders alive, still burning CPU and
+still writing into <output>/.tmp_convert while we delete that tree
+underneath them — so the cleanup could lose the race and leave a
+partial dataset behind. The subprocess is therefore started in its own
+session and torn down with killpg, awaited to completion *before* the
+output directory is removed.
 """
 
 from __future__ import annotations
@@ -26,6 +35,7 @@ import asyncio
 import json
 import os
 import shutil
+import signal
 from pathlib import Path
 from typing import AsyncIterator
 
@@ -252,6 +262,88 @@ def validate_body(body: ConvertBody) -> str | None:
     return None
 
 
+def _group_is_empty(pgid: int) -> bool:
+    """True once no process remains in `pgid`.
+
+    Signal 0 checks deliverability without sending anything: it fails with
+    ESRCH (ProcessLookupError) exactly when the group has no members left.
+    """
+    try:
+        os.killpg(pgid, 0)
+    except ProcessLookupError:
+        return True
+    except PermissionError:
+        # Group exists but is not ours to signal — treat as still alive.
+        return False
+    return False
+
+
+async def _await_group_exit(pgid: int, timeout_s: float) -> bool:
+    """Poll until `pgid` is empty. Returns True if it drained in time."""
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while asyncio.get_running_loop().time() < deadline:
+        if _group_is_empty(pgid):
+            return True
+        await asyncio.sleep(0.05)
+    return _group_is_empty(pgid)
+
+
+async def _kill_process_group(proc: asyncio.subprocess.Process, grace_s: float = 5.0) -> None:
+    """Terminate `proc` and every process it spawned, then wait for all of them.
+
+    `proc` is started with `start_new_session=True`, so it leads its own
+    process group and a single killpg reaches the converter plus all of its
+    ffmpeg/ffprobe children. SIGTERM first, to let ffmpeg close its output
+    files, then SIGKILL for anything still standing.
+
+    Liveness is tracked on the *group*, not on `proc`. The converter can exit
+    while its encoders keep running — that is precisely the leak this function
+    exists to close — so waiting on `proc.wait()` alone would return while
+    children were still writing into the output tree. The leader is reaped
+    first (a zombie stays a group member and would keep the group looking
+    alive), then the group is polled until empty.
+
+    Returns only once nothing in the group survives, which is what makes it
+    safe for the caller to delete the output directory afterwards.
+    """
+    # start_new_session=True makes the child a session+group leader, so its
+    # pgid *is* its pid. Deriving it that way rather than via os.getpgid()
+    # matters: asyncio's child watcher reaps the leader as soon as it exits,
+    # after which getpgid() raises ProcessLookupError even though the
+    # surviving encoders are still in the group.
+    pgid = proc.pid
+
+    try:
+        os.killpg(pgid, signal.SIGTERM)
+    except ProcessLookupError:
+        return
+
+    # Reap the leader so it stops counting as a group member.
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace_s)
+    except asyncio.TimeoutError:
+        pass
+
+    if await _await_group_exit(pgid, grace_s):
+        return
+
+    # Something ignored SIGTERM (or is wedged in a syscall). Escalate.
+    try:
+        os.killpg(pgid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+    await proc.wait()
+    if not await _await_group_exit(pgid, grace_s):
+        # SIGKILL is not refusable, so this means a child is stuck in
+        # uninterruptible sleep (usually blocked disk I/O). Say so rather
+        # than silently proceeding to delete the tree underneath it.
+        print(
+            f"Warning: process group {pgid} still has members after SIGKILL; "
+            "output cleanup may race a wedged encoder.",
+            flush=True,
+        )
+
+
 async def stream_conversion(body: ConvertBody, mcap_path: Path) -> AsyncIterator[str]:
     """Run the converter and yield SSE events.
 
@@ -287,6 +379,9 @@ async def stream_conversion(body: ConvertBody, mcap_path: Path) -> AsyncIterator
         # interleave naturally in one stream — the frontend log just
         # shows them in arrival order.
         stderr=asyncio.subprocess.STDOUT,
+        # Own session => own process group, so cancellation can signal the
+        # converter's ffmpeg children too (see module docstring).
+        start_new_session=True,
     )
 
     try:
@@ -343,15 +438,12 @@ async def stream_conversion(body: ConvertBody, mcap_path: Path) -> AsyncIterator
                 )
 
     except asyncio.CancelledError:
-        # SSE client disconnected. Tear down the subprocess and remove
-        # the partial output so nothing leaks into future scans.
-        if proc.returncode is None:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
+        # SSE client went away — either the user hit Cancel (the frontend
+        # aborts the fetch) or the tab died. Tear down the whole process
+        # group and *wait* for it, then remove the partial output. Doing
+        # these in the other order would race a surviving encoder that is
+        # still writing into <output>/.tmp_convert.
+        await _kill_process_group(proc)
         if output_path.is_dir():
             shutil.rmtree(output_path, ignore_errors=True)
         raise
