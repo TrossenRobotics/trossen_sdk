@@ -19,6 +19,7 @@
 #include <parquet/arrow/writer.h>
 
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_constants.hpp"
+#include "trossen_sdk/utils/depth_quantization.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"  // add_standard_metadata_features, generate_dataset_readme
 
 namespace trossen::convert {
@@ -298,7 +299,14 @@ bool LeRobotV3DatasetWriter::encode_episode_video(
   std::ostringstream cmd;
   cmd << "ffmpeg -y -loglevel error -framerate " << opts_.fps << " -start_number 0"
       << " -i " << input_pattern.string() << " -frames:v " << frame_count
-      << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p -r 30 " << out_mp4.string();
+      << " -c:v libsvtav1 -crf 30 -g 30 -preset 6";
+  // SVT-AV1's level-of-parallelism. ffmpeg's -threads is silently ignored by this
+  // encoder, so lp= is the only way to stop each concurrent worker's encoder from
+  // sizing itself to the whole machine.
+  if (opts_.encoder_threads > 0) {
+    cmd << " -svtav1-params lp=" << opts_.encoder_threads;
+  }
+  cmd << " -pix_fmt yuv420p -r 30 " << out_mp4.string();
   int ret = std::system(cmd.str().c_str());
   if (ret != 0) {
     std::cerr << "Error: ffmpeg encode failed (exit " << ret << "): " << cmd.str() << "\n";
@@ -310,23 +318,11 @@ bool LeRobotV3DatasetWriter::encode_episode_video(
 bool LeRobotV3DatasetWriter::encode_depth_video(
   const fs::path& image_dir, size_t frame_count, const fs::path& out_mp4) const
 {
-  // 16-bit depth (mm) → 12-bit log-quantized codes → lossless HEVC gray12le, matching
-  // lerobot 0.6.0 DepthEncoderConfig. depth_min/max/shift are in metres in lerobot; the
-  // raw depth here is millimetres, so the quant params are scaled to mm (× 1000).
-  constexpr double kShiftMm = 3.5 * 1000.0;
-  constexpr double kDepthMinMm = 0.01 * 1000.0;
-  constexpr double kDepthMaxMm = 10.0 * 1000.0;
-  constexpr int kQMax = 4095;  // (1 << 12) - 1
-  const double log_min = std::log(kDepthMinMm + kShiftMm);
-  const double inv_range = 1.0 / (std::log(kDepthMaxMm + kShiftMm) - log_min);
-
-  // Precompute the mm → 12-bit-code map once (raw depth is uint16, so 65536 entries).
-  std::vector<uint16_t> lut(65536);
-  for (int d = 0; d < 65536; ++d) {
-    const double norm = (std::log(static_cast<double>(d) + kShiftMm) - log_min) * inv_range;
-    const int64_t code = std::llround(norm * kQMax);
-    lut[d] = static_cast<uint16_t>(std::clamp<int64_t>(code, 0, kQMax));
-  }
+  // 16-bit depth (mm) → 12-bit log-quantized codes → lossless HEVC gray12le. The
+  // mapping lives in trossen_sdk/utils/depth_quantization.hpp so this converter and
+  // the MCAP recorder (which can encode depth video at capture time) cannot drift
+  // apart — a mismatch would decode to wrong distances without erroring.
+  const std::vector<uint16_t> lut = trossen::utils::build_depth_quantization_lut();
 
   int width = 0, height = 0;
   const fs::path raw_path = fs::path(out_mp4.string() + ".gray12.raw");
@@ -365,10 +361,18 @@ bool LeRobotV3DatasetWriter::encode_depth_video(
     return false;
   }
 
+  // x265 pools= caps its worker pool. ffmpeg's -threads only reaches x265's
+  // frame-threads, which leaves most of the pool uncapped, so use pools=.
+  std::ostringstream x265_params;
+  x265_params << "lossless=1:log-level=error";
+  if (opts_.encoder_threads > 0) {
+    x265_params << ":pools=" << opts_.encoder_threads;
+  }
+
   std::ostringstream cmd;
   cmd << "ffmpeg -y -loglevel error -f rawvideo -pix_fmt gray12le -s " << width << "x" << height
       << " -framerate " << opts_.fps << " -i " << raw_path.string() << " -frames:v " << frame_count
-      << " -c:v libx265 -x265-params lossless=1:log-level=error -pix_fmt gray12le -r 30 "
+      << " -c:v libx265 -x265-params " << x265_params.str() << " -pix_fmt gray12le -r 30 "
       << out_mp4.string();
   int ret = std::system(cmd.str().c_str());
   std::error_code ec;
