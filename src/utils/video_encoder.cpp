@@ -166,6 +166,13 @@ std::unique_ptr<VideoEncoder> VideoEncoder::create(const Params& params) {
       try_set_opt(ctx, "tune", "ull");            // ultra-low latency: no lookahead
       try_set_opt(ctx, "repeat_spspps", "1");
       try_set_opt(ctx, "bf", "0");
+      // NVENC's `delay` defaults to INT_MAX, which buffers output frames
+      // indefinitely: without these two, encode() returns nothing for the first
+      // several frames and the recorder drops them. `tune=ull` alone does not
+      // cover it -- it disables lookahead, not the output delay queue.
+      try_set_opt(ctx, "delay", "0");
+      try_set_opt(ctx, "zerolatency", "1");
+      try_set_opt(ctx, "rc-lookahead", "0");
     }
 
     if (avcodec_open2(ctx, codec, nullptr) < 0) {

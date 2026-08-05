@@ -26,6 +26,13 @@
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/configuration/types/backends/trossen_mcap_backend_config.hpp"
 
+namespace trossen::utils {
+// Defined in trossen_sdk/utils/video_encoder.hpp. Forward-declared so this
+// header stays free of libavcodec, and so the encoder map can be declared
+// unconditionally in builds without TROSSEN_ENABLE_VIDEO_ENCODE.
+class VideoEncoder;
+}  // namespace trossen::utils
+
 namespace trossen::io::backends {
 
 /// @brief Initial buffer size for encoded messages
@@ -219,6 +226,72 @@ private:
 
   /// @brief Map of image channels by camera name
   std::unordered_map<std::string, foxglove::RawChannel> image_channels_;
+
+  /**
+   * @brief Per-camera video encoder, populated only when recording video.
+   *
+   * One encoder per camera, created on that camera's first frame (the geometry
+   * is not known before then) and destroyed in close_resources(). The lifetime
+   * is deliberately tied to the episode: GOP state is per-encoder, so carrying
+   * one across episodes would make the next episode start on a delta frame and
+   * be undecodable from its beginning.
+   *
+   * Held as unique_ptr to a forward-declared type so this header does not drag
+   * libavcodec into every translation unit that includes it, and so the map can
+   * exist unconditionally even in builds without TROSSEN_ENABLE_VIDEO_ENCODE.
+   */
+  std::unordered_map<std::string, std::unique_ptr<trossen::utils::VideoEncoder>>
+    video_encoders_;
+
+  /**
+   * @brief Cameras already reported as failing to encode, to rate-limit logging.
+   *
+   * A broken encoder fails on every frame at 30 Hz per camera; without this the
+   * console becomes unusable and the real first error scrolls away.
+   */
+  std::unordered_map<std::string, bool> video_encode_failed_;
+
+  /**
+   * @brief Log one frame as uncompressed foxglove.RawImage.
+   *
+   * @param img Source record.
+   * @param depth Whether this record is a depth map (selects the stat counter).
+   * @param channel Channel to log on.
+   */
+  void write_raw_image(
+    const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
+
+  /**
+   * @brief Log a record's aligned depth map on its own `<id>_depth` channel.
+   *
+   * No-op unless the record carries one. Runs for both raw and video encodings,
+   * so a depth-capable camera's depth map is stored either way.
+   */
+  void write_aligned_depth_record(const data::ImageRecord& img);
+
+  /**
+   * @brief Encode one frame and log it as foxglove.CompressedVideo.
+   *
+   * @param img Source record; colour frames go to H.264, depth to lossless
+   *            HEVC Main 12 after LeRobot-compatible 12-bit log quantization.
+   * @param depth Whether this record is a depth map.
+   * @param channel Channel to log on (already created with the CompressedVideo schema).
+   */
+  void write_video_frame(
+    const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
+
+  /**
+   * @brief Get or create the encoder for one camera.
+   *
+   * @param img First (or current) frame, used for geometry.
+   * @param depth Whether this camera is a depth stream.
+   * @return Encoder, or nullptr if creation failed.
+   */
+  trossen::utils::VideoEncoder* ensure_video_encoder(
+    const data::ImageRecord& img, bool depth);
+
+  /// @brief mono16 -> 12-bit log code table, built once when depth video is used.
+  std::vector<uint16_t> depth_quant_lut_;
 
   /// @brief Helper to identify depth topics
   static bool is_depth_topic(const std::string& topic);

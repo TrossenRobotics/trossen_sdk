@@ -17,7 +17,12 @@
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
+#include "trossen_sdk/utils/depth_quantization.hpp"
 #include "trossen_sdk/version.hpp"
+
+#ifdef TROSSEN_ENABLE_VIDEO_ENCODE
+#include "trossen_sdk/utils/video_encoder.hpp"
+#endif
 
 namespace trossen::io::backends {
 
@@ -63,6 +68,26 @@ bool TrossenMCAPBackend::open() {
   if (opened_) {
     return true;
   }
+
+  // Refuse the episode rather than silently recording a format nobody asked
+  // for: a run that quietly fell back to raw would fill the disk at 83 MB/s,
+  // and one that quietly fell back from raw to video would be unreadable by
+  // older tooling. Both are worse than not starting.
+  if (!cfg_->image_encoding_is_valid()) {
+    std::cerr << "Unknown image_encoding '" << cfg_->image_encoding << "' (expected \""
+              << trossen::configuration::TROSSEN_MCAP_IMAGE_ENCODING_RAW << "\" or \""
+              << trossen::configuration::TROSSEN_MCAP_IMAGE_ENCODING_VIDEO << "\")\n";
+    return false;
+  }
+#ifndef TROSSEN_ENABLE_VIDEO_ENCODE
+  if (cfg_->records_video()) {
+    std::cerr << "image_encoding is \"video\" but this SDK was built without "
+                 "TROSSEN_ENABLE_VIDEO_ENCODE; rebuild with "
+                 "-DTROSSEN_ENABLE_VIDEO_ENCODE=ON or set image_encoding to \"raw\"\n";
+    return false;
+  }
+#endif
+
   std::ostringstream oss;
   oss << cfg_->root << "/"
       << cfg_->dataset_id << "/"
@@ -194,6 +219,12 @@ void TrossenMCAPBackend::close_resources() {
   joint_channels_.clear();
   image_channels_.clear();
   odometry_2d_channels_.clear();
+  // Encoders are per-episode: GOP state lives inside them, so reusing one for
+  // the next episode would make that episode open on a delta frame and be
+  // undecodable from its start. Both close() and discard_episode() come through
+  // here, so dropping them unconditionally is the whole lifetime rule.
+  video_encoders_.clear();
+  video_encode_failed_.clear();
   opened_ = false;
 }
 
@@ -310,11 +341,22 @@ foxglove::RawChannel* TrossenMCAPBackend::ensure_image_channel_with_metadata(
     return &it->second;
   }
 
-  // Use Foxglove SDK's built-in RawImage schema
-  foxglove::Schema schema = foxglove::schemas::RawImage::schema();
+  // Raw pixels or a compressed video stream, per config. The schema is a
+  // per-channel property, so a recording with both colour video and raw depth
+  // is legal MCAP and readers dispatch on the schema name.
+  const bool video = cfg_ && cfg_->records_video();
+  foxglove::Schema schema = video ? foxglove::schemas::CompressedVideo::schema()
+                                  : foxglove::schemas::RawImage::schema();
 
   // Convert metadata to std::map
   std::map<std::string, std::string> channel_metadata(metadata.begin(), metadata.end());
+  if (video) {
+    // Lets a reader pick a decoder without parsing the bitstream. Depth is
+    // HEVC Main 12; colour is H.264.
+    const auto it = channel_metadata.find("stream_type");
+    const bool depth = it != channel_metadata.end() && it->second == "depth";
+    channel_metadata["video_format"] = depth ? "h265" : "h264";
+  }
 
   // Create channel
   auto channel_result = foxglove::RawChannel::create(
@@ -451,6 +493,152 @@ void TrossenMCAPBackend::write_odometry_2d_record(const data::Odometry2DRecord& 
   }
 }
 
+trossen::utils::VideoEncoder* TrossenMCAPBackend::ensure_video_encoder(
+  const data::ImageRecord& img, bool depth)
+{
+#ifndef TROSSEN_ENABLE_VIDEO_ENCODE
+  (void)img;
+  (void)depth;
+  return nullptr;
+#else
+  auto it = video_encoders_.find(img.id);
+  if (it != video_encoders_.end()) {
+    return it->second.get();
+  }
+
+  trossen::utils::VideoEncoder::Params p;
+  p.width = static_cast<int>(img.width);
+  p.height = static_cast<int>(img.height);
+  // The encoder needs a nominal rate for its time base only; the true frame
+  // timing lives in each message's MCAP log time, which is the capture stamp.
+  p.fps = trossen::configuration::TROSSEN_MCAP_VIDEO_NOMINAL_FPS;
+  p.gop_size = cfg_->video_keyframe_interval;
+  p.encoder = cfg_->video_encoder;
+  if (depth) {
+    // 12-bit depth codes cannot survive an 8-bit codec, and quantization has
+    // already discarded everything that can be spared, so encode losslessly.
+    p.codec = trossen::utils::VideoCodec::H265;
+    p.lossless = true;
+  } else {
+    p.codec = trossen::utils::VideoCodec::H264;
+    p.bitrate_kbps = cfg_->video_bitrate_kbps;
+  }
+
+  auto encoder = trossen::utils::VideoEncoder::create(p);
+  if (!encoder) {
+    std::cerr << "Failed to create video encoder for camera " << img.id << "\n";
+    return nullptr;
+  }
+  auto [inserted, _] = video_encoders_.emplace(img.id, std::move(encoder));
+  return inserted->second.get();
+#endif
+}
+
+void TrossenMCAPBackend::write_video_frame(
+  const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel)
+{
+#ifndef TROSSEN_ENABLE_VIDEO_ENCODE
+  (void)img;
+  (void)depth;
+  (void)channel;
+#else
+  auto* encoder = ensure_video_encoder(img, depth);
+  if (!encoder) {
+    if (!video_encode_failed_[img.id]) {
+      video_encode_failed_[img.id] = true;
+      std::cerr << "Dropping frames for " << img.id << ": no video encoder\n";
+    }
+    return;
+  }
+
+  // The frame handed to the encoder: colour goes as BGR8, depth is
+  // log-quantized to 12-bit codes first so the stored stream is exactly what
+  // LeRobot's depth decoder expects.
+  cv::Mat source;
+  if (depth) {
+    if (img.image.type() != CV_16UC1) {
+      if (!video_encode_failed_[img.id]) {
+        video_encode_failed_[img.id] = true;
+        std::cerr << "Depth video for " << img.id << " needs CV_16UC1, got type "
+                  << img.image.type() << "\n";
+      }
+      return;
+    }
+    if (depth_quant_lut_.empty()) {
+      depth_quant_lut_ = trossen::utils::build_depth_quantization_lut();
+    }
+    source.create(img.image.rows, img.image.cols, CV_16UC1);
+    for (int y = 0; y < img.image.rows; ++y) {
+      const uint16_t* src = img.image.ptr<uint16_t>(y);
+      uint16_t* dst = source.ptr<uint16_t>(y);
+      for (int x = 0; x < img.image.cols; ++x) dst[x] = depth_quant_lut_[src[x]];
+    }
+  } else {
+    // The encoder converts BGR to YUV itself; anything else has to be
+    // normalised here so colour is not silently swapped.
+    if (img.encoding == "rgb8") {
+      cv::cvtColor(img.image, source, cv::COLOR_RGB2BGR);
+    } else if (img.encoding == "rgba8") {
+      cv::cvtColor(img.image, source, cv::COLOR_RGBA2BGR);
+    } else if (img.encoding == "bgra8") {
+      cv::cvtColor(img.image, source, cv::COLOR_BGRA2BGR);
+    } else if (img.image.type() == CV_8UC1) {
+      cv::cvtColor(img.image, source, cv::COLOR_GRAY2BGR);
+    } else {
+      source = img.image;
+    }
+  }
+
+  bool is_keyframe = false;
+  const auto packet = encoder->encode(source, is_keyframe);
+  if (!packet.has_value()) {
+    // One packet per frame is an invariant, not a nicety: the converter pairs
+    // camera frames to joint samples by index, so a dropped packet shifts every
+    // later frame's alignment. Report it rather than letting it pass quietly.
+    if (!video_encode_failed_[img.id]) {
+      video_encode_failed_[img.id] = true;
+      std::cerr << "Video encoder produced no packet for " << img.id
+                << "; frame/message alignment would drift, dropping frame\n";
+    }
+    return;
+  }
+
+  foxglove::schemas::CompressedVideo vmsg;
+  vmsg.timestamp = foxglove::schemas::Timestamp{
+    .sec = static_cast<uint32_t>(img.ts.realtime.sec),
+    .nsec = static_cast<uint32_t>(img.ts.realtime.nsec)
+  };
+  vmsg.frame_id = img.id;
+  vmsg.format = trossen::utils::video_codec_format(encoder->codec());
+  vmsg.data.assign(packet->begin(), packet->end());
+
+  std::vector<uint8_t> payload(TROSSEN_MCAP_INITIAL_ENCODED_BUFFER_SIZE);
+  size_t encoded_len = 0;
+  auto encode_result = vmsg.encode(payload.data(), payload.size(), &encoded_len);
+  if (encode_result == foxglove::FoxgloveError::BufferTooShort) {
+    payload.resize(encoded_len);
+    encode_result = vmsg.encode(payload.data(), payload.size(), &encoded_len);
+  }
+  if (encode_result != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to encode CompressedVideo: " << foxglove::strerror(encode_result) << "\n";
+    return;
+  }
+
+  auto st = channel->log(
+    reinterpret_cast<const std::byte*>(payload.data()),
+    encoded_len,
+    img.ts.realtime.to_ns());
+
+  if (st != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to write video frame: " << foxglove::strerror(st) << "\n";
+  } else if (depth) {
+    ++stats_.depth_images_written;
+  } else {
+    ++stats_.images_written;
+  }
+#endif
+}
+
 void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
   // Determine if this is a depth frame based on encoding or topic
   const bool depth =
@@ -479,6 +667,23 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
   if (!channel) {
     return;
   }
+
+  // Colour/depth pixels go out via whichever encoding is configured. Either way
+  // the aligned-depth block further down still runs: a colour record from a
+  // depth-capable camera also carries a depth map, which belongs on its own
+  // channel.
+  if (cfg_ && cfg_->records_video()) {
+    write_video_frame(img, depth, channel);
+  } else {
+    write_raw_image(img, depth, channel);
+  }
+
+  write_aligned_depth_record(img);
+}
+
+void TrossenMCAPBackend::write_raw_image(
+  const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel)
+{
   foxglove::schemas::RawImage imsg;
   imsg.timestamp = foxglove::schemas::Timestamp{
     .sec = static_cast<uint32_t>(img.ts.realtime.sec),
@@ -524,8 +729,11 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
       ++stats_.images_written;
     }
   }
+}
 
-  // Write optional depth image to a separate channel when ImageRecord carries depth
+void TrossenMCAPBackend::write_aligned_depth_record(const data::ImageRecord& img) {
+  // Cameras that produce colour plus an aligned depth map publish the depth on
+  // its own `<id>_depth` channel.
   if (img.has_depth()) {
     const std::string depth_topic_id = img.id + "_depth";
     std::unordered_map<std::string, std::string> md;
@@ -537,6 +745,24 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
 
     foxglove::RawChannel* depth_channel =
       ensure_image_channel_with_metadata(depth_topic_id, md);
+
+    if (depth_channel && cfg_ && cfg_->records_video()) {
+      // Route the aligned depth map through the same encode path as any other
+      // depth stream. A synthetic record carries the depth image under the
+      // `_depth` id so it gets its own encoder and its own channel.
+      data::ImageRecord drec;
+      drec.id = depth_topic_id;
+      drec.ts = img.ts;
+      drec.seq = img.seq;
+      drec.width = static_cast<uint32_t>(img.depth_image->cols);
+      drec.height = static_cast<uint32_t>(img.depth_image->rows);
+      drec.channels = 1;
+      drec.encoding = "16UC1";
+      drec.image = *img.depth_image;
+      write_video_frame(drec, /*depth=*/true, depth_channel);
+      return;
+    }
+
     if (depth_channel) {
       foxglove::schemas::RawImage dmsg;
       dmsg.timestamp = foxglove::schemas::Timestamp{

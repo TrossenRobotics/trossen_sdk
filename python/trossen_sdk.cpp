@@ -669,6 +669,15 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("dataset_id", &TrossenMCAPBackendConfig::dataset_id)
     .def_readwrite("episode_index", &TrossenMCAPBackendConfig::episode_index)
     .def_readwrite("task", &TrossenMCAPBackendConfig::task)
+    // "raw" stores foxglove.RawImage (uncompressed pixels); "video" stores
+    // foxglove.CompressedVideo (H.264 colour, lossless HEVC Main 12 depth),
+    // which is roughly 40x smaller on a typical 3-camera episode.
+    .def_readwrite("image_encoding", &TrossenMCAPBackendConfig::image_encoding)
+    .def_readwrite("video_bitrate_kbps", &TrossenMCAPBackendConfig::video_bitrate_kbps)
+    .def_readwrite(
+      "video_keyframe_interval", &TrossenMCAPBackendConfig::video_keyframe_interval)
+    .def_readwrite("video_encoder", &TrossenMCAPBackendConfig::video_encoder)
+    .def("records_video", &TrossenMCAPBackendConfig::records_video)
     .def_static("from_json", &TrossenMCAPBackendConfig::from_json, py::arg("json"));
 
   py::class_<LeRobotV2BackendConfig, BaseConfig,
