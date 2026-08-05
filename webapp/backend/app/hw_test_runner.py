@@ -202,7 +202,8 @@ def _park_arms_at_zero(arm_components: dict[str, object]) -> list[str]:
     Each arm's `end_teleop()` blocks the calling thread for the
     configured trajectory time. Running them in parallel keeps the
     total wall-clock at one trajectory regardless of arm count, which
-    matters for multi-arm rigs given the parent's 15s test timeout.
+    matters for multi-arm rigs given the parent's bounded test budget
+    (`compute_bringup_budget` in app/hw_test.py — 15s only for a trivial rig).
     """
     if not arm_components:
         return []

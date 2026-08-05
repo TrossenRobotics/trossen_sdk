@@ -46,9 +46,14 @@ export function useHardwareTest(): UseHardwareTest {
     setResult({ systemId, success: null, message: 'Running hardware test…', output: [] });
     const controller = new AbortController();
     // Net in case the backend hangs without a terminal event. The backend owns
-    // the real budget (scales with device count, up to ~90s), so this sits
-    // safely above its ceiling.
-    const safetyTimeoutId = window.setTimeout(() => controller.abort(), 120000);
+    // the real budget — `compute_bringup_budget` in app/hw_test.py, which scales
+    // with device count and is capped at 300s (a depth-enabled ZED costs ~30s
+    // each to open, so a 3-camera rig needs well over the old 90s).
+    //
+    // This MUST stay above that ceiling. When it was 120s it silently truncated
+    // the backend's own budget, so raising the backend alone changed nothing and
+    // the test still failed at exactly 2 minutes.
+    const safetyTimeoutId = window.setTimeout(() => controller.abort(), 330000);
     const collected: string[] = [];
     try {
       const res = await fetch(`/api/systems/${systemId}/test`, { method: 'POST', signal: controller.signal });

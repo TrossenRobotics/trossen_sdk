@@ -65,7 +65,25 @@ from app.ws_bus import bus
 # that path (the start failed → session errored → the operator was stuck in a
 # recover→start→error loop). 120s lets the connect retries grind through the
 # stale clients so recovery reliably succeeds on the first try.
+# Also a FLOOR, not just the value: `_bootstrap_timeout_for` scales this up for
+# rigs whose hardware is slower to open (depth-enabled ZEDs load a GPU-optimised
+# NEURAL model inside Camera::open()). A flat 120s SIGKILLed the child mid-open
+# on a 3-depth-camera rig, which surfaced as a failed recording start rather
+# than as a timeout anyone could attribute to the cameras.
 _BOOTSTRAP_TIMEOUT_S = 120.0
+
+
+def _bootstrap_timeout_for(config: dict[str, Any] | None) -> float:
+    """Bootstrap budget for this config: the arm-retry floor above, or the
+    shared hardware bring-up estimate, whichever is larger.
+
+    Shares `compute_bringup_budget` with the hardware test deliberately — the
+    two wait on the same work, and when they drift the Test button passes while
+    starting a recording gets killed.
+    """
+    from app.hw_test import compute_bringup_budget
+
+    return max(_BOOTSTRAP_TIMEOUT_S, compute_bringup_budget(config))
 
 # How long we wait for the child to exit after we signal stop. Mirrors
 # the 30s thread-join timeout from the previous in-process implementation
@@ -323,7 +341,9 @@ def start_recording(session: Session) -> None:
 
     last_lines: deque = deque(maxlen=_LAST_LINES_BUFFER)
     # _wait_for_ready kills the child itself on failure before raising.
-    _wait_for_ready(session.id, proc, last_lines)
+    _wait_for_ready(
+        session.id, proc, last_lines, _bootstrap_timeout_for(merged_config)
+    )
 
     # Bootstrap succeeded — episode 0 is already running inside the child.
     # The child also emits its own `episode_started` JSON event right
@@ -643,10 +663,11 @@ def _wait_for_ready(
     session_id: str,
     proc: subprocess.Popen,
     last_lines: deque,
+    timeout_s: float = _BOOTSTRAP_TIMEOUT_S,
 ) -> None:
     """Block until the child prints `__READY__` (success) or `__ERROR__`
-    / EOF (failure). Enforces `_BOOTSTRAP_TIMEOUT_S` by SIGKILLing the
-    child on expiry, which causes readline to see EOF.
+    / EOF (failure). Enforces `timeout_s` by SIGKILLing the child on
+    expiry, which causes readline to see EOF.
 
     Forwards every non-sentinel line to the parent's stdout so the
     operator sees SDK bootstrap output as it happens, mirroring how
@@ -661,7 +682,7 @@ def _wait_for_ready(
         except Exception:
             pass
 
-    timer = threading.Timer(_BOOTSTRAP_TIMEOUT_S, _on_timeout)
+    timer = threading.Timer(timeout_s, _on_timeout)
     timer.start()
 
     ready = False
@@ -699,7 +720,7 @@ def _wait_for_ready(
     if timed_out.is_set():
         raise RecorderError(
             f"Recorder subprocess bootstrap timed out after "
-            f"{_BOOTSTRAP_TIMEOUT_S:.0f}s"
+            f"{timeout_s:.0f}s"
         )
     if error_message:
         raise RecorderError(_with_diagnostics(error_message, last_lines))

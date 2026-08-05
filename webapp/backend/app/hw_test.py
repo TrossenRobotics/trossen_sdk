@@ -50,32 +50,82 @@ _FAILURE_MARKERS = ("[critical]", "[error]")
 # The budget scales with device count rather than being a flat constant:
 # arms connect serially over TCP/UDP at ~5-6s each on a healthy rig, so a
 # flat 15s falsely failed multi-arm systems that were connecting fine (a
-# 4-arm rig needs ~30s just for the arms). See `_compute_timeout`.
+# 4-arm rig needs ~30s just for the arms). See `compute_bringup_budget`.
 _TEST_TIMEOUT_BASE_S = 10.0
 _TEST_TIMEOUT_PER_ARM_S = 7.0
 _TEST_TIMEOUT_PER_CAMERA_S = 2.0
+# A ZED opened with depth costs far more than a colour-only camera: the ZED SDK
+# loads and GPU-optimises a NEURAL depth model inside Camera::open(), and the
+# opens run serially, so three depth cameras pay it three times. Measured on an
+# AGX Orin, a warm open is single-digit seconds; 2s/camera failed the test while
+# the cameras were coming up perfectly well.
+_TEST_TIMEOUT_PER_DEPTH_CAMERA_S = 30.0
 _TEST_TIMEOUT_PER_BASE_S = 3.0
 # Floor (no-/few-device configs still get a sane minimum) and hard ceiling
-# (backstop so a wedged test can't hang the budget indefinitely).
+# (backstop so a wedged test can't hang the budget indefinitely). The ceiling
+# has to clear the worst real config: 4 arms + 3 depth ZEDs + a base is
+# 10 + 28 + 90 + 3 = 131s, which the old 90s ceiling silently truncated — the
+# budget was computed correctly and then clamped below what the rig needed.
 _TEST_TIMEOUT_FLOOR_S = 15.0
-_TEST_TIMEOUT_CEILING_S = 90.0
+_TEST_TIMEOUT_CEILING_S = 300.0
+
+# NOTE: raising this alone is not enough. Three other limits bound the same
+# bring-up and must stay above it, or the fix looks like it did not work:
+#   - the frontend's own abort in `useHardwareTest.ts`
+#   - `recorder._BOOTSTRAP_TIMEOUT_S`, which SIGKILLs a slow recording start
+#   - a first-ever depth open, which is minutes (see `compute_bringup_budget`)
 
 
-def _compute_timeout(config: dict[str, Any] | None) -> float:
-    """Wall-clock budget for a system's hardware test, scaled by how many
-    devices it has to bring up. Arms dominate (serial connect ~6s each);
-    cameras and a base add smaller increments. Clamped to a floor/ceiling."""
+def compute_bringup_budget(config: dict[str, Any] | None) -> float:
+    """Wall-clock budget for bringing a system's hardware up, scaled by what it
+    has to open. Used for the hardware test and for the recorder's bootstrap
+    wait, so the two cannot drift apart.
+
+    Arms connect serially over TCP/UDP (~6s each). Colour cameras are cheap. A
+    depth-enabled ZED is the expensive one — see
+    `_TEST_TIMEOUT_PER_DEPTH_CAMERA_S`.
+
+    IMPORTANT: this budget assumes the depth models are already cached. The
+    FIRST depth open on a given rig also downloads and optimises the NEURAL
+    model, which takes minutes and would need an absurd budget to cover. Warm a
+    new rig once outside the test (`ZED_Depth_Viewer`, or a first run you let
+    exceed the timeout) rather than sizing the normal case around it.
+    """
     hardware = (config or {}).get("hardware") or {}
     arms = hardware.get("arms") or {}
     cameras = hardware.get("cameras") or []
-    base = hardware.get("base")
     n_arms = len(arms) if isinstance(arms, (dict, list)) else 0
-    n_cameras = len(cameras) if isinstance(cameras, (dict, list)) else 0
-    n_base = 1 if base else 0
+
+    n_cameras = n_depth_cameras = 0
+    if isinstance(cameras, (list, tuple)):
+        for cam in cameras:
+            if not isinstance(cam, dict):
+                n_cameras += 1
+                continue
+            # Only ZED has a depth model to load; `use_depth` is what the
+            # component gates on, so it decides the cost here too.
+            if cam.get("type") == "zed_camera" and cam.get("use_depth"):
+                n_depth_cameras += 1
+            else:
+                n_cameras += 1
+
+    # A base may be declared either as the legacy `hardware.base` object or, on
+    # a decomposed config, as a component. Counting only the former left every
+    # Rivet/Workbench contributing nothing for its base.
+    components = hardware.get("components") or []
+    n_base = 1 if hardware.get("base") else 0
+    if isinstance(components, (list, tuple)):
+        n_base += sum(
+            1
+            for c in components
+            if isinstance(c, dict) and c.get("type") in ("trossen_base", "slate_base")
+        )
+
     budget = (
         _TEST_TIMEOUT_BASE_S
         + _TEST_TIMEOUT_PER_ARM_S * n_arms
         + _TEST_TIMEOUT_PER_CAMERA_S * n_cameras
+        + _TEST_TIMEOUT_PER_DEPTH_CAMERA_S * n_depth_cameras
         + _TEST_TIMEOUT_PER_BASE_S * n_base
     )
     return max(_TEST_TIMEOUT_FLOOR_S, min(_TEST_TIMEOUT_CEILING_S, budget))
@@ -149,7 +199,7 @@ async def stream_system_hardware_test(
         proc.stdin.close()
 
         assert proc.stdout is not None
-        timeout_s = _compute_timeout(system.config)
+        timeout_s = compute_bringup_budget(system.config)
         deadline = asyncio.get_event_loop().time() + timeout_s
         timed_out = False
 
