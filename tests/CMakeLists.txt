@@ -38,6 +38,14 @@ endif()
 add_executable(test_lerobot_depth_utils test_lerobot_depth_utils.cpp)
 target_link_libraries(test_lerobot_depth_utils PRIVATE trossen_sdk GTest::gtest_main)
 
+# Depth-quantization tests always run; the video-encoder tests inside this file
+# are compiled out unless the ffmpeg-backed recording path is enabled.
+add_executable(test_video_encoder test_video_encoder.cpp)
+target_link_libraries(test_video_encoder PRIVATE trossen_sdk GTest::gtest_main)
+if(TROSSEN_ENABLE_VIDEO_ENCODE)
+  target_compile_definitions(test_video_encoder PRIVATE TROSSEN_ENABLE_VIDEO_ENCODE)
+endif()
+
 add_executable(test_record_types test_record_types.cpp)
 target_link_libraries(test_record_types PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -96,6 +104,7 @@ if(TROSSEN_ENABLE_REALSENSE)
   gtest_discover_tests(test_realsense_push_producer_metadata)
 endif()
 gtest_discover_tests(test_lerobot_depth_utils)
+gtest_discover_tests(test_video_encoder)
 gtest_discover_tests(test_record_types)
 gtest_discover_tests(test_config)
 gtest_discover_tests(test_lerobot_utils)

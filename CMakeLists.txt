@@ -12,6 +12,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # and opt-in dependencies?
 option(TROSSEN_ENABLE_REALSENSE "Enable RealSense camera support" ON)
 option(TROSSEN_ENABLE_ZED "Enable StereoLabs ZED camera support" OFF)
+# Needed only to *record* camera streams as video instead of raw images
+# (trossen_mcap_backend.image_encoding = "video"). Off leaves the recorder
+# raw-only and keeps the trimmed converter builds free of an ffmpeg dependency.
+option(TROSSEN_ENABLE_VIDEO_ENCODE "Enable in-MCAP H.264/H.265 video recording" ON)
 
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
@@ -57,6 +61,16 @@ if(TROSSEN_ENABLE_REALSENSE)
   find_package(fastcdr REQUIRED)
   find_package(fastrtps REQUIRED)
   find_package(realsense2 REQUIRED)
+endif()
+
+if(TROSSEN_ENABLE_VIDEO_ENCODE)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(FFMPEG_ENC REQUIRED IMPORTED_TARGET
+    libavcodec libavutil libswscale)
+  message(STATUS "In-MCAP video recording enabled (libavcodec ${FFMPEG_ENC_libavcodec_VERSION})")
+  target_sources(trossen_sdk PRIVATE src/utils/video_encoder.cpp)
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_VIDEO_ENCODE)
+  target_link_libraries(trossen_sdk PRIVATE PkgConfig::FFMPEG_ENC)
 endif()
 
 if(TROSSEN_ENABLE_ZED)
