@@ -136,7 +136,7 @@ def teleop_arm_step(leader, follower, gripper_home_offset, J0_min=None, J0_max=N
     follower.set_arm_positions(
         np.array([positions[0], positions[1], positions[2], -positions[3], -positions[4],
                 positions[5] + gripper_home_offset]),
-        0.0,
+        0.2,
         False,
     )
 
