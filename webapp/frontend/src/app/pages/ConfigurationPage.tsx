@@ -2870,138 +2870,6 @@ export function ConfigurationPage() {
             );
           })()}
 
-          {/* --- Teleoperation ------------------------------------------------
-              Modelled here rather than passed through, because the SDK only
-              WARNS about a pair naming a missing arm and then skips it. A rig
-              can therefore look configured and move nothing. */}
-          {(() => {
-            const sys = selectedSystemData;
-            const arms = sys.hardware.filter((h) => h.type === 'trossen_arm') as ArmHardware[];
-            const leaders = arms.filter((a) => a.role === 'leader');
-            const followers = arms.filter((a) => a.role === 'follower');
-            const teleop = sys.teleop ?? { enabled: false, rate_hz: DEFAULT_TELEOP_RATE_HZ, pairs: [] };
-            const armNames = new Set(arms.map((a) => a.name));
-            const orphaned = teleop.pairs.filter(
-              (pr) => !armNames.has(pr.leader) || !armNames.has(pr.follower),
-            );
-            const patch = (next: Partial<TeleopModel>) =>
-              setSystems((prev) =>
-                prev.map((x) =>
-                  x.id === sys.id ? { ...x, teleop: { ...teleop, ...next } } : x,
-                ),
-              );
-            const setPair = (i: number, next: Partial<TeleopPair>) =>
-              patch({ pairs: teleop.pairs.map((pr, j) => (j === i ? { ...pr, ...next } : pr)) });
-
-            return (
-              <div className="mb-[16px] border border-edge">
-                <div className="flex items-center justify-between px-[12px] py-[8px] border-b border-edge">
-                  <div className="text-brand text-[10px] uppercase font-bold">Teleoperation</div>
-                  <label className="flex items-center gap-[6px] text-[11px] text-dim cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={teleop.enabled}
-                      onChange={(e) => patch({ enabled: e.target.checked })}
-                    />
-                    Enabled
-                  </label>
-                </div>
-                <div className="p-[12px] space-y-[10px]">
-                  {arms.length === 0 ? (
-                    // A camera-only rig is a supported layout, not a broken one.
-                    <div className="text-dim text-[11px]">
-                      No arms configured — this is a camera-only system. Teleop stays off.
-                    </div>
-                  ) : (
-                    <>
-                      {teleop.pairs.length === 0 && (
-                        <div className="text-[11px] text-yellow-500">
-                          Arms are configured but no leader is linked to a follower, so nothing
-                          will move. Add a pair below.
-                        </div>
-                      )}
-                      {orphaned.length > 0 && (
-                        <div className="text-[11px] text-red-400">
-                          {orphaned.length} pair{orphaned.length !== 1 ? 's' : ''} name an arm that
-                          no longer exists and will be dropped on save.
-                        </div>
-                      )}
-                      {teleop.pairs.map((pr, i) => (
-                        <div key={i} className="grid grid-cols-[1fr_1fr_110px_32px] gap-[8px] items-center">
-                          <select
-                            value={pr.leader}
-                            onChange={(e) => setPair(i, { leader: e.target.value })}
-                            className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
-                          >
-                            <option value="">— leader —</option>
-                            {leaders.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
-                            {pr.leader && !armNames.has(pr.leader) && (
-                              <option value={pr.leader}>{pr.leader} (missing)</option>
-                            )}
-                          </select>
-                          <select
-                            value={pr.follower}
-                            onChange={(e) => setPair(i, { follower: e.target.value })}
-                            className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
-                          >
-                            <option value="">— follower —</option>
-                            {followers.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
-                            {pr.follower && !armNames.has(pr.follower) && (
-                              <option value={pr.follower}>{pr.follower} (missing)</option>
-                            )}
-                          </select>
-                          <select
-                            value={pr.space}
-                            onChange={(e) => setPair(i, { space: e.target.value as TeleopSpace })}
-                            className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
-                          >
-                            {TELEOP_SPACES.map((sp) => <option key={sp} value={sp}>{sp}</option>)}
-                          </select>
-                          <button
-                            onClick={() => patch({ pairs: teleop.pairs.filter((_, j) => j !== i) })}
-                            className="text-red-400 hover:text-red-300 text-[16px] leading-none"
-                            title="Remove this pair"
-                          >
-                            &times;
-                          </button>
-                        </div>
-                      ))}
-                      <div className="flex items-center gap-[12px] pt-[4px]">
-                        <button
-                          onClick={() =>
-                            patch({
-                              pairs: [
-                                ...teleop.pairs,
-                                {
-                                  leader: leaders[teleop.pairs.length]?.name ?? leaders[0]?.name ?? '',
-                                  follower: followers[teleop.pairs.length]?.name ?? followers[0]?.name ?? '',
-                                  space: 'joint' as TeleopSpace,
-                                },
-                              ],
-                            })
-                          }
-                          className="border border-edge text-ink px-[10px] py-[4px] text-[11px] uppercase hover:border-brand"
-                        >
-                          + Pair
-                        </button>
-                        <label className="flex items-center gap-[6px] text-[11px] text-dim">
-                          Rate
-                          <input
-                            type="number"
-                            value={teleop.rate_hz}
-                            onChange={(e) => patch({ rate_hz: Number(e.target.value) })}
-                            className="w-[90px] bg-app border border-edge text-ink px-[8px] py-[4px] text-[12px]"
-                          />
-                          Hz
-                        </label>
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
           {/* --- Glide handle input + buttons ---------------------------------
               These two components hard-fail in configure() when they name an
               arm that no longer exists ("no active trossen_arm named ..."),
@@ -3411,6 +3279,162 @@ export function ConfigurationPage() {
               )}
             </div>
           </div>
+          {/* --- Teleoperation ------------------------------------------------
+              Below the hardware, because it wires hardware together and reads
+              as nonsense before you know what arms exist.
+
+              Modelled here rather than passed through: the SDK only WARNS about
+              a pair naming a missing arm and then skips it, so a rig can look
+              configured and move nothing. */}
+          {(() => {
+            const sys = selectedSystemData;
+            const arms = sys.hardware.filter((h) => h.type === 'trossen_arm') as ArmHardware[];
+            const leaders = arms.filter((a) => a.role === 'leader');
+            const followers = arms.filter((a) => a.role === 'follower');
+            const teleop = sys.teleop ?? { enabled: false, rate_hz: DEFAULT_TELEOP_RATE_HZ, pairs: [] };
+
+            // Shown when the rig can actually teleoperate — one of each. The
+            // extra clauses keep an existing teleop block visible on a rig that
+            // no longer qualifies; hiding a panel that still holds live config
+            // is how config gets edited blind and then silently rewritten.
+            const canTeleop = leaders.length > 0 && followers.length > 0;
+            if (!canTeleop && teleop.pairs.length === 0 && !teleop.enabled) return null;
+
+            const armNames = new Set(arms.map((a) => a.name));
+            const orphaned = teleop.pairs.filter(
+              (pr) => !armNames.has(pr.leader) || !armNames.has(pr.follower),
+            );
+            const paired = new Set(teleop.pairs.flatMap((pr) => [pr.leader, pr.follower]));
+            const unpaired = [...leaders, ...followers].filter((a) => !paired.has(a.name));
+
+            const patch = (next: Partial<TeleopModel>) =>
+              setSystems((prev) =>
+                prev.map((x) =>
+                  x.id === sys.id ? { ...x, teleop: { ...teleop, ...next } } : x,
+                ),
+              );
+            const setPair = (i: number, next: Partial<TeleopPair>) =>
+              patch({ pairs: teleop.pairs.map((pr, j) => (j === i ? { ...pr, ...next } : pr)) });
+
+            return (
+              <div className="mt-[16px] border border-edge">
+                <div className="flex items-center justify-between px-[12px] py-[8px] border-b border-edge">
+                  <div className="text-brand text-[10px] uppercase font-bold">Teleoperation</div>
+                  <label className="flex items-center gap-[6px] text-[11px] text-dim cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={teleop.enabled}
+                      onChange={(e) => patch({ enabled: e.target.checked })}
+                    />
+                    Enabled
+                  </label>
+                </div>
+                <div className="p-[12px] space-y-[10px]">
+                  {!canTeleop && (
+                    <div className="text-[11px] text-red-400">
+                      This system has {leaders.length} leader{leaders.length !== 1 ? 's' : ''} and{' '}
+                      {followers.length} follower{followers.length !== 1 ? 's' : ''}. Teleop needs at
+                      least one of each; what is configured here will be dropped on save.
+                    </div>
+                  )}
+                  {canTeleop && teleop.pairs.length === 0 && (
+                    <div className="text-[11px] text-yellow-500">
+                      Leader and follower arms are configured but none are linked, so nothing will
+                      move. Add a pair below.
+                    </div>
+                  )}
+                  {canTeleop && teleop.pairs.length > 0 && !teleop.enabled && (
+                    <div className="text-[11px] text-yellow-500">
+                      Teleoperation is switched off, so these pairs are ignored and the followers
+                      will not track their leaders.
+                    </div>
+                  )}
+                  {unpaired.length > 0 && teleop.pairs.length > 0 && (
+                    <div className="text-[11px] text-yellow-500">
+                      Not in any pair: {unpaired.map((a) => a.name).join(', ')} — {unpaired.length === 1 ? 'it' : 'they'} will
+                      hold position.
+                    </div>
+                  )}
+                  {orphaned.length > 0 && (
+                    <div className="text-[11px] text-red-400">
+                      {orphaned.length} pair{orphaned.length !== 1 ? 's' : ''} name an arm that
+                      no longer exists and will be dropped on save.
+                    </div>
+                  )}
+                  {teleop.pairs.map((pr, i) => (
+                    <div key={i} className="grid grid-cols-[1fr_1fr_110px_32px] gap-[8px] items-center">
+                      <select
+                        value={pr.leader}
+                        onChange={(e) => setPair(i, { leader: e.target.value })}
+                        className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
+                      >
+                        <option value="">— leader —</option>
+                        {leaders.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+                        {pr.leader && !armNames.has(pr.leader) && (
+                          <option value={pr.leader}>{pr.leader} (missing)</option>
+                        )}
+                      </select>
+                      <select
+                        value={pr.follower}
+                        onChange={(e) => setPair(i, { follower: e.target.value })}
+                        className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
+                      >
+                        <option value="">— follower —</option>
+                        {followers.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+                        {pr.follower && !armNames.has(pr.follower) && (
+                          <option value={pr.follower}>{pr.follower} (missing)</option>
+                        )}
+                      </select>
+                      <select
+                        value={pr.space}
+                        onChange={(e) => setPair(i, { space: e.target.value as TeleopSpace })}
+                        className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
+                      >
+                        {TELEOP_SPACES.map((sp) => <option key={sp} value={sp}>{sp}</option>)}
+                      </select>
+                      <button
+                        onClick={() => patch({ pairs: teleop.pairs.filter((_, j) => j !== i) })}
+                        className="text-red-400 hover:text-red-300 text-[16px] leading-none"
+                        title="Remove this pair"
+                      >
+                        &times;
+                      </button>
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-[12px] pt-[4px]">
+                    <button
+                      onClick={() =>
+                        patch({
+                          pairs: [
+                            ...teleop.pairs,
+                            {
+                              leader: leaders[teleop.pairs.length]?.name ?? leaders[0]?.name ?? '',
+                              follower: followers[teleop.pairs.length]?.name ?? followers[0]?.name ?? '',
+                              space: 'joint' as TeleopSpace,
+                            },
+                          ],
+                        })
+                      }
+                      disabled={!canTeleop}
+                      className="border border-edge text-ink px-[10px] py-[4px] text-[11px] uppercase hover:border-brand disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      + Pair
+                    </button>
+                    <label className="flex items-center gap-[6px] text-[11px] text-dim">
+                      Rate
+                      <input
+                        type="number"
+                        value={teleop.rate_hz}
+                        onChange={(e) => patch({ rate_hz: Number(e.target.value) })}
+                        className="w-[90px] bg-app border border-edge text-ink px-[8px] py-[4px] text-[12px]"
+                      />
+                      Hz
+                    </label>
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
         </div>
       )}
       {/* End of !isLoading && !loadError guard */}
