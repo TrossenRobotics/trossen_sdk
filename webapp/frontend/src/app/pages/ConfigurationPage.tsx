@@ -100,6 +100,34 @@ const SESSION_CONTROL_EVENT_LABELS: Readonly<Record<SessionControlEvent, string>
   stop_session: 'Stop session',
 };
 
+/** Short forms for the button cross, where a full label will not fit. */
+const SESSION_CONTROL_EVENT_SHORT: Readonly<Record<SessionControlEvent, string>> = {
+  start: 'Start',
+  stop_early: 'Stop ep.',
+  rerecord: 'Re-record',
+  stop_session: 'Stop',
+};
+
+// The handle's four buttons sit in a cross, and the config stores each one as
+// a BIT INDEX into the driver's InputReport.buttons byte, not as a position.
+// Which bit is which button is a property of the handle hardware and appears
+// nowhere in the SDK, so this table is the only place the two are tied
+// together. Confirmed against the physical handle.
+//
+// Only 0-3 exist: `buttons` is a uint8_t and the driver sizes
+// button_led_effects at 4. Nothing validates the number, and the SDK's
+// accessor returns false for anything it does not recognise, so a bit typed by
+// hand outside this range yields a button that is silently dead. Picking from
+// the cross makes that unrepresentable.
+const GLIDE_BUTTON_LAYOUT = [
+  { bit: 0, label: 'Top', cell: 'col-start-2 row-start-1' },
+  { bit: 1, label: 'Right', cell: 'col-start-3 row-start-2' },
+  { bit: 2, label: 'Bottom', cell: 'col-start-2 row-start-3' },
+  { bit: 3, label: 'Left', cell: 'col-start-1 row-start-2' },
+] as const;
+
+const GLIDE_BUTTON_BITS: ReadonlySet<number> = new Set(GLIDE_BUTTON_LAYOUT.map((b) => b.bit));
+
 function asArmModel(value: unknown): ArmModel | undefined {
   return typeof value === 'string' && (ARM_MODELS as readonly string[]).includes(value)
     ? (value as ArmModel)
@@ -915,6 +943,61 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
  * `enabled` follows the pairs — a system with none (a camera-only rig) emits
  * `enabled: false` rather than an enabled block with nothing in it.
  */
+/**
+ * Add or remove one handle from the `glide_arm_input` component.
+ *
+ * Returns the patch rather than applying it, so the rule that governs it is
+ * testable: the component throws in configure() when it names no arms
+ * ("requires a non-empty 'arms' array"), so an empty list has to mean "do not
+ * declare the component at all" rather than "declare an empty one". Turning the
+ * last handle off therefore deletes the component.
+ */
+export function setGlideHandleInput(
+  system: HardwareSystem,
+  armName: string,
+  on: boolean,
+): Pick<HardwareSystem, 'glideInputs'> {
+  const existing = system.glideInputs;
+  const rest = (existing?.arms ?? []).filter((n) => n !== armName);
+  const arms = on ? [...rest, armName] : rest;
+  return {
+    glideInputs: arms.length ? { id: existing?.id ?? 'glide_inputs', arms } : undefined,
+  };
+}
+
+/**
+ * Bind or clear one button on one handle.
+ *
+ * `event: null` clears. Same lifecycle rule as the handle input above — the SDK
+ * rejects a `glide_session_control` that claims no buttons, so clearing the last
+ * binding anywhere in the system removes the component instead of leaving an
+ * empty one that fails at bring-up. Poll rate and debounce survive as long as
+ * the component does, and are re-seeded from the SDK's own defaults when it is
+ * created by the first binding.
+ */
+export function setGlideButtonBinding(
+  system: HardwareSystem,
+  armName: string,
+  bit: number,
+  event: SessionControlEvent | null,
+): Pick<HardwareSystem, 'sessionControl'> {
+  const existing = system.sessionControl;
+  const others = (existing?.buttons ?? []).filter(
+    (b) => !(b.arm_id === armName && b.bit === bit),
+  );
+  const buttons = event === null ? others : [...others, { arm_id: armName, bit, event }];
+  return {
+    sessionControl: buttons.length
+      ? {
+          id: existing?.id ?? 'session_control',
+          poll_rate_hz: existing?.poll_rate_hz ?? 50,
+          debounce_ms: existing?.debounce_ms ?? 40,
+          buttons,
+        }
+      : undefined,
+  };
+}
+
 function buildTeleop(
   system: HardwareSystem,
   armsObj: Record<string, RawArmConfig>,
@@ -1213,6 +1296,9 @@ export function ConfigurationPage() {
   const [selectedCameraType, setSelectedCameraType] = useState<'realsense_camera' | 'opencv_camera' | 'zed_camera'>('realsense_camera');
   const [currentParentHardwareId, setCurrentParentHardwareId] = useState<string | null>(null);
   const [hwFilter, setHwFilter] = useState<'all' | 'camera' | 'arm' | 'base'>('all');
+  // Which button on which handle's cross is open for binding. Keyed by arm NAME
+  // rather than id because that is what a session-control binding stores.
+  const [glideButtonSel, setGlideButtonSel] = useState<{ arm: string; bit: number } | null>(null);
 
   // Systems loaded from the backend API
   const [systems, setSystems] = useState<HardwareSystem[]>([]);
@@ -2338,6 +2424,169 @@ export function ConfigurationPage() {
     );
   };
 
+  /**
+   * The Glide handle's own controls, rendered inside the handle arm's card.
+   *
+   * These used to be one panel above the hardware list, which put a handle's
+   * settings nowhere near the handle. Both underlying components address arms
+   * by id — `glide_arm_input.arms` and each `glide_session_control` binding's
+   * `arm_id` — so per-arm is what the config actually looks like, and it means
+   * deleting a handle takes its bindings' UI with it instead of leaving rows
+   * pointing at an arm that is gone.
+   *
+   * Only the two genuinely global knobs (poll rate, debounce) stay elsewhere.
+   */
+  /**
+   * Whether this arm is a Glide handle, i.e. whether the handle controls make
+   * sense on its card.
+   *
+   * The `glide_left` / `glide_right` models are what the shipped Glide presets
+   * use, and they are the only arms with joysticks and buttons to read — an
+   * ordinary `wxai_v0` leader has neither, so offering the controls there would
+   * be a dead end. The two extra clauses catch a rig whose row has drifted from
+   * its preset: if the config already reads this arm's inputs or binds one of
+   * its buttons, the controls have to be reachable regardless of the model, or
+   * that config becomes uneditable.
+   */
+  const isGlideHandle = (arm: ArmHardware): boolean => {
+    if (arm.role !== 'leader') return false;
+    if (arm.model.startsWith('glide')) return true;
+    const sys = selectedSystemData;
+    if (!sys) return false;
+    return (
+      !!sys.glideInputs?.arms.includes(arm.name) ||
+      !!sys.sessionControl?.buttons.some((b) => b.arm_id === arm.name)
+    );
+  };
+
+  const renderGlideHandle = (arm: ArmHardware) => {
+    const sys = selectedSystemData;
+    if (!sys) return null;
+    const gi = sys.glideInputs;
+    const sc = sys.sessionControl;
+
+    const inputOn = !!gi?.arms.includes(arm.name);
+    const bindings = sc?.buttons ?? [];
+    const mine = bindings.filter((b) => b.arm_id === arm.name);
+    const bindingFor = (bit: number) => mine.find((b) => b.bit === bit);
+    // A hand-edited config can name a bit the hardware does not have. The cross
+    // cannot show it, so list it separately rather than dropping it silently.
+    const offCross = mine.filter((b) => !GLIDE_BUTTON_BITS.has(b.bit));
+
+    const patchSys = (next: Partial<HardwareSystem>) =>
+      setSystems((prev) => prev.map((x) => (x.id === sys.id ? { ...x, ...next } : x)));
+
+    const toggleInput = (on: boolean) => patchSys(setGlideHandleInput(sys, arm.name, on));
+    const setBinding = (bit: number, event: SessionControlEvent | null) =>
+      patchSys(setGlideButtonBinding(sys, arm.name, bit, event));
+
+    const selected =
+      glideButtonSel?.arm === arm.name && GLIDE_BUTTON_BITS.has(glideButtonSel.bit)
+        ? glideButtonSel.bit
+        : null;
+
+    return (
+      <div className="mt-[10px] border-t border-surface pt-[10px]">
+        <div className="flex items-center justify-between mb-[8px]">
+          <div className="text-dim text-[9px] uppercase">Glide Handle</div>
+          <label className="flex items-center gap-[6px] text-[11px] text-dim cursor-pointer">
+            <input type="checkbox" checked={inputOn} onChange={(e) => toggleInput(e.target.checked)} />
+            Read joystick &amp; buttons
+          </label>
+        </div>
+
+        {!inputOn ? (
+          <div className="text-dim text-[11px]">
+            Off — this handle drives its follower, but its joystick and buttons do nothing.
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-start gap-[20px]">
+            {/* The cross, laid out the way the buttons sit on the handle. */}
+            <div className="grid grid-cols-3 grid-rows-3 gap-[4px] w-[210px] shrink-0">
+              {GLIDE_BUTTON_LAYOUT.map(({ bit, label, cell }) => {
+                const bound = bindingFor(bit);
+                const isSel = selected === bit;
+                return (
+                  <button
+                    key={bit}
+                    type="button"
+                    onClick={() => setGlideButtonSel(isSel ? null : { arm: arm.name, bit })}
+                    title={`${label} button (bit ${bit})`}
+                    className={`${cell} h-[46px] border px-[4px] flex flex-col items-center justify-center leading-tight transition-colors ${
+                      isSel
+                        ? 'border-brand bg-brand/10'
+                        : bound
+                          ? 'border-edge bg-surface hover:border-brand'
+                          : 'border-dashed border-edge text-dim hover:border-brand'
+                    }`}
+                  >
+                    <span className="text-[9px] uppercase text-dim">{label}</span>
+                    <span className={`text-[10px] ${bound ? 'text-ink' : 'text-dim'}`}>
+                      {bound ? SESSION_CONTROL_EVENT_SHORT[bound.event] : 'unbound'}
+                    </span>
+                  </button>
+                );
+              })}
+              <div className="col-start-2 row-start-2 flex items-center justify-center text-dim text-[9px] uppercase">
+                {arm.name}
+              </div>
+            </div>
+
+            <div className="flex-1 min-w-[220px] space-y-[6px]">
+              {selected === null ? (
+                <div className="text-dim text-[11px]">
+                  Pick a button to bind it. Positions match the physical handle;
+                  the config stores each as its bit index.
+                </div>
+              ) : (
+                <>
+                  <div className="text-ink text-[11px]">
+                    {GLIDE_BUTTON_LAYOUT.find((b) => b.bit === selected)?.label} button
+                    <span className="text-dim"> · bit {selected}</span>
+                  </div>
+                  <select
+                    value={bindingFor(selected)?.event ?? ''}
+                    onChange={(e) =>
+                      setBinding(selected, e.target.value ? (e.target.value as SessionControlEvent) : null)
+                    }
+                    className="w-full bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
+                  >
+                    <option value="">— not bound —</option>
+                    {SESSION_CONTROL_EVENTS.map((ev) => (
+                      <option key={ev} value={ev}>{SESSION_CONTROL_EVENT_LABELS[ev]}</option>
+                    ))}
+                  </select>
+                </>
+              )}
+              {offCross.length > 0 && (
+                <div className="text-[11px] text-yellow-500">
+                  {offCross.map((b) => `bit ${b.bit} → ${SESSION_CONTROL_EVENT_SHORT[b.event]}`).join(', ')}
+                  {' '}— this handle has four buttons (bits 0–3), so this never fires.
+                  <button
+                    type="button"
+                    onClick={() =>
+                      patchSys({
+                        sessionControl: (() => {
+                          const kept = bindings.filter(
+                            (b) => !(b.arm_id === arm.name && !GLIDE_BUTTON_BITS.has(b.bit)),
+                          );
+                          return kept.length && sc ? { ...sc, buttons: kept } : undefined;
+                        })(),
+                      })
+                    }
+                    className="ml-[6px] underline hover:text-yellow-300"
+                  >
+                    remove
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderBaseFields = (base: BaseHardware) => {
     // The Rivet base (trossen_base) and the SLATE (slate_base) share nothing
     // but the word "base": the Rivet exposes per-axis ceilings including the
@@ -2870,213 +3119,6 @@ export function ConfigurationPage() {
             );
           })()}
 
-          {/* --- Glide handle input + buttons ---------------------------------
-              These two components hard-fail in configure() when they name an
-              arm that no longer exists ("no active trossen_arm named ..."),
-              which is why they are editable rather than passed through. */}
-          {(() => {
-            const sys = selectedSystemData;
-            const arms = sys.hardware.filter((h) => h.type === 'trossen_arm') as ArmHardware[];
-            const leaders = arms.filter((a) => a.role === 'leader');
-            const armNames = new Set(arms.map((a) => a.name));
-            const gi = sys.glideInputs;
-            const sc = sys.sessionControl;
-            if (!gi && !sc && leaders.length === 0) return null;
-
-            const patchSys = (next: Partial<HardwareSystem>) =>
-              setSystems((prev) => prev.map((x) => (x.id === sys.id ? { ...x, ...next } : x)));
-            const setButton = (i: number, next: Partial<SessionButton>) =>
-              sc && patchSys({
-                sessionControl: {
-                  ...sc,
-                  buttons: sc.buttons.map((b, j) => (j === i ? { ...b, ...next } : b)),
-                },
-              });
-
-            return (
-              <div className="mb-[16px] border border-edge">
-                <div className="px-[12px] py-[8px] border-b border-edge text-brand text-[10px] uppercase font-bold">
-                  Glide Handles
-                </div>
-                <div className="p-[12px] space-y-[14px]">
-                  {/* which handle arms feed the input layer */}
-                  <div>
-                    <div className="flex items-center justify-between mb-[6px]">
-                      <div className="text-ink text-[11px]">Handle input</div>
-                      <label className="flex items-center gap-[6px] text-[11px] text-dim cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={!!gi}
-                          onChange={(e) =>
-                            patchSys({
-                              glideInputs: e.target.checked
-                                ? { id: gi?.id ?? 'glide_inputs', arms: leaders.map((a) => a.name) }
-                                : undefined,
-                            })
-                          }
-                        />
-                        Enabled
-                      </label>
-                    </div>
-                    {gi ? (
-                      <div className="flex flex-wrap gap-[10px]">
-                        {leaders.length === 0 && (
-                          <div className="text-[11px] text-red-400">
-                            No leader arms — this component will fail to configure.
-                          </div>
-                        )}
-                        {leaders.map((a) => (
-                          <label key={a.id} className="flex items-center gap-[6px] text-[11px] text-dim">
-                            <input
-                              type="checkbox"
-                              checked={gi.arms.includes(a.name)}
-                              onChange={(e) =>
-                                patchSys({
-                                  glideInputs: {
-                                    ...gi,
-                                    arms: e.target.checked
-                                      ? [...gi.arms, a.name]
-                                      : gi.arms.filter((n) => n !== a.name),
-                                  },
-                                })
-                              }
-                            />
-                            <span className="font-mono">{a.name}</span>
-                          </label>
-                        ))}
-                        {gi.arms.filter((n) => !armNames.has(n)).map((n) => (
-                          <span key={n} className="text-[11px] text-red-400 font-mono">{n} (missing)</span>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className="text-dim text-[11px]">
-                        Off — handle joysticks and buttons are not read.
-                      </div>
-                    )}
-                  </div>
-
-                  {/* button -> session event bindings */}
-                  <div className="border-t border-surface pt-[10px]">
-                    <div className="flex items-center justify-between mb-[6px]">
-                      <div className="text-ink text-[11px]">Session buttons</div>
-                      <label className="flex items-center gap-[6px] text-[11px] text-dim cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={!!sc}
-                          onChange={(e) =>
-                            patchSys({
-                              sessionControl: e.target.checked
-                                ? {
-                                    id: sc?.id ?? 'session_control',
-                                    poll_rate_hz: sc?.poll_rate_hz ?? 50,
-                                    debounce_ms: sc?.debounce_ms ?? 40,
-                                    buttons: sc?.buttons ?? [],
-                                  }
-                                : undefined,
-                            })
-                          }
-                        />
-                        Enabled
-                      </label>
-                    </div>
-                    {sc ? (
-                      <div className="space-y-[8px]">
-                        {sc.buttons.map((b, i) => (
-                          <div key={i} className="grid grid-cols-[1fr_80px_1fr_32px] gap-[8px] items-center">
-                            <select
-                              value={b.arm_id}
-                              onChange={(e) => setButton(i, { arm_id: e.target.value })}
-                              className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
-                            >
-                              <option value="">— arm —</option>
-                              {leaders.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
-                              {b.arm_id && !armNames.has(b.arm_id) && (
-                                <option value={b.arm_id}>{b.arm_id} (missing)</option>
-                              )}
-                            </select>
-                            <input
-                              type="number"
-                              min={0}
-                              value={b.bit}
-                              onChange={(e) => setButton(i, { bit: Number(e.target.value) })}
-                              title="Button bit on the handle"
-                              className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
-                            />
-                            <select
-                              value={b.event}
-                              onChange={(e) => setButton(i, { event: e.target.value as SessionControlEvent })}
-                              className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
-                            >
-                              {SESSION_CONTROL_EVENTS.map((ev) => (
-                                <option key={ev} value={ev}>{SESSION_CONTROL_EVENT_LABELS[ev]}</option>
-                              ))}
-                            </select>
-                            <button
-                              onClick={() => patchSys({ sessionControl: { ...sc, buttons: sc.buttons.filter((_, j) => j !== i) } })}
-                              className="text-red-400 hover:text-red-300 text-[16px] leading-none"
-                              title="Remove this binding"
-                            >
-                              &times;
-                            </button>
-                          </div>
-                        ))}
-                        {sc.buttons.length === 0 && (
-                          // The SDK refuses a session-control component that
-                          // claims no buttons, so this cannot be left empty.
-                          <div className="text-[11px] text-yellow-500">
-                            No bindings — the SDK rejects a session-control component that claims
-                            nothing. Add one or switch this off.
-                          </div>
-                        )}
-                        <div className="flex items-center gap-[12px] pt-[2px]">
-                          <button
-                            onClick={() =>
-                              patchSys({
-                                sessionControl: {
-                                  ...sc,
-                                  buttons: [
-                                    ...sc.buttons,
-                                    { arm_id: leaders[0]?.name ?? '', bit: sc.buttons.length, event: 'start' },
-                                  ],
-                                },
-                              })
-                            }
-                            className="border border-edge text-ink px-[10px] py-[4px] text-[11px] uppercase hover:border-brand"
-                          >
-                            + Button
-                          </button>
-                          <label className="flex items-center gap-[6px] text-[11px] text-dim">
-                            Poll
-                            <input
-                              type="number"
-                              value={sc.poll_rate_hz ?? 50}
-                              onChange={(e) => patchSys({ sessionControl: { ...sc, poll_rate_hz: Number(e.target.value) } })}
-                              className="w-[70px] bg-app border border-edge text-ink px-[8px] py-[4px] text-[12px]"
-                            />
-                            Hz
-                          </label>
-                          <label className="flex items-center gap-[6px] text-[11px] text-dim">
-                            Debounce
-                            <input
-                              type="number"
-                              value={sc.debounce_ms ?? 40}
-                              onChange={(e) => patchSys({ sessionControl: { ...sc, debounce_ms: Number(e.target.value) } })}
-                              className="w-[70px] bg-app border border-edge text-ink px-[8px] py-[4px] text-[12px]"
-                            />
-                            ms
-                          </label>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="text-dim text-[11px]">
-                        Off — start, stop and re-record come from the web UI only.
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })()}
 
           <div className="flex items-center justify-between mb-[16px]">
             <div className="flex items-center gap-[12px]">
@@ -3188,6 +3230,12 @@ export function ConfigurationPage() {
                       <div className="mt-[8px]">
                         {hardware.type.includes('camera') && renderCameraFields(hardware as CameraHardware)}
                         {hardware.type === 'trossen_arm' && renderArmFields(hardware as ArmHardware)}
+                        {/* A handle IS a leader arm, so its Glide controls
+                            belong on its own card rather than in a panel that
+                            names it from a distance. */}
+                        {hardware.type === 'trossen_arm' &&
+                          isGlideHandle(hardware as ArmHardware) &&
+                          renderGlideHandle(hardware as ArmHardware)}
                         {(hardware.type === 'slate_base' || hardware.type === 'trossen_base') && renderBaseFields(hardware as BaseHardware)}
                       </div>
                     </div>
@@ -3279,6 +3327,7 @@ export function ConfigurationPage() {
               )}
             </div>
           </div>
+
           {/* --- Teleoperation ------------------------------------------------
               Below the hardware, because it wires hardware together and reads
               as nonsense before you know what arms exist.
@@ -3431,6 +3480,54 @@ export function ConfigurationPage() {
                       Hz
                     </label>
                   </div>
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* --- Glide session-control timing --------------------------------
+              Everything else about a handle now lives on the handle's own card.
+              These two are properties of the single glide_session_control
+              component rather than of any one handle, so they have nowhere else
+              to go. Hidden entirely until something is bound. */}
+          {(() => {
+            const sys = selectedSystemData;
+            const sc = sys.sessionControl;
+            if (!sc) return null;
+            const patchSc = (next: Partial<SessionControlModel>) =>
+              setSystems((prev) =>
+                prev.map((x) => (x.id === sys.id ? { ...x, sessionControl: { ...sc, ...next } } : x)),
+              );
+            return (
+              <div className="mt-[16px] border border-edge">
+                <div className="px-[12px] py-[8px] border-b border-edge text-brand text-[10px] uppercase font-bold">
+                  Handle Button Timing
+                </div>
+                <div className="p-[12px] flex flex-wrap items-center gap-[16px]">
+                  <div className="text-dim text-[11px]">
+                    {sc.buttons.length} binding{sc.buttons.length !== 1 ? 's' : ''} across all handles.
+                    Shared by every button.
+                  </div>
+                  <label className="flex items-center gap-[6px] text-[11px] text-dim">
+                    Poll
+                    <input
+                      type="number"
+                      value={sc.poll_rate_hz ?? 50}
+                      onChange={(e) => patchSc({ poll_rate_hz: Number(e.target.value) })}
+                      className="w-[70px] bg-app border border-edge text-ink px-[8px] py-[4px] text-[12px]"
+                    />
+                    Hz
+                  </label>
+                  <label className="flex items-center gap-[6px] text-[11px] text-dim">
+                    Debounce
+                    <input
+                      type="number"
+                      value={sc.debounce_ms ?? 40}
+                      onChange={(e) => patchSc({ debounce_ms: Number(e.target.value) })}
+                      className="w-[70px] bg-app border border-edge text-ink px-[8px] py-[4px] text-[12px]"
+                    />
+                    ms
+                  </label>
                 </div>
               </div>
             );

@@ -12,7 +12,12 @@
  * individual fields, so a fourth instance fails here rather than on a robot.
  */
 import { describe, it, expect } from 'vitest';
-import { sdkConfigToSystem, systemToSdkConfig } from './ConfigurationPage';
+import {
+  sdkConfigToSystem,
+  setGlideButtonBinding,
+  setGlideHandleInput,
+  systemToSdkConfig,
+} from './ConfigurationPage';
 
 /** A cut-down Rivet: the decomposed shape, with one of everything that matters. */
 function rivetConfig() {
@@ -537,6 +542,108 @@ describe('the Glide components', () => {
     expect(saved.hardware?.components?.find((c) => c.type === 'glide_arm_input')).toMatchObject({
       id: 'glide_inputs',
       arms: ['glide_left'],
+    });
+  });
+});
+
+describe('editing a Glide handle from its own card', () => {
+  // Both components hard-fail in configure() when they are declared with
+  // nothing in them, so the editor has to delete the component rather than
+  // leave an empty one. That rule is what these cover.
+  function rivetSystem() {
+    const cfg = rivetConfig();
+    cfg.hardware.components.push({
+      id: 'session_control',
+      type: 'glide_session_control',
+      poll_rate_hz: 50.0,
+      debounce_ms: 40,
+      buttons: [{ arm_id: 'glide_left', bit: 0, event: 'start' }],
+    } as unknown as (typeof cfg.hardware.components)[number]);
+    return sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: cfg });
+  }
+
+  describe('handle input', () => {
+    it('adds a handle without disturbing the others', () => {
+      const sys = { ...rivetSystem(), glideInputs: { id: 'glide_inputs', arms: ['glide_left'] } };
+      expect(setGlideHandleInput(sys, 'glide_right', true).glideInputs).toEqual({
+        id: 'glide_inputs',
+        arms: ['glide_left', 'glide_right'],
+      });
+    });
+
+    it('never lists the same handle twice', () => {
+      const sys = { ...rivetSystem(), glideInputs: { id: 'glide_inputs', arms: ['glide_left'] } };
+      expect(setGlideHandleInput(sys, 'glide_left', true).glideInputs?.arms).toEqual(['glide_left']);
+    });
+
+    it('drops the component when the last handle is switched off', () => {
+      // Not an empty arms array: `GlideArmInputComponent::configure` throws
+      // "requires a non-empty 'arms' array" on one.
+      const sys = { ...rivetSystem(), glideInputs: { id: 'glide_inputs', arms: ['glide_left'] } };
+      expect(setGlideHandleInput(sys, 'glide_left', false).glideInputs).toBeUndefined();
+    });
+
+    it('creates the component for the first handle', () => {
+      const sys = { ...rivetSystem(), glideInputs: undefined };
+      expect(setGlideHandleInput(sys, 'glide_left', true).glideInputs).toEqual({
+        id: 'glide_inputs',
+        arms: ['glide_left'],
+      });
+    });
+  });
+
+  describe('button bindings', () => {
+    it('binds a free button', () => {
+      const sc = setGlideButtonBinding(rivetSystem(), 'glide_left', 3, 'stop_session')
+        .sessionControl;
+      expect(sc?.buttons).toEqual([
+        { arm_id: 'glide_left', bit: 0, event: 'start' },
+        { arm_id: 'glide_left', bit: 3, event: 'stop_session' },
+      ]);
+    });
+
+    it('replaces rather than duplicates a rebound button', () => {
+      const sc = setGlideButtonBinding(rivetSystem(), 'glide_left', 0, 'rerecord').sessionControl;
+      expect(sc?.buttons).toEqual([{ arm_id: 'glide_left', bit: 0, event: 'rerecord' }]);
+    });
+
+    it('keeps the same bit on a different handle separate', () => {
+      // bit 0 is "top" on every handle, so the arm_id is the only thing telling
+      // two of them apart.
+      const sc = setGlideButtonBinding(rivetSystem(), 'glide_right', 0, 'start').sessionControl;
+      expect(sc?.buttons).toHaveLength(2);
+    });
+
+    it('preserves poll rate and debounce', () => {
+      const sc = setGlideButtonBinding(rivetSystem(), 'glide_left', 1, 'stop_early').sessionControl;
+      expect(sc).toMatchObject({ id: 'session_control', poll_rate_hz: 50, debounce_ms: 40 });
+    });
+
+    it('drops the component when the last binding is cleared', () => {
+      expect(
+        setGlideButtonBinding(rivetSystem(), 'glide_left', 0, null).sessionControl,
+      ).toBeUndefined();
+    });
+
+    it('creates the component, with SDK defaults, for the first binding', () => {
+      const sys = { ...rivetSystem(), sessionControl: undefined };
+      expect(setGlideButtonBinding(sys, 'glide_left', 0, 'start').sessionControl).toEqual({
+        id: 'session_control',
+        poll_rate_hz: 50,
+        debounce_ms: 40,
+        buttons: [{ arm_id: 'glide_left', bit: 0, event: 'start' }],
+      });
+    });
+
+    it('survives the round trip back into the config', () => {
+      // The editor's patch has to land somewhere the save path can see it.
+      const cfg = rivetConfig();
+      const sys = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: cfg });
+      const patched = { ...sys, ...setGlideButtonBinding(sys, 'glide_left', 3, 'stop_session') };
+      const saved = systemToSdkConfig(patched, cfg);
+      expect(
+        saved.hardware?.components?.find((c) => c.type === 'glide_session_control'),
+      ).toMatchObject({ buttons: [{ arm_id: 'glide_left', bit: 3, event: 'stop_session' }] });
     });
   });
 });
