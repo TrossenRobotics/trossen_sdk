@@ -354,6 +354,39 @@ describe('arm command smoothing', () => {
   });
 });
 
+describe('arm command goal time', () => {
+  // The field that made every Glide follower trail its leader by 0.3s. It was
+  // set in the factory presets, invisible in the UI, and stacked on top of the
+  // one-euro filter — so the page has to both preserve it and be able to clear
+  // it.
+  it('survives a save', () => {
+    const cfg = rivetConfig();
+    (cfg.hardware.arms.follower_left as Record<string, unknown>).write_moving_time_s = 0.3;
+    const { saved } = roundTrip(cfg);
+    expect(saved.hardware?.arms?.follower_left).toMatchObject({ write_moving_time_s: 0.3 });
+  });
+
+  it('is not invented for arms that never asked for it', () => {
+    const { saved } = roundTrip(rivetConfig());
+    expect(saved.hardware?.arms?.follower_left).not.toHaveProperty('write_moving_time_s');
+  });
+
+  it('drops the key when cleared to zero, which is the same thing to the SDK', () => {
+    // `write_moving_time_s_` defaults to 0.0f, so absent and 0 are identical
+    // to the driver. Dropping it keeps a real-time arm clean rather than
+    // pinning a redundant zero into every config we touch.
+    const cfg = rivetConfig();
+    (cfg.hardware.arms.follower_left as Record<string, unknown>).write_moving_time_s = 0.3;
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: cfg });
+    const follower = system.hardware.find((h) => h.id === 'follower_left') as {
+      write_moving_time_s?: number;
+    };
+    follower.write_moving_time_s = 0;
+    const saved = systemToSdkConfig(system as never, cfg);
+    expect(saved.hardware?.arms?.follower_left).not.toHaveProperty('write_moving_time_s');
+  });
+});
+
 describe('the whole config', () => {
   it('round-trips a Rivet without losing a section', () => {
     const original = rivetConfig();

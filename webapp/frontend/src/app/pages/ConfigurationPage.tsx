@@ -221,6 +221,17 @@ interface ArmHardware {
   position_tolerance?: number[];
   velocity_tolerance?: number[];
   effort_tolerance?: number[];
+  // Trajectory time the controller is given to reach each teleop command, in
+  // seconds. 0 = apply it immediately (the driver treats a goal time under
+  // 1 ms as no interpolation), which is what a real-time mirror wants.
+  //
+  // Non-zero is a lag, not a smoother: teleop issues a new command every tick,
+  // so at 1000 Hz a 0.3s goal time is superseded before it is 0.4% complete and
+  // the follower perpetually chases a point 0.3s ahead. Use the One-Euro filter
+  // below to damp jitter instead — it does not trade away tracking.
+  //
+  // Leaders are never commanded, so this has no effect on one.
+  write_moving_time_s?: number;
   // Optional One-Euro adaptive low-pass filter on outgoing position commands.
   // Off by default. Cuts teleop jitter without the constant lag of a fixed
   // low-pass: the cutoff rises with the command's rate of change, so slow
@@ -486,6 +497,7 @@ interface RawArmConfig {
   position_tolerance?: number[];
   velocity_tolerance?: number[];
   effort_tolerance?: number[];
+  write_moving_time_s?: number;
   smoothing_enabled?: boolean;
   smoothing_gripper?: boolean;
   smoothing_min_cutoff_hz?: number;
@@ -656,6 +668,7 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
       position_tolerance: Array.isArray(armCfg.position_tolerance) ? armCfg.position_tolerance : undefined,
       velocity_tolerance: Array.isArray(armCfg.velocity_tolerance) ? armCfg.velocity_tolerance : undefined,
       effort_tolerance: Array.isArray(armCfg.effort_tolerance) ? armCfg.effort_tolerance : undefined,
+      write_moving_time_s: typeof armCfg.write_moving_time_s === 'number' ? armCfg.write_moving_time_s : undefined,
       smoothing_enabled: typeof armCfg.smoothing_enabled === 'boolean' ? armCfg.smoothing_enabled : undefined,
       smoothing_gripper: typeof armCfg.smoothing_gripper === 'boolean' ? armCfg.smoothing_gripper : undefined,
       smoothing_min_cutoff_hz: typeof armCfg.smoothing_min_cutoff_hz === 'number' ? armCfg.smoothing_min_cutoff_hz : undefined,
@@ -962,6 +975,13 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
       if (arm.position_tolerance && arm.position_tolerance.length) armEntry.position_tolerance = arm.position_tolerance;
       if (arm.velocity_tolerance && arm.velocity_tolerance.length) armEntry.velocity_tolerance = arm.velocity_tolerance;
       if (arm.effort_tolerance && arm.effort_tolerance.length) armEntry.effort_tolerance = arm.effort_tolerance;
+      // Goal time, emitted only when it is actually asking for interpolation.
+      // Absence and 0 mean the same thing to the SDK (`write_moving_time_s_`
+      // defaults to 0.0f = apply immediately), so dropping a zero is lossless
+      // and keeps a real-time arm — the common case — clean in the config.
+      if (typeof arm.write_moving_time_s === 'number' && arm.write_moving_time_s > 0) {
+        armEntry.write_moving_time_s = arm.write_moving_time_s;
+      }
       // Command smoothing, same emit-only-when-on rule. The tuning rides along
       // only when smoothing is enabled, so an arm that never asked for it stays
       // clean in the config.
@@ -1613,6 +1633,9 @@ export function ConfigurationPage() {
     positionToleranceSet: false,
     velocityToleranceSet: false,
     effortToleranceSet: false,
+    // Goal time per teleop command. 0 = real-time, which is the SDK's own
+    // default and what a mirror wants.
+    writeMovingTimeS: 0,
     // One-Euro command smoothing. Defaults mirror the SDK's own
     // (TrossenArmComponent: min_cutoff 1.0 Hz, beta 0.9, d_cutoff 1.0 Hz) so
     // ticking the box on and saving reproduces the SDK default exactly.
@@ -1805,6 +1828,7 @@ export function ConfigurationPage() {
       positionToleranceSet: false,
       velocityToleranceSet: false,
       effortToleranceSet: false,
+      writeMovingTimeS: 0,
       smoothingEnabled: false,
       smoothingGripper: false,
       smoothingMinCutoffHz: SMOOTHING_DEFAULTS.min_cutoff_hz,
@@ -1876,6 +1900,7 @@ export function ConfigurationPage() {
         positionToleranceSet: !!arm.position_tolerance,
         velocityToleranceSet: !!arm.velocity_tolerance,
         effortToleranceSet: !!arm.effort_tolerance,
+        writeMovingTimeS: typeof arm.write_moving_time_s === 'number' ? arm.write_moving_time_s : 0,
         smoothingEnabled: arm.smoothing_enabled === true,
         smoothingGripper: arm.smoothing_gripper === true,
         smoothingMinCutoffHz: typeof arm.smoothing_min_cutoff_hz === 'number' ? arm.smoothing_min_cutoff_hz : SMOOTHING_DEFAULTS.min_cutoff_hz,
@@ -2054,6 +2079,9 @@ export function ConfigurationPage() {
       position_tolerance: armForm.tolerancesEnabled && armForm.positionToleranceSet ? [...armForm.positionTolerance] : undefined,
       velocity_tolerance: armForm.tolerancesEnabled && armForm.velocityToleranceSet ? [...armForm.velocityTolerance] : undefined,
       effort_tolerance: armForm.tolerancesEnabled && armForm.effortToleranceSet ? [...armForm.effortTolerance] : undefined,
+      // Inert on a leader for the same reason smoothing is — nothing is
+      // commanded to it — so it is not written back on one.
+      write_moving_time_s: armForm.role !== 'leader' ? armForm.writeMovingTimeS : undefined,
       // A leader receives no commands, so its smoothing keys are inert; do not
       // write them back even if a hand-edited config carried them.
       smoothing_enabled: armForm.smoothingEnabled && armForm.role !== 'leader' ? true : undefined,
@@ -2285,6 +2313,23 @@ export function ConfigurationPage() {
               {arm.smoothing_gripper ? ' · incl. gripper' : ''}
               {arm.role === 'leader' && (
                 <span className="text-yellow-500"> · ignored: a leader is not commanded</span>
+              )}
+            </div>
+          </div>
+        )}
+        {/* Only when non-zero: 0 is the default and the desired state, so
+            reporting it on every follower card would be noise. A goal time is
+            the one setting here that silently costs tracking, so it earns a
+            line on the card when someone has turned it on. */}
+        {typeof arm.write_moving_time_s === 'number' && arm.write_moving_time_s > 0 && (
+          <div className="col-span-2">
+            <div className="text-dim text-[9px] uppercase mb-[4px]">Command Goal Time</div>
+            <div className={arm.role === 'leader' ? 'text-dim' : 'text-ink'}>
+              {`${arm.write_moving_time_s}s`}
+              {arm.role === 'leader' ? (
+                <span className="text-yellow-500"> · ignored: a leader is not commanded</span>
+              ) : (
+                <span className="text-yellow-500"> · follower trails the leader by ~this much</span>
               )}
             </div>
           </div>
@@ -3882,6 +3927,42 @@ export function ConfigurationPage() {
                   )}
                 </div>
                 <div className="space-y-[12px]">
+                  {/* Goal time. Inert on a leader for the same reason smoothing
+                      is, so it is disabled there rather than hidden — an
+                      operator looking for it should find it greyed with the
+                      reason, not wonder where it went. */}
+                  <div className={armForm.role === 'leader' ? 'opacity-40 pointer-events-none' : ''}>
+                    <label htmlFor="write_moving_time" className="block text-dim text-[11px] mb-[4px]">Command goal time (s)</label>
+                    <input
+                      id="write_moving_time"
+                      type="number"
+                      step="any"
+                      min="0"
+                      disabled={armForm.role === 'leader'}
+                      value={armForm.writeMovingTimeS}
+                      onChange={e => {
+                        const v = parseFloat(e.target.value);
+                        setArmForm({ ...armForm, writeMovingTimeS: Number.isNaN(v) || v < 0 ? 0 : v });
+                      }}
+                      className="w-[160px] bg-app border border-edge text-ink px-[10px] py-[8px] text-[12px] focus:outline-none focus:border-brand disabled:cursor-not-allowed"
+                    />
+                    <span className="block text-dim text-[11px] mt-[3px]">
+                      How long the controller is given to reach each command.{' '}
+                      <span className="text-ink">0 = apply immediately</span>, which is what a
+                      real-time mirror wants and what the SDK defaults to.
+                    </span>
+                  </div>
+                  {armForm.role !== 'leader' && armForm.writeMovingTimeS > 0 && (
+                    <div className="text-[11px] text-yellow-500 border border-yellow-500/40 p-[8px]">
+                      A non-zero goal time is a lag, not a smoother. Teleop issues a new
+                      command every tick, so at {DEFAULT_TELEOP_RATE_HZ} Hz this one is
+                      replaced after ~{(1000 / DEFAULT_TELEOP_RATE_HZ).toFixed(1)} ms —{' '}
+                      {((100 / (armForm.writeMovingTimeS * DEFAULT_TELEOP_RATE_HZ)) || 0).toFixed(1)}% of
+                      the way through its {armForm.writeMovingTimeS}s trajectory. The follower
+                      never arrives; it trails the leader by roughly that time constant. To
+                      damp jitter without losing tracking, use command smoothing below.
+                    </div>
+                  )}
                   {/* One-Euro filters the COMMANDED pose on its way into the
                       controller (`cmd_filt_.filter(pos_d, ...)`), so it only does
                       anything on an arm that receives commands. A passive leader

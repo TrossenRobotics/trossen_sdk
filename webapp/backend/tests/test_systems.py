@@ -323,6 +323,30 @@ def test_shipped_rail_ceilings_agree() -> None:
     assert not disagreements, "rail ceiling disagreements: " + ", ".join(disagreements)
 
 
+def test_no_shipped_arm_asks_for_a_command_goal_time() -> None:
+    """`write_moving_time_s` buys lag, not smoothing, at teleop rates.
+
+    Teleop issues a fresh position command every tick, so a non-zero goal time
+    is superseded long before the controller reaches it — at 1000 Hz a 0.3s
+    trajectory gets 0.4% of the way through. The follower never arrives; it
+    trails the leader by roughly the goal time. Every Glide preset shipped 0.3
+    here, which is the sluggishness operators were reporting, and it was
+    stacked on top of the one-euro filter those same presets enable.
+
+    Jitter is the filter's job. If a preset ever needs a goal time again, it
+    needs a comment here saying why, not a silent number.
+    """
+    offenders: list[str] = []
+    for system_id, config in _shipped_configs().items():
+        for arm_id, arm in config.get("hardware", {}).get("arms", {}).items():
+            goal_time = arm.get("write_moving_time_s")
+            if goal_time:  # non-zero and not None
+                offenders.append(f"{system_id}:{arm_id}={goal_time}")
+    assert not offenders, (
+        "arms shipping a non-zero command goal time: " + ", ".join(offenders)
+    )
+
+
 def test_every_shipped_component_and_producer_has_an_id() -> None:
     """`hardware.components` entries are matched to producers by id.
 

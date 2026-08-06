@@ -37,7 +37,7 @@
           "ip_address": "192.168.1.4",
           "model": "pro",
           "end_effector": "pro_base",
-          "write_moving_time_s": 0.3,
+          "write_moving_time_s": 0.0,
           "smoothing_enabled": true,
           "smoothing_gripper": false,
           "smoothing_min_cutoff_hz": 1.0,
