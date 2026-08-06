@@ -2580,13 +2580,41 @@ export function ConfigurationPage() {
     // Read from the raw config: this page preserves glide_base verbatim rather
     // than modelling it, so its axes are only visible here.
     const railClaims = new Map<number, string>();
+    // What this handle's JOYSTICK drives, same source. A glide_base claims the
+    // stick as a unit, so it is either driving the base or free — and until now
+    // the card said nothing about it at all, even though the toggle above is
+    // called "read joystick & buttons".
+    const stickDrives: string[] = [];
     for (const comp of rawConfigs[sys.id]?.hardware?.components ?? []) {
       if (comp.type !== 'glide_base') continue;
-      const lift = (comp as unknown as { axes?: { lift?: Record<string, unknown> } }).axes?.lift;
-      if (!lift || lift.source !== 'buttons' || lift.arm_id !== arm.name) continue;
-      if (typeof lift.up_bit === 'number' && lift.up_bit >= 0) railClaims.set(lift.up_bit, 'rail up');
-      if (typeof lift.down_bit === 'number' && lift.down_bit >= 0) {
-        railClaims.set(lift.down_bit, 'rail down');
+      const gb = comp as unknown as {
+        translation?: Record<string, unknown>;
+        axes?: Record<string, Record<string, unknown>>;
+      };
+
+      // `translation` owns both linear and lateral and reads the whole stick.
+      if (gb.translation && gb.translation.arm_id === arm.name) {
+        const max = gb.translation.max;
+        stickDrives.push(`base drive${typeof max === 'number' ? ` (${max} m/s)` : ''}`);
+      }
+
+      for (const [axis, cfg] of Object.entries(gb.axes ?? {})) {
+        if (!cfg || cfg.arm_id !== arm.name) continue;
+        const src = typeof cfg.source === 'string' ? cfg.source : 'joystick_x';
+        if (src === 'buttons') {
+          if (typeof cfg.up_bit === 'number' && cfg.up_bit >= 0) {
+            railClaims.set(cfg.up_bit, `${axis} up`);
+          }
+          if (typeof cfg.down_bit === 'number' && cfg.down_bit >= 0) {
+            railClaims.set(cfg.down_bit, `${axis} down`);
+          }
+        } else {
+          const unit = axis === 'angular' ? 'rad/s' : 'm/s';
+          const max = cfg.max;
+          stickDrives.push(
+            `base ${axis}${typeof max === 'number' ? ` (${max} ${unit})` : ''}`,
+          );
+        }
       }
     }
 
@@ -2681,6 +2709,14 @@ export function ConfigurationPage() {
             </div>
 
             <div className="flex-1 min-w-[220px] space-y-[6px]">
+              <div className="text-[11px] pb-[4px] border-b border-surface">
+                <span className="text-dim">Joystick: </span>
+                {stickDrives.length > 0 ? (
+                  <span className="text-ink">{stickDrives.join(' · ')}</span>
+                ) : (
+                  <span className="text-dim">not mapped to anything</span>
+                )}
+              </div>
               {selected === null ? (
                 <div className="text-dim text-[11px]">
                   Pick a button to bind it. Positions match the physical handle;
@@ -3505,9 +3541,34 @@ export function ConfigurationPage() {
             const componentIds = ((rawConfigs[sys.id]?.hardware?.components ?? [])
               .map((c) => c.id)
               .filter((id): id is string => typeof id === 'string'));
-            const baseLeaderIds = ((rawConfigs[sys.id]?.hardware?.components ?? [])
+            // A glide_base is not a device — it is the mapping that turns the
+            // handles' JOYSTICKS (and, for the rail, their buttons) into base
+            // velocity. Label it by the handles it reads, because "base_leader
+            // (base)" told an operator nothing about where the input comes
+            // from.
+            const baseLeaders = ((rawConfigs[sys.id]?.hardware?.components ?? [])
               .filter((c) => c.type === 'glide_base' && typeof c.id === 'string')
-              .map((c) => c.id as string));
+              .map((c) => {
+                const gb = c as unknown as {
+                  id: string;
+                  translation?: { arm_id?: string };
+                  axes?: Record<string, { arm_id?: string }>;
+                };
+                const handles = [
+                  ...(gb.translation?.arm_id ? [gb.translation.arm_id] : []),
+                  ...Object.values(gb.axes ?? {})
+                    .map((a) => a?.arm_id)
+                    .filter((x): x is string => typeof x === 'string'),
+                ];
+                const unique = [...new Set(handles)];
+                return {
+                  id: gb.id,
+                  label: unique.length
+                    ? `${gb.id} — ${unique.join(' + ')} joystick`
+                    : `${gb.id} — handle joystick`,
+                };
+              }));
+            const baseLeaderIds = baseLeaders.map((b) => b.id);
             const baseFollowerIds = sys.hardware
               .filter((h) => h.type === 'trossen_base' || h.type === 'slate_base')
               .map((h) => h.name);
@@ -3588,8 +3649,8 @@ export function ConfigurationPage() {
                       >
                         <option value="">— leader —</option>
                         {leaders.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
-                        {baseLeaderIds.map((id) => (
-                          <option key={id} value={id}>{id} (base)</option>
+                        {baseLeaders.map((b) => (
+                          <option key={b.id} value={b.id}>{b.label}</option>
                         ))}
                         {pr.leader && !liveNames.has(pr.leader) && (
                           <option value={pr.leader}>{pr.leader} (missing)</option>
@@ -3603,7 +3664,7 @@ export function ConfigurationPage() {
                         <option value="">— follower —</option>
                         {followers.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
                         {baseFollowerIds.map((id) => (
-                          <option key={id} value={id}>{id} (base)</option>
+                          <option key={id} value={id}>{id} — mobile base</option>
                         ))}
                         {pr.follower && !liveNames.has(pr.follower) && (
                           <option value={pr.follower}>{pr.follower} (missing)</option>
