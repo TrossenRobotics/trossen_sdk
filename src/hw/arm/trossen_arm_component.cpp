@@ -4,6 +4,7 @@
  */
 
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
+#include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
 
 #include <algorithm>
@@ -201,6 +202,35 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
           std::to_string(njoints) + ")");
       }
     };
+    // The command clamp is parsed with the same length rule but is NOT pushed
+    // to the controller — it bounds what we ask for, not what the arm allows.
+    // NaN entries (JSON null) mean "leave this joint alone", so unlike the
+    // limits below a partially-specified array is the normal case.
+    auto parse_command_limit = [&](const char* key, std::vector<float>& dst) {
+      if (!config.contains(key)) return;
+      dst = configuration::ArmConfig::parse_nullable_limits(config.at(key));
+      if (!dst.empty() && dst.size() != njoints) {
+        throw std::runtime_error(
+          std::string("TrossenArmComponent: '") + key + "' length (" +
+          std::to_string(dst.size()) + ") must match joint count (" +
+          std::to_string(njoints) + ")");
+      }
+    };
+    parse_command_limit("command_position_min", command_position_min_);
+    parse_command_limit("command_position_max", command_position_max_);
+    for (size_t j = 0; j < njoints; ++j) {
+      const bool has_min =
+        j < command_position_min_.size() && !std::isnan(command_position_min_[j]);
+      const bool has_max =
+        j < command_position_max_.size() && !std::isnan(command_position_max_[j]);
+      if (has_min && has_max && command_position_min_[j] > command_position_max_[j]) {
+        throw std::runtime_error(
+          "TrossenArmComponent: command clamp for joint " + std::to_string(j) +
+          " has min (" + std::to_string(command_position_min_[j]) + ") above max (" +
+          std::to_string(command_position_max_[j]) + "), which would pin the joint");
+      }
+    }
+
     parse_limit("position_min", position_min_);
     parse_limit("position_max", position_max_);
     parse_limit("velocity_max", velocity_max_);
@@ -314,6 +344,17 @@ std::vector<float> TrossenArmComponent::read_joint() {
   return out;
 }
 
+void TrossenArmComponent::clamp_command(std::vector<double>& pos) const {
+  for (size_t j = 0; j < pos.size(); ++j) {
+    if (j < command_position_min_.size() && !std::isnan(command_position_min_[j])) {
+      pos[j] = std::max(pos[j], static_cast<double>(command_position_min_[j]));
+    }
+    if (j < command_position_max_.size() && !std::isnan(command_position_max_[j])) {
+      pos[j] = std::min(pos[j], static_cast<double>(command_position_max_[j]));
+    }
+  }
+}
+
 void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
   if (!driver_) return;
   if (cmd.size() != static_cast<size_t>(driver_->get_num_joints())) {
@@ -323,6 +364,11 @@ void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
       std::to_string(cmd.size()));
   }
   std::vector<double> pos_d(cmd.begin(), cmd.end());
+  // Clamp BEFORE filtering, matching the reference ordering
+  // (clip -> filter -> write). The one-Euro output is a convex combination of
+  // past inputs, so filtering clamped values can never leave the band; the
+  // other order could, because the filter overshoots on a direction change.
+  clamp_command(pos_d);
   // Low-pass the commanded pose before handing it to the controller, so a
   // jittery source (a hand-held leader) doesn't shake the arm. Adaptive: it
   // filters hard while the operator holds still and backs off as they move, so
@@ -378,6 +424,10 @@ void TrossenArmComponent::summon_joint(const std::vector<float>& cmd) {
   // mirror loop takes over with instant writes.
   driver_->set_all_modes(trossen_arm::Mode::position);
   std::vector<double> pos_d(cmd.begin(), cmd.end());
+  // Clamped for the same reason write_joint() is, and more urgently: this is a
+  // large unattended move to wherever the operator happened to leave the
+  // leader, so an out-of-band target here is driven to in one sweep.
+  clamp_command(pos_d);
   driver_->set_all_positions(pos_d, staging_time_s_, true);
 }
 

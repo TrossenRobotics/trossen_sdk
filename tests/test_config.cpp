@@ -6,6 +6,8 @@
  * and nested namespace handling in GlobalConfig.
  */
 
+#include <cmath>
+#include <limits>
 #include <memory>
 #include <string>
 
@@ -392,4 +394,70 @@ TEST(HardwareComponentsConfigTest, AbsentSectionYieldsNoComponents) {
   const auto hw = trossen::configuration::HardwareConfig::from_json(
     nlohmann::json::parse(R"({"arms":{}})"));
   EXPECT_TRUE(hw.components.empty());
+}
+
+// ---------------------------------------------------------------------------
+// CFG-14..17: the command clamp (ArmConfig::command_position_min/max)
+//
+// Separate from position_min/max, which are the arm's operating limits and are
+// enforced by the controller. These bound what teleop may ASK for. Because a
+// rig usually wants to bound ONE axis (the Rivet clamps J0 only, to keep each
+// follower out of the other's space), an entry has to be able to say "leave
+// this joint alone" — which JSON can only spell as null.
+// ---------------------------------------------------------------------------
+
+TEST(ArmConfigTest, CommandClamp_DefaultsOffAndIsOmittedFromJson) {
+  ArmConfig cfg;
+  EXPECT_TRUE(cfg.command_position_min.empty());
+  EXPECT_TRUE(cfg.command_position_max.empty());
+  const auto j = cfg.to_json();
+  EXPECT_FALSE(j.contains("command_position_min"));
+  EXPECT_FALSE(j.contains("command_position_max"));
+}
+
+TEST(ArmConfigTest, CommandClamp_NullMeansUnclamped) {
+  const auto j = nlohmann::json::parse(R"({
+    "ip_address": "192.168.1.4",
+    "command_position_min": [-1.1, null, null, null, null, null, null],
+    "command_position_max": [0.8,  null, null, null, null, null, null]
+  })");
+  const ArmConfig cfg = ArmConfig::from_json(j);
+  ASSERT_EQ(cfg.command_position_min.size(), 7u);
+  EXPECT_FLOAT_EQ(cfg.command_position_min[0], -1.1f);
+  EXPECT_FLOAT_EQ(cfg.command_position_max[0], 0.8f);
+  for (size_t i = 1; i < 7; ++i) {
+    EXPECT_TRUE(std::isnan(cfg.command_position_min[i])) << "joint " << i;
+    EXPECT_TRUE(std::isnan(cfg.command_position_max[i])) << "joint " << i;
+  }
+}
+
+TEST(ArmConfigTest, CommandClamp_RoundTripsNullsBackToNull) {
+  // A NaN written as a bare number would be invalid JSON and nlohmann emits it
+  // as null anyway on some paths — pin the representation so a saved config
+  // reloads as the same sparse clamp rather than as a clamp at zero.
+  ArmConfig original;
+  original.command_position_min = {
+    -1.1f, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::quiet_NaN()};
+  const auto j = original.to_json();
+  ASSERT_TRUE(j.contains("command_position_min"));
+  EXPECT_TRUE(j["command_position_min"][0].is_number());
+  EXPECT_TRUE(j["command_position_min"][1].is_null());
+
+  const ArmConfig restored = ArmConfig::from_json(j);
+  ASSERT_EQ(restored.command_position_min.size(), 3u);
+  EXPECT_FLOAT_EQ(restored.command_position_min[0], -1.1f);
+  EXPECT_TRUE(std::isnan(restored.command_position_min[1]));
+}
+
+TEST(ArmConfigTest, CommandClamp_IsIndependentOfTheControllerLimits) {
+  // The two must not be conflated: an arm can bound teleop's reach on J0 while
+  // leaving its operating limits at the firmware defaults.
+  const auto j = nlohmann::json::parse(R"({
+    "ip_address": "192.168.1.4",
+    "command_position_min": [-1.1, null, null, null, null, null, null]
+  })");
+  const ArmConfig cfg = ArmConfig::from_json(j);
+  EXPECT_FALSE(cfg.command_position_min.empty());
+  EXPECT_TRUE(cfg.position_min.empty());
+  EXPECT_TRUE(cfg.position_max.empty());
 }

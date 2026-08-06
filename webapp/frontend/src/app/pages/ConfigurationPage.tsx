@@ -249,6 +249,17 @@ interface ArmHardware {
   position_tolerance?: number[];
   velocity_tolerance?: number[];
   effort_tolerance?: number[];
+  // Optional per-joint clamp on the commands teleop sends to this arm, applied
+  // before smoothing. `null` for a joint leaves it unclamped, which is the
+  // normal case — a rig usually bounds one axis (J0, to keep a follower out of
+  // its neighbour's space) and leaves the rest alone.
+  //
+  // Not the same as position_min/position_max above. Those are the arm's
+  // operating limits and the CONTROLLER enforces them. These bound what we ask
+  // for, so an out-of-range leader pose is trimmed host-side and never becomes
+  // a limit fault that stops the session.
+  command_position_min?: (number | null)[];
+  command_position_max?: (number | null)[];
   // Trajectory time the controller is given to reach each teleop command, in
   // seconds. 0 = apply it immediately (the driver treats a goal time under
   // 1 ms as no interpolation), which is what a real-time mirror wants.
@@ -424,6 +435,19 @@ function armLimitOrDefault(stored: number[] | undefined, key: keyof JointLimitAr
     : [...DEFAULT_JOINT_LIMITS[key]];
 }
 
+/**
+ * Pick a stored command-clamp column for the edit form.
+ *
+ * Unlike the limit arrays above there is no sensible default to fall back on:
+ * inventing one would silently bound a joint nobody asked to bound. So a
+ * missing or wrong-length column becomes all-blank, i.e. unclamped.
+ */
+function clampColumnOrBlank(stored: (number | null)[] | undefined): (number | null)[] {
+  return Array.isArray(stored) && stored.length === NUM_ARM_JOINTS
+    ? stored.map((v) => (typeof v === 'number' ? v : null))
+    : Array<number | null>(NUM_ARM_JOINTS).fill(null);
+}
+
 const DEFAULT_JOINT_LIMITS: JointLimitArrays = {
   //             J1     J2     J3     J4     J5     J6    Gripper
   position_min: [-3.14, -3.14, -3.14, -3.14, -3.14, -3.14, 0.0],
@@ -525,6 +549,8 @@ interface RawArmConfig {
   position_tolerance?: number[];
   velocity_tolerance?: number[];
   effort_tolerance?: number[];
+  command_position_min?: (number | null)[];
+  command_position_max?: (number | null)[];
   write_moving_time_s?: number;
   smoothing_enabled?: boolean;
   smoothing_gripper?: boolean;
@@ -696,6 +722,8 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
       position_tolerance: Array.isArray(armCfg.position_tolerance) ? armCfg.position_tolerance : undefined,
       velocity_tolerance: Array.isArray(armCfg.velocity_tolerance) ? armCfg.velocity_tolerance : undefined,
       effort_tolerance: Array.isArray(armCfg.effort_tolerance) ? armCfg.effort_tolerance : undefined,
+      command_position_min: Array.isArray(armCfg.command_position_min) ? armCfg.command_position_min : undefined,
+      command_position_max: Array.isArray(armCfg.command_position_max) ? armCfg.command_position_max : undefined,
       write_moving_time_s: typeof armCfg.write_moving_time_s === 'number' ? armCfg.write_moving_time_s : undefined,
       smoothing_enabled: typeof armCfg.smoothing_enabled === 'boolean' ? armCfg.smoothing_enabled : undefined,
       smoothing_gripper: typeof armCfg.smoothing_gripper === 'boolean' ? armCfg.smoothing_gripper : undefined,
@@ -1058,6 +1086,13 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
       if (arm.position_tolerance && arm.position_tolerance.length) armEntry.position_tolerance = arm.position_tolerance;
       if (arm.velocity_tolerance && arm.velocity_tolerance.length) armEntry.velocity_tolerance = arm.velocity_tolerance;
       if (arm.effort_tolerance && arm.effort_tolerance.length) armEntry.effort_tolerance = arm.effort_tolerance;
+      // The command clamp, emitted only when at least one joint is actually
+      // bounded. An all-null array is the same as no array, and writing one
+      // would suggest a clamp exists where none does.
+      const clampSet = (a?: (number | null)[]) =>
+        !!a && a.length > 0 && a.some((v) => typeof v === 'number');
+      if (clampSet(arm.command_position_min)) armEntry.command_position_min = arm.command_position_min;
+      if (clampSet(arm.command_position_max)) armEntry.command_position_max = arm.command_position_max;
       // Goal time, emitted only when it is actually asking for interpolation.
       // Absence and 0 mean the same thing to the SDK (`write_moving_time_s_`
       // defaults to 0.0f = apply immediately), so dropping a zero is lossless
@@ -1719,6 +1754,11 @@ export function ConfigurationPage() {
     positionToleranceSet: false,
     velocityToleranceSet: false,
     effortToleranceSet: false,
+    // Per-joint clamp on outgoing teleop commands. Blank cell = that joint is
+    // unclamped, which is the usual state for all but one or two axes.
+    commandClampEnabled: false,
+    commandClampMin: Array<number | null>(NUM_ARM_JOINTS).fill(null),
+    commandClampMax: Array<number | null>(NUM_ARM_JOINTS).fill(null),
     // Goal time per teleop command. 0 = real-time, which is the SDK's own
     // default and what a mirror wants.
     writeMovingTimeS: 0,
@@ -1914,6 +1954,9 @@ export function ConfigurationPage() {
       positionToleranceSet: false,
       velocityToleranceSet: false,
       effortToleranceSet: false,
+      commandClampEnabled: false,
+      commandClampMin: Array<number | null>(NUM_ARM_JOINTS).fill(null),
+      commandClampMax: Array<number | null>(NUM_ARM_JOINTS).fill(null),
       writeMovingTimeS: 0,
       smoothingEnabled: false,
       smoothingGripper: false,
@@ -1986,6 +2029,9 @@ export function ConfigurationPage() {
         positionToleranceSet: !!arm.position_tolerance,
         velocityToleranceSet: !!arm.velocity_tolerance,
         effortToleranceSet: !!arm.effort_tolerance,
+        commandClampEnabled: !!(arm.command_position_min || arm.command_position_max),
+        commandClampMin: clampColumnOrBlank(arm.command_position_min),
+        commandClampMax: clampColumnOrBlank(arm.command_position_max),
         writeMovingTimeS: typeof arm.write_moving_time_s === 'number' ? arm.write_moving_time_s : 0,
         smoothingEnabled: arm.smoothing_enabled === true,
         smoothingGripper: arm.smoothing_gripper === true,
@@ -2165,6 +2211,16 @@ export function ConfigurationPage() {
       position_tolerance: armForm.tolerancesEnabled && armForm.positionToleranceSet ? [...armForm.positionTolerance] : undefined,
       velocity_tolerance: armForm.tolerancesEnabled && armForm.velocityToleranceSet ? [...armForm.velocityTolerance] : undefined,
       effort_tolerance: armForm.tolerancesEnabled && armForm.effortToleranceSet ? [...armForm.effortTolerance] : undefined,
+      // Only when the section is on AND some joint is actually bounded, so
+      // ticking the box and leaving every cell blank writes nothing.
+      command_position_min:
+        armForm.commandClampEnabled && armForm.commandClampMin.some((v) => v !== null)
+          ? [...armForm.commandClampMin]
+          : undefined,
+      command_position_max:
+        armForm.commandClampEnabled && armForm.commandClampMax.some((v) => v !== null)
+          ? [...armForm.commandClampMax]
+          : undefined,
       // Inert on a leader for the same reason smoothing is — nothing is
       // commanded to it — so it is not written back on one.
       write_moving_time_s: armForm.role !== 'leader' ? armForm.writeMovingTimeS : undefined,
@@ -2403,6 +2459,31 @@ export function ConfigurationPage() {
             </div>
           </div>
         )}
+        {/* A clamp changes where the arm can go, so it is worth a line — but
+            only naming the joints actually bounded, since most are not. */}
+        {(() => {
+          const lo = arm.command_position_min;
+          const hi = arm.command_position_max;
+          if (!lo && !hi) return null;
+          const bounded = ARM_JOINT_LABELS.map((label, i) => {
+            const a = typeof lo?.[i] === 'number' ? lo[i] : null;
+            const b = typeof hi?.[i] === 'number' ? hi[i] : null;
+            if (a === null && b === null) return null;
+            return `${label} ${a ?? '−∞'}…${b ?? '∞'}`;
+          }).filter(Boolean);
+          if (bounded.length === 0) return null;
+          return (
+            <div className="col-span-2">
+              <div className="text-dim text-[9px] uppercase mb-[4px]">Command Clamp</div>
+              <div className={arm.role === 'leader' ? 'text-dim' : 'text-ink'}>
+                {bounded.join(' · ')}
+                {arm.role === 'leader' && (
+                  <span className="text-yellow-500"> · ignored: a leader is not commanded</span>
+                )}
+              </div>
+            </div>
+          );
+        })()}
         {/* Only when non-zero: 0 is the default and the desired state, so
             reporting it on every follower card would be noise. A goal time is
             the one setting here that silently costs tracking, so it earns a
@@ -4048,6 +4129,103 @@ export function ConfigurationPage() {
                   )}
                 </div>
                 <div className="space-y-[12px]">
+                  {/* Command clamp. Bounds what teleop may ASK for, as opposed
+                      to the joint limits above which bound what the arm will
+                      accept — trimming here means no limit fault and no
+                      interrupted session. */}
+                  <div className={armForm.role === 'leader' ? 'opacity-40 pointer-events-none' : ''}>
+                    <div className="flex items-start gap-[8px]">
+                      <input
+                        type="checkbox"
+                        id="arm_command_clamp"
+                        disabled={armForm.role === 'leader'}
+                        checked={armForm.commandClampEnabled}
+                        onChange={(e) => setArmForm({ ...armForm, commandClampEnabled: e.target.checked })}
+                        className="w-[16px] h-[16px] mt-[2px]"
+                      />
+                      <label htmlFor="arm_command_clamp" className="text-ink text-[12px]">
+                        Clamp incoming teleop commands
+                        <span className="block text-dim text-[11px] mt-[2px]">
+                          Bounds the pose this arm will be asked for, per joint. A leader can
+                          reach places its follower should not go — another arm, the base, a
+                          shelf — and clamping here trims the command before it is sent, so the
+                          joint parks at the bound instead of the controller raising a limit
+                          fault and ending the session. Leave a cell blank to leave that joint
+                          alone.
+                        </span>
+                      </label>
+                    </div>
+                    {armForm.commandClampEnabled && (
+                      <div className="pl-[24px] mt-[10px] overflow-x-auto">
+                        <table className="text-[11px] border-separate border-spacing-0">
+                          <thead>
+                            <tr className="text-dim">
+                              <th className="text-left font-normal pr-[8px] pb-[4px]">Joint</th>
+                              <th className="text-left font-normal px-[4px] pb-[4px]">Min</th>
+                              <th className="text-left font-normal px-[4px] pb-[4px]">Max</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {ARM_JOINT_LABELS.map((jointLabel, jointIdx) => {
+                              const isGripper = jointIdx === NUM_ARM_JOINTS - 1;
+                              const cols = [
+                                { key: 'commandClampMin' as const, label: 'min' },
+                                { key: 'commandClampMax' as const, label: 'max' },
+                              ];
+                              return (
+                                <tr key={jointLabel}>
+                                  <td className="text-ink py-[3px] pr-[8px] whitespace-nowrap">{jointLabel}</td>
+                                  {cols.map((col) => (
+                                    <td key={col.key} className="py-[3px] px-[4px]">
+                                      <input
+                                        type="number"
+                                        step="any"
+                                        value={armForm[col.key][jointIdx] ?? ''}
+                                        placeholder="—"
+                                        title={`${isGripper ? 'm' : 'rad'} — blank leaves this joint unclamped`}
+                                        onChange={(e) => {
+                                          const raw = e.target.value;
+                                          const v = raw === '' ? null : parseFloat(raw);
+                                          setArmForm((prev) => {
+                                            const next = [...prev[col.key]];
+                                            next[jointIdx] = v !== null && Number.isNaN(v) ? null : v;
+                                            return { ...prev, [col.key]: next };
+                                          });
+                                        }}
+                                        className="w-[86px] bg-app border border-edge text-ink px-[6px] py-[4px] text-[12px] focus:outline-none focus:border-brand"
+                                      />
+                                    </td>
+                                  ))}
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                          <tfoot>
+                            <tr className="text-dim">
+                              <td className="pt-[6px] pr-[8px]" />
+                              <td className="pt-[6px] px-[4px] text-[10px]" colSpan={2}>
+                                rad · gripper m
+                              </td>
+                            </tr>
+                          </tfoot>
+                        </table>
+                        {(() => {
+                          const bad = ARM_JOINT_LABELS.map((label, i) => {
+                            const lo = armForm.commandClampMin[i];
+                            const hi = armForm.commandClampMax[i];
+                            return lo !== null && hi !== null && lo > hi ? label : null;
+                          }).filter(Boolean);
+                          if (bad.length === 0) return null;
+                          return (
+                            <div className="text-[11px] text-red-400 mt-[6px]">
+                              {bad.join(', ')}: min is above max, which pins the joint. The SDK
+                              refuses to configure an arm like this.
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    )}
+                  </div>
                   {/* Goal time. Inert on a leader for the same reason smoothing
                       is, so it is disabled there rather than hidden — an
                       operator looking for it should find it greyed with the

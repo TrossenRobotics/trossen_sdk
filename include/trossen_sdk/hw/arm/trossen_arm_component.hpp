@@ -269,6 +269,16 @@ private:
   /// each episode). Opt-in; parsed from "episode_lifecycle_enabled" in configure().
   bool episode_lifecycle_enabled_{false};
 
+  /// Optional per-joint clamp on outgoing commands, applied in write_joint()
+  /// and summon_joint() before smoothing. Empty = no clamping at all; a NaN
+  /// entry = that joint is unclamped. See configuration::ArmConfig for why this
+  /// is separate from the controller-side position limits.
+  std::vector<float> command_position_min_;
+  std::vector<float> command_position_max_;
+
+  /// Clamp `pos` in place to the command limits above. No-op when unset.
+  void clamp_command(std::vector<double>& pos) const;
+
   /// Per-write trajectory time passed to set_all_positions in write_joint().
   /// Zero means apply the goal immediately (libtrossen_arm interprets
   /// goal_time < 0.001s as no-interpolation). Non-zero values smooth the

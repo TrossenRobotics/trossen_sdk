@@ -6,6 +6,8 @@
 #ifndef TROSSEN_SDK__CONFIGURATION__TYPES__HARDWARE__ARM_CONFIG_HPP_
 #define TROSSEN_SDK__CONFIGURATION__TYPES__HARDWARE__ARM_CONFIG_HPP_
 
+#include <cmath>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -150,6 +152,49 @@ struct ArmConfig {
   std::vector<float> velocity_tolerance{};
   std::vector<float> effort_tolerance{};
 
+  /// @brief Optional per-joint clamp applied to outgoing position commands in
+  /// write_joint(), before any smoothing. Each array, when non-empty, has one
+  /// entry per joint; a NaN entry leaves that joint unclamped, so a rig can
+  /// bound one axis without inventing bounds for the rest. Serialised as JSON
+  /// `null`, which is how "no limit" survives a round trip through a config
+  /// file.
+  ///
+  /// Distinct from position_min/position_max above, which are the ARM's
+  /// operating limits and are enforced by the controller. These bound what
+  /// teleop is allowed to ASK for, and exist to keep a follower out of a
+  /// region its leader can reach but its workspace cannot — a shelf, a second
+  /// arm, the base. Clamping host-side means the command never reaches the
+  /// controller, so no limit fault is raised and teleop keeps running with the
+  /// joint parked at the bound.
+  std::vector<float> command_position_min{};
+  std::vector<float> command_position_max{};
+
+  /// @brief Read an array whose entries may be JSON null, mapping null to NaN.
+  /// Used for the command clamp, where an entry has to be able to say "leave
+  /// this joint alone" rather than being forced to pick a bound.
+  static std::vector<float> parse_nullable_limits(const nlohmann::json& arr) {
+    std::vector<float> out;
+    out.reserve(arr.size());
+    for (const auto& entry : arr) {
+      out.push_back(
+        entry.is_null() ? std::numeric_limits<float>::quiet_NaN() : entry.get<float>());
+    }
+    return out;
+  }
+
+  /// @brief Inverse of parse_nullable_limits: NaN becomes JSON null.
+  static nlohmann::json dump_nullable_limits(const std::vector<float>& v) {
+    auto arr = nlohmann::json::array();
+    for (const float x : v) {
+      if (std::isnan(x)) {
+        arr.push_back(nullptr);
+      } else {
+        arr.push_back(x);
+      }
+    }
+    return arr;
+  }
+
   static ArmConfig from_json(const nlohmann::json& j) {
     ArmConfig c;
     if (j.contains("ip_address")) j.at("ip_address").get_to(c.ip_address);
@@ -200,6 +245,11 @@ struct ArmConfig {
       j.at("velocity_tolerance").get_to(c.velocity_tolerance);
     if (j.contains("effort_tolerance"))
       j.at("effort_tolerance").get_to(c.effort_tolerance);
+    // JSON has no NaN, so "this joint is unclamped" travels as null.
+    if (j.contains("command_position_min"))
+      c.command_position_min = parse_nullable_limits(j.at("command_position_min"));
+    if (j.contains("command_position_max"))
+      c.command_position_max = parse_nullable_limits(j.at("command_position_max"));
     return c;
   }
 
@@ -248,6 +298,11 @@ struct ArmConfig {
     if (!position_tolerance.empty()) j["position_tolerance"] = position_tolerance;
     if (!velocity_tolerance.empty()) j["velocity_tolerance"] = velocity_tolerance;
     if (!effort_tolerance.empty()) j["effort_tolerance"] = effort_tolerance;
+    // Same emit-only-when-set rule; NaN entries go back out as null.
+    if (!command_position_min.empty())
+      j["command_position_min"] = dump_nullable_limits(command_position_min);
+    if (!command_position_max.empty())
+      j["command_position_max"] = dump_nullable_limits(command_position_max);
     return j;
   }
 };

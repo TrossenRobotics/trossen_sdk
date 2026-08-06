@@ -647,3 +647,62 @@ describe('editing a Glide handle from its own card', () => {
     });
   });
 });
+
+describe('the teleop command clamp', () => {
+  // Sparse by design: a rig bounds one axis (J0, so a follower cannot swing
+  // into its neighbour) and leaves the rest alone. JSON spells "leave alone"
+  // as null, and a null that decays to 0 would clamp a joint to zero — the
+  // worst possible failure, since it looks like a configured limit.
+  const J0_ONLY_MIN = [-1.1, null, null, null, null, null, null];
+  const J0_ONLY_MAX = [0.8, null, null, null, null, null, null];
+
+  function withClamp() {
+    const cfg = rivetConfig();
+    const f = cfg.hardware.arms.follower_left as Record<string, unknown>;
+    f.command_position_min = J0_ONLY_MIN;
+    f.command_position_max = J0_ONLY_MAX;
+    return cfg;
+  }
+
+  it('survives a save with its nulls intact', () => {
+    const { saved } = roundTrip(withClamp());
+    expect(saved.hardware?.arms?.follower_left).toMatchObject({
+      command_position_min: J0_ONLY_MIN,
+      command_position_max: J0_ONLY_MAX,
+    });
+  });
+
+  it('keeps null as null rather than collapsing it to zero', () => {
+    const { saved } = roundTrip(withClamp());
+    const min = saved.hardware?.arms?.follower_left?.command_position_min;
+    expect(min?.slice(1).every((v) => v === null)).toBe(true);
+    expect(min?.slice(1).some((v) => v === 0)).toBe(false);
+  });
+
+  it('is not invented for arms that never asked for one', () => {
+    const { saved } = roundTrip(rivetConfig());
+    expect(saved.hardware?.arms?.follower_left).not.toHaveProperty('command_position_min');
+    expect(saved.hardware?.arms?.glide_left).not.toHaveProperty('command_position_min');
+  });
+
+  it('drops an all-null column, which is the same as no clamp', () => {
+    const cfg = rivetConfig();
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: cfg });
+    const follower = system.hardware.find((h) => h.id === 'follower_left') as {
+      command_position_min?: (number | null)[];
+    };
+    follower.command_position_min = [null, null, null, null, null, null, null];
+    const saved = systemToSdkConfig(system as never, cfg);
+    expect(saved.hardware?.arms?.follower_left).not.toHaveProperty('command_position_min');
+  });
+
+  it('carries a min-only clamp without inventing a max', () => {
+    const cfg = rivetConfig();
+    (cfg.hardware.arms.follower_left as Record<string, unknown>).command_position_min = J0_ONLY_MIN;
+    const { saved } = roundTrip(cfg);
+    expect(saved.hardware?.arms?.follower_left).toMatchObject({
+      command_position_min: J0_ONLY_MIN,
+    });
+    expect(saved.hardware?.arms?.follower_left).not.toHaveProperty('command_position_max');
+  });
+});
