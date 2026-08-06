@@ -2277,9 +2277,15 @@ export function ConfigurationPage() {
         {arm.smoothing_enabled && (
           <div className="col-span-2">
             <div className="text-dim text-[9px] uppercase mb-[4px]">Command Smoothing</div>
-            <div className="text-ink">
+            {/* A leader receives no commands, so the filter never runs on it.
+                Say so rather than reporting a cutoff and beta that do nothing —
+                and flag that the keys go away on the next save. */}
+            <div className={arm.role === 'leader' ? 'text-dim' : 'text-ink'}>
               {`${arm.smoothing_min_cutoff_hz ?? SMOOTHING_DEFAULTS.min_cutoff_hz} Hz · β ${arm.smoothing_beta ?? SMOOTHING_DEFAULTS.beta}`}
               {arm.smoothing_gripper ? ' · incl. gripper' : ''}
+              {arm.role === 'leader' && (
+                <span className="text-yellow-500"> · ignored: a leader is not commanded</span>
+              )}
             </div>
           </div>
         )}
