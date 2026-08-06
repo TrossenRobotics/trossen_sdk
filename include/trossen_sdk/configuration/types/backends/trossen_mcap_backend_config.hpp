@@ -23,8 +23,6 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
   int chunk_size_bytes{TROSSEN_MCAP_DEFAULT_CHUNK_SIZE_BYTES};
   std::string compression{TROSSEN_MCAP_DEFAULT_COMPRESSION};
   std::string dataset_id{trossen::io::backends::auto_generate_dataset_id()};
-  // TODO(shantanuparab-tr): Remove episode index if not being used
-  int episode_index{0};
 
   /// Text description of the task being demonstrated (e.g. "pick up the cube").
   /// Written to the MCAP file-level metadata if non-empty.
@@ -45,7 +43,6 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
     if (j.contains("chunk_size_bytes")) j.at("chunk_size_bytes").get_to(c.chunk_size_bytes);
     if (j.contains("compression")) j.at("compression").get_to(c.compression);
     if (j.contains("dataset_id")) j.at("dataset_id").get_to(c.dataset_id);
-    if (j.contains("episode_index")) j.at("episode_index").get_to(c.episode_index);
     if (j.contains("task_description")) j.at("task_description").get_to(c.task_description);
 
     return c;

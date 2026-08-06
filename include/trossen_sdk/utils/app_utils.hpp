@@ -104,19 +104,6 @@ bool perform_sanity_check(
 bool interruptible_sleep(std::chrono::duration<double> duration);
 
 /**
- * @brief Generate episode file path
- *
- * @param output_dir Base output directory
- * @param episode_index Episode index
- * @param extension File extension (default: "trossen_mcap")
- * @return Full path to episode file
- */
-std::string generate_episode_path(
-  const std::string& output_dir,
-  uint32_t episode_index,
-  const std::string& extension = "trossen_mcap");
-
-/**
  * @brief Announce a message via text-to-speech (spd-say)
  *
  * Safe to call even if spd-say is not installed -- fails silently.

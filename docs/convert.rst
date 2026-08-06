@@ -39,7 +39,7 @@ The tool operates in two modes, distinguished by the first argument:
 .. code-block:: bash
 
     # Single-episode mode (first argument is an .mcap file)
-    ./build/scripts/trossen_mcap_to_lerobot_v2 <path/to/episode_000000.mcap>
+    ./build/scripts/trossen_mcap_to_lerobot_v2 <path/to/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap>
 
     # Batch mode (first argument is a directory containing .mcap files)
     ./build/scripts/trossen_mcap_to_lerobot_v2 <path/to/dataset_folder/>
@@ -71,8 +71,7 @@ Examples per robot:
 
 .. note::
 
-    Episode numbers are extracted from the filename (``episode_NNNNNN.mcap``, six-digit zero-padded).
-    Batch mode processes all matching files in episode-index order.
+    Batch mode processes the ``.mcap`` files in the order they were recorded (by the ``recording_start_time`` stored in each file) and assigns LeRobot episode indices from that order, so episode 0 is the earliest recording.
 
 Configuring the Conversion
 ==========================
@@ -97,7 +96,6 @@ Point it at a different config with ``--config <path>``.
         "max_image_queue":       10,                               // Back-pressure bound
         "png_compression_level": 5,                                // Intermediate PNG quality
         "chunk_size":            2,                                // Episodes per chunk-NNN folder
-        "episode_index":         0,                                // Starting episode index
         "overwrite_existing":    false                             // Refuse to clobber existing files
       }
     }
@@ -282,13 +280,15 @@ FFmpeg not found or codec error
 Install FFmpeg with ``sudo apt-get install ffmpeg``.
 The tool shells out to FFmpeg for AV1 encoding of the image streams.
 
-Episode numbering mismatch
---------------------------
+Episode ordering
+----------------
 
-The tool extracts episode indices from the MCAP filename.
-Filenames must follow ``episode_NNNNNN.mcap`` (six-digit zero-padded).
-This is the format the SDK writes natively.
-Do not rename the files.
+The tool assigns LeRobot episode indices from the order the episodes were recorded (the ``recording_start_time`` in each file's metadata), not from their (random) filenames.
+A newly recorded episode has a later timestamp, so it sorts to the end and receives the next index; existing episodes keep their indices, and the idempotent skip lets you re-run after recording more without re-converting what is already done.
+
+This assumes the recording clocks are consistent.
+When merging ``.mcap`` files from multiple machines whose clocks are not synchronized, the cross-machine ordering is only as reliable as those clocks, and inserting a file with an earlier timestamp can shift later indices.
+Files missing ``recording_start_time`` sort last, ordered by filename.
 
 What's Next
 ===========

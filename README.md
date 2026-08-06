@@ -27,7 +27,7 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Stereolab
 - Record synchronized episodes from arms, cameras, and a mobile base to a single `.mcap` file per episode
 - Config-driven setup: one JSON file describes all hardware, producers, and session parameters
 - CLI overrides via `--set key=value` dot-notation for quick iteration without editing JSON
-- Automatic episode numbering with resumption from existing episodes in the output directory
+- Unique, time-ordered episode filenames (UUIDv7) with resumption from existing episodes in the output directory
 - Joint states recordable up to 200 Hz; cameras at configurable frame rates
 - Converts recorded TrossenMCAP files to LeRobot V2 format (Parquet + MP4 video) with per-episode statistics computed during conversion
 - Interactive episode controls: re-record, skip, and discard episodes with keyboard shortcuts during recording
@@ -54,8 +54,8 @@ The diagram below shows how sensor data flows through the SDK — from hardware 
 Record demonstrations           Convert to training format
 ─────────────────────────       ─────────────────────────────────────────────
 Run example script          →   trossen_mcap_to_lerobot_v2 <input> <output>
-  ↓ episode_000000.mcap              ↓ Parquet + MP4 per episode
-  ↓ episode_000001.mcap              ↓ info.json with per-episode statistics
+  ↓ 0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap   ↓ Parquet + MP4 per episode
+  ↓ 0190b3c2-2f5a-7e91-b0c4-7d8e9f0a1b2c.mcap   ↓ info.json with per-episode statistics
   ↓ ...
 ```
 
@@ -373,7 +373,7 @@ After recording, convert your `.mcap` episodes to LeRobot V2 format:
 
 ```bash
 # Convert a single episode
-./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/my_dataset/episode_000000.mcap ~/lerobot_datasets
+./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/my_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap ~/lerobot_datasets
 
 # Convert all episodes in a folder (batch mode)
 ./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/my_dataset/ ~/lerobot_datasets

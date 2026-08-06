@@ -73,7 +73,7 @@ The script will:
 5. Repeat until `max_episodes` is reached or Ctrl+C is pressed
 6. Return arms to the sleep position
 
-Episodes are saved to `~/.trossen_sdk/<dataset_id>/episode_NNNNNN.mcap`.
+Episodes are saved to `~/.trossen_sdk/<dataset_id>/<id>.mcap` (`<id>` is a UUIDv7).
 
 ### Optional: home staging
 

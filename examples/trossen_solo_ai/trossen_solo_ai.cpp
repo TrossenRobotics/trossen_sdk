@@ -308,9 +308,7 @@ int main(int argc, char** argv) {
   // After each episode: print a summary and run sanity checks. (Teleop reset and
   // arm re-homing are owned by the SessionManager.)
   mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
-    const std::string file_path =
-      trossen::utils::generate_episode_path(root, stats.current_episode_index);
-    trossen::utils::print_episode_summary(file_path, stats);
+    trossen::utils::print_episode_summary(stats.current_episode_path, stats);
 
     trossen::utils::SanityCheckConfig sanity_cfg{
       stats.elapsed.count(),

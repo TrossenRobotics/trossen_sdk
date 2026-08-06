@@ -160,6 +160,9 @@ public:
   void set_episode_index(uint32_t episode_index) override {
     PYBIND11_OVERRIDE(void, Backend, set_episode_index, episode_index);
   }
+  std::string current_output_path() const override {
+    PYBIND11_OVERRIDE(std::string, Backend, current_output_path);
+  }
 };
 
 /// Trampoline for TeleopTypeIO (virtual leaders in Python).
@@ -413,7 +416,8 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def("close", &Backend::close)
     .def("discard_episode", &Backend::discard_episode)
     .def("scan_existing_episodes", &Backend::scan_existing_episodes)
-    .def("set_episode_index", &Backend::set_episode_index, py::arg("episode_index"));
+    .def("set_episode_index", &Backend::set_episode_index, py::arg("episode_index"))
+    .def("current_output_path", &Backend::current_output_path);
 
   py::class_<Backend::Config>(m, "BackendConfig")
     .def(py::init<>())
@@ -592,7 +596,6 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("chunk_size_bytes", &TrossenMCAPBackendConfig::chunk_size_bytes)
     .def_readwrite("compression", &TrossenMCAPBackendConfig::compression)
     .def_readwrite("dataset_id", &TrossenMCAPBackendConfig::dataset_id)
-    .def_readwrite("episode_index", &TrossenMCAPBackendConfig::episode_index)
     .def_readwrite("task_description", &TrossenMCAPBackendConfig::task_description)
     .def_static("from_json", &TrossenMCAPBackendConfig::from_json, py::arg("json"));
 
@@ -758,6 +761,8 @@ PYBIND11_MODULE(trossen_sdk, m) {
     py::class_<SessionManager::Stats>(m, "SessionManagerStats")
       .def_readwrite("current_episode_index",
                      &SessionManager::Stats::current_episode_index)
+      .def_readwrite("current_episode_path",
+                     &SessionManager::Stats::current_episode_path)
       .def_readwrite("episode_active", &SessionManager::Stats::episode_active)
       .def_property("elapsed",
         [](const SessionManager::Stats& s) { return s.elapsed.count(); },
@@ -883,10 +888,6 @@ PYBIND11_MODULE(trossen_sdk, m) {
     m.def("interruptible_sleep", &interruptible_sleep, py::arg("duration"),
           py::call_guard<py::gil_scoped_release>(),
           "Sleep that returns early if Ctrl+C pressed");
-
-    m.def("generate_episode_path", &generate_episode_path,
-          py::arg("output_dir"), py::arg("episode_index"),
-          py::arg("extension") = "trossen_mcap");
 
     m.def("announce", &announce, py::arg("message"), py::arg("block") = true,
           "Announce a message via text-to-speech");

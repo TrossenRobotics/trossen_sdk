@@ -107,15 +107,16 @@ public:
   /**
    * @brief Discard all data for the current episode
    *
-   * Closes the backend without finalizing, then deletes all files/directories
-   * associated with the current episode_index_. Used for re-recording.
-   * Safe to call even if the backend was already closed (e.g., by Sink::stop()).
+   * Closes the backend without finalizing, then deletes the output file(s) the backend
+   * wrote for the current episode. Used for re-recording. How the backend identifies those
+   * files is implementation-defined. Safe to call even if the backend was already closed
+   * (e.g., by Sink::stop()).
    */
   virtual void discard_episode() = 0;
 
   /**
-   * @brief Scan directory for existing episode files and return next index
-   * @return Next episode index to use
+   * @brief Count existing episodes in the output directory
+   * @return Number of existing episodes, which the caller uses as the next episode index
    */
   virtual uint32_t scan_existing_episodes() = 0;
 
@@ -128,6 +129,18 @@ public:
   virtual void set_episode_index(uint32_t episode_index) {
     episode_index_ = episode_index;
   }
+
+  /**
+   * @brief Path of the output file/artifact for the current episode
+   *
+   * Returns the concrete path the backend writes this episode to (e.g. the .mcap
+   * file or the LeRobot .parquet file), valid after open() and until the backend is
+   * closed/destroyed. Used for user-facing reporting. Defaults to empty for backends
+   * that produce no file (e.g. the null backend).
+   *
+   * @return Output path as a string, or an empty string if not applicable
+   */
+  virtual std::string current_output_path() const { return ""; }
 
 protected:
   /// @brief Whether the backend is opened

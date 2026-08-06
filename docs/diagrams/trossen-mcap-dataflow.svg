@@ -127,7 +127,7 @@
 
   <!-- ==================== ROW 6: MCAP Episode File (green) ==================== -->
   <rect x="100" y="574" width="760" height="120" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
-  <text x="480" y="598" text-anchor="middle" font-size="14" font-weight="700" fill="#065f46">episode_NNNNNN.mcap</text>
+  <text x="480" y="598" text-anchor="middle" font-size="14" font-weight="700" fill="#065f46">&lt;uuid&gt;.mcap</text>
 
   <!-- Metadata block -->
   <rect x="120" y="611" width="340" height="70" rx="5" fill="#fff" stroke="#34d399" stroke-width="1.2"/>

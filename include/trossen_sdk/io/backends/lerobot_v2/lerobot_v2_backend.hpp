@@ -855,6 +855,15 @@ public:
    uint32_t scan_existing_episodes() override;
 
   /**
+   * @brief Path of the .parquet file for the current episode
+   * @return The output parquet path as a string (empty until open() has run)
+   */
+  std::string current_output_path() const override {
+    if (data_root_.empty()) return "";
+    return (data_root_ / format_episode_parquet(episode_index_)).string();
+  }
+
+  /**
    * @brief Image encoding statistics
    */
   struct ImageEncodeStats {

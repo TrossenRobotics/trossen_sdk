@@ -46,7 +46,6 @@ TrossenMCAPBackend::TrossenMCAPBackend(
   std::cout << "Chunk Size Bytes: " << cfg_->chunk_size_bytes << std::endl;
   std::cout << "Compression: " << cfg_->compression << std::endl;
   std::cout << "Dataset ID: " << cfg_->dataset_id << std::endl;
-  std::cout << "Episode Index: " << cfg_->episode_index << std::endl;
   if (!cfg_->task_description.empty()) {
     std::cout << "Task Description: " << cfg_->task_description << std::endl;
   }
@@ -66,12 +65,11 @@ bool TrossenMCAPBackend::open() {
   if (opened_) {
     return true;
   }
-  std::ostringstream oss;
-  oss << cfg_->root << "/"
-      << cfg_->dataset_id << "/"
-      << "episode_" << std::setw(6) << std::setfill('0') << episode_index_ << ".mcap";
-  // Parse configs
-  path_ = std::filesystem::path(oss.str());
+
+  const std::filesystem::path dataset_dir = std::filesystem::path(cfg_->root) / cfg_->dataset_id;
+  do {
+    path_ = dataset_dir / (trossen::io::backends::generate_episode_id() + ".mcap");
+  } while (std::filesystem::exists(path_));
 
   // Create Foxglove context
   context_ = foxglove::Context::create();
@@ -124,7 +122,9 @@ bool TrossenMCAPBackend::open() {
   metadata["tool_version"] = trossen::core::version();
   metadata["dataset_id"] = cfg_->dataset_id;
   metadata["robot_name"] = cfg_->robot_name;
-  metadata["episode_index"] = std::to_string(episode_index_);
+  // Record the episode's id (the filename without the ".mcap" extension) so a file's
+  // identity is queryable from metadata, not only its name.
+  metadata["episode_id"] = path_.stem().string();
   auto now = trossen::data::now_real();
   metadata["recording_start_time"] = std::to_string(now.to_ns());
   if (!cfg_->task_description.empty()) {
@@ -205,13 +205,25 @@ void TrossenMCAPBackend::discard_episode() {
   std::scoped_lock lk(writer_mutex_);
   close_resources();
 
-  // Construct and delete the episode file (works even if already closed by sink)
-  std::ostringstream oss;
-  oss << cfg_->root << "/"
-      << cfg_->dataset_id << "/"
-      << "episode_" << std::setw(6) << std::setfill('0') << episode_index_ << ".mcap";
+  // Determine which file to delete (works even if already closed by the sink).
+  //
+  // Filenames are UUIDs, so the file cannot be reconstructed from an index.
+  // A live backend that called open() knows its own file via path_. The re-record path
+  // (SessionManager::discard_last_episode) instead spins up a fresh backend that never
+  // opened a file, so path_ is empty; there we delete the most-recently-written episode,
+  // which is the just-finished one this local operation is meant to discard.
+  std::filesystem::path target = path_;
+  if (target.empty()) {
+    target = find_latest_episode_file();
+  }
+
+  if (target.empty()) {
+    std::cerr << "Warning: No MCAP episode file found to discard.\n";
+    return;
+  }
+
   try {
-    std::filesystem::remove(std::filesystem::path(oss.str()));
+    std::filesystem::remove(target);
   } catch (const std::filesystem::filesystem_error& e) {
     std::cerr << "Warning: Failed to remove MCAP file during discard: "
               << e.what() << "\n";
@@ -630,9 +642,49 @@ bool TrossenMCAPBackend::is_depth_encoding(const std::string& enc) {
 }
 
 
+// Pattern for episode filenames: a canonical UUID (the current <uuid>.mcap naming) or the
+// legacy zero-padded episode_NNNNNN.mcap, so resuming/gating/discarding still see episodes
+// written by older SDKs.
+static const std::regex& episode_filename_pattern() {
+  // TODO(lukeschmitt-tr): remove the legacy pattern once no longer needed.
+  static const std::regex pattern(
+    R"(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|episode_[0-9]{6})\.mcap)");
+  return pattern;
+}
+
+std::filesystem::path TrossenMCAPBackend::find_latest_episode_file() const {
+  // "Latest" is decided by last-write time.
+  std::filesystem::path base_path = std::filesystem::path(cfg_->root) / cfg_->dataset_id;
+  if (!std::filesystem::is_directory(base_path)) {
+    return {};
+  }
+
+  std::filesystem::path latest;
+  std::filesystem::file_time_type latest_time{};
+  try {
+    for (const auto& entry : std::filesystem::directory_iterator(base_path)) {
+      if (!entry.is_regular_file()) {
+        continue;
+      }
+      if (!std::regex_match(entry.path().filename().string(), episode_filename_pattern())) {
+        continue;
+      }
+      auto mtime = entry.last_write_time();
+      if (latest.empty() || mtime > latest_time) {
+        latest = entry.path();
+        latest_time = mtime;
+      }
+    }
+  } catch (const std::filesystem::filesystem_error& e) {
+    std::cerr << "Filesystem error while locating latest episode: " << e.what() << std::endl;
+    return {};
+  }
+  return latest;
+}
+
 uint32_t TrossenMCAPBackend::scan_existing_episodes() {
   std::filesystem::path base_path = std::filesystem::path(cfg_->root) / cfg_->dataset_id;
-  // If directory doesn't exist, return 0
+  // If directory doesn't exist, there are no episodes yet
   if (!std::filesystem::exists(base_path)) {
     return 0;
   }
@@ -643,35 +695,16 @@ uint32_t TrossenMCAPBackend::scan_existing_episodes() {
     return 0;
   }
 
-  // Pattern: episode_NNNNNN.mcap (6-digit zero-padded) Regex to match episode files
-  std::regex episode_pattern(R"(episode_(\d{6})\.mcap)");
-
-  uint32_t max_index = 0;
-  bool found_any = false;
-
+  // Filenames are UUIDs, so there is no index to parse. Count the existing
+  // episode files; SessionManager uses this count to resume and to enforce max_episodes.
+  uint32_t count = 0;
   try {
-    // Iterate through directory entries
     for (const auto& entry : std::filesystem::directory_iterator(base_path)) {
-      // Skip if not a regular file
       if (!entry.is_regular_file()) {
         continue;
       }
-
-      // Get filename only (not full path)
-      std::string filename = entry.path().filename().string();
-
-      // Try to match against episode pattern
-      std::smatch match;
-      if (std::regex_match(filename, match, episode_pattern)) {
-        // Extract the numeric index from capture group 1
-        std::string index_str = match[1].str();
-        uint32_t index = static_cast<uint32_t>(std::stoul(index_str));
-
-        // Track maximum index found
-        if (!found_any || index > max_index) {
-          max_index = index;
-          found_any = true;
-        }
+      if (std::regex_match(entry.path().filename().string(), episode_filename_pattern())) {
+        ++count;
       }
       // Silently ignore non-episode files (as per design doc)
     }
@@ -680,8 +713,7 @@ uint32_t TrossenMCAPBackend::scan_existing_episodes() {
     return 0;
   }
 
-  // Return max_index + 1, or 0 if no episodes found
-  return found_any ? (max_index + 1) : 0;
+  return count;
 }
 
 }  // namespace trossen::io::backends

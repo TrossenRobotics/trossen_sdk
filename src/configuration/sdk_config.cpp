@@ -184,7 +184,6 @@ void SdkConfig::populate_global_config() const {
     bj["chunk_size_bytes"] = b.chunk_size_bytes;
     bj["compression"] = b.compression;
     bj["dataset_id"] = b.dataset_id;
-    bj["episode_index"] = b.episode_index;
     gc_json["trossen_mcap_backend"] = bj;
   }
 

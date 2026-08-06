@@ -28,7 +28,7 @@ Example:
 
 ```bash
 ./build/scripts/replay_trossen_mcap_jointstate \
-    ~/.trossen_sdk/my_dataset/episode_000000.mcap \
+    ~/.trossen_sdk/my_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
     scripts/replay_trossen_mcap_jointstate/config.json
 ```
 
