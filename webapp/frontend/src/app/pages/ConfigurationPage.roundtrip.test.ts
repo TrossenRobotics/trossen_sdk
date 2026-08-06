@@ -358,7 +358,12 @@ describe('the whole config', () => {
   it('round-trips a Rivet without losing a section', () => {
     const original = rivetConfig();
     const { saved } = roundTrip(original);
-    expect(saved.teleop).toEqual(original.teleop);
+    // teleop is no longer passed through byte-for-byte — the page owns it now,
+    // so it comes back normalised. Behaviour is unchanged: this fixture has no
+    // pairs, and an absent `enabled` means true in the SDK, so both the old
+    // shape and the new one yield zero teleop controllers. Keys the page does
+    // not model still survive.
+    expect(saved.teleop).toMatchObject({ mode: 'glide', enabled: false, pairs: [] });
     expect(saved.backend).toEqual(original.backend);
     expect(saved.session).toEqual(original.session);
     expect(saved.robot_name).toBe('rivet');
@@ -378,5 +383,127 @@ describe('the whole config', () => {
     const saved = systemToSdkConfig(system, config);
     expect(saved.producers?.map((p) => p.hardware_id)).not.toContain('camera_main');
     expect(saved.hardware?.cameras).toEqual([]);
+  });
+});
+
+describe('teleop pairs', () => {
+  it('round-trips the pairs and the rate', () => {
+    const cfg = rivetConfig();
+    (cfg.teleop as Record<string, unknown>).enabled = true;
+    (cfg.teleop as Record<string, unknown>).rate_hz = 1000;
+    (cfg.teleop as Record<string, unknown>).pairs = [
+      { leader: 'glide_left', follower: 'follower_left', space: 'joint' },
+    ];
+    const { saved } = roundTrip(cfg);
+    expect(saved.teleop).toMatchObject({
+      enabled: true,
+      rate_hz: 1000,
+      pairs: [{ leader: 'glide_left', follower: 'follower_left', space: 'joint' }],
+    });
+  });
+
+  it('defaults a pair with no space to joint, as the SDK does', () => {
+    const cfg = rivetConfig();
+    (cfg.teleop as Record<string, unknown>).pairs = [
+      { leader: 'glide_left', follower: 'follower_left' },
+    ];
+    const { saved } = roundTrip(cfg);
+    expect(saved.teleop).toMatchObject({
+      pairs: [{ leader: 'glide_left', follower: 'follower_left', space: 'joint' }],
+    });
+  });
+
+  it('prunes a pair whose leader no longer exists', () => {
+    // The failure that cost two sessions: arms deleted in the UI, pairs left
+    // behind naming them. The SDK only logs "[warn] Leader ... not registered"
+    // and carries on, so it is invisible until nothing moves.
+    const cfg = rivetConfig();
+    (cfg.teleop as Record<string, unknown>).pairs = [
+      { leader: 'glide_left', follower: 'follower_left', space: 'joint' },
+    ];
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: cfg });
+    const noLeaders = {
+      ...system,
+      hardware: system.hardware.filter((h) => !h.name.startsWith('glide_')),
+    };
+    const saved = systemToSdkConfig(noLeaders, cfg);
+    expect((saved.teleop as { pairs: unknown[] }).pairs).toEqual([]);
+    // ...and an enabled block with no pairs is meaningless, so it goes off.
+    expect((saved.teleop as { enabled: boolean }).enabled).toBe(false);
+  });
+
+  it('keeps teleop off for a camera-only system rather than inventing pairs', () => {
+    const cfg = rivetConfig();
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: cfg });
+    const camerasOnly = {
+      ...system,
+      hardware: system.hardware.filter((h) => h.type.includes('camera')),
+    };
+    const saved = systemToSdkConfig(camerasOnly, cfg);
+    expect(saved.teleop).toMatchObject({ enabled: false, pairs: [] });
+  });
+});
+
+describe('the Glide components', () => {
+  it('round-trips glide_arm_input', () => {
+    const { saved } = roundTrip(rivetConfig());
+    const gi = saved.hardware?.components?.find((c) => c.type === 'glide_arm_input');
+    expect(gi).toMatchObject({ id: 'glide_inputs', arms: ['glide_left'] });
+  });
+
+  it('round-trips session-control buttons', () => {
+    const cfg = rivetConfig();
+    cfg.hardware.components.push({
+      id: 'session_control',
+      type: 'glide_session_control',
+      poll_rate_hz: 50.0,
+      debounce_ms: 40,
+      buttons: [
+        { arm_id: 'glide_left', bit: 0, event: 'start' },
+        { arm_id: 'glide_left', bit: 2, event: 'rerecord' },
+      ],
+    } as unknown as (typeof cfg.hardware.components)[number]);
+    const { saved } = roundTrip(cfg);
+    const sc = saved.hardware?.components?.find((c) => c.type === 'glide_session_control');
+    expect(sc).toMatchObject({
+      id: 'session_control',
+      poll_rate_hz: 50,
+      debounce_ms: 40,
+      buttons: [
+        { arm_id: 'glide_left', bit: 0, event: 'start' },
+        { arm_id: 'glide_left', bit: 2, event: 'rerecord' },
+      ],
+    });
+  });
+
+  it('drops glide_arm_input when the user removes it', () => {
+    const cfg = rivetConfig();
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: cfg });
+    const saved = systemToSdkConfig({ ...system, glideInputs: undefined }, cfg);
+    expect(saved.hardware?.components?.some((c) => c.type === 'glide_arm_input')).toBe(false);
+  });
+
+  it('still preserves components it does not model', () => {
+    // The whole reason the page used to pass components through untouched.
+    const { saved } = roundTrip(rivetConfig());
+    const types = (saved.hardware?.components ?? []).map((c) => c.type);
+    expect(types).toContain('trossen_base');
+    expect(types).toContain('glide_base');
+  });
+
+  it('appends a Glide component the original config never had', () => {
+    const cfg = rivetConfig();
+    cfg.hardware.components = cfg.hardware.components.filter(
+      (c) => c.type !== 'glide_arm_input',
+    );
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: cfg });
+    const saved = systemToSdkConfig(
+      { ...system, glideInputs: { id: 'glide_inputs', arms: ['glide_left'] } },
+      cfg,
+    );
+    expect(saved.hardware?.components?.find((c) => c.type === 'glide_arm_input')).toMatchObject({
+      id: 'glide_inputs',
+      arms: ['glide_left'],
+    });
   });
 });

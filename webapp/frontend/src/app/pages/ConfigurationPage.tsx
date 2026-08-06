@@ -42,6 +42,89 @@ const ZED_RESOLUTION_NAMES = Object.keys(ZED_RESOLUTIONS) as ZedResolution[];
 // keeps behaving the way it already did.
 const DEFAULT_ZED_RESOLUTION: ZedResolution = 'HD720';
 
+// ---------------------------------------------------------------------------
+// Closed value sets the SDK validates against. Every one of these is rejected
+// at configure() time if it does not match exactly, so they belong in a
+// dropdown rather than a text field: the page previously defaulted a new arm to
+// model "ViperX-300" / end effector "Gripper", neither of which the driver
+// knows, so an arm added from the UI could not boot at all.
+// ---------------------------------------------------------------------------
+
+// Mirrors trossen_arm::MODEL_NAME in the installed driver. TrossenArmComponent
+// resolves `model` against that map and throws listing the valid names, so this
+// list must track the driver rather than the other way round.
+// TeleopConfig::rate_hz — the mirror loop rate. 1 kHz is what every shipped
+// preset uses; the arms' own control loop is what actually bounds this.
+const DEFAULT_TELEOP_RATE_HZ = 1000.0;
+
+const ARM_MODELS = [
+  'wxai_v0',
+  'vxai_v0_left',
+  'vxai_v0_right',
+  'core',
+  'pro',
+  'glide_left',
+  'glide_right',
+] as const;
+type ArmModel = (typeof ARM_MODELS)[number];
+
+// TrossenArmComponent hardcodes these three and throws on anything else. The
+// choice also decides leader vs follower internally: `wxai_v0_leader` sets
+// is_leader_, the other two clear it. `pro_base` matters beyond naming — using
+// a wxai end effector on a Pro loads the wrong mass into gravity compensation,
+// which the arm does not report as an error, it just holds position badly.
+const END_EFFECTORS = ['wxai_v0_leader', 'wxai_v0_follower', 'pro_base'] as const;
+type EndEffector = (typeof END_EFFECTORS)[number];
+
+// TeleopPairConfig::space. "joint" is the default; a pair naming anything else
+// needs that space implemented or the pair is skipped.
+const TELEOP_SPACES = ['joint', 'cartesian'] as const;
+type TeleopSpace = (typeof TELEOP_SPACES)[number];
+
+// GlideSessionControlComponent::event_from_name. `stop_early` is valid and
+// currently unused by any shipped preset; binding a button to "no event" is
+// deliberately not accepted by the SDK, so there is no empty option.
+const SESSION_CONTROL_EVENTS = [
+  'start',
+  'stop_early',
+  'rerecord',
+  'stop_session',
+] as const;
+type SessionControlEvent = (typeof SESSION_CONTROL_EVENTS)[number];
+
+/** Human labels for the button events; the wire values stay as the SDK spells them. */
+const SESSION_CONTROL_EVENT_LABELS: Readonly<Record<SessionControlEvent, string>> = {
+  start: 'Start / next episode',
+  stop_early: 'Stop episode early',
+  rerecord: 'Re-record episode',
+  stop_session: 'Stop session',
+};
+
+function asArmModel(value: unknown): ArmModel | undefined {
+  return typeof value === 'string' && (ARM_MODELS as readonly string[]).includes(value)
+    ? (value as ArmModel)
+    : undefined;
+}
+
+function asEndEffector(value: unknown): EndEffector | undefined {
+  return typeof value === 'string' && (END_EFFECTORS as readonly string[]).includes(value)
+    ? (value as EndEffector)
+    : undefined;
+}
+
+function asTeleopSpace(value: unknown): TeleopSpace | undefined {
+  return typeof value === 'string' && (TELEOP_SPACES as readonly string[]).includes(value)
+    ? (value as TeleopSpace)
+    : undefined;
+}
+
+function asSessionControlEvent(value: unknown): SessionControlEvent | undefined {
+  return typeof value === 'string' &&
+    (SESSION_CONTROL_EVENTS as readonly string[]).includes(value)
+    ? (value as SessionControlEvent)
+    : undefined;
+}
+
 // Depth modes the ZED component recognises, cheapest first. The
 // PERFORMANCE / QUALITY / ULTRA family it still accepts is deprecated in ZED
 // SDK 5.x and deliberately not offered. Case matters: the component compares
@@ -185,11 +268,58 @@ interface BaseHardware {
 type Hardware = CameraHardware | ArmHardware | BaseHardware;
 
 // Level 1 - Hardware System (top-level grouping)
+/** One leader -> follower link in `teleop.pairs`. */
+interface TeleopPair {
+  leader: string;
+  follower: string;
+  space: TeleopSpace;
+}
+
+/**
+ * The `teleop` block, which this page now owns rather than passing through.
+ *
+ * It used to be copied verbatim from the original config, so deleting an arm
+ * left its pairs behind (pointing at hardware that no longer existed) and
+ * ADDING arms never created any. Both failed at record time, not at save time.
+ */
+interface TeleopModel {
+  enabled: boolean;
+  rate_hz: number;
+  pairs: TeleopPair[];
+}
+
+/** A `glide_arm_input` component: which handle arms feed the input layer. */
+interface GlideInputsModel {
+  id: string;
+  arms: string[];
+}
+
+/** One button binding inside `glide_session_control`. */
+interface SessionButton {
+  arm_id: string;
+  bit: number;
+  event: SessionControlEvent;
+}
+
+/** A `glide_session_control` component: handle buttons -> session events. */
+interface SessionControlModel {
+  id: string;
+  poll_rate_hz?: number;
+  debounce_ms?: number;
+  buttons: SessionButton[];
+}
+
 interface HardwareSystem {
   id: string;
   name: string;
   description?: string;
   hardware: Hardware[];
+  // Modelled config that does not belong to a single hardware card. Anything
+  // NOT modelled here (glide_base, trossen_base, future component types) is
+  // still carried through untouched on save.
+  teleop?: TeleopModel;
+  glideInputs?: GlideInputsModel;
+  sessionControl?: SessionControlModel;
 }
 
 // Systems that ship with a factory-default config the user can revert to.
@@ -695,11 +825,63 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
   if (baseCount > 0) parts.push(`${baseCount} base`);
   const description = parts.length > 0 ? parts.join(', ') : 'No hardware';
 
+  // --- teleop ---------------------------------------------------------------
+  const rawTeleop = (config.teleop ?? {}) as Record<string, unknown>;
+  const rawPairs = Array.isArray(rawTeleop.pairs) ? rawTeleop.pairs : [];
+  const teleop: TeleopModel = {
+    // TeleopConfig::enabled defaults to TRUE in the SDK (`bool enabled{true}`),
+    // so an omitted key means on, not off.
+    enabled: typeof rawTeleop.enabled === 'boolean' ? rawTeleop.enabled : true,
+    rate_hz: typeof rawTeleop.rate_hz === 'number' ? rawTeleop.rate_hz : DEFAULT_TELEOP_RATE_HZ,
+    pairs: rawPairs
+      .filter((p): p is Record<string, unknown> => !!p && typeof p === 'object')
+      .map((p) => ({
+        leader: typeof p.leader === 'string' ? p.leader : '',
+        follower: typeof p.follower === 'string' ? p.follower : '',
+        // The SDK defaults an absent space to "joint"; mirror that rather than
+        // emitting an empty string it would then reject.
+        space: asTeleopSpace(p.space) ?? 'joint',
+      }))
+      .filter((p) => p.leader !== '' || p.follower !== ''),
+  };
+
+  // --- the two Glide components this page models ----------------------------
+  const glideInputsCfg = components.find((c) => c.type === 'glide_arm_input');
+  const glideInputs: GlideInputsModel | undefined = glideInputsCfg
+    ? {
+        id: String(glideInputsCfg.id ?? 'glide_inputs'),
+        arms: Array.isArray(glideInputsCfg.arms)
+          ? (glideInputsCfg.arms as unknown[]).filter((a): a is string => typeof a === 'string')
+          : [],
+      }
+    : undefined;
+
+  const sessionCfg = components.find((c) => c.type === 'glide_session_control');
+  const sessionControl: SessionControlModel | undefined = sessionCfg
+    ? {
+        id: String(sessionCfg.id ?? 'session_control'),
+        poll_rate_hz: typeof sessionCfg.poll_rate_hz === 'number' ? sessionCfg.poll_rate_hz : undefined,
+        debounce_ms: typeof sessionCfg.debounce_ms === 'number' ? sessionCfg.debounce_ms : undefined,
+        buttons: (Array.isArray(sessionCfg.buttons) ? sessionCfg.buttons : [])
+          .filter((b): b is Record<string, unknown> => !!b && typeof b === 'object')
+          .map((b) => ({
+            arm_id: typeof b.arm_id === 'string' ? b.arm_id : '',
+            bit: typeof b.bit === 'number' ? b.bit : 0,
+            // An unknown event would be rejected by the SDK; keep the binding
+            // visible by falling back rather than dropping the row silently.
+            event: asSessionControlEvent(b.event) ?? 'start',
+          })),
+      }
+    : undefined;
+
   return {
     id,
     name: apiData.name ?? config.robot_name ?? id,
     description,
     hardware: hardwareItems,
+    teleop,
+    glideInputs,
+    sessionControl,
   };
 }
 
@@ -709,6 +891,39 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
  * Sections not managed by the Configuration page (teleop, backend, session)
  * are preserved from the original config so they are not lost on save.
  */
+/**
+ * Build the `teleop` block, dropping pairs whose arms no longer exist.
+ *
+ * Pruning here rather than warning-and-emitting is deliberate: the SDK's teleop
+ * factory only logs `[warn] Leader '...' not registered, skipping pair` and
+ * carries on, so a dangling pair is invisible unless someone reads the bootstrap
+ * output. A config that cannot work should not be written in the first place.
+ *
+ * `enabled` follows the pairs — a system with none (a camera-only rig) emits
+ * `enabled: false` rather than an enabled block with nothing in it.
+ */
+function buildTeleop(
+  system: HardwareSystem,
+  armsObj: Record<string, RawArmConfig>,
+  originalConfig: RawSdkConfig | undefined,
+): Record<string, unknown> {
+  const model = system.teleop;
+  if (!model) return (originalConfig?.teleop as Record<string, unknown>) ?? {};
+  const live = new Set(Object.keys(armsObj));
+  const pairs = model.pairs
+    .filter((p) => live.has(p.leader) && live.has(p.follower))
+    .map((p) => ({ leader: p.leader, follower: p.follower, space: p.space }));
+  return {
+    // Spread first: TeleopConfig is a closed struct today, but silently
+    // dropping keys this page does not model is exactly how the ZED settings
+    // and the components block were lost before.
+    ...((originalConfig?.teleop as Record<string, unknown>) ?? {}),
+    enabled: model.enabled && pairs.length > 0,
+    rate_hz: model.rate_hz,
+    pairs,
+  };
+}
+
 export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdkConfig | undefined): RawSdkConfig {
   const armsObj: Record<string, RawArmConfig> = {};
   const camerasArr: RawCameraConfig[] = [];
@@ -863,7 +1078,27 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
   // therefore delete them, so start from the original and patch.
   const originalComponents = originalConfig?.hardware?.components;
   if (originalComponents?.length) {
-    hardware.components = originalComponents.map((comp) => {
+    hardware.components = originalComponents.flatMap((comp) => {
+      // The two Glide components ARE modelled now, so they are rebuilt from the
+      // UI rather than preserved. Returning [] drops one the user removed —
+      // which is the point: a config keeping `glide_arm_input` after its handle
+      // arms were deleted fails every recording in configure().
+      if (comp.type === 'glide_arm_input') {
+        return system.glideInputs
+          ? [{ ...comp, id: system.glideInputs.id, arms: [...system.glideInputs.arms] }]
+          : [];
+      }
+      if (comp.type === 'glide_session_control') {
+        if (!system.sessionControl) return [];
+        const sc: RawComponentConfig = {
+          ...comp,
+          id: system.sessionControl.id,
+          buttons: system.sessionControl.buttons.map((b) => ({ ...b })),
+        };
+        if (typeof system.sessionControl.poll_rate_hz === 'number') sc.poll_rate_hz = system.sessionControl.poll_rate_hz;
+        if (typeof system.sessionControl.debounce_ms === 'number') sc.debounce_ms = system.sessionControl.debounce_ms;
+        return [sc];
+      }
       // The rail's ceiling is edited in one place on the base panel but has to
       // land in two: here on the leader, which scales the lift command, and on
       // the base, which clamps it. Keeping them in step is the whole point —
@@ -875,10 +1110,10 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
         comp.id === trossenBase.lift_leader_id &&
         readLiftAxisMax(comp) !== undefined
       ) {
-        return withLiftAxisMax(comp, trossenBase.max_lift_units_per_s);
+        return [withLiftAxisMax(comp, trossenBase.max_lift_units_per_s)];
       }
       if (comp.type !== 'trossen_base' || !trossenBase || comp.id !== trossenBase.id) {
-        return comp;
+        return [comp];
       }
       const patched: RawComponentConfig = { ...comp };
       if (typeof trossenBase.max_linear_mps === 'number') patched.max_linear_mps = trossenBase.max_linear_mps;
@@ -886,8 +1121,28 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
       if (typeof trossenBase.max_lift_units_per_s === 'number') patched.max_lift_units_per_s = trossenBase.max_lift_units_per_s;
       if (typeof trossenBase.estop_battery_percent === 'number') patched.estop_battery_percent = trossenBase.estop_battery_percent;
       if (typeof trossenBase.ready_timeout_s === 'number') patched.ready_timeout_s = trossenBase.ready_timeout_s;
-      return patched;
+      return [patched];
     });
+  }
+
+  // A Glide component the original config never had — the user added it in the
+  // UI — has nothing to patch, so append it.
+  const existingTypes = new Set((hardware.components ?? []).map((c) => c.type));
+  if (system.glideInputs && !existingTypes.has('glide_arm_input')) {
+    hardware.components = [
+      ...(hardware.components ?? []),
+      { id: system.glideInputs.id, type: 'glide_arm_input', arms: [...system.glideInputs.arms] },
+    ];
+  }
+  if (system.sessionControl && !existingTypes.has('glide_session_control')) {
+    const sc: RawComponentConfig = {
+      id: system.sessionControl.id,
+      type: 'glide_session_control',
+      buttons: system.sessionControl.buttons.map((b) => ({ ...b })),
+    };
+    if (typeof system.sessionControl.poll_rate_hz === 'number') sc.poll_rate_hz = system.sessionControl.poll_rate_hz;
+    if (typeof system.sessionControl.debounce_ms === 'number') sc.debounce_ms = system.sessionControl.debounce_ms;
+    hardware.components = [...(hardware.components ?? []), sc];
   }
 
   // `allProducers` is rebuilt from the UI's hardware list, so a producer
@@ -912,7 +1167,10 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
     robot_name: originalConfig?.robot_name ?? system.name,
     hardware,
     producers: allProducers,
-    teleop: originalConfig?.teleop ?? {},
+    // Rebuilt from the model, and pruned to arms that still exist. Passing the
+    // original through verbatim is what left dangling pairs behind after an arm
+    // was deleted, and what stopped re-added arms from ever getting one.
+    teleop: buildTeleop(system, armsObj, originalConfig),
     backend: originalConfig?.backend ?? {},
     session: originalConfig?.session ?? {},
   };
@@ -1323,8 +1581,11 @@ export function ConfigurationPage() {
   const [armForm, setArmForm] = useState({
     name: '',
     ip_address: '192.168.1.10',
-    model: 'ViperX-300',
-    end_effector: 'Gripper',
+    // Defaults must be values the driver actually knows: 'ViperX-300' /
+    // 'Gripper' threw "Unknown model" at configure(), so an arm added from
+    // the UI could never boot. Matches the default role ('leader') below.
+    model: 'wxai_v0',
+    end_effector: 'wxai_v0_leader',
     role: 'leader' as 'leader' | 'follower',
     paired_with: '',
     passive: false,
@@ -1522,8 +1783,8 @@ export function ConfigurationPage() {
     setArmForm({
       name: '',
       ip_address: '192.168.1.10',
-      model: 'ViperX-300',
-      end_effector: 'Gripper',
+      model: 'wxai_v0',
+      end_effector: 'wxai_v0_leader',
       role: 'leader',
       paired_with: '',
       passive: false,
@@ -1793,7 +2054,9 @@ export function ConfigurationPage() {
       position_tolerance: armForm.tolerancesEnabled && armForm.positionToleranceSet ? [...armForm.positionTolerance] : undefined,
       velocity_tolerance: armForm.tolerancesEnabled && armForm.velocityToleranceSet ? [...armForm.velocityTolerance] : undefined,
       effort_tolerance: armForm.tolerancesEnabled && armForm.effortToleranceSet ? [...armForm.effortTolerance] : undefined,
-      smoothing_enabled: armForm.smoothingEnabled ? true : undefined,
+      // A leader receives no commands, so its smoothing keys are inert; do not
+      // write them back even if a hand-edited config carried them.
+      smoothing_enabled: armForm.smoothingEnabled && armForm.role !== 'leader' ? true : undefined,
       smoothing_gripper: armForm.smoothingEnabled && armForm.smoothingGripper ? true : undefined,
       smoothing_min_cutoff_hz: armForm.smoothingEnabled ? armForm.smoothingMinCutoffHz : undefined,
       smoothing_beta: armForm.smoothingEnabled ? armForm.smoothingBeta : undefined,
@@ -2556,6 +2819,346 @@ export function ConfigurationPage() {
             );
           })()}
 
+          {/* --- Teleoperation ------------------------------------------------
+              Modelled here rather than passed through, because the SDK only
+              WARNS about a pair naming a missing arm and then skips it. A rig
+              can therefore look configured and move nothing. */}
+          {(() => {
+            const sys = selectedSystemData;
+            const arms = sys.hardware.filter((h) => h.type === 'trossen_arm') as ArmHardware[];
+            const leaders = arms.filter((a) => a.role === 'leader');
+            const followers = arms.filter((a) => a.role === 'follower');
+            const teleop = sys.teleop ?? { enabled: false, rate_hz: DEFAULT_TELEOP_RATE_HZ, pairs: [] };
+            const armNames = new Set(arms.map((a) => a.name));
+            const orphaned = teleop.pairs.filter(
+              (pr) => !armNames.has(pr.leader) || !armNames.has(pr.follower),
+            );
+            const patch = (next: Partial<TeleopModel>) =>
+              setSystems((prev) =>
+                prev.map((x) =>
+                  x.id === sys.id ? { ...x, teleop: { ...teleop, ...next } } : x,
+                ),
+              );
+            const setPair = (i: number, next: Partial<TeleopPair>) =>
+              patch({ pairs: teleop.pairs.map((pr, j) => (j === i ? { ...pr, ...next } : pr)) });
+
+            return (
+              <div className="mb-[16px] border border-edge">
+                <div className="flex items-center justify-between px-[12px] py-[8px] border-b border-edge">
+                  <div className="text-brand text-[10px] uppercase font-bold">Teleoperation</div>
+                  <label className="flex items-center gap-[6px] text-[11px] text-dim cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={teleop.enabled}
+                      onChange={(e) => patch({ enabled: e.target.checked })}
+                    />
+                    Enabled
+                  </label>
+                </div>
+                <div className="p-[12px] space-y-[10px]">
+                  {arms.length === 0 ? (
+                    // A camera-only rig is a supported layout, not a broken one.
+                    <div className="text-dim text-[11px]">
+                      No arms configured — this is a camera-only system. Teleop stays off.
+                    </div>
+                  ) : (
+                    <>
+                      {teleop.pairs.length === 0 && (
+                        <div className="text-[11px] text-yellow-500">
+                          Arms are configured but no leader is linked to a follower, so nothing
+                          will move. Add a pair below.
+                        </div>
+                      )}
+                      {orphaned.length > 0 && (
+                        <div className="text-[11px] text-red-400">
+                          {orphaned.length} pair{orphaned.length !== 1 ? 's' : ''} name an arm that
+                          no longer exists and will be dropped on save.
+                        </div>
+                      )}
+                      {teleop.pairs.map((pr, i) => (
+                        <div key={i} className="grid grid-cols-[1fr_1fr_110px_32px] gap-[8px] items-center">
+                          <select
+                            value={pr.leader}
+                            onChange={(e) => setPair(i, { leader: e.target.value })}
+                            className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
+                          >
+                            <option value="">— leader —</option>
+                            {leaders.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+                            {pr.leader && !armNames.has(pr.leader) && (
+                              <option value={pr.leader}>{pr.leader} (missing)</option>
+                            )}
+                          </select>
+                          <select
+                            value={pr.follower}
+                            onChange={(e) => setPair(i, { follower: e.target.value })}
+                            className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
+                          >
+                            <option value="">— follower —</option>
+                            {followers.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+                            {pr.follower && !armNames.has(pr.follower) && (
+                              <option value={pr.follower}>{pr.follower} (missing)</option>
+                            )}
+                          </select>
+                          <select
+                            value={pr.space}
+                            onChange={(e) => setPair(i, { space: e.target.value as TeleopSpace })}
+                            className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
+                          >
+                            {TELEOP_SPACES.map((sp) => <option key={sp} value={sp}>{sp}</option>)}
+                          </select>
+                          <button
+                            onClick={() => patch({ pairs: teleop.pairs.filter((_, j) => j !== i) })}
+                            className="text-red-400 hover:text-red-300 text-[16px] leading-none"
+                            title="Remove this pair"
+                          >
+                            &times;
+                          </button>
+                        </div>
+                      ))}
+                      <div className="flex items-center gap-[12px] pt-[4px]">
+                        <button
+                          onClick={() =>
+                            patch({
+                              pairs: [
+                                ...teleop.pairs,
+                                {
+                                  leader: leaders[teleop.pairs.length]?.name ?? leaders[0]?.name ?? '',
+                                  follower: followers[teleop.pairs.length]?.name ?? followers[0]?.name ?? '',
+                                  space: 'joint' as TeleopSpace,
+                                },
+                              ],
+                            })
+                          }
+                          className="border border-edge text-ink px-[10px] py-[4px] text-[11px] uppercase hover:border-brand"
+                        >
+                          + Pair
+                        </button>
+                        <label className="flex items-center gap-[6px] text-[11px] text-dim">
+                          Rate
+                          <input
+                            type="number"
+                            value={teleop.rate_hz}
+                            onChange={(e) => patch({ rate_hz: Number(e.target.value) })}
+                            className="w-[90px] bg-app border border-edge text-ink px-[8px] py-[4px] text-[12px]"
+                          />
+                          Hz
+                        </label>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
+
+          {/* --- Glide handle input + buttons ---------------------------------
+              These two components hard-fail in configure() when they name an
+              arm that no longer exists ("no active trossen_arm named ..."),
+              which is why they are editable rather than passed through. */}
+          {(() => {
+            const sys = selectedSystemData;
+            const arms = sys.hardware.filter((h) => h.type === 'trossen_arm') as ArmHardware[];
+            const leaders = arms.filter((a) => a.role === 'leader');
+            const armNames = new Set(arms.map((a) => a.name));
+            const gi = sys.glideInputs;
+            const sc = sys.sessionControl;
+            if (!gi && !sc && leaders.length === 0) return null;
+
+            const patchSys = (next: Partial<HardwareSystem>) =>
+              setSystems((prev) => prev.map((x) => (x.id === sys.id ? { ...x, ...next } : x)));
+            const setButton = (i: number, next: Partial<SessionButton>) =>
+              sc && patchSys({
+                sessionControl: {
+                  ...sc,
+                  buttons: sc.buttons.map((b, j) => (j === i ? { ...b, ...next } : b)),
+                },
+              });
+
+            return (
+              <div className="mb-[16px] border border-edge">
+                <div className="px-[12px] py-[8px] border-b border-edge text-brand text-[10px] uppercase font-bold">
+                  Glide Handles
+                </div>
+                <div className="p-[12px] space-y-[14px]">
+                  {/* which handle arms feed the input layer */}
+                  <div>
+                    <div className="flex items-center justify-between mb-[6px]">
+                      <div className="text-ink text-[11px]">Handle input</div>
+                      <label className="flex items-center gap-[6px] text-[11px] text-dim cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!gi}
+                          onChange={(e) =>
+                            patchSys({
+                              glideInputs: e.target.checked
+                                ? { id: gi?.id ?? 'glide_inputs', arms: leaders.map((a) => a.name) }
+                                : undefined,
+                            })
+                          }
+                        />
+                        Enabled
+                      </label>
+                    </div>
+                    {gi ? (
+                      <div className="flex flex-wrap gap-[10px]">
+                        {leaders.length === 0 && (
+                          <div className="text-[11px] text-red-400">
+                            No leader arms — this component will fail to configure.
+                          </div>
+                        )}
+                        {leaders.map((a) => (
+                          <label key={a.id} className="flex items-center gap-[6px] text-[11px] text-dim">
+                            <input
+                              type="checkbox"
+                              checked={gi.arms.includes(a.name)}
+                              onChange={(e) =>
+                                patchSys({
+                                  glideInputs: {
+                                    ...gi,
+                                    arms: e.target.checked
+                                      ? [...gi.arms, a.name]
+                                      : gi.arms.filter((n) => n !== a.name),
+                                  },
+                                })
+                              }
+                            />
+                            <span className="font-mono">{a.name}</span>
+                          </label>
+                        ))}
+                        {gi.arms.filter((n) => !armNames.has(n)).map((n) => (
+                          <span key={n} className="text-[11px] text-red-400 font-mono">{n} (missing)</span>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="text-dim text-[11px]">
+                        Off — handle joysticks and buttons are not read.
+                      </div>
+                    )}
+                  </div>
+
+                  {/* button -> session event bindings */}
+                  <div className="border-t border-surface pt-[10px]">
+                    <div className="flex items-center justify-between mb-[6px]">
+                      <div className="text-ink text-[11px]">Session buttons</div>
+                      <label className="flex items-center gap-[6px] text-[11px] text-dim cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={!!sc}
+                          onChange={(e) =>
+                            patchSys({
+                              sessionControl: e.target.checked
+                                ? {
+                                    id: sc?.id ?? 'session_control',
+                                    poll_rate_hz: sc?.poll_rate_hz ?? 50,
+                                    debounce_ms: sc?.debounce_ms ?? 40,
+                                    buttons: sc?.buttons ?? [],
+                                  }
+                                : undefined,
+                            })
+                          }
+                        />
+                        Enabled
+                      </label>
+                    </div>
+                    {sc ? (
+                      <div className="space-y-[8px]">
+                        {sc.buttons.map((b, i) => (
+                          <div key={i} className="grid grid-cols-[1fr_80px_1fr_32px] gap-[8px] items-center">
+                            <select
+                              value={b.arm_id}
+                              onChange={(e) => setButton(i, { arm_id: e.target.value })}
+                              className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
+                            >
+                              <option value="">— arm —</option>
+                              {leaders.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
+                              {b.arm_id && !armNames.has(b.arm_id) && (
+                                <option value={b.arm_id}>{b.arm_id} (missing)</option>
+                              )}
+                            </select>
+                            <input
+                              type="number"
+                              min={0}
+                              value={b.bit}
+                              onChange={(e) => setButton(i, { bit: Number(e.target.value) })}
+                              title="Button bit on the handle"
+                              className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
+                            />
+                            <select
+                              value={b.event}
+                              onChange={(e) => setButton(i, { event: e.target.value as SessionControlEvent })}
+                              className="bg-app border border-edge text-ink px-[8px] py-[6px] text-[12px]"
+                            >
+                              {SESSION_CONTROL_EVENTS.map((ev) => (
+                                <option key={ev} value={ev}>{SESSION_CONTROL_EVENT_LABELS[ev]}</option>
+                              ))}
+                            </select>
+                            <button
+                              onClick={() => patchSys({ sessionControl: { ...sc, buttons: sc.buttons.filter((_, j) => j !== i) } })}
+                              className="text-red-400 hover:text-red-300 text-[16px] leading-none"
+                              title="Remove this binding"
+                            >
+                              &times;
+                            </button>
+                          </div>
+                        ))}
+                        {sc.buttons.length === 0 && (
+                          // The SDK refuses a session-control component that
+                          // claims no buttons, so this cannot be left empty.
+                          <div className="text-[11px] text-yellow-500">
+                            No bindings — the SDK rejects a session-control component that claims
+                            nothing. Add one or switch this off.
+                          </div>
+                        )}
+                        <div className="flex items-center gap-[12px] pt-[2px]">
+                          <button
+                            onClick={() =>
+                              patchSys({
+                                sessionControl: {
+                                  ...sc,
+                                  buttons: [
+                                    ...sc.buttons,
+                                    { arm_id: leaders[0]?.name ?? '', bit: sc.buttons.length, event: 'start' },
+                                  ],
+                                },
+                              })
+                            }
+                            className="border border-edge text-ink px-[10px] py-[4px] text-[11px] uppercase hover:border-brand"
+                          >
+                            + Button
+                          </button>
+                          <label className="flex items-center gap-[6px] text-[11px] text-dim">
+                            Poll
+                            <input
+                              type="number"
+                              value={sc.poll_rate_hz ?? 50}
+                              onChange={(e) => patchSys({ sessionControl: { ...sc, poll_rate_hz: Number(e.target.value) } })}
+                              className="w-[70px] bg-app border border-edge text-ink px-[8px] py-[4px] text-[12px]"
+                            />
+                            Hz
+                          </label>
+                          <label className="flex items-center gap-[6px] text-[11px] text-dim">
+                            Debounce
+                            <input
+                              type="number"
+                              value={sc.debounce_ms ?? 40}
+                              onChange={(e) => patchSys({ sessionControl: { ...sc, debounce_ms: Number(e.target.value) } })}
+                              className="w-[70px] bg-app border border-edge text-ink px-[8px] py-[4px] text-[12px]"
+                            />
+                            ms
+                          </label>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="text-dim text-[11px]">
+                        Off — start, stop and re-record come from the web UI only.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })()}
+
           <div className="flex items-center justify-between mb-[16px]">
             <div className="flex items-center gap-[12px]">
               <h2 className="text-[16px] text-ink uppercase">Hardware Devices</h2>
@@ -3044,11 +3647,35 @@ export function ConfigurationPage() {
                 <div className="grid grid-cols-2 gap-[12px]">
                   <div>
                     <label className="block text-ink text-[12px] mb-[8px]">Model</label>
-                    <input type="text" value={armForm.model} onChange={e => setArmForm({ ...armForm, model: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
+                    {/* Closed set: the driver rejects anything outside MODEL_NAME at
+                        configure() time, so a free-text field could only ever produce
+                        an arm that fails to boot. */}
+                    <select value={armForm.model} onChange={e => setArmForm({ ...armForm, model: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand">
+                      {ARM_MODELS.map(m => <option key={m} value={m}>{m}</option>)}
+                      {!asArmModel(armForm.model) && (
+                        // An existing config may name a model this build does not
+                        // know. Show it rather than silently switching the arm to
+                        // something else the moment the modal opens.
+                        <option value={armForm.model}>{armForm.model} (not recognised)</option>
+                      )}
+                    </select>
                   </div>
                   <div>
                     <label className="block text-ink text-[12px] mb-[8px]">End Effector</label>
-                    <input type="text" value={armForm.end_effector} onChange={e => setArmForm({ ...armForm, end_effector: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
+                    <select value={armForm.end_effector} onChange={e => setArmForm({ ...armForm, end_effector: e.target.value })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand">
+                      {END_EFFECTORS.map(e2 => <option key={e2} value={e2}>{e2}</option>)}
+                      {!asEndEffector(armForm.end_effector) && (
+                        <option value={armForm.end_effector}>{armForm.end_effector} (not recognised)</option>
+                      )}
+                    </select>
+                    {armForm.model === 'pro' && armForm.end_effector !== 'pro_base' && (
+                      // Not an SDK error — it loads the wrong mass into gravity
+                      // compensation and the arm just holds position badly.
+                      <p className="text-[11px] text-yellow-500 mt-[6px]">
+                        A Pro normally carries <span className="font-mono">pro_base</span>; another
+                        end effector loads the wrong mass into gravity compensation.
+                      </p>
+                    )}
                   </div>
                 </div>
                 <div>
@@ -3249,8 +3876,20 @@ export function ConfigurationPage() {
                   )}
                 </div>
                 <div className="space-y-[12px]">
-                  <div className="flex items-start gap-[8px]">
-                    <input type="checkbox" id="arm_smoothing" checked={armForm.smoothingEnabled} onChange={e => setArmForm({ ...armForm, smoothingEnabled: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
+                  {/* One-Euro filters the COMMANDED pose on its way into the
+                      controller (`cmd_filt_.filter(pos_d, ...)`), so it only does
+                      anything on an arm that receives commands. A passive leader
+                      gets none, which made these fields look meaningful on a card
+                      where they could never take effect. */}
+                  {armForm.role === 'leader' && (
+                    <div className="text-[11px] text-dim border border-edge/60 p-[8px]">
+                      Command smoothing applies to the arm that <span className="text-ink">receives</span>{' '}
+                      commands. Set it on the follower this leader drives — a leader is
+                      commanded by the operator's hand, not by the SDK.
+                    </div>
+                  )}
+                  <div className={`flex items-start gap-[8px] ${armForm.role === 'leader' ? 'opacity-40 pointer-events-none' : ''}`}>
+                    <input type="checkbox" id="arm_smoothing" disabled={armForm.role === 'leader'} checked={armForm.smoothingEnabled} onChange={e => setArmForm({ ...armForm, smoothingEnabled: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
                     <label htmlFor="arm_smoothing" className="text-ink text-[12px]">
                       Smooth outgoing commands
                       <span className="block text-dim text-[11px] mt-[2px]">One-Euro adaptive low-pass on the position commands sent to this arm. Unlike a fixed low-pass it raises its cutoff as the command speeds up, so slow motion is smoothed hard while fast motion keeps its response. Use it on a follower whose leader input is jittery. Off leaves commands untouched.</span>
