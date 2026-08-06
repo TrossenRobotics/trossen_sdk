@@ -519,6 +519,28 @@ TEST_F(GlideComponentTest, StopButtonEmitsStopSessionLikeTheWebappStopButton) {
   EXPECT_EQ(events[0], SessionControlEvent::kStopSession);
 }
 
+TEST_F(GlideComponentTest, SummonIsABindableEvent) {
+  // The free fourth handle button (bit 3, "left" on the cross) is the intended
+  // home for this: pulling a follower back onto its leader mid-session, after
+  // it has faulted or parked against a command clamp.
+  GlideSessionControlComponent control("session_control");
+  control.configure({
+    {"debounce_ms", 0},
+    {"buttons", {{{"arm_id", "glide_left"}, {"bit", 3}, {"event", "summon"}}}},
+  });
+
+  std::vector<SessionControlEvent> events;
+  control.set_callbacks([&](SessionControlEvent e) { events.push_back(e); }, [] {});
+
+  set_handle("glide_left", kStickCentre, kStickCentre, 0);
+  control.poll_once();
+  set_handle("glide_left", kStickCentre, kStickCentre, 1u << 3);
+  control.poll_once();
+
+  ASSERT_EQ(events.size(), 1u);
+  EXPECT_EQ(events[0], SessionControlEvent::kSummon);
+}
+
 TEST_F(GlideComponentTest, UnknownEventNameIsRejected) {
   GlideSessionControlComponent control("session_control");
   nlohmann::json config = {{"buttons", {

@@ -111,6 +111,23 @@ public:
    */
   void stop_teleop();
 
+  /**
+   * @brief Ask the follower to ease onto the leader's current pose.
+   *
+   * Thread-safe and non-blocking: it raises a flag that the MIRROR LOOP
+   * services at the top of its next tick, on the loop's own thread. That is
+   * the whole point — summon() is a blocking, time-parameterised move, and
+   * running it on the loop thread means the mirror cannot be writing
+   * high-rate commands to the same follower while it is in flight. Pausing
+   * and restarting the thread would work too, but it would re-arm teleop
+   * modes and re-run the start-of-teleop summon as a side effect.
+   *
+   * A no-op when there is no follower or the loop is not running — the pose
+   * would be stale by the time the loop restarted. Repeated calls before the
+   * loop services one collapse into a single summon.
+   */
+  void request_summon();
+
   /// @brief Check if the control loop is running.
   bool is_running() const { return running_.load(); }
 
@@ -138,6 +155,11 @@ private:
   Config cfg_;
   std::thread thread_;
   std::atomic<bool> running_{false};
+
+  /// Set by request_summon(), cleared by the mirror loop when it performs the
+  /// move. Atomic because it crosses from a session-control thread onto the
+  /// loop thread.
+  std::atomic<bool> summon_requested_{false};
 };
 
 }  // namespace trossen::hw::teleop

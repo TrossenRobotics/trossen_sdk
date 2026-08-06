@@ -26,9 +26,10 @@ SessionControlEvent event_from_name(const std::string& name) {
   if (name == "stop_early")   return SessionControlEvent::kStopEarly;
   if (name == "rerecord")     return SessionControlEvent::kRerecord;
   if (name == "stop_session") return SessionControlEvent::kStopSession;
+  if (name == "summon")       return SessionControlEvent::kSummon;
   throw std::invalid_argument(
     "GlideSessionControlComponent: unknown event '" + name +
-    "' (expected start, stop_early, rerecord, or stop_session)");
+    "' (expected start, stop_early, rerecord, stop_session, or summon)");
 }
 
 std::string event_name(SessionControlEvent event) {
@@ -37,6 +38,7 @@ std::string event_name(SessionControlEvent event) {
     case SessionControlEvent::kStopEarly:   return "stop_early";
     case SessionControlEvent::kRerecord:    return "rerecord";
     case SessionControlEvent::kStopSession: return "stop_session";
+    case SessionControlEvent::kSummon:      return "summon";
     case SessionControlEvent::kNone:        return "none";
   }
   return "unknown";

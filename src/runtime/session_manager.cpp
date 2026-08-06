@@ -1127,6 +1127,20 @@ void SessionManager::drain_control_events(ControlPhase phase) {
       case Event::kRerecord:
         rerecord_requested_.store(true);
         break;
+      case Event::kSummon:
+        // Deliberately phase-independent. The operator bound a button to this
+        // and pressed it; the usual reason is that a follower is no longer
+        // where its leader is (it faulted, or it is parked against a command
+        // clamp) and they want it back in sync. Each controller drops the
+        // request itself if it has no follower or its mirror is stopped.
+        //
+        // Note this DOES move the arm mid-episode if pressed while recording,
+        // and that motion lands in the data. That is the operator's call, the
+        // same as re-recording is.
+        for (auto& controller : teleop_controllers_) {
+          if (controller) controller->request_summon();
+        }
+        break;
       case Event::kStopSession:
         trossen::utils::g_stop_requested = true;
         break;

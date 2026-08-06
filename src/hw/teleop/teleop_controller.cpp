@@ -163,6 +163,19 @@ void TeleopController::stop_teleop() {
   }
 }
 
+void TeleopController::request_summon() {
+  // Dropped rather than queued when the mirror is not running: the point of a
+  // summon is "go to where the leader is NOW", and a request serviced at some
+  // later restart would drive to a pose the operator has long since left.
+  if (!follower_io_ || !running_.load()) {
+    std::cerr << "  [teleop] summon ignored — "
+              << (follower_io_ ? "mirror loop is not running" : "no follower configured")
+              << '\n';
+    return;
+  }
+  summon_requested_.store(true);
+}
+
 // ── Control loop ────────────────────────────────────────────────────────
 
 void TeleopController::control_loop() {
@@ -175,6 +188,22 @@ void TeleopController::control_loop() {
   try {
     while (running_) {
       auto deadline = std::chrono::steady_clock::now() + period;
+
+      // Serviced here, on the loop thread, so the blocking move cannot race
+      // the high-rate writes below. The deadline for this tick is abandoned:
+      // summon() takes seconds by design, so there is nothing to catch up to
+      // and the next tick simply starts fresh.
+      if (summon_requested_.exchange(false)) {
+        if (follower_io_) {
+          const auto pose = leader_io_->read();
+          if (!pose.empty()) {
+            std::cout << "  [teleop] Summoning follower to leader pose...\n";
+            follower_io_->summon(pose);
+            std::cout << "  [teleop] Summon complete\n";
+          }
+        }
+        continue;
+      }
 
       auto cmd = leader_io_->read();
       if (follower_io_) {

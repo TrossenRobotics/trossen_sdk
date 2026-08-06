@@ -38,6 +38,7 @@ VrInput vr_input_from_name(const std::string& name) {
 }
 
 Event event_from_name(const std::string& name) {
+  if (name == "summon")       return Event::kSummon;
   if (name == "start")        return Event::kStart;
   if (name == "stop_early")   return Event::kStopEarly;
   if (name == "rerecord")     return Event::kRerecord;

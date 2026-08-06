@@ -42,7 +42,8 @@ enum class SessionControlEvent {
   kStart,         ///< Start / stop-early / skip-reset depending on phase.
   kStopEarly,     ///< Stop the current recording without advancing.
   kRerecord,      ///< Discard current (recording) or last (resetting).
-  kStopSession    ///< End the whole session (equivalent to Ctrl+C).
+  kStopSession,   ///< End the whole session (equivalent to Ctrl+C).
+  kSummon         ///< Ease every follower onto its leader's current pose.
 };
 
 /**

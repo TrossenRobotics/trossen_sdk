@@ -89,6 +89,7 @@ const SESSION_CONTROL_EVENTS = [
   'stop_early',
   'rerecord',
   'stop_session',
+  'summon',
 ] as const;
 type SessionControlEvent = (typeof SESSION_CONTROL_EVENTS)[number];
 
@@ -98,6 +99,7 @@ const SESSION_CONTROL_EVENT_LABELS: Readonly<Record<SessionControlEvent, string>
   stop_early: 'Stop episode early',
   rerecord: 'Re-record episode',
   stop_session: 'Stop session',
+  summon: 'Summon follower to leader',
 };
 
 /** Short forms for the button cross, where a full label will not fit. */
@@ -106,6 +108,7 @@ const SESSION_CONTROL_EVENT_SHORT: Readonly<Record<SessionControlEvent, string>>
   stop_early: 'Stop ep.',
   rerecord: 'Re-record',
   stop_session: 'Stop',
+  summon: 'Summon',
 };
 
 // The handle's four buttons sit in a cross, and the config stores each one as
