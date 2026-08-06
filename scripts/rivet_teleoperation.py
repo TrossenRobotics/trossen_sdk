@@ -121,7 +121,7 @@ def scaled_leader_gripper_effort(follower_effort):
     return LEADER_MAX * (effort_norm**3) + LEADER_OFFSET
 
 
-def teleop_arm_step(leader, follower, gripper_home_offset):
+def teleop_arm_step(leader, follower, gripper_home_offset, J0_min=None, J0_max=None):
     """Mirror one leader/follower arm pair for a single control loop iteration.
 
     Feeds follower efforts back to the leader, leader positions forward to the
@@ -129,14 +129,8 @@ def teleop_arm_step(leader, follower, gripper_home_offset):
     while feeding the follower's gripper effort back as leader resistance.
     """
     positions = leader.get_all_positions()
-    efforts = follower.get_all_efforts()
 
-    # Feed the efforts from the follower robot to the leader robot
-    leader.set_arm_efforts(
-        np.array([efforts[0], efforts[1], efforts[2], -efforts[3], -efforts[4], efforts[5]]),
-        0.0,
-        False,
-    )
+    positions[0] = np.clip(positions[0], J0_min, J0_max)
 
     # Feed the positions from the leader robot to the follower robot
     follower.set_arm_positions(
@@ -240,10 +234,11 @@ if __name__ == "__main__":
 
             if ENABLE_RIGHT and ENABLE_FOLLOWER:
                 teleop_arm_step(driver_right_leader, driver_right_follower,
-                                GRIPPER_HOME_OFFSET_RIGHT)
+                                GRIPPER_HOME_OFFSET_RIGHT, J0_min=-0.8, J0_max=1.1)
 
             if ENABLE_LEFT and ENABLE_FOLLOWER:
-                teleop_arm_step(driver_left_leader, driver_left_follower, GRIPPER_HOME_OFFSET_LEFT)
+                teleop_arm_step(driver_left_leader, driver_left_follower, GRIPPER_HOME_OFFSET_LEFT,
+                                J0_min=-1.1, J0_max=0.8)
 
     except KeyboardInterrupt:
         print("Moving to stop positions...")
