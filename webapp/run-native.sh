@@ -97,6 +97,29 @@ if ! command -v uv >/dev/null; then
   exit 1
 fi
 
+# Refuse a port that is already taken, and say who has it. Checked up here with
+# the other preflights so it costs nothing rather than after `uv sync`.
+#
+# uvicorn binds AFTER running the app's startup hooks, and on a bind failure it
+# exits 1 having logged nothing visible -- the run ends right after the Alembic
+# startup lines with no error at all, which reads as "the app crashed during
+# startup" rather than "the port was taken". The usual holder is this webapp's
+# own Docker backend, which uses host networking and the same port 8000, and
+# neither that nor the fix is guessable from a silent exit.
+if command -v ss >/dev/null 2>&1 && ss -ltn "sport = :${PORT}" 2>/dev/null | grep -q LISTEN; then
+  echo "port ${PORT} is already in use — refusing to start." >&2
+  if command -v docker >/dev/null 2>&1 &&
+     docker ps --format '{{.Names}}' 2>/dev/null | grep -qx trossen_webapp_backend; then
+    echo "The Docker backend (trossen_webapp_backend) is running on host" >&2
+    echo "networking, so it holds this port. Stop it first:" >&2
+    echo "    docker stop trossen_webapp_backend    # or: docker compose down" >&2
+  else
+    echo "Find the holder with:  ss -ltnp \"sport = :${PORT}\"" >&2
+  fi
+  echo "Or serve on another port:  ./run-native.sh --port $((PORT + 1))" >&2
+  exit 1
+fi
+
 # Checked HERE, next to the uv check, rather than where npm is actually called:
 # that call sits after `uv sync`, so on a fresh machine a missing npm surfaced
 # only after a multi-minute SDK compile had already succeeded. Fail before doing
