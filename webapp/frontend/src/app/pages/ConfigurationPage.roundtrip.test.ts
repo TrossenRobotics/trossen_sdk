@@ -706,3 +706,66 @@ describe('the teleop command clamp', () => {
     expect(saved.hardware?.arms?.follower_left).not.toHaveProperty('command_position_max');
   });
 });
+
+describe('the mobile base as a teleop pair', () => {
+  // The Rivet drives its base through a teleop pair like any arm, except both
+  // endpoints are COMPONENTS: `base_leader` (a glide_base, reading the handle
+  // joysticks and the rail buttons) to `rivet_base`. Pruning and space parsing
+  // both used to assume arms, which meant opening the Rivet page and saving
+  // switched the base off — silently, and with no arm involved to hint at it.
+  function rivetWithBasePair() {
+    const cfg = rivetConfig();
+    (cfg.teleop as Record<string, unknown>).enabled = true;
+    (cfg.teleop as Record<string, unknown>).rate_hz = 1000;
+    (cfg.teleop as Record<string, unknown>).pairs = [
+      { leader: 'glide_left', follower: 'follower_left', space: 'joint' },
+      { leader: 'base_leader', follower: 'rivet_base', space: 'base' },
+    ];
+    return cfg;
+  }
+
+  it('keeps a pair whose endpoints are components, not arms', () => {
+    const { saved } = roundTrip(rivetWithBasePair());
+    expect((saved.teleop as { pairs: unknown[] }).pairs).toContainEqual({
+      leader: 'base_leader',
+      follower: 'rivet_base',
+      space: 'base',
+    });
+  });
+
+  it('keeps the base space instead of defaulting it to joint', () => {
+    // An unrecognised space silently became "joint", pointing the base at a
+    // space it does not implement.
+    const { saved } = roundTrip(rivetWithBasePair());
+    const pair = (saved.teleop as { pairs: { follower: string; space: string }[] }).pairs.find(
+      (p) => p.follower === 'rivet_base',
+    );
+    expect(pair?.space).toBe('base');
+  });
+
+  it('still drops a pair naming hardware that is genuinely gone', () => {
+    // The widened live set must not become a licence to keep dangling pairs.
+    const cfg = rivetWithBasePair();
+    (cfg.teleop as Record<string, unknown>).pairs = [
+      { leader: 'base_leader', follower: 'no_such_base', space: 'base' },
+    ];
+    const { saved } = roundTrip(cfg);
+    expect((saved.teleop as { pairs: unknown[] }).pairs).toEqual([]);
+  });
+
+  it('drops the base pair when the base is no longer declared', () => {
+    // The live set is built from the components actually emitted, so a config
+    // that stops declaring the base loses the pair too. (Deleting the base
+    // from the UI is not the path: that card is deliberately undeletable,
+    // because the save path patches hardware.components rather than
+    // rebuilding it and a delete would drop the card while leaving the
+    // component behind.)
+    const cfg = rivetWithBasePair();
+    cfg.hardware.components = cfg.hardware.components.filter((c) => c.id !== 'rivet_base');
+    const { saved } = roundTrip(cfg);
+    const followers = (saved.teleop as { pairs: { follower: string }[] }).pairs.map(
+      (p) => p.follower,
+    );
+    expect(followers).not.toContain('rivet_base');
+  });
+});

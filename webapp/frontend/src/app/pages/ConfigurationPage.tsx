@@ -78,7 +78,13 @@ type EndEffector = (typeof END_EFFECTORS)[number];
 
 // TeleopPairConfig::space. "joint" is the default; a pair naming anything else
 // needs that space implemented or the pair is skipped.
-const TELEOP_SPACES = ['joint', 'cartesian'] as const;
+//
+// "base" was missing here, and because an unrecognised space falls back to the
+// default, opening the Rivet config and saving rewrote its base pair from
+// "base" to "joint" -- pointing the mobile base at a space it does not
+// implement. The list has to track TeleopCapable::Space exactly
+// (teleop_capable.hpp maps Joint/Cartesian/Base to these names).
+const TELEOP_SPACES = ['joint', 'cartesian', 'base'] as const;
 type TeleopSpace = (typeof TELEOP_SPACES)[number];
 
 // GlideSessionControlComponent::event_from_name. `stop_early` is valid and
@@ -1031,12 +1037,24 @@ export function setGlideButtonBinding(
 
 function buildTeleop(
   system: HardwareSystem,
-  armsObj: Record<string, RawArmConfig>,
+  hardware: RawSdkHardware,
   originalConfig: RawSdkConfig | undefined,
 ): Record<string, unknown> {
   const model = system.teleop;
   if (!model) return (originalConfig?.teleop as Record<string, unknown>) ?? {};
-  const live = new Set(Object.keys(armsObj));
+  // Every id teleop can name, not just the arms. The Rivet drives its base
+  // through a pair too -- `base_leader` (a glide_base component) to
+  // `rivet_base` -- and pruning against the arm map alone deleted that pair on
+  // every save, silently switching the base off. The SDK resolves pair
+  // endpoints from the ActiveHardwareRegistry, which is keyed by id across
+  // arms, components and the base alike, so the live set has to be too.
+  const live = new Set<string>([
+    ...Object.keys(hardware.arms ?? {}),
+    ...(hardware.components ?? [])
+      .map((c) => c.id)
+      .filter((id): id is string => typeof id === 'string'),
+  ]);
+  if (hardware.mobile_base) live.add('slate_base');
   const pairs = model.pairs
     .filter((p) => live.has(p.leader) && live.has(p.follower))
     .map((p) => ({ leader: p.leader, follower: p.follower, space: p.space }));
@@ -1308,10 +1326,10 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
     robot_name: originalConfig?.robot_name ?? system.name,
     hardware,
     producers: allProducers,
-    // Rebuilt from the model, and pruned to arms that still exist. Passing the
-    // original through verbatim is what left dangling pairs behind after an arm
-    // was deleted, and what stopped re-added arms from ever getting one.
-    teleop: buildTeleop(system, armsObj, originalConfig),
+    // Rebuilt from the model, and pruned to hardware that still exists.
+    // Passing the original through verbatim is what left dangling pairs behind
+    // after an arm was deleted, and what stopped re-added arms from getting one.
+    teleop: buildTeleop(system, hardware, originalConfig),
     backend: originalConfig?.backend ?? {},
     session: originalConfig?.session ?? {},
   };
@@ -2550,6 +2568,28 @@ export function ConfigurationPage() {
     const sc = sys.sessionControl;
 
     const inputOn = !!gi?.arms.includes(arm.name);
+
+    // Buttons the linear rail has already taken. On a Rivet the lift is driven
+    // by two HANDLE BUTTONS (glide_base.axes.lift, source "buttons", up_bit /
+    // down_bit) rather than by a joystick, so on that rig glide_right bits 0
+    // and 2 belong to the rail. GlideSession refuses to let two components
+    // claim the same input, so binding a session event to one of these is not
+    // an override -- it makes the whole rig fail to configure. Show them as
+    // taken instead of offering them as free.
+    //
+    // Read from the raw config: this page preserves glide_base verbatim rather
+    // than modelling it, so its axes are only visible here.
+    const railClaims = new Map<number, string>();
+    for (const comp of rawConfigs[sys.id]?.hardware?.components ?? []) {
+      if (comp.type !== 'glide_base') continue;
+      const lift = (comp as unknown as { axes?: { lift?: Record<string, unknown> } }).axes?.lift;
+      if (!lift || lift.source !== 'buttons' || lift.arm_id !== arm.name) continue;
+      if (typeof lift.up_bit === 'number' && lift.up_bit >= 0) railClaims.set(lift.up_bit, 'rail up');
+      if (typeof lift.down_bit === 'number' && lift.down_bit >= 0) {
+        railClaims.set(lift.down_bit, 'rail down');
+      }
+    }
+
     const bindings = sc?.buttons ?? [];
     const mine = bindings.filter((b) => b.arm_id === arm.name);
     const bindingFor = (bit: number) => mine.find((b) => b.bit === bit);
@@ -2589,24 +2629,48 @@ export function ConfigurationPage() {
             <div className="grid grid-cols-3 grid-rows-3 gap-[4px] w-[210px] shrink-0">
               {GLIDE_BUTTON_LAYOUT.map(({ bit, label, cell }) => {
                 const bound = bindingFor(bit);
+                const rail = railClaims.get(bit);
+                // Both at once is a config the SDK will reject at bring-up.
+                const conflict = !!rail && !!bound;
                 const isSel = selected === bit;
                 return (
                   <button
                     key={bit}
                     type="button"
+                    disabled={!!rail && !conflict}
                     onClick={() => setGlideButtonSel(isSel ? null : { arm: arm.name, bit })}
-                    title={`${label} button (bit ${bit})`}
+                    title={
+                      conflict
+                        ? `${label} (bit ${bit}) is claimed by the rail AND bound to a session event — the rig will not configure`
+                        : rail
+                          ? `${label} (bit ${bit}) drives the linear rail (${rail})`
+                          : `${label} button (bit ${bit})`
+                    }
                     className={`${cell} h-[46px] border px-[4px] flex flex-col items-center justify-center leading-tight transition-colors ${
-                      isSel
-                        ? 'border-brand bg-brand/10'
-                        : bound
-                          ? 'border-edge bg-surface hover:border-brand'
-                          : 'border-dashed border-edge text-dim hover:border-brand'
+                      conflict
+                        ? 'border-red-400 bg-red-400/10'
+                        : rail
+                          ? 'border-edge bg-surface/50 cursor-not-allowed'
+                          : isSel
+                            ? 'border-brand bg-brand/10'
+                            : bound
+                              ? 'border-edge bg-surface hover:border-brand'
+                              : 'border-dashed border-edge text-dim hover:border-brand'
                     }`}
                   >
                     <span className="text-[9px] uppercase text-dim">{label}</span>
-                    <span className={`text-[10px] ${bound ? 'text-ink' : 'text-dim'}`}>
-                      {bound ? SESSION_CONTROL_EVENT_SHORT[bound.event] : 'unbound'}
+                    <span
+                      className={`text-[10px] ${
+                        conflict ? 'text-red-400' : rail ? 'text-dim italic' : bound ? 'text-ink' : 'text-dim'
+                      }`}
+                    >
+                      {conflict
+                        ? 'conflict'
+                        : rail
+                          ? rail
+                          : bound
+                            ? SESSION_CONTROL_EVENT_SHORT[bound.event]
+                            : 'unbound'}
                     </span>
                   </button>
                 );
@@ -3433,11 +3497,32 @@ export function ConfigurationPage() {
             const canTeleop = leaders.length > 0 && followers.length > 0;
             if (!canTeleop && teleop.pairs.length === 0 && !teleop.enabled) return null;
 
-            const armNames = new Set(arms.map((a) => a.name));
+            // A pair can name a component, not only an arm: the Rivet drives
+            // its base through one (`base_leader`, a glide_base, to
+            // `rivet_base`). Those ids come from the raw config because this
+            // page preserves components rather than modelling them, and the
+            // save path prunes against the same full set.
+            const componentIds = ((rawConfigs[sys.id]?.hardware?.components ?? [])
+              .map((c) => c.id)
+              .filter((id): id is string => typeof id === 'string'));
+            const baseLeaderIds = ((rawConfigs[sys.id]?.hardware?.components ?? [])
+              .filter((c) => c.type === 'glide_base' && typeof c.id === 'string')
+              .map((c) => c.id as string));
+            const baseFollowerIds = sys.hardware
+              .filter((h) => h.type === 'trossen_base' || h.type === 'slate_base')
+              .map((h) => h.name);
+
+            const liveNames = new Set<string>([
+              ...arms.map((a) => a.name),
+              ...componentIds,
+              ...baseFollowerIds,
+            ]);
             const orphaned = teleop.pairs.filter(
-              (pr) => !armNames.has(pr.leader) || !armNames.has(pr.follower),
+              (pr) => !liveNames.has(pr.leader) || !liveNames.has(pr.follower),
             );
             const paired = new Set(teleop.pairs.flatMap((pr) => [pr.leader, pr.follower]));
+            // Only arms are flagged as unpaired. A base leader with no pair is
+            // a deliberate configuration on rigs whose base is driven manually.
             const unpaired = [...leaders, ...followers].filter((a) => !paired.has(a.name));
 
             const patch = (next: Partial<TeleopModel>) =>
@@ -3503,7 +3588,10 @@ export function ConfigurationPage() {
                       >
                         <option value="">— leader —</option>
                         {leaders.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
-                        {pr.leader && !armNames.has(pr.leader) && (
+                        {baseLeaderIds.map((id) => (
+                          <option key={id} value={id}>{id} (base)</option>
+                        ))}
+                        {pr.leader && !liveNames.has(pr.leader) && (
                           <option value={pr.leader}>{pr.leader} (missing)</option>
                         )}
                       </select>
@@ -3514,7 +3602,10 @@ export function ConfigurationPage() {
                       >
                         <option value="">— follower —</option>
                         {followers.map((a) => <option key={a.id} value={a.name}>{a.name}</option>)}
-                        {pr.follower && !armNames.has(pr.follower) && (
+                        {baseFollowerIds.map((id) => (
+                          <option key={id} value={id}>{id} (base)</option>
+                        ))}
+                        {pr.follower && !liveNames.has(pr.follower) && (
                           <option value={pr.follower}>{pr.follower} (missing)</option>
                         )}
                       </select>
