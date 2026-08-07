@@ -408,7 +408,11 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .value("kStart", session_control::SessionControlEvent::kStart)
     .value("kStopEarly", session_control::SessionControlEvent::kStopEarly)
     .value("kRerecord", session_control::SessionControlEvent::kRerecord)
-    .value("kStopSession", session_control::SessionControlEvent::kStopSession);
+    .value("kStopSession", session_control::SessionControlEvent::kStopSession)
+    // Added alongside the enumerator itself: a value missing here is not a
+    // compile error, it is an AttributeError raised on a button-poll thread the
+    // first time an operator presses that button.
+    .value("kSummon", session_control::SessionControlEvent::kSummon);
 
   py::class_<session_control::SessionControlCapable,
              std::shared_ptr<session_control::SessionControlCapable>>(
@@ -859,6 +863,13 @@ PYBIND11_MODULE(trossen_sdk, m) {
          py::call_guard<py::gil_scoped_release>())
     .def("stop_teleop", &TeleopController::stop_teleop,
          py::call_guard<py::gil_scoped_release>())
+    // No gil_scoped_release: this only raises an atomic flag that the mirror
+    // loop services on its own thread. The blocking move happens there, not
+    // here, so the caller never holds the GIL across it.
+    .def("request_summon", &TeleopController::request_summon,
+         "Ask the mirror loop to ease the follower onto its leader's current "
+         "pose. Dropped, not queued, when there is no follower or the loop is "
+         "stopped.")
     .def("is_running", &TeleopController::is_running)
     .def("leader", &TeleopController::leader)
     .def("follower", &TeleopController::follower)
