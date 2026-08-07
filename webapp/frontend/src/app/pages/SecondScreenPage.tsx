@@ -76,6 +76,24 @@ function gib(bytes: number): string {
   return `${(bytes / 1024 ** 3).toFixed(0)} GB`;
 }
 
+/** A battery percentage, whole where it can be and one decimal where it cannot.
+ *
+ *  Both the reading and the auto-stop threshold are floats all the way through
+ *  the decision -- the driver returns a float, the threshold is a float from
+ *  config (`step="any"` in the editor), and the trip is a plain `percent <=
+ *  estop_battery_percent` in C++. Rounding both to whole numbers here used to
+ *  make the panel contradict the robot: with a trip at 20 and a reading of 19.6
+ *  the screen said "20%" under "Auto-stop at 20%" and then the base stopped
+ *  itself, which reads as stopping ABOVE its own limit. The tone is computed
+ *  from the raw float, so the giveaway was a number sitting exactly on the
+ *  displayed threshold while the colour had already gone red.
+ *
+ *  A decimal only when there is one keeps the ordinary integer case as clean as
+ *  it was, and matches what the configuration card already prints. */
+function batteryPercent(value: number): string {
+  return Number.isInteger(value) ? `${value}` : value.toFixed(1);
+}
+
 /** Battery colour by charge. Encoded as colour AND text everywhere it is used,
  *  so the state survives being glanced at by someone colour-blind.
  *
@@ -247,7 +265,7 @@ export function SecondScreenPage() {
                   rather than 0% keeps the screen from implying the robot is
                   about to stop itself while it is merely still waking up. */}
               {base.battery_reading_valid && percent !== undefined
-                ? `${percent.toFixed(0)}%`
+                ? `${batteryPercent(percent)}%`
                 : '—'}
             </div>
             <div className="text-dim text-[clamp(12px,1.7vh,16px)] leading-snug">
@@ -267,7 +285,7 @@ export function SecondScreenPage() {
               by a number nobody showed them. */}
           <div className="text-dim text-[clamp(11px,1.5vh,14px)] mt-2">
             {base.estop_battery_percent && base.estop_battery_percent > 0
-              ? `Auto-stop at ${base.estop_battery_percent.toFixed(0)}%`
+              ? `Auto-stop at ${batteryPercent(base.estop_battery_percent)}%`
               : 'Auto-stop disabled'}
             {/* Two different reasons for a dash, and they need different
                 responses. `telemetry()` returns only {id, connected} when the
