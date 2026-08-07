@@ -213,7 +213,7 @@ private:
   void close_data_writer();
   std::shared_ptr<arrow::Schema> make_data_schema() const;
   std::shared_ptr<arrow::Table> build_episode_table(
-    const AlignedEpisode& ep, int task_index, int64_t global_from) const;
+    const AlignedEpisode& ep, int episode_index, int task_index, int64_t global_from) const;
 
   // Video helpers (defined in the .cpp; shell out to ffmpeg/ffprobe).
   bool encode_episode_video(

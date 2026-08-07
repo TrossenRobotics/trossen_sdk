@@ -62,6 +62,9 @@ struct McapChannelMap {
 struct AlignedFrame {
   /// @brief Frame timestamp in seconds (synthetic, generated at the dataset fps).
   float timestamp_s{0.0f};
+  /// @brief Reference-stream log time this row was sampled at, in nanoseconds. The instant
+  /// every stream in the row was matched against; kept for alignment diagnostics.
+  uint64_t reference_timestamp_ns{0};
   /// @brief Leader joints (+ base velocities for mobile robots), the LeRobot `action`.
   std::vector<double> action;
   /// @brief Follower joints (+ base velocities), the LeRobot `observation.state`.
@@ -94,6 +97,15 @@ struct CameraInfo {
   std::string obs_key;
   /// @brief Number of frames extracted (filled by extract_camera_images()).
   size_t frame_count{0};
+  /// @brief Source frame chosen for each dataset row: one entry per AlignedEpisode::frames,
+  /// holding the 0-based arrival index of this camera's nearest-in-time frame.
+  ///
+  /// Cameras free-run on their own clock, so their frames neither start with nor keep pace
+  /// with the joint streams; pairing the two by position drifts. Each row therefore records
+  /// which source frame actually belongs to it, and extract_camera_images() writes exactly
+  /// those frames, in row order. Consecutive rows may name the same source frame when the
+  /// camera runs slower than the reference stream.
+  std::vector<size_t> row_source_index;
 };
 
 /// @brief Fully aligned, format-agnostic representation of one episode.
@@ -128,9 +140,11 @@ struct AlignedEpisode {
  * Decodes the embedded dataset_info metadata, auto-detects leader/follower joint
  * streams by topic name (falling back to single-robot mode), parses all joint and
  * odometry messages, and produces one AlignedFrame per dataset row via
- * nearest-timestamp matching (50 ms tolerance). Rows where any stream has no sample
- * within tolerance are dropped. Camera frames are NOT decoded here — call
- * extract_camera_images() for that.
+ * nearest-timestamp matching (50 ms tolerance). Camera frames are matched the same
+ * way — each row records the nearest frame per camera in CameraInfo::row_source_index
+ * — so images and joint states in a row share an instant rather than a position.
+ * Rows where any stream or camera has no sample within tolerance are dropped. Camera
+ * frames are NOT decoded here — call extract_camera_images() for that.
  *
  * @param mcap_file Path to the input MCAP file.
  * @param episode_index Zero-based episode index to stamp on the episode.
@@ -146,21 +160,32 @@ bool load_aligned_episode(
   bool native_schema = false);
 
 /**
- * @brief Decode camera frames from an MCAP file into caller-chosen directories.
+ * @brief Decode the row-matched camera frames from an MCAP file into caller-chosen directories.
  *
- * Re-opens the MCAP file and writes each camera's frames as `image_%06d.jpg`
- * (JPEG quality 95) into the directory returned by `dir_for(camera_name)`. The
- * callback is invoked once per camera and is responsible for creating the dir.
+ * Re-opens the MCAP file and writes, for every dataset row, that row's matched frame
+ * (CameraInfo::row_source_index) as `image_%06d.jpg` (JPEG quality 95, or 16-bit
+ * `image_%06d.png` for depth under the native schema) into the directory returned by
+ * `dir_for(camera_name)`. Output frames are numbered by row, so frame *k* of the encoded
+ * video is the observation belonging to data row *k*; a source frame matched by two
+ * consecutive rows is written twice. The callback is invoked once per camera and is
+ * responsible for creating the dir.
+ *
+ * Both passes read the same file through the same reader, so a camera's arrival order here
+ * is identical to the one load_aligned_episode() indexed into.
  *
  * @param mcap_file Path to the input MCAP file.
  * @param channels Channel maps from load_aligned_episode().
+ * @param episode Aligned episode supplying the per-row frame selection.
  * @param dir_for Maps a camera name to the directory its frames are written to.
- * @param out_counts Output per-camera frame counts.
- * @return true on success; false on a fatal error (message logged to stderr).
+ * @param out_counts Output per-camera written-frame counts (one per dataset row).
+ * @param native_schema Preserve 16-bit depth losslessly as PNG instead of 8-bit JPEG.
+ * @return true on success; false if a matched frame could not be decoded or written, or on
+ *         a fatal read error (message logged to stderr).
  */
 bool extract_camera_images(
   const std::string& mcap_file,
   const McapChannelMap& channels,
+  const AlignedEpisode& episode,
   const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
   std::map<std::string, size_t>& out_counts,
   bool native_schema = false);

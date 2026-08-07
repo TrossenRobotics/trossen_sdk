@@ -104,18 +104,29 @@ nlohmann::json channels_to_chw(const std::array<float, 3>& rgb) {
 }
 
 /// @brief Per-channel (RGB, normalized to [0,1]) stats over sampled images → [3,1,1] JSON.
+///
+/// @param images Samples from sample_images(): CV_32FC3, BGR, already scaled to [0,1].
+/// @param count Number of images the stats were computed over (LeRobot's `count` for image
+///        features is the sample count, not the episode frame count).
 nlohmann::ordered_json image_stats(const std::vector<cv::Mat>& images, int64_t count) {
-  // Collect normalized per-channel pixel values (RGB order) across all samples.
+  // Collect per-channel pixel values (RGB order) across all samples.
   std::array<std::vector<float>, 3> chan;
   for (const auto& img : images) {
-    if (img.empty() || img.channels() < 3) continue;
+    if (img.empty()) continue;
+    // sample_images() hands back float32 BGR in [0,1]. Reading these as 8-bit would
+    // reinterpret the mantissa bytes as pixels and yield uniform-noise statistics.
+    if (img.type() != CV_32FC3) {
+      std::cerr << "Warning: skipping image sample with unexpected type " << img.type()
+                << " (expected CV_32FC3)\n";
+      continue;
+    }
     for (int y = 0; y < img.rows; ++y) {
-      const cv::Vec3b* row = img.ptr<cv::Vec3b>(y);
+      const cv::Vec3f* row = img.ptr<cv::Vec3f>(y);
       for (int x = 0; x < img.cols; ++x) {
         // OpenCV is BGR; store as RGB.
-        chan[0].push_back(row[x][2] / 255.0f);
-        chan[1].push_back(row[x][1] / 255.0f);
-        chan[2].push_back(row[x][0] / 255.0f);
+        chan[0].push_back(row[x][2]);
+        chan[1].push_back(row[x][1]);
+        chan[2].push_back(row[x][0]);
       }
     }
   }
@@ -190,7 +201,7 @@ std::shared_ptr<arrow::Schema> LeRobotV3DatasetWriter::make_data_schema() const 
 }
 
 std::shared_ptr<arrow::Table> LeRobotV3DatasetWriter::build_episode_table(
-  const AlignedEpisode& ep, int task_index, int64_t global_from) const
+  const AlignedEpisode& ep, int episode_index, int task_index, int64_t global_from) const
 {
   arrow::FloatBuilder ts_b;
   auto obs_vb = std::make_shared<arrow::FloatBuilder>();
@@ -209,7 +220,7 @@ std::shared_ptr<arrow::Table> LeRobotV3DatasetWriter::build_episode_table(
     (void)act_b.Append();
     for (double v : f.action) (void)act_val->Append(static_cast<float>(v));
     (void)frame_b.Append(static_cast<int64_t>(i));
-    (void)epi_b.Append(ep.episode_index);
+    (void)epi_b.Append(episode_index);
     (void)idx_b.Append(global_from + static_cast<int64_t>(i));
     (void)task_b.Append(task_index);
   }
@@ -633,15 +644,20 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
       video_streams.size() < out.ep.cameras.size()) {
     std::map<std::string, fs::path> camera_dirs;
     std::map<std::string, size_t> camera_counts;
-    extract_camera_images(
-      mcap_path.string(), out.channels,
-      [&](const std::string& camera_name) -> fs::path {
-        fs::path dir = out.tmp_dir / camera_name;
-        fs::create_directories(dir);
-        camera_dirs[camera_name] = dir;
-        return dir;
-      },
-      camera_counts, opts_.native_schema);
+    if (!extract_camera_images(
+          mcap_path.string(), out.channels, out.ep,
+          [&](const std::string& camera_name) -> fs::path {
+            fs::path dir = out.tmp_dir / camera_name;
+            fs::create_directories(dir);
+            camera_dirs[camera_name] = dir;
+            return dir;
+          },
+          camera_counts, opts_.native_schema)) {
+      std::cerr << "[FAILED] Could not extract camera frames from " << mcap_path.string() << "\n";
+      std::error_code ec;
+      fs::remove_all(out.tmp_dir, ec);
+      return out;  // ok == false
+    }
 
     for (const auto& cam : out.ep.cameras) {
       // Already remuxed from a compressed stream above.
@@ -726,11 +742,17 @@ bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
   const int task_index = task_index_for(pe.task_name);
   const int64_t ep_frames = static_cast<int64_t>(ep.frames.size());
 
+  // The episode index is the position in the episodes table, assigned here rather than
+  // taken from the input file's position: LeRobot looks episodes up positionally
+  // (`meta.episodes[episode_index]`), so a skipped input must not leave a hole. A gap
+  // makes every later episode read another episode's video seek metadata.
+  const int episode_index = static_cast<int>(episodes_.size());
+
   // ── Data parquet: roll if needed, then write this episode as one row group ──
   if (!roll_data_file_if_needed(ep_frames)) return false;
 
   EpisodeMeta meta;
-  meta.episode_index = ep.episode_index;
+  meta.episode_index = episode_index;
   meta.tasks = {pe.task_name};
   meta.length = ep_frames;
   meta.data_chunk_index = data_.chunk_index;
@@ -738,7 +760,7 @@ bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
   meta.dataset_from_index = global_frame_index_;
   meta.dataset_to_index = global_frame_index_ + ep_frames;
 
-  auto table = build_episode_table(ep, task_index, global_frame_index_);
+  auto table = build_episode_table(ep, episode_index, task_index, global_frame_index_);
   auto st = data_.writer->WriteTable(*table, table->num_rows());  // one row group / episode
   if (!st.ok()) {
     std::cerr << "Error: Failed to write data table: " << st.ToString() << "\n";
@@ -946,7 +968,7 @@ bool LeRobotV3DatasetWriter::write_stats_json() {
   for (const auto& key : video_keys_) {
     auto it = image_samples_.find(key);
     if (it != image_samples_.end() && !it->second.empty()) {
-      stats[key] = image_stats(it->second, total_frames_);
+      stats[key] = image_stats(it->second, static_cast<int64_t>(it->second.size()));
     }
   }
 

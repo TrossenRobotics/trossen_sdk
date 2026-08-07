@@ -734,15 +734,18 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   if (cfg.extract_images && !channels.camera_channels.empty()) {
     std::cout << "\nExtracting camera images...\n";
     std::string episode_name = backends::format_episode_folder(cfg.episode_index);
-    trossen::convert::extract_camera_images(
-        cfg.mcap_file, channels,
-        [&](const std::string& camera_name) -> fs::path {
-          fs::path dir = images_dir / ("observation.images." + camera_name) / episode_name;
-          fs::create_directories(dir);
-          camera_dirs[camera_name] = dir;
-          return dir;
-        },
-        camera_counts);
+    if (!trossen::convert::extract_camera_images(
+            cfg.mcap_file, channels, ep,
+            [&](const std::string& camera_name) -> fs::path {
+              fs::path dir = images_dir / ("observation.images." + camera_name) / episode_name;
+              fs::create_directories(dir);
+              camera_dirs[camera_name] = dir;
+              return dir;
+            },
+            camera_counts)) {
+      std::cerr << "Error: Failed to extract camera frames from " << cfg.mcap_file << "\n";
+      return 1;
+    }
   }
 
   // ── Encode one MP4 per camera (libsvtav1, forced 30 fps) ──

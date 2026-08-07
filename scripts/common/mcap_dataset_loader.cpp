@@ -234,7 +234,9 @@ bool load_aligned_episode(
   std::cout << "\nParsing joint state messages...\n";
   std::map<std::string, std::vector<JointStateMessage>> messages_by_stream;
   std::vector<Odometry2DMessage> slate_base_messages;
-  std::map<std::string, size_t> camera_image_counts;
+  // Per camera, the log time of every frame in arrival order. The index into this vector is
+  // the same source index extract_camera_images() counts up as it re-reads the file.
+  std::map<std::string, std::vector<uint64_t>> camera_timestamps;
 
   size_t total_messages = 0;
   size_t total_images = 0;
@@ -278,7 +280,7 @@ bool load_aligned_episode(
 
     auto camera_it = channels.camera_channels.find(messageView.channel->id);
     if (camera_it != channels.camera_channels.end()) {
-      camera_image_counts[camera_it->second]++;
+      camera_timestamps[camera_it->second].push_back(messageView.message.logTime);
       ++total_images;
     }
   }
@@ -339,15 +341,21 @@ bool load_aligned_episode(
   std::cout << "  Using " << reference_stream << " as reference (" << reference_messages.size()
             << " messages)\n";
 
-  // Cap rows at the smallest camera frame count so every row has a frame to pair with.
-  size_t max_rows = reference_messages.size();
-  if (!camera_image_counts.empty()) {
-    size_t min_camera_frames = std::numeric_limits<size_t>::max();
-    for (const auto& [camera_name, count] : camera_image_counts) {
-      min_camera_frames = std::min(min_camera_frames, count);
+  const size_t max_rows = reference_messages.size();
+
+  // Record the cameras present. Built before the row loop so each row can store the frame
+  // it matched; frame_count is filled in by extract_camera_images().
+  for (const auto& [channel_id, camera_name] : channels.camera_channels) {
+    if (camera_timestamps[camera_name].empty()) {
+      std::cerr << "Error: camera '" << camera_name << "' has a channel but no frames\n";
+      return false;
     }
-    max_rows = std::min(max_rows, min_camera_frames);
-    std::cout << "  Limiting to " << max_rows << " rows to match camera frame count\n";
+    CameraInfo cam;
+    cam.name = camera_name;  // original name; used for extraction dirs + dataset_info lookups
+    const std::string out_name = native_schema ? native_camera_key(camera_name) : camera_name;
+    cam.obs_key = "observation.images." + out_name;
+    cam.row_source_index.reserve(max_rows);
+    out.cameras.push_back(std::move(cam));
   }
 
   // ── Align: for each reference timestamp, snap every stream to its nearest sample ──
@@ -360,6 +368,30 @@ bool load_aligned_episode(
   size_t slate_base_idx = 0;
   int64_t frame_index = 0;
   size_t rows_skipped = 0;
+  size_t rows_skipped_no_frame = 0;
+
+  // Per-camera search cursor. Rows are visited in increasing reference time, so each
+  // cursor only ever moves forward.
+  std::map<std::string, size_t> camera_cursors;
+  for (const auto& [camera_name, stamps] : camera_timestamps) camera_cursors[camera_name] = 0;
+
+  // Frame nearest `target`, or npos when the nearest is further away than the tolerance.
+  // Unlike the joint matcher (which snaps to the last sample at or before the target),
+  // this compares both neighbours: at 30 fps that halves the worst-case pairing error
+  // from a full frame period to half of one.
+  auto nearest_frame = [](const std::vector<uint64_t>& stamps, uint64_t target,
+                          size_t& cursor) -> size_t {
+    if (stamps.empty()) return std::numeric_limits<size_t>::max();
+    while (cursor + 1 < stamps.size() && stamps[cursor + 1] <= target) ++cursor;
+    size_t best = cursor;
+    auto distance = [target](uint64_t ts) {
+      return target > ts ? target - ts : ts - target;
+    };
+    if (cursor + 1 < stamps.size() && distance(stamps[cursor + 1]) < distance(stamps[cursor])) {
+      best = cursor + 1;
+    }
+    return distance(stamps[best]) > kToleranceNs ? std::numeric_limits<size_t>::max() : best;
+  };
 
   auto find_closest_message = [&](const std::string& stream_id, uint64_t target_ts,
                                   size_t& idx) -> std::vector<double>* {
@@ -431,6 +463,25 @@ bool load_aligned_episode(
       continue;
     }
 
+    // Every camera must offer a frame within tolerance, else the row would pair a joint
+    // state with a stale image. Selections are staged and only committed once the whole
+    // row is known good, so a late miss can't leave the cameras half-filled.
+    std::vector<size_t> staged_camera_frames;
+    staged_camera_frames.reserve(out.cameras.size());
+    for (const auto& cam : out.cameras) {
+      const size_t frame_idx = nearest_frame(camera_timestamps[cam.name], timestamp_ns,
+                                             camera_cursors[cam.name]);
+      if (frame_idx == std::numeric_limits<size_t>::max()) break;
+      staged_camera_frames.push_back(frame_idx);
+    }
+    if (staged_camera_frames.size() != out.cameras.size()) {
+      ++rows_skipped_no_frame;
+      continue;
+    }
+    for (size_t c = 0; c < out.cameras.size(); ++c) {
+      out.cameras[c].row_source_index.push_back(staged_camera_frames[c]);
+    }
+
     if (channels.has_slate_base) {
       actions.insert(actions.end(), base_velocities.begin(), base_velocities.end());
       observations.insert(observations.end(), base_velocities.begin(), base_velocities.end());
@@ -438,6 +489,7 @@ bool load_aligned_episode(
 
     AlignedFrame frame;
     frame.timestamp_s = static_cast<float>(static_cast<double>(frame_index) * frame_duration_s);
+    frame.reference_timestamp_ns = timestamp_ns;
     frame.action = std::move(actions);
     frame.observation = std::move(observations);
     out.frames.push_back(std::move(frame));
@@ -446,16 +498,31 @@ bool load_aligned_episode(
 
   std::cout << "  [ok] Aligned " << out.frames.size() << " frames";
   if (rows_skipped > 0) std::cout << " (skipped " << rows_skipped << " misaligned)";
+  if (rows_skipped_no_frame > 0) {
+    std::cout << " (skipped " << rows_skipped_no_frame << " with no camera frame in tolerance)";
+  }
   std::cout << "\n";
 
-  // Record the cameras present (frame counts filled by extract_camera_images()).
-  for (const auto& [channel_id, camera_name] : channels.camera_channels) {
-    CameraInfo cam;
-    cam.name = camera_name;  // original name; used for extraction dirs + dataset_info lookups
-    const std::string out_name = native_schema ? native_camera_key(camera_name) : camera_name;
-    cam.obs_key = "observation.images." + out_name;
-    out.cameras.push_back(cam);
+  // How far each camera ends up from its rows: a large or growing offset means the camera
+  // clock is drifting away from the reference stream and is worth investigating.
+  for (const auto& cam : out.cameras) {
+    if (cam.row_source_index.empty()) continue;
+    const auto& stamps = camera_timestamps[cam.name];
+    double sum_abs_ms = 0.0;
+    double worst_ms = 0.0;
+    for (size_t row = 0; row < out.frames.size(); ++row) {
+      const int64_t delta = static_cast<int64_t>(stamps[cam.row_source_index[row]]) -
+                            static_cast<int64_t>(out.frames[row].reference_timestamp_ns);
+      const double delta_ms = static_cast<double>(delta) / 1e6;
+      sum_abs_ms += std::abs(delta_ms);
+      worst_ms = std::max(worst_ms, std::abs(delta_ms));
+    }
+    std::cout << "    - " << cam.name << ": " << stamps.size() << " frames, pairing offset mean "
+              << std::fixed << std::setprecision(1)
+              << (sum_abs_ms / static_cast<double>(out.frames.size())) << " ms, worst " << worst_ms
+              << " ms\n";
   }
+  std::cout.unsetf(std::ios::floatfield);
 
   return true;
 }
@@ -463,6 +530,7 @@ bool load_aligned_episode(
 bool extract_camera_images(
   const std::string& mcap_file,
   const McapChannelMap& channels,
+  const AlignedEpisode& episode,
   const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
   std::map<std::string, size_t>& out_counts,
   bool native_schema)
@@ -473,11 +541,26 @@ bool extract_camera_images(
     return true;
   }
 
+  // Invert the per-row selection: source frame index → the rows that matched it. A frame
+  // matched by two consecutive rows is decoded once and written under both row numbers.
+  std::map<std::string, std::map<size_t, std::vector<size_t>>> rows_by_source;
+  std::map<std::string, size_t> expected_counts;
+  for (const auto& cam : episode.cameras) {
+    auto& mapping = rows_by_source[cam.name];
+    for (size_t row = 0; row < cam.row_source_index.size(); ++row) {
+      mapping[cam.row_source_index[row]].push_back(row);
+    }
+    expected_counts[cam.name] = cam.row_source_index.size();
+  }
+
   std::map<std::string, fs::path> camera_dirs;
   for (const auto& [channel_id, camera_name] : channels.camera_channels) {
     camera_dirs[camera_name] = dir_for(camera_name);
     out_counts[camera_name] = 0;
   }
+
+  // Arrival counter per camera, mirroring the indices load_aligned_episode() assigned.
+  std::map<std::string, size_t> source_indices;
 
   std::ifstream image_input(mcap_file, std::ios::binary);
   mcap::McapReader image_reader;
@@ -504,15 +587,20 @@ bool extract_camera_images(
       continue;
     }
     const std::string& camera_name = it->second;
-    size_t frame_idx = out_counts[camera_name];
+    const size_t source_idx = source_indices[camera_name]++;
+
+    // Only frames some row matched are decoded; the rest are read past.
+    const auto& mapping = rows_by_source[camera_name];
+    auto rows_it = mapping.find(source_idx);
+    if (rows_it == mapping.end()) continue;
+    const std::vector<size_t>& target_rows = rows_it->second;
 
     foxglove::RawImage raw_image;
     if (!raw_image.ParseFromArray(messageView.message.data,
                                   static_cast<int>(messageView.message.dataSize))) {
-      std::cerr << "Warning: Failed to parse RawImage message for " << camera_name << " frame "
-                << frame_idx << "\n";
-      out_counts[camera_name]++;
-      continue;
+      std::cerr << "Error: Failed to parse RawImage message for " << camera_name << " source frame "
+                << source_idx << " (needed by row " << target_rows.front() << ")\n";
+      return false;
     }
 
     int cv_type = -1;
@@ -531,10 +619,9 @@ bool extract_camera_images(
     } else if (raw_image.encoding() == "32FC1") {
       cv_type = CV_32FC1;
     } else {
-      std::cerr << "Warning: Unsupported encoding '" << raw_image.encoding() << "' for "
-                << camera_name << " frame " << frame_idx << "\n";
-      out_counts[camera_name]++;
-      continue;
+      std::cerr << "Error: Unsupported encoding '" << raw_image.encoding() << "' for "
+                << camera_name << " source frame " << source_idx << "\n";
+      return false;
     }
 
     cv::Mat image(raw_image.height(), raw_image.width(), cv_type,
@@ -550,29 +637,41 @@ bool extract_camera_images(
 
     cv::Mat image_copy = image.clone();
     if (image_copy.empty()) {
-      std::cerr << "Warning: Empty image for " << camera_name << " frame " << frame_idx << "\n";
-      out_counts[camera_name]++;
-      continue;
+      std::cerr << "Error: Empty image for " << camera_name << " source frame " << source_idx
+                << "\n";
+      return false;
     }
 
     // Native schema preserves 16-bit depth losslessly as PNG (JPEG is 8-bit and would
     // destroy the depth). RGB/8-bit stays JPEG. The writer picks its encode path by the
     // frame extension it finds (.png → gray12le HEVC depth, .jpg → av1 RGB).
     const bool depth_png = native_schema && cv_type == CV_16UC1;
-    char namebuf[32];
-    std::snprintf(namebuf, sizeof(namebuf), depth_png ? "image_%06zu.png" : "image_%06zu.jpg",
-                  frame_idx);
-    fs::path image_path = camera_dirs[camera_name] / namebuf;
-
     std::vector<int> compression_params =
       depth_png ? std::vector<int>{cv::IMWRITE_PNG_COMPRESSION, 1}
                 : std::vector<int>{cv::IMWRITE_JPEG_QUALITY, 95};
-    if (cv::imwrite(image_path.string(), image_copy, compression_params)) {
+
+    // Frames are numbered by row, not by arrival, so the encoded video lines up with the
+    // parquet rows one-for-one.
+    for (size_t row : target_rows) {
+      char namebuf[32];
+      std::snprintf(namebuf, sizeof(namebuf), depth_png ? "image_%06zu.png" : "image_%06zu.jpg",
+                    row);
+      fs::path image_path = camera_dirs[camera_name] / namebuf;
+      if (!cv::imwrite(image_path.string(), image_copy, compression_params)) {
+        std::cerr << "Error: Failed to save image: " << image_path.string() << "\n";
+        return false;
+      }
       ++images_saved;
       out_counts[camera_name]++;
-    } else {
-      std::cerr << "Warning: Failed to save image: " << image_path.string() << "\n";
-      out_counts[camera_name]++;
+    }
+  }
+
+  // A short camera means the video would silently run out of frames before the rows do.
+  for (const auto& [camera_name, expected] : expected_counts) {
+    if (out_counts[camera_name] != expected) {
+      std::cerr << "Error: " << camera_name << " wrote " << out_counts[camera_name]
+                << " frames but " << expected << " rows need one\n";
+      return false;
     }
   }
 
