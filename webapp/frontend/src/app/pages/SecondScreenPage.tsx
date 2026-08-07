@@ -269,7 +269,16 @@ export function SecondScreenPage() {
             {base.estop_battery_percent && base.estop_battery_percent > 0
               ? `Auto-stop at ${base.estop_battery_percent.toFixed(0)}%`
               : 'Auto-stop disabled'}
-            {!base.battery_reading_valid && ' · waiting for first BMS reading'}
+            {/* Two different reasons for a dash, and they need different
+                responses. `telemetry()` returns only {id, connected} when the
+                driver is absent, so `battery_reading_valid` is undefined rather
+                than false -- indistinguishable from "no BMS frame yet" unless
+                `connected` is checked first. Saying "waiting for first BMS
+                reading" about a base that is not connected sends the operator
+                off to wait for something that will never arrive. */}
+            {base.connected === false
+              ? ' · base not connected'
+              : !base.battery_reading_valid && ' · waiting for first BMS reading'}
           </div>
         </Tile>
       ) : (

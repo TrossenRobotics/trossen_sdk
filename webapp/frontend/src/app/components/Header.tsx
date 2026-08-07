@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router";
-import { Menu, X, Volume2, VolumeX, Sun, Moon, HelpCircle } from "lucide-react";
+import { Menu, X, Volume2, VolumeX, Sun, Moon, HelpCircle, MonitorUp } from "lucide-react";
 import { useState, useEffect } from "react";
 import imgTrossen2025White2 from '@/assets/6ef806f936e829141b2fab202fa6f7601e3a5a7b.png';
 import { useHwStatus } from '@/lib/HwStatusContext';
@@ -157,6 +157,23 @@ export function Header() {
             </Link>
           )
         )}
+
+        {/* The robot's fixed status display. Routed outside the Layout with no
+            nav of its own, so without this it was reachable only by typing the
+            URL. Opened in a separate window rather than navigated to: it is
+            meant to sit on a second monitor beside the app, and replacing the
+            current tab with a chrome-free panel that cannot navigate back is a
+            dead end. Deliberately not blocked by `navLocked` — it opens a
+            read-only display in another window and leaves this tab where it is,
+            so it cannot disturb a hardware test in flight. */}
+        <button
+          className="text-dim hover:text-ink p-2"
+          onClick={() => window.open('/second_screen', 'trossen_second_screen')}
+          title="Open the second screen (robot status display) in a new window"
+          aria-label="Open second screen in a new window"
+        >
+          <MonitorUp className="w-5 h-5" />
+        </button>
 
         {/* Report/track broken hardware — drives the fleet downtime log. */}
         <HardwareIssues />
