@@ -34,6 +34,7 @@ from app.datasets import (
 from app.db import apply_migrations
 from app.hw_test import stream_system_hardware_test
 from app.io_utils import is_safe_id
+from app.read_limits import ReadLimitsError, read_arm_joint_limits
 from app.paths import FRONTEND_DIST_DIR
 from app.rerun_playback import build_rrd
 from app.recorder import (
@@ -591,6 +592,49 @@ def test_system(system_id: str) -> StreamingResponse:
             yield ev
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+class ReadArmLimitsBody(BaseModel):
+    """One arm to connect to and read live operating limits from."""
+
+    model: str = "wxai_v0"
+    end_effector: str = "wxai_v0_follower"
+    ip_address: str
+
+
+@app.post("/api/arms/read-limits")
+async def read_arm_limits(body: ReadArmLimitsBody) -> dict[str, list[float]]:
+    """Connect to one arm and read its current per-joint limits + tolerances.
+
+    Seeds the configuration UI's per-joint fields from a real controller, so an
+    operator adjusts measured values rather than inventing seven numbers.
+
+    What comes back is what the controller currently HOLDS, which is the
+    firmware defaults only on a freshly power-cycled arm — otherwise it is
+    whatever was last written, including values this webapp wrote. That makes
+    read → save a fixed point, but it also means a capture taken mid-session
+    records the session rather than the arm.
+
+    Refuses with 409 while any session is active: the arm controller is
+    single-client, so a live recorder holds it and this connect would fail
+    anyway — better a clear refusal than a confusing timeout. Returns 502 if the
+    arm cannot be reached or the read fails.
+    """
+    active = [s for s in list_sessions() if s.status == "active"]
+    if active:
+        names = ", ".join(s.name or s.id for s in active)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot read arm limits: session '{names}' is active. "
+                f"Stop or complete it first."
+            ),
+        )
+
+    try:
+        return await read_arm_joint_limits(body.model_dump())
+    except ReadLimitsError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
 
 
 @app.get("/api/sessions")

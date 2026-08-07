@@ -2202,6 +2202,52 @@ export function ConfigurationPage() {
     setEditingHardwareId(null);
   };
 
+  // "Read from arm": connect to this arm, read what its controller currently
+  // holds, and overlay every limit and tolerance field.
+  //
+  // Both sections are switched on as part of accepting the read. Seeding fields
+  // the operator cannot see would be worse than not seeding them — and leaving
+  // tolerances off after an explicit read would silently discard the values on
+  // save, since the payload only carries a section that is enabled.
+  const [readingLimits, setReadingLimits] = useState(false);
+  const [readLimitsError, setReadLimitsError] = useState<string | null>(null);
+
+  const handleReadLimitsFromArm = async () => {
+    setReadLimitsError(null);
+    setReadingLimits(true);
+    try {
+      const lim = await apiPost<Record<string, number[]>>('/api/arms/read-limits', {
+        model: armForm.model,
+        end_effector: armForm.end_effector,
+        ip_address: armForm.ip_address,
+      });
+      setArmForm(prev => ({
+        ...prev,
+        limitsEnabled: true,
+        tolerancesEnabled: true,
+        // Each array is overlaid only when the arm actually reported it, so a
+        // short or empty response leaves the operator's current values alone
+        // rather than blanking a column.
+        positionMin: lim.position_min?.length ? lim.position_min : prev.positionMin,
+        positionMax: lim.position_max?.length ? lim.position_max : prev.positionMax,
+        velocityMax: lim.velocity_max?.length ? lim.velocity_max : prev.velocityMax,
+        effortMax: lim.effort_max?.length ? lim.effort_max : prev.effortMax,
+        positionTolerance: lim.position_tolerance?.length ? lim.position_tolerance : prev.positionTolerance,
+        velocityTolerance: lim.velocity_tolerance?.length ? lim.velocity_tolerance : prev.velocityTolerance,
+        effortTolerance: lim.effort_tolerance?.length ? lim.effort_tolerance : prev.effortTolerance,
+        // Mark each tolerance as explicitly set, or the per-row "set" flags
+        // would leave freshly-read values out of the saved config.
+        positionToleranceSet: lim.position_tolerance?.length ? true : prev.positionToleranceSet,
+        velocityToleranceSet: lim.velocity_tolerance?.length ? true : prev.velocityToleranceSet,
+        effortToleranceSet: lim.effort_tolerance?.length ? true : prev.effortToleranceSet,
+      }));
+    } catch (err) {
+      setReadLimitsError(describeError(err));
+    } finally {
+      setReadingLimits(false);
+    }
+  };
+
   const handleAddArm = (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedSystem) return;
@@ -4155,6 +4201,29 @@ export function ConfigurationPage() {
                   </div>
                 )}
                 <div className="space-y-[12px]">
+                  {/* Seeds every limit and tolerance field below from the arm
+                      itself. Without it the tolerance rows start at zero and an
+                      operator has to invent 21 numbers; with it they adjust
+                      measured ones. */}
+                  <div>
+                    <button
+                      type="button"
+                      onClick={handleReadLimitsFromArm}
+                      disabled={readingLimits || !armForm.ip_address}
+                      className="px-[12px] py-[6px] text-[12px] border border-edge text-ink hover:border-brand disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {readingLimits ? 'Reading from arm…' : 'Read from arm'}
+                    </button>
+                    <span className="block text-dim text-[11px] mt-[4px]">
+                      Connects to this arm and fills the limits and tolerances below with what its
+                      controller currently holds. Those are the firmware defaults only on a
+                      freshly power-cycled arm — otherwise they are whatever was last applied,
+                      including values saved from here. Needs the arm reachable and no session running.
+                    </span>
+                    {readLimitsError && (
+                      <span className="block text-[11px] mt-[4px] text-red-400">{readLimitsError}</span>
+                    )}
+                  </div>
                   <div className="flex items-start gap-[8px]">
                     <input type="checkbox" id="arm_limits" checked={armForm.limitsEnabled} onChange={e => setArmForm({ ...armForm, limitsEnabled: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
                     <label htmlFor="arm_limits" className="text-ink text-[12px]">
