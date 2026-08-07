@@ -305,6 +305,45 @@ private:
   utils::VecOneEuroFilter cmd_filt_;
 };
 
+/// @brief Per-joint operating limits and fault tolerances read live from an arm
+/// controller. Arrays are parallel, one entry per joint (arm joints in
+/// rad / rad·s⁻¹ / N·m, gripper in m / m·s⁻¹ / N).
+struct ArmJointLimits {
+  std::vector<double> position_min;
+  std::vector<double> position_max;
+  std::vector<double> velocity_max;
+  std::vector<double> effort_max;
+  std::vector<double> position_tolerance;
+  std::vector<double> velocity_tolerance;
+  std::vector<double> effort_tolerance;
+};
+
+/// @brief Connect to an arm controller, read its current joint limits, and
+/// disconnect.
+///
+/// Exists so the config UI can seed its per-joint limit and tolerance fields
+/// from a real arm instead of numbers nobody measured.
+///
+/// IMPORTANT — what "current" means. The controller holds whatever limits were
+/// last written to it until it is power-cycled, so this returns the firmware
+/// defaults only on a freshly booted controller; otherwise it returns whatever
+/// was last applied, including values this webapp wrote. That makes a
+/// read → save round trip a fixed point (which is what keeps repeated
+/// configure() calls from drifting), but it also means a value captured mid-
+/// session records the session, not the arm. Capture presets after a power
+/// cycle if the intent is "what this arm ships with".
+///
+/// Spins up a short-lived driver, so the arm must be reachable and NOT held by
+/// a running session. Throws std::runtime_error on an unknown model or end
+/// effector, or any driver failure.
+///
+/// @param model         Model identifier; any name the installed driver knows.
+/// @param end_effector  End-effector identifier (e.g. "wxai_v0_follower").
+/// @param ip_address    Network IP of the arm controller.
+ArmJointLimits read_arm_joint_limits(const std::string& model,
+                                     const std::string& end_effector,
+                                     const std::string& ip_address);
+
 }  // namespace trossen::hw::arm
 
 #endif  // TROSSEN_SDK__HW__ARM__TROSSEN_ARM_COMPONENT_HPP_

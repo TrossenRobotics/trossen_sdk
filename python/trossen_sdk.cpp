@@ -48,6 +48,7 @@ namespace {
 #include "trossen_sdk/hw/active_hardware_registry.hpp"
 #include "trossen_sdk/hw/glide/glide_session_control_component.hpp"
 #ifdef TROSSEN_ENABLE_RIVET
+#include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/base/trossen_base_component.hpp"
 #endif
 #include "trossen_sdk/hw/session_control/session_control_capable.hpp"
@@ -362,6 +363,34 @@ PYBIND11_MODULE(trossen_sdk, m) {
   // arm driver); what Python gets is the ability to see what the handles are
   // reporting, which is what a "press each button" hardware check needs, and the
   // snapshot-injection seam so that check can be exercised without hardware.
+  // ── Reading an arm's live limits ────────────────────────────────────────
+  // Lets the config UI seed its per-joint limit and tolerance fields from a
+  // real controller rather than from numbers nobody measured. Read-only from
+  // Python: these are a report of what the arm currently holds, not a handle
+  // for writing it back — limits are written through an arm's config.
+  {
+    using trossen::hw::arm::ArmJointLimits;
+    py::class_<ArmJointLimits>(m, "ArmJointLimits")
+      .def_readonly("position_min", &ArmJointLimits::position_min)
+      .def_readonly("position_max", &ArmJointLimits::position_max)
+      .def_readonly("velocity_max", &ArmJointLimits::velocity_max)
+      .def_readonly("effort_max", &ArmJointLimits::effort_max)
+      .def_readonly("position_tolerance", &ArmJointLimits::position_tolerance)
+      .def_readonly("velocity_tolerance", &ArmJointLimits::velocity_tolerance)
+      .def_readonly("effort_tolerance", &ArmJointLimits::effort_tolerance);
+
+    m.def("read_arm_joint_limits", &trossen::hw::arm::read_arm_joint_limits,
+          py::arg("model"), py::arg("end_effector"), py::arg("ip_address"),
+          // Connecting to the controller blocks on synchronous C work; drop the
+          // GIL so the caller's event loop and other threads keep running.
+          py::call_guard<py::gil_scoped_release>(),
+          "Connect to an arm controller, read its current per-joint operating "
+          "limits and tolerances, then disconnect. Returns what the controller "
+          "currently holds -- firmware defaults only on a freshly power-cycled "
+          "arm, otherwise whatever was last applied. The arm must be reachable "
+          "and not held by a running session.");
+  }
+
   py::class_<glide::GlideInputSnapshot>(m, "GlideInputSnapshot")
     .def(py::init<>())
     .def_readwrite("joystick_x", &glide::GlideInputSnapshot::joystick_x)

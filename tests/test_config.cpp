@@ -461,3 +461,104 @@ TEST(ArmConfigTest, CommandClamp_IsIndependentOfTheControllerLimits) {
   EXPECT_TRUE(cfg.position_min.empty());
   EXPECT_TRUE(cfg.position_max.empty());
 }
+
+// ---------------------------------------------------------------------------
+// Joint tolerances: absolute values, never a delta
+//
+// The controller keeps whatever limits were last written to it until it is
+// power-cycled. Anything derived from the arm's LIVE reading therefore
+// compounds: read, scale, write, and the next connect reads the already-scaled
+// value and scales it again. That is not hypothetical — the high-speed boost
+// shipped that way once and grew 1.2x -> 1.44x -> 1.73x across reconnects until
+// it was re-anchored to a config base.
+//
+// Tolerances avoid it by never being relative in the first place: config holds
+// the absolute value and TrossenArmComponent assigns it. These pin the property
+// at the config layer, where it can be checked without an arm attached, so a
+// future "scale the tolerances" convenience has to break a test to land.
+// ---------------------------------------------------------------------------
+
+TEST(ArmConfigTest, Tolerances_DefaultEmptyAndOmittedFromJson) {
+  ArmConfig cfg;
+  EXPECT_TRUE(cfg.position_tolerance.empty());
+  EXPECT_TRUE(cfg.velocity_tolerance.empty());
+  EXPECT_TRUE(cfg.effort_tolerance.empty());
+  const auto j = cfg.to_json();
+  // Absent, not zero-filled: an omitted tolerance means "leave the controller's
+  // own value alone", which is materially different from asking for 0.0 (fault
+  // on any overshoot at all).
+  EXPECT_FALSE(j.contains("position_tolerance"));
+  EXPECT_FALSE(j.contains("velocity_tolerance"));
+  EXPECT_FALSE(j.contains("effort_tolerance"));
+}
+
+TEST(ArmConfigTest, Tolerances_SurviveRoundTripUnscaled) {
+  const auto j = nlohmann::json::parse(R"({
+    "ip_address": "192.168.1.4",
+    "position_tolerance": [0.05, 0.05, 0.05, 0.05, 0.05, 0.05, 0.002],
+    "velocity_tolerance": [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.02],
+    "effort_tolerance":   [2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 1.0]
+  })");
+  const ArmConfig cfg = ArmConfig::from_json(j);
+  ASSERT_EQ(cfg.position_tolerance.size(), 7u);
+  EXPECT_FLOAT_EQ(cfg.position_tolerance[0], 0.05f);
+  EXPECT_FLOAT_EQ(cfg.velocity_tolerance[0], 0.5f);
+  EXPECT_FLOAT_EQ(cfg.effort_tolerance[6], 1.0f);
+
+  // Values come back at the same magnitude, not scaled by anything. Compared
+  // per-element as floats rather than as JSON: the config stores float, so
+  // widening back to JSON's double turns 0.05 into 0.05000000074505806. That
+  // is a one-time representation artefact of the storage type, and comparing
+  // raw JSON here would fail on it while saying nothing about scaling.
+  const ArmConfig again = ArmConfig::from_json(cfg.to_json());
+  ASSERT_EQ(again.position_tolerance.size(), 7u);
+  for (size_t i = 0; i < 7; ++i) {
+    EXPECT_FLOAT_EQ(again.position_tolerance[i], cfg.position_tolerance[i]) << "joint " << i;
+    EXPECT_FLOAT_EQ(again.velocity_tolerance[i], cfg.velocity_tolerance[i]) << "joint " << i;
+    EXPECT_FLOAT_EQ(again.effort_tolerance[i], cfg.effort_tolerance[i]) << "joint " << i;
+  }
+}
+
+TEST(ArmConfigTest, Tolerances_RepeatedRoundTripIsAFixedPoint) {
+  // The "Read from arm" loop in the config UI: read what the controller holds,
+  // save it, and the arm ends up holding exactly that. Doing it again must
+  // change nothing. Three passes, because a single round trip can hide an
+  // accumulation that only shows on the second.
+  auto j = nlohmann::json::parse(R"({
+    "ip_address": "192.168.1.4",
+    "position_tolerance": [0.05, 0.04, 0.03, 0.02, 0.01, 0.01, 0.002],
+    "velocity_tolerance": [0.5, 0.4, 0.3, 0.2, 0.1, 0.1, 0.02],
+    "effort_tolerance":   [2.0, 1.8, 1.6, 1.4, 1.2, 1.0, 0.5]
+  })");
+  // The baseline is the FIRST round trip's output, not the hand-written JSON:
+  // pass one quantises the literals to float, which is a property of the
+  // storage type and happens exactly once. Everything after it must be
+  // byte-identical. An accumulating factor cannot hide here — it would keep
+  // moving the values on every pass, which is precisely what compounding did
+  // to the high-speed boost.
+  j = ArmConfig::from_json(j).to_json();
+  const auto settled = j;
+  for (int pass = 2; pass <= 4; ++pass) {
+    j = ArmConfig::from_json(j).to_json();
+    EXPECT_EQ(j["position_tolerance"], settled["position_tolerance"]) << "pass " << pass;
+    EXPECT_EQ(j["velocity_tolerance"], settled["velocity_tolerance"]) << "pass " << pass;
+    EXPECT_EQ(j["effort_tolerance"], settled["effort_tolerance"]) << "pass " << pass;
+  }
+}
+
+TEST(ArmConfigTest, Tolerances_ZeroIsPreservedNotTreatedAsUnset) {
+  // Trossen's guidance is to start a new setup at 0.0 (fault on any overshoot)
+  // and raise once tuned, so 0.0 is a real, meaningful request. Dropping it as
+  // falsy would silently leave the controller's own wider tolerance in place —
+  // the opposite of what was asked for.
+  const auto j = nlohmann::json::parse(R"({
+    "ip_address": "192.168.1.4",
+    "position_tolerance": [0, 0, 0, 0, 0, 0, 0]
+  })");
+  const ArmConfig cfg = ArmConfig::from_json(j);
+  ASSERT_EQ(cfg.position_tolerance.size(), 7u);
+  for (size_t i = 0; i < 7; ++i) {
+    EXPECT_FLOAT_EQ(cfg.position_tolerance[i], 0.0f) << "joint " << i;
+  }
+  EXPECT_TRUE(cfg.to_json().contains("position_tolerance"));
+}

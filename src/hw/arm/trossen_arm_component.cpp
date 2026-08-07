@@ -25,6 +25,52 @@ double now_seconds() {
   using std::chrono::steady_clock;
   return duration<double>(steady_clock::now().time_since_epoch()).count();
 }
+
+/// Resolve a model name against the driver's own Model <-> name map, so every
+/// model the installed driver knows is accepted and the set cannot drift when
+/// the driver adds one.
+///
+/// Shared by configure() and read_arm_joint_limits() deliberately. Keeping two
+/// copies of this mapping is exactly how Pro-follower and Glide-handle support
+/// was silently dropped once already: the configs named those models, and a
+/// narrower hardcoded list rejected them before the driver ever saw them.
+trossen_arm::Model resolve_model(const std::string& name, const char* context) {
+  const auto it = std::find_if(
+    trossen_arm::MODEL_NAME.begin(), trossen_arm::MODEL_NAME.end(),
+    [&name](const auto& entry) { return entry.second == name; });
+  if (it != trossen_arm::MODEL_NAME.end()) return it->first;
+
+  std::string valid;
+  for (const auto& [_, model_name] : trossen_arm::MODEL_NAME) {
+    valid += (valid.empty() ? "" : ", ") + model_name;
+  }
+  throw std::runtime_error(
+    std::string(context) + ": Unknown model: " + name + " (valid: " + valid + ")");
+}
+
+/// Resolve an end-effector name to its standard properties. `is_leader` reports
+/// whether the name denotes a leader, which the caller uses to decide whether
+/// the arm is actuated. See resolve_model for why this is shared.
+trossen_arm::EndEffector resolve_end_effector(
+    const std::string& name, bool& is_leader, const char* context) {
+  if (name == "wxai_v0_leader") {
+    is_leader = true;
+    return trossen_arm::StandardEndEffector::wxai_v0_leader;
+  }
+  if (name == "wxai_v0_follower") {
+    is_leader = false;
+    return trossen_arm::StandardEndEffector::wxai_v0_follower;
+  }
+  if (name == "pro_base") {
+    // What the Rivet's Pro followers actually carry. Using a wxai end effector
+    // here loads the wrong mass/inertia into gravity compensation, which the
+    // arm does not report as an error — it just holds position badly.
+    is_leader = false;
+    return trossen_arm::StandardEndEffector::pro_base;
+  }
+  throw std::runtime_error(
+    std::string(context) + ": Unknown end_effector: " + name);
+}
 }  // namespace
 
 void TrossenArmComponent::configure(const nlohmann::json& config) {
@@ -39,48 +85,15 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     throw std::runtime_error("TrossenArmComponent: 'model' is required in config");
   }
   model_str_ = config.at("model").get<std::string>();
-  // Resolved against the driver's own Model <-> name map rather than an if-chain
-  // here. Every model the installed driver knows is therefore accepted, and the
-  // set cannot drift when the driver adds one. This component only understood
-  // "wxai_v0" while the retired composites each hardcoded their own subset
-  // (RivetComponent "pro", BimanualGlideComponent "glide_left"/"glide_right"), so
-  // decomposing onto plain trossen_arm components silently dropped support for
-  // the Pro followers and the Glide handles -- the configs name those models and
-  // were rejected before reaching the driver at all.
-  const auto model_it = std::find_if(
-    trossen_arm::MODEL_NAME.begin(), trossen_arm::MODEL_NAME.end(),
-    [this](const auto& entry) { return entry.second == model_str_; });
-  if (model_it == trossen_arm::MODEL_NAME.end()) {
-    std::string valid;
-    for (const auto& [_, name] : trossen_arm::MODEL_NAME) {
-      valid += (valid.empty() ? "" : ", ") + name;
-    }
-    throw std::runtime_error(
-      "TrossenArmComponent: Unknown model: " + model_str_ + " (valid: " + valid + ")");
-  }
-  const trossen_arm::Model model = model_it->first;
+  const trossen_arm::Model model = resolve_model(model_str_, "TrossenArmComponent");
 
   // Parse end effector
   if (!config.contains("end_effector")) {
     throw std::runtime_error("TrossenArmComponent: 'end_effector' is required in config");
   }
-  trossen_arm::EndEffector end_effector;
   end_effector_str_ = config.at("end_effector").get<std::string>();
-  if (end_effector_str_ == "wxai_v0_leader") {
-    end_effector = trossen_arm::StandardEndEffector::wxai_v0_leader;
-    is_leader_ = true;
-  } else if (end_effector_str_ == "wxai_v0_follower") {
-    end_effector = trossen_arm::StandardEndEffector::wxai_v0_follower;
-    is_leader_ = false;
-  } else if (end_effector_str_ == "pro_base") {
-    // What the Rivet's Pro followers actually carry. Using a wxai end effector
-    // here loads the wrong mass/inertia into gravity compensation, which the
-    // arm does not report as an error — it just holds position badly.
-    end_effector = trossen_arm::StandardEndEffector::pro_base;
-    is_leader_ = false;
-  } else {
-    throw std::runtime_error("TrossenArmComponent: Unknown end_effector: " + end_effector_str_);
-  }
+  const trossen_arm::EndEffector end_effector =
+    resolve_end_effector(end_effector_str_, is_leader_, "TrossenArmComponent");
 
   // Create and configure driver
   driver_ = std::make_shared<trossen_arm::TrossenArmDriver>();
@@ -580,5 +593,48 @@ void TrossenArmComponent::stage() {
 }
 
 REGISTER_HARDWARE(TrossenArmComponent, "trossen_arm")
+
+ArmJointLimits read_arm_joint_limits(const std::string& model,
+                                     const std::string& end_effector,
+                                     const std::string& ip_address) {
+  // Same resolvers configure() uses, so an arm the SDK can drive is always an
+  // arm the UI can read from. A private mapping here would drift and start
+  // rejecting rigs that run perfectly well.
+  bool is_leader = false;
+  const auto model_enum = resolve_model(model, "read_arm_joint_limits");
+  const auto end_effector_props =
+    resolve_end_effector(end_effector, is_leader, "read_arm_joint_limits");
+
+  // Short-lived driver: configure, read, and let the destructor disconnect.
+  trossen_arm::TrossenArmDriver driver;
+  try {
+    driver.configure(model_enum, end_effector_props, ip_address, true);
+  } catch (const std::exception& e) {
+    throw std::runtime_error(
+      "read_arm_joint_limits: Failed to connect to arm at " + ip_address + ": " +
+      std::string(e.what()));
+  }
+
+  const auto limits = driver.get_joint_limits();
+  ArmJointLimits out;
+  const auto n = limits.size();
+  out.position_min.reserve(n);
+  out.position_max.reserve(n);
+  out.velocity_max.reserve(n);
+  out.effort_max.reserve(n);
+  out.position_tolerance.reserve(n);
+  out.velocity_tolerance.reserve(n);
+  out.effort_tolerance.reserve(n);
+  for (const auto& jl : limits) {
+    out.position_min.push_back(jl.position_min);
+    out.position_max.push_back(jl.position_max);
+    out.velocity_max.push_back(jl.velocity_max);
+    out.effort_max.push_back(jl.effort_max);
+    out.position_tolerance.push_back(jl.position_tolerance);
+    out.velocity_tolerance.push_back(jl.velocity_tolerance);
+    out.effort_tolerance.push_back(jl.effort_tolerance);
+  }
+  return out;
+}
 
 }  // namespace trossen::hw::arm
