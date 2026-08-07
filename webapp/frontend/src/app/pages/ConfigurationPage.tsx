@@ -121,7 +121,17 @@ const SESSION_CONTROL_EVENT_SHORT: Readonly<Record<SessionControlEvent, string>>
 // a BIT INDEX into the driver's InputReport.buttons byte, not as a position.
 // Which bit is which button is a property of the handle hardware and appears
 // nowhere in the SDK, so this table is the only place the two are tied
-// together. Confirmed against the physical handle.
+// together.
+//
+// Bits 1 and 3 were transposed here until 2026-08-07: this table called bit 1
+// "Right" and bit 3 "Left", and drew them in those cells. The horizontal pair
+// is the only one that can be wrong without looking wrong -- top and bottom are
+// self-evident on the handle -- so the error survived by being invisible. What
+// it cost was a stop button bound to bit 1, labelled Right here, that appeared
+// completely dead: pressing the right-hand button emitted nothing, and the raw
+// bitmask, the claim arbitration and the debounce all had to be ruled out
+// before the label itself became the suspect. Verified on the physical handle
+// by pressing each button and reading which bit set.
 //
 // Only 0-3 exist: `buttons` is a uint8_t and the driver sizes
 // button_led_effects at 4. Nothing validates the number, and the SDK's
@@ -130,9 +140,9 @@ const SESSION_CONTROL_EVENT_SHORT: Readonly<Record<SessionControlEvent, string>>
 // the cross makes that unrepresentable.
 const GLIDE_BUTTON_LAYOUT = [
   { bit: 0, label: 'Top', cell: 'col-start-2 row-start-1' },
-  { bit: 1, label: 'Right', cell: 'col-start-3 row-start-2' },
+  { bit: 1, label: 'Left', cell: 'col-start-1 row-start-2' },
   { bit: 2, label: 'Bottom', cell: 'col-start-2 row-start-3' },
-  { bit: 3, label: 'Left', cell: 'col-start-1 row-start-2' },
+  { bit: 3, label: 'Right', cell: 'col-start-3 row-start-2' },
 ] as const;
 
 const GLIDE_BUTTON_BITS: ReadonlySet<number> = new Set(GLIDE_BUTTON_LAYOUT.map((b) => b.bit));
