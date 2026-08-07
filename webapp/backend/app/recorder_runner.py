@@ -1277,6 +1277,46 @@ def _stdin_reader(
             rerecord_event.set()
 
 
+def _handle_summon(component_id: str) -> None:
+    """Ease every follower onto its leader's current pose.
+
+    Summon is the one session-control event that is not a loop signal: it does
+    not end, redo or advance an episode, so there is no flag for the episode
+    loop to service. It goes straight to the teleop controllers, which is the
+    same thing SessionManager does for `kSummon` on the non-webapp path.
+
+    `request_summon()` only raises a flag — the blocking eased move runs on the
+    controller's own mirror thread, which is what keeps it from overlapping the
+    kHz command writes to the same follower. So this is safe to call from the
+    session-control poll thread, and a double-press collapses into one summon.
+
+    Deliberately phase-independent, matching the SDK: pressed mid-episode it
+    does move the arm and that motion lands in the recorded data. That is the
+    operator's call, the same as re-recording is.
+    """
+    requested = 0
+    for controller in _controllers or []:
+        try:
+            controller.request_summon()
+            requested += 1
+        except Exception as exc:
+            # An older extension without the binding, or a controller that
+            # rejected the call. Never let it reach the poll thread's caller:
+            # a failed summon costs the operator a re-sync, not the recording.
+            print(f"session control '{component_id}' -> summon failed: {exc}",
+                  flush=True)
+            return
+
+    print(f"session control '{component_id}' -> summon "
+          f"({requested} controller(s))", flush=True)
+    _emit({
+        "type": "event",
+        "event": "session_control",
+        "action": "summon",
+        "source": component_id,
+    })
+
+
 def _attach_session_controls(
     session_controls: list,
     stop_event: threading.Event,
@@ -1301,10 +1341,21 @@ def _attach_session_controls(
       kStopSession -> stop        (end the session; the loop discards the
                                    in-flight episode, matching the webapp's own
                                    Stop button)
+      kSummon      -> (no flag)   (serviced directly against the teleop
+                                   controllers; it does not end or redo an
+                                   episode, so the loop has nothing to do)
 
     Callbacks fire on each component's poll thread, so they only set an Event —
     the episode loop does the work. Setting an Event is atomic and idempotent,
     which makes a double-press harmless.
+
+    Every press also emits a `session_control` event on stdout BEFORE the flag
+    is set. Setting the flag is instant, but the loop then has to finish the
+    episode -- discard the partial, finalize the MCAP -- before it emits a
+    lifecycle event, and that takes long enough that a UI waiting only on
+    lifecycle events looks frozen and invites a second press. The ack is the
+    press itself, so the screen can acknowledge the button immediately and
+    show the resulting work as pending.
     """
     if not session_controls:
         return
@@ -1316,13 +1367,33 @@ def _attach_session_controls(
         ts.SessionControlEvent.kStopSession: ("stop", stop_event),
     }
 
+    # Resolved once, defensively: `kSummon` is newer than the rest of this enum,
+    # and an extension built before it exists would otherwise raise
+    # AttributeError inside the callback below -- on a button-poll thread, for
+    # EVERY press, taking start/stop/rerecord down with it. Absent the
+    # enumerator the summon button is simply inert, which is the same thing a
+    # config that never binds it does.
+    summon_event = getattr(ts.SessionControlEvent, "kSummon", None)
+
     def make_handler(component_id: str):
         def on_event(event) -> None:
+            if summon_event is not None and event == summon_event:
+                _handle_summon(component_id)
+                return
             mapped = event_map.get(event)
             if mapped is None:
                 return
             name, flag = mapped
             print(f"session control '{component_id}' -> {name}", flush=True)
+            # Ack before the flag: the flag is what makes the loop start the
+            # slow part, so emitting after it would race the very latency this
+            # exists to cover.
+            _emit({
+                "type": "event",
+                "event": "session_control",
+                "action": name,
+                "source": component_id,
+            })
             flag.set()
         return on_event
 

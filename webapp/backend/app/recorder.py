@@ -868,6 +868,21 @@ def _handle_event(runner: _Runner, payload: dict[str, Any]) -> None:
             return
         set_current_episode(runner.session_id, value)
         return
+    if event == "session_control":
+        # A hardware button was pressed. Forwarded as its own event rather than
+        # folded into the lifecycle stream because it reports an *intent*, not a
+        # state change: the episode has not ended yet, and for `summon` it never
+        # will. The screen uses it to acknowledge the press immediately instead
+        # of sitting unchanged until the loop finishes discarding and finalizing
+        # the in-flight episode.
+        bus.publish(runner.session_id, {
+            "type": "session_control",
+            "data": {
+                "action": payload.get("action"),
+                "source": payload.get("source"),
+            },
+        })
+        return
     if event in ("episode_started", "episode_ended", "episode_discarded"):
         try:
             episode_index = int(payload.get("episode_index", 0))

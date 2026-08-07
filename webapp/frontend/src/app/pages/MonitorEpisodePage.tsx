@@ -68,6 +68,15 @@ interface LogEntry {
 // button rather than recording on arrival (TDS-158).
 type Phase = 'not_started' | 'recording' | 'resetting' | 'complete' | 'stopped' | 'paused';
 
+/** What a pending hardware-button press is labelled while the loop services it.
+ *  Keyed by the `action` the recorder sends, which is the episode loop's own
+ *  vocabulary (stop / next / rerecord) rather than the SDK event name. */
+const HW_PENDING_LABEL: Record<string, string> = {
+  stop: 'handle: stopping…',
+  next: 'handle: ending episode…',
+  rerecord: 'handle: re-recording…',
+};
+
 function ConnectionBadge({ status, recording }: { status: WsStatus; recording: boolean }) {
   // The green `live` state means recording is actively in flight. After a
   // session stops or completes the socket stays `open` (keepalives, late
@@ -206,6 +215,11 @@ export function MonitorEpisodePage() {
   const [stopping, setStopping] = useState(false);
   const [rerecording, setRerecording] = useState(false);
   const [nexting, setNexting] = useState(false);
+  // Which hardware-button action has been acknowledged but not yet resolved by
+  // the lifecycle event it produces. Display-only: the recorder already holds
+  // the authoritative flag, so this never gates anything, it just stops the
+  // screen from looking inert while the loop finalizes an episode.
+  const [hwPending, setHwPending] = useState<string | null>(null);
   // In-place recovery from the error screen. The whole loop (clear the SDK
   // fault → re-test the hardware → resume) runs here without leaving the page:
   //   idle     → showing the error + "Clear Error & Recover"
@@ -721,6 +735,28 @@ export function MonitorEpisodePage() {
       return;
     }
 
+    // A Glide handle button was pressed. This arrives the instant the button
+    // fires, whereas the lifecycle event it leads to only lands once the loop
+    // has discarded the partial and finalized the MCAP — seconds later. Without
+    // this the screen sits unchanged after a press, which reads as a dropped
+    // button and invites a second one.
+    if (msg.type === 'session_control') {
+      const data = msg.data as { action?: string; source?: string };
+      const action = data.action ?? 'unknown';
+      // Summon is the exception: it never produces a lifecycle event, so this
+      // ack is the only feedback there will be. The others are marked pending
+      // and cleared by the lifecycle event that follows.
+      if (action === 'summon') {
+        addLog('info', 'Handle button: summoning followers onto leaders');
+        announce('Summoning followers');
+      } else {
+        setHwPending(action);
+        addLog('info', `Handle button: ${action}`);
+        announce(`Handle button ${action}`);
+      }
+      return;
+    }
+
     if (msg.type === 'lifecycle') {
       const data = msg.data as {
         event: string;
@@ -731,6 +767,11 @@ export function MonitorEpisodePage() {
         final_status?: string;
         dry_run?: boolean;
       };
+      // Whatever a handle button asked for has now actually happened (or the
+      // session ended), so retire the pending badge. Cleared unconditionally:
+      // a press whose lifecycle event never arrives would otherwise leave the
+      // badge stuck on screen for the rest of the session.
+      setHwPending(null);
       if (data.event === 'ready') addLog('success', 'Bridge ready');
       else if (data.event === 'episode_started') {
         announceEpisodeStart(data.episode_index ?? 0);
@@ -1342,9 +1383,22 @@ export function MonitorEpisodePage() {
               {phase === 'complete' && `Complete — ${currentEpisode} of ${totalEpisodes} episodes recorded`}
               {phase === 'stopped' && `Stopped — ${currentEpisode} of ${totalEpisodes} episodes saved (press Resume Session below to continue)`}
             </div>
-            {phase === 'recording' && (
-              <div className="text-ink text-[12px] relative z-10 font-mono">{episodeProgress}%</div>
-            )}
+            <div className="flex items-center gap-[8px] relative z-10">
+              {/* The press is acknowledged here the moment it happens; the work
+                  it triggers (discard the partial, finalize the MCAP) can take
+                  seconds, and this is what fills that gap. */}
+              {hwPending && (
+                <div
+                  className="text-[11px] font-mono px-[6px] py-[1px] rounded border border-surface animate-pulse"
+                  aria-live="polite"
+                >
+                  {HW_PENDING_LABEL[hwPending] ?? `handle: ${hwPending}…`}
+                </div>
+              )}
+              {phase === 'recording' && (
+                <div className="text-ink text-[12px] font-mono">{episodeProgress}%</div>
+              )}
+            </div>
           </div>
         </div>
       </div>
