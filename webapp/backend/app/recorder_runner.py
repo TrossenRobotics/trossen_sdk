@@ -1277,44 +1277,72 @@ def _stdin_reader(
             rerecord_event.set()
 
 
-def _handle_summon(component_id: str) -> None:
-    """Ease every follower onto its leader's current pose.
+# How long to wait for every accepted summon to finish before giving up. A
+# summon is a time-parameterised eased move of a few seconds; this is generous
+# enough to cover a long one and short enough that a wedged mirror loop does not
+# strand the operator staring at a screen that says nothing.
+_SUMMON_TIMEOUT_S = 20.0
 
-    Summon is the one session-control event that is not a loop signal: it does
-    not end, redo or advance an episode, so there is no flag for the episode
-    loop to service. It goes straight to the teleop controllers, which is the
-    same thing SessionManager does for `kSummon` on the non-webapp path.
 
-    `request_summon()` only raises a flag — the blocking eased move runs on the
-    controller's own mirror thread, which is what keeps it from overlapping the
-    kHz command writes to the same follower. So this is safe to call from the
-    session-control poll thread, and a double-press collapses into one summon.
+def _summon_all_and_wait(timeout_s: float = _SUMMON_TIMEOUT_S) -> bool:
+    """Summon every follower onto its leader and block until they arrive.
 
-    Deliberately phase-independent, matching the SDK: pressed mid-episode it
-    does move the arm and that motion lands in the recorded data. That is the
-    operator's call, the same as re-recording is.
+    Runs on the EPISODE LOOP thread, never on the button-poll thread. All the
+    session-control bindings share one poll thread, so blocking there for the
+    seconds a summon takes would stop stop/rerecord from being noticed at all.
+
+    Waiting is done by comparing `summons_completed()` against a baseline
+    sampled before the request, because no flag can express "the follower has
+    arrived": the controller consumes `summon_requested_` to claim the request
+    BEFORE starting the blocking move, so it reads false while the arm is still
+    travelling. Comparing counts also means a second summon landing mid-wait
+    cannot be mistaken for this one finishing.
+
+    A controller with no follower (leader-only) declines the request, which is
+    not a failure — it has nothing to summon. Returns False only when NOTHING
+    was summoned or something that accepted never finished, which is what the
+    caller treats as "do not start recording".
     """
-    requested = 0
-    for controller in _controllers or []:
-        try:
-            controller.request_summon()
-            requested += 1
-        except Exception as exc:
-            # An older extension without the binding, or a controller that
-            # rejected the call. Never let it reach the poll thread's caller:
-            # a failed summon costs the operator a re-sync, not the recording.
-            print(f"session control '{component_id}' -> summon failed: {exc}",
-                  flush=True)
-            return
+    controllers = list(_controllers or [])
+    if not controllers:
+        print("[recorder-runner] summon: no teleop controllers", flush=True)
+        return False
 
-    print(f"session control '{component_id}' -> summon "
-          f"({requested} controller(s))", flush=True)
-    _emit({
-        "type": "event",
-        "event": "session_control",
-        "action": "summon",
-        "source": component_id,
-    })
+    # (controller, count before the request) for the ones that took it.
+    accepted: list[tuple[Any, int]] = []
+    for controller in controllers:
+        try:
+            before = controller.summons_completed()
+            if controller.request_summon():
+                accepted.append((controller, before))
+        except Exception as exc:
+            # An extension too old to carry these bindings, or a controller that
+            # refused. Either way the followers are not known to be aligned, so
+            # this is a failure rather than something to press on through.
+            print(f"[recorder-runner] summon failed: {exc}", flush=True)
+            return False
+
+    if not accepted:
+        print("[recorder-runner] summon: every controller declined "
+              "(no follower, or the mirror is stopped)", flush=True)
+        return False
+
+    deadline = time.monotonic() + timeout_s
+    pending = accepted
+    while pending:
+        pending = [(c, before) for (c, before) in pending
+                   if c.summons_completed() == before]
+        if not pending:
+            break
+        if time.monotonic() >= deadline:
+            print(f"[recorder-runner] summon: {len(pending)} controller(s) did "
+                  f"not finish within {timeout_s}s", flush=True)
+            return False
+        time.sleep(0.05)
+
+    print(f"[recorder-runner] summon complete ({len(accepted)} follower(s))",
+          flush=True)
+    return True
 
 
 def _attach_session_controls(
@@ -1322,6 +1350,7 @@ def _attach_session_controls(
     stop_event: threading.Event,
     next_event: threading.Event,
     rerecord_event: threading.Event,
+    summon_event: threading.Event,
 ) -> None:
     """Wire hardware button sources to the same signal events stdin drives.
 
@@ -1341,9 +1370,15 @@ def _attach_session_controls(
       kStopSession -> stop        (end the session; the loop discards the
                                    in-flight episode, matching the webapp's own
                                    Stop button)
-      kSummon      -> (no flag)   (serviced directly against the teleop
-                                   controllers; it does not end or redo an
-                                   episode, so the loop has nothing to do)
+      kSummon      -> summon      (align the followers onto their leaders, then
+                                   begin recording — see the loop's handling.
+                                   Unlike SessionManager's kSummon, which only
+                                   re-syncs and is phase-independent, here it
+                                   also starts an episode. The webapp recorder
+                                   already reinterprets these events against its
+                                   own loop rather than driving the manager's
+                                   state machine -- kStart means "next" here for
+                                   the same reason.)
 
     Callbacks fire on each component's poll thread, so they only set an Event —
     the episode loop does the work. Setting an Event is atomic and idempotent,
@@ -1367,19 +1402,17 @@ def _attach_session_controls(
         ts.SessionControlEvent.kStopSession: ("stop", stop_event),
     }
 
-    # Resolved once, defensively: `kSummon` is newer than the rest of this enum,
-    # and an extension built before it exists would otherwise raise
-    # AttributeError inside the callback below -- on a button-poll thread, for
-    # EVERY press, taking start/stop/rerecord down with it. Absent the
-    # enumerator the summon button is simply inert, which is the same thing a
-    # config that never binds it does.
-    summon_event = getattr(ts.SessionControlEvent, "kSummon", None)
+    # Added conditionally, defensively: `kSummon` is newer than the rest of this
+    # enum, and naming it unconditionally would raise AttributeError on an
+    # extension built before it exists -- here at attach time, taking the whole
+    # recording down rather than just the one button. Absent the enumerator the
+    # summon button is simply inert, the same as a config that never binds it.
+    summon_enum = getattr(ts.SessionControlEvent, "kSummon", None)
+    if summon_enum is not None:
+        event_map[summon_enum] = ("summon", summon_event)
 
     def make_handler(component_id: str):
         def on_event(event) -> None:
-            if summon_event is not None and event == summon_event:
-                _handle_summon(component_id)
-                return
             mapped = event_map.get(event)
             if mapped is None:
                 return
@@ -1423,22 +1456,67 @@ def _wait_for_signal(
     next_event: threading.Event,
     rerecord_event: threading.Event,
     timeout: float,
+    summon_event: threading.Event | None = None,
 ) -> str | None:
-    """Wait up to `timeout` seconds for stop / next / rerecord. Returns the
-    name of the event that fired, or None on timeout. Polls at 100 ms.
+    """Wait up to `timeout` seconds for stop / next / rerecord / summon. Returns
+    the name of the event that fired, or None on timeout. Polls at 100 ms.
+
+    `summon_event` is optional and last so the existing three-event callers are
+    unchanged; a caller that passes None simply cannot be woken by a summon.
     """
     deadline = time.monotonic() + timeout
     while True:
+        # Checked in priority order, and stop stays first: a stop pressed at the
+        # same moment as anything else must win, since the other branches all
+        # lead to more recording.
         if stop_event.is_set():
             return "stop"
         if next_event.is_set():
             return "next"
         if rerecord_event.is_set():
             return "rerecord"
+        if summon_event is not None and summon_event.is_set():
+            return "summon"
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             return None
         time.sleep(min(0.1, remaining))
+
+
+def _await_decision_after_failed_summon(
+    stop_event: threading.Event,
+    next_event: threading.Event,
+    rerecord_event: threading.Event,
+    summon_event: threading.Event | None,
+) -> str:
+    """Block until the operator says what to do after a summon that did not
+    complete. Returns "stop", "summon" (try again) or "proceed" (start anyway).
+
+    Deliberately has no timeout that starts recording on its own. A summon
+    button says "do not record until the followers are where the leaders are",
+    so quietly starting after a failed alignment would record exactly the
+    mismatch the operator pressed the button to avoid. Every exit from here is
+    something a human chose.
+
+    Safe against an unattended rig despite blocking: an abort (frontend gone,
+    e-stop) always sets `stop_event` alongside `abort_event`, so teardown still
+    gets through.
+    """
+    while True:
+        sig = _wait_for_signal(
+            stop_event, next_event, rerecord_event, 1.0, summon_event)
+        if sig == "stop":
+            return "stop"
+        if sig == "summon":
+            if summon_event is not None:
+                summon_event.clear()
+            return "summon"
+        if sig in ("next", "rerecord"):
+            # An explicit press on another control is the operator overriding
+            # the block: they want the episode regardless. The flag is left set
+            # so the loop's own handling of it still runs.
+            return "proceed"
+        # None — timed out. Keep waiting; see above.
 
 
 def _run_episode_loop(
@@ -1452,6 +1530,7 @@ def _run_episode_loop(
     start_episode_index: int,
     dry_run: bool,
     mcap_root: str,
+    summon_event: threading.Event | None = None,
 ) -> None:
     """Drive episodes from `start_episode_index..num_episodes-1` to completion.
 
@@ -1489,9 +1568,39 @@ def _run_episode_loop(
 
     try:
         first_iteration_pending = True
+        # Set when a summon button press is waiting to be serviced. Held as a
+        # flag rather than acted on where the press is detected so the alignment
+        # always happens at the single point every episode begins, no matter
+        # which branch got here (pressed mid-episode, or during the reset wait).
+        pending_summon = False
         episode_index = start_episode_index
         while episode_index < num_episodes:
             if not first_iteration_pending:
+                if pending_summon:
+                    pending_summon = False
+                    if summon_event is not None:
+                        summon_event.clear()
+                    print(f"{tag} summon requested — aligning followers before "
+                          f"episode {episode_index}", flush=True)
+                    if not _summon_all_and_wait():
+                        # Do NOT start: the followers are not known to be on
+                        # their leaders, and recording from that mismatch is the
+                        # thing the button exists to prevent.
+                        print(f"{tag} summon did not complete — not starting "
+                              f"episode {episode_index}", flush=True)
+                        _emit({
+                            "type": "event",
+                            "event": "summon_failed",
+                            "episode_index": episode_index,
+                        })
+                        decision = _await_decision_after_failed_summon(
+                            stop_event, next_event, rerecord_event, summon_event)
+                        if decision == "stop":
+                            break
+                        if decision == "summon":
+                            pending_summon = True
+                            continue
+                        # "proceed" falls through and starts the episode.
                 next_event.clear()
                 rerecord_event.clear()
                 print(f"{tag} starting episode {episode_index}", flush=True)
@@ -1517,7 +1626,8 @@ def _run_episode_loop(
             print(f"{tag} waiting for episode {episode_index} to end", flush=True)
             polling_outcome: str | None = None
             while mgr.is_episode_active():
-                sig = _wait_for_signal(stop_event, next_event, rerecord_event, 0.1)
+                sig = _wait_for_signal(
+                    stop_event, next_event, rerecord_event, 0.1, summon_event)
                 if sig is None:
                     continue
                 polling_outcome = sig
@@ -1555,10 +1665,21 @@ def _run_episode_loop(
                 })
                 retry_this_episode = True
             else:
-                if polling_outcome == "next":
+                if polling_outcome in ("next", "summon"):
+                    # Summon pressed mid-episode behaves as next + align: the
+                    # in-flight episode is KEPT (stop_episode finalizes it, it is
+                    # not discarded), then the followers are aligned before the
+                    # next one starts. The alignment itself is deferred to the
+                    # top of the loop rather than run here, so it happens after
+                    # this episode is safely closed out and at the same point as
+                    # every other path into start_episode().
+                    if polling_outcome == "summon":
+                        pending_summon = True
+                        if summon_event is not None:
+                            summon_event.clear()
                     next_event.clear()
-                    print(f"{tag} next signaled during episode {episode_index}, "
-                          f"ending early", flush=True)
+                    print(f"{tag} {polling_outcome} signaled during episode "
+                          f"{episode_index}, ending early", flush=True)
                     if mgr.is_episode_active():
                         mgr.stop_episode()
                 # Drop ghost episodes (file finalized with no joint-state
@@ -1614,6 +1735,7 @@ def _run_episode_loop(
                 while True:
                     sig = _wait_for_signal(
                         stop_event, next_event, rerecord_event, reset_duration,
+                        summon_event,
                     )
                     if sig == "stop":
                         print(f"{tag} stop signaled during reset window", flush=True)
@@ -1644,6 +1766,18 @@ def _run_episode_loop(
                                   f"retrying slot; restarting reset wait",
                                   flush=True)
                         continue
+                    if sig == "summon":
+                        # This is the intended way to use the button: the
+                        # operator has the leaders where they want them during
+                        # the reset window and presses to align and go. Cut the
+                        # remaining wait short; the alignment runs at the top of
+                        # the loop, immediately before start_episode().
+                        pending_summon = True
+                        if summon_event is not None:
+                            summon_event.clear()
+                        print(f"{tag} summon signaled during reset window, "
+                              f"aligning then starting", flush=True)
+                        break
                     if sig == "next":
                         next_event.clear()
                         print(f"{tag} next signaled during reset window, "
@@ -1810,6 +1944,10 @@ def main() -> int:
     stop_event = threading.Event()
     next_event = threading.Event()
     rerecord_event = threading.Event()
+    # Hardware-only for now: no stdin signal sets it, because the on-screen
+    # controls have no summon button. The loop treats it as optional throughout,
+    # so nothing breaks if one is never wired.
+    summon_event = threading.Event()
     abort_event = threading.Event()
     shutdown_event = threading.Event()
 
@@ -1825,7 +1963,7 @@ def main() -> int:
     # events exist and after the first episode is live, so an early press cannot
     # set a flag the loop has not started watching for yet.
     _attach_session_controls(
-        _session_controls, stop_event, next_event, rerecord_event)
+        _session_controls, stop_event, next_event, rerecord_event, summon_event)
 
     try:
         _run_episode_loop(
@@ -1839,6 +1977,7 @@ def main() -> int:
             start_episode_index,
             dry_run,
             mcap_root,
+            summon_event,
         )
     except Exception as e:
         # Discard the partial recording for the in-flight episode so a

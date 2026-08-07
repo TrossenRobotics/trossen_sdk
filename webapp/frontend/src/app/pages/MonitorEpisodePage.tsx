@@ -75,6 +75,10 @@ const HW_PENDING_LABEL: Record<string, string> = {
   stop: 'handle: stopping…',
   next: 'handle: ending episode…',
   rerecord: 'handle: re-recording…',
+  // Summon holds the longest of the four -- it waits out a multi-second eased
+  // move before the episode starts -- so this badge is the only thing on screen
+  // for that whole window. Says what is moving, not just that something is.
+  summon: 'handle: aligning followers…',
 };
 
 function ConnectionBadge({ status, recording }: { status: WsStatus; recording: boolean }) {
@@ -743,17 +747,9 @@ export function MonitorEpisodePage() {
     if (msg.type === 'session_control') {
       const data = msg.data as { action?: string; source?: string };
       const action = data.action ?? 'unknown';
-      // Summon is the exception: it never produces a lifecycle event, so this
-      // ack is the only feedback there will be. The others are marked pending
-      // and cleared by the lifecycle event that follows.
-      if (action === 'summon') {
-        addLog('info', 'Handle button: summoning followers onto leaders');
-        announce('Summoning followers');
-      } else {
-        setHwPending(action);
-        addLog('info', `Handle button: ${action}`);
-        announce(`Handle button ${action}`);
-      }
+      setHwPending(action);
+      addLog('info', `Handle button: ${action}`);
+      announce(`Handle button ${action}`);
       return;
     }
 
@@ -772,6 +768,18 @@ export function MonitorEpisodePage() {
       // a press whose lifecycle event never arrives would otherwise leave the
       // badge stuck on screen for the rest of the session.
       setHwPending(null);
+      if (data.event === 'summon_failed') {
+        // The recorder is parked, not broken: it refuses to start from a pose
+        // the followers may not be holding. Surfaced as a toast as well as a log
+        // line because nothing else will change on screen until the operator
+        // presses something, and a silent stall reads as a hang.
+        addLog('warning',
+          'Summon did not complete — episode not started. Press the summon ' +
+          'button to retry, or Next to record anyway.');
+        toast.warning('Followers did not align — episode not started');
+        announce('Summon failed, episode not started');
+        return;
+      }
       if (data.event === 'ready') addLog('success', 'Bridge ready');
       else if (data.event === 'episode_started') {
         announceEpisodeStart(data.episode_index ?? 0);

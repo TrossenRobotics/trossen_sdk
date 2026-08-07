@@ -883,6 +883,22 @@ def _handle_event(runner: _Runner, payload: dict[str, Any]) -> None:
             },
         })
         return
+    if event == "summon_failed":
+        # The recorder is deliberately parked: the followers are not known to be
+        # on their leaders, so it will not start the episode. Published as a
+        # lifecycle event so the monitor's handler retires the pending badge --
+        # leaving it spinning would imply work still in progress when the loop is
+        # in fact waiting on the operator.
+        print(f"[recorder {runner.session_id[:8]}] summon did not complete — "
+              f"episode not started, waiting for the operator", flush=True)
+        bus.publish(runner.session_id, {
+            "type": "lifecycle",
+            "data": {
+                "event": "summon_failed",
+                "episode_index": payload.get("episode_index"),
+            },
+        })
+        return
     if event in ("episode_started", "episode_ended", "episode_discarded"):
         try:
             episode_index = int(payload.get("episode_index", 0))
