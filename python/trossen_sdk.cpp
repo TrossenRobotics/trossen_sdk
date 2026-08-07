@@ -868,8 +868,13 @@ PYBIND11_MODULE(trossen_sdk, m) {
     // here, so the caller never holds the GIL across it.
     .def("request_summon", &TeleopController::request_summon,
          "Ask the mirror loop to ease the follower onto its leader's current "
-         "pose. Dropped, not queued, when there is no follower or the loop is "
-         "stopped.")
+         "pose. Returns True if the request was accepted, False if it was "
+         "dropped (no follower, or the mirror is stopped). Acceptance is not "
+         "arrival — pair it with summons_completed() to wait for the move.")
+    .def("summons_completed", &TeleopController::summons_completed,
+         "Monotonic count of summons carried through to completion. Sample it, "
+         "call request_summon(), then wait for it to change; it is bumped only "
+         "after the blocking move returns.")
     .def("is_running", &TeleopController::is_running)
     .def("leader", &TeleopController::leader)
     .def("follower", &TeleopController::follower)

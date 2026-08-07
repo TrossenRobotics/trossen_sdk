@@ -296,3 +296,85 @@ TEST(TeleopControllerSummonTest, LeaderOnlySetupIsSafe) {
   EXPECT_TRUE(ctrl.is_running());
   ctrl.stop_teleop();
 }
+
+// ── Observing that a summon has FINISHED ────────────────────────────────
+//
+// A caller that must not act until the follower has actually arrived — the
+// webapp recorder, which aligns the arms before it starts recording — cannot
+// use the request flag: the loop consumes it to claim the request BEFORE the
+// blocking move, so it reads false for the whole time the arm is travelling.
+// summons_completed() is the signal that exists for that, and these pin the
+// two properties a waiter depends on: it lags the request, and it is only
+// published once the move is genuinely done.
+
+TEST(TeleopControllerSummonTest, CompletedCountLagsTheRequest) {
+  auto leader = std::make_shared<PosedLeader>();
+  auto follower = std::make_shared<RecordingFollower>();
+  follower->io.summon_duration = std::chrono::milliseconds(150);
+  TeleopController ctrl(leader, follower, {TeleopCapable::Space::Joint, 500.0f});
+  ctrl.teleop();
+
+  const auto before = ctrl.summons_completed();
+  EXPECT_TRUE(ctrl.request_summon());
+  // Sampled while the move is deliberately still in flight. A waiter that
+  // treated acceptance as arrival would start recording here, mid-trajectory.
+  std::this_thread::sleep_for(std::chrono::milliseconds(40));
+  EXPECT_EQ(ctrl.summons_completed(), before);
+
+  ASSERT_TRUE(wait_for_summons(*follower, 1));
+  // The follower's own counter is bumped inside summon(); the controller's is
+  // bumped after it returns, so allow the loop a moment to get there.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (ctrl.summons_completed() == before &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
+  EXPECT_GT(ctrl.summons_completed(), before);
+  ctrl.stop_teleop();
+}
+
+TEST(TeleopControllerSummonTest, RequestIsRefusedWhenThereIsNothingToSummon) {
+  // False is what tells the recorder "nothing was aligned", which it turns into
+  // "do not start the episode". A silent no-op returning true would let it
+  // record from a pose no follower ever moved to.
+  auto leader = std::make_shared<PosedLeader>();
+
+  TeleopController leader_only(leader, nullptr,
+                               {TeleopCapable::Space::Joint, 500.0f});
+  leader_only.teleop();
+  EXPECT_FALSE(leader_only.request_summon());
+  EXPECT_EQ(leader_only.summons_completed(), 0u);
+  leader_only.stop_teleop();
+
+  auto follower = std::make_shared<RecordingFollower>();
+  TeleopController stopped(leader, follower,
+                           {TeleopCapable::Space::Joint, 500.0f});
+  EXPECT_FALSE(stopped.request_summon());  // mirror never started
+  EXPECT_EQ(stopped.summons_completed(), 0u);
+}
+
+TEST(TeleopControllerSummonTest, CompletedCountIsMonotonicAcrossSummons) {
+  // The recorder waits for the count to CHANGE rather than reach a value, so a
+  // second summon landing during someone else's wait must not roll it back.
+  auto leader = std::make_shared<PosedLeader>();
+  auto follower = std::make_shared<RecordingFollower>();
+  follower->io.summon_duration = std::chrono::milliseconds(20);
+  TeleopController ctrl(leader, follower, {TeleopCapable::Space::Joint, 500.0f});
+  ctrl.teleop();
+
+  std::uint64_t seen = ctrl.summons_completed();
+  for (int i = 1; i <= 3; ++i) {
+    EXPECT_TRUE(ctrl.request_summon());
+    ASSERT_TRUE(wait_for_summons(*follower, i));
+    const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (ctrl.summons_completed() == seen &&
+           std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    const auto now = ctrl.summons_completed();
+    EXPECT_GT(now, seen);
+    seen = now;
+  }
+  ctrl.stop_teleop();
+}

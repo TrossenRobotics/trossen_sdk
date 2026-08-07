@@ -163,7 +163,7 @@ void TeleopController::stop_teleop() {
   }
 }
 
-void TeleopController::request_summon() {
+bool TeleopController::request_summon() {
   // Dropped rather than queued when the mirror is not running: the point of a
   // summon is "go to where the leader is NOW", and a request serviced at some
   // later restart would drive to a pose the operator has long since left.
@@ -171,9 +171,10 @@ void TeleopController::request_summon() {
     std::cerr << "  [teleop] summon ignored — "
               << (follower_io_ ? "mirror loop is not running" : "no follower configured")
               << '\n';
-    return;
+    return false;
   }
   summon_requested_.store(true);
+  return true;
 }
 
 // ── Control loop ────────────────────────────────────────────────────────
@@ -200,6 +201,12 @@ void TeleopController::control_loop() {
             std::cout << "  [teleop] Summoning follower to leader pose...\n";
             follower_io_->summon(pose);
             std::cout << "  [teleop] Summon complete\n";
+            // Published only here, after the move returns, so a caller waiting
+            // on this count never sees "arrived" while the arm is still moving.
+            // An empty leader read deliberately does not count: nothing moved,
+            // so reporting a completion would let a waiter start recording from
+            // a pose the follower never reached.
+            summons_completed_.fetch_add(1, std::memory_order_release);
           }
         }
         continue;

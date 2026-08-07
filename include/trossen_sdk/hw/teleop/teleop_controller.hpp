@@ -17,6 +17,7 @@
 #define TROSSEN_SDK__HW__TELEOP__TELEOP_CONTROLLER_HPP
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
 #include <thread>
 #include <vector>
@@ -125,8 +126,33 @@ public:
    * A no-op when there is no follower or the loop is not running — the pose
    * would be stale by the time the loop restarted. Repeated calls before the
    * loop services one collapse into a single summon.
+   *
+   * @return True if the request was accepted and the loop will service it;
+   *   false if it was dropped (no follower, or the mirror is stopped). A caller
+   *   that must not proceed until the follower has actually arrived needs both
+   *   this and `summons_completed()` — the return only says the request was
+   *   taken, not that the move has finished.
    */
-  void request_summon();
+  bool request_summon();
+
+  /**
+   * @brief Count of summons the mirror loop has carried through to completion.
+   *
+   * Monotonic, and incremented only after `summon()` returns — so it never
+   * reports a move that is still in flight, and never one that was skipped
+   * because the leader read came back empty.
+   *
+   * The counter exists because no other state can express "the follower has
+   * arrived". `summon_requested_` is cleared BEFORE the blocking move starts
+   * (the loop exchanges it to claim the request), so it reads false throughout
+   * the seconds the arm is actually moving. Sample this, call
+   * `request_summon()`, then wait for the value to change; comparing counts
+   * rather than watching a flag also makes the wait immune to a second summon
+   * landing in between.
+   */
+  std::uint64_t summons_completed() const {
+    return summons_completed_.load(std::memory_order_acquire);
+  }
 
   /// @brief Check if the control loop is running.
   bool is_running() const { return running_.load(); }
@@ -160,6 +186,11 @@ private:
   /// move. Atomic because it crosses from a session-control thread onto the
   /// loop thread.
   std::atomic<bool> summon_requested_{false};
+
+  /// Bumped by the mirror loop after each completed summon; see
+  /// summons_completed(). Separate from the flag above because the flag is
+  /// consumed before the move begins.
+  std::atomic<std::uint64_t> summons_completed_{0};
 };
 
 }  // namespace trossen::hw::teleop
