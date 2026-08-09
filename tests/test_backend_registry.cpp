@@ -4,7 +4,6 @@
  */
 
 #include <filesystem>
-#include <iostream>
 #include <memory>
 #include <stdexcept>
 
@@ -26,23 +25,13 @@ using trossen::io::backends::TrossenMCAPBackend;
 class BackendRegistryTest : public ::testing::Test {
  protected:
   static void SetUpTestSuite() {
-    // Load configuration once for all tests
-    // Tests run from build/tests directory, so we need to go up two levels
-    const std::string config_path = "../../tests/test_config.json";
+    // Absolute fixture path injected by tests/CMakeLists.txt.
+    const std::string config_path = TROSSEN_TEST_CONFIG_PATH;
 
-    if (!std::filesystem::exists(config_path)) {
-      std::cerr << "Warning: " << config_path << " not found" << std::endl;
-      std::cerr << "Current directory: " << std::filesystem::current_path() << std::endl;
-      return;
-    }
+    ASSERT_TRUE(std::filesystem::exists(config_path)) << "Missing test fixture: " << config_path;
 
-    try {
-      auto j = trossen::configuration::JsonLoader::load(config_path);
-      trossen::configuration::GlobalConfig::instance().load_from_json(j);
-      std::cout << "Successfully loaded configuration from " << config_path << std::endl;
-    } catch (const std::exception& e) {
-      std::cerr << "Error loading config: " << e.what() << std::endl;
-    }
+    auto j = trossen::configuration::JsonLoader::load(config_path);
+    trossen::configuration::GlobalConfig::instance().load_from_json(j);
   }
 };
 

@@ -1,0 +1,41 @@
+[
+  {
+    "name": "default",
+    "flags": "-DTROSSEN_ENABLE_REALSENSE=ON",
+    "pr": true
+  },
+  {
+    "name": "policy",
+    "flags": "-DTROSSEN_ENABLE_REALSENSE=ON -DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON",
+    "pr": true
+  },
+  {
+    "name": "policy-no-realsense",
+    "flags": "-DTROSSEN_ENABLE_REALSENSE=OFF -DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON"
+  },
+  {
+    "name": "minimal",
+    "flags": "-DTROSSEN_ENABLE_REALSENSE=OFF"
+  },
+  {
+    "name": "policy-no-testing",
+    "flags": "-DTROSSEN_ENABLE_REALSENSE=ON -DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON -DBUILD_TESTING=OFF",
+    "skip_tests": true
+  },
+  {
+    "name": "policy-release",
+    "flags": "-DTROSSEN_ENABLE_REALSENSE=ON -DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON -DCMAKE_BUILD_TYPE=Release"
+  },
+  {
+    "name": "policy-python",
+    "flags": "-DTROSSEN_ENABLE_REALSENSE=ON -DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON -DBUILD_PYTHON_BINDINGS=ON"
+  },
+  {
+    "name": "policy-rerun",
+    "flags": "-DTROSSEN_ENABLE_REALSENSE=ON -DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON -DTROSSEN_ENABLE_RERUN_OBSERVER=ON"
+  },
+  {
+    "name": "all-on",
+    "flags": "-DTROSSEN_ENABLE_REALSENSE=ON -DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON -DTROSSEN_ENABLE_RERUN_OBSERVER=ON -DBUILD_PYTHON_BINDINGS=ON"
+  }
+]
