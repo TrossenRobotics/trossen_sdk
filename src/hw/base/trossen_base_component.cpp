@@ -102,6 +102,30 @@ void TrossenBaseComponent::configure(const nlohmann::json& config) {
 
   update_running_.store(true, std::memory_order_relaxed);
   update_thread_ = std::thread(&TrossenBaseComponent::update_loop, this);
+
+  home_modules();
+}
+
+void TrossenBaseComponent::home_modules() {
+  const auto& id = get_identifier();
+
+  // Ordered AFTER the servicing thread starts, and that ordering is load
+  // bearing: home_modules() blocks this thread until the firmware confirms
+  // (its reply timeout is 120s), while the 10Hz connection heartbeat is only
+  // sent from update_base(). Homing first would leave the link silent for the
+  // whole operation and invite a comm-loss fault.
+  std::cout << "TrossenBaseComponent '" << id
+            << "': homing swerve modules, this can take a moment..." << std::endl;
+
+  if (!driver_->home_modules()) {
+    throw std::runtime_error(
+      "TrossenBaseComponent '" + id + "': swerve module homing failed. The base "
+      "reported ready but did not confirm homing. Check that no pivot module is "
+      "obstructed and that the base has no latched fault, then try again.");
+  }
+
+  std::cout << "TrossenBaseComponent '" << id << "': swerve modules homed"
+            << std::endl;
 }
 
 void TrossenBaseComponent::update_loop() {

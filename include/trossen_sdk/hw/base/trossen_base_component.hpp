@@ -52,12 +52,29 @@ public:
   ~TrossenBaseComponent() override;
 
   /**
-   * @brief Connect to the base, wait for it to report ready, start servicing it.
+   * @brief Connect to the base, wait for it to report ready, start servicing it,
+   *        then home the swerve modules.
    *
    * @throws std::runtime_error if the base does not become ready within
-   *         `ready_timeout_s`, or if any configured limit is not positive.
+   *         `ready_timeout_s`, if homing does not complete, or if any configured
+   *         limit is not positive.
    */
   void configure(const nlohmann::json& config) override;
+
+  /**
+   * @brief Re-zero the swerve modules against their hall sensors.
+   *
+   * Called on every bring-up from configure(), so a session never starts against
+   * a stale zero. The base does self-home at power-on, but a pivot can be nudged
+   * by hand or lose its reference to a fault afterwards, and nothing else
+   * rechecks it for the rest of the machine's uptime.
+   *
+   * Blocks until the firmware confirms. The base answers in a second or two in
+   * the normal case; the driver waits up to 120s before giving up.
+   *
+   * @throws std::runtime_error if the base does not confirm homing.
+   */
+  void home_modules();
 
   std::string get_type() const override { return "trossen_base"; }
 

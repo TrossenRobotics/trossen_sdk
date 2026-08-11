@@ -114,6 +114,21 @@ void RivetComponent::configure(const nlohmann::json& config) {
   base_update_running_ = true;
   base_update_thread_ = std::thread(&RivetComponent::base_update_loop, this);
 
+  // Re-zero the swerve modules on every bring-up, matching TrossenBaseComponent.
+  // Ordered after the servicing thread starts on purpose: home_modules() blocks
+  // until the firmware confirms (up to 120s) and the connection heartbeat is
+  // only sent from update_base(), so homing first would leave the link silent
+  // for the whole operation and invite a comm-loss fault.
+  std::cout << "RivetComponent: homing swerve modules, this can take a moment..."
+            << std::endl;
+  if (!base_driver_->home_modules()) {
+    throw std::runtime_error(
+      "RivetComponent: swerve module homing failed. The base reported ready but "
+      "did not confirm homing. Check that no pivot module is obstructed and that "
+      "the base has no latched fault, then try again.");
+  }
+  std::cout << "RivetComponent: swerve modules homed" << std::endl;
+
 
   if (left_driver_->get_num_joints() != right_driver_->get_num_joints()) {
     throw std::runtime_error(
