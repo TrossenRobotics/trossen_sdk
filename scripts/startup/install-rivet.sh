@@ -73,6 +73,23 @@ if [ ! -x "$REPO_DIR/webapp/run-native.sh" ]; then
   echo "         Set REPO_DIR in $CONF. Installing the units anyway." >&2
 fi
 
+# systemd gives a unit a minimal PATH — no ~/.local/bin — and that is where the
+# astral installer puts `uv`. So the service failed with "uv is not installed"
+# on a rig where the operator runs run-native.sh by hand every day. Resolve it
+# through the user's own login shell and bake the directory into the unit.
+UV_DIR=""
+if id "$RUN_USER" >/dev/null 2>&1; then
+  UV_PATH="$(runuser -u "$RUN_USER" -- bash -lc 'command -v uv' 2>/dev/null)" || UV_PATH=""
+  [ -n "$UV_PATH" ] && UV_DIR="$(dirname "$UV_PATH")"
+fi
+if [ -n "$UV_DIR" ]; then
+  echo "Found uv at $UV_PATH — adding $UV_DIR to the service PATH"
+else
+  echo "WARNING: could not find 'uv' for $RUN_USER. run-native.sh needs it." >&2
+  echo "         Install with: curl -LsSf https://astral.sh/uv/install.sh | sh" >&2
+fi
+SERVICE_PATH="${UV_DIR:+$UV_DIR:}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
 # --- scripts -----------------------------------------------------------------
 echo "Installing scripts to $LIB"
 run install -d -m 0755 "$LIB"
@@ -114,11 +131,21 @@ Description=Trossen SDK webapp (native)
 # reach. Start this by hand to override for one boot.
 Requires=trossen-rivet-preflight.service
 After=trossen-rivet-preflight.service
+# Bound the retry loop. Restart=on-failure against a fault that is not going to
+# clear — a missing dependency, a bad flag — otherwise retries every 10s
+# forever, filling the journal and hiding the first, most useful error a long
+# way up. Five tries in five minutes, then it stays failed where you can see it.
+StartLimitIntervalSec=300
+StartLimitBurst=5
 
 [Service]
 Type=simple
 User=$RUN_USER
 WorkingDirectory=$REPO_DIR/webapp
+# A unit does not read the user's shell profile, so anything installed under
+# ~/.local/bin — uv, notably — is invisible without this. HOME/USER/SHELL come
+# from the account database because User= is set, so they need no line here.
+Environment=PATH=$SERVICE_PATH
 ExecStart=$REPO_DIR/webapp/run-native.sh $WEBAPP_ARGS
 # The first start compiles the SDK extension, which is slow on an Orin and must
 # not be mistaken for a hang.
