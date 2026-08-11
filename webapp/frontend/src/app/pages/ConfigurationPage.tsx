@@ -331,7 +331,48 @@ interface BaseHardware {
   // them in step on save. `lift_leader_id` is the component the value came from.
   lift_leader_max?: number;
   lift_leader_id?: string;
+  // The stick mapping of the glide_base leader that drives this base, when it
+  // has one. Carried on the base card for the same reason as the lift ceiling:
+  // it belongs to a different component, but it is the base's behaviour the
+  // operator is looking at when they need to change it.
+  joystick?: BaseLeaderJoystickModel;
   producers: Producer[];
+}
+
+/**
+ * The raw stick channel an axis reads. The driver reports each stick only as a
+ * 0-4095 count with no physical direction, so which channel is fore/aft differs
+ * per handle revision and is discovered by pushing the stick, not derived.
+ *
+ * `buttons` is a third source the SDK accepts (it drives the lift), but it is
+ * deliberately not offered here — see `readBaseLeaderJoystick`.
+ */
+type JoystickSource = 'joystick_x' | 'joystick_y';
+
+/** One axis of a glide_base leader's stick mapping. */
+interface JoystickAxisModel {
+  source: JoystickSource;
+  invert: boolean;
+}
+
+/**
+ * The part of a `glide_base` leader that decides which way the base goes when
+ * the operator pushes a stick.
+ *
+ * Both halves fail the same silent way — a wrong `invert` drives the base away
+ * from where the stick was pushed, a wrong `source` drives the wrong axis
+ * entirely — and neither raises an error anywhere, so both are only settled by
+ * driving the robot. That is why they are editable here rather than in JSON.
+ *
+ * `angular` is optional: a leader may have no rotation axis, or may drive it
+ * from buttons rather than a stick.
+ */
+export interface BaseLeaderJoystickModel {
+  /** The glide_base component id these values came from, so save patches it. */
+  id: string;
+  forward: JoystickAxisModel;
+  lateral: JoystickAxisModel;
+  angular?: JoystickAxisModel;
 }
 
 type Hardware = CameraHardware | ArmHardware | BaseHardware;
@@ -649,6 +690,98 @@ function withLiftAxisMax(comp: RawComponentConfig, max: number): RawComponentCon
   return { ...comp, axes: { ...axes, lift: { ...lift, max } } };
 }
 
+/** Narrows a raw `source` string to the two stick channels this page edits. */
+function asJoystickSource(value: unknown): JoystickSource | undefined {
+  return value === 'joystick_x' || value === 'joystick_y' ? value : undefined;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === 'object' && value !== null ? (value as Record<string, unknown>) : undefined;
+}
+
+/**
+ * Reads the stick mapping off a glide_base leader, or undefined when it has no
+ * `translation` block — a leader that only drives the lift is a normal
+ * configuration, not an error.
+ *
+ * Defaults mirror GlideBaseComponent's own parsing exactly (forward_source
+ * "joystick_y", lateral_source "joystick_x", inverts false), so a config that
+ * omits a key shows what the SDK would actually apply rather than a blank.
+ *
+ * `angular` is reported only when it reads a stick. An axis sourced from
+ * `buttons` is left out of the model entirely, which is what keeps save from
+ * rewriting it into a stick channel it never used.
+ */
+function readBaseLeaderJoystick(comp: RawComponentConfig): BaseLeaderJoystickModel | undefined {
+  const translation = asRecord(comp.translation);
+  if (!translation) return undefined;
+
+  const angularRaw = asRecord(asRecord(comp.axes)?.angular);
+  const angularSource = angularRaw ? asJoystickSource(angularRaw.source ?? 'joystick_x') : undefined;
+
+  return {
+    id: typeof comp.id === 'string' ? comp.id : '',
+    forward: {
+      source: asJoystickSource(translation.forward_source) ?? 'joystick_y',
+      invert: translation.forward_invert === true,
+    },
+    lateral: {
+      source: asJoystickSource(translation.lateral_source) ?? 'joystick_x',
+      invert: translation.lateral_invert === true,
+    },
+    angular: angularSource ? { source: angularSource, invert: angularRaw?.invert === true } : undefined,
+  };
+}
+
+/**
+ * Writes one axis key, or leaves it out.
+ *
+ * A key the config never carried, still holding the value the SDK defaults it
+ * to, is not written — same rule the arm form follows for smoothing and goal
+ * time. Saving a config therefore does not litter it with every default this
+ * page happens to know, and a config the operator has not touched here comes
+ * back out of a round trip unchanged. Once a value differs from the default it
+ * is always written, because then it is a real decision.
+ */
+function setAxisKey(
+  target: Record<string, unknown>,
+  key: string,
+  value: string | boolean,
+  sdkDefault: string | boolean,
+): void {
+  if (key in target || value !== sdkDefault) target[key] = value;
+}
+
+/**
+ * Returns a copy of a glide_base component carrying `js`, preserving every
+ * other key at every level — `arm_id`, `max`, `deadzone` and the lift axis all
+ * live in these same objects and none of them are modelled here.
+ *
+ * The angular axis is only touched when the model carries one, so a leader that
+ * rotates from buttons keeps its mapping.
+ */
+function withBaseLeaderJoystick(
+  comp: RawComponentConfig,
+  js: BaseLeaderJoystickModel,
+): RawComponentConfig {
+  const translation = { ...(asRecord(comp.translation) ?? {}) };
+  setAxisKey(translation, 'forward_source', js.forward.source, 'joystick_y');
+  setAxisKey(translation, 'forward_invert', js.forward.invert, false);
+  setAxisKey(translation, 'lateral_source', js.lateral.source, 'joystick_x');
+  setAxisKey(translation, 'lateral_invert', js.lateral.invert, false);
+
+  const patched: RawComponentConfig = { ...comp, translation };
+  if (js.angular) {
+    const axes = { ...(asRecord(comp.axes) ?? {}) };
+    const angular = { ...(asRecord(axes.angular) ?? {}) };
+    setAxisKey(angular, 'source', js.angular.source, 'joystick_x');
+    setAxisKey(angular, 'invert', js.angular.invert, false);
+    axes.angular = angular;
+    patched.axes = axes;
+  }
+  return patched;
+}
+
 interface RawSdkHardware {
   arms?: Record<string, RawArmConfig>;
   cameras?: RawCameraConfig[];
@@ -868,6 +1001,13 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
     (c) => c.type === 'glide_base' && readLiftAxisMax(c) !== undefined,
   );
 
+  // The same component's other half: which stick drives the base, and which way.
+  // Looked up independently of the lift because the two need not be the same
+  // leader — one handle can own the rail while the other owns the sticks.
+  const joystickLeader = components.find(
+    (c) => c.type === 'glide_base' && readBaseLeaderJoystick(c) !== undefined,
+  );
+
   for (const comp of components) {
     if (comp.type !== 'trossen_base') continue;
     const baseId = comp.id ?? 'trossen_base';
@@ -898,6 +1038,7 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
       ready_timeout_s: typeof comp.ready_timeout_s === 'number' ? comp.ready_timeout_s : undefined,
       lift_leader_max: liftLeader ? readLiftAxisMax(liftLeader) : undefined,
       lift_leader_id: typeof liftLeader?.id === 'string' ? liftLeader.id : undefined,
+      joystick: joystickLeader ? readBaseLeaderJoystick(joystickLeader) : undefined,
       producers: baseProducers,
     } as BaseHardware);
   }
@@ -1268,18 +1409,26 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
         if (typeof system.sessionControl.debounce_ms === 'number') sc.debounce_ms = system.sessionControl.debounce_ms;
         return [sc];
       }
-      // The rail's ceiling is edited in one place on the base panel but has to
-      // land in two: here on the leader, which scales the lift command, and on
-      // the base, which clamps it. Keeping them in step is the whole point —
-      // raising only one leaves the rail capped by the other.
-      if (
-        trossenBase &&
-        typeof trossenBase.max_lift_units_per_s === 'number' &&
-        comp.type === 'glide_base' &&
-        comp.id === trossenBase.lift_leader_id &&
-        readLiftAxisMax(comp) !== undefined
-      ) {
-        return [withLiftAxisMax(comp, trossenBase.max_lift_units_per_s)];
+      // A glide_base leader carries two things the base panel edits, and one
+      // component can own both — so they are applied in sequence rather than
+      // as alternatives. Everything else about the leader is preserved.
+      if (comp.type === 'glide_base' && trossenBase) {
+        let leader = comp;
+        // The rail's ceiling is edited in one place on the base panel but has to
+        // land in two: here on the leader, which scales the lift command, and on
+        // the base, which clamps it. Keeping them in step is the whole point —
+        // raising only one leaves the rail capped by the other.
+        if (
+          typeof trossenBase.max_lift_units_per_s === 'number' &&
+          comp.id === trossenBase.lift_leader_id &&
+          readLiftAxisMax(comp) !== undefined
+        ) {
+          leader = withLiftAxisMax(leader, trossenBase.max_lift_units_per_s);
+        }
+        if (trossenBase.joystick && comp.id === trossenBase.joystick.id) {
+          leader = withBaseLeaderJoystick(leader, trossenBase.joystick);
+        }
+        return [leader];
       }
       if (comp.type !== 'trossen_base' || !trossenBase || comp.id !== trossenBase.id) {
         return [comp];
@@ -1818,6 +1967,10 @@ export function ConfigurationPage() {
     max_lift_units_per_s: 8000,
     estop_battery_percent: 0,
     ready_timeout_s: 60,
+    // The leader's stick mapping, or null when this base is driven by no
+    // glide_base leader (every SLATE, and a Rivet whose leader was removed).
+    // Null is what hides the section rather than showing empty selects.
+    joystick: null as BaseLeaderJoystickModel | null,
   });
 
   // The type of the base currently open in the modal. A trossen_base can be
@@ -2004,6 +2157,9 @@ export function ConfigurationPage() {
       max_lift_units_per_s: 8000,
       estop_battery_percent: 0,
       ready_timeout_s: 60,
+      // Cleared with the rest of the form: this path is only reached when
+      // ADDING a base, which is always a SLATE and never has a Glide leader.
+      joystick: null,
     });
     setEditingBaseType(null);
     setShowAddHardwareModal(true);
@@ -2088,6 +2244,17 @@ export function ConfigurationPage() {
         // correct fallback here — not a placeholder.
         estop_battery_percent: base.estop_battery_percent ?? 0,
         ready_timeout_s: base.ready_timeout_s ?? 60,
+        // Deep-copied: the form mutates axes in place as the operator flips
+        // them, and sharing the object would edit the saved system directly,
+        // so Cancel would no longer undo anything.
+        joystick: base.joystick
+          ? {
+              ...base.joystick,
+              forward: { ...base.joystick.forward },
+              lateral: { ...base.joystick.lateral },
+              angular: base.joystick.angular ? { ...base.joystick.angular } : undefined,
+            }
+          : null,
       });
     }
 
@@ -2359,6 +2526,14 @@ export function ConfigurationPage() {
         showAlert('E-Stop Battery must be between 0 and 100 percent (0 disables the check).', 'Validation Error');
         return;
       }
+      // GlideBaseComponent rejects a translation whose two axes read the same
+      // stick channel. The selects below swap rather than duplicate, so this
+      // only fires for a config that arrived that way — but it fires here
+      // instead of at record time, on the rig, with the arms already energised.
+      if (baseForm.joystick && baseForm.joystick.forward.source === baseForm.joystick.lateral.source) {
+        showAlert('Forward and Strafe must read different stick axes — the SDK refuses to start otherwise.', 'Validation Error');
+        return;
+      }
     }
 
     setSystems(prev => prev.map(sys => {
@@ -2386,6 +2561,10 @@ export function ConfigurationPage() {
                 max_lift_units_per_s: baseForm.max_lift_units_per_s,
                 estop_battery_percent: baseForm.estop_battery_percent,
                 ready_timeout_s: baseForm.ready_timeout_s,
+                // Undefined, not null: BaseHardware.joystick is optional, and a
+                // base with no leader must stay that way rather than gain an
+                // empty mapping that save would then write out.
+                joystick: baseForm.joystick ?? undefined,
               };
             }
             return {
@@ -2885,6 +3064,33 @@ export function ConfigurationPage() {
               </div>
             )}
           </div>
+
+          {/* Handle sticks — the leader's mapping, shown here because it is the
+              base's behaviour an operator is judging when they read it. */}
+          {base.joystick && (
+            <div className="border-t border-edge pt-[10px]">
+              <div className="text-dim text-[9px] uppercase mb-[6px] tracking-wide">Handle Sticks</div>
+              <div className="grid grid-cols-3 portrait:grid-cols-1 gap-[12px] text-[12px]">
+                {([
+                  ['forward', 'Forward'],
+                  ['lateral', 'Strafe'],
+                  ['angular', 'Rotate'],
+                ] as const).map(([axis, label]) => {
+                  const value = base.joystick?.[axis];
+                  return (
+                    <div key={axis}>
+                      <div className="text-dim text-[9px] uppercase mb-[4px]">{label}</div>
+                      <div className="text-ink">
+                        {value
+                          ? `${value.source === 'joystick_x' ? 'Stick X' : 'Stick Y'}${value.invert ? ' · inverted' : ''}`
+                          : '—'}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Safety */}
           <div className="border-t border-edge pt-[10px]">
@@ -4627,6 +4833,83 @@ export function ConfigurationPage() {
                         </span>
                       </div>
                     </div>
+
+                    {/* ── Handle sticks ────────────────────────────────── */}
+                    {baseForm.joystick && (
+                      <div className="border-t border-edge pt-[14px]">
+                        <div className="text-dim text-[10px] uppercase mb-[4px] tracking-wide">
+                          Handle Sticks <span className="normal-case tracking-normal">· {baseForm.joystick.id}</span>
+                        </div>
+                        <div className="text-dim text-[11px] leading-[1.5] mb-[10px]">
+                          Which stick axis drives each direction, and which way is positive. The
+                          driver reports a stick only as a raw count with no physical direction, so
+                          both are settled by pushing the stick and watching the base — not derived.
+                        </div>
+
+                        <div className="space-y-[10px]">
+                          {([
+                            ['forward', 'Forward / Back', 'Push away from you should drive the base forward.'],
+                            ['lateral', 'Strafe', 'Push right should drive the base right.'],
+                            ['angular', 'Rotate', 'Push right should yaw the base clockwise seen from above.'],
+                          ] as const).map(([axis, label, hint]) => {
+                            const value = baseForm.joystick?.[axis];
+                            if (!value) return null;
+                            return (
+                              <div key={axis} className="grid grid-cols-[1fr_auto] gap-[12px] items-start">
+                                <div>
+                                  <label htmlFor={`base_js_${axis}`} className="block text-ink text-[12px] mb-[8px]">{label}</label>
+                                  <select
+                                    id={`base_js_${axis}`}
+                                    value={value.source}
+                                    onChange={e => setBaseForm(prev => {
+                                      const js = prev.joystick;
+                                      if (!js) return prev;
+                                      const source = e.target.value as JoystickSource;
+                                      const next = { ...js, [axis]: { ...js[axis]!, source } };
+                                      // Translation's two axes must read different
+                                      // channels, so picking one moves the other
+                                      // rather than colliding with it. Rotation is
+                                      // independent and may share either.
+                                      if (axis === 'forward' && js.lateral.source === source) {
+                                        next.lateral = { ...js.lateral, source: value.source };
+                                      } else if (axis === 'lateral' && js.forward.source === source) {
+                                        next.forward = { ...js.forward, source: value.source };
+                                      }
+                                      return { ...prev, joystick: next };
+                                    })}
+                                    className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand"
+                                  >
+                                    <option value="joystick_x">Stick X</option>
+                                    <option value="joystick_y">Stick Y</option>
+                                  </select>
+                                  <span className="block text-dim text-[10px] mt-[3px]">{hint}</span>
+                                </div>
+                                <label className="flex items-center gap-[6px] text-ink text-[12px] pt-[30px] whitespace-nowrap">
+                                  <input
+                                    type="checkbox"
+                                    checked={value.invert}
+                                    onChange={e => setBaseForm(prev => prev.joystick
+                                      ? { ...prev, joystick: { ...prev.joystick, [axis]: { ...prev.joystick[axis]!, invert: e.target.checked } } }
+                                      : prev)}
+                                    className="w-[16px] h-[16px]"
+                                  />
+                                  Invert
+                                </label>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        <div className="mt-[10px] flex items-start gap-[6px] border border-brand/40 bg-brand/[0.06] px-[10px] py-[8px]">
+                          <Radio className="w-[12px] h-[12px] text-brand shrink-0 mt-[3px]" />
+                          <span className="text-dim text-[11px] leading-[1.5]">
+                            If the direction changes between bring-ups with nothing edited here,
+                            stop flipping signs — that is the swerve modules' homed zero landing
+                            half a turn out, and a flip will only be right until the next restart.
+                          </span>
+                        </div>
+                      </div>
+                    )}
 
                     {/* ── Safety ───────────────────────────────────────── */}
                     <div className="border-t border-edge pt-[14px]">

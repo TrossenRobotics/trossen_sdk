@@ -12,6 +12,7 @@
  * individual fields, so a fourth instance fails here rather than on a robot.
  */
 import { describe, it, expect } from 'vitest';
+import type { BaseLeaderJoystickModel } from './ConfigurationPage';
 import {
   sdkConfigToSystem,
   setGlideButtonBinding,
@@ -298,6 +299,133 @@ describe('the Rivet base', () => {
       (c) => c.id === 'rivet_base',
     );
     expect(base?.estop_battery_percent).toBe(0);
+  });
+});
+
+// Which stick drives the base, and which way. Both halves fail silently — a
+// wrong sign drives away from the push, a wrong source drives the wrong axis —
+// so they are edited on the base card rather than by hand in JSON. The leader
+// they live on is otherwise unmodelled, which is what these tests guard.
+describe("the base leader's stick mapping", () => {
+  /** The glide_base leader as it comes back out of a save. */
+  function savedLeader(system: ReturnType<typeof sdkConfigToSystem>, original: ReturnType<typeof rivetConfig>) {
+    return systemToSdkConfig(system, original).hardware?.components?.find((c) => c.id === 'base_leader');
+  }
+
+  /** Returns the system with `patch` applied to the base's joystick model. */
+  function withJoystick(
+    system: ReturnType<typeof sdkConfigToSystem>,
+    patch: (js: BaseLeaderJoystickModel) => BaseLeaderJoystickModel,
+  ) {
+    return {
+      ...system,
+      hardware: system.hardware.map((h) =>
+        h.id === 'rivet_base' && 'joystick' in h && h.joystick
+          ? { ...h, joystick: patch(h.joystick) }
+          : h,
+      ),
+    };
+  }
+
+  it('surfaces the mapping on the base, defaulting keys the config omits', () => {
+    // The fixture sets forward_source only. The rest must read as what
+    // GlideBaseComponent would actually apply, not as blank.
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: rivetConfig() });
+    const base = system.hardware.find((h) => h.id === 'rivet_base') as { joystick?: Record<string, unknown> };
+    expect(base.joystick).toEqual({
+      id: 'base_leader',
+      forward: { source: 'joystick_y', invert: false },
+      lateral: { source: 'joystick_x', invert: false },
+      angular: { source: 'joystick_x', invert: false },
+    });
+  });
+
+  it('writes a flipped sign to the leader', () => {
+    const original = rivetConfig();
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: original });
+    const flipped = withJoystick(system, (js) => ({
+      ...js,
+      forward: { source: 'joystick_y', invert: true },
+      angular: { source: 'joystick_x', invert: true },
+    }));
+
+    const leader = savedLeader(flipped, original);
+    expect((leader?.translation as Record<string, unknown>).forward_invert).toBe(true);
+    expect(((leader?.axes as Record<string, Record<string, unknown>>).angular).invert).toBe(true);
+  });
+
+  it('writes a swapped axis source', () => {
+    // The failure inverting cannot fix: the stick is on the other channel.
+    const original = rivetConfig();
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: original });
+    const swapped = withJoystick(system, (js) => ({
+      ...js,
+      forward: { source: 'joystick_x', invert: false },
+      lateral: { source: 'joystick_y', invert: false },
+    }));
+
+    const translation = savedLeader(swapped, original)?.translation as Record<string, unknown>;
+    expect(translation.forward_source).toBe('joystick_x');
+    expect(translation.lateral_source).toBe('joystick_y');
+  });
+
+  it('does not invent keys for values the config left at the SDK default', () => {
+    // Same rule the arm form follows for smoothing: opening a config and
+    // saving it unchanged must not grow it a set of explicit defaults.
+    const { saved } = roundTrip(rivetConfig());
+    const leader = saved.hardware?.components?.find((c) => c.id === 'base_leader');
+    expect(leader?.translation).toEqual({ arm_id: 'glide_left', forward_source: 'joystick_y', max: 0.6 });
+  });
+
+  it('keeps everything else on the leader while flipping a sign', () => {
+    // arm_id, max, deadzone and the whole lift axis live in the same objects
+    // and none of them are modelled here.
+    const original = rivetConfig();
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: original });
+    const flipped = withJoystick(system, (js) => ({
+      ...js,
+      lateral: { source: 'joystick_x', invert: true },
+    }));
+
+    const leader = savedLeader(flipped, original);
+    expect(leader?.translation).toEqual({
+      arm_id: 'glide_left',
+      forward_source: 'joystick_y',
+      max: 0.6,
+      lateral_invert: true,
+    });
+    expect((leader?.axes as Record<string, unknown>).lift).toEqual(
+      rivetConfig().hardware.components[2].axes!.lift,
+    );
+  });
+
+  it('applies a raised rail ceiling and a flipped sign to the same leader', () => {
+    // Both edits target one component. An early return for either would drop
+    // the other silently.
+    const original = rivetConfig();
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: original });
+    const both = {
+      ...withJoystick(system, (js) => ({ ...js, forward: { source: 'joystick_y', invert: true } })),
+    };
+    both.hardware = both.hardware.map((h) =>
+      h.id === 'rivet_base' ? { ...h, max_lift_units_per_s: 5000 } : h,
+    );
+
+    const leader = savedLeader(both, original);
+    expect((leader?.translation as Record<string, unknown>).forward_invert).toBe(true);
+    expect(((leader?.axes as Record<string, Record<string, unknown>>).lift).max).toBe(5000);
+  });
+
+  it('leaves a leader that drives no sticks alone', () => {
+    // A glide_base with only a lift axis is a normal configuration. Modelling
+    // it would mean saving a translation block it never had.
+    const original = rivetConfig();
+    delete (original.hardware.components[2] as { translation?: unknown }).translation;
+    const system = sdkConfigToSystem('rivet', { id: 'rivet', name: 'Rivet', config: original });
+    const base = system.hardware.find((h) => h.id === 'rivet_base') as { joystick?: unknown };
+
+    expect(base.joystick).toBeUndefined();
+    expect(savedLeader(system, original)).toEqual(original.hardware.components[2]);
   });
 });
 
