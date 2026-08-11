@@ -98,6 +98,10 @@ RETIRED_FACTORY_IDS = frozenset(
         "stationary_portable",
         # Camera-only Rivet diagnostic, not a robot anyone records with.
         "rivet_cameras",
+        # Superseded by per-rig presets (`rivet_01`, ...). Camera serials differ
+        # from one Rivet to the next, so one shared "Rivet" preset was always
+        # wrong on every rig but the one whose serials it happened to carry.
+        "rivet",
     }
 )
 

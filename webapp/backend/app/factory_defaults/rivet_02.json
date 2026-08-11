@@ -1,5 +1,5 @@
 {
-  "name": "Trossen Rivet",
+  "name": "Trossen Rivet 02",
   "config": {
     "robot_name": "trossen_rivet",
     "hardware": {
@@ -197,7 +197,7 @@
         {
           "id": "camera_main",
           "type": "zed_camera",
-          "serial_number": "51287468",
+          "serial_number": "56066260",
           "resolution": "HD1200",
           "fps": 30,
           "use_depth": false
@@ -205,7 +205,7 @@
         {
           "id": "camera_left",
           "type": "zed_camera",
-          "serial_number": "95483555",
+          "serial_number": "99078701",
           "resolution": "HD1200",
           "fps": 30,
           "use_depth": false
@@ -213,7 +213,7 @@
         {
           "id": "camera_right",
           "type": "zed_camera",
-          "serial_number": "97389637",
+          "serial_number": "97839053",
           "resolution": "HD1200",
           "fps": 30,
           "use_depth": false

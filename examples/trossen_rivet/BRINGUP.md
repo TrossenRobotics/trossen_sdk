@@ -140,8 +140,19 @@ behaviour rather than an error:
 
 - **Session button bits** on the left handle (start / stop / re-record).
 - **All `invert` flags**, currently `false`.
-- **`camera_main` serial `51287468`.** The other two follow Mya's most recent
-  change (`95483555` → `97900849`, `97389637` → `97525506`); this third one comes
-  from the earlier three-camera config and that change did not touch it.
+- **Which side each ZED X Nano is on.** Every serial below was read off the rig
+  it belongs to, so the cameras are confirmed present — but nothing in the
+  enumeration says which Nano faces left. The ZED X Mini is always `camera_main`.
+
+  | preset | `camera_main` (Mini) | `camera_left` | `camera_right` |
+  | --- | --- | --- | --- |
+  | `rivet_01` | 51287468 | 97900849 (`/dev/i2c-12`) | 93182069 (`/dev/i2c-11`) |
+  | `rivet_02` | 56066260 | 99078701 (`/dev/i2c-12`) | 97839053 (`/dev/i2c-11`) |
+
+  rivet-01's assignment is inherited from the config it already had; rivet-02
+  copies that rig's i2c ordering (`i2c-12` left, `i2c-11` right) on the
+  assumption the GMSL harness is wired the same way on both. If the side feeds
+  come up mirrored, swap the two Nano serials in that rig's preset — nothing
+  else changes.
 - **Arm IPs**, which follow the factory-default convention rather than being read
   off this rig.

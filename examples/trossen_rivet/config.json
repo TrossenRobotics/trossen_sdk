@@ -175,7 +175,7 @@
       {
         "id": "camera_right",
         "type": "zed_camera",
-        "serial_number": "97525506",
+        "serial_number": "93182069",
         "resolution": "HD1200",
         "fps": 30,
         "use_depth": false

@@ -394,7 +394,7 @@ interface HardwareSystem {
 // Systems that ship with a factory-default config the user can revert to.
 // Hoisted out of the component so the reset useCallback's dependency array
 // stays stable across renders.
-const RESETTABLE_SYSTEMS: readonly string[] = ['solo', 'solo_glide', 'stationary', 'mobile', 'workbench', 'rivet'];
+const RESETTABLE_SYSTEMS: readonly string[] = ['solo', 'solo_glide', 'stationary', 'mobile', 'workbench', 'rivet_01', 'rivet_02'];
 
 // The lightweight (passive) Trossen leader has no actuators and its joints
 // don't map 1:1 onto the follower: J3/J4 are inverted and the wrist (J5)
@@ -3042,7 +3042,7 @@ export function ConfigurationPage() {
           {[...systems].sort((a, b) => {
             // Shipped layouts first, smallest to largest; anything user-created
             // sorts after them.
-            const order: Record<string, number> = { solo: 0, solo_glide: 1, stationary: 2, mobile: 3, workbench: 4, rivet: 5 };
+            const order: Record<string, number> = { solo: 0, solo_glide: 1, stationary: 2, mobile: 3, workbench: 4, rivet_01: 5, rivet_02: 6 };
             return (order[a.id] ?? 99) - (order[b.id] ?? 99);
           }).map(system => {
             const isConfigured = system.hardware.length > 0;
@@ -3299,8 +3299,11 @@ export function ConfigurationPage() {
               stationary:          { label: 'Stationary',          leaders: 2, followers: 2, cameras: 4, bases: 0 },
               mobile:              { label: 'Mobile',              leaders: 2, followers: 2, cameras: 3, bases: 1 },
               workbench:           { label: 'Workbench',           leaders: 2, followers: 2, cameras: 3, bases: 0 },
-              // Three ZEDs: main plus the two side cameras, now fitted.
-              rivet:               { label: 'Rivet',               leaders: 2, followers: 2, cameras: 3, bases: 1 },
+              // Three ZEDs: main plus the two side cameras, now fitted. One
+              // entry per physical Rivet — the layout is identical, but each
+              // rig carries its own camera serials.
+              rivet_01:            { label: 'Rivet 01',            leaders: 2, followers: 2, cameras: 3, bases: 1 },
+              rivet_02:            { label: 'Rivet 02',            leaders: 2, followers: 2, cameras: 3, bases: 1 },
             };
             const spec = layoutSpecs[selectedSystemData.id];
             if (!spec) return null;
