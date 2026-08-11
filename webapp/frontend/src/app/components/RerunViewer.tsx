@@ -10,7 +10,8 @@
  *     at `rerun+http://<hostname>:9876/proxy` thanks to Docker host networking.
  *  2. The layout — a `.rbl` blueprint file served by the backend
  *     (`/api/sessions/{id}/rerun_blueprint.rbl`) that arranges the cameras in
- *     a grid and hides every panel, so the viewer shows ONLY the feeds.
+ *     a grid and hides every panel, so the viewer shows ONLY the feeds. Pass
+ *     `cameraId` to request a single-camera layout instead of the grid.
  *
  * Why ship the blueprint as a file instead of pushing it over the data stream:
  * the Rerun web viewer persists a per-app "active" blueprint in browser
@@ -39,11 +40,16 @@ const READINESS_POLL_MS = 1500;
 export function RerunViewer({
   sessionId,
   recording = false,
+  cameraId,
 }: {
   sessionId: string;
   /** True while an episode is actively recording, so the placeholder can
    *  distinguish "feed is connecting" from "nothing is recording yet". */
   recording?: boolean;
+  /** Show only this camera, filling the viewer, instead of the full grid. Used
+   *  by the third screen. Must be a stream id the session's config declares —
+   *  the blueprint endpoint 404s on anything else. */
+  cameraId?: string;
 }): React.ReactElement {
   // The recorder's in-process Rerun gRPC server only exists while a recording
   // child is running, and it takes ~1s to bind after the episode starts. The
@@ -69,7 +75,9 @@ export function RerunViewer({
       : window.location.hostname;
   const httpBase = `http://${host}:${RERUN_GRPC_PORT}/`;
   const dataUrl = `rerun+http://${host}:${RERUN_GRPC_PORT}/proxy`;
-  const blueprintUrl = `${window.location.origin}/api/sessions/${sessionId}/rerun_blueprint.rbl`;
+  const blueprintUrl =
+    `${window.location.origin}/api/sessions/${sessionId}/rerun_blueprint.rbl` +
+    (cameraId ? `?camera=${encodeURIComponent(cameraId)}` : '');
 
   // Poll the gRPC server until it's reachable, then stop. A `no-cors` GET
   // resolves once the server answers (even with an HTTP error) and rejects

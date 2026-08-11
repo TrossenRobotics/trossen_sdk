@@ -8,6 +8,7 @@ import { DatasetDetailsPage } from "@/app/pages/DatasetDetailsPage";
 import { MonitorEpisodePage } from '@/app/pages/MonitorEpisodePage';
 import { EmbeddedViewerPage } from '@/app/pages/EmbeddedViewerPage';
 import { SecondScreenPage } from '@/app/pages/SecondScreenPage';
+import { ThirdScreenPage } from '@/app/pages/ThirdScreenPage';
 import { RouteError } from '@/app/components/RouteError';
 import { DatasetsProvider } from '@/lib/DatasetsContext';
 import { HwStatusProvider } from '@/lib/HwStatusContext';
@@ -25,6 +26,11 @@ const router = createBrowserRouter([
   // navigate to. Runs on every modality and is always reachable, so the robot's
   // screen can be pointed at it once and left alone.
   { path: '/second_screen', element: <SecondScreenPage /> },
+  // Third display: one selected camera, as large as the screen allows. OUTSIDE
+  // the Layout for the same reason as the two above — it is a display, not a
+  // page someone navigates from. `?camera=<stream_id>` pins the feed so a kiosk
+  // comes back to the same view after a reboot.
+  { path: '/third_screen', element: <ThirdScreenPage /> },
   {
     path: '/',
     element: <Layout />,

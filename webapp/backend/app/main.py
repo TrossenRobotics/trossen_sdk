@@ -869,6 +869,49 @@ def second_screen() -> dict[str, Any]:
     }
 
 
+@app.get("/api/third-screen")
+def third_screen() -> dict[str, Any]:
+    """Everything the third screen (one big camera view) shows, in one poll.
+
+    Separate from `/api/second-screen` rather than a field added to it: the two
+    displays are different products polling at different rates, and the camera
+    list costs a system-config lookup the status panel has no use for.
+
+    `cameras` is the list of Rerun stream ids the live viewer can show, taken
+    from the ACTIVE session's system config — the same ids the recorder's Rerun
+    observer publishes and the blueprint endpoint accepts. It is empty when no
+    session is running, because nothing is publishing then and offering a choice
+    of feeds that cannot appear would be a lie. The screen keeps showing its
+    last selection and picks it back up when a session starts.
+    """
+    sessions = list_sessions()
+    active = next((s for s in sessions if s.status == "active"), None)
+
+    cameras: list[str] = []
+    if active is not None:
+        system = get_system(active.system_id)
+        if system is not None and isinstance(system.config, dict):
+            cameras = _camera_stream_ids_from_config(system.config)
+
+    return {
+        "active_session": (
+            {
+                "id": active.id,
+                "name": active.name,
+                "status": active.status,
+                "current_episode": active.current_episode,
+                "num_episodes": active.num_episodes,
+                "system_id": active.system_id,
+                "system_name": active.system_name,
+                "dry_run": active.dry_run,
+            }
+            if active
+            else None
+        ),
+        "cameras": cameras,
+    }
+
+
 @app.post("/api/sessions/{session_id}/emergency-stop")
 def emergency_stop(session_id: str) -> Session:
     """Software emergency stop: halt the base, home the arms, end the session.
@@ -1083,13 +1126,19 @@ def _build_camera_blueprint_rbl(camera_ids: list[str]) -> bytes:
 
 
 @app.get("/api/sessions/{session_id}/rerun_blueprint.rbl")
-def session_rerun_blueprint(session_id: str) -> Response:
+def session_rerun_blueprint(session_id: str, camera: str | None = None) -> Response:
     """Serve the camera-only Rerun blueprint (.rbl) for a session's viewer.
 
     The frontend loads this alongside the live gRPC source so the embedded
     Rerun web viewer applies the camera-grid layout deterministically on every
     machine — independent of any blueprint cached in the browser's storage,
     which is why pushing the blueprint over the data stream was unreliable.
+
+    `camera` narrows the layout to a single feed filling the whole viewer, which
+    is what the third screen asks for. An unknown id is a 404 rather than a
+    silent fall back to the full grid: the only way to get one is a stale kiosk
+    URL or a stored selection outliving a config change, and a display quietly
+    showing four feeds where one was pinned is harder to notice than an error.
     """
     sess = get_session(session_id)
     if sess is None:
@@ -1100,6 +1149,16 @@ def session_rerun_blueprint(session_id: str) -> Response:
     camera_ids = _camera_stream_ids_from_config(system.config)
     if not camera_ids:
         raise HTTPException(status_code=404, detail="No cameras in system config")
+    if camera is not None:
+        if camera not in camera_ids:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Camera '{camera}' is not in this system's config "
+                    f"(has: {', '.join(camera_ids)})"
+                ),
+            )
+        camera_ids = [camera]
     return Response(
         content=_build_camera_blueprint_rbl(camera_ids),
         media_type="application/octet-stream",

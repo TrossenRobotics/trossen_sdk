@@ -14,12 +14,18 @@
  *
  * Mounted OUTSIDE the app Layout so it carries no nav chrome — it's just the feed.
  */
-import { useParams } from 'react-router';
+import { useParams, useSearchParams } from 'react-router';
 import { RerunViewer } from '@/app/components/RerunViewer';
 import { ErrorBoundary } from '@/app/components/ErrorBoundary';
 
 export function EmbeddedViewerPage() {
   const { sessionId } = useParams<{ sessionId: string }>();
+  // `?camera=<stream_id>` requests a single-feed layout instead of the grid —
+  // the third screen's whole purpose. Carried in the iframe src rather than as a
+  // prop because the parent recreates this document to change camera anyway (see
+  // the WASM note above), so the src IS the state.
+  const [search] = useSearchParams();
+  const cameraId = search.get('camera') ?? undefined;
   return (
     <div style={{ width: '100vw', height: '100vh', overflow: 'hidden', background: '#000' }}>
       {sessionId ? (
@@ -44,7 +50,7 @@ export function EmbeddedViewerPage() {
               session is active, so the placeholder reads "Connecting…" not
               "Start recording…". The src is kept free of phase state so the
               iframe only reloads on a session change, never mid-session. */}
-          <RerunViewer sessionId={sessionId} recording />
+          <RerunViewer sessionId={sessionId} recording cameraId={cameraId} />
         </ErrorBoundary>
       ) : null}
     </div>
