@@ -156,7 +156,7 @@
             "angular": {
               "arm_id": "glide_right",
               "source": "joystick_x",
-              "invert": false,
+              "invert": true,
               "max": 1.2,
               "deadzone": 0.08
             },

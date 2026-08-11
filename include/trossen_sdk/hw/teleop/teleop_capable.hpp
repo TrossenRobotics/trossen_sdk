@@ -292,12 +292,24 @@ public:
 // `lateral` would sit more naturally beside `linear`: index 1 already means
 // angular in shipped SLATE and VR code, and renumbering would silently swap
 // yaw for strafe on hardware that is working today.
+// SIGNS. The frame is right-handed with +x forward and +z up, so every axis
+// below is positive in the LEFT/UP/FORWARD sense: forward, counter-clockwise
+// (turning LEFT), lift up, strafe left. State this at the call site when
+// mapping an input device, because a raw joystick axis carries no convention of
+// its own — libtrossen_arm documents its handle stick only as "0 to 4095", and
+// on the Glide handle the raw value INCREASES TO THE RIGHT (measured on a Rivet,
+// 2026-08-11). A left-positive axis fed from that stick therefore needs its
+// mapping inverted, which is what `glide_base`'s `invert` / `lateral_invert`
+// flags are for. Getting this wrong is invisible in code review and reads on
+// hardware as "rotate right turns it left".
 namespace base_axis {
 
-/// Forward translational velocity along the base heading (m/s). Required.
+/// Forward translational velocity along the base heading (m/s), positive
+/// forward. Required.
 inline constexpr std::size_t kLinear = 0;
 
-/// Yaw rate about the vertical axis (rad/s). Required.
+/// Yaw rate about the vertical axis (rad/s), positive counter-clockwise seen
+/// from above — i.e. positive turns the robot LEFT. Required.
 inline constexpr std::size_t kAngular = 1;
 
 /// Vertical lift / linear-actuator velocity, in the actuator's own units per
