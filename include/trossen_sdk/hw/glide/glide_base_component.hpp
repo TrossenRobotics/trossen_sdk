@@ -42,28 +42,31 @@ namespace trossen::hw::glide {
  * the whole mapping is declarative: discovering that "raise" is really bit 4 is
  * a config edit, not a rebuild.
  *
- * ### Measured handle geometry (Rivet, 2026-08-11)
+ * ### Which axis is which on a Rivet (2026-08-11)
  *
  * The driver reports each stick only as "0 to 4095" with no physical direction,
- * so the mapping below was established by driving the base and watching it. The
- * two handles are different mirrored models and **do not agree**, so neither can
- * be inferred from the other:
+ * so every one of these flags was arrived at by driving the base and watching
+ * it. What is solid is the axis ASSIGNMENT: on `glide_left` fore/aft lives on
+ * `joystick_x` and left/right on `joystick_y` — swapped from what the config
+ * originally assumed — while on `glide_right` yaw lives on `joystick_x`. The two
+ * handles are different mirrored models and do not agree, so neither can be
+ * inferred from the other; that inference is what produced two wrong signs
+ * before the flags converged on what the Rivet preset ships:
  *
- * | handle        | raw joystick_x       | raw joystick_y        |
- * |---------------|----------------------|-----------------------|
- * | `glide_right` | left/right, up = RIGHT| (unmeasured)         |
- * | `glide_left`  | fore/aft, up = BACK  | left/right, up = LEFT |
+ *     angular:  joystick_x, invert true
+ *     forward:  joystick_x, invert false
+ *     lateral:  joystick_y, invert true
  *
- * So `glide_left`'s stick sits ~90 degrees round from `glide_right`'s. Combined
- * with the forward/left/counter-clockwise-positive base frame (see `base_axis`
- * in teleop_capable.hpp), that yields the Rivet preset's flags: angular
- * `invert: true`, translation `forward_source: joystick_x, forward_invert: true`,
- * `lateral_source: joystick_y, lateral_invert: false`.
- *
- * Re-measure rather than copy these onto different hardware.
+ * The SIGNS are operator-verified, not probed — nobody has yet read the raw
+ * counts while pushing the stick a known way. So treat them as "what the robot
+ * did" rather than as a derivation, and do not re-derive other flags from them.
  * `scripts/glide_input_probe` prints the raw axes live and moves nothing, which
- * is the cheap way to get them: pass the handles' real IPs, as its defaults are
- * a different subnet from the Rivet's.
+ * is the cheap way to settle it properly: pass the handles' real IPs, as its
+ * defaults are a different subnet from the Rivet's.
+ *
+ * If translation direction ever changes between BRINGUPS with nothing edited,
+ * stop chasing these flags — that is the swerve modules' homed zero landing half
+ * a turn out, and a sign flip will only be right until the next restart.
  *
  * Expected JSON:
  * @code
