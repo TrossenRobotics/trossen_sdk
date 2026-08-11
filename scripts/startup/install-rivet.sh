@@ -52,10 +52,12 @@ if [ "$UNINSTALL" = "1" ]; then
 fi
 
 # --- config ------------------------------------------------------------------
+CONF_CREATED=0
 if [ ! -f "$CONF" ]; then
   echo "Installing $CONF from the example — FILL IT IN before rebooting."
   run install -d -m 0755 /etc/trossen
   run install -m 0644 "$HERE/rivet.conf.example" "$CONF"
+  CONF_CREATED=1
 else
   echo "$CONF exists; leaving it alone (this robot's values live there)."
 fi
@@ -139,8 +141,19 @@ run systemctl enable trossen-webapp.service
 
 # --- the screen --------------------------------------------------------------
 # Installed for the account that will be logged in, which is RUN_USER, not root.
-USER_HOME="$(getent passwd "$RUN_USER" | cut -d: -f6)"
-AUTOSTART="$USER_HOME/.config/autostart"
+# `|| USER_HOME=""` is load-bearing: getent exits non-zero when the user does
+# not exist, and under `set -e` that assignment ends the script — silently, with
+# the units already installed and no autostart entry, which looks like success.
+USER_HOME="$(getent passwd "$RUN_USER" 2>/dev/null | cut -d: -f6)" || USER_HOME=""
+if [ -z "$USER_HOME" ]; then
+  echo "SKIPPING the second-screen autostart entry: user '$RUN_USER' does not exist" >&2
+  echo "  Set RUN_USER in $CONF to the account that logs in on the robot's screen." >&2
+  AUTOSTART=""
+else
+  AUTOSTART="$USER_HOME/.config/autostart"
+fi
+
+if [ -n "$AUTOSTART" ]; then
 echo "Installing the second-screen autostart entry for $RUN_USER"
 if [ "$DRY" = "1" ]; then
   echo "  would: write $AUTOSTART/trossen-second-screen.desktop -> $SCREEN_URL"
@@ -156,26 +169,52 @@ X-GNOME-Autostart-enabled=true
 DESKTOP
   chown "$RUN_USER:$RUN_USER" "$AUTOSTART/trossen-second-screen.desktop"
 fi
+fi
+
+# What is left to do depends on what is already done — an installer that prints
+# the same two chores every time trains you to skip the whole block, including
+# the run where one of them matters.
+echo
+echo "Installed. What is left:"
+echo
+
+if [ "$CONF_CREATED" = "1" ] || [ -z "${WIFI_CONN:-}" ] || [ -z "${STATIC_IP:-}" ]; then
+  echo "* FILL IN $CONF — WIFI_CONN, WIFI_BSSID, STATIC_IP are what this rig"
+  echo "  cannot be guessed for. ./detect-network.sh prints the block to paste."
+else
+  echo "* $CONF looks complete (WIFI_CONN=\"$WIFI_CONN\", STATIC_IP=$STATIC_IP)."
+fi
+
+# GDM's config lives in one of two places depending on the distro's packaging.
+GDM_CONF=/etc/gdm3/custom.conf
+[ -f "$GDM_CONF" ] || GDM_CONF=/etc/gdm/custom.conf
+if [ -f "$GDM_CONF" ] && grep -qE '^\s*AutomaticLoginEnable\s*=\s*[Tt]rue' "$GDM_CONF" 2>/dev/null; then
+  echo "* Autologin is already enabled in $GDM_CONF for $(grep -E '^\s*AutomaticLogin\s*=' "$GDM_CONF" | head -1 | cut -d= -f2- | tr -d ' ')."
+else
+  echo "* ENABLE AUTOLOGIN for $RUN_USER, or the screen stays on a login prompt and"
+  echo "  the second-screen entry never runs:"
+  echo
+  echo "      sudo nano $GDM_CONF"
+  echo "        [daemon]"
+  echo "        AutomaticLoginEnable=true"
+  echo "        AutomaticLogin=$RUN_USER"
+  echo
+  echo "  Left manual because it weakens physical security on a machine that may"
+  echo "  not be yours to make that call about."
+fi
 
 cat <<NEXT
 
-Installed. Two things are NOT done automatically, on purpose:
+Test the checks WITHOUT rebooting — nothing depends on the result yet:
 
-1. FILL IN $CONF — WIFI_CONN, WIFI_BSSID, STATIC_IP. Without them the preflight
-   reports what it cannot do and carries on; it does not guess.
+  sudo systemctl start trossen-rivet-preflight
+  journalctl -u trossen-rivet-preflight -b --no-pager | tail -25
 
-2. ENABLE AUTOLOGIN for $RUN_USER, or the screen stays on a login prompt and the
-   autostart entry never runs. On a Jetson with GDM:
+Then the webapp (first start compiles the SDK extension — minutes on an Orin):
 
-     sudo nano /etc/gdm3/custom.conf     # or /etc/gdm/custom.conf
-       [daemon]
-       AutomaticLoginEnable=true
-       AutomaticLogin=$RUN_USER
+  sudo systemctl start trossen-webapp
+  journalctl -u trossen-webapp -f
 
-   Left manual because it weakens physical security on a machine that may not
-   be yours to make that call about.
-
-Then:  sudo reboot
-Check: systemctl status trossen-rivet-preflight trossen-webapp
-       journalctl -u trossen-rivet-preflight -b
+Back out at any point with:
+  sudo systemctl disable --now trossen-rivet-preflight trossen-webapp
 NEXT
