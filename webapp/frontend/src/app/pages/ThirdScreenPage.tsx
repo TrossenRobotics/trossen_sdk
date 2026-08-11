@@ -8,7 +8,10 @@
  * changed.
  *
  * Mounted OUTSIDE the app Layout, like the second screen and the embedded
- * viewer: a display bolted to a bench has nowhere to navigate to.
+ * viewer: a display bolted to a bench has nowhere to go. It carries one link
+ * back to the app anyway, for the window someone opened by hand — and the app's
+ * header carries a button here, without which this screen was reachable only by
+ * typing the URL.
  *
  * WHICH CAMERA, in priority order:
  *   1. `?camera=<stream_id>` in the URL — the kiosk pin. It wins on every load
@@ -27,7 +30,8 @@
  * WebGPU device and the second camera shows nothing.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
+import { Home } from 'lucide-react';
 import { apiGet } from '@/lib/api';
 
 /** Poll period. Only needs to notice a session starting/stopping and the camera
@@ -153,11 +157,26 @@ export function ThirdScreenPage() {
             {session?.system_name ?? 'IDLE'}
           </span>
         </div>
-        <div
-          className="text-[13px] tracking-wide shrink-0"
-          style={{ color: linkDown ? '#ff4d4d' : '#3ddc97' }}
-        >
-          {linkDown ? 'LINK DOWN' : 'LIVE'}
+        <div className="flex items-center gap-[16px] shrink-0">
+          <div
+            className="text-[13px] tracking-wide"
+            style={{ color: linkDown ? '#ff4d4d' : '#3ddc97' }}
+          >
+            {linkDown ? 'LINK DOWN' : 'LIVE'}
+          </div>
+          {/* The way out. A display opened in its own window used to be a dead
+              end — no nav, and nothing in the app pointing back — so anyone who
+              landed here by URL had to retype one. Small and to the side on
+              purpose: this screen is watched, not operated, and a fat target
+              next to a live feed gets pressed by accident. */}
+          <Link
+            to="/"
+            className="text-dim hover:text-ink p-[6px]"
+            title="Back to the main app"
+            aria-label="Back to the main app"
+          >
+            <Home className="w-[18px] h-[18px]" />
+          </Link>
         </div>
       </header>
 

@@ -7,7 +7,9 @@
  * offers exactly one control: stop.
  *
  * Mounted OUTSIDE the app Layout (like EmbeddedViewerPage) so it carries no nav
- * chrome — the display is bolted to a robot and has nowhere to navigate to.
+ * chrome — the display is bolted to a robot and has nowhere to go. The one
+ * exception is a small link back to the app: the panel is also what a browser
+ * lands on when the URL is opened by hand, and no chrome then means no way out.
  *
  * PORTRAIT: the panel is fixed vertically, so the layout is a single column
  * sized in viewport units and never assumes width > height.
@@ -17,6 +19,8 @@
  * zeros — a battery reading of 0% and "no battery fitted" must not look alike.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router';
+import { Home } from 'lucide-react';
 import { apiGet, apiPost, describeError } from '@/lib/api';
 
 /** Poll period. The server samples the base at 2 Hz; 1 Hz here is a status
@@ -205,14 +209,29 @@ export function SecondScreenPage() {
             {session?.system_name ?? 'IDLE'}
           </div>
         </div>
-        <div className="text-right">
-          <div className="text-dim text-[13px] tracking-wide">LINK</div>
-          <div
-            className="text-[clamp(15px,2.2vh,22px)]"
-            style={{ color: linkDown ? '#ff4d4d' : '#3ddc97' }}
-          >
-            {linkDown ? 'DOWN' : 'UP'}
+        <div className="flex items-center gap-[3vw]">
+          <div className="text-right">
+            <div className="text-dim text-[13px] tracking-wide">LINK</div>
+            <div
+              className="text-[clamp(15px,2.2vh,22px)]"
+              style={{ color: linkDown ? '#ff4d4d' : '#3ddc97' }}
+            >
+              {linkDown ? 'DOWN' : 'UP'}
+            </div>
           </div>
+          {/* The way out. This panel is bolted to a robot and normally has
+              nowhere to go, but it is also what a browser lands on when someone
+              opens the URL by hand — and then a missing link back is a dead end.
+              Kept small and away from STOP: the one control that matters here
+              must not gain a neighbour that looks like it. */}
+          <Link
+            to="/"
+            className="text-dim hover:text-ink p-[6px]"
+            title="Back to the main app"
+            aria-label="Back to the main app"
+          >
+            <Home className="w-[20px] h-[20px]" />
+          </Link>
         </div>
       </header>
 

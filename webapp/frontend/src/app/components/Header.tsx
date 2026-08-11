@@ -1,5 +1,5 @@
 import { Link, useLocation } from "react-router";
-import { Menu, X, Volume2, VolumeX, Sun, Moon, HelpCircle, MonitorUp } from "lucide-react";
+import { Menu, X, Volume2, VolumeX, Sun, Moon, HelpCircle, MonitorUp, MonitorPlay } from "lucide-react";
 import { useState, useEffect } from "react";
 import imgTrossen2025White2 from '@/assets/6ef806f936e829141b2fab202fa6f7601e3a5a7b.png';
 import { useHwStatus } from '@/lib/HwStatusContext';
@@ -173,6 +173,19 @@ export function Header() {
           aria-label="Open second screen in a new window"
         >
           <MonitorUp className="w-5 h-5" />
+        </button>
+
+        {/* The camera display. Same reasoning as the button above, and it
+            shipped without one — reachable only by typing /third_screen, which
+            is no way to find a feature. A separate named window so opening one
+            display does not replace the other. */}
+        <button
+          className="text-dim hover:text-ink p-2"
+          onClick={() => window.open('/third_screen', 'trossen_third_screen')}
+          title="Open the third screen (single camera view) in a new window"
+          aria-label="Open third screen in a new window"
+        >
+          <MonitorPlay className="w-5 h-5" />
         </button>
 
         {/* Report/track broken hardware — drives the fleet downtime log. */}
