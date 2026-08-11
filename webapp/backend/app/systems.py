@@ -308,6 +308,12 @@ def _carry_over_unmodelled_config(
             if key in stored_arm:
                 arm[key] = stored_arm[key]
 
+        # --- gripper feedback mode ---
+        # Unlike the other fields, the Configuration page does not include gripper_feedback_mode, so
+        # every save drops it and the arm  reverts to the SDK's "external_effort" default
+        if "gripper_feedback_mode" not in arm and "gripper_feedback_mode" in stored_arm:
+            arm["gripper_feedback_mode"] = stored_arm["gripper_feedback_mode"]
+
     return incoming
 
 
