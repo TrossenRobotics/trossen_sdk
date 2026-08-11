@@ -60,11 +60,19 @@ _TEST_TIMEOUT_PER_CAMERA_S = 2.0
 # AGX Orin, a warm open is single-digit seconds; 2s/camera failed the test while
 # the cameras were coming up perfectly well.
 _TEST_TIMEOUT_PER_DEPTH_CAMERA_S = 30.0
-_TEST_TIMEOUT_PER_BASE_S = 3.0
+# A swerve base costs its CAN bring-up plus a full re-home of the pivot
+# modules, which TrossenBaseComponent.configure() performs on every bring-up.
+# Homing is mechanical (each pivot rotates until it finds its hall sensor) and
+# is not something we can hurry: the firmware answers in a second or two when
+# nothing is obstructed, and the driver waits up to 120s before declaring
+# failure. 30s buys margin for a slow or partly obstructed home while still
+# failing the test long before that 120s ceiling, whose expiry would otherwise
+# be reported as "the test timed out" rather than "homing didn't finish".
+_TEST_TIMEOUT_PER_BASE_S = 33.0
 # Floor (no-/few-device configs still get a sane minimum) and hard ceiling
 # (backstop so a wedged test can't hang the budget indefinitely). The ceiling
 # has to clear the worst real config: 4 arms + 3 depth ZEDs + a base is
-# 10 + 28 + 90 + 3 = 131s, which the old 90s ceiling silently truncated — the
+# 10 + 28 + 90 + 33 = 161s, which the old 90s ceiling silently truncated — the
 # budget was computed correctly and then clamped below what the rig needed.
 _TEST_TIMEOUT_FLOOR_S = 15.0
 _TEST_TIMEOUT_CEILING_S = 300.0
@@ -83,7 +91,9 @@ def compute_bringup_budget(config: dict[str, Any] | None) -> float:
 
     Arms connect serially over TCP/UDP (~6s each). Colour cameras are cheap. A
     depth-enabled ZED is the expensive one — see
-    `_TEST_TIMEOUT_PER_DEPTH_CAMERA_S`.
+    `_TEST_TIMEOUT_PER_DEPTH_CAMERA_S`. A swerve base pays for a mechanical
+    re-home of its pivot modules on every bring-up — see
+    `_TEST_TIMEOUT_PER_BASE_S`.
 
     IMPORTANT: this budget assumes the depth models are already cached. The
     FIRST depth open on a given rig also downloads and optimises the NEURAL

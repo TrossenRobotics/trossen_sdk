@@ -3,6 +3,10 @@
 Spawned by `app.hw_test.stream_system_hardware_test`. Reads a system
 config JSON from stdin, runs the SDK initialisation steps (arms +
 cameras + mobile_base, no producers / teleop / recording), then exits.
+
+A swerve base additionally re-homes its pivot modules, because
+`TrossenBaseComponent::configure()` does that on every bring-up — so
+running the Test button is also how an operator re-zeros the base.
 Status is signalled by exit code:
 
   0 — success (final stdout line begins with `__SUCCESS__: `)
@@ -136,6 +140,16 @@ def main() -> int:
         for comp_cfg in cfg.hardware.components:
             if comp_cfg.type not in _TESTABLE_COMPONENT_TYPES:
                 continue
+            # A swerve base re-zeros its pivot modules inside configure(), which
+            # blocks for as long as the mechanical home takes. Say so before the
+            # call: the operator sees the wheels turn, and without a line here the
+            # stream simply stalls with no indication of why.
+            if comp_cfg.type == "trossen_base":
+                print(
+                    f"base '{comp_cfg.id}': connecting, then homing the swerve "
+                    f"modules (the wheels will turn on the spot)",
+                    flush=True,
+                )
             ts.HardwareRegistry.create(
                 comp_cfg.type, comp_cfg.id, comp_cfg.to_json()
             )

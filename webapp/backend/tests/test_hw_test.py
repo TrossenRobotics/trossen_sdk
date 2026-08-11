@@ -42,8 +42,8 @@ def test_scales_with_device_count():
 
 
 def test_base_adds_to_budget():
-    # 10 + 4*7 + 3*2 + 3 (base) = 47
-    assert compute_bringup_budget(_system(n_arms=4, n_cameras=3, base=True)) == 47.0
+    # 10 + 4*7 + 3*2 + 33 (base: CAN bring-up + a full swerve re-home) = 77
+    assert compute_bringup_budget(_system(n_arms=4, n_cameras=3, base=True)) == 77.0
 
 
 def test_few_devices_clamped_to_floor():
