@@ -29,14 +29,22 @@ if command -v gsettings >/dev/null 2>&1; then
 fi
 command -v xset >/dev/null 2>&1 && { xset s off; xset -dpms; xset s noblank; } 2>/dev/null || true
 
+# Snaps live in /snap/bin, which a systemd unit's PATH and some non-login
+# shells do not carry. A Jetson with Brave installed as a snap therefore looked
+# like a machine with no browser at all.
+case ":$PATH:" in *":/snap/bin:"*) ;; *) PATH="$PATH:/snap/bin" ;; esac
+
 # Whatever Chromium is called on this machine. Firefox last: its kiosk mode
 # works but ignores several of the flags below.
 BROWSER=""
-for candidate in chromium chromium-browser google-chrome google-chrome-stable brave-browser firefox; do
+for candidate in brave brave-browser chromium chromium-browser google-chrome google-chrome-stable firefox; do
   if command -v "$candidate" >/dev/null 2>&1; then BROWSER="$candidate"; break; fi
 done
 if [ -z "$BROWSER" ]; then
-  echo "kiosk: no browser found (tried chromium, google-chrome, brave, firefox)" >&2
+  echo "kiosk: no browser found. Tried brave, chromium, google-chrome, firefox" >&2
+  echo "kiosk: on PATH=$PATH" >&2
+  echo "kiosk: install one with 'sudo snap install brave' or" >&2
+  echo "kiosk: 'sudo apt install -y chromium-browser'" >&2
   exit 1
 fi
 echo "kiosk: $BROWSER -> $URL"

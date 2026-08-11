@@ -46,6 +46,20 @@ WEBAPP_URL="http://localhost:8000"
 # What the robot's own screen shows once the webapp is up.
 SCREEN_URL="http://localhost:8000/second_screen"
 
+# --- Touchscreen -------------------------------------------------------------
+# X spreads a touch device across the whole desktop, so on a rotated panel the
+# touches land 90 degrees out. kiosk-touch.sh binds the device to its output at
+# every login; these only need setting when the automatic choice is wrong.
+#
+# Exact xinput name. Empty = every device whose name mentions touch.
+TOUCH_DEVICE=""
+# xrandr output name. Empty = the only connected output, which is the normal
+# case; required when two displays are attached.
+TOUCH_OUTPUT=""
+# Nine numbers, applied INSTEAD of map-to-output. Only for a panel whose
+# transform has to be stated by hand, e.g. right-rotated: 0 1 0 -1 0 1 0 0 1
+TOUCH_MATRIX=""
+
 # --- Housekeeping ------------------------------------------------------------
 # Mute the robot's audio outputs to zero at every boot. A Jetson with a monitor
 # plugged in has a working HDMI sink and nothing useful to say through it.

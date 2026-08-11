@@ -11,6 +11,30 @@ Three machines, no keyboard, no login, no one typing a URL:
 Each installer is idempotent and has `--uninstall`. `install-rivet.sh` also has
 `--dry-run`, which prints every change and touches nothing.
 
+## A whole Rivet in one command
+
+```bash
+sudo ./setup-rivet.sh --hostname rivet-02 --static-ip 192.168.5.34/24 \
+     --ts-authkey tskey-auth-…
+```
+
+Hostname, WiFi discovery, `/etc/trossen/rivet.conf`, the network fixes, a
+browser, autologin, the services and autostart entries, Tailscale, then it runs
+the preflight and shows you the result. Every step is idempotent and skippable
+(`--no-netfix`, `--no-browser`, `--no-autologin`), and `--dry-run` prints the
+lot without touching anything.
+
+Run it **on the robot**, over the wired link or the console if you can: the
+network step re-activates WiFi and will drop an SSH session on that interface.
+Under tmux it survives — `robots shell <host>` gives you one.
+
+Two things it decides for you, both deliberate and both reversible: it pins the
+strongest **5 GHz** BSSID for the SSID you are currently on (`--bssid` to
+override), and it turns off `autoconnect` on every *other* wireless profile, so
+the rig cannot come up on a network you are not looking for.
+
+It stops short of rebooting, which is the only real test.
+
 ## First: find out what to put in the config
 
 ```bash
@@ -130,7 +154,21 @@ rectangle means 9877 is blocked.
 `kiosk-browser.sh` waits for the webapp, disables screen blanking and idle
 locking, opens the first browser it finds fullscreen, and **restarts it if it
 exits**. A kiosk that closes and stays closed needs a person; one that comes
-back does not.
+back does not. It searches `/snap/bin` too, and prefers Brave — a Jetson with
+Brave installed as a snap otherwise looks like a machine with no browser at all.
+
+`kiosk-touch.sh` binds the touch panel to its display at every login. X spreads
+a touch device across the whole desktop, so on the Rivet's portrait screen
+(`rotate right`) touches land 90° out. `xinput map-to-output` derives the
+transform from that output's own CRTC, which fixes rotation and multi-head with
+one call — no matrices to work out.
+
+It addresses the device by **numeric id, never by name**: a touch panel appears
+twice under one name, as a slave pointer and a slave keyboard, and xinput
+refuses an ambiguous name outright rather than picking one. Set `TOUCH_DEVICE`,
+`TOUCH_OUTPUT` or `TOUCH_MATRIX` in `rivet.conf` when the automatic choice is
+wrong — `TOUCH_OUTPUT` is required once two displays are connected, because
+which panel the glass belongs to is not something a script can know.
 
 `wait-for-url.sh` is that wait, on its own, because all three machines need it
 and a browser started before the webapp is listening shows a connection error

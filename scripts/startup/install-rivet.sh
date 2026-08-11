@@ -93,7 +93,7 @@ SERVICE_PATH="${UV_DIR:+$UV_DIR:}/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/b
 # --- scripts -----------------------------------------------------------------
 echo "Installing scripts to $LIB"
 run install -d -m 0755 "$LIB"
-for f in rivet-preflight.sh wait-for-url.sh kiosk-browser.sh; do
+for f in rivet-preflight.sh wait-for-url.sh kiosk-browser.sh kiosk-touch.sh; do
   run install -m 0755 "$HERE/$f" "$LIB/$f"
 done
 
@@ -195,6 +195,24 @@ Exec=$LIB/kiosk-browser.sh $SCREEN_URL trossen-second-screen
 X-GNOME-Autostart-enabled=true
 DESKTOP
   chown "$RUN_USER:$RUN_USER" "$AUTOSTART/trossen-second-screen.desktop"
+fi
+
+# Separate entry from the browser, and ordered before it, because the two fail
+# independently: a touchscreen 90° out is still worth fixing on a display whose
+# browser did not start, and vice versa.
+echo "Installing the touchscreen mapping autostart entry"
+if [ "$DRY" = "1" ]; then
+  echo "  would: write $AUTOSTART/trossen-touch.desktop"
+else
+  cat > "$AUTOSTART/trossen-touch.desktop" <<DESKTOP
+[Desktop Entry]
+Type=Application
+Name=Trossen touchscreen mapping
+Comment=Bind the touch panel to its display, which X does not do by itself
+Exec=$LIB/kiosk-touch.sh
+X-GNOME-Autostart-enabled=true
+DESKTOP
+  chown "$RUN_USER:$RUN_USER" "$AUTOSTART/trossen-touch.desktop"
 fi
 fi
 
