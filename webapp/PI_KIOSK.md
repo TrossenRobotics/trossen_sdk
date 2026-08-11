@@ -1,5 +1,10 @@
 # Raspberry Pi Kiosk Viewer
 
+> **There is a script for this now:** `scripts/startup/install-pi-kiosk.sh` does
+> every step below. This page remains the explanation — why `cage`, why Pi OS
+> Lite, what each flag is for, and what to do when it will not come up. Read it
+> when the script's result surprises you.
+
 Turn a Raspberry Pi into a fixed display for a webapp that is running **somewhere
 else** — typically the robot's Jetson Orin. The Pi runs no backend, touches no
 hardware, and stores nothing; it is a browser bolted to a monitor.

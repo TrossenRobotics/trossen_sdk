@@ -1,0 +1,68 @@
+# Rivet startup configuration.
+#
+# Copy to /etc/trossen/rivet.conf on the robot and fill in the blanks. Sourced
+# by rivet-preflight.sh as root, so it is shell syntax: no spaces around `=`,
+# quote anything with a space in it.
+#
+# Every value here is per-ROBOT, which is why it is not in the repo: rivet-01
+# and rivet-02 have different addresses and may sit on different APs.
+
+# --- WiFi --------------------------------------------------------------------
+# The wireless interface. `nmcli device status` names it.
+WIFI_IFACE="wlan0"
+
+# The NetworkManager connection profile to manage. Usually the SSID.
+# `nmcli -t -f NAME,TYPE connection show` lists them.
+WIFI_CONN=""
+
+# Pin the association to ONE access point. On a floor with several APs sharing
+# an SSID, roaming mid-session drops the link long enough to stall a stream;
+# pinning costs mobility, which a robot on a stand does not need.
+# Empty = do not pin. `iw dev "$WIFI_IFACE" scan | grep -B5 SSID` finds it.
+WIFI_BSSID=""
+
+# --- Static addressing -------------------------------------------------------
+# Empty STATIC_IP = leave the profile on DHCP and only check that it came up.
+# CIDR, e.g. "192.168.5.33/24".
+STATIC_IP=""
+STATIC_GW=""
+# Space-separated, e.g. "192.168.5.1 1.1.1.1".
+STATIC_DNS=""
+
+# --- The webapp --------------------------------------------------------------
+# Repo checkout on the robot, and the account that owns it.
+REPO_DIR="/home/trossen/trossen_sdk"
+RUN_USER="trossen"
+
+# Arguments to webapp/run-native.sh. `--rivet` builds the base follower and is
+# correct on a Rivet and wrong anywhere else.
+WEBAPP_ARGS="--rivet --zed --no-realsense"
+
+# Where the webapp answers once it is up. The preflight does not use this; the
+# second-screen launcher waits on it.
+WEBAPP_URL="http://localhost:8000"
+
+# --- Display -----------------------------------------------------------------
+# What the robot's own screen shows once the webapp is up.
+SCREEN_URL="http://localhost:8000/second_screen"
+
+# --- Housekeeping ------------------------------------------------------------
+# Mute the robot's audio outputs to zero at every boot. A Jetson with a monitor
+# plugged in has a working HDMI sink and nothing useful to say through it.
+MUTE_AUDIO=1
+
+# How many times to retry a fix we can apply ourselves (power save, addressing,
+# BSSID pin) before giving up and failing the unit.
+FIX_RETRIES=3
+
+# Seconds to wait for the wireless interface to exist at all. A cold boot races
+# the driver.
+IFACE_WAIT_S=45
+
+# Free space below which the disk check complains, in GB. Not fatal — a Rivet
+# that cannot record is still a robot you may want to drive.
+MIN_FREE_GB=20
+
+# The wired subnet the arms live on. Checked for a carrier only; the webapp's
+# own hardware test is what actually talks to them.
+ARM_SUBNET_IFACE="eth0"
