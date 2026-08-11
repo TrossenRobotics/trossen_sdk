@@ -108,10 +108,15 @@ else
     # associated and pingable while throughput collapses in bursts, which reads
     # as "the app is slow" rather than as a network fault.
     # `wifi.powersave` on the modify side is nmcli's alias; the property is
-    # reported under its real name, with a dot. 2 = disabled (1 = default,
-    # 3 = enabled), and the numeric form is what `-t` prints.
+    # reported under its real name, with a dot.
+    #
+    # Accept BOTH spellings of the value. nmcli takes the number on the way in
+    # (2 = disabled) but prints it back differently depending on version: this
+    # Jetson's NetworkManager says `disable`, others say `2`, others still
+    # `2 (disable)`. Testing only for the number cost us a rig that refused to
+    # start its webapp because a correctly-disabled radio failed the check.
     apply_fix "wifi.powersave disabled" \
-      "nmcli -t -f 802-11-wireless.powersave connection show '$WIFI_CONN' | grep -q ':2\$'" \
+      "nmcli -t -f 802-11-wireless.powersave connection show '$WIFI_CONN' | grep -qE ':[[:space:]]*(2|disable)\b'" \
       nmcli connection modify "$WIFI_CONN" wifi.powersave 2
 
     # Belt and braces: the profile setting applies on the next activation, this

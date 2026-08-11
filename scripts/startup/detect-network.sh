@@ -174,11 +174,19 @@ else
     say "profile  : ${ACTIVE_CONN:-none active}"
     if [ -n "$ACTIVE_CONN" ]; then
       ps_val="$(nmcli -t -f 802-11-wireless.powersave connection show "$ACTIVE_CONN" 2>/dev/null | cut -d: -f2)"
+      # nmcli prints this back as a number on some versions and a word on
+      # others (this Jetson says "disable"), so match both spellings.
       case "$ps_val" in
-        2) say "powersave: 2 (disabled) — what we want" ;;
-        3) say "powersave: 3 (ENABLED) — this is the one that makes throughput collapse in bursts" ;;
-        *) say "powersave: ${ps_val:-unset} (0=default 1=ignore 2=disable 3=enable)" ;;
+        2|disable*)
+          say "powersave: $ps_val — disabled, which is what we want" ;;
+        3|enable*)
+          say "powersave: $ps_val — ENABLED. This is what makes throughput collapse in"
+          say "           bursts, and single pings fail while TCP survives." ;;
+        *)
+          say "powersave: ${ps_val:-unset} — not explicitly disabled (0/default 1/ignore 2/disable 3/enable)" ;;
       esac
+      # The profile value only applies on activation; this is the radio now.
+      have iw && say "runtime  : power_save $(iw dev "$WIFI_DEV" get power_save 2>/dev/null | awk '{print $3}')"
       pinned="$(nmcli -t -f 802-11-wireless.bssid connection show "$ACTIVE_CONN" 2>/dev/null | cut -d: -f2-)"
       say "pinned   : ${pinned:-none — free to roam}"
 
