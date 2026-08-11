@@ -148,7 +148,7 @@
             "forward_source": "joystick_x",
             "forward_invert": true,
             "lateral_source": "joystick_y",
-            "lateral_invert": true,
+            "lateral_invert": false,
             "max": 0.6,
             "deadzone": 0.05
           },

@@ -42,6 +42,29 @@ namespace trossen::hw::glide {
  * the whole mapping is declarative: discovering that "raise" is really bit 4 is
  * a config edit, not a rebuild.
  *
+ * ### Measured handle geometry (Rivet, 2026-08-11)
+ *
+ * The driver reports each stick only as "0 to 4095" with no physical direction,
+ * so the mapping below was established by driving the base and watching it. The
+ * two handles are different mirrored models and **do not agree**, so neither can
+ * be inferred from the other:
+ *
+ * | handle        | raw joystick_x       | raw joystick_y        |
+ * |---------------|----------------------|-----------------------|
+ * | `glide_right` | left/right, up = RIGHT| (unmeasured)         |
+ * | `glide_left`  | fore/aft, up = BACK  | left/right, up = LEFT |
+ *
+ * So `glide_left`'s stick sits ~90 degrees round from `glide_right`'s. Combined
+ * with the forward/left/counter-clockwise-positive base frame (see `base_axis`
+ * in teleop_capable.hpp), that yields the Rivet preset's flags: angular
+ * `invert: true`, translation `forward_source: joystick_x, forward_invert: true`,
+ * `lateral_source: joystick_y, lateral_invert: false`.
+ *
+ * Re-measure rather than copy these onto different hardware.
+ * `scripts/glide_input_probe` prints the raw axes live and moves nothing, which
+ * is the cheap way to get them: pass the handles' real IPs, as its defaults are
+ * a different subnet from the Rivet's.
+ *
  * Expected JSON:
  * @code
  * {
