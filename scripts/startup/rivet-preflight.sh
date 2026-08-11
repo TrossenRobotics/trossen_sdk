@@ -63,9 +63,28 @@ else
 
   # --- 2. fixes we own. Each is applied then verified; verification failing is
   # what counts, because nmcli exits 0 for plenty of things that did not happen.
+  # An unset WIFI_CONN is recoverable: whatever profile is up on this device is
+  # the one worth fixing. Better than skipping every fix because a config line
+  # is blank.
   if [ -z "$WIFI_CONN" ]; then
-    warn "WIFI_CONN unset in $CONF — cannot pin the AP, disable power save, or fix the address"
+    WIFI_CONN="$(nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null |
+                 awk -F: -v d="$WIFI_IFACE" '$2==d{print $1; exit}')"
+    [ -n "$WIFI_CONN" ] && log "WIFI_CONN unset — using the active profile '$WIFI_CONN'"
+  fi
+
+  if [ -z "$WIFI_CONN" ]; then
+    warn "WIFI_CONN unset in $CONF and no profile active — cannot pin the AP, disable power save, or fix the address"
   else
+    # Fixes are applied to ONE named profile. If a different one is live, they
+    # land somewhere the machine is not using, which looks exactly like a fix
+    # that worked. Say so; `nmcli connection up` below then converges on the
+    # configured profile.
+    live="$(nmcli -t -f NAME,DEVICE connection show --active 2>/dev/null |
+            awk -F: -v d="$WIFI_IFACE" '$2==d{print $1; exit}')"
+    if [ -n "$live" ] && [ "$live" != "$WIFI_CONN" ]; then
+      warn "profile '$live' is active but WIFI_CONN says '$WIFI_CONN' — fixing the latter and switching to it"
+    fi
+
     apply_fix() {
       # $1 human name, $2 verify command, $3.. the fix command
       local name="$1" verify="$2"; shift 2

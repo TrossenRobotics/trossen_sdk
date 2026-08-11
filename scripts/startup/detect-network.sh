@@ -144,6 +144,27 @@ else
       esac
       pinned="$(nmcli -t -f 802-11-wireless.bssid connection show "$ACTIVE_CONN" 2>/dev/null | cut -d: -f2-)"
       say "pinned   : ${pinned:-none — free to roam}"
+
+      # More than one profile for one SSID is a trap: the startup config names
+      # ONE of them, and NetworkManager picks at boot by priority then by which
+      # was used last. Fixes applied to the profile that does not win are
+      # invisible — everything looks configured and nothing took effect.
+      dupes="$(nmcli -t -f NAME,TYPE connection show 2>/dev/null |
+               awk -F: '$2=="802-11-wireless"' | cut -d: -f1 |
+               while IFS= read -r c; do
+                 [ "$c" = "$ACTIVE_CONN" ] && continue
+                 s="$(nmcli -t -f 802-11-wireless.ssid connection show "$c" 2>/dev/null | cut -d: -f2-)"
+                 [ "$s" = "$CUR_SSID" ] && printf '%s\n' "$c"
+               done)"
+      if [ -n "$dupes" ]; then
+        say ""
+        say "WARNING: other profiles exist for SSID \"$CUR_SSID\":"
+        printf '           %s\n' "$dupes"
+        say "  Only \"$ACTIVE_CONN\" is in use now. Whichever wins at boot is the one"
+        say "  that matters, so either delete the others —"
+        say "      nmcli connection delete <name>"
+        say "  or make sure WIFI_CONN names the one that actually comes up."
+      fi
     fi
   fi
 fi
@@ -210,10 +231,40 @@ check() { # name, command...
   local name="$1"; shift
   if "$@" >/dev/null 2>&1; then say "OK    $name"; else say "FAIL  $name"; fi
 }
-[ -n "$GW" ] && check "gateway $GW answers ping" ping -c1 -W2 "$GW"
-# Separate on purpose: an address that pings but a name that will not resolve is
-# a DNS problem, and the two look identical from inside the app.
-check "internet by address (1.1.1.1)" ping -c1 -W2 1.1.1.1
+
+# ICMP is not a reliable single probe on a wireless link with power save on: the
+# radio sleeps, one echo request is dropped, and a single ping with a 2s
+# deadline reports the network as down while TCP — which retransmits — is fine.
+# That misdiagnosis was observed on a Rivet, so this sends several and then
+# falls back to TCP and to ARP rather than trusting one packet.
+reachable() { # host [tcp_port...]
+  local host="$1"; shift
+  if ping -c3 -W3 -i 0.3 "$host" >/dev/null 2>&1; then
+    say "OK    $host (icmp)"
+    return 0
+  fi
+  local port
+  for port in "$@"; do
+    if timeout 3 bash -c "exec 3<>/dev/tcp/$host/$port" 2>/dev/null; then
+      say "OK    $host (tcp/$port — ICMP did not answer, which is normal on a"
+      say "      power-saving link or a device that simply does not do ping)"
+      return 0
+    fi
+  done
+  # Layer 2. A device that answers neither ICMP nor TCP but has an ARP entry is
+  # present on the wire — the distinction between "not there" and "not talking".
+  if ip neigh show "$host" 2>/dev/null | grep -qE 'REACHABLE|STALE|DELAY'; then
+    say "WARN  $host is in the ARP table but answered nothing"
+    return 0
+  fi
+  say "FAIL  $host — no ICMP, no TCP, no ARP entry"
+  return 1
+}
+
+[ -n "$GW" ] && reachable "$GW" 80 443 53
+# Separate from DNS on purpose: an address that answers while a name will not
+# resolve is a DNS fault, and from inside the app the two are indistinguishable.
+reachable 1.1.1.1 443 53
 check "DNS resolves github.com"       getent hosts github.com
 have curl && check "HTTPS to github.com" curl -fsS --max-time 8 -o /dev/null https://github.com
 
