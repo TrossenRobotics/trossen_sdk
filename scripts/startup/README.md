@@ -11,6 +11,29 @@ Three machines, no keyboard, no login, no one typing a URL:
 Each installer is idempotent and has `--uninstall`. `install-rivet.sh` also has
 `--dry-run`, which prints every change and touches nothing.
 
+## First: find out what to put in the config
+
+```bash
+./detect-network.sh --static-ip 192.168.5.33
+```
+
+Read-only, no root, safe on a robot mid-session — with one caveat: `--rescan`
+sweeps every channel, which briefly interrupts traffic on some drivers, so it is
+opt-in. **Run it on the rig**, not on the laptop: every value it prints belongs
+to the machine it runs on, and the whole point is that the two differ.
+
+It reports the interfaces, the AP you are associated to and its band, every AP
+for that SSID with band and signal, the profile's configured addressing versus
+the lease it actually got, whether power save is on, and whether the box can
+reach the gateway, the internet by address, and a name. Then it prints a
+`rivet.conf` block with the answers filled in.
+
+Two things it deliberately does not decide for you: which BSSID to pin (the one
+you are on now is not necessarily the 5 GHz one you want), and whether the
+static address sits outside the router's DHCP pool — put a robot inside the pool
+and the same address eventually gets leased to something else, and both drop off
+intermittently.
+
 ## Rivet
 
 ```bash
