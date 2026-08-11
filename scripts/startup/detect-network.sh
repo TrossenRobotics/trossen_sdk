@@ -51,6 +51,43 @@ say "hostname : $(hostname)"
 say "kernel   : $(uname -r)"
 say "uptime   : $(uptime -p 2>/dev/null || true)"
 
+hr "NAMES AND REACHABILITY-BY-NAME"
+# A rig is found by name or not at all: an IP here is a DHCP lease that will
+# later point at some other device, which does not fail cleanly — it answers
+# ping and refuses port 22, and reads exactly like "the rig is broken".
+HOSTNAME_NOW="$(hostname)"
+say "hostname : $HOSTNAME_NOW"
+if printf '%s' "$HOSTNAME_NOW" | grep -qE '^(workbench|rivet|stationary|cockpit|payload)-[0-9]{2}$'; then
+  say "           matches the <type>-<nn> scheme"
+else
+  say "           DOES NOT match <type>-<nn> (e.g. rivet-01)."
+  say "           The ssh config keys on that pattern, so a name outside it"
+  say "           skips the rig block entirely: no mDNS suffix, no key, no"
+  say "           prompt-free settings. Rename with:"
+  say "             sudo hostnamectl set-hostname rivet-01"
+fi
+
+if systemctl is-active --quiet avahi-daemon 2>/dev/null; then
+  say "mDNS     : avahi running — answers to $HOSTNAME_NOW.local on this LAN"
+else
+  say "mDNS     : avahi NOT running — the .local name will not resolve"
+fi
+
+if have tailscale; then
+  ts_state="$(tailscale status --json 2>/dev/null |
+              python3 -c 'import json,sys; d=json.load(sys.stdin); s=d.get("Self",{}); print(s.get("DNSName","").rstrip("."), d.get("BackendState",""))' 2>/dev/null)"
+  if [ -n "${ts_state% *}" ] && [ "${ts_state% *}" != "" ]; then
+    say "tailscale: ${ts_state% *} (${ts_state##* })"
+    say "           reachable from any network, no LAN or mDNS needed"
+  else
+    say "tailscale: installed but not logged in — sudo tailscale up --ssh --hostname=<name>"
+  fi
+else
+  say "tailscale: NOT installed. This rig is only reachable on its own LAN,"
+  say "           and only while its address holds. Install (Ubuntu/Jetson):"
+  say "             curl -fsSL https://tailscale.com/install.sh | sh"
+fi
+
 hr "INTERFACES"
 if have nmcli; then
   nmcli -t -f DEVICE,TYPE,STATE,CONNECTION device status 2>/dev/null |
