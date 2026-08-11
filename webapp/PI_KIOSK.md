@@ -120,24 +120,36 @@ Line by line, the parts that matter:
 - **`--password-store=basic`** — suppresses a keyring prompt that would otherwise
   sit underneath the kiosk where it cannot be clicked.
 
-## 5. Switch the viewer to Lite — do not skip this
+## 5. Keep WebGPU out of it — do not skip this
 
-On the Monitor page, set the viewer dropdown to **"Lite (Pi)"**.
+The thing most likely to make a Pi unusable is the Rerun WASM viewer: a ~47 MB
+wasm bundle that wants WebGPU, on a box whose renderer is software. Which page
+you point at decides whether you get it.
 
-The default embeds the Rerun WASM viewer: a ~47 MB wasm bundle that wants WebGPU.
-That is the single thing most likely to make a Pi unusable. Lite mode is a plain
-`<img>` MJPEG grid served by the recorder — no wasm, no WebGPU, no GPU path to
-lose. The same panel exposes `previewFps` and `previewDownscale`; lower both on a
-Pi.
+**`/third_screen` — one camera, as large as the display allows.** Nothing to
+configure: this page is MJPEG only, a plain `<img>` served by the recorder, and
+carries no Rerun path at all. It is the intended kiosk target for watching work
+happen. Pin the feed with `?camera=<stream_id>` so the display comes back to the
+same camera after a reboot:
 
-The choice persists in `localStorage`, which is what `--user-data-dir` above is
-protecting.
+```
+http://192.168.5.30:8000/third_screen?camera=camera_main
+```
+
+**The Monitor page — the full grid.** This one defaults to Rerun, so set its
+viewer dropdown to **"Lite (Pi)"** before leaving it on a Pi. That choice
+persists in `localStorage`, which is what `--user-data-dir` above is protecting.
+
+Either way the feed comes off the same preview tap, so the Monitor page's
+`previewFps` and `previewDownscale` apply to both — lower them for a Pi.
 
 ## 6. What to expect
 
 **The camera feed only exists while a recording session is running.** The MJPEG
 server lives inside the recorder subprocess (port 9877, bound to `0.0.0.0`), so
-between sessions both viewer modes are empty. This is not a fault on the Pi.
+between sessions every camera view is empty. This is not a fault on the Pi.
+`/third_screen` says so in words rather than showing black, and reconnects on its
+own when a session starts — no reload, nobody standing in front of it.
 
 For a status-only panel — system state, battery, disk, emergency stop, no video
 pipeline at all — point the kiosk at `/second_screen` instead:
@@ -151,7 +163,9 @@ to a Pi. It is also a good way to confirm the kiosk itself is healthy when no
 session is running.
 
 Ports the Pi must be able to reach on the robot: **8000** (UI + API) and, for
-Lite mode, **9877** (MJPEG).
+any camera feed, **9877** (MJPEG). `/third_screen` needs both — the page and its
+camera list come from 8000, the pixels from 9877 — so a display that shows the
+header and a black rectangle is a blocked 9877, not a broken camera.
 
 ## Troubleshooting
 
@@ -179,6 +193,7 @@ sudo raspi-config nonint do_boot_behaviour B2
 bash -n ~/.bash_profile && sudo reboot
 ```
 
-Per-Pi, only two things change: the URL in the cage line, and whether you want
-the Monitor page or `/second_screen`. The Lite-mode selection must be made once
-per Pi, in the browser, since it lives in that Pi's `localStorage`.
+Per-Pi, only two things change: the URL in the cage line, and which page you
+want — `/third_screen` for one camera, `/second_screen` for status, the Monitor
+page for the full grid. Only the last of those needs the Lite-mode selection
+made by hand once per Pi, since it lives in that Pi's `localStorage`.

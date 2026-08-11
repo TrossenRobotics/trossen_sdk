@@ -23,11 +23,21 @@
  * rather than requested — the blueprint endpoint 404s on an unknown id, which
  * would leave the viewer with no layout at all.
  *
- * WHY AN IFRAME: the Rerun WASM viewer cannot be remounted inside one document
- * (see EmbeddedViewerPage). Switching camera changes the blueprint, which means
- * a new viewer — so the camera is part of the iframe's key and changing it
- * destroys the document and loads a clean one. Attempting it in-place leaks the
- * WebGPU device and the second camera shows nothing.
+ * WHY MJPEG AND NOT RERUN: this screen exists to be driven by a low-power
+ * client — a Raspberry Pi kiosk (see webapp/PI_KIOSK.md) — and the Rerun WASM
+ * viewer needs WebGPU, which such a box does not have; under the software
+ * renderer a Pi falls back to, it does not run at all. An <img> pointed at the
+ * recorder's MJPEG server is JPEG decode plus a blit, which anything can do.
+ *
+ * It also deletes a whole class of problem: the Rerun viewer cannot be remounted
+ * inside one document (see EmbeddedViewerPage), so showing it here meant an
+ * iframe keyed on session AND camera, recreated to force a clean WASM/WebGPU
+ * state. An <img> just changes its `src`.
+ *
+ * The cost is that this screen shows colour frames and nothing else — no depth,
+ * no 3D, no plots. For those, the Monitor page's Rerun mode is still there.
+ * Both feeds come off the SAME preview tap in the recorder, so the FPS and
+ * resolution knobs on that page apply here too.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
@@ -45,6 +55,16 @@ const LINK_DOWN_AFTER = 3;
 
 /** Remembers the picker's choice per browser. Absent when the URL pins one. */
 const STORAGE_KEY = 'thirdScreenCamera';
+
+/** How long to wait before reopening a stream that errored. Long enough not to
+ *  hammer a recorder that is still starting, short enough that a display heals
+ *  itself before anyone walks over to look at it. */
+const RETRY_MS = 1500;
+
+/** The recorder serves the MJPEG feed from a fixed port on the SAME host that
+ *  serves this page (the backend runs with host networking). MUST match
+ *  `_MJPEG_PORT` in webapp/backend/app/recorder_runner.py. */
+const MJPEG_PORT = 9877;
 
 type ActiveSession = {
   id: string;
@@ -73,6 +93,7 @@ function label(cameraId: string): string {
 export function ThirdScreenPage() {
   const [search] = useSearchParams();
   const pinned = search.get('camera');
+  const mjpegBase = `http://${window.location.hostname}:${MJPEG_PORT}`;
 
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [linkDown, setLinkDown] = useState(false);
@@ -136,6 +157,27 @@ export function ThirdScreenPage() {
     [pinned],
   );
 
+  // An <img> MJPEG stream never reconnects on its own: when the recorder exits
+  // (session end, resume, re-record) or the connection drops, the element sits
+  // on its last frame forever, and even a reload can reuse the dead connection.
+  // So the URL carries a token — the session id, which changes with every fresh
+  // recorder, plus a counter bumped when the element errors. Nobody is standing
+  // in front of this screen to notice a frozen picture, which is exactly why it
+  // has to heal itself.
+  const [streamRetry, setStreamRetry] = useState(0);
+  useEffect(() => { setStreamRetry(0); }, [session?.id]);
+  const retryTimer = useRef<number | null>(null);
+  const handleStreamError = useCallback(() => {
+    if (retryTimer.current != null) return; // coalesce a burst of img errors
+    retryTimer.current = window.setTimeout(() => {
+      retryTimer.current = null;
+      setStreamRetry(r => r + 1);
+    }, RETRY_MS);
+  }, []);
+  useEffect(() => () => {
+    if (retryTimer.current != null) window.clearTimeout(retryTimer.current);
+  }, []);
+
   // The pin names a camera this system does not have — worth saying out loud,
   // because the screen is showing a DIFFERENT feed than the URL asked for and
   // that is exactly the kind of thing nobody notices for a week.
@@ -190,17 +232,19 @@ export function ThirdScreenPage() {
         </div>
       )}
 
-      {/* The feed. Keyed by session AND camera so either change reloads the
-          iframe, which is the only reliable way to reset the Rerun viewer's
-          WASM/WebGPU state. */}
+      {/* The feed: one <img>, JPEG decode and blit, no WebGPU anywhere. The
+          reconnect token in the query string is what keeps an unattended
+          display honest — see `streamRetry`. object-contain scales a downscaled
+          preview UP to fill the space rather than pinning it to its intrinsic
+          size, so lowering the preview resolution for a Pi does not shrink the
+          picture on the wall. */}
       <div className="flex-1 min-h-0 bg-black">
         {session && camera ? (
-          <iframe
-            key={`${session.id}:${camera}`}
-            src={`/embed/viewer/${session.id}?camera=${encodeURIComponent(camera)}`}
-            title={`Live view — ${label(camera)}`}
-            className="w-full h-full"
-            style={{ border: 0 }}
+          <img
+            src={`${mjpegBase}/stream/${encodeURIComponent(camera)}?s=${session.id}&r=${streamRetry}`}
+            alt={`Live view — ${label(camera)}`}
+            onError={handleStreamError}
+            className="w-full h-full object-contain"
           />
         ) : (
           <div className="w-full h-full flex flex-col items-center justify-center gap-[1vh] select-none px-[4vw] text-center">
