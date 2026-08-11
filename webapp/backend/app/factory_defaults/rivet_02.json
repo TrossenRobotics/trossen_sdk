@@ -5,7 +5,7 @@
     "hardware": {
       "arms": {
         "glide_left": {
-          "ip_address": "192.168.5.3",
+          "ip_address": "192.168.5.13",
           "model": "glide_left",
           "end_effector": "wxai_v0_leader",
           "joint_signs": [
@@ -34,7 +34,7 @@
           "gripper_force_feedback": true
         },
         "glide_right": {
-          "ip_address": "192.168.5.2",
+          "ip_address": "192.168.5.12",
           "model": "glide_right",
           "end_effector": "wxai_v0_leader",
           "joint_signs": [
@@ -63,7 +63,7 @@
           "gripper_force_feedback": true
         },
         "follower_left": {
-          "ip_address": "192.168.1.4",
+          "ip_address": "192.168.1.15",
           "model": "pro",
           "end_effector": "pro_base",
           "write_moving_time_s": 0.0,
@@ -93,7 +93,7 @@
           ]
         },
         "follower_right": {
-          "ip_address": "192.168.1.5",
+          "ip_address": "192.168.1.14",
           "model": "pro",
           "end_effector": "pro_base",
           "write_moving_time_s": 0.0,

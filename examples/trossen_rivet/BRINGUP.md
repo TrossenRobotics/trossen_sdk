@@ -133,13 +133,31 @@ otherwise fine — the backend venv volume is carrying a stale compiled extensio
 The entrypoint self-heals this on start; the log line is
 `trossen_sdk extension is stale`.
 
+## Confirmed on the robot
+
+- **The stick mapping in `rivet_01`, as of 2026-08-11.** Driving rivet-01 with
+  what that preset ships is correct in every direction:
+
+      angular:  joystick_x, invert true
+      forward:  joystick_x, invert false
+      lateral:  joystick_y, invert true
+
+  Verified after the swerve modules started homing on every bring-up, which is
+  the other thing that moves translation direction — so this is the mapping
+  against a base whose zero is repeatable, not a sign that happened to cancel a
+  half-turn error. `rivet_02` ships the same values on the assumption its
+  handles are wired like rivet-01's; that half is not yet driven.
+
+  If a direction is wrong on a rig, change it on the base card in the webapp
+  (Configuration → the base → Handle Sticks) rather than here. Editing this file
+  is only for a rig that has no webapp in front of it.
+
 ## Known-unconfirmed values
 
 Everything below is a guess or is inherited, and produces plausible-looking wrong
 behaviour rather than an error:
 
 - **Session button bits** on the left handle (start / stop / re-record).
-- **All `invert` flags**, currently `false`.
 - **Which side each ZED X Nano is on.** Every serial below was read off the rig
   it belongs to, so the cameras are confirmed present — but nothing in the
   enumeration says which Nano faces left. The ZED X Mini is always `camera_main`.
@@ -154,5 +172,8 @@ behaviour rather than an error:
   assumption the GMSL harness is wired the same way on both. If the side feeds
   come up mirrored, swap the two Nano serials in that rig's preset — nothing
   else changes.
-- **Arm IPs**, which follow the factory-default convention rather than being read
-  off this rig.
+- **rivet-01's arm IPs**, which follow the factory-default convention rather than
+  being read off that rig. rivet-02's are not a guess — leaders `192.168.5.13`
+  (left) / `192.168.5.12` (right), followers `192.168.1.15` (left) /
+  `192.168.1.14` (right), which is a different assignment from rivet-01's in
+  both pairs.
