@@ -50,6 +50,12 @@ WEBAPP_URL="http://localhost:8000"
 # particular Workbench really is only ever a status display.
 SCREEN_URL="http://localhost:8000/"
 
+# UI scale for that screen, as a factor: 1.5 = 150%, 1 = the display's own
+# scale. Applied with Chromium's --force-device-scale-factor, so the layout,
+# the fonts and the touch targets all grow together and a tap still lands where
+# it looks like it should. Empty = leave the display alone.
+SCREEN_SCALE="1.5"
+
 # --- Touchscreen -------------------------------------------------------------
 # X spreads a touch device across the whole desktop, so on a multi-head or
 # rotated setup touches land in the wrong place. kiosk-touch.sh binds the device

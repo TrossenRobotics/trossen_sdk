@@ -4,6 +4,11 @@
 #
 #   kiosk-browser.sh <url> [profile_name]
 #
+# Environment:
+#   KIOSK_WAIT_S   seconds to wait for the app before opening anyway (default 300)
+#   KIOSK_SCALE    UI scale factor, e.g. 1.5 for 150%. Unset = the display's own
+#                  scale. Chromium only; see the note at the flag below.
+#
 # Used by the Rivet's own screen and by the third-screen machine. The Pi is the
 # exception: it has no desktop session, so it runs chromium under `cage`
 # directly (see install-pi-kiosk.sh).
@@ -100,6 +105,12 @@ while true; do
   clear_stale_lock
   started_at=$SECONDS
   if [ "$BROWSER" = "firefox" ]; then
+    # No scaling here on purpose: Firefox has no equivalent command-line flag.
+    # It scales through the layout.css.devPixelsPerPx pref, which lives inside a
+    # profile this script does not create. Say so rather than silently ignoring
+    # a KIOSK_SCALE the operator set and believes is in effect.
+    [ -n "${KIOSK_SCALE:-}" ] &&
+      echo "kiosk: KIOSK_SCALE=$KIOSK_SCALE ignored -- firefox has no flag for it" >&2
     "$BROWSER" --kiosk "$URL"
   else
     # --user-data-dir keeps this window's state (the third screen's camera
@@ -112,10 +123,18 @@ while true; do
     # is really in use when something goes wrong.
     profile_flag=()
     [ "$IS_SNAP" = "0" ] && profile_flag=(--user-data-dir="$PROFILE_DIR")
+    # --force-device-scale-factor and NOT a page zoom. It scales the whole UI --
+    # layout, fonts and hit targets together -- so on a touchscreen the targets
+    # stay where they appear. Page zoom is stored per-origin inside profile
+    # state, which a snap keeps somewhere this script does not control, so it
+    # would survive or vanish unpredictably across restarts.
+    scale_flag=()
+    [ -n "${KIOSK_SCALE:-}" ] && scale_flag=(--force-device-scale-factor="$KIOSK_SCALE")
     "$BROWSER" \
       --kiosk \
       --app="$URL" \
       "${profile_flag[@]}" \
+      "${scale_flag[@]}" \
       --noerrdialogs \
       --disable-session-crashed-bubble \
       --disable-infobars \

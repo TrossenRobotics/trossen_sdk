@@ -78,7 +78,7 @@ fi
 
 # Read it, so the units can be written with this robot's paths baked in.
 REPO_DIR="/home/trossen/trossen_sdk"; RUN_USER="trossen"
-WEBAPP_ARGS="--zed --no-realsense"; SCREEN_URL="http://localhost:8000/"
+WEBAPP_ARGS="--zed --no-realsense"; SCREEN_URL="http://localhost:8000/"; SCREEN_SCALE="1.5"
 ARM_IFACES=""; ARM_ADDRS=""
 # shellcheck source=/dev/null
 [ -r "$CONF" ] && . "$CONF"
@@ -215,16 +215,21 @@ echo "Installing the kiosk autostart entry for $RUN_USER"
 # windows fighting over one display is not a state anyone diagnoses quickly.
 if [ "$DRY" = "1" ]; then
   echo "  would: rm -f $AUTOSTART/trossen-second-screen.desktop (renamed)"
-  echo "  would: write $AUTOSTART/trossen-kiosk.desktop -> $SCREEN_URL"
+  echo "  would: write $AUTOSTART/trossen-kiosk.desktop -> $SCREEN_URL (scale ${SCREEN_SCALE:-none})"
 else
   install -d -m 0755 -o "$RUN_USER" -g "$RUN_USER" "$AUTOSTART"
   rm -f "$AUTOSTART/trossen-second-screen.desktop"
+  # `env VAR=... cmd` because an Exec= line is not a shell: it cannot expand or
+  # export a variable itself. An empty SCREEN_SCALE writes no env at all, so the
+  # display keeps whatever scale it already has.
+  KIOSK_ENV=""
+  [ -n "${SCREEN_SCALE:-}" ] && KIOSK_ENV="/usr/bin/env KIOSK_SCALE=${SCREEN_SCALE} "
   cat > "$AUTOSTART/trossen-kiosk.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
 Name=Trossen kiosk
 Comment=The webapp, fullscreen on this robot's screen, once it answers
-Exec=$LIB/kiosk-browser.sh $SCREEN_URL trossen-kiosk
+Exec=${KIOSK_ENV}$LIB/kiosk-browser.sh $SCREEN_URL trossen-kiosk
 X-GNOME-Autostart-enabled=true
 DESKTOP
   chown "$RUN_USER:$RUN_USER" "$AUTOSTART/trossen-kiosk.desktop"
