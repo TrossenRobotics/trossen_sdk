@@ -47,8 +47,14 @@ namespace {
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/hw/active_hardware_registry.hpp"
 #include "trossen_sdk/hw/glide/glide_session_control_component.hpp"
-#ifdef TROSSEN_ENABLE_RIVET
+// Unconditional: the arm component is core, not Rivet hardware. It was behind
+// the flag below until a Workbench — the first rig ever built with
+// TROSSEN_ENABLE_RIVET=OFF — failed to compile, because the ArmJointLimits and
+// TrossenArmComponent bindings further down use it whatever the flag says.
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
+#ifdef TROSSEN_ENABLE_RIVET
+// The mobile base genuinely is Rivet-only: it needs trossen_base, a private
+// dependency a Workbench neither has nor can fetch.
 #include "trossen_sdk/hw/base/trossen_base_component.hpp"
 #endif
 #include "trossen_sdk/hw/session_control/session_control_capable.hpp"
