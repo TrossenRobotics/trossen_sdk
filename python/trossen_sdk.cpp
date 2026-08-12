@@ -466,6 +466,25 @@ PYBIND11_MODULE(trossen_sdk, m) {
          py::call_guard<py::gil_scoped_release>(),
          "Stop producing events and join the reader thread. Idempotent.");
 
+  // Registered HERE, ahead of the components below, because pybind requires a
+  // base to be registered BEFORE any class that declares it as a base. This
+  // block used to sit further down the file, next to the rest of the teleop
+  // bindings, while TrossenArmComponent -- which derives from TeleopCapable in
+  // C++ -- was registered up here. pybind cannot see a base it has not been
+  // told about yet, so the arm component reached Python without end_teleop(),
+  // stage(), pre_episode() or post_episode() on it, and the first call to any of
+  // them failed with "not a part of TrossenArmComponent". Keep it above.
+  py::class_<teleop::TeleopCapable, PyTeleopCapable,
+             std::shared_ptr<teleop::TeleopCapable>>(m, "TeleopCapable")
+    .def(py::init<>())
+    .def("as_space_io", &teleop::TeleopCapable::as_space_io,
+         py::arg("space"), py::return_value_policy::reference_internal)
+    .def("prepare_for_teleop", &teleop::TeleopCapable::prepare_for_teleop)
+    .def("end_teleop", &teleop::TeleopCapable::end_teleop)
+    .def("stage", &teleop::TeleopCapable::stage)
+    .def("pre_episode", &teleop::TeleopCapable::pre_episode)
+    .def("post_episode", &teleop::TeleopCapable::post_episode);
+
   // Registered so HardwareRegistry.create() returns an object Python can see as
   // SessionControlCapable — pybind resolves the most-derived *registered* type,
   // so without this the component arrives as a plain HardwareComponent and the
@@ -479,6 +498,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
   // returns a plain HardwareComponent and the two recovery calls below are
   // unreachable from the recorder.
   py::class_<arm::TrossenArmComponent, HardwareComponent,
+             teleop::TeleopCapable,
              std::shared_ptr<arm::TrossenArmComponent>>(
       m, "TrossenArmComponent")
     .def("error_information", &arm::TrossenArmComponent::error_information,
@@ -871,16 +891,9 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def("write", &TeleopTypeIO::write, py::arg("cmd"))
     .def("sync_to_state", &TeleopTypeIO::sync_to_state, py::arg("state"));
 
-  py::class_<TeleopCapable, PyTeleopCapable,
-             std::shared_ptr<TeleopCapable>>(m, "TeleopCapable")
-    .def(py::init<>())
-    .def("as_space_io", &TeleopCapable::as_space_io,
-         py::arg("space"), py::return_value_policy::reference_internal)
-    .def("prepare_for_teleop", &TeleopCapable::prepare_for_teleop)
-    .def("end_teleop", &TeleopCapable::end_teleop)
-    .def("stage", &TeleopCapable::stage)
-    .def("pre_episode", &TeleopCapable::pre_episode)
-    .def("post_episode", &TeleopCapable::post_episode);
+  // TeleopCapable itself is registered much earlier in this function, next to
+  // the hardware components. It has to precede TrossenArmComponent, which
+  // declares it as a base -- do not move the registration back down here.
 
   m.def("as_teleop_capable",
     [](std::shared_ptr<trossen::hw::HardwareComponent> hw)
