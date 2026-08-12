@@ -223,6 +223,7 @@
     "teleop": {
       "enabled": true,
       "rate_hz": 1000.0,
+      "leader_timeout_ms": 2000.0,
       "pairs": [
         {
           "leader": "glide_left",
