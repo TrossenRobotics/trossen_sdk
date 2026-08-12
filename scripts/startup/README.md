@@ -5,6 +5,7 @@ Three machines, no keyboard, no login, no one typing a URL:
 | Machine | Script | What it does at boot |
 | --- | --- | --- |
 | Rivet (Jetson Orin) | `install-rivet.sh` | Network fixes and checks, mutes audio, starts the webapp, shows `/second_screen` on its own display |
+| Workbench (Jetson Orin) | `install-workbench.sh` | Wired link and arm checks, mutes audio, starts the webapp, shows `/second_screen` on its own display |
 | Raspberry Pi | `install-pi-kiosk.sh` | `cage` + Chromium straight into the webapp home screen |
 | Third-screen box (Ubuntu/GNOME) | `install-desktop-kiosk.sh` | Autologin, then Chromium fullscreen on `/third_screen` |
 
@@ -107,6 +108,45 @@ so without autologin the robot's screen sits at a login prompt. Enabling it
 weakens physical security on a machine that may not be yours to make that call
 about, so `install-rivet.sh` prints the three lines for `/etc/gdm3/custom.conf`
 and leaves it.
+
+## Workbench
+
+```bash
+sudo ./install-workbench.sh
+sudo nano /etc/trossen/workbench.conf   # ← ARM_IFACES and ARM_ADDRS
+sudo systemctl start trossen-workbench-preflight   # safe to test without rebooting
+sudo reboot
+```
+
+A separate script from the Rivet's, and the reason is the failure policy rather
+than the checks. **A Workbench preflight can never block the boot.** The Rivet's
+fails when a fix it *owns* will not apply — the AP pin, WiFi power save, the
+static address — because configuration that refuses to apply means the machine
+is not the one we think it is. A Workbench is wired end to end and owns no such
+fixes: its addressing is static on interfaces NetworkManager already brought up.
+So everything it reports is an observation, the webapp only `Wants=` it, and a
+Workbench whose arms are switched off still brings up its UI — which is how the
+operator finds out the arms are switched off.
+
+It has **no WiFi section at all**. That is deliberate: a Workbench with no
+association is not a degraded Rivet, it is a normal Workbench. Pointing
+`rivet.conf` at one meant the preflight tried to disable power save on a guest
+network the rig did not care about, failed, and refused to start the webapp over
+it.
+
+Two checks the Rivet's does not have:
+
+- **Both wired ports**, because a Workbench can split leaders and followers
+  across two (`mgbe0` and `mgbe1` on the one we have).
+- **Do the arms answer**, by ARP. Never by ping — these controllers do not
+  answer ICMP at all, so a ping test reports every healthy arm as dead, which is
+  worse than no test because it teaches people to ignore it.
+
+`WEBAPP_ARGS` is validated for `--rivet` and the installer refuses it outright.
+On a Workbench that flag sets `TROSSEN_ENABLE_RIVET=ON`, CMake then clones the
+private `trossen_base` over HTTPS, and git blocks forever on a credential prompt
+no unit can answer — the service sits in `activating` at near-zero CPU,
+indistinguishable from a slow compile.
 
 ## Raspberry Pi
 

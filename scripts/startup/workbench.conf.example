@@ -1,0 +1,68 @@
+# Workbench startup configuration.
+#
+# Copy to /etc/trossen/workbench.conf on the robot and fill in the blanks.
+# Sourced by workbench-preflight.sh as root, so it is shell syntax: no spaces
+# around `=`, quote anything with a space in it.
+#
+# Deliberately has NO WiFi section. A Workbench is wired: the Orin and every arm
+# sit on the same switch. If a rig of yours genuinely needs the radio managed —
+# pinned AP, power save off, static address — it wants rivet.conf and
+# install-rivet.sh instead, which is where all of that lives.
+
+# --- The arms' wired links ---------------------------------------------------
+# Space-separated, because a Workbench can split leaders and followers across
+# two ports. Checked for carrier only.
+ARM_IFACES="mgbe0 mgbe1"
+
+# Every arm controller's address, space-separated. Checked with ARP, never with
+# ping: these controllers do not answer ICMP, so a ping test would report every
+# healthy arm as dead. Leave empty to skip the check.
+ARM_ADDRS="192.168.7.2 192.168.7.3 192.168.8.4 192.168.8.5"
+
+# --- The webapp --------------------------------------------------------------
+REPO_DIR="/home/trossen/trossen_sdk"
+RUN_USER="trossen"
+
+# Arguments to webapp/run-native.sh.
+#
+# NEVER --rivet on a Workbench. That flag sets TROSSEN_ENABLE_RIVET=ON, which
+# makes CMake FetchContent clone the private trossen_base over HTTPS — and with
+# no TTY behind a systemd unit, git blocks forever on a credential prompt it
+# cannot answer. It does not fail; the unit sits in `activating` at near-zero
+# CPU looking exactly like a slow compile.
+WEBAPP_ARGS="--zed --no-realsense"
+
+# Where the webapp answers once it is up. The preflight does not use this; the
+# second-screen launcher waits on it.
+WEBAPP_URL="http://localhost:8000"
+
+# --- Display -----------------------------------------------------------------
+SCREEN_URL="http://localhost:8000/second_screen"
+
+# --- Touchscreen -------------------------------------------------------------
+# X spreads a touch device across the whole desktop, so on a multi-head or
+# rotated setup touches land in the wrong place. kiosk-touch.sh binds the device
+# to its output at every login; these only need setting when the automatic
+# choice is wrong.
+#
+# Exact xinput name. Empty = every device whose name mentions touch.
+TOUCH_DEVICE=""
+# xrandr output name. Empty = the only connected output, which is the normal
+# case; required when two displays are attached.
+TOUCH_OUTPUT=""
+# Nine numbers, applied INSTEAD of map-to-output. Only needed for a panel whose
+# transform has to be stated by hand, e.g. right-rotated: 0 1 0 -1 0 1 0 0 1.
+# A landscape, unrotated screen wants this EMPTY.
+TOUCH_MATRIX=""
+
+# --- Housekeeping ------------------------------------------------------------
+# Mute the audio outputs to zero at every boot. A Jetson with a monitor plugged
+# in has a working HDMI sink and nothing useful to say through it.
+MUTE_AUDIO=1
+
+# Free space below which the disk check complains, in GB.
+MIN_FREE_GB=20
+
+# Seconds to wait for a wired interface to exist at all. A cold boot races the
+# driver.
+IFACE_WAIT_S=30
