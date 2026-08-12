@@ -56,7 +56,7 @@ fi
 # --- packages ----------------------------------------------------------------
 # Font included on purpose: the UI asks for JetBrains Mono and ships no webfont,
 # so without it every screen renders in a fallback and looks broken.
-PKGS=(cage chromium fonts-jetbrains-mono fonts-dejavu-core)
+PKGS=(cage chromium fonts-jetbrains-mono fonts-dejavu-core curl)
 missing=()
 for p in "${PKGS[@]}"; do
   dpkg -s "$p" >/dev/null 2>&1 || missing+=("$p")
@@ -93,6 +93,20 @@ $MARK_BEGIN
 # Only on the physical console: over SSH there is no seat, cage fails, and
 # without this guard every ssh login would try to start a browser.
 if [ "\$(tty)" = "/dev/tty1" ]; then
+  # Wait for the robot before opening anything. The Pi boots in seconds; the
+  # Rivet takes minutes — power both on together and the webapp is not
+  # listening yet. Chromium does NOT retry a page it failed to load, so a
+  # browser started too early parks on a connection error until someone finds a
+  # keyboard, which is the one thing this whole arrangement exists to avoid.
+  #
+  # Any HTTP response counts, including 404: an API-only backend with no
+  # frontend bundle is up, and treating that as down would wait out the full
+  # five minutes for nothing.
+  echo "kiosk: waiting for $URL"
+  for _ in \$(seq 1 150); do
+    curl -sS -o /dev/null --max-time 3 "$URL" && break
+    sleep 2
+  done
   # WLR_RENDERER=pixman forces software rendering. Fine for these pages — they
   # composite images and text — and necessary on a Pi with no usable GPU path.
   export WLR_RENDERER=pixman
