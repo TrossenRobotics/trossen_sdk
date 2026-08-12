@@ -35,6 +35,7 @@ from app.db import apply_migrations
 from app.hw_test import stream_system_hardware_test
 from app.io_utils import is_safe_id
 from app.read_limits import ReadLimitsError, read_arm_joint_limits
+from app.recover import RecoverError, recover_hardware
 from app.paths import FRONTEND_DIST_DIR
 from app.rerun_playback import build_rrd
 from app.recorder import (
@@ -634,6 +635,52 @@ async def read_arm_limits(body: ReadArmLimitsBody) -> dict[str, list[float]]:
     try:
         return await read_arm_joint_limits(body.model_dump())
     except ReadLimitsError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/api/hardware/recover")
+async def recover_hardware_endpoint(system_id: str) -> dict[str, Any]:
+    """Clear a latched base e-stop and any latched arm errors, then report.
+
+    The operator-confirmed half of fault recovery. Nothing re-enables hardware
+    on its own: a fault stops the session and leaves the robot where it is, and
+    this runs only when someone has looked at the robot and pressed the button.
+
+    Scoped to HARDWARE, not to a session, because by the time this is useful
+    the faulted session has ended and its recorder has exited — there is no
+    session left to address. What survives a recorder exit is exactly what this
+    clears: the base's e-stop latch (held in the base itself) and any arm error
+    still latched in a controller.
+
+    Returns 200 with a per-device verdict even when a device did NOT recover —
+    "the gripper is still outside its limit" is the answer, not an error. A 502
+    means recovery could not be attempted at all.
+
+    Refuses with 409 while a session is active, for the same reason
+    /api/arms/read-limits does: the arm controllers are single-client, so a
+    live recorder holds them and every connect here would fail anyway.
+    """
+    active = [s for s in list_sessions() if s.status == "active"]
+    if active:
+        names = ", ".join(s.name or s.id for s in active)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot recover hardware: session '{names}' is active. Stop it "
+                f"first — its recorder holds the arms."
+            ),
+        )
+
+    # Explicit rather than inferred: recovery talks to real hardware, and the
+    # caller knows which rig it just watched fault. Guessing here would let a
+    # stale "current system" point recovery at addresses nothing answers on.
+    system = get_system(system_id)
+    if system is None:
+        raise HTTPException(status_code=404, detail=f"System '{system_id}' not found")
+
+    try:
+        return await recover_hardware(system.config)
+    except RecoverError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
 

@@ -610,6 +610,39 @@ export function MonitorEpisodePage() {
         setPhase(current?.status === 'paused' ? 'paused' : 'not_started');
         return;
       }
+      // 2.5. Clear what is latched in the HARDWARE, before testing it.
+      //    Clearing the session row above only fixes the database. A base
+      //    e-stop latch lives in the base and a controller error lives in the
+      //    arm; both survive the recorder exiting, so without this the
+      //    re-test below just re-discovers the same fault and Resume stays
+      //    locked. Best-effort: a rig with nothing latched returns a clean
+      //    verdict, and a failure here should still let the test run and give
+      //    its own, more specific diagnosis.
+      try {
+        const verdict = await apiPost<{
+          recovered?: boolean;
+          base?: Record<string, { recovered?: boolean; detail?: string }>;
+          arms?: Record<string, { recovered?: boolean; detail?: string }>;
+        }>(`/api/hardware/recover?system_id=${encodeURIComponent(sysId)}`);
+        const stuck = [
+          ...Object.entries(verdict.base ?? {}),
+          ...Object.entries(verdict.arms ?? {}),
+        ].filter(([, d]) => !d.recovered);
+        for (const [id, d] of stuck) {
+          addLog('warning', `${id}: ${d.detail ?? 'did not recover'}`);
+        }
+        if (stuck.length) {
+          // Named rather than summarised: "the gripper is still outside its
+          // limit" is a thing the operator can walk over and fix, and the
+          // re-test that follows will otherwise just fail opaquely.
+          toast.error(
+            `Still faulted: ${stuck.map(([id]) => id).join(', ')} — see the log`,
+          );
+        }
+      } catch (err) {
+        addLog('warning', `Hardware recovery could not run: ${describeError(err)}`);
+      }
+
       // 3. Re-test the hardware inline. runTest flips hwStatus → 'ready' on a
       //    pass, which is what unlocks Resume on the screen we land on next.
       setRecoverStage('testing');
@@ -750,6 +783,37 @@ export function MonitorEpisodePage() {
       setHwPending(action);
       addLog('info', `Handle button: ${action}`);
       announce(`Handle button ${action}`);
+      return;
+    }
+
+    // The robot stopped ITSELF: a lost cockpit link, an arm controller that
+    // faulted and idled its joints, or the base bumper. Deliberately routed to
+    // the same error screen a crash uses, so there is one recovery path and one
+    // button rather than a second flow an operator meets for the first time
+    // during an incident. The difference is the message, which names the cause
+    // and what to check before pressing it.
+    if (msg.type === 'session_faulted') {
+      const data = msg.data as {
+        reason?: string;
+        message?: string;
+        recoverable?: boolean;
+      };
+      const titles: Record<string, string> = {
+        link_lost: 'Lost contact with the leader arms',
+        arm_error: 'An arm controller faulted',
+        base_estop: 'The base e-stop is engaged',
+        teleop_error: 'Teleoperation stopped unexpectedly',
+      };
+      setElapsed(0);
+      setFatalError({
+        title: titles[data.reason ?? ''] ?? 'The session stopped itself',
+        message:
+          data.message?.trim() ||
+          'The robot stopped itself and the in-flight episode was discarded.',
+      });
+      addLog('error', data.message || `Session faulted: ${data.reason}`);
+      playCue('error');
+      toast.error(titles[data.reason ?? ''] ?? 'The session stopped itself');
       return;
     }
 
