@@ -59,7 +59,9 @@ if [ "$UNINSTALL" = "1" ]; then
   run rm -f /etc/systemd/system/trossen-webapp.service \
             /etc/systemd/system/trossen-workbench-preflight.service
   run systemctl daemon-reload
-  echo "Autostart entry (if any) is per-user: rm ~/.config/autostart/trossen-second-screen.desktop"
+  echo "Autostart entries (if any) are per-user:"
+  echo "  rm ~/.config/autostart/trossen-kiosk.desktop ~/.config/autostart/trossen-touch.desktop"
+  echo "  (and trossen-second-screen.desktop, this entry's name before the rename)"
   exit 0
 fi
 
@@ -76,7 +78,7 @@ fi
 
 # Read it, so the units can be written with this robot's paths baked in.
 REPO_DIR="/home/trossen/trossen_sdk"; RUN_USER="trossen"
-WEBAPP_ARGS="--zed --no-realsense"; SCREEN_URL="http://localhost:8000/second_screen"
+WEBAPP_ARGS="--zed --no-realsense"; SCREEN_URL="http://localhost:8000/"
 ARM_IFACES=""; ARM_ADDRS=""
 # shellcheck source=/dev/null
 [ -r "$CONF" ] && . "$CONF"
@@ -198,7 +200,7 @@ run systemctl enable trossen-webapp.service
 # the units already installed and no autostart entry, which looks like success.
 USER_HOME="$(getent passwd "$RUN_USER" 2>/dev/null | cut -d: -f6)" || USER_HOME=""
 if [ -z "$USER_HOME" ]; then
-  echo "SKIPPING the second-screen autostart entry: user '$RUN_USER' does not exist" >&2
+  echo "SKIPPING the kiosk autostart entry: user '$RUN_USER' does not exist" >&2
   echo "  Set RUN_USER in $CONF to the account that logs in on the robot's screen." >&2
   AUTOSTART=""
 else
@@ -206,20 +208,26 @@ else
 fi
 
 if [ -n "$AUTOSTART" ]; then
-echo "Installing the second-screen autostart entry for $RUN_USER"
+echo "Installing the kiosk autostart entry for $RUN_USER"
+# Renamed from trossen-second-screen.desktop, so remove that one explicitly.
+# Both are autostart entries: a rig provisioned before the rename would
+# otherwise keep it and launch a SECOND kiosk browser, and two fullscreen
+# windows fighting over one display is not a state anyone diagnoses quickly.
 if [ "$DRY" = "1" ]; then
-  echo "  would: write $AUTOSTART/trossen-second-screen.desktop -> $SCREEN_URL"
+  echo "  would: rm -f $AUTOSTART/trossen-second-screen.desktop (renamed)"
+  echo "  would: write $AUTOSTART/trossen-kiosk.desktop -> $SCREEN_URL"
 else
   install -d -m 0755 -o "$RUN_USER" -g "$RUN_USER" "$AUTOSTART"
-  cat > "$AUTOSTART/trossen-second-screen.desktop" <<DESKTOP
+  rm -f "$AUTOSTART/trossen-second-screen.desktop"
+  cat > "$AUTOSTART/trossen-kiosk.desktop" <<DESKTOP
 [Desktop Entry]
 Type=Application
-Name=Trossen second screen
-Comment=Robot status display, fullscreen, once the webapp answers
-Exec=$LIB/kiosk-browser.sh $SCREEN_URL trossen-second-screen
+Name=Trossen kiosk
+Comment=The webapp, fullscreen on this robot's screen, once it answers
+Exec=$LIB/kiosk-browser.sh $SCREEN_URL trossen-kiosk
 X-GNOME-Autostart-enabled=true
 DESKTOP
-  chown "$RUN_USER:$RUN_USER" "$AUTOSTART/trossen-second-screen.desktop"
+  chown "$RUN_USER:$RUN_USER" "$AUTOSTART/trossen-kiosk.desktop"
 fi
 
 # Separate entry from the browser, and ordered before it, because the two fail
@@ -266,7 +274,7 @@ if [ -f "$GDM_CONF" ] && grep -qE '^\s*AutomaticLoginEnable\s*=\s*[Tt]rue' "$GDM
   echo "* Autologin is already enabled in $GDM_CONF for $(grep -E '^\s*AutomaticLogin\s*=' "$GDM_CONF" | head -1 | cut -d= -f2- | tr -d ' ')."
 else
   echo "* ENABLE AUTOLOGIN for $RUN_USER, or the screen stays on a login prompt and"
-  echo "  the second-screen entry never runs:"
+  echo "  the kiosk entry never runs:"
   echo "    [daemon]"
   echo "    AutomaticLoginEnable=true"
   echo "    AutomaticLogin=$RUN_USER"

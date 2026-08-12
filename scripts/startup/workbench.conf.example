@@ -33,11 +33,22 @@ RUN_USER="trossen"
 WEBAPP_ARGS="--zed --no-realsense"
 
 # Where the webapp answers once it is up. The preflight does not use this; the
-# second-screen launcher waits on it.
+# kiosk launcher waits on it.
 WEBAPP_URL="http://localhost:8000"
 
 # --- Display -----------------------------------------------------------------
-SCREEN_URL="http://localhost:8000/second_screen"
+# What the robot's own screen opens at boot, fullscreen.
+#
+# A Workbench opens the OPERATOR UI, not `/second_screen`, and that is the one
+# place its display deliberately differs from a Rivet's. A Rivet is driven from
+# somewhere else and its panel is a read-only status display with nowhere to
+# navigate to. A Workbench is worked at directly: the screen in front of the
+# operator is the screen they start a session from, so a status panel there
+# leaves them with no way to press Record.
+#
+# `/` redirects to `/record`. Point this at `/second_screen` instead if a
+# particular Workbench really is only ever a status display.
+SCREEN_URL="http://localhost:8000/"
 
 # --- Touchscreen -------------------------------------------------------------
 # X spreads a touch device across the whole desktop, so on a multi-head or

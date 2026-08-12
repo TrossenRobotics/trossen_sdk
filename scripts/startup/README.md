@@ -5,7 +5,7 @@ Three machines, no keyboard, no login, no one typing a URL:
 | Machine | Script | What it does at boot |
 | --- | --- | --- |
 | Rivet (Jetson Orin) | `install-rivet.sh` | Network fixes and checks, mutes audio, starts the webapp, shows `/second_screen` on its own display |
-| Workbench (Jetson Orin) | `install-workbench.sh` | Wired link and arm checks, mutes audio, starts the webapp, shows `/second_screen` on its own display |
+| Workbench (Jetson Orin) | `install-workbench.sh` | Wired link and arm checks, mutes audio, starts the webapp, opens the operator UI (`/` → `/record`) on its own display |
 | Raspberry Pi | `install-pi-kiosk.sh` | `cage` + Chromium straight into the webapp home screen |
 | Third-screen box (Ubuntu/GNOME) | `install-desktop-kiosk.sh` | Autologin, then Chromium fullscreen on `/third_screen` |
 
