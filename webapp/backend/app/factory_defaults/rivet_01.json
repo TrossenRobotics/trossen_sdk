@@ -31,7 +31,34 @@
           "gripper_feedback_offset": 6.5,
           "gripper_feedback_mode": "effort",
           "actuated": false,
-          "gripper_force_feedback": true
+          "gripper_force_feedback": true,
+          "position_tolerance": [
+            0.7854,
+            0.7854,
+            0.7854,
+            0.7854,
+            0.7854,
+            0.7854,
+            0.005
+          ],
+          "velocity_tolerance": [
+            2.3562,
+            2.3562,
+            2.3562,
+            2.3562,
+            2.3562,
+            2.3562,
+            0.0625
+          ],
+          "effort_tolerance": [
+            1.75,
+            1.75,
+            1.75,
+            1.75,
+            1.75,
+            1.75,
+            300.0
+          ]
         },
         "glide_right": {
           "ip_address": "192.168.5.2",
@@ -60,7 +87,34 @@
           "gripper_feedback_offset": 6.5,
           "gripper_feedback_mode": "effort",
           "actuated": false,
-          "gripper_force_feedback": true
+          "gripper_force_feedback": true,
+          "position_tolerance": [
+            0.7854,
+            0.7854,
+            0.7854,
+            0.7854,
+            0.7854,
+            0.7854,
+            0.005
+          ],
+          "velocity_tolerance": [
+            2.3562,
+            2.3562,
+            2.3562,
+            2.3562,
+            2.3562,
+            2.3562,
+            0.0625
+          ],
+          "effort_tolerance": [
+            1.75,
+            1.75,
+            1.75,
+            1.75,
+            1.75,
+            1.75,
+            300.0
+          ]
         },
         "follower_left": {
           "ip_address": "192.168.1.4",
@@ -77,19 +131,46 @@
             -1.1,
             null,
             null,
-            null,
-            null,
-            null,
+            -1.5359,
+            -1.5359,
+            -3.1067,
             null
           ],
           "command_position_max": [
             0.8,
-            null,
-            null,
-            null,
-            null,
-            null,
+            3.1067,
+            2.3213,
+            1.5359,
+            1.5359,
+            3.1067,
             null
+          ],
+          "position_tolerance": [
+            0.2,
+            0.2,
+            0.2,
+            0.4,
+            0.4,
+            0.4,
+            0.005
+          ],
+          "velocity_tolerance": [
+            1.5708,
+            1.5708,
+            1.5708,
+            2.3562,
+            2.3562,
+            2.3562,
+            0.0625
+          ],
+          "effort_tolerance": [
+            6.75,
+            24.25,
+            6.75,
+            1.75,
+            1.75,
+            1.75,
+            300.0
           ]
         },
         "follower_right": {
@@ -107,19 +188,46 @@
             -0.8,
             null,
             null,
-            null,
-            null,
-            null,
+            -1.5359,
+            -1.5359,
+            -3.1067,
             null
           ],
           "command_position_max": [
             1.1,
-            null,
-            null,
-            null,
-            null,
-            null,
+            3.1067,
+            2.3213,
+            1.5359,
+            1.5359,
+            3.1067,
             null
+          ],
+          "position_tolerance": [
+            0.2,
+            0.2,
+            0.2,
+            0.4,
+            0.4,
+            0.4,
+            0.005
+          ],
+          "velocity_tolerance": [
+            1.5708,
+            1.5708,
+            1.5708,
+            2.3562,
+            2.3562,
+            2.3562,
+            0.0625
+          ],
+          "effort_tolerance": [
+            6.75,
+            24.25,
+            6.75,
+            1.75,
+            1.75,
+            1.75,
+            300.0
           ]
         }
       },
