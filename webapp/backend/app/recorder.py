@@ -923,6 +923,31 @@ def _handle_event(runner: _Runner, payload: dict[str, Any]) -> None:
             "data": {"event": event, "episode_index": episode_index},
         })
         return
+    if event == "session_faulted":
+        # Distinct from emergency_stopped on purpose. That one says the robot
+        # was stopped; this one says WHY it stopped itself and whether an
+        # operator can do anything about it. The UI needs the difference to
+        # decide between "stopped" and "stopped, here is the Recover button".
+        #
+        # Unrelated to `app/faults.py` despite the word: those are maintenance
+        # tickets an operator files about a device ("camera dead, needs a
+        # D435"), persisted and reported on. This is a runtime safety trip on
+        # one session and is not recorded as a defect — a wifi drop is not a
+        # broken robot.
+        reason = payload.get("reason", "unknown")
+        print(f"[recorder {runner.session_id[:8]}] SESSION FAULTED "
+              f"(reason={reason}): {payload.get('message')} "
+              f"detail={payload.get('detail')}", flush=True)
+        bus.publish(runner.session_id, {
+            "type": "session_faulted",
+            "data": {
+                "reason": reason,
+                "recoverable": bool(payload.get("recoverable", False)),
+                "message": payload.get("message"),
+                "detail": payload.get("detail"),
+            },
+        })
+        return
     if event == "emergency_stopped":
         # Logged as well as published, deliberately: a stop that safed the
         # hardware is the one event you want in the container log afterwards,

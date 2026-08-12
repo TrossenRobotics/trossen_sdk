@@ -71,6 +71,16 @@ struct TeleoperationConfig : public BaseConfig {
   /// @brief Teleoperation control loop rate in Hz
   float rate_hz{1000.0f};
 
+  /// @brief Declare the leader link dead after this long without a successful
+  /// read, in milliseconds. 0 (the default) disables the check.
+  ///
+  /// Only worth setting where the leader is reached over a network that can
+  /// fail silently — the Rivet's Glide handles arrive via proxy-ARP on the
+  /// cockpit Pi, which blackholes frames when it dies instead of refusing
+  /// them, so the read blocks rather than throwing. Wired rigs get nothing
+  /// from this that the exception path does not already give them.
+  float leader_timeout_ms{0.0f};
+
   /// @brief Leader->follower pairings
   std::vector<TeleoperationPair> pairs;
 
@@ -80,6 +90,9 @@ struct TeleoperationConfig : public BaseConfig {
     TeleoperationConfig c;
     if (j.contains("enabled")) j.at("enabled").get_to(c.enabled);
     if (j.contains("rate_hz")) j.at("rate_hz").get_to(c.rate_hz);
+    if (j.contains("leader_timeout_ms")) {
+      j.at("leader_timeout_ms").get_to(c.leader_timeout_ms);
+    }
     if (j.contains("pairs")) {
       for (const auto& pair_j : j.at("pairs")) {
         c.pairs.push_back(TeleoperationPair::from_json(pair_j));

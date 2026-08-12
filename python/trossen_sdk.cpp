@@ -469,6 +469,22 @@ PYBIND11_MODULE(trossen_sdk, m) {
              std::shared_ptr<glide::GlideSessionControlComponent>>(
       m, "GlideSessionControlComponent");
 
+  // Same reason again: without the registration HardwareRegistry.create()
+  // returns a plain HardwareComponent and the two recovery calls below are
+  // unreachable from the recorder.
+  py::class_<arm::TrossenArmComponent, HardwareComponent,
+             std::shared_ptr<arm::TrossenArmComponent>>(
+      m, "TrossenArmComponent")
+    .def("error_information", &arm::TrossenArmComponent::error_information,
+         py::call_guard<py::gil_scoped_release>(),
+         "The Arm Controller's own error text, '' when it reports none. "
+         "RAISES if the arm is unreachable -- and that is the useful answer: "
+         "a fault you cannot interrogate is a link fault, not an arm fault.")
+    .def("clear_error", &arm::TrossenArmComponent::clear_error,
+         py::call_guard<py::gil_scoped_release>(),
+         "Clear a latched controller error and reconnect. Does NOT move the "
+         "arm or restore teleop modes. Returns True if the error was cleared.");
+
 #ifdef TROSSEN_ENABLE_RIVET
   // Registered for the same reason as the Glide component above: without it
   // HardwareRegistry.create() hands Python a plain HardwareComponent and the
@@ -876,7 +892,20 @@ PYBIND11_MODULE(trossen_sdk, m) {
   py::class_<TeleopController::Config>(m, "TeleopControllerConfig")
     .def(py::init<>())
     .def_readwrite("space", &TeleopController::Config::space)
-    .def_readwrite("control_rate_hz", &TeleopController::Config::control_rate_hz);
+    .def_readwrite("control_rate_hz", &TeleopController::Config::control_rate_hz)
+    .def_readwrite("leader_timeout_ms", &TeleopController::Config::leader_timeout_ms,
+                   "Declare the leader link dead after this long without a "
+                   "successful read. 0 disables the watchdog.");
+
+  py::enum_<TeleopController::FaultCause>(m, "TeleopFaultCause")
+    .value("kLeaderStalled", TeleopController::FaultCause::kLeaderStalled)
+    .value("kLeaderError", TeleopController::FaultCause::kLeaderError)
+    .value("kFollowerError", TeleopController::FaultCause::kFollowerError)
+    .value("kUnknown", TeleopController::FaultCause::kUnknown);
+
+  py::class_<TeleopController::Fault>(m, "TeleopFault")
+    .def_readonly("cause", &TeleopController::Fault::cause)
+    .def_readonly("detail", &TeleopController::Fault::detail);
 
   py::class_<TeleopController, std::shared_ptr<TeleopController>>(
       m, "TeleopController")
@@ -904,6 +933,16 @@ PYBIND11_MODULE(trossen_sdk, m) {
          "Monotonic count of summons carried through to completion. Sample it, "
          "call request_summon(), then wait for it to change; it is bumped only "
          "after the blocking move returns.")
+    // Fires on the mirror or watchdog thread, not the caller's; pybind takes
+    // the GIL to invoke it. Same rule as SessionControlCapable's callbacks and
+    // for the same reason: do NOT call stop_teleop()/pause_teleop() from in
+    // here, because both join the thread the callback is running on. Queue the
+    // fault and let the main loop act on it.
+    .def("set_fault_callback", &TeleopController::set_fault_callback,
+         py::arg("on_fault"),
+         "Install the callback fired when the mirror stops on its own — a "
+         "stalled leader link, or a read/write that threw. Fires at most once "
+         "per teleop() run. Call before teleop().")
     .def("is_running", &TeleopController::is_running)
     .def("leader", &TeleopController::leader)
     .def("follower", &TeleopController::follower)

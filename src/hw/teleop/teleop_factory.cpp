@@ -75,6 +75,7 @@ create_controllers_from_global_config() {
       TeleopController::Config tc{};
       tc.space = parse_space(pair.space);
       tc.control_rate_hz = cfg->rate_hz;
+      tc.leader_timeout_ms = cfg->leader_timeout_ms;
       // Compute the log label BEFORE moving `follower` into the controller —
       // otherwise the check below reads a moved-from (null) shared_ptr and
       // always prints "(leader-only)" even when a follower is attached.

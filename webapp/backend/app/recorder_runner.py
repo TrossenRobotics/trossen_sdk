@@ -34,6 +34,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import queue
 import signal
 import sys
 import threading
@@ -55,6 +56,25 @@ _READY_PREFIX = "__READY__:"
 # full trajectory) while still bounded: the base is already halted by the time
 # we get here, so a wedged arm must not hold the whole stop open.
 _ESTOP_HOME_TIMEOUT_S = 15.0
+
+# Longest the software e-stop waits for one teleop mirror to stop. Bounded for
+# the same reason the homing join is, but a different failure: a mirror parked
+# in a leader read that will never return (the link blackholed) cannot be
+# joined at all, and stop_teleop() joins that thread. Unbounded, a dropped
+# cockpit would hang the very stop meant to handle it.
+_ESTOP_MIRROR_TIMEOUT_S = 5.0
+
+# Faults raised by the teleop mirrors, drained by _fault_watcher. A queue
+# rather than a direct call because the callback runs ON the mirror or watchdog
+# thread, and the response (stop_teleop) joins that thread — calling it inline
+# is a guaranteed self-deadlock.
+_fault_queue: "queue.Queue[dict[str, Any]]" = queue.Queue()
+
+# Set by _emergency_stop() so the base e-stop WE latched is not then read back
+# off telemetry as a bumper strike. is_e_stopped() reports the bit, not who set
+# it, so without this every software stop would look like a physical one and
+# re-enter the fault path.
+_estop_self_latched = threading.Event()
 
 # How often base telemetry is sampled for the secondary screen. 2 Hz: it is a
 # status board read from across a room, so battery and pose do not need to be
@@ -1067,6 +1087,7 @@ def _emergency_stop() -> dict[str, Any]:
     result: dict[str, Any] = {"base": None, "teleop": None, "arms": {}}
 
     # 1. Base first.
+    _estop_self_latched.set()
     for base_id, base in _components_of_type("trossen_base").items():
         try:
             result["base"] = {base_id: bool(base.emergency_stop())}
@@ -1074,14 +1095,41 @@ def _emergency_stop() -> dict[str, Any]:
             result["base"] = {base_id: f"failed: {exc}"}
 
     # 2. Silence the mirror before touching the arms.
+    #
+    # Each stop runs on its own thread with a bounded join. stop_teleop() joins
+    # the mirror thread, and when the fault IS that the mirror is stuck in a
+    # leader read that never returns, that join never completes. Giving up on
+    # it is safe here for the same reason as the homing join below: the base is
+    # already halted, so a mirror we cannot stop is a reporting problem rather
+    # than a moving robot. It stays wedged either way; what changes is that the
+    # rest of the stop still runs.
     stopped = 0
-    for controller in _controllers or []:
+    mirror_errors: list[str] = []
+    mirror_threads: list[tuple[threading.Thread, Any]] = []
+
+    def stop_one(controller: Any) -> None:
         try:
             controller.stop_teleop()
-            stopped += 1
-        except Exception as exc:
-            result["teleop"] = f"failed: {exc}"
-    if result["teleop"] is None:
+        except Exception as exc:  # noqa: BLE001 - reported, never raised here
+            mirror_errors.append(str(exc))
+
+    for controller in _controllers or []:
+        t = threading.Thread(target=stop_one, args=(controller,), daemon=True,
+                             name="estop-stop-mirror")
+        t.start()
+        mirror_threads.append((t, controller))
+    for t, _ in mirror_threads:
+        t.join(timeout=_ESTOP_MIRROR_TIMEOUT_S)
+    wedged = sum(1 for t, _ in mirror_threads if t.is_alive())
+    stopped = len(mirror_threads) - wedged
+
+    if mirror_errors:
+        result["teleop"] = f"failed: {'; '.join(mirror_errors)}"
+    elif wedged:
+        result["teleop"] = (
+            f"stopped {stopped} controller(s); {wedged} did not stop within "
+            f"{_ESTOP_MIRROR_TIMEOUT_S}s (mirror blocked in a hardware call)")
+    else:
         result["teleop"] = f"stopped {stopped} controller(s)"
 
     # 3. Home the arms. Mirrors _park_arms_at_zero in hw_test_runner.
@@ -1114,6 +1162,133 @@ def _emergency_stop() -> dict[str, Any]:
         result["arms"][arm_id] = errors.get(arm_id, "homed")
 
     return result
+
+
+def _install_fault_callbacks(controllers: list) -> int:
+    """Route every mirror's fault callback into `_fault_queue`.
+
+    Must run BEFORE the mirrors start, and the callback body must stay this
+    trivial: it executes on the mirror or watchdog thread, and anything that
+    joins that thread (stop_teleop) deadlocks if called from here. Queue it and
+    let `_fault_watcher` do the work.
+
+    Tolerates an SDK without the hook so a stale extension degrades to the old
+    behaviour — a mirror that dies quietly — rather than failing to record at
+    all.
+    """
+    installed = 0
+    for index, ctrl in enumerate(controllers or []):
+        setter = getattr(ctrl, "set_fault_callback", None)
+        if setter is None:
+            continue
+
+        def on_fault(fault: Any, pair: int = index) -> None:
+            _fault_queue.put({
+                "pair": pair,
+                "cause": getattr(fault.cause, "name", str(fault.cause)),
+                "stalled": fault.cause == ts.TeleopFaultCause.kLeaderStalled,
+                "detail": fault.detail,
+            })
+
+        setter(on_fault)
+        installed += 1
+
+    if installed == 0 and controllers:
+        print("[recorder-runner] this SDK build has no teleop fault callback — "
+              "a lost leader will stop the mirror silently, as it did before",
+              flush=True)
+    return installed
+
+
+def _probe_arm_errors() -> tuple[dict[str, str], list[str]]:
+    """Ask every arm what it thinks is wrong.
+
+    Returns (errors by arm id, arms that could not be asked). The split is the
+    whole point: an arm that ANSWERS with an error text has faulted and idled
+    its joints, while an arm that cannot be asked is on the other side of a
+    dead link and its actual state is unknown. Those need different recovery.
+    """
+    reported: dict[str, str] = {}
+    unreachable: list[str] = []
+    for arm_id, comp in _components_of_type("trossen_arm").items():
+        probe = getattr(comp, "error_information", None)
+        if probe is None:
+            continue
+        try:
+            info = probe()
+        except Exception as exc:  # noqa: BLE001 - the failure IS the signal
+            unreachable.append(f"{arm_id}: {exc}")
+            continue
+        if info:
+            reported[arm_id] = info
+    return reported, unreachable
+
+
+def _fault_watcher(
+    stop: threading.Event,
+    stop_event: threading.Event,
+    abort_event: threading.Event,
+) -> None:
+    """Turn a mirror fault into a stopped session with a reason attached.
+
+    Runs on its own thread so the response never executes on the thread that
+    faulted. One fault ends the session — there is no partial-recovery mode,
+    because a rig that has lost one arm is not a rig anyone should keep
+    recording with.
+    """
+    while not stop.is_set():
+        try:
+            fault = _fault_queue.get(timeout=_TELEMETRY_PERIOD_S)
+        except queue.Empty:
+            continue
+
+        # A stall is already conclusive: nothing answered inside the deadline,
+        # so there is nothing to interrogate. Only a thrown fault is ambiguous
+        # enough to be worth asking the arms about.
+        if fault["stalled"]:
+            reason = "link_lost"
+            message = ("Lost contact with the leader arms. Check the cockpit "
+                       "Pi and its bridge, then use Recover.")
+            probe: dict[str, Any] = {}
+        else:
+            reported, unreachable = _probe_arm_errors()
+            probe = {"arm_errors": reported, "unreachable": unreachable}
+            if reported:
+                reason = "arm_error"
+                message = ("An arm controller faulted and idled its joints: "
+                           + "; ".join(f"{k}: {v}" for k, v in reported.items())
+                           + ". Use Recover to clear it.")
+            elif unreachable:
+                reason = "link_lost"
+                message = ("An arm stopped answering. Check the cockpit link, "
+                           "then use Recover.")
+            else:
+                # Threw, but every arm now says it is fine. Genuinely unclear —
+                # do not guess a cause the operator would then chase.
+                reason = "teleop_error"
+                message = ("Teleoperation stopped unexpectedly: "
+                           f"{fault['detail']}. Use Recover to restart it.")
+
+        print(f"[recorder-runner] TELEOP FAULT (pair={fault['pair']} "
+              f"cause={fault['cause']} reason={reason}): {fault['detail']}",
+              flush=True)
+
+        try:
+            outcome = _emergency_stop()
+        except Exception as exc:
+            outcome = {"error": str(exc)}
+
+        _emit({
+            "type": "event",
+            "event": "session_faulted",
+            "reason": reason,
+            "recoverable": True,
+            "message": message,
+            "detail": {"fault": fault, "probe": probe, "stop": outcome},
+        })
+        abort_event.set()
+        stop_event.set()
+        return
 
 
 def _base_telemetry_sampler(
@@ -1163,6 +1338,38 @@ def _base_telemetry_sampler(
                 "id": base_id,
                 "data": data,
             })
+
+            # The bumper. A physical strike latches the base's e-stop, and
+            # from here that is indistinguishable from the software one — the
+            # bit says stopped, not who stopped it — so the flag we set in
+            # _emergency_stop() is what keeps our own stop from being read back
+            # as a strike and looping.
+            if data.get("e_stopped") and not _estop_self_latched.is_set():
+                if not tripped:
+                    tripped = True
+                    print(f"[recorder-runner] base '{base_id}' reports "
+                          f"E-STOPPED and we did not latch it — treating as a "
+                          f"bumper strike, stopping the session", flush=True)
+                    try:
+                        outcome = _emergency_stop()
+                    except Exception as exc:
+                        outcome = {"error": str(exc)}
+                    _emit({
+                        "type": "event",
+                        "event": "session_faulted",
+                        "reason": "base_estop",
+                        "recoverable": True,
+                        "detail": outcome,
+                        "message": (
+                            "The base e-stop is engaged. Clear the obstruction, "
+                            "then use Recover to re-enable the base."),
+                    })
+                    # Same ending as every other trip: the in-flight episode is
+                    # discarded, because a robot that hit something mid-episode
+                    # did not record the task anyone asked for.
+                    abort_event.set()
+                    stop_event.set()
+                continue
 
             if tripped:
                 continue
@@ -1566,6 +1773,17 @@ def _run_episode_loop(
     )
     telemetry.start()
 
+    # Shares the same stop for the same reason. Separate thread from the
+    # telemetry sampler because it must be free to block on the fault queue
+    # without delaying the status feed the second screen reads.
+    faults = threading.Thread(
+        target=_fault_watcher,
+        args=(sampler_stop, stop_event, abort_event),
+        name="recorder-faults",
+        daemon=True,
+    )
+    faults.start()
+
     try:
         first_iteration_pending = True
         # Set when a summon button press is waiting to be serviced. Held as a
@@ -1914,6 +2132,10 @@ def main() -> int:
             global _controllers, _session_controls
             mgr, _controllers, _session_controls, mcap_root = (
                 _build_session_manager(config))
+            # Before the first start_episode(): on_pre_episode starts the
+            # mirrors, and a callback installed after teleop() has begun would
+            # miss a fault raised during the very first tick.
+            _install_fault_callbacks(_controllers)
             # Clear ghost/header-only episode files from a prior aborted run
             # before start_episode() scans the dataset, so they don't inflate
             # the SDK's filename-based episode count and wedge resume at

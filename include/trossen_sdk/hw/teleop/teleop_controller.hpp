@@ -18,7 +18,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <memory>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -34,7 +36,43 @@ public:
 
     /// Control loop rate in Hz (how fast leader state is mirrored to follower).
     float control_rate_hz{1000.0f};
+
+    /// How long the mirror may go without a successful leader read before the
+    /// link is declared dead, in milliseconds. 0 disables the watchdog.
+    ///
+    /// Not merely belt-and-braces over the exception path: a leader reached
+    /// through a proxy-ARP bridge (the Rivet's Glide handles arrive over
+    /// `parprouted` on the cockpit Pi) fails by BLACKHOLING frames, not by
+    /// refusing them. The read blocks instead of throwing, so without a
+    /// deadline the mirror waits forever and the session records a follower
+    /// that stopped tracking minutes ago.
+    ///
+    /// Off by default because it is only meaningful where the leader is
+    /// remote: on a wired rig a stall means the arm itself is wedged, which
+    /// the exception path already reports. Opt in per rig.
+    float leader_timeout_ms{0.0f};
   };
+
+  /// Why the mirror stopped without anyone asking it to.
+  ///
+  /// The distinction that matters downstream is *stalled* versus *threw*: a
+  /// stall is a dead link and the arm may be perfectly healthy, while a throw
+  /// usually means the controller latched an error and idled every joint.
+  /// They need different recovery, so they are not collapsed into one code.
+  enum class FaultCause {
+    kLeaderStalled,   ///< No successful leader read inside `leader_timeout_ms`.
+    kLeaderError,     ///< Reading the leader threw.
+    kFollowerError,   ///< Writing the follower threw.
+    kUnknown          ///< Non-`std::exception` throw; nothing to report but the fact.
+  };
+
+  struct Fault {
+    FaultCause cause{FaultCause::kUnknown};
+    /// Exception text, or for a stall how long the mirror went unserviced.
+    std::string detail;
+  };
+
+  using FaultCallback = std::function<void(const Fault&)>;
 
   /**
    * @brief Construct a teleop controller.
@@ -154,6 +192,22 @@ public:
     return summons_completed_.load(std::memory_order_acquire);
   }
 
+  /**
+   * @brief Install the callback fired when the mirror stops on its own.
+   *
+   * Call before `teleop()`; the callback is read without locking from both
+   * the mirror thread and the watchdog thread. Fires AT MOST ONCE per run and
+   * is re-armed by the next `teleop()`, so a fault that takes down leader and
+   * follower together reports one cause rather than a burst.
+   *
+   * @warning The callback runs on whichever thread detected the fault, never
+   * the caller's. It must not call `stop_teleop()` or `pause_teleop()` — both
+   * join the very thread the callback is running on, which deadlocks. Hand the
+   * intent to the host's main loop instead, exactly as SessionControlCapable
+   * requires of its disconnect callback.
+   */
+  void set_fault_callback(FaultCallback cb) { fault_cb_ = std::move(cb); }
+
   /// @brief Check if the control loop is running.
   bool is_running() const { return running_.load(); }
 
@@ -169,6 +223,18 @@ public:
 private:
   void resolve_space_views();
   void control_loop();
+
+  /// Watchdog thread body. Runs only when `leader_timeout_ms > 0`.
+  void watchdog_loop();
+
+  /// Fire the fault callback, at most once between `teleop()` calls, and stop
+  /// the mirror. Safe to call from either thread.
+  void report_fault(FaultCause cause, std::string detail);
+
+  /// Join the watchdog if it is running. Separate from the mirror join because
+  /// every path that stops the mirror must also stop the watchdog, or it goes
+  /// on declaring a stall against a loop that was deliberately paused.
+  void join_watchdog();
 
   std::shared_ptr<TeleopCapable> leader_;
   std::shared_ptr<TeleopCapable> follower_;
@@ -191,6 +257,32 @@ private:
   /// summons_completed(). Separate from the flag above because the flag is
   /// consumed before the move begins.
   std::atomic<std::uint64_t> summons_completed_{0};
+
+  FaultCallback fault_cb_;
+
+  /// Watchdog thread, spawned by teleop() only when the timeout is configured.
+  std::thread watchdog_thread_;
+
+  /// steady_clock nanoseconds at the last successful leader read. Written by
+  /// the mirror thread, read by the watchdog — the one piece of state that
+  /// tells a blocked read apart from a slow one.
+  std::atomic<std::int64_t> last_read_ns_{0};
+
+  /// Claimed by whichever thread reports first, so leader and follower failing
+  /// together produce one fault. Reset by teleop().
+  std::atomic<bool> fault_pending_{true};
+
+  /// Cleared to stop the watchdog independently of `running_`: the mirror sets
+  /// running_ = false as it unwinds, and the watchdog must not read that as a
+  /// reason to keep waiting for a tick that will never come.
+  std::atomic<bool> watchdog_active_{false};
+
+  /// Non-zero while the mirror is inside a deliberately blocking call, so the
+  /// watchdog holds off. A summon is a timed move measured in SECONDS — far
+  /// longer than any sane leader deadline — and it does not read the leader
+  /// while it runs. Without this the first summon of every episode would trip
+  /// the watchdog and kill the session it was meant to protect.
+  std::atomic<int> watchdog_paused_{0};
 };
 
 }  // namespace trossen::hw::teleop

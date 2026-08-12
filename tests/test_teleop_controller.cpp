@@ -5,8 +5,12 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <functional>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
+#include <string>
 #include <thread>
 #include <vector>
 
@@ -377,4 +381,184 @@ TEST(TeleopControllerSummonTest, CompletedCountIsMonotonicAcrossSummons) {
     seen = now;
   }
   ctrl.stop_teleop();
+}
+
+// ── Fault reporting and the stall watchdog ──────────────────────────────
+//
+// Before these existed, a mirror that lost its leader printed one line to
+// stderr and stopped, while the session it belonged to carried on recording a
+// follower nobody was driving. The tests below pin the two failure shapes that
+// have to reach the host: a read that THROWS, and a read that never returns.
+
+namespace {
+
+/// A leader whose read() blocks until released, the way a link that blackholes
+/// frames behaves — no exception, no return, just silence. This is the case the
+/// exception path cannot catch and the watchdog exists for.
+class StallingLeader : public TeleopCapable {
+public:
+  struct IO : JointSpaceTeleop {
+    std::atomic<bool> released{false};
+    std::vector<float> read() override {
+      while (!released.load()) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(2));
+      }
+      return {0.0f, 0.0f, 0.0f};
+    }
+    void write(const std::vector<float>&) override {}
+  } io;
+
+  TeleopTypeIO* as_space_io(Space) override { return &io; }
+  /// Let the blocked read finish. Tests MUST call this before the controller is
+  /// destroyed: the destructor joins the mirror thread, and a thread parked in
+  /// read() never gets there. On real hardware the driver's own timeout plays
+  /// this role.
+  void release() { io.released.store(true); }
+};
+
+/// Collects faults off whichever thread reported them.
+struct FaultSink {
+  std::mutex mu;
+  std::vector<TeleopController::Fault> faults;
+
+  void operator()(const TeleopController::Fault& f) {
+    std::lock_guard<std::mutex> lock(mu);
+    faults.push_back(f);
+  }
+  std::size_t count() {
+    std::lock_guard<std::mutex> lock(mu);
+    return faults.size();
+  }
+  bool wait_for(std::size_t n,
+                std::chrono::milliseconds timeout = std::chrono::seconds(3)) {
+    const auto deadline = std::chrono::steady_clock::now() + timeout;
+    while (count() < n) {
+      if (std::chrono::steady_clock::now() >= deadline) return false;
+      std::this_thread::sleep_for(std::chrono::milliseconds(2));
+    }
+    return true;
+  }
+};
+
+}  // namespace
+
+TEST(TeleopControllerFaultTest, LeaderExceptionReportsLeaderError) {
+  auto leader = std::make_shared<ThrowingLeader>();
+  TeleopController ctrl(leader, nullptr, {TeleopCapable::Space::Joint, 500.0f});
+  FaultSink sink;
+  ctrl.set_fault_callback(std::ref(sink));
+  ctrl.teleop();
+
+  ASSERT_TRUE(sink.wait_for(1));
+  EXPECT_EQ(sink.faults[0].cause, TeleopController::FaultCause::kLeaderError);
+  // The driver's own message has to survive to the host: "something threw" is
+  // not enough to tell a joint-limit fault from a refused connection.
+  EXPECT_NE(sink.faults[0].detail.find("test exception from read()"),
+            std::string::npos);
+  EXPECT_FALSE(ctrl.is_running());
+}
+
+TEST(TeleopControllerFaultTest, StalledLeaderFaultsEvenThoughNothingThrows) {
+  auto leader = std::make_shared<StallingLeader>();
+  TeleopController::Config cfg{TeleopCapable::Space::Joint, 500.0f};
+  cfg.leader_timeout_ms = 100.0f;
+  TeleopController ctrl(leader, nullptr, cfg);
+  FaultSink sink;
+  ctrl.set_fault_callback(std::ref(sink));
+  ctrl.teleop();
+
+  ASSERT_TRUE(sink.wait_for(1));
+  EXPECT_EQ(sink.faults[0].cause, TeleopController::FaultCause::kLeaderStalled);
+  EXPECT_FALSE(ctrl.is_running());
+
+  leader->release();  // let the parked read return so the join below completes
+}
+
+TEST(TeleopControllerFaultTest, WatchdogStaysQuietOnAHealthyMirror) {
+  // The failure mode this guards against is worse than the one it detects: a
+  // watchdog that fires on a working rig ends good episodes at random.
+  auto leader = std::make_shared<StubLeader>();
+  TeleopController::Config cfg{TeleopCapable::Space::Joint, 500.0f};
+  cfg.leader_timeout_ms = 50.0f;
+  TeleopController ctrl(leader, nullptr, cfg);
+  FaultSink sink;
+  ctrl.set_fault_callback(std::ref(sink));
+  ctrl.teleop();
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(400));  // 8x the deadline
+  EXPECT_EQ(sink.count(), 0u);
+  EXPECT_TRUE(ctrl.is_running());
+  ctrl.stop_teleop();
+}
+
+TEST(TeleopControllerFaultTest, DeliberateStopIsNotAFault) {
+  // stop_teleop() leaves the mirror not-running, which is exactly what a stall
+  // looks like from the watchdog's side. Telling them apart is the difference
+  // between "the operator ended the session" and "the robot lost its cockpit".
+  auto leader = std::make_shared<StubLeader>();
+  TeleopController::Config cfg{TeleopCapable::Space::Joint, 500.0f};
+  cfg.leader_timeout_ms = 50.0f;
+  TeleopController ctrl(leader, nullptr, cfg);
+  FaultSink sink;
+  ctrl.set_fault_callback(std::ref(sink));
+  ctrl.teleop();
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  ctrl.stop_teleop();
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_EQ(sink.count(), 0u);
+}
+
+TEST(TeleopControllerFaultTest, PauseBetweenEpisodesIsNotAFault) {
+  // pause_teleop() is used to re-stage arms between episodes and can hold the
+  // mirror stopped for longer than any leader deadline.
+  auto leader = std::make_shared<StubLeader>();
+  TeleopController::Config cfg{TeleopCapable::Space::Joint, 500.0f};
+  cfg.leader_timeout_ms = 50.0f;
+  TeleopController ctrl(leader, nullptr, cfg);
+  FaultSink sink;
+  ctrl.set_fault_callback(std::ref(sink));
+  ctrl.teleop();
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  ctrl.pause_teleop();
+
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  EXPECT_EQ(sink.count(), 0u);
+
+  // ...and re-arming works: the next run reports its own faults.
+  ctrl.teleop();
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  EXPECT_TRUE(ctrl.is_running());
+  ctrl.stop_teleop();
+}
+
+TEST(TeleopControllerFaultTest, OneFaultPerRunThenReArmed) {
+  auto leader = std::make_shared<ThrowingLeader>();
+  TeleopController ctrl(leader, nullptr, {TeleopCapable::Space::Joint, 500.0f});
+  FaultSink sink;
+  ctrl.set_fault_callback(std::ref(sink));
+
+  ctrl.teleop();
+  ASSERT_TRUE(sink.wait_for(1));
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  EXPECT_EQ(sink.count(), 1u);  // not one per failed tick
+
+  ctrl.teleop();  // a new run re-arms reporting
+  EXPECT_TRUE(sink.wait_for(2));
+}
+
+TEST(TeleopControllerFaultTest, NoCallbackInstalledIsSafe) {
+  // Leader-only rigs, examples and tests never install one; reporting a fault
+  // into a null std::function must not take the process down with it.
+  auto leader = std::make_shared<ThrowingLeader>();
+  TeleopController ctrl(leader, nullptr, {TeleopCapable::Space::Joint, 500.0f});
+  ctrl.teleop();
+  EXPECT_TRUE(wait_until_stopped(ctrl));
+}
+
+TEST(TeleopControllerFaultTest, NegativeLeaderTimeoutRejected) {
+  auto leader = std::make_shared<StubLeader>();
+  TeleopController::Config cfg{TeleopCapable::Space::Joint, 500.0f};
+  cfg.leader_timeout_ms = -1.0f;
+  EXPECT_THROW(TeleopController(leader, nullptr, cfg), std::invalid_argument);
 }

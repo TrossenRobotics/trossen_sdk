@@ -5,14 +5,53 @@
 
 #include "trossen_sdk/hw/teleop/teleop_controller.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace trossen::hw::teleop {
+
+namespace {
+
+/// steady_clock now, in nanoseconds. Steady rather than system time on
+/// purpose: the watchdog measures an interval, and a clock step (NTP settling
+/// after boot is routine on these rigs) must not read as a stalled link.
+std::int64_t now_ns() {
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+    std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+/// RAII hold on the stall watchdog, for the mirror's deliberately blocking
+/// sections.
+///
+/// Refreshes the tick clock on the way OUT as well, and before releasing the
+/// hold: otherwise the loop resumes and is immediately judged against the
+/// seconds it spent in a move the host asked for, which would fault every
+/// summon rather than none.
+class WatchdogPause {
+public:
+  WatchdogPause(std::atomic<int>& paused, std::atomic<std::int64_t>& last_read)
+    : paused_(paused), last_read_(last_read) {
+    paused_.fetch_add(1, std::memory_order_relaxed);
+  }
+  ~WatchdogPause() {
+    last_read_.store(now_ns(), std::memory_order_relaxed);
+    paused_.fetch_sub(1, std::memory_order_relaxed);
+  }
+  WatchdogPause(const WatchdogPause&) = delete;
+  WatchdogPause& operator=(const WatchdogPause&) = delete;
+
+private:
+  std::atomic<int>& paused_;
+  std::atomic<std::int64_t>& last_read_;
+};
+
+}  // namespace
 
 TeleopController::TeleopController(
     std::shared_ptr<TeleopCapable> leader,
@@ -28,6 +67,11 @@ TeleopController::TeleopController(
   if (cfg_.control_rate_hz <= 0.0f || !std::isfinite(cfg_.control_rate_hz)) {
     throw std::invalid_argument(
       "TeleopController: control_rate_hz must be positive and finite");
+  }
+  if (cfg_.leader_timeout_ms < 0.0f || !std::isfinite(cfg_.leader_timeout_ms)) {
+    throw std::invalid_argument(
+      "TeleopController: leader_timeout_ms must be non-negative and finite "
+      "(0 disables the watchdog)");
   }
 
   // Resolve the requested space on both sides. Throws if the hardware does
@@ -45,6 +89,9 @@ TeleopController::~TeleopController() {
   // and always join if the thread is still joinable. Skipping join on a
   // joinable thread causes std::terminate at destruction.
   running_.store(false);
+  // Before the mirror: the watchdog can still fire a fault, and a callback
+  // reaching into a half-destroyed controller is worse than a late one.
+  join_watchdog();
   if (thread_.joinable()) {
     thread_.join();
   }
@@ -129,7 +176,21 @@ void TeleopController::teleop() {
   if (thread_.joinable()) {
     thread_.join();
   }
+  // Reap a watchdog left over from a previous run before re-arming.
+  join_watchdog();
+
+  // Re-arm fault reporting for this run, and seed the tick clock so the
+  // watchdog measures from the start of teleop rather than from an epoch that
+  // would look like an instant stall.
+  fault_pending_.store(true);
+  last_read_ns_.store(now_ns());
+
   thread_ = std::thread([this]() { control_loop(); });
+
+  if (cfg_.leader_timeout_ms > 0.0f) {
+    watchdog_active_.store(true);
+    watchdog_thread_ = std::thread([this]() { watchdog_loop(); });
+  }
 }
 
 void TeleopController::reset_teleop() {
@@ -144,6 +205,9 @@ void TeleopController::pause_teleop() {
   // so the next prepare_teleop() re-arms teleop modes and teleop() can restart
   // the loop. Unlike stop_teleop(), end_teleop() is not called.
   running_.store(false);
+  // A deliberate pause is not a stall. Stopping the watchdog first means a
+  // between-episode re-stage cannot be reported as a dead link.
+  join_watchdog();
   if (thread_.joinable()) {
     thread_.join();
   }
@@ -151,6 +215,7 @@ void TeleopController::pause_teleop() {
 
 void TeleopController::stop_teleop() {
   running_.store(false);
+  join_watchdog();
   if (thread_.joinable()) {
     thread_.join();
   }
@@ -183,9 +248,16 @@ void TeleopController::control_loop() {
   const auto period = std::chrono::nanoseconds(
     static_cast<int64_t>(1e9 / cfg_.control_rate_hz));
 
+  // Which side we are talking to right now, so the catch below can name the
+  // culprit instead of reporting "something threw". Cheap to maintain — a
+  // plain local, written a few times per tick on the thread that reads it.
+  FaultCause phase = FaultCause::kUnknown;
+
   // An uncaught exception would invoke std::terminate (thread functions are
-  // implicitly noexcept at the boundary). Catch and log so that
-  // prepare_teleop() can observe the mirror as stopped.
+  // implicitly noexcept at the boundary). Catch and report so that
+  // prepare_teleop() can observe the mirror as stopped AND the host learns
+  // why — before this had a fault callback, a dead leader produced one stderr
+  // line and a session that carried on recording a follower nobody was driving.
   try {
     while (running_) {
       auto deadline = std::chrono::steady_clock::now() + period;
@@ -196,10 +268,19 @@ void TeleopController::control_loop() {
       // and the next tick simply starts fresh.
       if (summon_requested_.exchange(false)) {
         if (follower_io_) {
+          phase = FaultCause::kLeaderError;
           const auto pose = leader_io_->read();
+          last_read_ns_.store(now_ns(), std::memory_order_relaxed);
           if (!pose.empty()) {
             std::cout << "  [teleop] Summoning follower to leader pose...\n";
-            follower_io_->summon(pose);
+            phase = FaultCause::kFollowerError;
+            {
+              // Hold the watchdog off for the duration: this move is seconds
+              // long and reads nothing, so it is indistinguishable from a dead
+              // link by age alone.
+              WatchdogPause pause(watchdog_paused_, last_read_ns_);
+              follower_io_->summon(pose);
+            }
             std::cout << "  [teleop] Summon complete\n";
             // Published only here, after the move returns, so a caller waiting
             // on this count never sees "arrived" while the arm is still moving.
@@ -212,8 +293,15 @@ void TeleopController::control_loop() {
         continue;
       }
 
+      phase = FaultCause::kLeaderError;
       auto cmd = leader_io_->read();
+      // The heartbeat the watchdog measures against. Stored after the read
+      // RETURNS, so a call that blocks forever never refreshes it — which is
+      // the whole point on a link that blackholes rather than resets.
+      last_read_ns_.store(now_ns(), std::memory_order_relaxed);
+
       if (follower_io_) {
+        phase = FaultCause::kFollowerError;
         follower_io_->write(cmd);
       }
 
@@ -235,11 +323,78 @@ void TeleopController::control_loop() {
       std::this_thread::sleep_until(deadline);
     }
   } catch (const std::exception& e) {
-    std::cerr << "  [teleop] mirror loop terminated: " << e.what() << '\n';
-    running_.store(false);
+    report_fault(phase, e.what());
   } catch (...) {
-    std::cerr << "  [teleop] mirror loop terminated with unknown error\n";
-    running_.store(false);
+    report_fault(FaultCause::kUnknown, "non-std::exception thrown by the mirror loop");
+  }
+}
+
+// ── Fault reporting and the stall watchdog ──────────────────────────────
+
+void TeleopController::report_fault(FaultCause cause, std::string detail) {
+  // Stop first, report second. Whatever the host does with the fault, the
+  // mirror must already have given up on the hardware by the time it hears —
+  // a callback that stages a recovery while the loop is still writing to a
+  // half-dead follower is the race this ordering removes.
+  running_.store(false);
+  watchdog_active_.store(false);
+
+  // One fault per run. Leader and follower usually fail together (a dropped
+  // link takes both), and the host only needs the first cause to decide what
+  // to do; re-arming happens in teleop().
+  if (!fault_pending_.exchange(false)) {
+    return;
+  }
+
+  // Kept on stderr as well as the callback: this line predates the callback
+  // and is what shows up in the recorder's log, which is the only record when
+  // no host callback is installed (tests, examples, leader-only rigs).
+  std::cerr << "  [teleop] mirror loop terminated: " << detail << '\n';
+
+  if (fault_cb_) {
+    fault_cb_(Fault{cause, std::move(detail)});
+  }
+}
+
+void TeleopController::watchdog_loop() {
+  const auto timeout_ns =
+    static_cast<std::int64_t>(cfg_.leader_timeout_ms * 1e6);
+
+  // Poll at a quarter of the deadline so worst-case detection is ~1.25x the
+  // configured timeout rather than 2x, with a 20 ms floor so a very short
+  // deadline cannot turn this into a spin loop on a busy Orin.
+  const auto tick = std::max<std::int64_t>(
+    20'000'000, timeout_ns / 4);
+
+  while (watchdog_active_.load()) {
+    std::this_thread::sleep_for(std::chrono::nanoseconds(tick));
+
+    // Re-checked after the sleep: stop_teleop() may have run while we slept,
+    // and faulting a mirror that was deliberately stopped would end a session
+    // the operator just ended themselves.
+    if (!watchdog_active_.load()) {
+      return;
+    }
+    if (watchdog_paused_.load(std::memory_order_relaxed) > 0) {
+      continue;
+    }
+
+    const auto age_ns = now_ns() - last_read_ns_.load(std::memory_order_relaxed);
+    if (age_ns > timeout_ns) {
+      report_fault(
+        FaultCause::kLeaderStalled,
+        "no leader read for " + std::to_string(age_ns / 1'000'000) +
+        " ms (limit " + std::to_string(static_cast<std::int64_t>(cfg_.leader_timeout_ms)) +
+        " ms) — the leader link is not delivering");
+      return;
+    }
+  }
+}
+
+void TeleopController::join_watchdog() {
+  watchdog_active_.store(false);
+  if (watchdog_thread_.joinable()) {
+    watchdog_thread_.join();
   }
 }
 

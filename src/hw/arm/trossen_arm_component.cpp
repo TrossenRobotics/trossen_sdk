@@ -592,6 +592,35 @@ void TrossenArmComponent::stage() {
   driver_->set_all_positions(pos_d, staging_time_s_, true);
 }
 
+std::string TrossenArmComponent::error_information() {
+  if (!driver_) {
+    throw std::runtime_error(
+      "TrossenArmComponent '" + get_identifier() + "': no driver configured");
+  }
+  // Deliberately unguarded: a throw from here is the answer (see the header).
+  // Swallowing it and returning "" would report a dead link as a healthy arm,
+  // which is the one mistake that sends recovery down the wrong path.
+  return driver_->get_error_information();
+}
+
+bool TrossenArmComponent::clear_error() {
+  if (!driver_) {
+    throw std::runtime_error(
+      "TrossenArmComponent '" + get_identifier() + "': no driver configured");
+  }
+  try {
+    // clear_error() internally cleans up and re-configures with the clear flag
+    // set, so it re-establishes the connection as a side effect — which is
+    // what makes it work after a link drop as well as after an arm fault.
+    driver_->clear_error();
+    return true;
+  } catch (const std::exception& e) {
+    std::cerr << "  [arm] " << get_identifier()
+              << ": clear_error failed: " << e.what() << '\n';
+    return false;
+  }
+}
+
 REGISTER_HARDWARE(TrossenArmComponent, "trossen_arm")
 
 ArmJointLimits read_arm_joint_limits(const std::string& model,

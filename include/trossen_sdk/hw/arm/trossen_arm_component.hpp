@@ -100,6 +100,35 @@ public:
    */
   std::shared_ptr<trossen_arm::TrossenArmDriver> get_hardware() { return driver_; }
 
+  /**
+   * @brief The Arm Controller's own error text, empty when it reports none.
+   *
+   * Exists to tell two failures apart that arrive identically — as a thrown
+   * exception from a read or a write. If the controller answers with an error
+   * string, the ARM faulted (a joint limit exceeded, a motor overheated) and
+   * it has idled every joint. If asking is itself impossible, the LINK is
+   * down and the arm's own state is unknown. Those need different recovery,
+   * so the caller must be able to distinguish them.
+   *
+   * @throws std::runtime_error if the arm cannot be reached, or if no driver
+   *   is configured. A throw here is a meaningful answer, not a failure of
+   *   this call: treat it as "link", not "arm".
+   */
+  std::string error_information();
+
+  /**
+   * @brief Clear a latched controller error, then reconnect.
+   *
+   * The controller latches an error until told otherwise and stays idle
+   * meanwhile, so this is the first half of any recovery. It does NOT move
+   * the arm or restore teleop modes — the caller decides when it is safe for
+   * the arm to hold position again.
+   *
+   * @return True if the error was cleared.
+   * @throws std::runtime_error if no driver is configured.
+   */
+  bool clear_error();
+
   // ── TeleopCapable: space-view accessor ───────────────────────────────────
   // Returns the adapter view for the requested space. Extend the switch to
   // add a new space.
