@@ -435,7 +435,7 @@ interface HardwareSystem {
 // Systems that ship with a factory-default config the user can revert to.
 // Hoisted out of the component so the reset useCallback's dependency array
 // stays stable across renders.
-const RESETTABLE_SYSTEMS: readonly string[] = ['solo', 'solo_glide', 'stationary', 'mobile', 'workbench', 'rivet_01', 'rivet_02'];
+const RESETTABLE_SYSTEMS: readonly string[] = ['solo', 'solo_glide', 'stationary', 'mobile', 'workbench', 'workbench_01', 'rivet_01', 'rivet_02'];
 
 // The lightweight (passive) Trossen leader has no actuators and its joints
 // don't map 1:1 onto the follower: J3/J4 are inverted and the wrist (J5)
@@ -3248,7 +3248,7 @@ export function ConfigurationPage() {
           {[...systems].sort((a, b) => {
             // Shipped layouts first, smallest to largest; anything user-created
             // sorts after them.
-            const order: Record<string, number> = { solo: 0, solo_glide: 1, stationary: 2, mobile: 3, workbench: 4, rivet_01: 5, rivet_02: 6 };
+            const order: Record<string, number> = { solo: 0, solo_glide: 1, stationary: 2, mobile: 3, workbench: 4, workbench_01: 5, rivet_01: 6, rivet_02: 7 };
             return (order[a.id] ?? 99) - (order[b.id] ?? 99);
           }).map(system => {
             const isConfigured = system.hardware.length > 0;
@@ -3505,6 +3505,12 @@ export function ConfigurationPage() {
               stationary:          { label: 'Stationary',          leaders: 2, followers: 2, cameras: 4, bases: 0 },
               mobile:              { label: 'Mobile',              leaders: 2, followers: 2, cameras: 3, bases: 1 },
               workbench:           { label: 'Workbench',           leaders: 2, followers: 2, cameras: 3, bases: 0 },
+              // Per-rig, for the same reason as the Rivets below: camera
+              // serials and arm addresses differ between Workbenches, so the
+              // shared `workbench` entry above is only ever right for one of
+              // them. Kept alongside rather than replacing it until the other
+              // Workbenches have been split out too.
+              workbench_01:        { label: 'Workbench 01',        leaders: 2, followers: 2, cameras: 3, bases: 0 },
               // Three ZEDs: main plus the two side cameras, now fitted. One
               // entry per physical Rivet — the layout is identical, but each
               // rig carries its own camera serials.

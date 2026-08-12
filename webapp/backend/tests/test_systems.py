@@ -126,6 +126,7 @@ def test_seed_then_retire_leaves_the_current_lineup() -> None:
         "stationary",
         "mobile",
         "workbench",
+        "workbench_01",
         "rivet_01",
         "rivet_02",
     }
