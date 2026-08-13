@@ -280,6 +280,212 @@ _rerun_observer: Any | None = None
 _rerun_record_ids: list[str] = []
 
 
+# --- Motion rollup (durable telemetry) -------------------------------------
+#
+# Answers "were the arms moving, was the base moving" for the hourly digest.
+# Detection has to run far faster than the row it produces: a 30s sample of
+# instantaneous velocity would miss a five-second nudge completely, so motion is
+# observed on the record stream and accumulated as *seconds spent moving*, which
+# is both more useful than a boolean and cheap to sum into utilisation.
+#
+# The arm components expose no velocity getter to Python (only error_information
+# and clear_error), so this rides JointStateRecord.velocities off the same
+# observer mechanism the Rerun preview uses. No SDK change needed.
+
+# Retained for the process lifetime; the SDK holds weak refs to the callbacks.
+_motion_observer: Any | None = None
+
+# Hz to subscribe motion detection at. Well under the arms' 30 Hz produce rate:
+# enough to resolve a brief movement, few enough that the callback cost is
+# irrelevant. Detection sensitivity comes from the thresholds, not this rate.
+_MOTION_SUBSCRIBE_HZ = 10.0
+
+# Movement thresholds. Above sensor noise on a stationary joint, below any
+# deliberate motion. A passive leader hangs with small encoder jitter, so a zero
+# threshold would report a rig as permanently busy.
+_ARM_MOVING_RAD_S = 0.02
+_BASE_MOVING_M_S = 0.01
+
+# Longest gap between two records that may still be credited as continuous
+# motion. Without this a stall — a wedged producer, a paused process — would,
+# on the next record, book the whole gap as movement.
+_MOTION_MAX_GAP_S = 1.0
+
+
+class _MotionTracker:
+    """Accumulates seconds-in-motion per record stream.
+
+    Thread-safe: observer callbacks are invoked from the SDK's producer threads
+    while the rollup emitter drains from its own.
+
+    `drain()` returns the totals and resets, so each emitted row covers exactly
+    the window since the previous one and nothing is double counted. Streams that
+    have produced no record at all stay absent rather than reporting 0.0 — the
+    caller turns absence into a null column, which is how "not sampled" is kept
+    distinct from "sampled and still".
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._active_s: dict[str, float] = {}
+        self._last_seen: dict[str, float] = {}
+        self._distance_m = 0.0
+
+    def note(self, record_id: str, moving: bool, speed_m_s: float = 0.0) -> None:
+        now = time.monotonic()
+        with self._lock:
+            previous = self._last_seen.get(record_id)
+            self._last_seen[record_id] = now
+            # Seed the stream on its first record so it reports 0.0 rather than
+            # staying absent, which would read as "never sampled".
+            self._active_s.setdefault(record_id, 0.0)
+            if previous is None:
+                return
+            dt = now - previous
+            if dt <= 0.0 or dt > _MOTION_MAX_GAP_S:
+                return
+            if moving:
+                self._active_s[record_id] += dt
+                self._distance_m += abs(speed_m_s) * dt
+
+    def drain(self) -> tuple[dict[str, float], float]:
+        with self._lock:
+            active = dict(self._active_s)
+            distance = self._distance_m
+            self._active_s = {k: 0.0 for k in self._active_s}
+            self._distance_m = 0.0
+        return active, distance
+
+
+_arm_motion = _MotionTracker()
+_base_motion = _MotionTracker()
+
+# Seconds per durable rollup row. The operator asked for 30s-to-a-minute, and 30
+# gives ~120 rows an hour per rig — nothing for SQLite, and fine enough that a
+# short burst of work is still visible in the series.
+_ROLLUP_PERIOD_S = 30.0
+
+# Latest battery block per base id, refreshed by the 2 Hz telemetry sampler and
+# read by the rollup emitter. Last-value-wins rather than averaged: percentage
+# and current are instantaneous readings, and an average across a window that may
+# span a charger being plugged in would describe a state that never existed.
+_latest_battery_lock = threading.Lock()
+_latest_battery: dict[str, dict[str, Any]] = {}
+
+
+def _stash_battery(base_id: str, data: dict[str, Any]) -> None:
+    """Keep the newest battery reading for the rollup emitter."""
+    battery = (data or {}).get("battery") or {}
+    if not battery:
+        return
+    with _latest_battery_lock:
+        _latest_battery[base_id] = {
+            "percent": battery.get("percent"),
+            "voltage": battery.get("voltage"),
+            "current": battery.get("current"),
+            "temp": battery.get("temp"),
+            "charging_state": battery.get("charging_state"),
+            # Carried so a reading of 0% can be told apart from "no BMS frame
+            # yet" downstream, the same distinction the e-stop check relies on.
+            "reading_valid": data.get("battery_reading_valid"),
+        }
+
+
+def _telemetry_rollup_emitter(stop: threading.Event) -> None:
+    """Emit one durable telemetry rollup every `_ROLLUP_PERIOD_S`.
+
+    The parent persists these; see `app/telemetry.record_sample`. Separate from
+    the 2 Hz display sampler because the two have different jobs: that one feeds
+    a live screen and is allowed to drop samples, this one is the audit trail.
+
+    A stream that produced no record contributes no key, and the parent writes
+    null for it — so "not sampled" survives to the CSV as an empty cell instead
+    of being flattened into a zero.
+    """
+    while not stop.wait(_ROLLUP_PERIOD_S):
+        try:
+            arms, _ = _arm_motion.drain()
+            bases, distance = _base_motion.drain()
+            with _latest_battery_lock:
+                battery = {k: dict(v) for k, v in _latest_battery.items()}
+            _emit({
+                "type": "telemetry_rollup",
+                "window_s": _ROLLUP_PERIOD_S,
+                # Max across arms, not sum: the question is whether the rig was
+                # being worked, and two arms moving together is one span of work,
+                # not two. Summing would let a bimanual rig report 60s of motion
+                # inside a 30s window.
+                "arms_active_s": max(arms.values()) if arms else None,
+                "base_active_s": max(bases.values()) if bases else None,
+                # Requires the commanded lift, which the SDK does not expose yet.
+                "rail_active_s": None,
+                "base_distance_m": distance if bases else None,
+                "battery": battery or None,
+                "battery_source": "recorder",
+            })
+        except Exception as e:
+            # A rollup is bookkeeping; never let it disturb the recording.
+            print(f"[recorder-runner] telemetry rollup failed: {e}", flush=True)
+
+
+def _make_motion_handler(record_id: str, kind: str) -> Any:
+    """Observer callback that folds one stream's records into a tracker.
+
+    Never raises: this runs inside the SDK's C++ producer tick, and an exception
+    escaping into it would take down a recording for the sake of a metric.
+    """
+    def handle(rec: Any) -> None:
+        try:
+            if kind == "arm":
+                velocities = getattr(rec, "velocities", None)
+                if not velocities:
+                    return
+                peak = max(abs(v) for v in velocities)
+                _arm_motion.note(record_id, peak > _ARM_MOVING_RAD_S)
+            else:
+                twist = getattr(rec, "twist", None)
+                if twist is None:
+                    return
+                # Planar speed only. The lift axis is absent from the odometry
+                # record, which is why rail motion stays unavailable until the
+                # SDK exposes the commanded lift.
+                speed = max(
+                    abs(twist.linear_x), abs(twist.linear_y), abs(twist.angular_z)
+                )
+                _base_motion.note(record_id, speed > _BASE_MOVING_M_S, speed)
+        except Exception:
+            pass
+    return handle
+
+
+def _register_motion_observer(mgr: Any, arm_ids: list[str], base_ids: list[str]) -> None:
+    """Subscribe motion detection to the arm and base record streams.
+
+    Best-effort, exactly like the Rerun observer: telemetry is never worth
+    failing bootstrap over.
+    """
+    global _motion_observer
+    if not arm_ids and not base_ids:
+        return
+    try:
+        obs = ts.ObserverBase("webapp_motion")
+        for record_id in arm_ids:
+            obs.add_subscription(
+                record_id, _MOTION_SUBSCRIBE_HZ, _make_motion_handler(record_id, "arm")
+            )
+        for record_id in base_ids:
+            obs.add_subscription(
+                record_id, _MOTION_SUBSCRIBE_HZ, _make_motion_handler(record_id, "base")
+            )
+        mgr.add_observer(obs)
+        _motion_observer = obs
+        print(f"[recorder-runner] motion observer subscribed: arms={arm_ids} "
+              f"bases={base_ids} at {_MOTION_SUBSCRIBE_HZ} Hz", flush=True)
+    except Exception as e:
+        print(f"[recorder-runner] motion observer setup failed: {e}; "
+              f"motion will be reported as not sampled", flush=True)
+
+
 # --- Lightweight MJPEG live feed (low-power / Raspberry Pi viewer) ----------
 #
 # A second, dependency-light preview path for clients that can't drive the
@@ -938,6 +1144,12 @@ def _build_session_manager(
     # (the SDK sets `rec->id = cfg_.stream_id`).
     camera_stream_ids: list[str] = []
 
+    # Non-camera streams, tapped for the durable motion rollup rather than the
+    # preview. Collected here because this loop is the only place that knows
+    # which producer owns which stream_id.
+    arm_stream_ids: list[str] = []
+    base_stream_ids: list[str] = []
+
     for prod_cfg in cfg.producers:
         period_ms = int(1000.0 / prod_cfg.poll_rate_hz)
         if prod_cfg.type == "trossen_arm":
@@ -947,7 +1159,9 @@ def _build_session_manager(
                 prod_cfg.to_registry_json(),
             )
             mgr.add_producer(prod, period_ms)
+            arm_stream_ids.append(prod_cfg.stream_id)
         elif prod_cfg.hardware_id in component_components:
+            base_stream_ids.append(prod_cfg.stream_id)
             # Any producer whose hardware is a generic component — the Rivet base
             # emitting odometry, and whatever else gets registered later.
             prod = ts.ProducerRegistry.create(
@@ -976,6 +1190,7 @@ def _build_session_manager(
     # before the first episode starts. No-op when the Rerun server failed to
     # start or there are no cameras.
     _register_rerun_observer(mgr, camera_stream_ids)
+    _register_motion_observer(mgr, arm_stream_ids, base_stream_ids)
 
     mgr.on_pre_episode(lambda: (_start_controllers(controllers), True)[-1])
     mgr.on_pre_shutdown(lambda: _stop_controllers(controllers))
@@ -1338,6 +1553,10 @@ def _base_telemetry_sampler(
                 "id": base_id,
                 "data": data,
             })
+
+            # Same read feeds the durable rollup, so the audit trail costs no
+            # extra traffic on the base's CAN link.
+            _stash_battery(base_id, data)
 
             # The bumper. A physical strike latches the base's e-stop, and
             # from here that is indistinguishable from the software one — the
@@ -1783,6 +2002,17 @@ def _run_episode_loop(
         daemon=True,
     )
     faults.start()
+
+    # Shares the same stop again. Unlike the display feeds above this one is the
+    # durable audit trail, so it runs even on a rig with no base or cameras —
+    # arm motion alone is worth recording.
+    rollup = threading.Thread(
+        target=_telemetry_rollup_emitter,
+        args=(sampler_stop,),
+        name="recorder-rollup",
+        daemon=True,
+    )
+    rollup.start()
 
     try:
         first_iteration_pending = True

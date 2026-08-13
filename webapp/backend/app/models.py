@@ -216,3 +216,116 @@ class EpisodeRecord(SQLModel, table=True):
     outcome: str = "success"
     duration_s: float = 0.0
     created_at: str = Field(default_factory=_now_iso)
+
+
+class TelemetrySample(SQLModel, table=True):
+    """One 30-second rollup of what the hardware was doing.
+
+    The row the hourly CSV is built from. Detection runs far faster than this
+    row does: arm and base motion is observed on the record stream (tens of Hz)
+    and battery on the recorder's 2 Hz sampler, then aggregated here. Sampling
+    motion once every 30s directly would miss a five-second nudge entirely.
+
+    Motion is stored as *seconds of movement inside the window* rather than a
+    boolean, which costs nothing extra and answers the question a boolean
+    can't: was this rig being worked, or merely left switched on. The values sum
+    to utilisation over any range.
+
+    `NULL` and `0.0` mean different things here and must not be conflated. A
+    null motion column means nothing was sampled — arm and base state is
+    readable only while a recorder holds the hardware, since the controllers
+    are single-client — whereas 0.0 means it was sampled and genuinely still.
+    """
+
+    __tablename__ = "telemetry_sample"
+
+    id: str = Field(primary_key=True)
+    # Indexed because every export and prune is a range scan over this column.
+    ts: str = Field(index=True, default_factory=_now_iso)
+    window_s: float = 30.0
+
+    session_id: str = ""
+    session_status: str = ""
+    current_episode: int = 0
+    machine_state: str = ""
+    operator_id: str = ""
+
+    # Per-base battery, keyed by component id: a rig may carry more than one,
+    # and the shape is the driver's, which we don't own. `current` is the field
+    # that actually shows idle draw; percentage sags too slowly to see it.
+    battery: dict[str, Any] | None = Field(default=None, sa_column=Column(JSON))
+    # "recorder" (sampled by the live session) or "idle_probe" (read while
+    # nothing was recording), so a gap in the series stays legible.
+    battery_source: str = ""
+
+    arms_active_s: float | None = None
+    base_active_s: float | None = None
+    # Null until the SDK exposes the commanded lift: the base reports pose and
+    # twist but no rail axis, so rail motion is not observable from feedback.
+    rail_active_s: float | None = None
+    base_distance_m: float | None = None
+
+    disk_free_bytes: int = 0
+
+
+class SessionRun(SQLModel, table=True):
+    """One start-to-stop span of a recording session.
+
+    Separate from `session` on purpose. A session row is mutable and reusable —
+    it can be started, stopped and resumed repeatedly — so it has no room to
+    record *when* each attempt ran. Adding started_at/ended_at there would also
+    change a wire shape the frontend already parses. One row per attempt keeps
+    the history and leaves the existing API contract alone.
+    """
+
+    __tablename__ = "session_run"
+
+    id: str = Field(primary_key=True)
+    session_id: str = Field(index=True)
+    session_name: str = ""
+    system_id: str = ""
+    started_at: str = Field(default_factory=_now_iso)
+    # Null while the run is in progress. A null that outlives its process is
+    # what `reconcile_orphaned_sessions` exists to clean up.
+    ended_at: str | None = None
+    duration_s: float | None = None
+    # "completed" | "stopped" | "error" | "orphaned"
+    end_reason: str = ""
+    episodes_done: int = 0
+    error_event_id: str = ""
+
+
+class ErrorEvent(SQLModel, table=True):
+    """One fault, captured automatically rather than filed by a person.
+
+    Distinct from `device_fault`, which an operator raises by hand to declare
+    hardware down. This is the machine's own record, written the moment a fault
+    surfaces, and it is what the immediate email alert is built from.
+
+    `controller_log` is the field that earns this table. The driver's own
+    message is generic — "Controller's CAN interface failed to receive a
+    message" — while the arm controller separately reports the line that names
+    the part, e.g. "2 consecutive feedback losses for J4310_24V motor 6". The
+    recorder already parses both and then discards them; without the second
+    line a fault report cannot say which motor to go and reseat.
+    """
+
+    __tablename__ = "error_event"
+
+    id: str = Field(primary_key=True)
+    ts: str = Field(index=True, default_factory=_now_iso)
+    # "critical" (ended the session) | "warning" (logged, session continued)
+    severity: str = "critical"
+    # Component or arm id that raised it, e.g. "glide_right"; "" when unknown.
+    source: str = ""
+    message: str = ""
+    controller_log: str = ""
+    session_id: str = ""
+    session_run_id: str = ""
+    # Trailing recorder stdout, for the context a one-line message loses.
+    raw_tail: str = ""
+    # Occurrences suppressed by the alert throttle since this row was written.
+    # The alert de-duplicates; the CSV must still show the true count, so the
+    # suppressed ones are folded in here rather than dropped.
+    suppressed_count: int = 0
+    alert_sent_at: str | None = None

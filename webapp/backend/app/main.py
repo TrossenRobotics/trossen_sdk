@@ -3,10 +3,11 @@ import re
 import shutil
 from contextlib import asynccontextmanager
 from dataclasses import asdict
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -14,7 +15,7 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app import activity, assignments, episodes
 from app import faults as faults_mod
-from app import hub_client, hw_status, operators
+from app import hub_client, hw_status, operators, telemetry_export
 from app.converter import ConvertBody, stream_conversion, validate_body
 from app.dataset_settings import (
     DatasetSettings,
@@ -34,6 +35,7 @@ from app.datasets import (
 from app.db import apply_migrations
 from app.hw_test import stream_system_hardware_test
 from app.io_utils import is_safe_id
+from app.machine_identity import get_machine_name
 from app.read_limits import ReadLimitsError, read_arm_joint_limits
 from app.recover import RecoverError, recover_hardware
 from app.paths import FRONTEND_DIST_DIR
@@ -307,6 +309,88 @@ def dataset_episode_rrd(dataset_id: str, filename: str) -> Response:
             detail=f"Could not decode episode for playback: {e}",
         ) from e
     return Response(content=data, media_type="application/octet-stream")
+
+
+def _csv_response(body: str, kind: str, start: str) -> Response:
+    """Serve a CSV as a download, named so files sort per rig and per hour."""
+    name = telemetry_export.filename(kind, get_machine_name(), start)
+    return Response(
+        content=body,
+        # charset matters: the body carries a BOM for Excel's benefit, and
+        # declaring UTF-8 stops a browser preview from second-guessing it.
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{name}"'},
+    )
+
+
+def _resolve_range(from_: str | None, to: str | None) -> tuple[str, str]:
+    """Normalise a query range to UTC ISO bounds, defaulting to the last 24h.
+
+    Accepts a bare date (`2026-08-13`) or a full ISO timestamp. A naive value is
+    read as the machine's local time, which is what someone typing a date into
+    the URL means; it is converted to UTC because that is how rows are stored.
+    """
+    def norm(value: str | None, fallback: datetime) -> str:
+        if not value:
+            return fallback.astimezone(timezone.utc).isoformat()
+        try:
+            dt = datetime.fromisoformat(value)
+        except ValueError as e:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Could not read '{value}' as a date. Use YYYY-MM-DD or a "
+                    f"full ISO-8601 timestamp."
+                ),
+            ) from e
+        if dt.tzinfo is None:
+            dt = dt.astimezone()
+        return dt.astimezone(timezone.utc).isoformat()
+
+    now = datetime.now(timezone.utc)
+    start = norm(from_, now - timedelta(days=1))
+    end = norm(to, now)
+    if end <= start:
+        raise HTTPException(
+            status_code=422,
+            detail="The 'to' time must be after 'from'.",
+        )
+    return start, end
+
+
+@app.get("/api/telemetry/export.csv")
+def telemetry_export_csv(
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+) -> Response:
+    """The 30s rollup series — battery and motion over time.
+
+    The download path for a machine with no route to the internet: the Workbench
+    collects the same rows as the Rivets but cannot mail them, so it is read from
+    here instead. Also the way to pull a range wider than one hourly attachment.
+    """
+    start, end = _resolve_range(from_, to)
+    return _csv_response(telemetry_export.telemetry_csv(start, end), "telemetry", start)
+
+
+@app.get("/api/telemetry/sessions.csv")
+def telemetry_sessions_csv(
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+) -> Response:
+    """One row per run: start, end, duration, episodes, how it ended."""
+    start, end = _resolve_range(from_, to)
+    return _csv_response(telemetry_export.sessions_csv(start, end), "sessions", start)
+
+
+@app.get("/api/telemetry/errors.csv")
+def telemetry_errors_csv(
+    from_: str | None = Query(None, alias="from"),
+    to: str | None = None,
+) -> Response:
+    """Faults, with the controller line that names the failing part."""
+    start, end = _resolve_range(from_, to)
+    return _csv_response(telemetry_export.errors_csv(start, end), "errors", start)
 
 
 @app.post("/api/datasets/{dataset_id}/convert-to-lerobot")

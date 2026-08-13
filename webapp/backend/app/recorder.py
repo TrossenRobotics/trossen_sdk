@@ -28,6 +28,7 @@ import copy
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -36,7 +37,7 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Any
 
-from app import episodes, hw_status
+from app import episodes, hw_status, operators, telemetry
 from app.dataset_settings import load_dataset_settings
 from app.sessions import (
     Session,
@@ -172,6 +173,133 @@ def _extract_fault_detail(last_lines: deque) -> str:
             if not out or out[-1] != line:
                 out.append(line)
     return "\n".join(out)
+
+
+# Pulls the component id out of an SDK log prefix like
+# "[2026-08-13 12:37:58] [glide_right@192.168.7.2] [CRITICAL] Error occurred: …".
+# The id alone is what a fault report needs — the address is a DHCP detail and
+# changes between boots.
+_SOURCE_RE = re.compile(r"\[([A-Za-z_][\w-]*)@[\d.]+\]")
+
+# The driver's own summary, after the "Error occurred: " lead-in.
+_MESSAGE_RE = re.compile(r"Error occurred:\s*(.+?)\s*$")
+
+# The line that actually names the failing part, e.g.
+# "[ERROR] [Motor Interface] 2 consecutive feedback losses for J4310_24V motor 6."
+# This is the difference between a fault report you can act on and one you can't:
+# the driver-level message says only that CAN feedback stopped, never which motor.
+_CONTROLLER_RE = re.compile(r"\[Motor Interface\]\s*(.+?)\s*$")
+
+
+def _parse_fault(detail: str) -> tuple[str, str, str]:
+    """Split an SDK diagnostic block into (source, message, controller_log).
+
+    Every part is optional — the SDK's failure output is not a stable format, and
+    a great many failures carry no component prefix at all. Missing pieces come
+    back as "" and the caller still gets a usable row; the block itself is
+    retained separately as `raw_tail`, so nothing is lost to a parse miss.
+    """
+    source = message = controller = ""
+    for raw in detail.splitlines():
+        line = raw.strip()
+        if not source:
+            m = _SOURCE_RE.search(line)
+            if m:
+                source = m.group(1)
+        if not message:
+            m = _MESSAGE_RE.search(line)
+            if m:
+                message = m.group(1)
+        if not controller:
+            m = _CONTROLLER_RE.search(line)
+            if m:
+                controller = m.group(1)
+    if not message:
+        # No "Error occurred:" lead-in. Fall back to the first non-empty line so
+        # the row is never blank, since message is what the throttle keys on.
+        for raw in detail.splitlines():
+            if raw.strip():
+                message = raw.strip()[:500]
+                break
+    return source, message, controller
+
+
+def _persist_rollup(runner: _Runner, payload: dict[str, Any]) -> None:
+    """Write one motion/battery rollup from the child to the telemetry table.
+
+    Passes the child's `None`s straight through. A null motion column means the
+    stream produced no record in that window, which is a different fact from 0.0
+    ("sampled, and genuinely still") and must not be coerced into it.
+    """
+    try:
+        sess = get_session(runner.session_id)
+        free = 0
+        try:
+            free = shutil.disk_usage(runner.mcap_root).free if runner.mcap_root else 0
+        except OSError:
+            # A missing or unmounted dataset root is worth a row without the disk
+            # figure, not a lost row.
+            free = 0
+        telemetry.record_sample(
+            session_id=runner.session_id,
+            session_status=sess.status if sess else "",
+            current_episode=sess.current_episode if sess else 0,
+            machine_state="recording",
+            operator_id=(operators.get_active_operator() or {}).get("id", ""),
+            battery=payload.get("battery"),
+            battery_source=payload.get("battery_source", "recorder"),
+            arms_active_s=payload.get("arms_active_s"),
+            base_active_s=payload.get("base_active_s"),
+            rail_active_s=payload.get("rail_active_s"),
+            base_distance_m=payload.get("base_distance_m"),
+            disk_free_bytes=free,
+            window_s=float(payload.get("window_s", 30.0)),
+        )
+    except Exception as e:
+        print(f"[recorder] rollup persist failed for "
+              f"{runner.session_id}: {e}", flush=True)
+
+
+def _episodes_done(runner: _Runner) -> int:
+    """Episodes completed so far, for stamping onto a closing run.
+
+    Read from the session row rather than tracked here: `current_episode` is the
+    value the recorder and the SDK already reconcile, so re-deriving it would
+    just be a second answer that can disagree with the first.
+    """
+    try:
+        sess = get_session(runner.session_id)
+        return int(sess.current_episode) if sess else 0
+    except Exception:
+        return 0
+
+
+def _capture_error_event(runner: _Runner, detail: str, full_msg: str) -> str:
+    """Persist the fault for the digest. Returns the row id, or "".
+
+    Best-effort by design: this runs on the crash path, where the job that
+    matters is safing the hardware and telling the operator. A telemetry write
+    must never be the reason a crash handler dies.
+    """
+    try:
+        source, message, controller = _parse_fault(detail or full_msg)
+        event_id, _should_alert = telemetry.record_error(
+            message=message or full_msg[:500],
+            source=source,
+            controller_log=controller,
+            severity="critical",
+            session_id=runner.session_id,
+            session_run_id=telemetry.open_run_id(runner.session_id),
+            raw_tail="\n".join(list(runner.last_lines)[-15:]),
+        )
+        # `_should_alert` is the throttle's verdict; Phase 2's mailer is what
+        # consumes it. Recording it now means the suppressed-occurrence count is
+        # already accurate by the time alerts are switched on.
+        return event_id or ""
+    except Exception as e:
+        print(f"[recorder] error event capture failed for "
+              f"{runner.session_id}: {e}", flush=True)
+        return ""
 
 
 def _diagnostic_tail(last_lines: deque, limit: int = 15) -> str:
@@ -435,6 +563,13 @@ def _start_recording_inner(session: Session) -> None:
     )
     with _lock:
         _runners[session.id] = runner
+
+    # Open the run span here rather than in `/start`: by this point the child has
+    # printed __READY__, so every arm and camera is actually up. Timing it from
+    # the endpoint would fold bringup — which can be tens of seconds, and can
+    # fail outright — into the recorded duration.
+    telemetry.open_run(session.id, session.name, session.system_id)
+
     runner.reader.start()
 
     # Guard against unattended recording: if the operator's browser goes away
@@ -864,6 +999,11 @@ def _run_reader(session_id: str, runner: _Runner) -> None:
                 # sample.
                 _set_latest_telemetry(session_id, payload)
                 bus.publish(session_id, payload)
+            elif ptype == "telemetry_rollup":
+                # The durable audit trail, as opposed to the display feed above.
+                # Not published on the bus: nothing in the UI consumes it, and
+                # the hourly CSV reads it back out of the DB.
+                _persist_rollup(runner, payload)
             elif ptype == "event":
                 _handle_event(runner, payload)
                 if payload.get("event") == "session_complete":
@@ -1079,6 +1219,15 @@ def _finalize_session_complete(
     # ("paused") and pick the right toast / phase. Falling back to the
     # last-known sess if the row vanished mid-finalize keeps us robust.
     final_sess = get_session(session_id) or sess
+    # `paused` here means the operator pressed Stop, which the SDK still reports
+    # as a clean exit — recording the two separately is the whole point of
+    # end_reason, since "ran to the end of its schedule" and "a person stopped
+    # it early" are different facts about the same tidy shutdown.
+    telemetry.close_run(
+        session_id,
+        end_reason="stopped" if final_sess.status == "paused" else "completed",
+        episodes_done=final_sess.current_episode,
+    )
     bus.publish(session_id, {
         "type": "lifecycle",
         "data": {
@@ -1130,6 +1279,16 @@ def _finalize_crash(
             f"last lines: {tail}"
         ) if tail else f"Recorder subprocess exited with code {return_code}"
     full_msg = msg
+    # Capture before the run is closed so the event can be stamped onto it, and
+    # before the session row flips so the fault is durable even if the DB write
+    # below fails.
+    event_id = _capture_error_event(runner, detail, full_msg)
+    telemetry.close_run(
+        runner.session_id,
+        end_reason="error",
+        episodes_done=_episodes_done(runner),
+        error_event_id=event_id,
+    )
     _discard_partial_episode(runner)
     force_session_to_error(runner.session_id, full_msg)
     hw_status.set_status(runner.system_id, "error", full_msg)
@@ -1178,6 +1337,14 @@ def reconcile_orphaned_sessions() -> list[str]:
                 "Recorder is no longer running (the web server restarted while "
                 "this session was recording). The session was left marked "
                 "active; recovering it so it can be cleared and resumed."
+            )
+            # No runner means no last_lines and so no fault text — the run gets
+            # `orphaned` rather than `error` to say exactly that: it stopped
+            # being tracked, and why is not recoverable from here.
+            telemetry.close_run(
+                session.id,
+                end_reason="orphaned",
+                episodes_done=session.current_episode,
             )
             force_session_to_error(session.id, msg)
             hw_status.set_status(session.system_id, "error", msg)
