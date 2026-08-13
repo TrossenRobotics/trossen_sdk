@@ -5,19 +5,12 @@
 
 #include <chrono>
 #include <csignal>
-#include <cstdlib>
-#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <thread>
 #include <vector>
-
-#include <fcntl.h>
-#include <spawn.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
 #include "trossen_sdk/utils/app_utils.hpp"
 
@@ -280,78 +273,6 @@ std::string generate_episode_path(
        << std::setfill('0') << std::setw(6) << episode_index
        << "." << extension;
   return path.str();
-}
-
-void announce(const std::string& message, bool block) {
-  if (message.empty()) return;
-
-  // Opt-out for environments where speech cannot work and must not be waited
-  // on: test suites, CI, and anything running as root (root has no session bus,
-  // so spd-say can hang instead of failing).
-  if (const char* off = std::getenv("TROSSEN_NO_ANNOUNCE")) {
-    if (off[0] != '\0' && std::strcmp(off, "0") != 0) return;
-  }
-
-  if (!block) {
-    // Double-fork so the process that actually runs spd-say is orphaned and
-    // reaped by init. The previous single-spawn-and-never-wait left one zombie
-    // per announcement for the life of the process — which for a session that
-    // announces every episode boundary is unbounded growth.
-    pid_t middle = fork();
-    if (middle < 0) return;
-    if (middle == 0) {
-      if (fork() == 0) {
-        // Only async-signal-safe calls between fork and exec.
-        int devnull = open("/dev/null", O_WRONLY);
-        if (devnull >= 0) {
-          dup2(devnull, STDERR_FILENO);
-          close(devnull);
-        }
-        const char* argv[] = {"spd-say", message.c_str(), nullptr};
-        execvp("spd-say", const_cast<char**>(argv));
-        _exit(127);  // spd-say not installed; the caller neither knows nor cares
-      }
-      _exit(0);
-    }
-    // Returns immediately: the middle process exits as soon as it has forked.
-    waitpid(middle, nullptr, 0);
-    return;
-  }
-
-  // Blocking: -w makes spd-say wait for speech to finish, which is the point.
-  const char* argv[] = {"spd-say", "-w", message.c_str(), nullptr};
-
-  posix_spawn_file_actions_t actions;
-  bool have_actions = (posix_spawn_file_actions_init(&actions) == 0);
-  if (have_actions) {
-    // Suppress stderr so a missing spd-say doesn't print errors.
-    posix_spawn_file_actions_addopen(
-      &actions, STDERR_FILENO, "/dev/null", O_WRONLY, 0);
-  }
-
-  pid_t pid;
-  int err = posix_spawnp(
-    &pid, "spd-say", have_actions ? &actions : nullptr, nullptr,
-    const_cast<char**>(argv), environ);
-  if (have_actions) posix_spawn_file_actions_destroy(&actions);
-  if (err != 0) return;
-
-  // Bounded wait. An unbounded waitpid here is a deadlock waiting to happen:
-  // spd-say blocks indefinitely when it cannot reach a speech server, so one
-  // unavailable audio session was enough to wedge a caller forever. A spoken
-  // cue is never worth stalling a recording session or a test for, so give up
-  // and kill the child rather than wait on it.
-  const auto deadline =
-    std::chrono::steady_clock::now() + kAnnounceBlockTimeout;
-  for (;;) {
-    const pid_t done = waitpid(pid, nullptr, WNOHANG);
-    if (done == pid || done < 0) return;  // exited, or already reaped
-    if (std::chrono::steady_clock::now() >= deadline) break;
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  }
-
-  kill(pid, SIGKILL);
-  waitpid(pid, nullptr, 0);  // immediate after SIGKILL; leaves no zombie
 }
 
 }  // namespace trossen::utils

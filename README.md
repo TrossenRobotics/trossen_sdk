@@ -31,7 +31,6 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Stereolab
 - Joint states recordable up to 200 Hz; cameras at configurable frame rates
 - Converts recorded TrossenMCAP files to LeRobot V2 format (Parquet + MP4 video) with per-episode statistics computed during conversion
 - Interactive episode controls: re-record, skip, and discard episodes with keyboard shortcuts during recording
-- Audio announcements via text-to-speech for hands-free session feedback
 - Configurable reset duration between episodes (countdown, skip, or wait for input)
 
 
@@ -239,16 +238,6 @@ The pause between episodes is controlled by `session.reset_duration` in the conf
 | Positive number (e.g. `5.0`) | Countdown for that many seconds, then start next episode |
 | `0` | No pause — start the next episode immediately |
 | Omitted / `null` | Wait indefinitely until the operator presses right arrow |
-
-### Audio announcements
-
-The SDK announces session events via text-to-speech using `spd-say`. Install it for audio cues:
-
-```bash
-sudo apt-get install -y speech-dispatcher
-```
-
-Events announced: "Episode N started", "Episode N complete", "Reset time". If `spd-say` is not installed, announcements are silently skipped.
 
 ### Custom input methods
 

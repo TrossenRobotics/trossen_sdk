@@ -97,9 +97,6 @@ target_link_libraries(test_session_manager_control PRIVATE trossen_sdk GTest::gt
 add_executable(test_keyboard_input_utils test_keyboard_input_utils.cpp)
 target_link_libraries(test_keyboard_input_utils PRIVATE trossen_sdk GTest::gtest_main)
 
-add_executable(test_announce test_announce.cpp)
-target_link_libraries(test_announce PRIVATE trossen_sdk GTest::gtest_main)
-
 add_executable(test_teleop_space_helpers test_teleop_space_helpers.cpp)
 target_link_libraries(test_teleop_space_helpers PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -172,14 +169,10 @@ target_link_libraries(test_active_hardware_registry PRIVATE trossen_sdk GTest::g
 # Enable CTest integration
 include(GoogleTest)
 
-# Every test runs with text-to-speech disabled. A test has no business making the
-# machine talk, and more to the point spd-say blocks indefinitely when it cannot
-# reach a speech server — which is the case for root, so `sudo ./setup.sh` used to
-# hang here with no output rather than run the suite. Wrapping discovery keeps
-# this true for tests added later, instead of relying on each one to remember.
+# One seam for every test's discovery, so a property that has to hold suite-wide
+# is set in a single place rather than relying on each new test to remember it.
 function(trossen_discover_tests target)
-  gtest_discover_tests(${target}
-    PROPERTIES ENVIRONMENT "TROSSEN_NO_ANNOUNCE=1")
+  gtest_discover_tests(${target})
 endfunction()
 
 trossen_discover_tests(test_timestamp)
@@ -211,7 +204,6 @@ trossen_discover_tests(test_session_manager)
 trossen_discover_tests(test_session_manager_discard)
 trossen_discover_tests(test_session_manager_control)
 trossen_discover_tests(test_keyboard_input_utils)
-trossen_discover_tests(test_announce)
 trossen_discover_tests(test_teleop_space_helpers)
 trossen_discover_tests(test_teleop_controller)
 trossen_discover_tests(test_teleop_config)

@@ -96,18 +96,6 @@ Install the RealSense SDK 2.0 by following the `librealsense distribution guide 
     RealSense depth capture is supported alongside RGB, but enabling it significantly increases USB bandwidth.
     When running multiple cameras, prefer short, high-quality USB 3.0 cables and distribute cameras across independent USB host controllers.
 
-Audio Announcements (Optional)
-------------------------------
-
-The SDK announces episode lifecycle events via text-to-speech using ``spd-say``.
-Install it for hands-free audio cues during recording.
-
-.. code-block:: bash
-
-    sudo apt-get install -y speech-dispatcher
-
-If ``spd-say`` is not installed, announcements are silently skipped.
-
 Building the SDK
 ================
 

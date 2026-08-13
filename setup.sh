@@ -108,9 +108,7 @@ have()    { command -v "$1" >/dev/null 2>&1; }
 #   * git has none of the user's credentials, so cloning a private dependency
 #     stops on an interactive username prompt;
 #   * every file created in the repo, i.e. the entire build tree, is left
-#     root-owned, so the user cannot rebuild afterwards without sudo;
-#   * root has no session bus, so anything that speaks blocks forever inside
-#     spd-say and the script appears to hang with no output.
+#     root-owned, so the user cannot rebuild afterwards without sudo.
 run_as_invoker() {
   if [[ "$(id -u)" -eq 0 && -n "${SUDO_USER:-}" ]]; then
     sudo -u "$SUDO_USER" -H "$@"
@@ -271,13 +269,6 @@ phase_system_packages() {
     libboost-filesystem-dev libboost-serialization-dev \
     python3 python3-dev python3-venv python3-pip \
     || CRITICAL_FAILED=1
-
-  # Optional: text-to-speech for the SDK's spoken episode cues. Non-fatal.
-  if $SUDO apt-get install -yqq --no-install-recommends speech-dispatcher; then
-    ok "Audio announcements (speech-dispatcher)"
-  else
-    warn "speech-dispatcher not installed — spoken cues will be silently skipped"
-  fi
 
   # RealSense build prerequisites (only when RealSense is enabled).
   if [[ "$ENABLE_REALSENSE" -eq 1 ]]; then
@@ -516,14 +507,11 @@ phase_check_sdk() {
   # failure here is reported as a warning rather than a hard error.
   #
   # Run as the invoking user, and with a timeout. Under sudo this would otherwise
-  # run as root, and root has no session bus — a test that speaks would block
-  # forever inside spd-say, which presented as setup.sh hanging silently with no
-  # output partway through. The suite also sets TROSSEN_NO_ANNOUNCE itself; this
-  # belt is here because a hang at this step is invisible to the operator, and
-  # the timeout keeps *any* future wedge from stalling an unattended install.
+  # run as root and leave root-owned files behind, and the timeout keeps any
+  # future wedge from stalling an unattended install — a hang at this step is
+  # invisible to the operator.
   step "Running unit tests (ctest)"
-  if run_as_invoker env TROSSEN_NO_ANNOUNCE=1 \
-       timeout 600 ctest --test-dir "$REPO_ROOT/build" \
+  if run_as_invoker timeout 600 ctest --test-dir "$REPO_ROOT/build" \
        --output-on-failure --timeout 120 -j "$JOBS"; then
     ok "Unit tests passed"
   else

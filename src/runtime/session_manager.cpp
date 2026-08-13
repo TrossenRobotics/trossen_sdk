@@ -502,9 +502,6 @@ bool SessionManager::start_episode() {
     std::chrono::duration<double>(prep_end_time - prep_start_time).count();
   std::cout << "Episode " << next_episode_index_ << " started." << std::endl;
 
-  trossen::utils::announce(
-    "Episode " + std::to_string(next_episode_index_) + " started", false);
-
   // SDK-driven episode start: bring teleop mirrors up now that recording is live, and
   // notify components that the episode has started.
   for (auto& ctrl : teleop_controllers_) ctrl->teleop();
@@ -632,9 +629,6 @@ void SessionManager::teardown_episode(bool discard) {
       std::chrono::duration<double>(shutdown_end_time - shutdown_start_time).count();
     std::cout << "\nEpisode stopped. Total completed: " << total_episodes_completed_
               << ", Next index: " << next_episode_index_ << std::endl;
-
-    trossen::utils::announce(
-      "Episode " + std::to_string(finished_episode_index) + " complete");
 
     // Notify any threads waiting for auto-stop
     {
@@ -1030,7 +1024,6 @@ UserAction SessionManager::wait_for_reset() {
     std::cout << "\nResetting environment — next episode in "
               << total_seconds << " seconds...\n"
               << "  (-> skip | <- re-record)\n";
-    trossen::utils::announce("Reset time");
 
     for (int i = total_seconds; i > 0; --i) {
       if (trossen::utils::g_stop_requested || reset_signaled_.load()) break;
@@ -1048,7 +1041,6 @@ UserAction SessionManager::wait_for_reset() {
     // Infinite wait: block until keypress, signal, or Ctrl+C
     std::cout << "\nWaiting for input...\n"
               << "  (-> continue | <- re-record)\n";
-    trossen::utils::announce("Reset time. Waiting for input.");
 
     while (!trossen::utils::g_stop_requested &&
            !reset_signaled_.load() &&

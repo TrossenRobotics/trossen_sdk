@@ -1155,9 +1155,6 @@ PYBIND11_MODULE(trossen_sdk, m) {
           py::arg("output_dir"), py::arg("episode_index"),
           py::arg("extension") = "trossen_mcap");
 
-    m.def("announce", &announce, py::arg("message"), py::arg("block") = true,
-          "Announce a message via text-to-speech");
-
     py::enum_<KeyPress>(m, "KeyPress")
       .value("kNone", KeyPress::kNone)
       .value("kRightArrow", KeyPress::kRightArrow)
