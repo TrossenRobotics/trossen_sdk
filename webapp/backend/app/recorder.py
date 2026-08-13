@@ -272,6 +272,14 @@ _lock = threading.Lock()
 _finalized: set[str] = set()
 _finalized_lock = threading.Lock()
 
+# Sessions whose recorder is mid-bootstrap: the row already says `active`, but
+# `_runners` has no entry yet because start_recording only registers one after
+# the child prints __READY__, and that wait covers opening every camera and arm.
+# Without this the reconciler sees "active, no runner" during a perfectly normal
+# start and kills it. Observed on rivet-02: a recorder spawned at 19:58:02 was
+# declared an orphan at 19:58:05, three seconds into its own bootstrap.
+_starting: set[str] = set()
+
 
 def _claim_finalize(session_id: str) -> bool:
     """True if this caller is the one that gets to run crash finalisation."""
@@ -310,7 +318,19 @@ def start_recording(session: Session) -> None:
     # A previous run of this same session may have crashed and been finalised.
     # Re-arm, or this run's crash would be silently swallowed as a duplicate.
     _release_finalize(session.id)
+    # Claim the bootstrap window before anything slow happens, so the reconciler
+    # cannot mistake this start for an orphan while the child opens hardware.
+    with _lock:
+        _starting.add(session.id)
+    try:
+        _start_recording_inner(session)
+    finally:
+        with _lock:
+            _starting.discard(session.id)
 
+
+def _start_recording_inner(session: Session) -> None:
+    """The body of start_recording, minus the bootstrap-window bookkeeping."""
     system = get_system(session.system_id)
     if system is None:
         raise RecorderError(
@@ -1146,6 +1166,12 @@ def reconcile_orphaned_sessions() -> list[str]:
     for session in [s for s in list_sessions() if s.status == "active"]:
         with _lock:
             runner = _runners.get(session.id)
+            starting = session.id in _starting
+
+        # Mid-bootstrap: the row is already `active` but the runner is not
+        # registered until __READY__. Not an orphan, just slow hardware.
+        if starting:
+            continue
 
         if runner is None:
             msg = (

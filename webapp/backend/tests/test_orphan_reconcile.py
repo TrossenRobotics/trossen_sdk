@@ -82,10 +82,12 @@ def _clean_registry():
     """The runner registry and finalise-guard are module globals."""
     with recorder._lock:
         recorder._runners.clear()
+        recorder._starting.clear()
     recorder._finalized.clear()
     yield
     with recorder._lock:
         recorder._runners.clear()
+        recorder._starting.clear()
     recorder._finalized.clear()
 
 
@@ -160,3 +162,28 @@ def test_finalisation_runs_once_even_if_the_pump_wakes_up() -> None:
     recorder._finalize_crash(late, -9, None)
 
     assert _status_of("s-race") == "pending", "late pump must not re-error it"
+
+
+def test_bootstrapping_session_is_not_treated_as_an_orphan() -> None:
+    """A session mid-start must survive reconciliation.
+
+    Regression cover for a race this module's own fix introduced. `/start`
+    flips the row to `active`, then `start_recording` spawns the child and
+    blocks until it prints __READY__ — which covers opening every camera and
+    arm. Only then is the runner registered. During that window there is no
+    `_runners` entry, and the first version of the reconciler read that as an
+    orphan and errored a session three seconds into its own bootstrap.
+    """
+    _make_session("s-booting")
+    with recorder._lock:
+        recorder._starting.add("s-booting")
+    try:
+        assert recorder.reconcile_orphaned_sessions() == []
+        assert _status_of("s-booting") == "active"
+    finally:
+        with recorder._lock:
+            recorder._starting.discard("s-booting")
+
+    # Once the bootstrap window closes with still no runner, it IS an orphan.
+    assert recorder.reconcile_orphaned_sessions() == ["s-booting"]
+    assert _status_of("s-booting") == "error"
