@@ -31,34 +31,7 @@
           "gripper_feedback_offset": 6.5,
           "gripper_feedback_mode": "effort",
           "actuated": false,
-          "gripper_force_feedback": true,
-          "position_tolerance": [
-            0.7854,
-            0.7854,
-            0.7854,
-            0.7854,
-            0.7854,
-            0.7854,
-            0.005
-          ],
-          "velocity_tolerance": [
-            94.2478,
-            94.2478,
-            94.2478,
-            94.2478,
-            94.2478,
-            94.2478,
-            0.25
-          ],
-          "effort_tolerance": [
-            1.75,
-            1.75,
-            1.75,
-            1.75,
-            1.75,
-            1.75,
-            300.0
-          ]
+          "gripper_force_feedback": true
         },
         "glide_right": {
           "ip_address": "192.168.5.2",
@@ -87,34 +60,7 @@
           "gripper_feedback_offset": 6.5,
           "gripper_feedback_mode": "effort",
           "actuated": false,
-          "gripper_force_feedback": true,
-          "position_tolerance": [
-            0.7854,
-            0.7854,
-            0.7854,
-            0.7854,
-            0.7854,
-            0.7854,
-            0.005
-          ],
-          "velocity_tolerance": [
-            94.2478,
-            94.2478,
-            94.2478,
-            94.2478,
-            94.2478,
-            94.2478,
-            0.25
-          ],
-          "effort_tolerance": [
-            1.75,
-            1.75,
-            1.75,
-            1.75,
-            1.75,
-            1.75,
-            300.0
-          ]
+          "gripper_force_feedback": true
         },
         "follower_left": {
           "ip_address": "192.168.1.4",
@@ -144,33 +90,6 @@
             1.5359,
             3.1067,
             null
-          ],
-          "position_tolerance": [
-            0.2,
-            0.2,
-            0.2,
-            0.4,
-            0.4,
-            0.4,
-            0.005
-          ],
-          "velocity_tolerance": [
-            1.5708,
-            1.5708,
-            1.5708,
-            2.3562,
-            2.3562,
-            2.3562,
-            0.0625
-          ],
-          "effort_tolerance": [
-            6.75,
-            24.25,
-            6.75,
-            1.75,
-            1.75,
-            1.75,
-            300.0
           ]
         },
         "follower_right": {
@@ -201,33 +120,6 @@
             1.5359,
             3.1067,
             null
-          ],
-          "position_tolerance": [
-            0.2,
-            0.2,
-            0.2,
-            0.4,
-            0.4,
-            0.4,
-            0.005
-          ],
-          "velocity_tolerance": [
-            1.5708,
-            1.5708,
-            1.5708,
-            2.3562,
-            2.3562,
-            2.3562,
-            0.0625
-          ],
-          "effort_tolerance": [
-            6.75,
-            24.25,
-            6.75,
-            1.75,
-            1.75,
-            1.75,
-            300.0
           ]
         }
       },
