@@ -42,6 +42,7 @@ from app.sessions import (
     Session,
     force_session_to_error,
     get_session,
+    list_sessions,
     reset_to_pending,
     set_current_episode,
     transition_session,
@@ -256,10 +257,35 @@ class _Runner:
 
 
 # In-memory registry of running recorders, keyed by session id. A uvicorn
-# restart clears this map — sessions whose status="active" but no entry
-# here are zombies. (Cleanup of zombies is a future TODO.)
+# restart clears this map — sessions whose status="active" but no entry here
+# are orphans. `reconcile_orphaned_sessions()` below cleans those up, along
+# with the nastier case where the entry survives but its process is dead.
 _runners: dict[str, _Runner] = {}
 _lock = threading.Lock()
+
+# Session ids whose crash transitions have already run. `_finalize_crash` can
+# now be reached from two directions — the pump thread on EOF, and the
+# reconciler when it notices a dead process — and they race. Without this, a
+# pump that wakes up long after the reconciler has already recovered the
+# session would flip a session the operator had since cleared straight back to
+# error.
+_finalized: set[str] = set()
+_finalized_lock = threading.Lock()
+
+
+def _claim_finalize(session_id: str) -> bool:
+    """True if this caller is the one that gets to run crash finalisation."""
+    with _finalized_lock:
+        if session_id in _finalized:
+            return False
+        _finalized.add(session_id)
+        return True
+
+
+def _release_finalize(session_id: str) -> None:
+    """Forget a finalised session so a later run of it can crash again."""
+    with _finalized_lock:
+        _finalized.discard(session_id)
 
 
 def start_recording(session: Session) -> None:
@@ -281,6 +307,9 @@ def start_recording(session: Session) -> None:
             raise RecorderError(
                 f"Session '{session.id}' already has a running recorder"
             )
+    # A previous run of this same session may have crashed and been finalised.
+    # Re-arm, or this run's crash would be silently swallowed as a duplicate.
+    _release_finalize(session.id)
 
     system = get_system(session.system_id)
     if system is None:
@@ -1060,6 +1089,11 @@ def _finalize_crash(
       - flip hw_status → red badge so the gate banner forces a re-test
       - emit a lifecycle error event on the WS bus
     """
+    # First caller wins. The pump thread and the reconciler can both get here
+    # for the same session, and the loser must not re-flip a session the
+    # operator may already have cleared.
+    if not _claim_finalize(runner.session_id):
+        return
     # Prefer the SDK's own multi-line diagnostics (motor detail + critical
     # summary + troubleshooting URL) so the operator sees the full, verbatim
     # fault rather than a single interpreted line. Fall back to the sentinel
@@ -1083,6 +1117,73 @@ def _finalize_crash(
         "type": "lifecycle",
         "data": {"event": "error", "message": full_msg},
     })
+
+
+def reconcile_orphaned_sessions() -> list[str]:
+    """Force sessions that claim to be recording, but aren't, into `error`.
+
+    Two ways a session ends up lying about its status:
+
+    * **uvicorn restarted.** `_runners` is in-memory, so every entry is gone
+      while the DB still says `active`.
+    * **The recorder died but its pump thread never noticed.** The pump blocks
+      on `for line in proc.stdout`, which only ends at EOF — and EOF needs
+      *every* holder of the pipe's write end to close it. A SIGKILLed child
+      becomes a zombie holding nothing, but any grandchild the SDK spawned
+      inherited that descriptor and keeps it open, so EOF never arrives, the
+      `finally` that calls `proc.wait()` never runs, and `_finalize_crash` is
+      never reached. Seen on rivet-02: three pump threads parked in
+      `pipe_read`, the recorder defunct for 14 minutes, session still `active`.
+
+    Neither case self-heals, and the operator has no way out from the UI:
+    `/clear-error` refuses anything that is not already `error`, and `/start`
+    refuses while a session is active. The session is simply wedged.
+
+    Returns the ids it recovered. Cheap and safe to call often — it does
+    nothing when every active session has a live process.
+    """
+    recovered: list[str] = []
+    for session in [s for s in list_sessions() if s.status == "active"]:
+        with _lock:
+            runner = _runners.get(session.id)
+
+        if runner is None:
+            msg = (
+                "Recorder is no longer running (the web server restarted while "
+                "this session was recording). The session was left marked "
+                "active; recovering it so it can be cleared and resumed."
+            )
+            force_session_to_error(session.id, msg)
+            hw_status.set_status(session.system_id, "error", msg)
+            bus.publish(session.id, {
+                "type": "lifecycle",
+                "data": {"event": "error", "message": msg},
+            })
+            recovered.append(session.id)
+            print(f"[recorder] reconciled orphan {session.id[:8]}: no runner",
+                  flush=True)
+            continue
+
+        # poll() is deliberate: it reaps the zombie as a side effect, which is
+        # what the never-reached proc.wait() would have done.
+        rc = runner.proc.poll()
+        if rc is None:
+            continue  # genuinely alive, leave it alone
+
+        print(f"[recorder] reconciled orphan {session.id[:8]}: process exited "
+              f"(code={rc}) but the pump never finalised", flush=True)
+        # Reuses the normal crash path, so the operator gets the real fault
+        # text from last_lines rather than a generic message. Idempotent, so
+        # if the pump ever does wake up it will not redo any of this.
+        _finalize_crash(runner, rc, None)
+        with _lock:
+            _runners.pop(session.id, None)
+        recovered.append(session.id)
+        # The pump thread is left parked on its dead pipe. Closing stdout from
+        # here would be a use-after-free risk while another thread is blocked
+        # reading it, and one stranded thread per crash is the cheaper leak.
+
+    return recovered
 
 
 def _discard_partial_episode(runner: _Runner) -> None:

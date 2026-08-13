@@ -42,6 +42,7 @@ from app.recorder import (
     RecorderError,
     clear_session_headless,
     mark_session_headless,
+    reconcile_orphaned_sessions,
     set_preview,
     signal_emergency_stop,
     signal_next,
@@ -686,7 +687,15 @@ async def recover_hardware_endpoint(system_id: str) -> dict[str, Any]:
 
 @app.get("/api/sessions")
 def list_all_sessions() -> list[Session]:
-    """Return all sessions, newest first."""
+    """Return all sessions, newest first.
+
+    Reconciles first, so a session whose recorder has died is reported as
+    `error` rather than a phantom `active`. Hooked here because it is the
+    endpoint the UI polls continuously — the list the operator is looking at
+    is exactly where a lie about "still recording" has to be corrected, and it
+    means recovery needs no separate timer or daemon.
+    """
+    reconcile_orphaned_sessions()
     return list_sessions()
 
 
