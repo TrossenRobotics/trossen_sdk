@@ -40,8 +40,10 @@ harmful. 437/437 tests pass.
 
 ## 2. ZED will not open after a crash
 
-- [ ] Retry the open with backoff
-- [ ] Close cameras on every exit path
+- [x] Retry the open with backoff
+- [x] Close cameras when the recorder is asked to stop
+- [ ] Verify on a rig (kill a recorder mid-run, start the next session)
+- [ ] Same `close()` for the RealSense and OpenCV components
 
 **Problem.** `sl::Camera::close()` is only called from `~ZedCameraComponent`, so
 SIGKILL and `std::terminate` skip it. Argus keeps the camera allocated to the
@@ -58,9 +60,28 @@ header note reads *"make sure your camera is not already used by another
 process"*. Nothing retries, so one failed open fails the whole bootstrap. In one
 window rivet-02 logged 6 opens and 0 closes.
 
-**Fix.** Retry the open on the transient codes with backoff (and widen the
-bootstrap budget to match, or the parent SIGKILLs the child mid-retry). Plus an
-explicit `close()` that runs on SIGTERM instead of only on destruction.
+**Fix**, in two halves — because one of them cannot cover every case.
+
+*Give the camera back.* `HardwareComponent::close()` is now a virtual any
+component can implement, `ZedCameraComponent` implements it, and the destructor
+just calls it. The recorder handles SIGTERM: it aborts the in-flight episode,
+lets the loop shut down normally, and releases every device in the registry —
+with an 8s deadline that releases and exits anyway if the wind-down wedges. The
+parent now sends SIGTERM and waits 12s before killing, where it used to SIGKILL
+on sight of a `[critical]` line. A `terminate called` line is still killed
+immediately: that process is already inside abort() and no handler will run.
+
+*Survive one that wasn't given back.* SIGKILL and abort still exist, so
+`configure()` retries the open 4 times at 2s intervals on the codes that clear
+themselves (`CANNOT_START_CAMERA_STREAM`, `CAMERA_FAILED_TO_SETUP`,
+`CAMERA_DETECTION_ISSUE`, `CAMERA_NOT_DETECTED`, `CAMERA_REBOOTING`) and fails
+fast on the ones that never will. Both knobs are per-camera config
+(`open_retries`, `open_retry_delay_s`). The bring-up budget grew by 8s per
+camera to match — without that the parent kills the child in the middle of the
+retry that would have worked, which reads as "the camera failed".
+
+A `DRIVER_FAILURE` now says to restart nvargus-daemon, and a busy camera says
+so in words rather than only as an error code.
 
 ---
 

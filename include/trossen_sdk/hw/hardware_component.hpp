@@ -123,6 +123,27 @@ public:
    */
   virtual bool is_episode_lifecycle_enabled() const { return false; }
 
+  /**
+   * @brief Release the underlying device now, instead of at destruction.
+   *
+   * Destruction is not a teardown path a host process can rely on: a SIGKILL or a
+   * `std::terminate` runs no destructors at all, and even an orderly exit only
+   * releases hardware once the last shared_ptr goes — which a Python host can hold
+   * long past the point it stopped recording. A device left open is a device the
+   * next process cannot have: an abruptly-killed recorder used to leave its ZED
+   * cameras allocated to the dead client, and the next session then failed to open
+   * them with CANNOT_START_CAMERA_STREAM.
+   *
+   * So this is the seam a signal handler can call. Implementations must be
+   * idempotent and safe to call on an unconfigured component, since the caller
+   * generally cannot know how far bring-up got. Destructors call it too, making
+   * the explicit call an early release rather than a separate lifecycle.
+   *
+   * Default is a no-op: hardware with nothing exclusive to give back need not
+   * override it.
+   */
+  virtual void close() {}
+
 protected:
   /// @brief Component identifier
   std::string identifier_;

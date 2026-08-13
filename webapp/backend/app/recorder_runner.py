@@ -882,6 +882,94 @@ def _block_signals_on_this_thread() -> Any:
         signal.pthread_sigmask(signal.SIG_SETMASK, old)
 
 
+# How long the graceful wind-down gets after a SIGTERM before we stop waiting,
+# release the hardware ourselves and exit. Long enough for the loop to discard
+# the in-flight episode and for mgr.shutdown() to walk the arms back to rest;
+# short enough that the parent's own kill timer (recorder.py `_TERM_GRACE_S`)
+# does not fire first and take the cameras down with it.
+_TERM_GRACE_S = 8.0
+
+# Exit code for "terminated by signal, but we cleaned up on the way out". The
+# shell convention for SIGTERM, so the parent reads it as a signal death rather
+# than an SDK failure.
+_TERM_EXIT_CODE = 143
+
+
+def _release_hardware_now() -> None:
+    """Close every active device immediately. Idempotent, never raises.
+
+    Destruction is the normal release path, and it is exactly the path a signal
+    death skips. A camera left open is a camera the next session cannot have:
+    an abruptly-killed recorder used to leave its ZEDs allocated to the dead
+    client, and the next start then failed with CANNOT_START_CAMERA_STREAM. So
+    close every component explicitly first, then clear the registry that owns
+    them, rather than trusting the interpreter to get there.
+    """
+    try:
+        active = ts.ActiveHardwareRegistry.get_all()
+    except Exception:
+        active = {}
+    # get_all() is a map of id -> component; iterating it directly walks the ids.
+    components = list(active.values()) if isinstance(active, dict) else list(active)
+    for component in components:
+        try:
+            component.close()
+        except Exception as e:  # one bad device must not strand the rest
+            print(f"[recorder-runner] close failed: {e}", flush=True)
+    try:
+        ts.ActiveHardwareRegistry.clear()
+    except Exception:
+        pass
+
+
+def _install_termination_handler(
+    stop_event: threading.Event,
+    abort_event: threading.Event,
+) -> None:
+    """Make SIGTERM/SIGINT wind the session down instead of killing it dead.
+
+    Without this the parent's `terminate()` lands on Python's default handler,
+    which ends the process where it stands: no destructors, no
+    `mgr.shutdown()`, arms left powered and cameras left open for whoever
+    starts next. Here the signal does what the `abort` control message does —
+    discard the in-flight episode (it ends mid-motion, so it is not data) and
+    let the loop exit through its normal teardown.
+
+    A wind-down can wedge, though, and a handler that only asks nicely is no
+    better than none when it does. So the first signal also arms a deadline
+    thread that releases the hardware and exits regardless, and a second signal
+    skips straight to that.
+    """
+    forcing = threading.Event()
+
+    def force_exit() -> None:
+        if forcing.is_set():
+            return
+        forcing.set()
+        _release_hardware_now()
+        # os._exit, not sys.exit: this can run from the deadline thread, where
+        # a SystemExit would only end that thread and leave the process wedged
+        # exactly as it was.
+        os._exit(_TERM_EXIT_CODE)
+
+    def handler(signum: int, _frame: Any) -> None:
+        if forcing.is_set() or stop_event.is_set():
+            # Already asked once and it did not take. Stop being polite.
+            force_exit()
+            return
+        print(f"[recorder-runner] signal {signum} — winding down "
+              f"(hardware released in {_TERM_GRACE_S:g}s regardless)",
+              flush=True)
+        abort_event.set()
+        stop_event.set()
+        deadline = threading.Timer(_TERM_GRACE_S, force_exit)
+        deadline.daemon = True
+        deadline.start()
+
+    signal.signal(signal.SIGTERM, handler)
+    signal.signal(signal.SIGINT, handler)
+
+
 def _emit(payload: dict[str, Any]) -> None:
     """Write one JSON-encoded event line to stdout, flushed immediately."""
     print(json.dumps(payload), flush=True)
@@ -2402,6 +2490,12 @@ def main() -> int:
     summon_event = threading.Event()
     abort_event = threading.Event()
     shutdown_event = threading.Event()
+
+    # After bootstrap, because bootstrap runs with every signal blocked on this
+    # thread (see _block_signals_on_this_thread) — a handler installed earlier
+    # could not run there anyway. That window belongs to the parent's bootstrap
+    # timeout instead.
+    _install_termination_handler(stop_event, abort_event)
 
     stdin_thread = threading.Thread(
         target=_stdin_reader,

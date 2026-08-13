@@ -7,9 +7,12 @@
  * int overload of InputType::setFromSerialNumber() (standard for ZED cameras).
  */
 
+#include <algorithm>
+#include <chrono>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 #include "trossen_sdk/hw/camera/zed_camera_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
@@ -67,10 +70,32 @@ sl::RESOLUTION ZedCameraComponent::parse_resolution(const std::string& res_str) 
 // ─────────────────────────────────────────────────────────────
 
 ZedCameraComponent::~ZedCameraComponent() {
+  close();
+}
+
+void ZedCameraComponent::close() {
   if (camera_ && camera_->isOpened()) {
     camera_->close();
     std::cout << "[ZedCameraComponent] Closed camera " << get_identifier()
               << " (S/N " << serial_number_ << ")\n";
+  }
+}
+
+bool ZedCameraComponent::is_transient_open_error(sl::ERROR_CODE err) {
+  switch (err) {
+    // The camera is there but not yet ours: still allocated to a client the
+    // driver has not reaped, mid-reboot, or enumerating. All clear on their own.
+    case sl::ERROR_CODE::CANNOT_START_CAMERA_STREAM:
+    case sl::ERROR_CODE::CAMERA_FAILED_TO_SETUP:
+    case sl::ERROR_CODE::CAMERA_DETECTION_ISSUE:
+    case sl::ERROR_CODE::CAMERA_NOT_DETECTED:
+    case sl::ERROR_CODE::CAMERA_REBOOTING:
+      return true;
+    // Everything else — no GPU, bad resolution, SDK mismatch, DRIVER_FAILURE —
+    // describes a rig that is misconfigured or a driver that needs restarting.
+    // Waiting cannot fix any of them, and retrying only delays the real message.
+    default:
+      return false;
   }
 }
 
@@ -91,6 +116,9 @@ void ZedCameraComponent::configure(const nlohmann::json& config) {
   int requested_fps = config.value("fps", 0);
   use_depth_ = config.value("use_depth", false);
   depth_mode_str_ = config.value("depth_mode", std::string("NONE"));
+  open_retries_ = std::max(0, config.value("open_retries", kDefaultOpenRetries));
+  open_retry_delay_s_ =
+    std::max(0.0, config.value("open_retry_delay_s", kDefaultOpenRetryDelayS));
 
   // Build InitParameters
   sl::InitParameters init;
@@ -112,13 +140,42 @@ void ZedCameraComponent::configure(const nlohmann::json& config) {
   }
   init.input.setFromSerialNumber(sn_uint);
 
-  // Open camera
+  // Open the camera, retrying while the failure is one that clears itself.
+  //
+  // The camera is dropped and rebuilt between attempts rather than reused: a
+  // failed open() leaves the handle in an unspecified state, and the ZED SDK's
+  // own guidance for a busy device is a fresh open, not a second call on the
+  // same object.
   camera_ = std::make_shared<sl::Camera>();
   sl::ERROR_CODE err = camera_->open(init);
+  for (int attempt = 1; attempt <= open_retries_ && err != sl::ERROR_CODE::SUCCESS;
+       ++attempt)
+  {
+    if (!is_transient_open_error(err)) break;
+    std::cerr << "[ZedCameraComponent] " << get_identifier() << " (S/N "
+              << serial_number_ << ") open failed: " << sl::toString(err)
+              << " — retrying in " << open_retry_delay_s_ << "s (" << attempt
+              << "/" << open_retries_ << ")\n";
+    std::this_thread::sleep_for(
+      std::chrono::duration<double>(open_retry_delay_s_));
+    camera_ = std::make_shared<sl::Camera>();
+    err = camera_->open(init);
+  }
   if (err != sl::ERROR_CODE::SUCCESS) {
+    std::string hint;
+    if (err == sl::ERROR_CODE::CANNOT_START_CAMERA_STREAM) {
+      // Naming the likely cause matters here: the raw code reads like broken
+      // hardware, and the operator's actual problem is almost always a previous
+      // recorder that died holding this camera.
+      hint =
+        " (the camera is still held by another process — usually a recorder "
+        "that crashed without releasing it)";
+    } else if (err == sl::ERROR_CODE::DRIVER_FAILURE) {
+      hint = " (GMSL driver failure — restart nvargus-daemon on the rig)";
+    }
     throw std::runtime_error(
       "ZedCameraComponent: Failed to open ZED camera S/N " + serial_number_ +
-      ": " + std::string(sl::toString(err).c_str()));
+      ": " + std::string(sl::toString(err).c_str()) + hint);
   }
 
   // Read back negotiated resolution

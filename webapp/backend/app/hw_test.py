@@ -60,6 +60,13 @@ _TEST_TIMEOUT_PER_CAMERA_S = 2.0
 # AGX Orin, a warm open is single-digit seconds; 2s/camera failed the test while
 # the cameras were coming up perfectly well.
 _TEST_TIMEOUT_PER_DEPTH_CAMERA_S = 30.0
+# Every camera also carries its open-retry allowance. A camera still held by a
+# crashed predecessor is retried rather than failed (ZedCameraComponent
+# kDefaultOpenRetries x kDefaultOpenRetryDelayS = 4 x 2s), and a budget that
+# does not cover those retries kills the child in the middle of them — which
+# reads as "the camera failed" while the retry that would have worked never
+# got to run. Paid per camera because the opens are serial.
+_TEST_TIMEOUT_CAMERA_OPEN_RETRY_S = 8.0
 # A swerve base costs its CAN bring-up plus a full re-home of the pivot
 # modules, which TrossenBaseComponent.configure() performs on every bring-up.
 # Homing is mechanical (each pivot rotates until it finds its hall sensor) and
@@ -136,6 +143,7 @@ def compute_bringup_budget(config: dict[str, Any] | None) -> float:
         + _TEST_TIMEOUT_PER_ARM_S * n_arms
         + _TEST_TIMEOUT_PER_CAMERA_S * n_cameras
         + _TEST_TIMEOUT_PER_DEPTH_CAMERA_S * n_depth_cameras
+        + _TEST_TIMEOUT_CAMERA_OPEN_RETRY_S * (n_cameras + n_depth_cameras)
         + _TEST_TIMEOUT_PER_BASE_S * n_base
     )
     return max(_TEST_TIMEOUT_FLOOR_S, min(_TEST_TIMEOUT_CEILING_S, budget))

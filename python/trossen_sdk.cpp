@@ -362,7 +362,12 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def(py::init<const std::string&>(), py::arg("identifier"))
     .def("get_identifier", &HardwareComponent::get_identifier)
     .def("get_type", &HardwareComponent::get_type)
-    .def("get_info", &HardwareComponent::get_info);
+    .def("get_info", &HardwareComponent::get_info)
+    .def("close", &HardwareComponent::close,
+         py::call_guard<py::gil_scoped_release>(),
+         "Release the underlying device now rather than at destruction. "
+         "Idempotent. This is what a signal handler calls so a camera is not "
+         "left allocated to a process that is about to die.");
 
   // ── Glide handle input ───────────────────────────────────────────────────
   // Read-side only. Registering a reader stays in C++ (glide_arm_input owns the

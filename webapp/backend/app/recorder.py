@@ -92,8 +92,16 @@ def _bootstrap_timeout_for(config: dict[str, Any] | None) -> float:
 # so user-facing behaviour is unchanged.
 _GRACEFUL_STOP_TIMEOUT_S = 30.0
 
-# After SIGTERM, how long until SIGKILL.
-_KILL_TIMEOUT_S = 5.0
+# How long a child gets, after we signal it, to release its hardware before we
+# kill it. Must exceed the child's own `_TERM_GRACE_S` (recorder_runner) or we
+# would kill it mid-cleanup — precisely the failure this exists to prevent — so
+# it is that value plus room for the arms to reach rest.
+_TERM_GRACE_S = 12.0
+
+# After SIGTERM, how long until SIGKILL. The same budget: SIGTERM is now a
+# request to wind down and put the hardware away, not a formality before the
+# real kill, and 5s was not enough to finish it.
+_KILL_TIMEOUT_S = _TERM_GRACE_S
 
 # Orphan-recording watchdog. If every WebSocket client for an active recording
 # goes away and none returns within this grace window — and the operator did
@@ -926,6 +934,56 @@ def _wait_for_ready(
     )
 
 
+def _end_child_after_fault(runner: _Runner, line: str, tag: str) -> None:
+    """End a doomed child, giving it a chance to put its hardware down first.
+
+    An unrecoverable fault means this run is over, and we end it here rather
+    than waiting: the SDK logs the fault *before* the abort actually freezes the
+    process, and during that freeze no events reach the monitor, which keeps
+    animating a session that is already dead.
+
+    How we end it depends on what the line says, because the two markers
+    describe different states:
+
+    * `terminate called` — the process is already unwinding into abort(). No
+      handler will run, nothing can be saved, so kill it now.
+    * `[critical]` — the SDK is reporting a fault but the interpreter is still
+      alive and can still act. SIGTERM there reaches the child's handler, which
+      discards the in-flight episode, walks the arms back to rest and **closes
+      the cameras**. Skipping that step is what used to leave the ZEDs
+      allocated to a dead process, so the next session could not open them.
+
+    Either way a kill follows `_TERM_GRACE_S` later, so a child that ignores
+    the signal (or is too wedged to hear it) still dies.
+    """
+    already_aborting = "terminate called" in line.lower()
+    try:
+        if already_aborting:
+            print(f"{tag} fatal SDK fault detected — killing child to surface "
+                  f"the error now", flush=True)
+            runner.proc.kill()
+            return
+        print(f"{tag} fatal SDK fault detected — asking child to release its "
+              f"hardware ({_TERM_GRACE_S:g}s, then kill)", flush=True)
+        runner.proc.terminate()
+    except Exception as e:
+        print(f"{tag} signalling child after fatal fault failed: {e}", flush=True)
+        return
+
+    def _kill_if_still_up() -> None:
+        if runner.proc.poll() is None:
+            print(f"{tag} child did not exit after {_TERM_GRACE_S:g}s — killing",
+                  flush=True)
+            try:
+                runner.proc.kill()
+            except Exception:
+                pass
+
+    timer = threading.Timer(_TERM_GRACE_S, _kill_if_still_up)
+    timer.daemon = True
+    timer.start()
+
+
 def _run_reader(session_id: str, runner: _Runner) -> None:
     """Consume the child's stdout, translate events to DB + WS bus updates.
 
@@ -982,13 +1040,7 @@ def _run_reader(session_id: str, runner: _Runner) -> None:
                     fault_killed = True
                     if error_message is None:
                         error_message = line.strip()
-                    print(f"{tag} fatal SDK fault detected — killing child to "
-                          f"surface the error now", flush=True)
-                    try:
-                        runner.proc.kill()
-                    except Exception as e:
-                        print(f"{tag} kill after fatal fault failed: {e}",
-                              flush=True)
+                    _end_child_after_fault(runner, line, tag)
                 continue
 
             ptype = payload.get("type")

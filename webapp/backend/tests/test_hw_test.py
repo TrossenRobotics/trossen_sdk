@@ -6,6 +6,7 @@ device count (a flat 15s was falsely failing multi-arm rigs), and the later
 depth-camera and component-base terms.
 """
 from app.hw_test import (
+    _TEST_TIMEOUT_CAMERA_OPEN_RETRY_S as RETRY,
     _TEST_TIMEOUT_CEILING_S,
     _TEST_TIMEOUT_FLOOR_S,
     compute_bringup_budget,
@@ -36,19 +37,20 @@ def test_empty_config_uses_floor():
 
 
 def test_scales_with_device_count():
-    # base 10 + 7/arm + 2/camera
-    assert compute_bringup_budget(_system(n_arms=2, n_cameras=2)) == 28.0  # Solo
-    assert compute_bringup_budget(_system(n_arms=4, n_cameras=4)) == 46.0  # Stationary
+    # base 10 + 7/arm + (2 + open-retry allowance)/camera
+    assert compute_bringup_budget(_system(n_arms=2, n_cameras=2)) == 28.0 + 2 * RETRY
+    assert compute_bringup_budget(_system(n_arms=4, n_cameras=4)) == 46.0 + 4 * RETRY
 
 
 def test_base_adds_to_budget():
     # 10 + 4*7 + 3*2 + 33 (base: CAN bring-up + a full swerve re-home) = 77
-    assert compute_bringup_budget(_system(n_arms=4, n_cameras=3, base=True)) == 77.0
+    assert (compute_bringup_budget(_system(n_arms=4, n_cameras=3, base=True))
+            == 77.0 + 3 * RETRY)
 
 
 def test_few_devices_clamped_to_floor():
-    # 10 + 0 = 10 -> floored to 15
-    assert compute_bringup_budget(_system(n_arms=0, n_cameras=1)) == _TEST_TIMEOUT_FLOOR_S
+    # 10 + 0 arms = 10 -> floored to 15
+    assert compute_bringup_budget(_system(n_arms=0, n_cameras=0)) == _TEST_TIMEOUT_FLOOR_S
 
 
 def test_many_devices_clamped_to_ceiling():
@@ -86,8 +88,8 @@ class TestDepthCameras:
         depth = compute_bringup_budget(
             {"hardware": {"arms": {}, "cameras": _zeds(3, use_depth=True)}}
         )
-        assert colour == 16.0            # 10 + 3*2
-        assert depth == 100.0            # 10 + 3*30
+        assert colour == 16.0 + 3 * RETRY    # 10 + 3*2
+        assert depth == 100.0 + 3 * RETRY    # 10 + 3*30
         assert depth > colour
 
     def test_the_real_workbench_with_depth_clears_the_old_ceiling(self):
@@ -95,7 +97,7 @@ class TestDepthCameras:
         # clamped this below what the rig needs, which is the bug.
         cfg = _system(n_arms=4)
         cfg["hardware"]["cameras"] = _zeds(3, use_depth=True)
-        assert compute_bringup_budget(cfg) == 128.0
+        assert compute_bringup_budget(cfg) == 128.0 + 3 * RETRY
         assert compute_bringup_budget(cfg) > 90.0
 
     def test_depth_is_only_charged_for_zed(self):
@@ -109,7 +111,7 @@ class TestDepthCameras:
                 ],
             }
         }
-        assert compute_bringup_budget(cfg) == _TEST_TIMEOUT_FLOOR_S  # 10+2 -> floor
+        assert compute_bringup_budget(cfg) == 10.0 + 2.0 + RETRY
 
     def test_a_mixed_camera_list_charges_each_correctly(self):
         cfg = {
@@ -118,11 +120,26 @@ class TestDepthCameras:
                 "cameras": _zeds(1, use_depth=True) + _zeds(2, use_depth=False),
             }
         }
-        assert compute_bringup_budget(cfg) == 10.0 + 30.0 + 2 * 2.0  # 44
+        assert compute_bringup_budget(cfg) == 10.0 + 30.0 + 2 * 2.0 + 3 * RETRY
 
     def test_absent_use_depth_is_not_charged_as_depth(self):
         cfg = {"hardware": {"arms": {}, "cameras": [{"type": "zed_camera"}]}}
-        assert compute_bringup_budget(cfg) == _TEST_TIMEOUT_FLOOR_S  # 10+2 -> floor
+        assert compute_bringup_budget(cfg) == 10.0 + 2.0 + RETRY
+
+    def test_every_camera_carries_its_open_retry_allowance(self):
+        # The retry is what saves a start when a crashed predecessor is still
+        # holding the camera, so the budget has to cover it or the child is
+        # killed mid-retry. Charged per camera, depth or not, because the opens
+        # are serial.
+        one = compute_bringup_budget(
+            {"hardware": {"arms": {f"a{i}": {} for i in range(4)},
+                          "cameras": _zeds(1, use_depth=False)}}
+        )
+        two = compute_bringup_budget(
+            {"hardware": {"arms": {f"a{i}": {} for i in range(4)},
+                          "cameras": _zeds(2, use_depth=False)}}
+        )
+        assert two - one == 2.0 + RETRY
 
 
 class TestComponentBase:
@@ -137,7 +154,9 @@ class TestComponentBase:
         cfg["hardware"]["components"] = [
             {"id": "rivet_base", "type": "trossen_base"},
         ]
-        assert compute_bringup_budget(cfg) == 47.0  # same as the legacy shape
+        # Same as the legacy `hardware.base` shape above.
+        assert (compute_bringup_budget(cfg)
+                == compute_bringup_budget(_system(n_arms=4, n_cameras=3, base=True)))
 
     def test_non_base_components_are_not_counted(self):
         cfg = _system(n_arms=4, n_cameras=3)
@@ -146,7 +165,7 @@ class TestComponentBase:
             {"id": "base_leader", "type": "glide_base"},
             {"id": "session_control", "type": "glide_session_control"},
         ]
-        assert compute_bringup_budget(cfg) == 44.0  # no base term
+        assert compute_bringup_budget(cfg) == 44.0 + 3 * RETRY  # no base term
 
     def test_malformed_components_do_not_crash(self):
         cfg = _system(n_arms=1)
@@ -170,5 +189,5 @@ class TestRecorderSharesTheBudget:
 
         cfg = _system(n_arms=4)
         cfg["hardware"]["cameras"] = _zeds(3, use_depth=True)
-        assert _bootstrap_timeout_for(cfg) == 128.0
+        assert _bootstrap_timeout_for(cfg) == 128.0 + 3 * RETRY
         assert _bootstrap_timeout_for(cfg) > _BOOTSTRAP_TIMEOUT_S

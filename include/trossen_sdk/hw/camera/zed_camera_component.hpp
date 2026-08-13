@@ -35,6 +35,21 @@ namespace trossen::hw::camera {
  */
 class ZedCameraComponent : public HardwareComponent {
 public:
+  /// @brief Extra open() attempts, past the first, before configure() gives up.
+  ///
+  /// A recorder killed mid-session leaves its cameras allocated to a client the
+  /// driver has not finished reaping, and the next open then fails with
+  /// CANNOT_START_CAMERA_STREAM even though the hardware is fine. The allocation
+  /// clears on its own once the dead client's socket is torn down, so the useful
+  /// response is to wait and ask again rather than fail the whole session start.
+  /// Four retries at the delay below spans ~8s, comfortably past the reap in
+  /// every case measured on the Rivets, while still surfacing a genuinely absent
+  /// camera inside the bring-up budget.
+  static constexpr int kDefaultOpenRetries = 4;
+
+  /// @brief Seconds between open() attempts.
+  static constexpr double kDefaultOpenRetryDelayS = 2.0;
+
   /**
    * @brief Constructor
    *
@@ -63,6 +78,14 @@ public:
    * @throws std::runtime_error on open failure
    */
   void configure(const nlohmann::json& config) override;
+
+  /**
+   * @brief Close the camera now, releasing it back to the driver.
+   *
+   * Idempotent, and safe before configure(). Called by the destructor, so an
+   * explicit call is an early release rather than a separate teardown.
+   */
+  void close() override;
 
   std::string get_type() const override { return "zed_camera"; }
   nlohmann::json get_info() const override;
@@ -98,6 +121,9 @@ private:
   /// @brief Parse a resolution string to sl::RESOLUTION
   static sl::RESOLUTION parse_resolution(const std::string& res_str);
 
+  /// @brief Whether a failed open() is worth trying again, or is final.
+  static bool is_transient_open_error(sl::ERROR_CODE err);
+
   std::shared_ptr<sl::Camera> camera_;
   std::string serial_number_{"unspecified"};
   int width_{0};
@@ -105,6 +131,13 @@ private:
   int fps_{0};
   bool use_depth_{false};
   std::string depth_mode_str_{"NONE"};
+
+  /// @brief Extra open() attempts after the first, for a camera a dead process
+  /// has not finished releasing. See kDefaultOpenRetries.
+  int open_retries_{kDefaultOpenRetries};
+
+  /// @brief Seconds between those attempts.
+  double open_retry_delay_s_{kDefaultOpenRetryDelayS};
 };
 
 }  // namespace trossen::hw::camera
