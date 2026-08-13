@@ -43,7 +43,8 @@ harmful. 437/437 tests pass.
 - [x] Retry the open with backoff
 - [x] Close cameras when the recorder is asked to stop
 - [x] Verified on rivet-02 (2026-08-13)
-- [ ] Deploy + verify on rivet-01
+- [x] Deployed to rivet-01 (2026-08-13) — recovers, though the retry did not
+      need to fire there; see below
 - [ ] Same `close()` for the RealSense and OpenCV components
 
 **Problem.** `sl::Camera::close()` is only called from `~ZedCameraComponent`, so
@@ -102,6 +103,14 @@ originally-observed code would have failed this test.
 The killed session also finalised at 18:33:36, in the same second as the kill,
 as `error / exited with code -9`. That is the spd-say fix: EOF now arrives, so
 the pump wakes and the session closes itself instead of hanging as `active`.
+
+**rivet-01**, same test against the full config (4 arms + base + 3 ZEDs),
+recovered with **no retry needed**: killed at 18:53:29, `camera_main opened` at
+18:53:39. The difference is bootstrap order — arms connect before cameras, and
+those ~10s are enough for Argus to finish reaping the dead client, so the race
+never opens. A cameras-only config reaches `open()` about 2s in and lands
+squarely in it. Worth remembering when reproducing this: **a config that brings
+up arms first will often not show the bug at all**.
 
 ---
 
