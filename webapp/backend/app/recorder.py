@@ -234,8 +234,14 @@ def _persist_rollup(runner: _Runner, payload: dict[str, Any]) -> None:
     try:
         sess = get_session(runner.session_id)
         free = 0
+        # `runner.mcap_root` comes from the backend config and is empty for a dry
+        # run, which uses the null backend and writes nowhere. Disk headroom is a
+        # property of the machine rather than of this run, so fall back to the
+        # configured dataset root — otherwise every dry run reports 0 bytes free,
+        # which reads as a full disk rather than as "not applicable".
+        root = runner.mcap_root or load_dataset_settings().mcap_root
         try:
-            free = shutil.disk_usage(runner.mcap_root).free if runner.mcap_root else 0
+            free = shutil.disk_usage(os.path.expanduser(root)).free if root else 0
         except OSError:
             # A missing or unmounted dataset root is worth a row without the disk
             # figure, not a lost row.
