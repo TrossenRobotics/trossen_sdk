@@ -42,7 +42,8 @@ harmful. 437/437 tests pass.
 
 - [x] Retry the open with backoff
 - [x] Close cameras when the recorder is asked to stop
-- [ ] Verify on a rig (kill a recorder mid-run, start the next session)
+- [x] Verified on rivet-02 (2026-08-13)
+- [ ] Deploy + verify on rivet-01
 - [ ] Same `close()` for the RealSense and OpenCV components
 
 **Problem.** `sl::Camera::close()` is only called from `~ZedCameraComponent`, so
@@ -82,6 +83,25 @@ retry that would have worked, which reads as "the camera failed".
 
 A `DRIVER_FAILURE` now says to restart nvargus-daemon, and a busy camera says
 so in words rather than only as an error code.
+
+**Verified on rivet-02**, 2026-08-13. `kill -9` on a recorder holding three
+ZEDs, next session started the same second:
+
+```
+18:33:36  killed recorder pid=6750
+18:33:38  camera_main (S/N 56066260) open failed: CAMERA NOT DETECTED — retrying in 2s (1/4)
+18:33:45  camera_main opened: 1920x1200 @ 30 FPS
+18:33:56  all three open, session active
+```
+
+One retry was enough. Note the code was `CAMERA_NOT_DETECTED`, not the
+`CANNOT_START_CAMERA_STREAM` seen in the original failures — a camera mid-reap
+can report either, so the retry set has to cover both. Retrying only the
+originally-observed code would have failed this test.
+
+The killed session also finalised at 18:33:36, in the same second as the kill,
+as `error / exited with code -9`. That is the spd-say fix: EOF now arrives, so
+the pump wakes and the session closes itself instead of hanging as `active`.
 
 ---
 
