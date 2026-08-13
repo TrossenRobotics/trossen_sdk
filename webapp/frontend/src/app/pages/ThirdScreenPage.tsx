@@ -2,7 +2,8 @@
  * Third screen — the cameras, as large as the display allows.
  *
  * LAYOUTS: `single` (one camera, the original behaviour), `row` (left | centre |
- * right across), and `stack` (the two side cameras on top, centre beneath).
+ * right across), `stack` (the two side cameras on top, centre spanning beneath)
+ * and `pair` (just left and right, for when the centre view is not the point).
  * Chosen the same way the camera is — `?layout=` pins it for a kiosk, otherwise
  * localStorage remembers the last press. Grid modes cost one MJPEG stream per
  * tile, which is why the strip also carries an FPS control: three feeds at 15
@@ -80,12 +81,13 @@ const LAYOUT_STORAGE_KEY = 'thirdScreenLayout';
  * cost by the number of tiles — on the Pi kiosk that is the difference between
  * comfortable and not. That is what the FPS control below is for.
  */
-type Layout = 'single' | 'row' | 'stack';
-const LAYOUTS: readonly Layout[] = ['single', 'row', 'stack'];
+type Layout = 'single' | 'row' | 'stack' | 'pair';
+const LAYOUTS: readonly Layout[] = ['single', 'row', 'stack', 'pair'];
 const LAYOUT_LABEL: Record<Layout, string> = {
   single: 'SINGLE',
   row: 'ROW',
   stack: '2 + 1',
+  pair: 'L + R',
 };
 
 function isLayout(v: string | null): v is Layout {
@@ -98,26 +100,51 @@ function isLayout(v: string | null): v is Layout {
 const FPS_CHOICES = [1, 5, 10, 15] as const;
 
 /**
- * Sort camera ids into [left, center, right] for the grid layouts.
+ * Work out which camera is left, centre and right.
  *
  * Ids are stream ids chosen per rig (`camera_left`, `cam_high`, `left_wrist`),
  * so this matches on the words rather than assuming the Rivet's exact naming.
- * Anything that names neither side is a candidate for the centre slot, and if
- * the guesses come up short we fall back to declaration order — a grid showing
- * the right feeds in a debatable order beats a grid with holes in it.
+ * Anything naming neither side is a candidate for the centre slot; a fourth
+ * camera lands in `rest` and is still shown rather than silently dropped.
  */
-function arrangeTiles(cameras: string[]): string[] {
-  if (cameras.length <= 1) return cameras;
+function classify(cameras: string[]) {
   const has = (id: string, word: string) => new RegExp(`(^|[_-])${word}([_-]|$)`, 'i').test(id);
   const left = cameras.find(c => has(c, 'left'));
   const right = cameras.find(c => has(c, 'right'));
-  const middle = cameras.filter(c => c !== left && c !== right);
-  const center = middle[0];
-  const ordered = [left, center, right].filter((c): c is string => Boolean(c));
-  // Anything not placed (a fourth camera, or two unclassifiable ones) still gets
-  // shown rather than silently dropped.
-  const rest = cameras.filter(c => !ordered.includes(c));
-  return [...ordered, ...rest];
+  const center = cameras.find(c => c !== left && c !== right);
+  const rest = cameras.filter(c => c !== left && c !== right && c !== center);
+  return { left, center, right, rest };
+}
+
+/**
+ * The tiles a layout shows, in render order, plus which one spans a full row.
+ *
+ * Order is per-layout rather than one fixed arrangement, because `row` and
+ * `stack` disagree about where the centre camera goes: across the middle for
+ * `row`, but LAST for `stack`, where the two side cameras take the top row and
+ * the centre spans beneath them. Sharing one order between them is what put the
+ * right camera on the bottom row instead of the centre one.
+ *
+ * `spanIndex` is returned rather than assumed, so a rig missing a side camera
+ * still spans the correct tile instead of a hardcoded position.
+ */
+function tilesFor(layout: Layout, cameras: string[]): { tiles: string[]; spanIndex: number } {
+  const { left, center, right, rest } = classify(cameras);
+  const present = (xs: (string | undefined)[]) => xs.filter((c): c is string => Boolean(c));
+
+  if (layout === 'pair') {
+    // Just the two side views. Falls back to the first two declared cameras so
+    // a rig that names neither side still gets two tiles rather than none.
+    const both = present([left, right]);
+    return { tiles: both.length === 2 ? both : cameras.slice(0, 2), spanIndex: -1 };
+  }
+  if (layout === 'stack') {
+    const tiles = present([left, right, center, ...rest]);
+    // The centre camera is the one that spans, wherever it ended up.
+    return { tiles, spanIndex: center ? tiles.indexOf(center) : -1 };
+  }
+  // row
+  return { tiles: present([left, center, right, ...rest]), spanIndex: -1 };
 }
 
 /** How long to wait before reopening a stream that errored. Long enough not to
@@ -241,7 +268,10 @@ export function ThirdScreenPage() {
     [pinnedLayout],
   );
 
-  const tiles = useMemo(() => arrangeTiles(cameras), [cameras]);
+  const { tiles, spanIndex } = useMemo(
+    () => tilesFor(layout, cameras),
+    [layout, cameras],
+  );
 
   // Display fps for the live preview tap. This is a SHARED setting: the same
   // tap feeds the Monitor page and any other viewer on this session, so
@@ -376,9 +406,11 @@ export function ThirdScreenPage() {
                 <div
                   key={id}
                   className="relative bg-black min-w-0 min-h-0"
-                  // In `stack`, the third tile is the centre camera and spans
-                  // both columns beneath the pair above it.
-                  style={layout === 'stack' && i === 2 ? { gridColumn: '1 / -1' } : undefined}
+                  // In `stack` this is the centre camera, spanning both columns
+                  // beneath the two side views. Driven by spanIndex rather than
+                  // a fixed position so it stays correct when a rig is missing
+                  // one of the side cameras.
+                  style={i === spanIndex ? { gridColumn: '1 / -1' } : undefined}
                 >
                   <img
                     src={`${mjpegBase}/stream/${encodeURIComponent(id)}?s=${session.id}&r=${streamRetry}`}
