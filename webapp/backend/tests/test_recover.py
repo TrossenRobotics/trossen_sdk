@@ -9,6 +9,7 @@ that stops again in seconds.
 from __future__ import annotations
 
 import sys
+import time
 import types
 from typing import Any
 
@@ -244,6 +245,68 @@ def test_the_joint6_case_still_reports_the_surviving_fault(runner):
     assert arm.probe_calls == 2, "and re-read afterwards to catch the re-fault"
     assert arms["glide_left"]["recovered"] is False
     assert "Joint 6" in arms["glide_left"]["remaining_error"]
+
+
+def test_arms_are_recovered_concurrently(runner, monkeypatch):
+    """Recovery is the slowest connect path there is, so it fans out.
+
+    The fault being recovered from is exactly what leaves a stale single-client
+    connection on each controller, so every arm can burn its full ~20s TCP
+    timeout. Serially a 4-arm rig spent over a minute; these overlap now.
+
+    Asserted by interleaving, not wall clock, so it does not flake under load.
+    """
+    import threading
+
+    log: list[str] = []
+    lock = threading.Lock()
+    real = runner._test_bringup.ts.HardwareRegistry.create
+
+    def slow_create(type_name, ident, config, mark_active=True):
+        with lock:
+            log.append(f"enter {ident}")
+        time.sleep(0.05)
+        with lock:
+            log.append(f"exit {ident}")
+        return real(type_name, ident, config, mark_active)
+
+    monkeypatch.setattr(
+        runner._test_bringup.ts.HardwareRegistry, "create", slow_create)
+    for name in ("glide_left", "glide_right", "follower_left", "follower_right"):
+        runner._test_devices[name] = _FakeArm()
+
+    out = runner._recover_arms({
+        name: {"ip_address": "192.168.5.3"} for name in
+        ("glide_left", "glide_right", "follower_left", "follower_right")
+    })
+
+    assert all(v["recovered"] for v in out.values())
+    first_exit = next(i for i, e in enumerate(log) if e.startswith("exit"))
+    assert first_exit == 4, (
+        f"expected all 4 arm connects in flight together, got {log}"
+    )
+
+
+def test_a_concurrent_recovery_still_reports_every_arm_in_config_order(runner):
+    """Completion order must not leak into the report."""
+    runner._test_devices["glide_left"] = ConnectionError("no route to host")
+    runner._test_devices["glide_right"] = _FakeArm()
+    runner._test_devices["follower_left"] = _FakeArm(
+        remaining="Joint 6 position limit exceeded")
+
+    out = runner._recover_arms({
+        "glide_left": {}, "glide_right": {}, "follower_left": {},
+    })
+
+    assert list(out) == ["glide_left", "glide_right", "follower_left"]
+    assert out["glide_left"]["recovered"] is False
+    assert out["glide_right"]["recovered"] is True
+    assert out["follower_left"]["recovered"] is False
+
+
+def test_no_arms_is_not_an_error(runner):
+    """A camera-only or base-only rig has nothing to clear."""
+    assert runner._recover_arms({}) == {}
 
 
 def test_the_base_is_recovered_without_a_mechanical_re_home(runner):

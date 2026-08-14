@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import json
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 import trossen_sdk as ts
@@ -102,63 +103,89 @@ def _read_error(comp: Any) -> str:
 
 
 def _recover_arms(arms: dict[str, Any]) -> dict[str, Any]:
-    """Clear each arm's latched controller error and report what is left."""
-    out: dict[str, Any] = {}
-    for arm_id, arm_json in arms.items():
-        try:
-            # ONE connect in the common case, two only when the first did not
-            # take.
-            #
-            # Creating the component calls driver_->configure(..., clear=true),
-            # which clears a latched fault by itself. This used to then call
-            # clear_error() unconditionally -- and clear_error() internally cleans
-            # up and re-configures, i.e. a second full connect. So every Recover
-            # connected every arm twice, on the slowest connect path there is:
-            # the fault being recovered from is exactly what leaves a stale
-            # single-client connection on each controller, so each connect can
-            # burn its full ~20s TCP timeout.
-            #
-            # `hw_bringup.create_arm` is the one retry wrapper shared with the
-            # test and the recorder. It matters most here: this module's own copy
-            # retried ANY exception, so on the one path where the arms are most
-            # likely to be genuinely misconfigured — a wrong IP, an unknown model
-            # — recovery burned two extra full connect timeouts before reporting
-            # a failure that could never have succeeded on a retry.
-            comp = hw_bringup.create_arm(arm_id, dict(arm_json))
+    """Clear every arm's latched error concurrently; report each one's outcome.
 
-            # Probe before clearing, not after. If configure's clear flag did the
-            # job — the normal outcome — there is nothing left to clear and the
-            # second connect is pure cost.
+    Concurrent for the same reason bring-up is (see `app.hw_bringup`): the arms
+    are independent controllers, and `HardwareRegistry.create` releases the GIL,
+    so what used to cost the sum of the connects now costs the slowest one. It
+    matters more here than anywhere else -- the fault being recovered from is
+    exactly what leaves a stale single-client connection on each controller, so
+    every arm can burn its full ~20s TCP timeout, and serially a 4-arm rig spent
+    over a minute doing it.
+
+    Each task reports its own verdict rather than raising, because a device that
+    is still faulted is a normal outcome here and the operator needs to know
+    which one; one bad arm must not hide the state of the others.
+    """
+    if not arms:
+        return {}
+    with ThreadPoolExecutor(
+        max_workers=len(arms), thread_name_prefix="recover-arm"
+    ) as pool:
+        verdicts = list(pool.map(
+            lambda item: (item[0], _recover_one_arm(item[0], item[1])),
+            arms.items(),
+        ))
+    # Filed in config order, not completion order, so the report reads the same
+    # every time.
+    return dict(verdicts)
+
+
+def _recover_one_arm(arm_id: str, arm_json: Any) -> dict[str, Any]:
+    """Clear one arm's latched controller error and report what is left.
+
+    Never raises: a device that is still faulted is a reportable outcome, and
+    this runs on a worker thread whose siblings must all still produce a verdict.
+    """
+    try:
+        # ONE connect in the common case, two only when the first did not take.
+        #
+        # Creating the component calls driver_->configure(..., clear=true), which
+        # clears a latched fault by itself. This used to then call clear_error()
+        # unconditionally -- and clear_error() internally cleans up and
+        # re-configures, i.e. a second full connect. So every Recover connected
+        # every arm twice, on the slowest connect path there is: the fault being
+        # recovered from is exactly what leaves a stale single-client connection
+        # on each controller, so each connect can burn its full ~20s TCP timeout.
+        #
+        # `hw_bringup.create_arm` is the one retry wrapper shared with the test
+        # and the recorder. It matters most here: this module's own copy retried
+        # ANY exception, so on the one path where the arms are most likely to be
+        # genuinely misconfigured — a wrong IP, an unknown model — recovery burned
+        # two extra full connect timeouts before reporting a failure that could
+        # never have succeeded on a retry.
+        comp = hw_bringup.create_arm(arm_id, dict(arm_json))
+
+        # Probe before clearing, not after. If configure's clear flag did the job
+        # — the normal outcome — there is nothing left to clear and the second
+        # connect is pure cost.
+        remaining = _read_error(comp)
+        cleared = True
+
+        if remaining:
+            # Still faulted, so the second connect is now worth paying for. This
+            # is also the link-drop case the old unconditional call was really
+            # protecting: clear_error() re-establishes the connection as a side
+            # effect, which is why it works when a plain retry would not.
+            print(f"arm '{arm_id}': still reporting after connect, clearing "
+                  f"explicitly: {remaining}", flush=True)
+            clear = getattr(comp, "clear_error", None)
+            if clear is not None:
+                cleared = bool(clear())
+            # Re-read after clearing. An arm parked physically outside its limits
+            # re-faults the instant the error is cleared, and saying "recovered"
+            # about it would send the operator back to a session that stops again
+            # in seconds. This is the joint-6 gripper case exactly.
             remaining = _read_error(comp)
-            cleared = True
 
-            if remaining:
-                # Still faulted, so the second connect is now worth paying for.
-                # This is also the link-drop case the old unconditional call was
-                # really protecting: clear_error() re-establishes the connection
-                # as a side effect, which is why it works when a plain retry
-                # would not.
-                print(f"arm '{arm_id}': still reporting after connect, clearing "
-                      f"explicitly: {remaining}", flush=True)
-                clear = getattr(comp, "clear_error", None)
-                if clear is not None:
-                    cleared = bool(clear())
-                # Re-read after clearing. An arm parked physically outside its
-                # limits re-faults the instant the error is cleared, and saying
-                # "recovered" about it would send the operator back to a session
-                # that stops again in seconds. This is the joint-6 gripper case
-                # exactly.
-                remaining = _read_error(comp)
-
-            out[arm_id] = {
-                "recovered": bool(cleared) and not remaining,
-                "remaining_error": remaining,
-                "detail": (f"still reporting: {remaining}" if remaining
-                           else "error cleared"),
-            }
-        except Exception as exc:  # noqa: BLE001 - reported per device
-            out[arm_id] = {"recovered": False, "detail": f"unreachable: {exc}"}
-    return out
+        return {
+            "recovered": bool(cleared) and not remaining,
+            "remaining_error": remaining,
+            "detail": (f"still reporting: {remaining}" if remaining
+                       else "error cleared"),
+        }
+    except Exception as exc:  # noqa: BLE001 - reported per device
+        return {"recovered": False, "detail": f"unreachable: {exc}"}
 
 
 def main() -> int:
