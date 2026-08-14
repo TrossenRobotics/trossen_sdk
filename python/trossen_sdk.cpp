@@ -545,7 +545,11 @@ PYBIND11_MODULE(trossen_sdk, m) {
         "CAN, waits for the first BMS frame, and returns the same dict shape as "
         "TrossenBaseComponent.telemetry() minus pose and estop_battery_percent. "
         "Nothing moves -- no homing, no velocity commands -- and it answers on "
-        "an e-stopped base, where the full bring-up never gets a reading. "
+        "an e-stopped base, where the full bring-up never gets a reading. NOT "
+        "quite read-only: connecting requests init, which can clear a latched "
+        "e-stop, so a base found e-stopped has the stop RE-ASSERTED before this "
+        "returns. e_stopped=True means 'found stopped, put back' -- keep showing "
+        "it as stopped. "
         "RAISES if no frame arrives within timeout_s, which is how a base that "
         "is off, unplugged, held by a session, or simply not fitted reports "
         "itself. The base must not be held by a running recorder.");

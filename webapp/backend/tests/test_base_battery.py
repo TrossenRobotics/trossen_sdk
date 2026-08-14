@@ -147,6 +147,21 @@ def test_clean_whitelists_the_response_and_coerces_types():
     assert cleaned["connected"] is True
 
 
+def test_clean_preserves_e_stopped():
+    """`e_stopped` must survive to the display, and not be dropped as noise on a
+    read-only-looking endpoint.
+
+    The probe re-asserts a stop it found (connecting requests init, which can
+    clear a latched e-stop), so a true here means "found stopped, put back". The
+    panel keys its BASE E-STOPPED banner off this field, so losing it would show
+    a stopped robot as running."""
+    from app.base_battery import _clean
+
+    cleaned = _clean({**_READING, "e_stopped": True})
+
+    assert cleaned["e_stopped"] is True
+
+
 def test_clean_omits_absent_battery_fields_rather_than_zeroing_them():
     """A missing voltage must not become 0.0 V. The panel renders each field
     only when present, and a fabricated zero looks like a measurement."""

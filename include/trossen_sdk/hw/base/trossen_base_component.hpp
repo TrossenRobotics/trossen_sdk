@@ -205,6 +205,18 @@ private:
 /// servicing thread — nothing moves. It also answers on an e-stopped base,
 /// where the full bring-up path never reaches a reading at all.
 ///
+/// NOT QUITE READ-ONLY, for a safety reason. The driver's constructor requests
+/// init, and that re-enables a base that was emergency-stopped — the driver
+/// documents it and the constructor sends it unconditionally, so connecting at
+/// all can clear a latched stop. Reading the battery must not be a way to re-arm
+/// a stopped robot, so if this sees the base e-stopped at any point it
+/// re-asserts the stop before returning, leaving the base as it found it. That
+/// narrows the window; it does not close it (an init that clears the latch
+/// before the first heartbeat reply leaves nothing to observe), and the physical
+/// e-stop remains the only stop that cannot be undone over CAN. A returned
+/// `e_stopped` of true therefore means "found stopped, put back", and the caller
+/// should keep presenting it as stopped.
+///
 /// Returns the same JSON shape as TrossenBaseComponent::telemetry(), minus
 /// `pose` and `estop_battery_percent`: odometry means nothing on a base that
 /// has not moved, and the auto-stop threshold is component config that no

@@ -313,10 +313,18 @@ nlohmann::json read_base_battery(double timeout_s) {
       std::to_string(timeout_s));
   }
 
-  // Constructing the driver opens CAN and requests init. Note what it does NOT
-  // do: throw when the interface is missing. It logs and carries on with a dead
-  // socket, so reaching the loop below proves nothing about the base being
-  // there — only a BMS frame does.
+  // Constructing the driver opens CAN and requests init. Two consequences, both
+  // load bearing:
+  //
+  // 1. It does NOT throw when the interface is missing. It logs and carries on
+  //    with a dead socket, so reaching the loop below proves nothing about the
+  //    base being there — only a BMS frame does.
+  // 2. The init it requests re-enables a base that was emergency-stopped. That
+  //    is the driver's documented behaviour for INIT_BASE and it is not
+  //    optional: the constructor sends it. So this function CAN clear a latched
+  //    e-stop as a side effect of connecting, which on a panel whose other
+  //    control is the e-stop would be an unpleasant surprise. Hence the restore
+  //    below.
   trossen_base::TrossenBase driver;
 
   const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
@@ -329,17 +337,43 @@ nlohmann::json read_base_battery(double timeout_s) {
   float percent = 0.0f;
   auto next_tick = std::chrono::steady_clock::now();
 
+  // Latched, not sampled once at the end: by then the init this function sent
+  // may already have cleared the bit, and the whole point is to notice that the
+  // base WAS stopped before deciding whether to put it back.
+  bool saw_e_stopped = false;
+
   while (std::chrono::steady_clock::now() < deadline) {
     // Heartbeat plus a BMS refresh, which is the whole reason this loop exists:
     // the reading is pulled from the last frame the receive thread cached, so
     // there is nothing to read until one has arrived.
     driver.update_base();
 
+    if (driver.is_e_stopped()) saw_e_stopped = true;
+
     percent = driver.get_percent();
     if (percent > 0.0f) break;
 
     next_tick += period;
     std::this_thread::sleep_until(next_tick);
+  }
+
+  // Put the stop back if we found one, BEFORE either exit below -- a base that
+  // answered heartbeats but never sent a BMS frame still leaves through the
+  // throw, and leaving that one enabled would be the worst case of the three.
+  //
+  // Reading the battery must not be a way to re-arm a stopped robot. Connecting
+  // can clear the latch (see the constructor note), so the stop is re-asserted
+  // here on the way out: the probe leaves the base as it found it.
+  //
+  // This narrows the window rather than closing it. If the init clears the latch
+  // before the first heartbeat reply lands, there is nothing left to observe and
+  // nothing to restore -- so this is a mitigation, not a guarantee, and the
+  // physical e-stop remains the only stop that cannot be undone over CAN.
+  if (saw_e_stopped) {
+    const bool restored = driver.e_stop();
+    std::cerr << "read_base_battery: base was e-stopped; re-asserting the stop "
+              << "after reading (" << (restored ? "sent" : "FAILED TO SEND")
+              << ")" << std::endl;
   }
 
   // Zero means "no frame yet", not "flat" -- the same reading the auto-stop
@@ -362,7 +396,12 @@ nlohmann::json read_base_battery(double timeout_s) {
   t["battery_reading_valid"] = true;
 
   t["ready"] = driver.is_ready();
-  t["e_stopped"] = driver.is_e_stopped();
+
+  // `saw_e_stopped` wins over a fresh read. The re-assert above needs a heartbeat
+  // round trip before the bit reads back, so a plain read here would report
+  // "running" about a base this function just stopped -- and the panel would
+  // drop its BASE E-STOPPED banner on the strength of it.
+  t["e_stopped"] = saw_e_stopped || driver.is_e_stopped();
 
   t["battery"] = {
     {"percent", percent},
