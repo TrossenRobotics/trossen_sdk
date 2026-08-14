@@ -60,13 +60,19 @@ from app.ws_bus import bus
 # are single-client and don't release a dead client immediately, so a recorder
 # SIGKILLed on a fault (recorder.py fatal-fault kill) leaves a stale client on
 # every arm it held. The next bootstrap then has each arm's connect stall its
-# full ~20s TCP timeout before the controller-side release lets a retry through
-# — and the connects run serially (one arm at a time, GIL-held in
-# HardwareRegistry.create), so a 2-arm rig can burn ~40s of stalls plus retry
-# backoffs before cameras/session/episode-0 even begin. 60s was too tight for
-# that path (the start failed → session errored → the operator was stuck in a
-# recover→start→error loop). 120s lets the connect retries grind through the
-# stale clients so recovery reliably succeeds on the first try.
+# full ~20s TCP timeout before the controller-side release lets a retry through.
+# 60s was too tight for that path (the start failed → session errored → the
+# operator was stuck in a recover→start→error loop). 120s lets the connect
+# retries grind through the stale clients so recovery reliably succeeds on the
+# first try.
+#
+# Those stalls now overlap rather than accumulate — the arms are opened
+# concurrently (see app/hw_bringup.py), so a rig burns roughly one stall rather
+# than one per arm. The budget is deliberately NOT reduced to match: it is an
+# upper bound, and being generous costs nothing when hardware is healthy, while
+# being too small SIGKILLs a slow-but-fine rig mid-open and reports it as a
+# failed start. Re-derive it from measurements ([timing] lines), not from this
+# change.
 # Also a FLOOR, not just the value: `_bootstrap_timeout_for` scales this up for
 # rigs whose hardware is slower to open (depth-enabled ZEDs load a GPU-optimised
 # NEURAL model inside Camera::open()). A flat 120s SIGKILLed the child mid-open

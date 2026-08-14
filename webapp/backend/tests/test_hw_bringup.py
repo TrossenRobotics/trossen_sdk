@@ -218,16 +218,34 @@ def test_arms_are_opened_before_any_component(bringup):
     assert last_arm < first_component
 
 
-def test_components_keep_their_declared_order(bringup):
-    """Reordering them would break a component that resolves another one."""
+def test_wiring_components_keep_their_declared_order(bringup):
+    """Reordering the wiring would break one that resolves another.
+
+    Only the wiring is order-sensitive. Device components are deliberately
+    hoisted ahead of it (see the next test), so declared order is preserved
+    *among the wiring*, which is where it means something.
+    """
     bringup.bring_up(_rivet_cfg(), bringup.EVERYTHING)
 
     order = [ident for _type, ident, _cfg, _active in bringup._test_calls]
-    component_order = [c for c in order if c in
-                       ("glide_inputs", "rivet_base", "base_leader", "session_ctl")]
-    assert component_order == [
-        "glide_inputs", "rivet_base", "base_leader", "session_ctl",
-    ]
+    wiring = [c for c in order
+              if c in ("glide_inputs", "base_leader", "session_ctl")]
+    assert wiring == ["glide_inputs", "base_leader", "session_ctl"]
+
+
+def test_a_device_component_is_hoisted_ahead_of_the_wiring(bringup):
+    """The base opens in stage 1, even though the preset declares it second.
+
+    This is what lets its mechanical homing overlap the arm connects instead of
+    waiting behind a wiring component that is itself waiting on the arms. Safe
+    because trossen_base resolves nothing out of the active registry — only
+    glide_arm_input, the teleop factory and the policy client do — and it puts
+    the base *earlier* relative to anything that pairs against it, not later.
+    """
+    bringup.bring_up(_rivet_cfg(), bringup.EVERYTHING)
+
+    order = [ident for _type, ident, _cfg, _active in bringup._test_calls]
+    assert order.index("rivet_base") < order.index("glide_inputs")
 
 
 def test_a_component_is_passed_its_entry_verbatim(bringup):
@@ -274,6 +292,161 @@ def test_the_legacy_mobile_base_slot_is_honoured(bringup):
     assert brought.mobile_base is not None
     types_created = [t for t, _i, _c, _a in bringup._test_calls]
     assert types_created == ["slate_base"]
+
+
+# --- concurrency ------------------------------------------------------------
+
+
+def _slow_registry(bringup, monkeypatch, delay_s: float, log: list[str]):
+    """Make every create() take `delay_s`, recording enter/exit interleaving."""
+    import threading
+    import time as _time
+
+    real = bringup.ts.HardwareRegistry.create
+    lock = threading.Lock()
+
+    def slow_create(type_name, ident, config, mark_active=True):
+        with lock:
+            log.append(f"enter {ident}")
+        _time.sleep(delay_s)
+        with lock:
+            log.append(f"exit {ident}")
+        return real(type_name, ident, config, mark_active)
+
+    monkeypatch.setattr(bringup.ts.HardwareRegistry, "create", slow_create)
+
+
+def test_arms_and_the_base_open_concurrently(bringup, monkeypatch):
+    """The point of the whole exercise.
+
+    Asserted by interleaving rather than by wall clock: a timing threshold is a
+    flaky test on a loaded CI box, whereas "a second device entered before the
+    first had exited" is exactly the property that matters and cannot happen
+    serially.
+    """
+    log: list[str] = []
+    _slow_registry(bringup, monkeypatch, 0.05, log)
+
+    bringup.bring_up(_rivet_cfg(), bringup.DEVICES_ONLY,
+                     concurrency=bringup.CONCURRENT)
+
+    # Stage 1 is the two arms plus the base. All three must be in flight at once.
+    stage1 = [e for e in log
+              if e.split()[1] in ("glide_left", "follower_left", "rivet_base")]
+    first_exit = next(i for i, e in enumerate(stage1) if e.startswith("exit"))
+    entered_before_any_exit = sum(
+        1 for e in stage1[:first_exit] if e.startswith("enter")
+    )
+    assert entered_before_any_exit == 3, (
+        f"expected all 3 stage-1 devices in flight together, got {stage1}"
+    )
+
+
+def test_serial_mode_opens_one_device_at_a_time(bringup, monkeypatch):
+    """The escape hatch has to actually be serial, or it is no use for bisecting."""
+    log: list[str] = []
+    _slow_registry(bringup, monkeypatch, 0.01, log)
+
+    bringup.bring_up(_rivet_cfg(), bringup.DEVICES_ONLY,
+                     concurrency=bringup.SERIAL)
+
+    # Strictly alternating enter/exit for the same id is what serial means.
+    assert len(log) % 2 == 0
+    for i in range(0, len(log), 2):
+        opened, closed = log[i], log[i + 1]
+        assert opened.startswith("enter"), f"opens overlapped: {log}"
+        assert closed == "exit " + opened.removeprefix("enter "), (
+            f"opens overlapped in SERIAL mode: {log}"
+        )
+
+
+def test_cameras_are_serial_by_default(bringup, monkeypatch):
+    """Default off: a ZED open does GPU work and an unclean exit can wedge the
+    next open entirely. Opt in only after measuring on the target rig."""
+    log: list[str] = []
+    _slow_registry(bringup, monkeypatch, 0.02, log)
+
+    cfg = _Cfg(cameras=[
+        _Json({"id": "camera_main", "type": "zed_camera"}),
+        _Json({"id": "camera_left", "type": "zed_camera"}),
+    ])
+    bringup.bring_up(cfg, bringup.DEVICES_ONLY)
+
+    assert log == [
+        "enter camera_main", "exit camera_main",
+        "enter camera_left", "exit camera_left",
+    ]
+
+
+def test_cameras_can_be_opted_into_concurrency(bringup, monkeypatch):
+    log: list[str] = []
+    _slow_registry(bringup, monkeypatch, 0.05, log)
+
+    cfg = _Cfg(cameras=[
+        _Json({"id": "camera_main", "type": "zed_camera"}),
+        _Json({"id": "camera_left", "type": "zed_camera"}),
+    ])
+    bringup.bring_up(cfg, bringup.DEVICES_ONLY,
+                     concurrency=bringup.Concurrency(cameras=True))
+
+    assert log[:2] == ["enter camera_main", "enter camera_left"], (
+        f"expected both camera opens in flight, got {log}"
+    )
+
+
+def test_a_failure_waits_for_its_siblings_before_raising(bringup, monkeypatch):
+    """Unwinding while sibling opens are still running is how a controller or a
+    ZED is left holding a connection nobody owns."""
+    import threading
+    import time as _time
+
+    finished: list[str] = []
+    lock = threading.Lock()
+    real = bringup.ts.HardwareRegistry.create
+
+    def create(type_name, ident, config, mark_active=True):
+        if ident == "glide_left":
+            raise RuntimeError("Unsupported arm model 'nope'")
+        _time.sleep(0.05)
+        with lock:
+            finished.append(ident)
+        return real(type_name, ident, config, mark_active)
+
+    monkeypatch.setattr(bringup.ts.HardwareRegistry, "create", create)
+
+    with pytest.raises(RuntimeError, match="Unsupported arm model"):
+        bringup.bring_up(_rivet_cfg(), bringup.DEVICES_ONLY)
+
+    # The slow siblings ran to completion despite the early failure.
+    assert set(finished) == {"follower_left", "rivet_base"}, (
+        f"siblings were abandoned mid-open: {finished}"
+    )
+
+
+def test_the_first_failure_is_the_one_reported(bringup):
+    """Two bad arms must not produce a verdict that varies run to run.
+
+    Deterministic because results are collected in submission order, not
+    completion order — so the reported cause is the first device in the config
+    that failed, whichever happened to fail soonest in wall-clock terms.
+    """
+    bringup._test_behaviour["glide_left"] = RuntimeError("first problem")
+    bringup._test_behaviour["follower_left"] = RuntimeError("second problem")
+
+    with pytest.raises(RuntimeError, match="first problem"):
+        bringup.bring_up(_rivet_cfg(), bringup.DEVICES_ONLY)
+
+
+def test_each_task_opens_its_own_device(bringup):
+    """Guards the late-binding trap: a closure over the loop variable would make
+    every task open whatever the last iteration left behind."""
+    bringup.bring_up(_rivet_cfg(), bringup.DEVICES_ONLY)
+
+    opened = sorted(ident for _t, ident, _c, _a in bringup._test_calls)
+    assert opened == sorted([
+        "glide_left", "follower_left", "rivet_base",
+        "camera_main", "camera_left",
+    ])
 
 
 # --- timing -----------------------------------------------------------------

@@ -33,10 +33,18 @@ from app.systems import SystemResponse
 # and emit an error event with whatever progress lines came through up to
 # that moment, so the user always has SDK output to debug from.
 #
-# The budget scales with device count rather than being a flat constant:
-# arms connect serially over TCP/UDP at ~5-6s each on a healthy rig, so a
-# flat 15s falsely failed multi-arm systems that were connecting fine (a
-# 4-arm rig needs ~30s just for the arms). See `compute_bringup_budget`.
+# The budget scales with device count rather than being a flat constant: arms
+# connect over TCP/UDP at ~5-6s each on a healthy rig, so a flat 15s falsely
+# failed multi-arm systems that were connecting fine (a 4-arm rig needs ~30s just
+# for the arms). See `compute_bringup_budget`.
+#
+# It STILL sums per-device costs even though the devices are now opened
+# concurrently (app/hw_bringup.py), so it over-estimates on purpose. That is the
+# safe direction: an over-generous timeout costs nothing on healthy hardware,
+# whereas one sized to the concurrent best case SIGKILLs a slow-but-fine rig
+# mid-open and reports it as a device failure — the exact bug the notes below
+# were written to stop recurring. Re-derive these from measured [timing] lines
+# when there are enough of them, not from the fact that opens now overlap.
 _TEST_TIMEOUT_BASE_S = 10.0
 _TEST_TIMEOUT_PER_ARM_S = 7.0
 _TEST_TIMEOUT_PER_CAMERA_S = 2.0
