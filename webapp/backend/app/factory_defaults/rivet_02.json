@@ -33,15 +33,15 @@
           "actuated": false,
           "gripper_force_feedback": true,
           "haptic_feedback": true,
-          "haptic_force_deadband_n": 5.0,
-          "haptic_force_max_n": 40.0,
+          "haptic_force_deadband_n": 6.5,
+          "haptic_force_max_n": 90.0,
           "haptic_intensity_floor": 80,
           "haptic_intensity_max": 255,
           "haptic_curve_gamma": 1.0,
           "haptic_levels": 16,
           "haptic_update_hz": 30.0,
           "haptic_baseline_tau_s": 3.0,
-          "haptic_command_threshold": 0.002
+          "haptic_command_threshold": 0.02
         },
         "glide_right": {
           "ip_address": "192.168.5.12",
@@ -72,15 +72,15 @@
           "actuated": false,
           "gripper_force_feedback": true,
           "haptic_feedback": true,
-          "haptic_force_deadband_n": 5.0,
-          "haptic_force_max_n": 40.0,
+          "haptic_force_deadband_n": 6.5,
+          "haptic_force_max_n": 90.0,
           "haptic_intensity_floor": 80,
           "haptic_intensity_max": 255,
           "haptic_curve_gamma": 1.0,
           "haptic_levels": 16,
           "haptic_update_hz": 30.0,
           "haptic_baseline_tau_s": 3.0,
-          "haptic_command_threshold": 0.002
+          "haptic_command_threshold": 0.02
         },
         "follower_left": {
           "ip_address": "192.168.1.15",
