@@ -33,7 +33,7 @@ from app.datasets import (
     scan_mcap_detail,
 )
 from app.db import apply_migrations
-from app.hw_test import stream_system_hardware_test
+from app.hw_test import request_cancel, stream_system_hardware_test
 from app.io_utils import is_safe_id
 from app.machine_identity import get_machine_name
 from app.base_battery import BaseBatteryError, read_base_battery
@@ -626,14 +626,49 @@ def reset_to_factory(system_id: str) -> SystemResponse:
     return result
 
 
+@app.post("/api/systems/{system_id}/test/cancel")
+def cancel_system_test(system_id: str) -> dict[str, bool]:
+    """Stop the in-flight Hardware Test for `system_id`.
+
+    A hardware test engages real devices and can take most of a minute on a
+    multi-arm rig, so an operator who spots the wrong system selected — or who
+    needs the arms back — must be able to stop it without waiting out the budget
+    or restarting the backend.
+
+    Terminating the runner explicitly rather than letting the operator's browser
+    hang up: a dropped connection reaps the subprocess only when the response
+    generator is finalised, which is left to the garbage collector, and a runner
+    that outlives its request keeps holding the cameras. A ZED released that way
+    stays claimed and fails the NEXT test.
+
+    Returns 404 when nothing is running for that system, which is the ordinary
+    outcome of a Cancel that raced the test's own final event — the frontend
+    treats it as "already finished", not as an error worth showing.
+    """
+    if not is_safe_id(system_id):
+        raise HTTPException(status_code=400, detail="Invalid system id")
+
+    if not request_cancel(system_id):
+        raise HTTPException(
+            status_code=404,
+            detail=f"No hardware test is running for system '{system_id}'",
+        )
+    # The stream itself emits the terminal `cancelled` event and releases the
+    # devices; this only asks it to. Deliberately does NOT touch hw_status —
+    # a cancelled test proves nothing either way, so the badge keeps whatever
+    # the last COMPLETED test said.
+    return {"cancelled": True}
+
+
 @app.post("/api/systems/{system_id}/test")
 def test_system(system_id: str) -> StreamingResponse:
     """Stream the per-system Hardware Test as Server-Sent Events.
 
     The frontend's test button consumes the same SSE shape as the
     converter — `progress` events for each captured SDK log line, then
-    a final `complete` (success) or `error` (failure or timeout) event
-    carrying the cumulative `output[]`. Streaming gets diagnostic lines
+    a final `complete` (success), `error` (failure or timeout), or
+    `cancelled` (operator stopped it) event carrying the cumulative
+    `output[]`. Streaming gets diagnostic lines
     out before any timeout fires, so a frontend abort still shows the
     user what the SDK was up to.
 
@@ -676,6 +711,11 @@ def test_system(system_id: str) -> StreamingResponse:
                     hw_status.set_status(
                         system_id, "error", payload.get("message") or ""
                     )
+                # `cancelled` is deliberately absent: a test the operator stopped
+                # says nothing about the hardware, so the badge must keep the
+                # verdict of the last test that actually finished. Marking it
+                # 'error' would re-lock the Start gate over a non-fault, and
+                # marking it 'ready' would unlock recording on an unproven rig.
             yield ev
 
     return StreamingResponse(gen(), media_type="text/event-stream")

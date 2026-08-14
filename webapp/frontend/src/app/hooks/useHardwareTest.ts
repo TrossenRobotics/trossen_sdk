@@ -18,11 +18,21 @@ import { useHwStatus } from '@/lib/HwStatusContext';
 
 export interface HwTestResult {
   systemId: string;
-  /** null while running, true on pass, false on failure/timeout. */
+  /** null while running OR when cancelled, true on pass, false on failure. */
   success: boolean | null;
   message: string;
   /** Captured SDK output lines, newest appended. */
   output: string[];
+  /**
+   * True when the operator stopped the run. Distinguished from `success: false`
+   * on purpose: a cancelled test is not a failed one, so it must not colour the
+   * badge red, fire a failure toast, or claim the hardware is broken.
+   *
+   * A cancelled result carries `success: null` — the same value as "running" —
+   * so any renderer keying "in progress" off `success === null` must check this
+   * flag too. `testingSystemId` is the reliable in-flight signal.
+   */
+  cancelled?: boolean;
 }
 
 interface UseHardwareTest {
@@ -32,6 +42,14 @@ interface UseHardwareTest {
   testingSystemId: string | null;
   /** Start a test; resolves true on pass, false otherwise. Single-flight. */
   runTest: (systemId: string) => Promise<boolean>;
+  /**
+   * Ask the backend to stop the in-flight test. Resolves once the request is
+   * acknowledged, NOT once the devices are released — the stream's terminal
+   * `cancelled` event is what says that. Safe to call when nothing is running.
+   */
+  cancelTest: (systemId?: string) => Promise<void>;
+  /** True between a cancel request and the run actually ending. */
+  cancelling: boolean;
   /** Drop the local result panel (does not touch HwStatus). */
   clearResult: () => void;
 }
@@ -39,10 +57,12 @@ interface UseHardwareTest {
 export function useHardwareTest(): UseHardwareTest {
   const { setStatus, testingSystemId, setTestingSystemId } = useHwStatus();
   const [result, setResult] = useState<HwTestResult | null>(null);
+  const [cancelling, setCancelling] = useState(false);
 
   const runTest = useCallback(async (systemId: string): Promise<boolean> => {
     if (testingSystemId !== null) return false; // single-flight, app-wide
     setTestingSystemId(systemId);
+    setCancelling(false);
     setResult({ systemId, success: null, message: 'Running hardware test…', output: [] });
     const controller = new AbortController();
     // Net in case the backend hangs without a terminal event. The backend owns
@@ -94,6 +114,22 @@ export function useHardwareTest(): UseHardwareTest {
               announce('Hardware test failed');
               finalised = false;
               break;
+            } else if (data.type === 'cancelled') {
+              // Deliberately does NOT call setStatus: a test the operator stopped
+              // says nothing about the hardware, so the badge keeps the verdict of
+              // the last run that actually finished. Marking it 'error' would
+              // re-lock the Start gate over a non-fault.
+              setResult({
+                systemId,
+                success: null,
+                cancelled: true,
+                message: data.message,
+                output: data.output || collected,
+              });
+              toast.info('Hardware test cancelled');
+              announce('Hardware test cancelled');
+              finalised = false;
+              break;
             }
           } catch {
             // Non-JSON SSE comment / keepalive — ignore.
@@ -122,10 +158,34 @@ export function useHardwareTest(): UseHardwareTest {
     } finally {
       window.clearTimeout(safetyTimeoutId);
       setTestingSystemId(null);
+      setCancelling(false);
     }
   }, [testingSystemId, setTestingSystemId, setStatus]);
 
+  const cancelTest = useCallback(async (systemId?: string): Promise<void> => {
+    const target = systemId ?? testingSystemId;
+    if (!target) return;
+    setCancelling(true);
+    try {
+      const res = await fetch(`/api/systems/${target}/test/cancel`, { method: 'POST' });
+      // 404 means the run finished between the operator's click and this request.
+      // Nothing to report: the stream's own terminal event has already landed and
+      // is the truth about how the test ended.
+      if (!res.ok && res.status !== 404) {
+        toast.error(`Could not cancel the hardware test (server returned ${res.status})`);
+        setCancelling(false);
+      }
+    } catch (err) {
+      // The backend owns teardown, so a failed request means the test is very
+      // likely still running — say so rather than leaving a stuck Cancelling…
+      toast.error(`Could not cancel the hardware test: ${describeError(err)}`);
+      setCancelling(false);
+    }
+    // On success `cancelling` stays true until runTest's finally clears it, which
+    // is what keeps the button showing "Cancelling…" across the terminate-and-wait.
+  }, [testingSystemId]);
+
   const clearResult = useCallback(() => setResult(null), []);
 
-  return { result, testingSystemId, runTest, clearResult };
+  return { result, testingSystemId, runTest, cancelTest, cancelling, clearResult };
 }

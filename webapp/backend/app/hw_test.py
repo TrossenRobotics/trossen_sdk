@@ -153,6 +153,43 @@ def compute_bringup_budget(config: dict[str, Any] | None) -> float:
 _SUCCESS_PREFIX = "__SUCCESS__: "
 _ERROR_PREFIX = "__ERROR__: "
 
+# In-flight tests, `system_id -> {cancel events}`, one event per streaming run.
+#
+# Cancellation is a real backend operation rather than just a dropped HTTP
+# connection, because dropping the connection reaps the runner only when the
+# response generator is finalised — and `main.py` consumes this generator through
+# an `async for`, so closing the outer one leaves finalising the inner one to the
+# garbage collector. A runner that outlives its request by even a moment still
+# holds the arms and the cameras, and a ZED whose process was killed without
+# releasing it leaves the Argus provider claimed: the NEXT test then fails with
+# CANNOT_START_CAMERA_STREAM. Terminating on an explicit request makes teardown
+# deterministic.
+#
+# A set per system, not a single event, so two overlapping runs of the same
+# system cannot leave one of them without a cancel handle. Nothing on the server
+# enforces single-flight — that is the frontend's `testingSystemId` — so this
+# module must not assume it.
+_cancel_events: dict[str, set[asyncio.Event]] = {}
+
+
+def request_cancel(system_id: str) -> bool:
+    """Ask every in-flight test for `system_id` to stop.
+
+    Returns False if no test is running for that system, which the endpoint
+    reports as a 404 — the operator's Cancel raced the test's own completion.
+    """
+    events = _cancel_events.get(system_id)
+    if not events:
+        return False
+    for event in events:
+        event.set()
+    return True
+
+
+def is_test_running(system_id: str) -> bool:
+    """True while at least one streaming test is open for `system_id`."""
+    return bool(_cancel_events.get(system_id))
+
 
 def _sse(event_type: str, **fields: Any) -> str:
     """Format a single Server-Sent Events frame. Same encoding as
@@ -190,6 +227,23 @@ async def stream_system_hardware_test(
     # does. Bounds the failure-marker scan below to the work phase.
     captured_at_success: int | None = None
     error_message: str | None = None
+    cancelled = False
+
+    # Registered before the subprocess exists so a Cancel arriving during launch
+    # is still honoured (the loop below checks the event before its first read).
+    cancel_event = asyncio.Event()
+    _cancel_events.setdefault(system.id, set()).add(cancel_event)
+
+    def _release_cancel_slot() -> None:
+        """Deregister this run. Idempotent, and must run on EVERY exit path — a
+        leaked entry makes `is_test_running` lie forever and gives the Cancel
+        endpoint a handle to a test that finished long ago."""
+        events = _cancel_events.get(system.id)
+        if events is None:
+            return
+        events.discard(cancel_event)
+        if not events:
+            _cancel_events.pop(system.id, None)
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -201,12 +255,22 @@ async def stream_system_hardware_test(
             stderr=asyncio.subprocess.STDOUT,
         )
     except Exception as exc:
+        _release_cancel_slot()
         yield _sse(
             "error",
             message=f"Failed to launch hardware test runner: {exc}",
             output=[],
         )
         return
+
+    # Created before the try below, because the `finally` cancels it: anything
+    # that throws on the way in (a broken stdin write) would otherwise turn a
+    # real failure into a NameError raised from cleanup.
+    #
+    # One long-lived waiter reused across loop iterations rather than a fresh task
+    # per line: the loop runs once per SDK log line, and an event that is already
+    # set stays set, so re-awaiting it is free.
+    cancel_wait = asyncio.ensure_future(cancel_event.wait())
 
     try:
         # Hand the system config to the runner via stdin so we don't
@@ -222,17 +286,39 @@ async def stream_system_hardware_test(
         timed_out = False
 
         while True:
+            if cancel_event.is_set():
+                cancelled = True
+                break
+
             remaining = deadline - asyncio.get_event_loop().time()
             if remaining <= 0:
                 timed_out = True
                 break
-            try:
-                line_bytes = await asyncio.wait_for(
-                    proc.stdout.readline(), timeout=remaining
-                )
-            except asyncio.TimeoutError:
+
+            # Race the next line against a cancel request. `wait_for` on the read
+            # alone could not be interrupted, so a Cancel during a long silent
+            # stretch — an unreachable arm's TCP connect, exactly when an operator
+            # reaches for Cancel — would not be noticed until the read returned.
+            read_task = asyncio.ensure_future(proc.stdout.readline())
+            done, _ = await asyncio.wait(
+                {read_task, cancel_wait},
+                timeout=remaining,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+            if cancel_wait in done:
+                # Discard the in-flight read: its line is irrelevant now, and the
+                # subprocess is about to be terminated in the `finally` below.
+                read_task.cancel()
+                cancelled = True
+                break
+
+            if read_task not in done:
+                read_task.cancel()
                 timed_out = True
                 break
+
+            line_bytes = read_task.result()
 
             if not line_bytes:
                 # EOF — runner exited.
@@ -259,6 +345,11 @@ async def stream_system_hardware_test(
             captured.append(line)
             yield _sse("progress", message=line)
     finally:
+        # Deregistered before the (awaiting) teardown below, so a second Cancel
+        # arriving while we are already stopping gets an honest 404 instead of
+        # setting an event nobody will read.
+        _release_cancel_slot()
+        cancel_wait.cancel()
         if proc.returncode is None:
             proc.terminate()
             try:
@@ -266,6 +357,19 @@ async def stream_system_hardware_test(
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.wait()
+
+    # Checked FIRST, ahead of the timeout and the failure-marker scan. Killing the
+    # runner mid-bring-up routinely makes it log `[error]` on its way down, and a
+    # test the operator stopped on purpose must not be reported as hardware that
+    # failed — that would stamp the badge red and send them debugging a fault
+    # that does not exist.
+    if cancelled:
+        yield _sse(
+            "cancelled",
+            message="Hardware test cancelled. The devices were released.",
+            output=captured,
+        )
+        return
 
     if timed_out:
         yield _sse(

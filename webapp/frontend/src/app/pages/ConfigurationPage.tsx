@@ -1,4 +1,4 @@
-import { Server, Camera, Bot, Plus, Trash2, Edit, ChevronDown, ChevronUp, Radio, Smartphone, Save, Loader2, AlertTriangle, RotateCcw } from 'lucide-react';
+import { Server, Camera, Bot, Plus, Trash2, Edit, ChevronDown, ChevronUp, Radio, Smartphone, Save, Loader2, AlertTriangle, RotateCcw, X } from 'lucide-react';
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useBlocker } from 'react-router';
 import { toast } from 'sonner';
@@ -1606,7 +1606,17 @@ export function ConfigurationPage() {
     success: boolean | null;
     message: string;
     output: string[];
+    /**
+     * Set when the operator stopped the run. Carries `success: null` (the same
+     * value as "running"), so anything deciding "in progress" from `success`
+     * alone must exclude this too — a cancelled test is neither running nor
+     * failed, and must not colour the badge red.
+     */
+    cancelled?: boolean;
   } | null>(null);
+  // True between a cancel request and the run actually ending, so the button can
+  // say "Cancelling…" across the backend's terminate-and-wait.
+  const [hwTestCancelling, setHwTestCancelling] = useState(false);
   // Auto-scroll the output panel to the bottom whenever new lines
   // arrive, so the user always sees the most recent SDK output
   // without having to drag the scrollbar themselves.
@@ -1804,6 +1814,7 @@ export function ConfigurationPage() {
     // Stationary card highlighted while the banner reads "FAILED — Solo".
     setSelectedSystem(systemId);
     setTestingSystemId(systemId);
+    setHwTestCancelling(false);
     setDryRunResult({ systemId, success: null, message: 'Running hardware test…', output: [] });
     const controller = new AbortController();
     // Last-resort net in case the backend hangs without ever sending a
@@ -1858,6 +1869,21 @@ export function ConfigurationPage() {
               announce('Hardware test failed');
               finalised = true;
               break;
+            } else if (data.type === 'cancelled') {
+              // No setHwStatusEntry on purpose: a test the operator stopped says
+              // nothing about the hardware, so the badge keeps the verdict of the
+              // last run that actually finished.
+              setDryRunResult({
+                systemId,
+                success: null,
+                cancelled: true,
+                message: data.message,
+                output: data.output || collected,
+              });
+              toast.info('Hardware test cancelled');
+              announce('Hardware test cancelled');
+              finalised = true;
+              break;
             }
           } catch {
             // Non-JSON SSE comment / keepalive — ignore.
@@ -1883,8 +1909,32 @@ export function ConfigurationPage() {
     } finally {
       window.clearTimeout(safetyTimeoutId);
       setTestingSystemId(null);
+      setHwTestCancelling(false);
     }
   }, [testingSystemId, setTestingSystemId, setDryRunResult, setHwStatusEntry, setSelectedSystem]);
+
+  // Stop the in-flight test. The backend terminates the runner and releases the
+  // devices, then the stream emits its terminal `cancelled` event — so this only
+  // sends the request and lets the normal event path finish the run.
+  const cancelHardwareTest = useCallback(async () => {
+    if (testingSystemId === null) return;
+    const systemId = testingSystemId;
+    setHwTestCancelling(true);
+    try {
+      const res = await fetch(`/api/systems/${systemId}/test/cancel`, { method: 'POST' });
+      // 404 = the run ended between the click and this request. Its own terminal
+      // event has already landed and is the truth about how it finished.
+      if (!res.ok && res.status !== 404) {
+        toast.error(`Could not cancel the hardware test (server returned ${res.status})`);
+        setHwTestCancelling(false);
+      }
+    } catch (err) {
+      // Teardown is the backend's job, so a failed request means the test is
+      // probably still running — better to say so than to sit on "Cancelling…".
+      toast.error(`Could not cancel the hardware test: ${describeError(err)}`);
+      setHwTestCancelling(false);
+    }
+  }, [testingSystemId]);
 
   // Deep-link autotest: arriving at /configuration?system=<id>&autotest=1
   // (from the "Test Hardware" gate banners) auto-selects the system and starts
@@ -3386,12 +3436,26 @@ export function ConfigurationPage() {
                 <div className="flex items-center justify-between mt-[8px]">
                   <div className="text-brand text-[10px]">{system.hardware.length} devices</div>
                   <div className="flex items-center gap-[4px]">
+                    {/* While THIS system is under test the button becomes Cancel,
+                        which is where an operator looks first — they started the
+                        run from here. Still disabled while a DIFFERENT system is
+                        testing, since cancelling that one from this card would be
+                        a surprise. */}
                     <button
-                      onClick={(e) => { e.stopPropagation(); runHardwareTest(system.id); }}
-                      disabled={hwTesting !== null}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (hwTesting === system.id) {
+                          cancelHardwareTest();
+                        } else {
+                          runHardwareTest(system.id);
+                        }
+                      }}
+                      disabled={hwTesting !== null && hwTesting !== system.id}
                       className={`px-[12px] py-[6px] text-[11px] font-bold uppercase transition-colors rounded flex items-center gap-[5px] ${
                         hwTesting === system.id
-                          ? 'bg-brand/30 text-brand cursor-wait'
+                          ? hwTestCancelling
+                            ? 'bg-red-500/20 border border-red-500 text-red-300 cursor-wait'
+                            : 'bg-red-500/20 border border-red-500 text-red-300 hover:bg-red-500/30'
                           : hwTesting !== null
                             ? 'bg-brand/40 text-ink/60 cursor-not-allowed'
                             : sysHwStatus === 'ready'
@@ -3401,10 +3465,20 @@ export function ConfigurationPage() {
                               ? 'bg-transparent border border-edge text-dim hover:border-brand hover:text-ink'
                               : 'bg-brand hover:bg-[#4aa8cc] text-white'
                       }`}
-                      title={sysHwStatus === 'ready' ? 'Re-test hardware connectivity' : 'Test hardware connectivity'}
+                      title={
+                        hwTesting === system.id
+                          ? 'Stop the hardware test and release the devices'
+                          : sysHwStatus === 'ready'
+                            ? 'Re-test hardware connectivity'
+                            : 'Test hardware connectivity'
+                      }
                     >
-                      <Radio className="w-[12px] h-[12px]" />
-                      {hwTesting === system.id ? 'Testing…' : sysHwStatus === 'ready' ? 'Re-test' : 'Test'}
+                      {hwTesting === system.id
+                        ? <X className="w-[12px] h-[12px]" />
+                        : <Radio className="w-[12px] h-[12px]" />}
+                      {hwTesting === system.id
+                        ? (hwTestCancelling ? 'Cancelling…' : 'Cancel')
+                        : sysHwStatus === 'ready' ? 'Re-test' : 'Test'}
                     </button>
                     <button
                       onClick={(e) => openEditSystemModal(system, e)}
@@ -3424,23 +3498,31 @@ export function ConfigurationPage() {
 
         {/* Dry Run Result Banner */}
         {hwTestResult && (() => {
-          const inProgress = hwTestResult.success === null;
+          // `cancelled` also carries success === null, so it has to be excluded
+          // here or a stopped test would render as one still running — spinner,
+          // locked actions and all.
+          const cancelled = hwTestResult.cancelled === true;
+          const inProgress = hwTestResult.success === null && !cancelled;
           const passed = hwTestResult.success === true;
           const resultSystemName =
             systems.find(s => s.id === hwTestResult.systemId)?.name ?? hwTestResult.systemId;
-          // Three-state styling: cyan while running, green on pass,
-          // red on fail. Same colour family as the badges so the
-          // banner matches the system card's verdict at a glance.
+          // Four-state styling: cyan while running, green on pass, red on fail,
+          // and neutral amber when the operator stopped it — deliberately NOT red,
+          // because nothing was found wrong with the hardware.
           const palette = inProgress
             ? { bg: 'bg-brand/10', border: 'border-brand', text: 'text-brand' }
-            : passed
-              ? { bg: 'bg-green-500/10', border: 'border-green-500', text: 'text-green-500' }
-              : { bg: 'bg-red-500/10', border: 'border-red-500', text: 'text-red-500' };
+            : cancelled
+              ? { bg: 'bg-yellow-500/10', border: 'border-yellow-500', text: 'text-yellow-400' }
+              : passed
+                ? { bg: 'bg-green-500/10', border: 'border-green-500', text: 'text-green-500' }
+                : { bg: 'bg-red-500/10', border: 'border-red-500', text: 'text-red-500' };
           const heading = inProgress
             ? 'Testing Hardware'
-            : passed
-              ? 'Hardware Test Passed'
-              : 'Hardware Test Failed';
+            : cancelled
+              ? 'Hardware Test Cancelled'
+              : passed
+                ? 'Hardware Test Passed'
+                : 'Hardware Test Failed';
           return (
             <div className={`mt-[12px] p-[12px] border rounded ${palette.bg} ${palette.border}`}>
               <div className="flex items-center justify-between mb-[6px]">
@@ -3448,18 +3530,40 @@ export function ConfigurationPage() {
                   {inProgress && <Loader2 className="w-[14px] h-[14px] animate-spin" />}
                   {heading} — {resultSystemName}
                 </span>
-                {/* Action row hidden while the test is running so the user
-                    can't dismiss/retry a banner that's still streaming —
-                    same lock policy as the nav bar. On failure, offer a
-                    one-click Retry so the next step is obvious instead of
-                    hunting for the card's TEST button again. */}
+                {/* While the test runs, the only offered action is Cancel:
+                    dismissing or retrying a still-streaming banner would leave a
+                    run going with nothing on screen tracking it, but stopping a
+                    bring-up that is engaging the wrong system (or that the
+                    operator needs the arms back from) must not require waiting
+                    out the whole budget. */}
+                {inProgress && (
+                  <button
+                    onClick={cancelHardwareTest}
+                    disabled={hwTestCancelling}
+                    title="Stop the hardware test and release the devices"
+                    className="flex items-center gap-[5px] border border-red-500 text-red-400 hover:bg-red-500 hover:text-white px-[10px] py-[4px] text-[11px] font-bold uppercase rounded transition-colors disabled:opacity-50 disabled:cursor-wait"
+                  >
+                    <X className="w-[12px] h-[12px]" />
+                    {hwTestCancelling ? 'Cancelling…' : 'Cancel test'}
+                  </button>
+                )}
+                {/* On failure, offer a one-click Retry so the next step is
+                    obvious instead of hunting for the card's TEST button again.
+                    A cancelled run gets the same Retry, since resuming is the
+                    usual next move after stopping the wrong one. */}
                 {!inProgress && (
                   <div className="flex items-center gap-[10px]">
                     {!passed && (
                       <button
                         onClick={() => runHardwareTest(hwTestResult.systemId)}
                         disabled={testingSystemId !== null}
-                        className="flex items-center gap-[5px] border border-red-500 text-red-400 hover:bg-red-500 hover:text-white px-[10px] py-[4px] text-[11px] font-bold uppercase rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        // Red reads as "something is wrong", which is true of a
+                        // failure but not of a run the operator chose to stop.
+                        className={`flex items-center gap-[5px] border px-[10px] py-[4px] text-[11px] font-bold uppercase rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+                          cancelled
+                            ? 'border-yellow-500 text-yellow-400 hover:bg-yellow-500 hover:text-app'
+                            : 'border-red-500 text-red-400 hover:bg-red-500 hover:text-white'
+                        }`}
                       >
                         <RotateCcw className="w-[12px] h-[12px]" />
                         Retry test

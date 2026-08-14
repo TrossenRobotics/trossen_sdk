@@ -166,7 +166,13 @@ export function MonitorEpisodePage() {
   const { confirm, modalElement } = useConfirm();
   // Inline hardware test — lets the Start/Resume gates and the error-recovery
   // flow run the test in place instead of deep-linking to Configuration.
-  const { runTest, testingSystemId, result: hwTestResult } = useHardwareTest();
+  const {
+    runTest,
+    cancelTest,
+    cancelling: hwTestCancelling,
+    testingSystemId,
+    result: hwTestResult,
+  } = useHardwareTest();
   // True once we've shown a "connection lost" warning for the current drop,
   // so the toast fires once per outage (not once per reconnect attempt).
   const wsDroppedRef = useRef(false);
@@ -1295,9 +1301,11 @@ export function MonitorEpisodePage() {
                  just the hardware test. */
               <div className="flex flex-col gap-[12px] pt-[2px]">
                 <div className="bg-yellow-500/10 border border-yellow-500 text-yellow-300 px-[14px] py-[10px] text-[12px] leading-relaxed">
-                  {hwTestResult?.success === false
-                    ? `Hardware test failed: ${hwTestResult.message}`
-                    : 'Recovery couldn’t finish. Check the hardware and try again.'}
+                  {hwTestResult?.cancelled
+                    ? 'You cancelled the hardware test, so recovery stopped. Try again when ready.'
+                    : hwTestResult?.success === false
+                      ? `Hardware test failed: ${hwTestResult.message}`
+                      : 'Recovery couldn’t finish. Check the hardware and try again.'}
                 </div>
                 <div className="flex flex-wrap items-center gap-[12px]">
                   <button
@@ -1669,6 +1677,8 @@ export function MonitorEpisodePage() {
                       <HwTestButton
                         systemId={systemId}
                         runTest={runTest}
+                        cancelTest={cancelTest}
+                        cancelling={hwTestCancelling}
                         testingSystemId={testingSystemId}
                         result={hwTestResult}
                       />
@@ -1738,6 +1748,8 @@ export function MonitorEpisodePage() {
                       <HwTestButton
                         systemId={systemId}
                         runTest={runTest}
+                        cancelTest={cancelTest}
+                        cancelling={hwTestCancelling}
                         testingSystemId={testingSystemId}
                         result={hwTestResult}
                       />

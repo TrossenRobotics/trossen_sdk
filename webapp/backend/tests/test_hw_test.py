@@ -5,12 +5,19 @@ ideal first unit test. It guards the fix that scaled the test budget by
 device count (a flat 15s was falsely failing multi-arm rigs), and the later
 depth-camera and component-base terms.
 """
+import asyncio
+import json
+
 from app.hw_test import (
     _TEST_TIMEOUT_CAMERA_OPEN_RETRY_S as RETRY,
     _TEST_TIMEOUT_CEILING_S,
     _TEST_TIMEOUT_FLOOR_S,
     compute_bringup_budget,
+    is_test_running,
+    request_cancel,
+    stream_system_hardware_test,
 )
+from app.systems import SystemResponse
 
 
 def _system(n_arms=0, n_cameras=0, base=False):
@@ -191,3 +198,222 @@ class TestRecorderSharesTheBudget:
         cfg["hardware"]["cameras"] = _zeds(3, use_depth=True)
         assert _bootstrap_timeout_for(cfg) == 128.0 + 3 * RETRY
         assert _bootstrap_timeout_for(cfg) > _BOOTSTRAP_TIMEOUT_S
+
+
+class TestCancel:
+    """Cancelling an in-flight hardware test.
+
+    Driven against a fake subprocess: the point under test is the streaming
+    state machine (does a cancel interrupt a silent read, does it reach the
+    runner, does it beat the failure-marker scan), none of which needs real
+    hardware. `asyncio.run` rather than pytest-asyncio, which is not a dependency
+    of this backend.
+    """
+
+    @staticmethod
+    def _system(system_id="sys_cancel"):
+        return SystemResponse(
+            id=system_id, name="Cancel Rig", config=_system(n_arms=1)
+        )
+
+    @staticmethod
+    def _make_proc(lines, *, returncode=None, hang=False):
+        """A stand-in for the runner.
+
+        `hang=True` withholds EOF, which is what lets a test cancel while the
+        stream is blocked mid-read — the state a real rig is in while an arm's
+        TCP connect is timing out, and exactly when an operator reaches for
+        Cancel.
+
+        MUST be called from inside a running loop: asyncio.StreamReader binds to
+        the current event loop at construction, so building one before
+        `asyncio.run` raises "no current event loop".
+        """
+
+        class _Stdin:
+            def write(self, _data):
+                pass
+
+            async def drain(self):
+                pass
+
+            def close(self):
+                pass
+
+        class _Proc:
+            def __init__(self):
+                self.stdin = _Stdin()
+                self.stdout = asyncio.StreamReader()
+                for line in lines:
+                    self.stdout.feed_data(line)
+                if not hang:
+                    self.stdout.feed_eof()
+                self.returncode = returncode
+                self.terminated = False
+                self.killed = False
+
+            def terminate(self):
+                self.terminated = True
+                self.returncode = -15
+
+            def kill(self):
+                self.killed = True
+                self.returncode = -9
+
+            async def wait(self):
+                return self.returncode
+
+        return _Proc()
+
+    def _patch_spawn(self, monkeypatch, *specs):
+        """Patch subprocess spawning; return the list procs get appended to.
+
+        Procs are constructed lazily, on the spawn call, so that they are built
+        inside the running loop (see `_make_proc`). The returned list is empty
+        until the stream is actually consumed.
+        """
+        created: list = []
+        queue = list(specs)
+
+        async def _fake_spawn(*_args, **_kwargs):
+            proc = self._make_proc(**queue.pop(0))
+            created.append(proc)
+            return proc
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _fake_spawn)
+        return created
+
+    @staticmethod
+    def _payload(frame):
+        return json.loads(frame.removeprefix("data: ").rstrip("\n"))
+
+    def test_request_cancel_is_false_when_nothing_is_running(self):
+        # The ordinary outcome of a Cancel that raced the test's own last event;
+        # the endpoint turns this into a 404 rather than a lie.
+        assert request_cancel("no_such_system") is False
+        assert is_test_running("no_such_system") is False
+
+    def test_cancel_terminates_the_runner_and_reports_cancelled(self, monkeypatch):
+        created = self._patch_spawn(
+            monkeypatch, {"lines": [b"connecting arm_0\n"], "hang": True}
+        )
+
+        async def scenario():
+            agen = stream_system_hardware_test(self._system())
+            first = self._payload(await agen.__anext__())
+            assert first["type"] == "progress"
+            # Registered while streaming, which is what gives Cancel a handle.
+            assert is_test_running("sys_cancel") is True
+
+            assert request_cancel("sys_cancel") is True
+            terminal = self._payload(await agen.__anext__())
+            await agen.aclose()
+            return terminal
+
+        terminal = asyncio.run(scenario())
+        assert terminal["type"] == "cancelled"
+        # The whole reason this is a backend operation and not a dropped socket.
+        assert created[0].terminated is True
+        # Progress captured before the cancel is still handed back, so the
+        # operator can see how far the bring-up got.
+        assert terminal["output"] == ["connecting arm_0"]
+        # Deregistered on the way out, or `is_test_running` would lie forever.
+        assert is_test_running("sys_cancel") is False
+
+    def test_cancel_beats_a_failure_marker_logged_on_the_way_down(self, monkeypatch):
+        """A cancelled test must not be reported as failed hardware.
+
+        Killing the runner mid-bring-up routinely makes it log `[error]`, and the
+        marker scan would otherwise turn a deliberate stop into a red badge and
+        send the operator debugging a fault that never existed.
+        """
+        self._patch_spawn(
+            monkeypatch,
+            {"lines": [b"[error] connection reset by peer\n"], "hang": True},
+        )
+
+        async def scenario():
+            agen = stream_system_hardware_test(self._system())
+            await agen.__anext__()  # the [error] line, as progress
+            request_cancel("sys_cancel")
+            terminal = self._payload(await agen.__anext__())
+            await agen.aclose()
+            return terminal
+
+        terminal = asyncio.run(scenario())
+        assert terminal["type"] == "cancelled"
+
+    def test_an_uncancelled_run_still_completes(self, monkeypatch):
+        """The happy path must be untouched by the cancel plumbing."""
+        created = self._patch_spawn(
+            monkeypatch,
+            {
+                "lines": [
+                    b"connecting arm_0\n",
+                    b"__SUCCESS__: All hardware reachable\n",
+                ],
+                "returncode": 0,
+            },
+        )
+
+        async def scenario():
+            frames = [
+                self._payload(frame)
+                async for frame in stream_system_hardware_test(self._system())
+            ]
+            return frames
+
+        frames = asyncio.run(scenario())
+        assert frames[-1]["type"] == "complete"
+        assert frames[-1]["message"] == "All hardware reachable"
+        # An already-exited runner must not be terminated again.
+        assert created[0].terminated is False
+        assert is_test_running("sys_cancel") is False
+
+    def test_a_failed_launch_releases_the_cancel_slot(self, monkeypatch):
+        """Otherwise the system is permanently 'running' and Cancel has a handle
+        to a test that never started."""
+
+        async def _boom(*_args, **_kwargs):
+            raise OSError("stdbuf not found")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", _boom)
+
+        async def scenario():
+            return [
+                self._payload(frame)
+                async for frame in stream_system_hardware_test(self._system())
+            ]
+
+        frames = asyncio.run(scenario())
+        assert frames[-1]["type"] == "error"
+        assert is_test_running("sys_cancel") is False
+
+    def test_two_runs_of_one_system_both_get_cancelled(self, monkeypatch):
+        """Nothing server-side enforces single-flight — that is the frontend's
+        `testingSystemId` — so one system can legitimately have two streams and
+        neither may be left without a cancel handle."""
+        created = self._patch_spawn(
+            monkeypatch,
+            {"lines": [b"a\n"], "hang": True},
+            {"lines": [b"b\n"], "hang": True},
+        )
+
+        async def scenario():
+            gen_a = stream_system_hardware_test(self._system())
+            gen_b = stream_system_hardware_test(self._system())
+            await gen_a.__anext__()
+            await gen_b.__anext__()
+
+            assert request_cancel("sys_cancel") is True
+            first = self._payload(await gen_a.__anext__())
+            second = self._payload(await gen_b.__anext__())
+            await gen_a.aclose()
+            await gen_b.aclose()
+            return first, second
+
+        first, second = asyncio.run(scenario())
+        assert first["type"] == "cancelled"
+        assert second["type"] == "cancelled"
+        assert [p.terminated for p in created] == [True, True]
+        assert is_test_running("sys_cancel") is False
