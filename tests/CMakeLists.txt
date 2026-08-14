@@ -219,6 +219,12 @@ endif()
 trossen_discover_tests(test_policy_client_config)
 trossen_discover_tests(test_action_chunk)
 trossen_discover_tests(test_active_hardware_registry)
+# The glide targets were built but never registered, so `ctest` reported a fully
+# green suite while none of these ran — including the haptic curve and the
+# resting-level tracker, whose whole purpose is to be checkable without hardware.
+trossen_discover_tests(test_glide_session)
+trossen_discover_tests(test_glide_components)
+trossen_discover_tests(test_glide_haptics)
 if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
   trossen_discover_tests(test_policy_client)
   trossen_discover_tests(test_policy_client_producer)

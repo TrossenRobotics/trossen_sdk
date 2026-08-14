@@ -343,6 +343,24 @@ private:
   /// header stays free of <chrono>.
   double haptic_last_push_s_{0.0};
 
+  /// Time constant for tracking the resting residual, in seconds. Zero disables
+  /// tracking and renders the raw reading.
+  ///
+  /// The residual is NOT zero on an untouched arm: it carries whatever gravity
+  /// and payload the controller's model cannot account for, measured at ~50 N on
+  /// a Rivet follower doing nothing, and it shifts with pose and with whether the
+  /// arm is holding position. So it is tracked rather than configured as an
+  /// offset, and only the deviation from it is rendered.
+  ///
+  /// Sets the trade-off between the two ways this can feel wrong: too short and
+  /// a slow steady push is absorbed into the baseline and stops being felt, too
+  /// long and the buzz lingers after a pose change that shifted the residual.
+  float haptic_baseline_tau_s_{3.0f};
+
+  /// Tracks the resting residual so only deviation from it is rendered. Built in
+  /// configure() from haptic_baseline_tau_s and the curve's dead zone.
+  glide::HapticBaseline haptic_baseline_{};
+
   /// True while the gripper is actually in external-effort mode for feedback
   /// (set by prepare_for_teleop, cleared by end_teleop). Guards end_teleop's
   /// effort release so it never commands external effort on an idle gripper —

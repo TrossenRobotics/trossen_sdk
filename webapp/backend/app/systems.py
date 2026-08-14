@@ -301,8 +301,14 @@ def _carry_over_unmodelled_config(
         "smoothing_beta",
         "smoothing_d_cutoff_hz",
     )
-    # Leader-only contact haptics. No Configuration page controls exist for
-    # these, so they are carried over verbatim; see the loop below.
+    # Leader-only contact haptics. The Configuration page edits the enable flag,
+    # the dead zone, the max force and the intensity floor; the rest of the curve
+    # has no controls at all, so a save that omits a key means "keep it" rather
+    # than "clear it" and every key here is carried over.
+    #
+    # `haptic_feedback` is in this list too, which puts a requirement on the
+    # client: to turn haptics OFF it must send `false` explicitly, because an
+    # omitted flag is preserved and would silently switch back on.
     _HAPTIC_KEYS = (
         "haptic_feedback",
         "haptic_force_deadband_n",
@@ -312,6 +318,7 @@ def _carry_over_unmodelled_config(
         "haptic_curve_gamma",
         "haptic_levels",
         "haptic_update_hz",
+        "haptic_baseline_tau_s",
     )
     stored_arms = stored_hw.get("arms") or {}
     for arm_id, arm in (incoming_hw.get("arms") or {}).items():

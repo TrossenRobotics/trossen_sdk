@@ -252,6 +252,18 @@ interface ArmHardware {
   gripper_feedback_leader_max?: number;
   gripper_feedback_follower_max?: number;
   gripper_feedback_offset?: number;
+  // Leader-only contact haptics: the follower's end-effector contact force is
+  // rendered as vibration in this leader's handle. Independent of the gripper
+  // channel above and of `actuated` — the motor is in the handle, not a joint,
+  // so a fully passive leader renders it.
+  //
+  // Only these four are edited here. The rest of the curve (gamma, levels,
+  // update rate, baseline time constant) has no controls and is preserved
+  // server-side, so leaving it out of a save does not un-tune the handle.
+  haptic_feedback?: boolean;
+  haptic_force_deadband_n?: number;
+  haptic_force_max_n?: number;
+  haptic_intensity_floor?: number;
   // Optional per-joint operating limits pushed to the controller on connect.
   // Each array, when set, has one entry per joint (arm joints in rad / rad·s⁻¹
   // / N·m, gripper in m / m·s⁻¹ / N). The controller resets these on power
@@ -602,6 +614,10 @@ interface RawArmConfig {
   gripper_feedback_leader_max?: number;
   gripper_feedback_follower_max?: number;
   gripper_feedback_offset?: number;
+  haptic_feedback?: boolean;
+  haptic_force_deadband_n?: number;
+  haptic_force_max_n?: number;
+  haptic_intensity_floor?: number;
   position_min?: number[];
   position_max?: number[];
   velocity_max?: number[];
@@ -867,6 +883,10 @@ export function sdkConfigToSystem(id: string, apiData: RawSystemResponse): Hardw
       gripper_feedback_leader_max: typeof armCfg.gripper_feedback_leader_max === 'number' ? armCfg.gripper_feedback_leader_max : undefined,
       gripper_feedback_follower_max: typeof armCfg.gripper_feedback_follower_max === 'number' ? armCfg.gripper_feedback_follower_max : undefined,
       gripper_feedback_offset: typeof armCfg.gripper_feedback_offset === 'number' ? armCfg.gripper_feedback_offset : undefined,
+      haptic_feedback: typeof armCfg.haptic_feedback === 'boolean' ? armCfg.haptic_feedback : undefined,
+      haptic_force_deadband_n: typeof armCfg.haptic_force_deadband_n === 'number' ? armCfg.haptic_force_deadband_n : undefined,
+      haptic_force_max_n: typeof armCfg.haptic_force_max_n === 'number' ? armCfg.haptic_force_max_n : undefined,
+      haptic_intensity_floor: typeof armCfg.haptic_intensity_floor === 'number' ? armCfg.haptic_intensity_floor : undefined,
       position_min: Array.isArray(armCfg.position_min) ? armCfg.position_min : undefined,
       position_max: Array.isArray(armCfg.position_max) ? armCfg.position_max : undefined,
       velocity_max: Array.isArray(armCfg.velocity_max) ? armCfg.velocity_max : undefined,
@@ -1247,6 +1267,23 @@ export function systemToSdkConfig(system: HardwareSystem, originalConfig: RawSdk
         if (typeof arm.gripper_feedback_leader_max === 'number') armEntry.gripper_feedback_leader_max = arm.gripper_feedback_leader_max;
         if (typeof arm.gripper_feedback_follower_max === 'number') armEntry.gripper_feedback_follower_max = arm.gripper_feedback_follower_max;
         if (typeof arm.gripper_feedback_offset === 'number') armEntry.gripper_feedback_offset = arm.gripper_feedback_offset;
+      }
+      // Contact haptics, and note this one is emitted even when OFF, unlike every
+      // block around it. The backend PRESERVES haptic keys a save leaves out (it
+      // has to: there are no controls for most of the curve, so an omitted key
+      // means "keep it" rather than "clear it"). Omitting `false` would therefore
+      // be read as "no opinion" and the stored `true` would be restored — the
+      // toggle would visibly refuse to turn off.
+      if (arm.role === 'leader' && typeof arm.haptic_feedback === 'boolean') {
+        armEntry.haptic_feedback = arm.haptic_feedback;
+        // The curve numbers only when enabled: while off they are meaningless,
+        // and leaving them out means the backend keeps the last tuning for when
+        // it is switched back on.
+        if (arm.haptic_feedback) {
+          if (typeof arm.haptic_force_deadband_n === 'number') armEntry.haptic_force_deadband_n = arm.haptic_force_deadband_n;
+          if (typeof arm.haptic_force_max_n === 'number') armEntry.haptic_force_max_n = arm.haptic_force_max_n;
+          if (typeof arm.haptic_intensity_floor === 'number') armEntry.haptic_intensity_floor = arm.haptic_intensity_floor;
+        }
       }
       // Only emit per-joint limits that are actually set, so arms left at the
       // controller's firmware defaults stay clean in the config.
@@ -1919,6 +1956,13 @@ export function ConfigurationPage() {
     gripperFeedbackLeaderMax: 27,
     gripperFeedbackFollowerMax: 87.5,
     gripperFeedbackOffset: 8,
+    // Leader contact haptics (off by default). Defaults match the SDK's, and the
+    // dead zone is the knob that matters: the signal behind it is a residual that
+    // is never zero, so too low a value buzzes on an untouched arm.
+    hapticFeedback: false,
+    hapticDeadband: 5,
+    hapticMaxForce: 40,
+    hapticIntensityFloor: 80,
     // Per-joint operating limits. When disabled, nothing is emitted and the
     // controller's firmware defaults apply. When enabled, all four arrays
     // (length NUM_ARM_JOINTS) are pushed to the arm on every connect.
@@ -2126,6 +2170,10 @@ export function ConfigurationPage() {
       gripperFeedbackLeaderMax: 27,
       gripperFeedbackFollowerMax: 87.5,
       gripperFeedbackOffset: 8,
+      hapticFeedback: false,
+      hapticDeadband: 5,
+      hapticMaxForce: 40,
+      hapticIntensityFloor: 80,
       limitsEnabled: false,
       positionMin: [...DEFAULT_JOINT_LIMITS.position_min],
       positionMax: [...DEFAULT_JOINT_LIMITS.position_max],
@@ -2201,6 +2249,10 @@ export function ConfigurationPage() {
         gripperFeedbackLeaderMax: typeof arm.gripper_feedback_leader_max === 'number' ? arm.gripper_feedback_leader_max : 27,
         gripperFeedbackFollowerMax: typeof arm.gripper_feedback_follower_max === 'number' ? arm.gripper_feedback_follower_max : 87.5,
         gripperFeedbackOffset: typeof arm.gripper_feedback_offset === 'number' ? arm.gripper_feedback_offset : 8,
+        hapticFeedback: arm.haptic_feedback === true,
+        hapticDeadband: typeof arm.haptic_force_deadband_n === 'number' ? arm.haptic_force_deadband_n : 5,
+        hapticMaxForce: typeof arm.haptic_force_max_n === 'number' ? arm.haptic_force_max_n : 40,
+        hapticIntensityFloor: typeof arm.haptic_intensity_floor === 'number' ? arm.haptic_intensity_floor : 80,
         limitsEnabled: !!(arm.position_min || arm.position_max || arm.velocity_max || arm.effort_max),
         positionMin: armLimitOrDefault(arm.position_min, 'position_min'),
         positionMax: armLimitOrDefault(arm.position_max, 'position_max'),
@@ -2428,6 +2480,10 @@ export function ConfigurationPage() {
     // gripper renders the reflected force from the follower's grip effort).
     const isGripperFeedback = armForm.role === 'leader' && armForm.gripperFeedback;
 
+    // Contact haptics is leader-only too, but unlike the gripper channel it does
+    // not need an actuated gripper — the vibration motor is in the handle.
+    const isHaptic = armForm.role === 'leader' && armForm.hapticFeedback;
+
     const armData: ArmHardware = {
       id: editingHardwareId || `arm-${Date.now()}`,
       name: armForm.name,
@@ -2444,6 +2500,13 @@ export function ConfigurationPage() {
       gripper_feedback_leader_max: isGripperFeedback ? armForm.gripperFeedbackLeaderMax : undefined,
       gripper_feedback_follower_max: isGripperFeedback ? armForm.gripperFeedbackFollowerMax : undefined,
       gripper_feedback_offset: isGripperFeedback ? armForm.gripperFeedbackOffset : undefined,
+      // Explicit boolean for a leader, never undefined — see the emit path, where
+      // an omitted key means "keep what is stored" and would undo switching this
+      // off. Followers send nothing: haptics is a leader-only channel.
+      haptic_feedback: armForm.role === 'leader' ? armForm.hapticFeedback : undefined,
+      haptic_force_deadband_n: isHaptic ? armForm.hapticDeadband : undefined,
+      haptic_force_max_n: isHaptic ? armForm.hapticMaxForce : undefined,
+      haptic_intensity_floor: isHaptic ? armForm.hapticIntensityFloor : undefined,
       position_min: armForm.limitsEnabled ? [...armForm.positionMin] : undefined,
       position_max: armForm.limitsEnabled ? [...armForm.positionMax] : undefined,
       velocity_max: armForm.limitsEnabled ? [...armForm.velocityMax] : undefined,
@@ -4410,6 +4473,32 @@ export function ConfigurationPage() {
                           <label className="block text-ink text-[12px] mb-[6px]">Offset (N)</label>
                           <input type="number" step="any" value={armForm.gripperFeedbackOffset} onChange={e => setArmForm({ ...armForm, gripperFeedbackOffset: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
                           <span className="block text-dim text-[11px] mt-[2px]">Baseline effort that keeps the leader gripper open when nothing is grasped (reference: 8).</span>
+                        </div>
+                      </div>
+                    )}
+                    <div className="flex items-start gap-[8px]">
+                      <input type="checkbox" id="arm_haptic_feedback" checked={armForm.hapticFeedback} onChange={e => setArmForm({ ...armForm, hapticFeedback: e.target.checked })} className="w-[16px] h-[16px] mt-[2px]" />
+                      <label htmlFor="arm_haptic_feedback" className="text-ink text-[12px]">
+                        Contact haptics (handle vibration)
+                        <span className="block text-dim text-[11px] mt-[2px]">Buzz this handle in proportion to how hard the paired <b className="text-ink">follower</b> is pushing on the world, so the operator feels it meet a table or a fixture. Needs a Glide handle. Independent of gripper force feedback, and works on a passive leader — the motor is in the handle, not a joint.</span>
+                      </label>
+                    </div>
+                    {armForm.hapticFeedback && (
+                      <div className="pl-[24px] grid grid-cols-2 gap-[12px]">
+                        <div>
+                          <label className="block text-ink text-[12px] mb-[6px]">Dead zone (N)</label>
+                          <input type="number" step="any" value={armForm.hapticDeadband} onChange={e => setArmForm({ ...armForm, hapticDeadband: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
+                          <span className="block text-dim text-[11px] mt-[2px]">Contact below this stays silent (reference: 5). Measured <b className="text-ink">against the arm's resting level</b>, which is tracked continuously — the raw signal is never zero, so this is not an absolute force. Raise it if the handle buzzes while nothing is touching the follower.</span>
+                        </div>
+                        <div>
+                          <label className="block text-ink text-[12px] mb-[6px]">Max force (N)</label>
+                          <input type="number" step="any" value={armForm.hapticMaxForce} onChange={e => setArmForm({ ...armForm, hapticMaxForce: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
+                          <span className="block text-dim text-[11px] mt-[2px]">Contact that buzzes at full strength (reference: 40). Must exceed the dead zone. Lower it to make light contact more obvious, at the cost of headroom on a hard push.</span>
+                        </div>
+                        <div>
+                          <label className="block text-ink text-[12px] mb-[6px]">Intensity floor (0–255)</label>
+                          <input type="number" step="1" min="0" max="255" value={armForm.hapticIntensityFloor} onChange={e => setArmForm({ ...armForm, hapticIntensityFloor: parseFloat(e.target.value) })} className="w-full bg-app border border-edge text-ink px-[12px] py-[8px] text-[14px] focus:outline-none focus:border-brand" />
+                          <span className="block text-dim text-[11px] mt-[2px]">Duty applied the moment the dead zone is passed (reference: 80). The motor does not spin at all below roughly 60–80, so this exists to stop the bottom of the range being felt as nothing. Raise it if light contact is imperceptible.</span>
                         </div>
                       </div>
                     )}

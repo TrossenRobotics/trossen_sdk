@@ -92,6 +92,79 @@ struct GlideHapticCurve {
   void validate(const std::string& who) const;
 };
 
+/**
+ * @brief Tracks the resting force level so only the deviation from it is felt.
+ *
+ * Separated from the hardware for the same reason as GlideHapticCurve: this is
+ * the part whose behaviour over time decides whether the handle is quiet, and
+ * that has to be testable without an arm.
+ *
+ * It exists because the signal the haptic channel is given is NOT a contact
+ * force. It is the driver's external-effort residual, which carries whatever
+ * gravity and payload the controller's model cannot account for. Measured on an
+ * idle Rivet follower with nothing touching it, that reads ~50 N — ten times the
+ * default dead zone, enough to hold the motor at full duty forever.
+ *
+ * A configured offset cannot fix it, because the offset is not constant: it
+ * moves with the arm's pose, and it is far larger on a limp arm than on the same
+ * arm actively holding position. So the resting level is re-measured
+ * continuously and contact is rendered as a DEVIATION from it — which matches
+ * what contact physically is, a change.
+ *
+ * The one subtlety is that the tracker must not learn the thing it is trying to
+ * detect. Adaptation is FROZEN while the deviation exceeds the dead zone, so a
+ * sustained push cannot be absorbed into the baseline and fade out under the
+ * operator's hand. Smaller deviations — including negative ones, when a contact
+ * is released — always adapt, so an arm that started already in contact
+ * recovers by itself rather than staying numb for the session.
+ */
+class HapticBaseline {
+public:
+  HapticBaseline() = default;
+
+  /// @param tau_s Seconds over which the resting level is tracked. Zero means
+  ///        never adapt, which renders the raw residual — useful only for
+  ///        characterising an arm.
+  /// @param deadband_n Deviation above which adaptation freezes. Pass the same
+  ///        dead zone the curve uses, or the tracker will keep learning through
+  ///        exactly the contacts the curve renders.
+  HapticBaseline(float tau_s, float deadband_n)
+    : tau_s_(tau_s), deadband_n_(deadband_n) {}
+
+  /**
+   * @brief Feed one raw residual reading and get back what should be rendered.
+   *
+   * @param raw_n The driver's residual magnitude (N).
+   * @param now_s Monotonic seconds. Adaptation uses the real elapsed time, so
+   *        the time constant means the same thing at any loop rate.
+   * @return Deviation above the resting level in N, never negative. Zero on the
+   *         first call of a session (that call establishes the level) and on a
+   *         non-finite input.
+   */
+  float deviation_for(float raw_n, double now_s);
+
+  /// Forget the resting level, so the next reading measures it afresh. Called on
+  /// teardown: a level learned with the arm limp, or in another pose, would
+  /// otherwise be carried into a session starting somewhere else.
+  void reset();
+
+  /// Whether a resting level has been measured yet. Diagnostics and tests.
+  bool measured() const { return measured_; }
+
+  /// The tracked resting level (N). Meaningless until measured(). Diagnostics.
+  float level() const { return static_cast<float>(baseline_n_); }
+
+private:
+  float tau_s_{3.0f};
+  float deadband_n_{5.0f};
+
+  /// Held as double because it is an accumulator: a long session applies many
+  /// thousands of small exponential increments to it.
+  double baseline_n_{0.0};
+  double last_s_{0.0};
+  bool   measured_{false};
+};
+
 }  // namespace trossen::hw::glide
 
 #endif  // TROSSEN_SDK__HW__GLIDE__GLIDE_HAPTICS_HPP_

@@ -169,6 +169,15 @@ struct ArmConfig {
   std::uint8_t haptic_levels{16};
   float haptic_update_hz{30.0f};
 
+  /// @brief Seconds over which the resting force level is tracked, so only the
+  /// deviation from it is rendered. Zero disables tracking.
+  ///
+  /// Required for the handle to be quiet at rest at all: the residual on an
+  /// untouched arm is ~50 N, not 0, and it shifts with pose — so there is no
+  /// fixed offset that could be subtracted instead. Too short absorbs a slow
+  /// steady push; too long leaves the buzz lingering after a pose change.
+  float haptic_baseline_tau_s{3.0f};
+
   /// @brief Optional per-joint operating limits pushed to the controller on
   /// connect. Each array, when non-empty, must have one entry per joint (arm
   /// joints in rad / rad·s⁻¹ / N·m, gripper in m / m·s⁻¹ / N). Empty = leave
@@ -289,6 +298,8 @@ struct ArmConfig {
       j.at("haptic_curve_gamma").get_to(c.haptic_curve_gamma);
     if (j.contains("haptic_levels")) j.at("haptic_levels").get_to(c.haptic_levels);
     if (j.contains("haptic_update_hz")) j.at("haptic_update_hz").get_to(c.haptic_update_hz);
+    if (j.contains("haptic_baseline_tau_s"))
+      j.at("haptic_baseline_tau_s").get_to(c.haptic_baseline_tau_s);
     if (j.contains("position_min")) j.at("position_min").get_to(c.position_min);
     if (j.contains("position_max")) j.at("position_max").get_to(c.position_max);
     if (j.contains("velocity_max")) j.at("velocity_max").get_to(c.velocity_max);
@@ -346,6 +357,7 @@ struct ArmConfig {
       j["haptic_curve_gamma"] = haptic_curve_gamma;
       j["haptic_levels"] = haptic_levels;
       j["haptic_update_hz"] = haptic_update_hz;
+      j["haptic_baseline_tau_s"] = haptic_baseline_tau_s;
     }
     // Emit smoothing tuning only when enabled, same reasoning as the gripper
     // feedback block above — the constants are meaningless while it is off.

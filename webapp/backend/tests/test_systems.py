@@ -196,11 +196,12 @@ class TestCarryOverUnmodelledConfig:
         assert merged["hardware"]["arms"]["follower"]["smoothing_beta"] == 0.4
 
     def test_haptics_are_restored(self) -> None:
-        """The Configuration page has no haptic controls, so EVERY save drops them.
+        """Most of the haptic curve has no controls, so a save drops it.
 
-        Not a legacy-bundle concern like the cases above: the current page omits
-        these keys too, so without this a tuned handle is un-tuned by any
-        unrelated edit to the same system.
+        The Configuration page edits four keys — the enable flag, dead zone, max
+        force and intensity floor — and rebuilds every arm without the rest
+        (gamma, levels, update rate, baseline time constant). Without this, tuning
+        one of those by hand is undone by any later edit to the same system.
         """
         stored = self._stored()
         stored["hardware"]["arms"]["glide_left"] = {
@@ -225,8 +226,11 @@ class TestCarryOverUnmodelledConfig:
     def test_a_client_can_turn_haptics_off(self) -> None:
         """Per key, not per block: a client that sends one key controls that key.
 
-        So a future page that grows a single on/off toggle can disable haptics
-        without also having to reproduce the whole curve.
+        This is what lets the Configuration page's toggle actually turn haptics
+        off. It only works because the page sends `false` EXPLICITLY — an omitted
+        flag is preserved by the carry-over above, so a page that emitted nothing
+        when unchecked would find the stored `true` restored and the toggle would
+        appear to do nothing.
         """
         stored = self._stored()
         stored["hardware"]["arms"]["glide_left"] = {
@@ -242,6 +246,37 @@ class TestCarryOverUnmodelledConfig:
         # The rest of the curve is still carried over — harmless while off, and
         # it means toggling back on does not lose the tuning.
         assert arm["haptic_force_max_n"] == 35.0
+
+    def test_tuning_sent_by_the_page_wins_over_the_stored_row(self) -> None:
+        """The knobs the Configuration page does edit must not be reverted.
+
+        The mirror image of test_haptics_are_restored: carrying over a key the
+        client actually sent would make the tuning sliders silently inert, which
+        is the whole point of having them on the page.
+        """
+        stored = self._stored()
+        stored["hardware"]["arms"]["glide_left"] = {
+            "haptic_feedback": True,
+            "haptic_force_deadband_n": 5.0,
+            "haptic_force_max_n": 40.0,
+            "haptic_intensity_floor": 80,
+            "haptic_baseline_tau_s": 3.0,
+        }
+        incoming = self._old_client_put()
+        incoming["hardware"]["arms"]["glide_left"] = {
+            "haptic_feedback": True,
+            "haptic_force_deadband_n": 12.0,
+            "haptic_force_max_n": 25.0,
+            "haptic_intensity_floor": 120,
+        }
+
+        merged = _carry_over_unmodelled_config(incoming, stored)
+        arm = merged["hardware"]["arms"]["glide_left"]
+        assert arm["haptic_force_deadband_n"] == 12.0
+        assert arm["haptic_force_max_n"] == 25.0
+        assert arm["haptic_intensity_floor"] == 120
+        # Not editable on the page, so still carried from the stored row.
+        assert arm["haptic_baseline_tau_s"] == 3.0
 
     def test_producer_type_wins_over_the_stored_row(self) -> None:
         """A save that changes the camera type must not be undone by this."""

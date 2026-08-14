@@ -1,6 +1,7 @@
 /**
  * @file test_glide_haptics.cpp
- * @brief Unit tests for the Glide contact-force to vibration-intensity curve.
+ * @brief Unit tests for the force-to-vibration curve and the resting-level
+ *        tracker that decides what counts as contact in the first place.
  */
 
 #include <cmath>
@@ -15,6 +16,7 @@
 namespace {
 
 using trossen::hw::glide::GlideHapticCurve;
+using trossen::hw::glide::HapticBaseline;
 
 /// A curve with round numbers, so the expected values below are obvious by
 /// inspection rather than the output of the code under test.
@@ -192,6 +194,214 @@ TEST(GlideHapticCurve, ValidationMessageNamesTheOffendingArm) {
   } catch (const std::invalid_argument& e) {
     EXPECT_NE(std::string(e.what()).find("glide_left"), std::string::npos);
   }
+}
+
+// ── HapticBaseline ────────────────────────────────────────────────────────
+//
+// Measured on hardware: an idle Rivet follower reports ~50 N of external-effort
+// residual with nothing touching it, so these tests use a resting level in that
+// range rather than a tidy zero. Rendering that raw number is what pinned the
+// motor at full duty, and it is the failure these tests exist to prevent.
+
+namespace {
+constexpr float kRest = 50.0f;      // measured idle residual, N
+constexpr float kDead = 5.0f;       // dead zone, N
+constexpr float kTau  = 3.0f;       // tracking time constant, s
+
+/// Settles the tracker at `rest` by feeding it that level for `seconds`.
+HapticBaseline settled(float rest, double& t, double seconds = 10.0,
+                       float tau = kTau, float dead = kDead) {
+  HapticBaseline b(tau, dead);
+  const double step = 0.01;
+  for (double elapsed = 0.0; elapsed < seconds; elapsed += step) {
+    t += step;
+    b.deviation_for(rest, t);
+  }
+  return b;
+}
+}  // namespace
+
+TEST(HapticBaseline, TheFirstReadingIsSilentAndBecomesTheRestingLevel) {
+  HapticBaseline b(kTau, kDead);
+  EXPECT_FALSE(b.measured());
+
+  // Silent even though 50 N would saturate the curve outright: the first sample
+  // defines "at rest", so a session starts quiet instead of buzzing until the
+  // tracker settles.
+  EXPECT_FLOAT_EQ(b.deviation_for(kRest, 1.0), 0.0f);
+  EXPECT_TRUE(b.measured());
+  EXPECT_NEAR(b.level(), kRest, 1e-3);
+}
+
+TEST(HapticBaseline, AnUntouchedArmStaysSilentAtAnyRestingLevel) {
+  // The regression test for the reported bug: the handle buzzed constantly with
+  // nothing touching the arm.
+  double t = 0.0;
+  HapticBaseline b = settled(kRest, t);
+
+  for (int i = 0; i < 200; ++i) {
+    t += 0.01;
+    EXPECT_FLOAT_EQ(b.deviation_for(kRest, t), 0.0f);
+  }
+}
+
+TEST(HapticBaseline, RestingNoiseBelowTheDeadZoneStaysSilent) {
+  // The measured residual wanders a few N around its mean, which must not read
+  // as contact.
+  double t = 0.0;
+  HapticBaseline b = settled(kRest, t);
+
+  const float wobble[] = {-3.0f, 2.5f, -1.0f, 3.5f, -2.0f, 1.5f};
+  for (int pass = 0; pass < 20; ++pass) {
+    for (float w : wobble) {
+      t += 0.01;
+      EXPECT_LE(b.deviation_for(kRest + w, t), kDead)
+        << "resting noise must not exceed the dead zone";
+    }
+  }
+}
+
+TEST(HapticBaseline, ContactIsReportedAsDeviationNotAbsoluteForce) {
+  double t = 0.0;
+  HapticBaseline b = settled(kRest, t);
+
+  t += 0.01;
+  // 20 N of contact on top of a 50 N resting level must read as 20, not 70 --
+  // otherwise every contact saturates a curve whose max is 40.
+  EXPECT_NEAR(b.deviation_for(kRest + 20.0f, t), 20.0f, 0.5f);
+}
+
+TEST(HapticBaseline, ASustainedPushDoesNotFadeOut) {
+  // The reason adaptation freezes above the dead zone. A plain low-pass would
+  // learn the push and go quiet under the operator's hand while they were still
+  // leaning on something.
+  double t = 0.0;
+  HapticBaseline b = settled(kRest, t);
+
+  float last = 0.0f;
+  for (double elapsed = 0.0; elapsed < 30.0; elapsed += 0.01) {
+    t += 0.01;
+    last = b.deviation_for(kRest + 20.0f, t);
+  }
+  EXPECT_NEAR(last, 20.0f, 0.5f)
+    << "a 30s push (10x the time constant) must still be felt";
+}
+
+TEST(HapticBaseline, ReleasingAContactReturnsToSilence) {
+  double t = 0.0;
+  HapticBaseline b = settled(kRest, t);
+
+  for (double elapsed = 0.0; elapsed < 5.0; elapsed += 0.01) {
+    t += 0.01;
+    b.deviation_for(kRest + 20.0f, t);
+  }
+  t += 0.01;
+  EXPECT_FLOAT_EQ(b.deviation_for(kRest, t), 0.0f);
+}
+
+TEST(HapticBaseline, AnArmThatStartsInContactRecoversInsteadOfStayingNumb) {
+  // The known cost of measuring the level from the arm's own state: a contact
+  // present at the first reading is taken for the resting level and cannot be
+  // felt. It must not be permanent -- once released, the level adapts DOWN
+  // (negative deviations never freeze) and the arm becomes sensitive again.
+  double t = 1.0;
+  HapticBaseline b(kTau, kDead);
+  b.deviation_for(kRest + 20.0f, t);   // starts pressed
+  EXPECT_NEAR(b.level(), kRest + 20.0f, 1e-3);
+
+  for (double elapsed = 0.0; elapsed < 20.0; elapsed += 0.01) {
+    t += 0.01;
+    b.deviation_for(kRest, t);          // released
+  }
+  EXPECT_NEAR(b.level(), kRest, 0.5f);
+
+  t += 0.01;
+  EXPECT_NEAR(b.deviation_for(kRest + 20.0f, t), 20.0f, 0.5f);
+}
+
+TEST(HapticBaseline, ThePoseResidualIsTrackedSoItDoesNotReadAsContact) {
+  // The reason this is tracked rather than configured as a constant: moving the
+  // arm changes the residual, and a fixed offset measured in one pose would make
+  // every other pose buzz. Ramped in slowly, as a pose change is.
+  double t = 0.0;
+  HapticBaseline b = settled(kRest, t);
+
+  // +15 N over 30 s = 0.5 N/s, well inside the dead zone per step, so it is
+  // learned rather than latched as contact.
+  constexpr float kRate = 0.5f;   // N/s
+  for (int i = 1; i <= 3000; ++i) {
+    t += 0.01;
+    b.deviation_for(kRest + kRate * 0.01f * static_cast<float>(i), t);
+  }
+
+  // An exponential tracker follows a ramp with a steady-state lag of exactly
+  // rate * tau, so it settles 1.5 N behind rather than dead on. Asserted rather
+  // than tolerated: that lag is the price of the time constant, and it is also
+  // the budget the dead zone has to cover, so a change in either should fail here
+  // rather than quietly start buzzing on every pose change.
+  EXPECT_NEAR(b.level(), kRest + 15.0f - kRate * kTau, 0.2f);
+
+  t += 0.01;
+  EXPECT_LE(b.deviation_for(kRest + 15.0f, t), kDead)
+    << "the new pose must be the new normal, not a permanent buzz";
+}
+
+TEST(HapticBaseline, ZeroTauNeverAdaptsAndRendersTheRawResidual) {
+  // The characterisation mode, and a guard on the meaning of 0: it must disable
+  // tracking rather than divide by zero or adapt instantly.
+  double t = 1.0;
+  HapticBaseline b(0.0f, kDead);
+  b.deviation_for(0.0f, t);            // level = 0
+
+  t += 1.0;
+  EXPECT_NEAR(b.deviation_for(kRest, t), kRest, 1e-3);
+  t += 100.0;
+  EXPECT_NEAR(b.deviation_for(kRest, t), kRest, 1e-3) << "must never adapt";
+}
+
+TEST(HapticBaseline, ResetForgetsTheLevelSoTheNextSessionRemeasures) {
+  double t = 0.0;
+  HapticBaseline b = settled(kRest, t);
+  ASSERT_TRUE(b.measured());
+
+  b.reset();
+  EXPECT_FALSE(b.measured());
+
+  // A level learned with the arm limp must not carry into a session that starts
+  // in a different pose -- the next reading defines the level afresh, silently.
+  t += 0.01;
+  EXPECT_FLOAT_EQ(b.deviation_for(12.0f, t), 0.0f);
+  EXPECT_NEAR(b.level(), 12.0f, 1e-3);
+}
+
+TEST(HapticBaseline, ANonFiniteReadingIsDroppedAndDoesNotPoisonTheLevel) {
+  // A NaN folded into the level would never wash out: every later comparison
+  // against it is false, so the handle would go silent for the rest of the
+  // session. Reached in practice when a driver read races a reconnect.
+  double t = 0.0;
+  HapticBaseline b = settled(kRest, t);
+
+  t += 0.01;
+  EXPECT_FLOAT_EQ(b.deviation_for(std::nanf(""), t), 0.0f);
+  t += 0.01;
+  EXPECT_FLOAT_EQ(
+    b.deviation_for(std::numeric_limits<float>::infinity(), t), 0.0f);
+
+  EXPECT_NEAR(b.level(), kRest, 0.5f) << "the level must survive intact";
+  t += 0.01;
+  EXPECT_NEAR(b.deviation_for(kRest + 20.0f, t), 20.0f, 0.5f);
+}
+
+TEST(HapticBaseline, ARepeatedOrBackwardTimestampDoesNotCorruptTheLevel) {
+  // dt <= 0 must be skipped rather than trusted: a negative alpha would push the
+  // level the wrong way.
+  double t = 0.0;
+  HapticBaseline b = settled(kRest, t);
+  const float before = b.level();
+
+  b.deviation_for(kRest + 3.0f, t);        // same timestamp
+  b.deviation_for(kRest + 3.0f, t - 5.0);  // earlier timestamp
+  EXPECT_NEAR(b.level(), before, 1e-3);
 }
 
 }  // namespace

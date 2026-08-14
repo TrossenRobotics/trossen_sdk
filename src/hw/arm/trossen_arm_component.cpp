@@ -335,6 +335,9 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
   if (config.contains("haptic_update_hz")) {
     haptic_update_hz_ = config.at("haptic_update_hz").get<float>();
   }
+  if (config.contains("haptic_baseline_tau_s")) {
+    haptic_baseline_tau_s_ = config.at("haptic_baseline_tau_s").get<float>();
+  }
   // Validate only when enabled, so a rig can leave half-tuned numbers in a
   // config it has switched off. A bad curve is a startup error naming the field
   // rather than a handle that silently never buzzes.
@@ -345,6 +348,20 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
         "TrossenArmComponent '" + get_identifier() +
         "': haptic_update_hz must be > 0, got " + std::to_string(haptic_update_hz_));
     }
+    // Negative is rejected; zero is allowed and means "never adapt", which
+    // renders the raw residual. That is only useful for characterising an arm --
+    // in normal use it is what makes the motor buzz permanently.
+    if (!(haptic_baseline_tau_s_ >= 0.0f)) {
+      throw std::runtime_error(
+        "TrossenArmComponent '" + get_identifier() +
+        "': haptic_baseline_tau_s must be >= 0, got " +
+        std::to_string(haptic_baseline_tau_s_));
+    }
+    // Given the curve's own dead zone, not a separate knob: the tracker must
+    // freeze on exactly the contacts the curve renders. Two independent
+    // thresholds would let it keep learning through a push that is being felt.
+    haptic_baseline_ =
+      glide::HapticBaseline(haptic_baseline_tau_s_, haptic_curve_.deadband_n);
   }
 
   // Size the command filter to this arm's joint count. Built here rather than
@@ -481,7 +498,15 @@ std::optional<float> TrossenArmComponent::read_contact_force() {
 void TrossenArmComponent::apply_haptic_feedback(float follower_contact_force_n) {
   if (!haptic_feedback_) return;
 
-  haptic_force_sum_ += static_cast<double>(follower_contact_force_n);
+  // What arrives here is NOT a contact force: it is the driver's external-effort
+  // residual, which on an untouched arm carries the whole of whatever gravity and
+  // payload the controller's model cannot explain (~50 N on a Rivet follower).
+  // Rendering it directly held the motor at full duty permanently. The tracker
+  // turns it into a deviation from the resting level; see HapticBaseline.
+  const float deviation =
+    haptic_baseline_.deviation_for(follower_contact_force_n, now_seconds());
+
+  haptic_force_sum_ += static_cast<double>(deviation);
   ++haptic_force_samples_;
 
   // Zero means no push has happened yet, so the first call of a session is
@@ -519,6 +544,11 @@ void TrossenArmComponent::stop_haptic_feedback() {
   haptic_force_sum_     = 0.0;
   haptic_force_samples_ = 0;
   haptic_last_push_s_   = 0.0;
+  // Forget the resting level too, so the next session measures it fresh. Keeping
+  // it would carry a level learned in one pose (or with the arm limp, which reads
+  // far higher than the same arm holding position) into a session that starts
+  // somewhere else entirely.
+  haptic_baseline_.reset();
   glide::GlideSession::instance().set_vibration(get_identifier(), 0);
 }
 
