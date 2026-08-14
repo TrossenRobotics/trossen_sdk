@@ -9,6 +9,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -22,6 +23,12 @@ namespace trossen::hw {
  * @brief Static registry for hardware component factory functions
  *
  * Hardware implementations register themselves at static initialization time.
+ *
+ * @note Thread-safe, and create() may be called concurrently for different
+ *       devices -- that is how a multi-arm rig opens its hardware in parallel
+ *       rather than one device at a time. The internal lock covers the factory
+ *       lookup only; the component's configure(), which is where all the time
+ *       goes, runs unlocked.
  */
 class HardwareRegistry {
 public:
@@ -83,8 +90,18 @@ private:
    * @return Reference to the static registry map
    *
    * @note Using a function-local static ensures proper initialization order
+   * @note Callers must hold get_mutex() for the duration of any access
    */
   static std::map<std::string, FactoryFunc>& get_registry();
+
+  /**
+   * @brief Get the mutex guarding the factory map
+   *
+   * @return Reference to the static mutex
+   *
+   * @note Never hold it across a factory call or configure(); see create().
+   */
+  static std::mutex& get_mutex();
 };
 
 /**
