@@ -30,16 +30,35 @@ class _FakeBase:
 
 
 class _FakeArm:
-    def __init__(self, *, cleared: bool = True, remaining: str = ""):
+    """An arm that reports `remaining`, optionally only until it is cleared.
+
+    `clears_on_clear_error=True` models the arm the old code was really written
+    for: the fault survives configure() and goes away once clear_error() has
+    reconnected. `remaining` alone models the joint-6 case, where it comes
+    straight back.
+    """
+
+    def __init__(self, *, cleared: bool = True, remaining: str = "",
+                 clears_on_clear_error: bool = False,
+                 raise_on_probe: Exception | None = None):
         self._cleared = cleared
         self._remaining = remaining
+        self._clears_on_clear_error = clears_on_clear_error
+        self._raise_on_probe = raise_on_probe
         self.clear_calls = 0
+        self.probe_calls = 0
 
     def clear_error(self) -> bool:
         self.clear_calls += 1
+        if self._clears_on_clear_error:
+            self._remaining = ""
+            self._raise_on_probe = None
         return self._cleared
 
     def error_information(self) -> str:
+        self.probe_calls += 1
+        if self._raise_on_probe is not None:
+            raise self._raise_on_probe
         return self._remaining
 
 
@@ -48,11 +67,15 @@ def runner(monkeypatch):
     """Import app.recover_runner with a stub trossen_sdk in place."""
     created: dict[str, Any] = {}
     devices: dict[str, Any] = {}
+    configs: dict[str, Any] = {}
 
     class _Registry:
         @staticmethod
         def create(type_name, ident, config, mark_active=True):
             created[ident] = type_name
+            # Snapshot rather than alias: a test asserting the caller's dict was
+            # not mutated needs the two to be distinguishable.
+            configs[ident] = dict(config)
             if ident not in devices:
                 raise RuntimeError(f"no fake device registered for '{ident}'")
             dev = devices[ident]
@@ -79,6 +102,7 @@ def runner(monkeypatch):
     monkeypatch.setattr(bringup, "ARM_RETRY_BACKOFF_S", 0.0)
     mod._test_devices = devices
     mod._test_created = created
+    mod._test_configs = configs
     mod._test_bringup = bringup
     yield mod
     sys.modules.pop("app.recover_runner", None)
@@ -139,6 +163,114 @@ def test_unreachable_arm_is_reported_not_raised(runner):
     assert arms["glide_left"]["recovered"] is False
     assert "unreachable" in arms["glide_left"]["detail"]
     assert arms["glide_right"]["recovered"] is True
+
+
+def test_a_clean_arm_is_connected_once_not_twice(runner):
+    """Creating the component already configures with the clear flag set.
+
+    Calling clear_error() on top of that is a SECOND full connect, because it
+    internally cleans up and re-configures. Every Recover used to pay that for
+    every arm, on the slowest connect path there is — the fault being recovered
+    from is exactly what leaves a stale single-client connection on each
+    controller, so each connect can burn its full ~20s timeout.
+    """
+    arm = _FakeArm()
+    runner._test_devices["glide_left"] = arm
+
+    arms = runner._recover_arms({"glide_left": {"ip_address": "192.168.5.3"}})
+
+    assert arms["glide_left"]["recovered"] is True
+    assert arm.clear_calls == 0, (
+        "configure() already cleared the latch; clear_error() here is a wasted "
+        "reconnect"
+    )
+    assert arm.probe_calls == 1, "one probe decides it; no need to re-read"
+
+
+def test_an_arm_still_faulted_after_connect_is_cleared_explicitly(runner):
+    """The case the unconditional call was really protecting.
+
+    A fault that survives configure() — or a link that dropped between the two —
+    still gets clear_error(), which re-establishes the connection as a side
+    effect. The second connect is worth paying for here; it just should not be
+    the default.
+    """
+    arm = _FakeArm(remaining="Motor 3 overcurrent", clears_on_clear_error=True)
+    runner._test_devices["glide_left"] = arm
+
+    arms = runner._recover_arms({"glide_left": {"ip_address": "192.168.5.3"}})
+
+    assert arm.clear_calls == 1, "a surviving fault must still be cleared"
+    assert arms["glide_left"]["recovered"] is True
+    assert arms["glide_left"]["remaining_error"] == ""
+
+
+def test_a_probe_that_throws_still_triggers_a_clear(runner):
+    """A dead link makes error_information() throw, deliberately.
+
+    That is the link-drop case, and clear_error() reconnecting is exactly the
+    right response — so a throwing probe must not be mistaken for a healthy arm
+    OR abort the recovery of the others.
+    """
+    arm = _FakeArm(raise_on_probe=RuntimeError("connection reset"),
+                   clears_on_clear_error=True)
+    runner._test_devices["glide_left"] = arm
+
+    arms = runner._recover_arms({"glide_left": {"ip_address": "192.168.5.3"}})
+
+    assert arm.clear_calls == 1
+    assert arms["glide_left"]["recovered"] is True
+
+
+def test_a_permanently_unreadable_arm_is_not_called_recovered(runner):
+    """If the probe throws both times, the verdict has to stay negative."""
+    arm = _FakeArm(raise_on_probe=RuntimeError("connection reset"))
+    runner._test_devices["glide_left"] = arm
+
+    arms = runner._recover_arms({"glide_left": {"ip_address": "192.168.5.3"}})
+
+    assert arms["glide_left"]["recovered"] is False
+    assert "could not re-read" in arms["glide_left"]["remaining_error"]
+
+
+def test_the_joint6_case_still_reports_the_surviving_fault(runner):
+    """An arm outside its limit re-faults the instant it is cleared."""
+    arm = _FakeArm(remaining="Joint 6 position limit exceeded")
+    runner._test_devices["glide_left"] = arm
+
+    arms = runner._recover_arms({"glide_left": {"ip_address": "192.168.5.3"}})
+
+    assert arm.clear_calls == 1, "it was faulted, so clearing was attempted"
+    assert arm.probe_calls == 2, "and re-read afterwards to catch the re-fault"
+    assert arms["glide_left"]["recovered"] is False
+    assert "Joint 6" in arms["glide_left"]["remaining_error"]
+
+
+def test_the_base_is_recovered_without_a_mechanical_re_home(runner):
+    """Recovery clears one latched bit; homing every pivot to do that cost ~33s.
+
+    Nothing here commands a wheel and the driver is dropped immediately after, so
+    the zero the modules hold is never used. The session that follows opens the
+    base for real and homes it as usual.
+    """
+    runner._test_devices["rivet_base"] = _FakeBase()
+
+    runner._recover_bases([{"id": "rivet_base", "type": "trossen_base"}])
+
+    passed = runner._test_configs["rivet_base"]
+    assert passed["home_on_configure"] is False, (
+        "recovery must not pay for a mechanical re-home"
+    )
+
+
+def test_recovery_does_not_mutate_the_caller_config(runner):
+    """The opt-out is applied to a copy; the config dict came from the request."""
+    original = {"id": "rivet_base", "type": "trossen_base"}
+    runner._test_devices["rivet_base"] = _FakeBase()
+
+    runner._recover_bases([original])
+
+    assert "home_on_configure" not in original
 
 
 def test_non_base_components_are_skipped(runner):
