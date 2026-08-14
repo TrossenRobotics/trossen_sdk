@@ -520,9 +520,16 @@ _mjpeg_server: Any | None = None
 # blocked in write() forever once the socket buffer fills, pinning a thread and
 # spending airtime on frames nobody receives. (Seen on rivet-01: a screen that
 # was 100% unreachable still held three established sockets.) A timeout turns
-# that into an ordinary disconnect. Generous on purpose: a preview frame is
-# tens of KB, so any client still alive drains it in well under a second.
-_MJPEG_SEND_TIMEOUT_S = 15.0
+# that into an ordinary disconnect.
+#
+# Deliberately far longer than a frame needs. The failure modes are asymmetric:
+# dropping a client late costs a little wasted bandwidth, while dropping a LIVE
+# but briefly-stalled one is unrecoverable — the browser fires no event when a
+# stream dies, so that tile freezes until someone hard-refreshes. The Rivets'
+# shared Wi-Fi produces multi-second stalls, so a short timeout would convert
+# "slow" into "frozen". A client that is genuinely gone never drains at all and
+# still gets reaped, just two minutes later.
+_MJPEG_SEND_TIMEOUT_S = 120.0
 
 
 def _encode_jpeg(img: np.ndarray, encoding: str) -> bytes | None:
