@@ -37,7 +37,8 @@ namespace trossen::hw::base {
  * @code
  * { "id": "rivet_base", "type": "trossen_base",
  *   "max_linear_mps": 0.6, "max_angular_rps": 1.2,
- *   "max_lift_units_per_s": 8000.0, "ready_timeout_s": 60.0 }
+ *   "max_lift_units_per_s": 8000.0, "ready_timeout_s": 60.0,
+ *   "home_on_configure": true }
  * @endcode
  */
 class TrossenBaseComponent : public HardwareComponent,
@@ -53,24 +54,44 @@ public:
 
   /**
    * @brief Connect to the base, wait for it to report ready, start servicing it,
-   *        then home the swerve modules.
+   *        and (unless `home_on_configure` is false) home the swerve modules.
    *
    * @throws std::runtime_error if the base does not become ready within
-   *         `ready_timeout_s`, if homing does not complete, or if any configured
-   *         limit is not positive.
+   *         `ready_timeout_s`, if homing is requested and does not complete, or
+   *         if any configured limit is not positive.
    */
   void configure(const nlohmann::json& config) override;
 
   /**
    * @brief Re-zero the swerve modules against their hall sensors.
    *
-   * Called on every bring-up from configure(), so a session never starts against
-   * a stale zero. The base does self-home at power-on, but a pivot can be nudged
-   * by hand or lose its reference to a fault afterwards, and nothing else
-   * rechecks it for the rest of the machine's uptime.
+   * Called from configure() when `home_on_configure` is true, which is the
+   * default, so a session never starts against a stale zero. The base does
+   * self-home at power-on, but a pivot can be nudged by hand or lose its
+   * reference to a fault afterwards, and nothing else rechecks it for the rest
+   * of the machine's uptime.
    *
    * Blocks until the firmware confirms. The base answers in a second or two in
    * the normal case; the driver waits up to 120s before giving up.
+   *
+   * `home_on_configure: false` exists for callers that connect to the base for a
+   * reason other than driving it -- clearing a latched e-stop, reading the
+   * battery -- where the mechanical re-home is tens of seconds spent to change
+   * one bit, and the caller disconnects again without ever commanding a wheel.
+   *
+   * KEEP IT ON for anything that then moves the base. Skipping it means the
+   * modules run on whatever zero they last established, and a pivot that has
+   * drifted will translate a commanded heading into the wrong actual heading --
+   * a robot that drives off at an angle, not one that refuses to drive.
+   *
+   * In particular: do NOT set it false for a recording session on the grounds
+   * that a hardware test homed a moment ago. It is the obvious next saving --
+   * homing dominates what is left of a Rivet's bring-up -- and it is not safe
+   * as things stand, because "the modules are still homed" is an assumption
+   * nothing can check. There is no query for zero validity, so a pivot nudged
+   * between the two bring-ups is undetectable, and the session that inherits it
+   * drives wrong with no error anywhere. Making this safe means exposing that
+   * query from the driver first, not reasoning about how recently we homed.
    *
    * @throws std::runtime_error if the base does not confirm homing.
    */
@@ -178,6 +199,11 @@ private:
   float max_angular_rps_{1.2f};
   float max_lift_units_per_s_{8000.0f};
   double ready_timeout_s_{60.0};
+
+  /// Whether configure() re-zeros the swerve modules. Defaults to true so an
+  /// existing config behaves exactly as it did before this knob existed; see
+  /// home_modules() for when turning it off is legitimate and when it is not.
+  bool home_on_configure_{true};
 
   /// Battery percentage at or below which the host should emergency-stop.
   /// Zero disables the check, which is the default: a robot that stops itself

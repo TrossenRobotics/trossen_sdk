@@ -49,10 +49,31 @@ import trossen_sdk as ts
 
 from app import hw_bringup, runner_proto
 
-# Pause after creating hardware so background reader threads (notably the
-# trossen_arm TCP reader) have time to log a delayed failure into our stdout
-# before we exit.
+# Window after creating hardware in which a delayed failure can still surface.
+# A driver's background reader thread (notably the trossen_arm TCP reader) can
+# log a dropped link a beat after create() returned successfully, and without
+# this the test would already have declared success.
+#
+# NOT shortened, and not moved after the park, for two reasons worth stating
+# because both look like easy wins:
+#
+#   - it is waiting for the ABSENCE of an event, so there is no signal that
+#     would let it exit early. "No fault yet" at 0.2s does not mean no fault at
+#     1.4s. Only measurement can justify a smaller number, and nothing has
+#     measured how late these arrive -- the [timing] lines added alongside this
+#     are the way to find out.
+#   - running it after the park would mean commanding a 2s trajectory on an arm
+#     whose bring-up faults have not surfaced yet. Saving a second is not worth
+#     moving an arm we are not yet sure about.
+#
+# What it does do now is spend the window ACTIVELY: the arms are polled during
+# it, so a fault is caught by asking the arm rather than only by hoping a log
+# line appeared, and a bad arm fails the test as soon as it reports instead of
+# always costing the full window.
 _ASYNC_FAILURE_GRACE_S = 1.5
+
+# How often to poll the arms during that window.
+_FAULT_POLL_INTERVAL_S = 0.25
 
 # Trajectory time used to park every arm at all-zeros at the end of the test. We
 # override the arm's configured `teleop_moving_time_s` with this value at
@@ -87,7 +108,14 @@ def main() -> int:
             arm_overrides={"teleop_moving_time_s": _PARK_AT_ZEROS_S},
         )
 
-        time.sleep(_ASYNC_FAILURE_GRACE_S)
+        # Settle window, spent polling rather than sleeping. Fails fast on an arm
+        # that reports a fault; otherwise costs exactly what the sleep did.
+        late_faults = _watch_for_late_faults(brought.arms)
+        if late_faults:
+            runner_proto.emit_error(
+                f"a device faulted just after connecting: {'; '.join(late_faults)}"
+            )
+            return 2
 
         # Park every arm at all-zeros over _PARK_AT_ZEROS_S so the operator
         # finishes the test with the hardware in a known, safe pose. end_teleop()
@@ -134,6 +162,44 @@ def main() -> int:
             ts.ActiveHardwareRegistry.clear()
         except Exception:  # noqa: BLE001
             pass
+
+
+def _watch_for_late_faults(arm_components: dict[str, object]) -> list[str]:
+    """Poll every arm for `_ASYNC_FAILURE_GRACE_S`; return what any of them reports.
+
+    Replaces a blind `sleep()` of the same length. The window still runs to its
+    end when everything is healthy — see `_ASYNC_FAILURE_GRACE_S` for why it
+    cannot exit early on good news — but a fault is now caught by asking the arm
+    directly, and returns as soon as it appears.
+
+    An arm with no `error_information` (a stub, or a future component type) is
+    skipped rather than treated as faulted; with no arms at all this degrades to
+    the original sleep, which the camera and base driver threads still need.
+    """
+    deadline = time.perf_counter() + _ASYNC_FAILURE_GRACE_S
+    probes = {
+        arm_id: probe
+        for arm_id, comp in arm_components.items()
+        if (probe := getattr(comp, "error_information", None)) is not None
+    }
+
+    while time.perf_counter() < deadline:
+        time.sleep(min(_FAULT_POLL_INTERVAL_S, max(0.0, deadline - time.perf_counter())))
+        faults = []
+        for arm_id, probe in probes.items():
+            try:
+                reported = probe() or ""
+            except Exception as exc:  # noqa: BLE001 - a throw IS the answer here
+                # error_information() is deliberately unguarded in the SDK: it
+                # throws when the link is gone, and a dead link is exactly the
+                # delayed failure this window exists to catch.
+                faults.append(f"{arm_id}: {exc}")
+                continue
+            if reported:
+                faults.append(f"{arm_id}: {reported}")
+        if faults:
+            return faults
+    return []
 
 
 def _park_arms_at_zero(arm_components: dict[str, object]) -> list[str]:

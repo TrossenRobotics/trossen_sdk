@@ -47,12 +47,25 @@ def _recover_bases(components: list[dict[str, Any]]) -> dict[str, Any]:
             continue
         comp_id = comp.get("id", "base")
         try:
-            # Connecting re-homes the swerve modules, so the wheels turn on the
-            # spot. Announced because otherwise a robot that starts moving
-            # during "recovery" is alarming rather than expected.
-            print(f"base '{comp_id}': connecting (the wheels will turn on the "
-                  f"spot as the swerve modules re-home)", flush=True)
-            base = ts.HardwareRegistry.create(comp.get("type"), comp_id, comp, True)
+            # Connect WITHOUT re-homing the swerve modules.
+            #
+            # Recovery exists to clear one latched bit. Homing is mechanical --
+            # every pivot rotates until it finds its hall sensor -- and it was
+            # costing ~33s of an operator's time, on the path they are already
+            # waiting on, to change that bit. Nothing here commands a wheel and
+            # the driver is dropped again immediately, so the zero the modules
+            # are holding is never used.
+            #
+            # The recording session that follows opens the base for real, homes
+            # it as usual, and starts against a fresh zero. Skipping it here does
+            # not carry a stale zero into anything that drives.
+            base_cfg = dict(comp)
+            base_cfg["home_on_configure"] = False
+            print(f"base '{comp_id}': connecting to clear the e-stop "
+                  f"(not re-homing — the wheels will stay put)", flush=True)
+            base = ts.HardwareRegistry.create(
+                comp.get("type"), comp_id, base_cfg, True
+            )
             recovered = bool(base.recover())
             # Read the bit back rather than trusting the send. recover() returns
             # whether the command went out, which is not the same as the latch
@@ -71,14 +84,39 @@ def _recover_bases(components: list[dict[str, Any]]) -> dict[str, Any]:
     return out
 
 
+def _read_error(comp: Any) -> str:
+    """Whatever the arm still reports, or "" if it reports nothing.
+
+    A throw is an answer, not a failure to get one: `error_information()` is
+    deliberately unguarded on the SDK side because swallowing it would report a
+    dead link as a healthy arm. Turned into a string here so one bad arm produces
+    a verdict rather than aborting the whole recovery.
+    """
+    probe = getattr(comp, "error_information", None)
+    if probe is None:
+        return ""
+    try:
+        return probe() or ""
+    except Exception as exc:  # noqa: BLE001 - reported, per device
+        return f"(could not re-read: {exc})"
+
+
 def _recover_arms(arms: dict[str, Any]) -> dict[str, Any]:
     """Clear each arm's latched controller error and report what is left."""
     out: dict[str, Any] = {}
     for arm_id, arm_json in arms.items():
         try:
-            # Creating the component configures the driver with clear_error set,
-            # so this alone clears a latched fault. The explicit clear_error()
-            # below covers an error raised between the two.
+            # ONE connect in the common case, two only when the first did not
+            # take.
+            #
+            # Creating the component calls driver_->configure(..., clear=true),
+            # which clears a latched fault by itself. This used to then call
+            # clear_error() unconditionally -- and clear_error() internally cleans
+            # up and re-configures, i.e. a second full connect. So every Recover
+            # connected every arm twice, on the slowest connect path there is:
+            # the fault being recovered from is exactly what leaves a stale
+            # single-client connection on each controller, so each connect can
+            # burn its full ~20s TCP timeout.
             #
             # `hw_bringup.create_arm` is the one retry wrapper shared with the
             # test and the recorder. It matters most here: this module's own copy
@@ -87,22 +125,30 @@ def _recover_arms(arms: dict[str, Any]) -> dict[str, Any]:
             # — recovery burned two extra full connect timeouts before reporting
             # a failure that could never have succeeded on a retry.
             comp = hw_bringup.create_arm(arm_id, dict(arm_json))
-            cleared = True
-            clear = getattr(comp, "clear_error", None)
-            if clear is not None:
-                cleared = bool(clear())
 
-            # Re-read afterwards. An arm parked physically outside its limits
-            # re-faults the instant the error is cleared, and saying "recovered"
-            # about it would send the operator back to a session that stops
-            # again in seconds. This is the joint-6 gripper case exactly.
-            remaining = ""
-            probe = getattr(comp, "error_information", None)
-            if probe is not None:
-                try:
-                    remaining = probe() or ""
-                except Exception as exc:  # noqa: BLE001
-                    remaining = f"(could not re-read: {exc})"
+            # Probe before clearing, not after. If configure's clear flag did the
+            # job — the normal outcome — there is nothing left to clear and the
+            # second connect is pure cost.
+            remaining = _read_error(comp)
+            cleared = True
+
+            if remaining:
+                # Still faulted, so the second connect is now worth paying for.
+                # This is also the link-drop case the old unconditional call was
+                # really protecting: clear_error() re-establishes the connection
+                # as a side effect, which is why it works when a plain retry
+                # would not.
+                print(f"arm '{arm_id}': still reporting after connect, clearing "
+                      f"explicitly: {remaining}", flush=True)
+                clear = getattr(comp, "clear_error", None)
+                if clear is not None:
+                    cleared = bool(clear())
+                # Re-read after clearing. An arm parked physically outside its
+                # limits re-faults the instant the error is cleared, and saying
+                # "recovered" about it would send the operator back to a session
+                # that stops again in seconds. This is the joint-6 gripper case
+                # exactly.
+                remaining = _read_error(comp)
 
             out[arm_id] = {
                 "recovered": bool(cleared) and not remaining,

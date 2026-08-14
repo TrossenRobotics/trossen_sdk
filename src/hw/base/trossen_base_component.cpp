@@ -94,6 +94,13 @@ void TrossenBaseComponent::configure(const nlohmann::json& config) {
       "[0, 100] (0 disables), got " + std::to_string(estop_battery_percent_));
   }
 
+  // Defaults to true, so an existing config homes exactly as it always has.
+  // Opting out is for the callers that connect for a reason other than driving
+  // the base -- clearing a latched e-stop, reading the battery -- where a full
+  // mechanical re-home is tens of seconds spent to change one bit. See the
+  // header for why it must stay on for anything that then MOVES the base.
+  home_on_configure_ = config.value("home_on_configure", home_on_configure_);
+
   driver_ = std::make_shared<trossen_base::TrossenBase>();
 
   if (!driver_->wait_until_ready(ready_timeout_s_)) {
@@ -111,7 +118,16 @@ void TrossenBaseComponent::configure(const nlohmann::json& config) {
   update_running_.store(true, std::memory_order_relaxed);
   update_thread_ = std::thread(&TrossenBaseComponent::update_loop, this);
 
-  home_modules();
+  if (home_on_configure_) {
+    home_modules();
+  } else {
+    // Said out loud rather than silently skipped: a base that did not home is
+    // running on whatever zero it last established, and someone reading the log
+    // of a session that drove oddly needs to see that this happened.
+    std::cout << "TrossenBaseComponent '" << id
+              << "': skipping swerve homing (home_on_configure=false); the "
+                 "modules keep their existing zero" << std::endl;
+  }
 }
 
 void TrossenBaseComponent::home_modules() {
@@ -297,6 +313,10 @@ nlohmann::json TrossenBaseComponent::get_info() const {
   info["max_linear_mps"] = max_linear_mps_;
   info["max_angular_rps"] = max_angular_rps_;
   info["max_lift_units_per_s"] = max_lift_units_per_s_;
+  // Reported because "the base drives at the wrong angle" and "this bring-up
+  // skipped homing" are the same bug seen from two ends, and this is the only
+  // place to find out afterwards which one you have.
+  info["home_on_configure"] = home_on_configure_;
   info["connected"] = static_cast<bool>(driver_);
   if (driver_) {
     info["ready"]      = driver_->is_ready();
