@@ -584,6 +584,31 @@ def _start_recording_inner(session: Session) -> None:
     # fail outright — into the recorded duration.
     telemetry.open_run(session.id, session.name, session.system_id)
 
+    # A healthy bootstrap IS a passing hardware test, so record it as one.
+    #
+    # The gate on RecordPage / MonitorEpisodePage only lets a pending or paused
+    # session start when `hw_status` reads 'ready', and until now the sole writer
+    # of 'ready' was the Test button. So every session paid a full bring-up to be
+    # allowed to do a full bring-up: on a Rivet that is two swerve homings and
+    # eight arm connects to record one session, and sessions 2..N of a shift paid
+    # it again each time even though the previous session had just proven the
+    # hardware.
+    #
+    # The child has opened every arm, camera and base AND built its producers and
+    # teleop controllers, which is strictly more than the test proves. Marking
+    # ready here is therefore not a weakening of the gate — the gate still fires
+    # on a red status from `_finalize_crash` / `_fail_stuck_session`, which is
+    # what it exists for. What changes is that "never tested during this backend
+    # uptime" and "last session ran fine" stop being treated as the same thing.
+    #
+    # Scoped to backend uptime exactly like a passing test (see app/hw_status.py);
+    # no aging, so this stays one comparison rather than a freshness policy.
+    hw_status.set_status(
+        session.system_id,
+        "ready",
+        f"Hardware brought up successfully by session '{session.name}'",
+    )
+
     runner.reader.start()
 
     # Guard against unattended recording: if the operator's browser goes away

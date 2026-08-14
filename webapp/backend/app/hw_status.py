@@ -1,8 +1,17 @@
-"""In-memory hardware-test status store, scoped to backend uptime.
+"""In-memory hardware-readiness store, scoped to backend uptime.
 
-Holds the most recent `(status, message)` from POST /api/systems/{id}/test
-keyed by system id. Lives in process memory only — no DB column, no
-disk file — so:
+Holds the most recent `(status, message)` for a system id. Two things write
+'ready', and both mean the same thing — "the hardware in this config was
+successfully opened during this backend's uptime":
+
+  - POST /api/systems/{id}/test, the explicit Test button;
+  - a recorder child that reached `__READY__` (`recorder.start_recording`),
+    which has opened every device AND built its producers and teleop.
+
+Treating a successful session as proof is what stops every session from paying
+a full bring-up just to be allowed to do a full bring-up.
+
+Lives in process memory only — no DB column, no disk file — so:
 
   - Browser refresh keeps the badge (frontend seeds from GET /api/systems
     on mount, which reads through this store).
@@ -25,12 +34,12 @@ from typing import NamedTuple
 
 
 class HwStatusEntry(NamedTuple):
-    """One system's most recent test result.
+    """One system's most recent readiness result.
 
-    `status` is `'ready'` on a passing test, `'error'` on a failing
-    one. The frontend's badge logic also recognises `'active'` (set by
-    the recorder when a session is live), but `/test` itself only
-    writes ready / error.
+    `status` is `'ready'` when the hardware was last opened successfully —
+    by a passing test or by a recorder that reached `__READY__` — and
+    `'error'` when it failed or a live session faulted. The frontend's badge
+    logic also recognises `'active'` (a session currently running).
     """
 
     status: str
