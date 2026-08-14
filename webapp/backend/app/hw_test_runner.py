@@ -75,6 +75,26 @@ _ASYNC_FAILURE_GRACE_S = 1.5
 # How often to poll the arms during that window.
 _FAULT_POLL_INTERVAL_S = 0.25
 
+# What a HEALTHY arm says when asked for its error information. The driver's
+# get_error_information() does not return an empty string when all is well — it
+# returns the literal "No error", so a plain truthiness test on the reply marks
+# every healthy arm as faulted. That is not hypothetical: it failed the hardware
+# test on all four arms of both Rivets, reported as
+# "a device faulted just after connecting: follower_left: No error; ...".
+# Compared case-folded and stripped so firmware punctuation or casing drift does
+# not silently resurrect the bug.
+_HEALTHY_ERROR_STRINGS = frozenset({"", "no error", "no errors", "none", "ok"})
+
+
+def _is_fault(reported: str) -> bool:
+    """True when an `error_information()` reply describes an actual fault.
+
+    Anything unrecognised counts as a fault: a new firmware string we have not
+    seen should fail loudly rather than be waved through as healthy, which is the
+    safer direction for a check whose whole job is catching a broken arm.
+    """
+    return reported.strip().rstrip(".").casefold() not in _HEALTHY_ERROR_STRINGS
+
 # Trajectory time used to park every arm at all-zeros at the end of the test. We
 # override the arm's configured `teleop_moving_time_s` with this value at
 # component-creation time so the test always trajects the same way regardless of
@@ -175,6 +195,8 @@ def _watch_for_late_faults(arm_components: dict[str, object]) -> list[str]:
     An arm with no `error_information` (a stub, or a future component type) is
     skipped rather than treated as faulted; with no arms at all this degrades to
     the original sleep, which the camera and base driver threads still need.
+
+    A healthy arm answers with text, not an empty string — see `_is_fault`.
     """
     deadline = time.perf_counter() + _ASYNC_FAILURE_GRACE_S
     probes = {
@@ -195,7 +217,7 @@ def _watch_for_late_faults(arm_components: dict[str, object]) -> list[str]:
                 # delayed failure this window exists to catch.
                 faults.append(f"{arm_id}: {exc}")
                 continue
-            if reported:
+            if _is_fault(reported):
                 faults.append(f"{arm_id}: {reported}")
         if faults:
             return faults

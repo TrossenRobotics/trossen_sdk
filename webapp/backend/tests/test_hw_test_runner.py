@@ -20,7 +20,10 @@ import pytest
 class _Arm:
     """An arm that reports `faults_after` seconds into the window."""
 
-    def __init__(self, *, remaining: str = "", faults_after: float = 0.0,
+    # Healthy default is "No error", NOT "": that is what the driver actually
+    # answers, and modelling it as an empty string is what let a truthiness test
+    # on the reply pass every unit test while failing all four arms on both rigs.
+    def __init__(self, *, remaining: str = "No error", faults_after: float = 0.0,
                  raises: Exception | None = None):
         self._remaining = remaining
         self._raises = raises
@@ -30,7 +33,7 @@ class _Arm:
     def error_information(self) -> str:
         self.probe_calls += 1
         if time.perf_counter() < self._faults_at:
-            return ""
+            return "No error"
         if self._raises is not None:
             raise self._raises
         return self._remaining
@@ -121,6 +124,30 @@ def test_every_faulted_arm_is_named_not_just_the_first(runner):
     assert sorted(faults) == [
         "follower_left: limit exceeded", "glide_left: overcurrent",
     ]
+
+
+@pytest.mark.parametrize("healthy", [
+    "No error", "no error", "  No error  ", "No error.", "NO ERRORS", "None", "",
+])
+def test_a_healthy_reply_is_not_a_fault(runner, healthy):
+    """Regression: the driver says "No error" when all is well, not "".
+
+    A plain truthiness test on the reply reported every healthy arm as faulted —
+    "a device faulted just after connecting: follower_left: No error; ..." — on
+    all four arms of both Rivets, while every unit test stayed green because the
+    fixture modelled healthy as an empty string.
+    """
+    assert runner._watch_for_late_faults({"glide_left": _Arm(remaining=healthy)}) == []
+
+
+@pytest.mark.parametrize("fault", [
+    "Motor 3 overcurrent", "link lost", "No error detected on joint 2 — joint 4 faulted",
+])
+def test_an_unrecognised_reply_is_still_a_fault(runner, fault):
+    """Unknown text fails loudly rather than being waved through as healthy."""
+    faults = runner._watch_for_late_faults({"glide_left": _Arm(remaining=fault)})
+
+    assert faults == [f"glide_left: {fault}"]
 
 
 def test_a_component_without_the_probe_is_skipped_not_failed(runner):
