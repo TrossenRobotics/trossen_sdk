@@ -73,11 +73,15 @@ def test_runner_prints_the_reading_and_the_requested_timeout(
     assert "__SUCCESS__" in out
     assert calls == [4.5], "the probe timeout must come from the request"
 
+    # The marker prefixes live in app.runner_proto now, so that the parent and
+    # every child agree on one spelling.
+    from app.runner_proto import RESULT_PREFIX
+
     result = json.loads(
         next(
-            line[len(mod._RESULT_PREFIX):]
+            line[len(RESULT_PREFIX):]
             for line in out.splitlines()
-            if line.startswith(mod._RESULT_PREFIX)
+            if line.startswith(RESULT_PREFIX)
         )
     )
     assert result["battery"]["percent"] == 87.5

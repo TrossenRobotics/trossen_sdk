@@ -1,47 +1,34 @@
 """Hardware connectivity test, streamed via Server-Sent Events.
 
-Mirrors the hardware-creation portion of `recorder._build_session_manager`
-(arms + cameras + mobile_base — no producers, no teleop, no recording)
-so the per-system Test button on ConfigurationPage proves the configured
-hardware is reachable without side effects.
+Opens exactly what a recording session opens, minus the teleop wiring — see
+`app.hw_bringup`, which both this and the recorder now go through, so the per-
+system Test button on ConfigurationPage cannot disagree with the recorder about
+what a config declares. (It used to: the two were separate implementations, and
+the test skipped `hardware.components` entirely, passing a Rivet whose base was
+unreachable.)
 
-Architecture: the actual SDK initialisation runs in a subprocess
-(`app.hw_test_runner`), launched under `stdbuf -oL -eL` for line-
-buffered stdout. We read its stdout asynchronously and yield each
-line as an SSE `progress` event. This keeps the diagnostic stream
-flowing even when the SDK is mid-block — the previous in-process
-threading version was GIL-starved and couldn't poll its captured
-tempfile until the SDK returned control.
+Architecture: the SDK work runs in a subprocess (`app.hw_test_runner`) launched
+through `app.runner_proto`, which owns the `stdbuf` line buffering, the deadline,
+the teardown and the marker parsing. We forward each output line as an SSE
+`progress` event, so the diagnostic stream keeps flowing even while the SDK is
+mid-block. See `app.hw_test_runner` for why the subprocess is not optional.
 
-Why subprocess: SDK calls hold the GIL through synchronous C work
-(TCP handshake, camera enumeration). With both the worker and the
-asyncio polling on the same Python interpreter, the event loop
-starves and no events reach the wire until the SDK is done — so a
-frontend abort sees nothing. A subprocess has its own GIL, and the
-OS pipe between us and it doesn't care about either side's GIL state.
-
-Marker scan and result decision: the runner prints an explicit
-`__SUCCESS__: ...` or `__ERROR__: ...` line before exit. We also
-scan the captured progress lines for the SDK's own `[critical]` /
-`[error]` markers in case a background reader thread logged a
-failure that didn't surface as a Python exception.
+Result decision: the runner prints an explicit `__SUCCESS__` or `__ERROR__: ...`
+line before exit, and `RunnerOutcome` additionally scans the progress lines up to
+the success marker for the SDK's own `[critical]` / `[error]` markers, in case a
+background reader thread logged a failure that never surfaced as a Python
+exception.
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import sys
 from collections.abc import AsyncIterator
 from typing import Any
 
+from app import runner_proto
 from app.systems import SystemResponse
-
-# Log-level markers the SDK uses for unrecoverable failures. Anything
-# matching here in the captured progress lines flips a clean exit to
-# a failure verdict — handles the case where create() returned but a
-# background reader logged a connection drop during the grace window.
-_FAILURE_MARKERS = ("[critical]", "[error]")
 
 # Wall-clock budget for the test. On expiry we terminate the subprocess
 # and emit an error event with whatever progress lines came through up to
@@ -148,11 +135,6 @@ def compute_bringup_budget(config: dict[str, Any] | None) -> float:
     )
     return max(_TEST_TIMEOUT_FLOOR_S, min(_TEST_TIMEOUT_CEILING_S, budget))
 
-# Sentinel prefixes the runner uses to communicate its terminal
-# verdict on stdout. Kept in sync with `app/hw_test_runner.py`.
-_SUCCESS_PREFIX = "__SUCCESS__: "
-_ERROR_PREFIX = "__ERROR__: "
-
 # In-flight tests, `system_id -> {cancel events}`, one event per streaming run.
 #
 # Cancellation is a real backend operation rather than just a dropped HTTP
@@ -212,25 +194,11 @@ async def stream_system_hardware_test(
         yield _sse("error", message="System has no config to test", output=[])
         return
 
-    cmd = [
-        # `stdbuf -oL -eL` is what makes line buffering kick in on the
-        # subprocess's stdout/stderr so each SDK log line shows up in
-        # our pipe immediately. Without it we'd see nothing until the
-        # libc 4 KiB buffer filled or the process exited.
-        "stdbuf", "-oL", "-eL",
-        sys.executable, "-m", "app.hw_test_runner",
-    ]
+    timeout_s = compute_bringup_budget(system.config)
+    outcome = runner_proto.RunnerOutcome()
 
-    captured: list[str] = []
-    success_message: str | None = None
-    # Index into `captured` at which the runner declared success; None until it
-    # does. Bounds the failure-marker scan below to the work phase.
-    captured_at_success: int | None = None
-    error_message: str | None = None
-    cancelled = False
-
-    # Registered before the subprocess exists so a Cancel arriving during launch
-    # is still honoured (the loop below checks the event before its first read).
+    # Registered before the runner is launched so a Cancel arriving during launch
+    # is still honoured — `stream_runner` checks the event before its first read.
     cancel_event = asyncio.Event()
     _cancel_events.setdefault(system.id, set()).add(cancel_event)
 
@@ -246,132 +214,37 @@ async def stream_system_hardware_test(
             _cancel_events.pop(system.id, None)
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            # Merge stderr into stdout so we have one stream to parse
-            # and SDK errors interleave naturally with progress logs.
-            stderr=asyncio.subprocess.STDOUT,
-        )
-    except Exception as exc:
-        _release_cancel_slot()
-        yield _sse(
-            "error",
-            message=f"Failed to launch hardware test runner: {exc}",
-            output=[],
-        )
-        return
-
-    # Created before the try below, because the `finally` cancels it: anything
-    # that throws on the way in (a broken stdin write) would otherwise turn a
-    # real failure into a NameError raised from cleanup.
-    #
-    # One long-lived waiter reused across loop iterations rather than a fresh task
-    # per line: the loop runs once per SDK log line, and an event that is already
-    # set stays set, so re-awaiting it is free.
-    cancel_wait = asyncio.ensure_future(cancel_event.wait())
-
-    try:
-        # Hand the system config to the runner via stdin so we don't
-        # have to round-trip it through the filesystem.
-        assert proc.stdin is not None
-        proc.stdin.write(json.dumps(system.config).encode())
-        await proc.stdin.drain()
-        proc.stdin.close()
-
-        assert proc.stdout is not None
-        timeout_s = compute_bringup_budget(system.config)
-        deadline = asyncio.get_event_loop().time() + timeout_s
-        timed_out = False
-
-        while True:
-            if cancel_event.is_set():
-                cancelled = True
-                break
-
-            remaining = deadline - asyncio.get_event_loop().time()
-            if remaining <= 0:
-                timed_out = True
-                break
-
-            # Race the next line against a cancel request. `wait_for` on the read
-            # alone could not be interrupted, so a Cancel during a long silent
-            # stretch — an unreachable arm's TCP connect, exactly when an operator
-            # reaches for Cancel — would not be noticed until the read returned.
-            read_task = asyncio.ensure_future(proc.stdout.readline())
-            done, _ = await asyncio.wait(
-                {read_task, cancel_wait},
-                timeout=remaining,
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            if cancel_wait in done:
-                # Discard the in-flight read: its line is irrelevant now, and the
-                # subprocess is about to be terminated in the `finally` below.
-                read_task.cancel()
-                cancelled = True
-                break
-
-            if read_task not in done:
-                read_task.cancel()
-                timed_out = True
-                break
-
-            line_bytes = read_task.result()
-
-            if not line_bytes:
-                # EOF — runner exited.
-                break
-
-            line = line_bytes.decode(errors="replace").rstrip("\r\n")
-            if not line:
-                continue
-
-            # Sentinel lines carry the runner's verdict; don't echo
-            # them as progress events — the frontend would render the
-            # internal markers verbatim, which is just noise.
-            if line.startswith(_SUCCESS_PREFIX):
-                success_message = line[len(_SUCCESS_PREFIX):]
-                # Remember where success was declared. Output after this point is
-                # process teardown, and a driver complaining on the way out must
-                # not retroactively fail a test in which every device connected.
-                captured_at_success = len(captured)
-                continue
-            if line.startswith(_ERROR_PREFIX):
-                error_message = line[len(_ERROR_PREFIX):]
-                continue
-
-            captured.append(line)
+        # Marker lines are consumed into `outcome` rather than reaching us, so
+        # everything yielded here is genuine SDK output — the frontend never sees
+        # the internal sentinels.
+        async for line in runner_proto.stream_runner(
+            "app.hw_test_runner", system.config, timeout_s, outcome, cancel_event
+        ):
             yield _sse("progress", message=line)
     finally:
-        # Deregistered before the (awaiting) teardown below, so a second Cancel
-        # arriving while we are already stopping gets an honest 404 instead of
+        # Released before anything below can return, so a second Cancel arriving
+        # while this run is already finishing gets an honest 404 rather than
         # setting an event nobody will read.
         _release_cancel_slot()
-        cancel_wait.cancel()
-        if proc.returncode is None:
-            proc.terminate()
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=2.0)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.wait()
 
-    # Checked FIRST, ahead of the timeout and the failure-marker scan. Killing the
-    # runner mid-bring-up routinely makes it log `[error]` on its way down, and a
-    # test the operator stopped on purpose must not be reported as hardware that
-    # failed — that would stamp the badge red and send them debugging a fault
-    # that does not exist.
-    if cancelled:
+    # Checked FIRST, ahead of the timeout and the failure-marker scan. Terminating
+    # the runner mid-bring-up routinely makes it log `[error]` on its way down, and
+    # a test the operator stopped on purpose must not be reported as hardware that
+    # failed — that would stamp the badge red and send them debugging a fault that
+    # does not exist.
+    if outcome.cancelled:
         yield _sse(
             "cancelled",
             message="Hardware test cancelled. The devices were released.",
-            output=captured,
+            output=outcome.lines,
         )
         return
 
-    if timed_out:
+    if outcome.launch_error is not None:
+        yield _sse("error", message=outcome.launch_error, output=[])
+        return
+
+    if outcome.timed_out:
         yield _sse(
             "error",
             message=(
@@ -381,41 +254,30 @@ async def stream_system_hardware_test(
                 "respond. Check that every arm and camera is powered and connected, "
                 "then run the test again."
             ),
-            output=captured,
+            output=outcome.lines,
         )
         return
 
-    if error_message is not None:
-        yield _sse("error", message=error_message, output=captured)
+    if outcome.error_message is not None:
+        yield _sse("error", message=outcome.error_message, output=outcome.lines)
         return
 
-    # Even on a clean runner exit, scan for SDK-level failure markers
-    # in the streamed progress — a background reader thread can log
-    # `[critical]` after the foreground create() returned successfully.
-    #
-    # Bounded to the lines before the success marker. The runner releases every
-    # device before declaring success, so anything after that is teardown of an
-    # already-verified rig: CUDA winding down under a ZED's close, a driver
-    # grumbling as the process exits. Those used to flip a wholly successful test
-    # to "failed", reporting the teardown line as if it were the verdict.
-    scanned = captured if captured_at_success is None else captured[:captured_at_success]
-    failure_lines = [
-        line
-        for line in scanned
-        if any(marker in line.lower() for marker in _FAILURE_MARKERS)
-    ]
-    if failure_lines:
-        yield _sse("error", message=failure_lines[0], output=captured)
+    # Even on a clean exit, a background reader thread can log `[critical]` after
+    # the foreground create() returned. `failure_marker()` scans for that, bounded
+    # to the lines before the success marker — see `app.runner_proto`.
+    marker = outcome.failure_marker()
+    if marker is not None:
+        yield _sse("error", message=marker, output=outcome.lines)
         return
 
-    if proc.returncode == 0 and success_message is not None:
-        yield _sse("complete", message=success_message, output=captured)
+    if outcome.returncode == 0 and outcome.success_message is not None:
+        yield _sse("complete", message=outcome.success_message, output=outcome.lines)
         return
 
-    # Catch-all — runner exited non-zero without an explicit `__ERROR__`
+    # Catch-all — the runner exited non-zero without an explicit `__ERROR__`
     # line, or zero without a `__SUCCESS__` line. Should be rare.
     yield _sse(
         "error",
-        message=f"Hardware test exited with code {proc.returncode}",
-        output=captured,
+        message=f"Hardware test exited with code {outcome.returncode}",
+        output=outcome.lines,
     )

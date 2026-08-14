@@ -62,17 +62,27 @@ def runner(monkeypatch):
 
     stub = types.ModuleType("trossen_sdk")
     stub.HardwareRegistry = _Registry
+    # `hw_bringup` resolves SessionControlCapable for isinstance checks; recovery
+    # never reaches that path, but the attribute has to exist to import.
+    stub.SessionControlCapable = type("SessionControlCapable", (), {})
     monkeypatch.setitem(sys.modules, "trossen_sdk", stub)
+    # Both modules bind `trossen_sdk` at import time, so both have to be
+    # re-imported under the stub — recover_runner delegates the arm connect to
+    # hw_bringup, which is where the real HardwareRegistry.create call lives.
     sys.modules.pop("app.recover_runner", None)
+    sys.modules.pop("app.hw_bringup", None)
+    import app.hw_bringup as bringup
     import app.recover_runner as mod
 
     # Retries exist for stale single-client arm connections; sleeping through
     # them here would add seconds to the suite for no coverage.
-    monkeypatch.setattr(mod, "_ARM_RETRY_BACKOFF_S", 0.0)
+    monkeypatch.setattr(bringup, "ARM_RETRY_BACKOFF_S", 0.0)
     mod._test_devices = devices
     mod._test_created = created
+    mod._test_bringup = bringup
     yield mod
     sys.modules.pop("app.recover_runner", None)
+    sys.modules.pop("app.hw_bringup", None)
 
 
 def test_base_and_arms_both_recover(runner):
