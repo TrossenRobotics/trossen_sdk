@@ -319,6 +319,7 @@ def _carry_over_unmodelled_config(
         "haptic_levels",
         "haptic_update_hz",
         "haptic_baseline_tau_s",
+        "haptic_command_threshold",
     )
     stored_arms = stored_hw.get("arms") or {}
     for arm_id, arm in (incoming_hw.get("arms") or {}).items():

@@ -178,6 +178,15 @@ struct ArmConfig {
   /// steady push; too long leaves the buzz lingering after a pose change.
   float haptic_baseline_tau_s{3.0f};
 
+  /// @brief Haptics only run while EVERY commanded joint position is further
+  /// than this from zero, so a parked arm cannot buzz.
+  ///
+  /// Radians for arm joints, metres for the gripper — one number for both,
+  /// because this asks "is this element pinned at zero", not a distance with a
+  /// physical meaning. Note the strictness has teeth: a closed gripper commands
+  /// ~0, so grasping shuts the gate, and a joint crossing zero shuts it briefly.
+  float haptic_command_threshold{0.002f};
+
   /// @brief Optional per-joint operating limits pushed to the controller on
   /// connect. Each array, when non-empty, must have one entry per joint (arm
   /// joints in rad / rad·s⁻¹ / N·m, gripper in m / m·s⁻¹ / N). Empty = leave
@@ -300,6 +309,8 @@ struct ArmConfig {
     if (j.contains("haptic_update_hz")) j.at("haptic_update_hz").get_to(c.haptic_update_hz);
     if (j.contains("haptic_baseline_tau_s"))
       j.at("haptic_baseline_tau_s").get_to(c.haptic_baseline_tau_s);
+    if (j.contains("haptic_command_threshold"))
+      j.at("haptic_command_threshold").get_to(c.haptic_command_threshold);
     if (j.contains("position_min")) j.at("position_min").get_to(c.position_min);
     if (j.contains("position_max")) j.at("position_max").get_to(c.position_max);
     if (j.contains("velocity_max")) j.at("velocity_max").get_to(c.velocity_max);
@@ -358,6 +369,7 @@ struct ArmConfig {
       j["haptic_levels"] = haptic_levels;
       j["haptic_update_hz"] = haptic_update_hz;
       j["haptic_baseline_tau_s"] = haptic_baseline_tau_s;
+      j["haptic_command_threshold"] = haptic_command_threshold;
     }
     // Emit smoothing tuning only when enabled, same reasoning as the gripper
     // feedback block above — the constants are meaningless while it is off.

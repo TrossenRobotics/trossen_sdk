@@ -338,6 +338,9 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
   if (config.contains("haptic_baseline_tau_s")) {
     haptic_baseline_tau_s_ = config.at("haptic_baseline_tau_s").get<float>();
   }
+  if (config.contains("haptic_command_threshold")) {
+    haptic_command_threshold_ = config.at("haptic_command_threshold").get<float>();
+  }
   // Validate only when enabled, so a rig can leave half-tuned numbers in a
   // config it has switched off. A bad curve is a startup error naming the field
   // rather than a handle that silently never buzzes.
@@ -356,6 +359,15 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
         "TrossenArmComponent '" + get_identifier() +
         "': haptic_baseline_tau_s must be >= 0, got " +
         std::to_string(haptic_baseline_tau_s_));
+    }
+    // Zero is allowed and means the gate opens on any command that is not
+    // exactly zero. Negative would open it on everything including a true zero
+    // pose, which defeats the gate entirely rather than merely disabling it.
+    if (!(haptic_command_threshold_ >= 0.0f)) {
+      throw std::runtime_error(
+        "TrossenArmComponent '" + get_identifier() +
+        "': haptic_command_threshold must be >= 0, got " +
+        std::to_string(haptic_command_threshold_));
     }
     // Given the curve's own dead zone, not a separate knob: the tracker must
     // freeze on exactly the contacts the curve renders. Two independent
@@ -412,6 +424,12 @@ std::vector<float> TrossenArmComponent::read_joint() {
   // Apply the optional affine remap so a mismatched leader publishes commands
   // already in the follower's joint frame. Empty arrays = identity.
   apply_joint_remap(out);
+  // Kept for the haptic command gate, which asks whether this leader is actually
+  // commanding a pose. Recorded AFTER the remap, so the gate judges what the
+  // follower is really told rather than the raw handle reading. Written and read
+  // only from the mirror thread, which calls read() and apply_haptic_feedback()
+  // in that order on every tick, so it needs no lock.
+  if (haptic_feedback_) haptic_last_command_ = out;
   return out;
 }
 
@@ -495,6 +513,10 @@ std::optional<float> TrossenArmComponent::read_contact_force() {
   return static_cast<float>(std::sqrt(fx * fx + fy * fy + fz * fz));
 }
 
+bool TrossenArmComponent::haptic_command_gate_open() const {
+  return glide::command_clears_zero(haptic_last_command_, haptic_command_threshold_);
+}
+
 void TrossenArmComponent::apply_haptic_feedback(float follower_contact_force_n) {
   if (!haptic_feedback_) return;
 
@@ -503,8 +525,31 @@ void TrossenArmComponent::apply_haptic_feedback(float follower_contact_force_n) 
   // payload the controller's model cannot explain (~50 N on a Rivet follower).
   // Rendering it directly held the motor at full duty permanently. The tracker
   // turns it into a deviation from the resting level; see HapticBaseline.
+  //
+  // Fed even while the gate is shut, so the resting level stays current and the
+  // handle does not lurch when the gate opens onto a pose learned minutes ago.
   const float deviation =
     haptic_baseline_.deviation_for(follower_contact_force_n, now_seconds());
+
+  // The command gate. Silence unless this leader is commanding a real pose; see
+  // haptic_command_gate_open() for what that means and what it costs.
+  const bool gate_open = haptic_command_gate_open();
+  if (!gate_open) {
+    haptic_force_sum_     = 0.0;
+    haptic_force_samples_ = 0;
+    // Zero means "overdue", so the tick that reopens the gate renders at once
+    // rather than sitting silent for one more interval.
+    haptic_last_push_s_   = 0.0;
+    // Written once on the way shut, not every tick: this runs at the mirror
+    // rate (up to 1 kHz) and every call takes GlideSession's lock, so
+    // re-asserting a zero the handle already holds is pure contention.
+    if (haptic_gate_was_open_) {
+      glide::GlideSession::instance().set_vibration(get_identifier(), 0);
+      haptic_gate_was_open_ = false;
+    }
+    return;
+  }
+  haptic_gate_was_open_ = true;
 
   haptic_force_sum_ += static_cast<double>(deviation);
   ++haptic_force_samples_;
@@ -549,6 +594,11 @@ void TrossenArmComponent::stop_haptic_feedback() {
   // far higher than the same arm holding position) into a session that starts
   // somewhere else entirely.
   haptic_baseline_.reset();
+  // Forget the last command too, so the gate starts SHUT next session. Otherwise
+  // a pose left over from the previous run could open it before the new one has
+  // commanded anything.
+  haptic_last_command_.clear();
+  haptic_gate_was_open_ = false;
   glide::GlideSession::instance().set_vibration(get_identifier(), 0);
 }
 

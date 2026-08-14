@@ -361,6 +361,28 @@ private:
   /// configure() from haptic_baseline_tau_s and the curve's dead zone.
   glide::HapticBaseline haptic_baseline_{};
 
+  /// @brief Whether this leader is commanding a real pose, so haptics should run.
+  ///
+  /// True only when EVERY element of the last command clears
+  /// haptic_command_threshold_. See the definition for what that costs.
+  bool haptic_command_gate_open() const;
+
+  /// Distance from zero, per element, that a commanded position must exceed for
+  /// the gate to open. Radians for arm joints, metres for the gripper — one
+  /// number for both, because it is a "is this pin at zero" test rather than a
+  /// physically meaningful distance.
+  float haptic_command_threshold_{0.002f};
+
+  /// The last command this leader published, post-remap. Written by read() and
+  /// consumed by apply_haptic_feedback(), which the mirror thread calls in that
+  /// order on the same tick — so this is deliberately unguarded, unlike
+  /// last_command_ above, which the producer thread also reads.
+  std::vector<float> haptic_last_command_{};
+
+  /// Whether the gate was open on the previous tick, so the motor is zeroed once
+  /// on the way shut instead of at the full mirror rate.
+  bool haptic_gate_was_open_{false};
+
   /// True while the gripper is actually in external-effort mode for feedback
   /// (set by prepare_for_teleop, cleared by end_teleop). Guards end_teleop's
   /// effort release so it never commands external effort on an idle gripper —

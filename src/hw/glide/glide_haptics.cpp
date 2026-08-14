@@ -87,6 +87,14 @@ void HapticBaseline::reset() {
   last_s_     = 0.0;
 }
 
+bool command_clears_zero(const std::vector<float>& command, float threshold) {
+  if (command.empty()) return false;
+  for (const float q : command) {
+    if (!std::isfinite(q) || std::fabs(q) <= threshold) return false;
+  }
+  return true;
+}
+
 void GlideHapticCurve::validate(const std::string& who) const {
   if (deadband_n < 0.0f) {
     throw std::invalid_argument(

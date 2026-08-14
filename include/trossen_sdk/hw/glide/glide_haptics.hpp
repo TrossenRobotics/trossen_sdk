@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <string>
+#include <vector>
 
 namespace trossen::hw::glide {
 
@@ -164,6 +165,30 @@ private:
   double last_s_{0.0};
   bool   measured_{false};
 };
+
+/**
+ * @brief True when EVERY element of `command` is further than `threshold` from
+ *        zero — the test for "this leader is commanding a real pose".
+ *
+ * Gates the haptic channel so a parked arm cannot buzz. An empty command is
+ * false: the mirror treats an empty leader read as "nothing moved", so there is
+ * no pose to feel.
+ *
+ * Every element, gripper included, and that strictness is the point rather than
+ * an oversight — but it has two consequences worth knowing before tuning:
+ *
+ *  - A closed gripper commands ~0, so grasping closes the gate and the operator
+ *    feels nothing while holding something.
+ *  - A single joint passing through zero in ordinary motion closes it for as
+ *    long as it takes to cross, so the buzz can flicker.
+ *
+ * Relaxing to "any element clears the threshold" removes both and still
+ * suppresses the parked pose, which is the case this exists for.
+ *
+ * A non-finite element is treated as not clearing the threshold, so a garbage
+ * read closes the gate rather than opening it.
+ */
+bool command_clears_zero(const std::vector<float>& command, float threshold);
 
 }  // namespace trossen::hw::glide
 
