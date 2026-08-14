@@ -9,6 +9,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -561,4 +562,173 @@ TEST(TeleopControllerFaultTest, NegativeLeaderTimeoutRejected) {
   TeleopController::Config cfg{TeleopCapable::Space::Joint, 500.0f};
   cfg.leader_timeout_ms = -1.0f;
   EXPECT_THROW(TeleopController(leader, nullptr, cfg), std::invalid_argument);
+}
+
+// ── The haptic contact channel ───────────────────────────────────────────
+//
+// The vibration motor latches, so what these tests really protect is the
+// guarantee that the mirror never leaves a handle buzzing. Each way the loop can
+// end gets its own case, because they are reached by different code paths:
+// stop_teleop() unwinds deliberately, pause_teleop() deliberately does NOT call
+// end_teleop(), and a fault throws out of the middle of a tick.
+
+/// A leader that records what it was asked to render, and whether it was
+/// silenced. Renders haptics so the controller runs the channel.
+class RecordingHapticLeader : public TeleopCapable {
+  struct IO : JointSpaceTeleop {
+    std::vector<float> read() override { return {0.0f, 0.0f, 0.0f}; }
+    void write(const std::vector<float>&) override {}
+    bool renders_haptic_feedback() const override { return true; }
+    void apply_haptic_feedback(float force_n) override {
+      last_force.store(force_n);
+      ++applied;
+    }
+    void stop_haptic_feedback() override { ++stopped; }
+
+    std::atomic<float> last_force{-1.0f};
+    std::atomic<int>   applied{0};
+    std::atomic<int>   stopped{0};
+  } io_;
+public:
+  TeleopTypeIO* as_space_io(Space) override { return &io_; }
+  IO& io() { return io_; }
+};
+
+/// A leader that renders haptics but throws on read(), to reach the fault path
+/// with the channel active.
+class ThrowingHapticLeader : public TeleopCapable {
+  struct IO : JointSpaceTeleop {
+    std::vector<float> read() override {
+      throw std::runtime_error("test exception from read()");
+    }
+    void write(const std::vector<float>&) override {}
+    bool renders_haptic_feedback() const override { return true; }
+    void stop_haptic_feedback() override { ++stopped; }
+    std::atomic<int> stopped{0};
+  } io_;
+public:
+  TeleopTypeIO* as_space_io(Space) override { return &io_; }
+  IO& io() { return io_; }
+};
+
+/// A follower reporting a fixed contact force, counting how often it was asked.
+class ForceReportingFollower : public TeleopCapable {
+  struct IO : JointSpaceTeleop {
+    std::vector<float> read() override { return {}; }
+    void write(const std::vector<float>&) override {}
+    std::optional<float> read_contact_force() override {
+      ++reads;
+      return force;
+    }
+    float            force{25.0f};
+    std::atomic<int> reads{0};
+  } io_;
+public:
+  TeleopTypeIO* as_space_io(Space) override { return &io_; }
+  IO& io() { return io_; }
+};
+
+/// Bounded wait for an atomic counter to reach `target`.
+bool wait_for_count(const std::atomic<int>& counter, int target,
+                    std::chrono::milliseconds timeout = std::chrono::seconds(2)) {
+  const auto deadline = std::chrono::steady_clock::now() + timeout;
+  while (counter.load() < target) {
+    if (std::chrono::steady_clock::now() >= deadline) return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return true;
+}
+
+TEST(TeleopControllerHapticTest, FollowerForceReachesTheLeader) {
+  auto leader   = std::make_shared<RecordingHapticLeader>();
+  auto follower = std::make_shared<ForceReportingFollower>();
+  TeleopController ctrl(leader, follower, {TeleopCapable::Space::Joint, 200.0f});
+
+  ctrl.teleop();
+  ASSERT_TRUE(wait_for_count(leader->io().applied, 3));
+  ctrl.stop_teleop();
+
+  EXPECT_FLOAT_EQ(leader->io().last_force.load(), 25.0f);
+}
+
+TEST(TeleopControllerHapticTest, ChannelIsSkippedWhenTheLeaderDoesNotRenderIt) {
+  // A rig with no vibration motor must not pay for the follower's force read on
+  // every tick of the mirror loop.
+  auto leader   = std::make_shared<StubLeader>();
+  auto follower = std::make_shared<ForceReportingFollower>();
+  TeleopController ctrl(leader, follower, {TeleopCapable::Space::Joint, 500.0f});
+
+  ctrl.teleop();
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  ctrl.stop_teleop();
+
+  EXPECT_EQ(follower->io().reads.load(), 0);
+}
+
+TEST(TeleopControllerHapticTest, StoppingTheMirrorSilencesTheHandle) {
+  auto leader   = std::make_shared<RecordingHapticLeader>();
+  auto follower = std::make_shared<ForceReportingFollower>();
+  TeleopController ctrl(leader, follower, {TeleopCapable::Space::Joint, 200.0f});
+
+  ctrl.teleop();
+  ASSERT_TRUE(wait_for_count(leader->io().applied, 1));
+  ctrl.stop_teleop();
+
+  EXPECT_GE(leader->io().stopped.load(), 1);
+}
+
+TEST(TeleopControllerHapticTest, PausingTheMirrorSilencesTheHandle) {
+  // The case with no other safety net: pause_teleop() deliberately does not call
+  // end_teleop(), so if the loop did not silence on its way out, a handle paused
+  // mid-contact would buzz for as long as it stayed paused.
+  auto leader   = std::make_shared<RecordingHapticLeader>();
+  auto follower = std::make_shared<ForceReportingFollower>();
+  TeleopController ctrl(leader, follower, {TeleopCapable::Space::Joint, 200.0f});
+
+  ctrl.teleop();
+  ASSERT_TRUE(wait_for_count(leader->io().applied, 1));
+  ctrl.pause_teleop();
+
+  EXPECT_GE(leader->io().stopped.load(), 1);
+}
+
+TEST(TeleopControllerHapticTest, AFaultedMirrorStillSilencesTheHandle) {
+  // Reached by a throw out of the middle of a tick, which is also the case where
+  // the silencing write is most likely to fail — hence it must not re-throw.
+  auto leader   = std::make_shared<ThrowingHapticLeader>();
+  auto follower = std::make_shared<ForceReportingFollower>();
+  TeleopController ctrl(leader, follower, {TeleopCapable::Space::Joint, 200.0f});
+
+  ctrl.teleop();
+  ASSERT_TRUE(wait_until_stopped(ctrl));
+
+  EXPECT_GE(leader->io().stopped.load(), 1);
+}
+
+TEST(TeleopControllerHapticTest, AThrowingSilenceDoesNotTakeTheProcessDown) {
+  // The silencing write happens outside the loop's try/catch, on a thread whose
+  // boundary is effectively noexcept: an escaping exception would terminate.
+  class ThrowOnStopLeader : public TeleopCapable {
+    struct IO : JointSpaceTeleop {
+      std::vector<float> read() override { return {0.0f}; }
+      void write(const std::vector<float>&) override {}
+      bool renders_haptic_feedback() const override { return true; }
+      void apply_haptic_feedback(float) override { ++applied; }
+      void stop_haptic_feedback() override {
+        throw std::runtime_error("handle link is down");
+      }
+      std::atomic<int> applied{0};
+    } io_;
+  public:
+    TeleopTypeIO* as_space_io(Space) override { return &io_; }
+    IO& io() { return io_; }
+  };
+
+  auto leader   = std::make_shared<ThrowOnStopLeader>();
+  auto follower = std::make_shared<ForceReportingFollower>();
+  TeleopController ctrl(leader, follower, {TeleopCapable::Space::Joint, 200.0f});
+
+  ctrl.teleop();
+  ASSERT_TRUE(wait_for_count(leader->io().applied, 1));
+  ctrl.stop_teleop();  // must return normally rather than terminating
 }

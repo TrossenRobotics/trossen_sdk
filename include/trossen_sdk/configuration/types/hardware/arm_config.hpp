@@ -7,6 +7,7 @@
 #define TROSSEN_SDK__CONFIGURATION__TYPES__HARDWARE__ARM_CONFIG_HPP_
 
 #include <cmath>
+#include <cstdint>
 #include <limits>
 #include <string>
 #include <vector>
@@ -129,6 +130,45 @@ struct ArmConfig {
   /// existing behaviour everywhere it is not set.
   std::string gripper_feedback_mode{"external_effort"};
 
+  /// @brief Leader-only: buzz this arm's handle in proportion to how hard the
+  /// FOLLOWER's end effector is pushing on the world, so the operator feels the
+  /// arm meet a table, a wall, or a fixture. Independent of
+  /// gripper_force_feedback (a rig may run either, both, or neither) and of
+  /// `actuated`, since the vibration motor is in the handle rather than a joint.
+  ///
+  /// Only meaningful on hardware with a Glide handle: the intensity is applied
+  /// through GlideSession, which reaches the motor over the same driver that
+  /// serves the handle's joystick and button LEDs.
+  bool haptic_feedback{false};
+
+  /// @brief Force-to-vibration curve. Contact force at or below
+  /// `haptic_force_deadband_n` is silent, `haptic_force_max_n` saturates the
+  /// motor, and the range between is shaped by `haptic_curve_gamma` (1.0 =
+  /// linear in duty, > 1 = late onset).
+  ///
+  /// The dead zone is required, not cosmetic: the rendered force is the driver's
+  /// external-effort residual, which is non-zero on a free-moving arm from
+  /// payload model error and inertia. `haptic_intensity_floor` is the duty
+  /// applied the instant the dead zone is passed, because an eccentric-mass
+  /// motor does not spin at low duty — ramping from 0 would waste the bottom of
+  /// the range on silence.
+  float haptic_force_deadband_n{5.0f};
+  float haptic_force_max_n{40.0f};
+  std::uint8_t haptic_intensity_floor{80};
+  std::uint8_t haptic_intensity_max{255};
+  float haptic_curve_gamma{1.0f};
+
+  /// @brief Number of distinct intensity steps, and how often the intensity is
+  /// pushed to the handle (Hz).
+  ///
+  /// Both exist to protect the handle's link rather than to shape the feel. The
+  /// mirror loop runs at up to 1 kHz and every distinct intensity costs a packet
+  /// on the same channel as the button LEDs, so intensity is quantised into
+  /// `haptic_levels` steps and pushed at most `haptic_update_hz` times a second,
+  /// averaging the forces seen in between.
+  std::uint8_t haptic_levels{16};
+  float haptic_update_hz{30.0f};
+
   /// @brief Optional per-joint operating limits pushed to the controller on
   /// connect. Each array, when non-empty, must have one entry per joint (arm
   /// joints in rad / rad·s⁻¹ / N·m, gripper in m / m·s⁻¹ / N). Empty = leave
@@ -235,6 +275,20 @@ struct ArmConfig {
       j.at("gripper_feedback_offset").get_to(c.gripper_feedback_offset);
     if (j.contains("gripper_feedback_mode"))
       j.at("gripper_feedback_mode").get_to(c.gripper_feedback_mode);
+    if (j.contains("haptic_feedback"))
+      j.at("haptic_feedback").get_to(c.haptic_feedback);
+    if (j.contains("haptic_force_deadband_n"))
+      j.at("haptic_force_deadband_n").get_to(c.haptic_force_deadband_n);
+    if (j.contains("haptic_force_max_n"))
+      j.at("haptic_force_max_n").get_to(c.haptic_force_max_n);
+    if (j.contains("haptic_intensity_floor"))
+      j.at("haptic_intensity_floor").get_to(c.haptic_intensity_floor);
+    if (j.contains("haptic_intensity_max"))
+      j.at("haptic_intensity_max").get_to(c.haptic_intensity_max);
+    if (j.contains("haptic_curve_gamma"))
+      j.at("haptic_curve_gamma").get_to(c.haptic_curve_gamma);
+    if (j.contains("haptic_levels")) j.at("haptic_levels").get_to(c.haptic_levels);
+    if (j.contains("haptic_update_hz")) j.at("haptic_update_hz").get_to(c.haptic_update_hz);
     if (j.contains("position_min")) j.at("position_min").get_to(c.position_min);
     if (j.contains("position_max")) j.at("position_max").get_to(c.position_max);
     if (j.contains("velocity_max")) j.at("velocity_max").get_to(c.velocity_max);
@@ -279,6 +333,19 @@ struct ArmConfig {
       j["gripper_feedback_follower_max"] = gripper_feedback_follower_max;
       j["gripper_feedback_offset"] = gripper_feedback_offset;
       j["gripper_feedback_mode"] = gripper_feedback_mode;
+    }
+    // Same emit-only-when-enabled rule as the gripper block: the curve is
+    // meaningless while haptics are off, and emitting it would put eight keys
+    // into every ordinary follower's config.
+    if (haptic_feedback) {
+      j["haptic_feedback"] = haptic_feedback;
+      j["haptic_force_deadband_n"] = haptic_force_deadband_n;
+      j["haptic_force_max_n"] = haptic_force_max_n;
+      j["haptic_intensity_floor"] = haptic_intensity_floor;
+      j["haptic_intensity_max"] = haptic_intensity_max;
+      j["haptic_curve_gamma"] = haptic_curve_gamma;
+      j["haptic_levels"] = haptic_levels;
+      j["haptic_update_hz"] = haptic_update_hz;
     }
     // Emit smoothing tuning only when enabled, same reasoning as the gripper
     // feedback block above — the constants are meaningless while it is off.

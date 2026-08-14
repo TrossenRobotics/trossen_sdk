@@ -58,6 +58,9 @@ target_link_libraries(test_glide_session PRIVATE trossen_sdk GTest::gtest_main)
 add_executable(test_glide_components test_glide_components.cpp)
 target_link_libraries(test_glide_components PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_glide_haptics test_glide_haptics.cpp)
+target_link_libraries(test_glide_haptics PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_lerobot_depth_utils test_lerobot_depth_utils.cpp)
 target_link_libraries(test_lerobot_depth_utils PRIVATE trossen_sdk GTest::gtest_main)
 

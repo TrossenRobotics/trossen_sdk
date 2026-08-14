@@ -301,6 +301,18 @@ def _carry_over_unmodelled_config(
         "smoothing_beta",
         "smoothing_d_cutoff_hz",
     )
+    # Leader-only contact haptics. No Configuration page controls exist for
+    # these, so they are carried over verbatim; see the loop below.
+    _HAPTIC_KEYS = (
+        "haptic_feedback",
+        "haptic_force_deadband_n",
+        "haptic_force_max_n",
+        "haptic_intensity_floor",
+        "haptic_intensity_max",
+        "haptic_curve_gamma",
+        "haptic_levels",
+        "haptic_update_hz",
+    )
     stored_arms = stored_hw.get("arms") or {}
     for arm_id, arm in (incoming_hw.get("arms") or {}).items():
         stored_arm = stored_arms.get(arm_id)
@@ -317,6 +329,16 @@ def _carry_over_unmodelled_config(
         # every save drops it and the arm  reverts to the SDK's "external_effort" default
         if "gripper_feedback_mode" not in arm and "gripper_feedback_mode" in stored_arm:
             arm["gripper_feedback_mode"] = stored_arm["gripper_feedback_mode"]
+
+        # --- contact haptics ---
+        # Same situation as gripper_feedback_mode: the Configuration page has no
+        # controls for the haptic curve, so it rebuilds every arm without these
+        # keys and a save would silently un-tune the handles. Preserved per key
+        # rather than as a block so a future client that learns some of them
+        # keeps control of exactly those.
+        for key in _HAPTIC_KEYS:
+            if key not in arm and key in stored_arm:
+                arm[key] = stored_arm[key]
 
     return incoming
 

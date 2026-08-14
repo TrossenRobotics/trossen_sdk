@@ -195,6 +195,54 @@ class TestCarryOverUnmodelledConfig:
         assert merged["hardware"]["arms"]["follower"]["smoothing_enabled"] is True
         assert merged["hardware"]["arms"]["follower"]["smoothing_beta"] == 0.4
 
+    def test_haptics_are_restored(self) -> None:
+        """The Configuration page has no haptic controls, so EVERY save drops them.
+
+        Not a legacy-bundle concern like the cases above: the current page omits
+        these keys too, so without this a tuned handle is un-tuned by any
+        unrelated edit to the same system.
+        """
+        stored = self._stored()
+        stored["hardware"]["arms"]["glide_left"] = {
+            "ip_address": "192.168.5.3",
+            "haptic_feedback": True,
+            "haptic_force_deadband_n": 6.5,
+            "haptic_force_max_n": 35.0,
+            "haptic_intensity_floor": 90,
+            "haptic_curve_gamma": 1.4,
+        }
+        incoming = self._old_client_put()
+        incoming["hardware"]["arms"]["glide_left"] = {"ip_address": "192.168.5.3"}
+
+        merged = _carry_over_unmodelled_config(incoming, stored)
+        arm = merged["hardware"]["arms"]["glide_left"]
+        assert arm["haptic_feedback"] is True
+        assert arm["haptic_force_deadband_n"] == 6.5
+        assert arm["haptic_force_max_n"] == 35.0
+        assert arm["haptic_intensity_floor"] == 90
+        assert arm["haptic_curve_gamma"] == 1.4
+
+    def test_a_client_can_turn_haptics_off(self) -> None:
+        """Per key, not per block: a client that sends one key controls that key.
+
+        So a future page that grows a single on/off toggle can disable haptics
+        without also having to reproduce the whole curve.
+        """
+        stored = self._stored()
+        stored["hardware"]["arms"]["glide_left"] = {
+            "haptic_feedback": True,
+            "haptic_force_max_n": 35.0,
+        }
+        incoming = self._old_client_put()
+        incoming["hardware"]["arms"]["glide_left"] = {"haptic_feedback": False}
+
+        merged = _carry_over_unmodelled_config(incoming, stored)
+        arm = merged["hardware"]["arms"]["glide_left"]
+        assert arm["haptic_feedback"] is False
+        # The rest of the curve is still carried over — harmless while off, and
+        # it means toggling back on does not lose the tuning.
+        assert arm["haptic_force_max_n"] == 35.0
+
     def test_producer_type_wins_over_the_stored_row(self) -> None:
         """A save that changes the camera type must not be undone by this."""
         incoming = self._old_client_put()

@@ -373,4 +373,97 @@ TEST_F(GlideSessionTest, OutputsAreIndependentPerHandle) {
   EXPECT_EQ(session().output_command("glide_right").led_effects[0], GlideLedEffect::kOff);
 }
 
+// ── Handle outputs (vibration) ───────────────────────────────────────────
+
+TEST_F(GlideSessionTest, VibrationIsStagedAndPushedToTheWriter) {
+  std::vector<GlideOutputCommand> writes;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand& c) {
+    writes.push_back(c);
+    return true;
+  });
+
+  EXPECT_TRUE(session().set_vibration("glide_right", 128));
+
+  ASSERT_EQ(writes.size(), 1u);
+  EXPECT_EQ(writes[0].vibration_intensity, 128);
+  EXPECT_EQ(session().output_command("glide_right").vibration_intensity, 128);
+}
+
+TEST_F(GlideSessionTest, UnchangedVibrationDoesNotReachTheDriver) {
+  int writes = 0;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand&) {
+    ++writes;
+    return true;
+  });
+
+  // This is what makes it safe to render haptics from the teleop loop: a steady
+  // lean on a table holds one intensity, so it costs one packet, not one per
+  // push interval.
+  session().set_vibration("glide_right", 96);
+  for (int i = 0; i < 10; ++i) session().set_vibration("glide_right", 96);
+  EXPECT_EQ(writes, 1);
+
+  session().set_vibration("glide_right", 0);
+  EXPECT_EQ(writes, 2);
+}
+
+TEST_F(GlideSessionTest, LedUpdateDoesNotSilenceAnActiveBuzz) {
+  std::vector<GlideOutputCommand> writes;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand& c) {
+    writes.push_back(c);
+    return true;
+  });
+
+  session().set_vibration("glide_right", 200);
+  // The driver applies InputCommand whole, so an LED write that did not carry
+  // the current intensity forward would cut the motor. The merged command is
+  // the only thing standing between these two features.
+  session().set_led_brightness("glide_right", 255);
+
+  ASSERT_EQ(writes.size(), 2u);
+  EXPECT_EQ(writes[1].vibration_intensity, 200);
+  EXPECT_EQ(writes[1].led_brightness, 255);
+}
+
+TEST_F(GlideSessionTest, VibrationDoesNotDisturbLedState) {
+  std::vector<GlideOutputCommand> writes;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand& c) {
+    writes.push_back(c);
+    return true;
+  });
+
+  session().set_button_led("glide_right", 3, GlideLedEffect::kBreathe);
+  session().set_led_brightness("glide_right", 40);
+  session().set_vibration("glide_right", 64);
+
+  // The mirror of the previous case: haptics must not turn the lights off.
+  ASSERT_EQ(writes.size(), 3u);
+  EXPECT_EQ(writes[2].led_effects[3], GlideLedEffect::kBreathe);
+  EXPECT_EQ(writes[2].led_brightness, 40);
+  EXPECT_EQ(writes[2].vibration_intensity, 64);
+}
+
+TEST_F(GlideSessionTest, VibrationStagedBeforeWriterIsPushedOnRegistration) {
+  session().set_vibration("glide_right", 90);
+
+  std::vector<GlideOutputCommand> writes;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand& c) {
+    writes.push_back(c);
+    return true;
+  });
+
+  ASSERT_EQ(writes.size(), 1u);
+  EXPECT_EQ(writes[0].vibration_intensity, 90);
+}
+
+TEST_F(GlideSessionTest, FailedVibrationWriteIsReportedToTheCaller) {
+  session().register_writer("glide_right", [](const GlideOutputCommand&) { return false; });
+  EXPECT_FALSE(session().set_vibration("glide_right", 128));
+}
+
+TEST_F(GlideSessionTest, VibrationIsIndependentPerHandle) {
+  session().set_vibration("glide_left", 255);
+  EXPECT_EQ(session().output_command("glide_right").vibration_intensity, 0);
+}
+
 }  // namespace

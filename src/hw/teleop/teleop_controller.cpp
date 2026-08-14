@@ -320,12 +320,39 @@ void TeleopController::control_loop() {
         }
       }
 
+      // Second reverse channel: reflect how hard the follower is pushing on the
+      // world onto the leader as vibration, so the operator feels contact. Fed
+      // every tick and rate-limited by the leader, which is the only side that
+      // knows what its own link can absorb.
+      if (follower_io_ && leader_io_->renders_haptic_feedback()) {
+        if (const auto force = follower_io_->read_contact_force()) {
+          leader_io_->apply_haptic_feedback(*force);
+        }
+      }
+
       std::this_thread::sleep_until(deadline);
     }
   } catch (const std::exception& e) {
     report_fault(phase, e.what());
   } catch (...) {
     report_fault(FaultCause::kUnknown, "non-std::exception thrown by the mirror loop");
+  }
+
+  // Every way out of the loop lands here — asked to stop, paused, or faulted —
+  // and the vibration motor latches on its last commanded value. Without this a
+  // handle that was buzzing at the moment the mirror stopped keeps buzzing
+  // indefinitely, and pause_teleop() in particular never calls end_teleop(), so
+  // nothing else would ever clear it.
+  //
+  // Swallowed rather than reported: the common reason to be here at all is that
+  // the leader's link just died, in which case this write cannot succeed and
+  // its failure adds nothing to the fault already being reported. A throw would
+  // also escape a noexcept thread boundary and terminate the process.
+  if (leader_io_ && leader_io_->renders_haptic_feedback()) {
+    try {
+      leader_io_->stop_haptic_feedback();
+    } catch (...) {
+    }
   }
 }
 

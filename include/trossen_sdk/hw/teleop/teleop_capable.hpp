@@ -137,6 +137,46 @@ public:
   virtual void apply_multiple_gripper_feedback(std::vector<float> follower_gripper_effort) {
     (void)follower_gripper_effort;
   }
+
+  // ── Optional haptic contact channel (follower → leader) ──────────────────
+  //
+  // A second reverse channel, independent of the gripper one above and gated
+  // separately: the follower reports how hard its end effector is pushing on
+  // the world, and the leader renders that as vibration so the operator feels
+  // the arm hit a table, a wall, or a fixture. Where the gripper channel
+  // reflects force back as force, this one reflects it as a different modality
+  // entirely — which is the point, because a passive leader has no way to
+  // resist the operator's arm.
+  //
+  // Kept separate from the gripper channel rather than folded into it because
+  // the two are independently useful: a Glide handle renders contact haptics
+  // whether or not its gripper is actuated, and an actuated leader can reflect
+  // grip force with no vibration motor anywhere in the rig.
+
+  /// Leader role: true if this hardware renders contact haptics. Gates whether
+  /// the controller runs this channel at all.
+  virtual bool renders_haptic_feedback() const { return false; }
+
+  /// Follower role: magnitude of the external force this hardware's end
+  /// effector is exerting on the world (N), or nullopt if it cannot report one.
+  /// A sensor read, independent of the arm's control mode.
+  virtual std::optional<float> read_contact_force() { return std::nullopt; }
+
+  /// Leader role: render the follower's contact force. Called every control
+  /// tick, so the implementation owns its own rate limiting — the handle is
+  /// reached over a link and cannot absorb a packet per tick.
+  virtual void apply_haptic_feedback(float follower_contact_force_n) {
+    (void)follower_contact_force_n;
+  }
+
+  /// Leader role: silence the haptics NOW, bypassing any rate limiting.
+  ///
+  /// Not the same as `apply_haptic_feedback(0)`: that is a rate-limited request
+  /// that may not reach the hardware before the next tick, and on every path
+  /// that calls this there is no next tick. The vibration motor latches, so a
+  /// mirror loop that stops — cleanly, paused, or faulted — must drive it to
+  /// zero here or the handle goes on buzzing in the operator's hand.
+  virtual void stop_haptic_feedback() {}
 };
 
 /**

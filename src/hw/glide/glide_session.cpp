@@ -213,6 +213,12 @@ bool GlideSession::set_led_brightness(const std::string& arm_id, std::uint8_t br
   });
 }
 
+bool GlideSession::set_vibration(const std::string& arm_id, std::uint8_t intensity) {
+  return apply_output(arm_id, [intensity](GlideOutputCommand& cmd) {
+    cmd.vibration_intensity = intensity;
+  });
+}
+
 void GlideSession::reset_for_test() {
   std::lock_guard<std::mutex> lock(mutex_);
   claims_.clear();

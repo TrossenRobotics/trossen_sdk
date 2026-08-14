@@ -13,6 +13,7 @@
 
 #include "libtrossen_arm/trossen_arm.hpp"
 
+#include "trossen_sdk/hw/glide/glide_haptics.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/teleop/teleop_capable.hpp"
 #include "trossen_sdk/utils/one_euro_filter.hpp"
@@ -181,6 +182,28 @@ private:
   /// Only meaningful when gripper_force_feedback_ is set.
   void apply_gripper_feedback(float follower_gripper_effort);
 
+  /// Follower role: magnitude of the external force on the end effector (N),
+  /// or nullopt without a driver.
+  ///
+  /// Read from the driver's CARTESIAN external efforts — the first three
+  /// elements, which are the force at the end effector in the base frame — so
+  /// the answer is one number in Newtons that does not change meaning with the
+  /// arm's configuration. The joint-space external efforts describe the same
+  /// contact as a torque vector whose shape depends entirely on the pose, which
+  /// would make a fixed dead zone meaningless. Available in either teleop space,
+  /// because the controller computes cartesian output regardless of which space
+  /// the mirror runs in.
+  std::optional<float> read_contact_force();
+
+  /// Leader role: render the follower's contact force as vibration on this
+  /// arm's handle. Called every control tick; pushes to the handle at
+  /// haptic_update_hz_, averaging the forces seen in between.
+  void apply_haptic_feedback(float follower_contact_force_n);
+
+  /// Leader role: drive the vibration to zero immediately and drop any
+  /// part-accumulated average. See TeleopTypeIO::stop_haptic_feedback.
+  void stop_haptic_feedback();
+
   std::vector<float> read_cartesian();
   void               write_cartesian(const std::vector<float>& cmd);
 
@@ -208,6 +231,18 @@ private:
     void apply_gripper_feedback(float follower_gripper_effort) override {
       self->apply_gripper_feedback(follower_gripper_effort);
     }
+    bool renders_haptic_feedback() const override {
+      return self->haptic_feedback_;
+    }
+    std::optional<float> read_contact_force() override {
+      return self->read_contact_force();
+    }
+    void apply_haptic_feedback(float follower_contact_force_n) override {
+      self->apply_haptic_feedback(follower_contact_force_n);
+    }
+    void stop_haptic_feedback() override {
+      self->stop_haptic_feedback();
+    }
   };
 
   struct CartView : teleop::CartesianSpaceTeleop {
@@ -218,6 +253,20 @@ private:
     }
     void write(const std::vector<float>& cmd) override {
       self->write_cartesian(cmd);
+    }
+    // Haptics are space-agnostic — the contact force is read from the driver's
+    // cartesian output either way — so cartesian teleop gets the same channel.
+    bool renders_haptic_feedback() const override {
+      return self->haptic_feedback_;
+    }
+    std::optional<float> read_contact_force() override {
+      return self->read_contact_force();
+    }
+    void apply_haptic_feedback(float follower_contact_force_n) override {
+      self->apply_haptic_feedback(follower_contact_force_n);
+    }
+    void stop_haptic_feedback() override {
+      self->stop_haptic_feedback();
     }
   };
 
@@ -260,6 +309,39 @@ private:
   /// the SDK was tuned on external effort, so this defaults to false. Resolved
   /// once in configure() from "gripper_feedback_mode".
   bool  gripper_feedback_plain_effort_{false};
+
+  /// Leader-only contact haptics. When set, the teleop loop feeds this arm the
+  /// FOLLOWER's end-effector contact force and it buzzes its own handle's
+  /// vibration motor in proportion. Independent of gripper_force_feedback_ and
+  /// of actuated_ — a fully passive handle renders this perfectly well, since
+  /// the motor is in the handle rather than in a joint.
+  bool haptic_feedback_{false};
+
+  /// The force-to-duty mapping. Parsed from the haptic_* keys in configure()
+  /// and validated there, so a nonsensical curve fails at startup.
+  glide::GlideHapticCurve haptic_curve_{};
+
+  /// How often the accumulated force is pushed to the handle (Hz). The mirror
+  /// loop runs at up to 1 kHz and every distinct intensity is a packet on the
+  /// handle's link, so this is what keeps haptics from flooding it.
+  float haptic_update_hz_{30.0f};
+
+  /// Boxcar accumulator over one push interval: forces are summed as they
+  /// arrive and the MEAN is what gets rendered.
+  ///
+  /// Averaging rather than sampling the latest value, because the residual this
+  /// reads is noisy at 1 kHz — sampling once every 33 ms would render that noise
+  /// and make a steady lean flicker between steps. Mean rather than peak so a
+  /// single spurious spike cannot buzz the handle, at the cost of blunting a
+  /// genuinely brief tap.
+  double haptic_force_sum_{0.0};
+  int    haptic_force_samples_{0};
+
+  /// Monotonic seconds at the last push; 0 means "never", which makes the first
+  /// tick of a session render immediately instead of waiting out one silent
+  /// interval. Seconds-since-steady-epoch rather than a time_point so this
+  /// header stays free of <chrono>.
+  double haptic_last_push_s_{0.0};
 
   /// True while the gripper is actually in external-effort mode for feedback
   /// (set by prepare_for_teleop, cleared by end_teleop). Guards end_teleop's

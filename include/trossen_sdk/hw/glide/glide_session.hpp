@@ -119,6 +119,11 @@ enum class GlideLedEffect : std::uint8_t {
  * Note `brightness` is per HANDLE, not per button — the hardware has one
  * brightness for all four LEDs. Only buttons whose effect is not kOff show it,
  * so brightness changes are visible on exactly the lit buttons and no others.
+ *
+ * LEDs and vibration live in ONE struct because the driver applies them in one
+ * packet: there is no way to set the lights without also restating the motor.
+ * Merging them here is what stops a component that only touches the LEDs from
+ * silencing a buzz set by another (and vice versa).
  */
 struct GlideOutputCommand {
   /// Per-button effect, indexed by button bit (bit N is SEL_(N+1)).
@@ -127,8 +132,14 @@ struct GlideOutputCommand {
   /// Shared LED brightness, 0-255.
   std::uint8_t led_brightness{0};
 
+  /// Vibration motor duty, 0-255. LATCHING: the handle buzzes at this value
+  /// until something writes a lower one, so whoever raises it owns clearing it.
+  std::uint8_t vibration_intensity{0};
+
   bool operator==(const GlideOutputCommand& other) const {
-    return led_effects == other.led_effects && led_brightness == other.led_brightness;
+    return led_effects == other.led_effects &&
+           led_brightness == other.led_brightness &&
+           vibration_intensity == other.vibration_intensity;
   }
   bool operator!=(const GlideOutputCommand& other) const { return !(*this == other); }
 };
@@ -256,6 +267,24 @@ public:
   /// Set the shared LED brightness for `arm_id`. Same change-detection and
   /// return contract as set_button_led.
   bool set_led_brightness(const std::string& arm_id, std::uint8_t brightness);
+
+  /**
+   * @brief Set the vibration motor duty (0-255) for `arm_id`.
+   *
+   * Same merge and change-detection contract as the LED setters, which is what
+   * makes this callable from a control loop: re-asserting the current intensity
+   * puts nothing on the wire.
+   *
+   * @warning The motor LATCHES. A handle told to buzz keeps buzzing until
+   * something writes a lower value — stopping the loop that set it is NOT
+   * enough, and neither is dropping the writer, because the driver holds the
+   * last packet it was given. Every caller needs a path that reaches 0 on
+   * teardown, including the fault path.
+   *
+   * @return false if a write was attempted and failed; true otherwise
+   *         (including when nothing changed and no write was needed).
+   */
+  bool set_vibration(const std::string& arm_id, std::uint8_t intensity);
 
   /// The command currently staged for `arm_id`. Diagnostics and tests.
   GlideOutputCommand output_command(const std::string& arm_id) const;

@@ -67,6 +67,7 @@ add_library(trossen_sdk SHARED
   src/hw/camera/mock_producer.cpp
   src/hw/camera/mock_synced_producer.cpp
   src/hw/glide/glide_session.cpp
+  src/hw/glide/glide_haptics.cpp
   src/hw/glide/glide_base_component.cpp
   src/hw/glide/glide_session_control_component.cpp
   src/hw/glide/glide_arm_input_component.cpp

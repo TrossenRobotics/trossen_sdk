@@ -5,6 +5,7 @@
 
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
+#include "trossen_sdk/hw/glide/glide_session.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
 
 #include <algorithm>
@@ -306,6 +307,46 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     }
   }
 
+  // Leader-only contact haptics: buzz this arm's handle in proportion to how
+  // hard the FOLLOWER is pushing on the world. Independent of the gripper
+  // channel above — a rig can run either, both, or neither.
+  if (config.contains("haptic_feedback")) {
+    haptic_feedback_ = config.at("haptic_feedback").get<bool>();
+  }
+  if (config.contains("haptic_force_deadband_n")) {
+    haptic_curve_.deadband_n = config.at("haptic_force_deadband_n").get<float>();
+  }
+  if (config.contains("haptic_force_max_n")) {
+    haptic_curve_.max_n = config.at("haptic_force_max_n").get<float>();
+  }
+  if (config.contains("haptic_intensity_floor")) {
+    haptic_curve_.intensity_floor =
+      config.at("haptic_intensity_floor").get<std::uint8_t>();
+  }
+  if (config.contains("haptic_intensity_max")) {
+    haptic_curve_.intensity_max = config.at("haptic_intensity_max").get<std::uint8_t>();
+  }
+  if (config.contains("haptic_curve_gamma")) {
+    haptic_curve_.gamma = config.at("haptic_curve_gamma").get<float>();
+  }
+  if (config.contains("haptic_levels")) {
+    haptic_curve_.levels = config.at("haptic_levels").get<std::uint8_t>();
+  }
+  if (config.contains("haptic_update_hz")) {
+    haptic_update_hz_ = config.at("haptic_update_hz").get<float>();
+  }
+  // Validate only when enabled, so a rig can leave half-tuned numbers in a
+  // config it has switched off. A bad curve is a startup error naming the field
+  // rather than a handle that silently never buzzes.
+  if (haptic_feedback_) {
+    haptic_curve_.validate("TrossenArmComponent '" + get_identifier() + "'");
+    if (!(haptic_update_hz_ > 0.0f)) {
+      throw std::runtime_error(
+        "TrossenArmComponent '" + get_identifier() +
+        "': haptic_update_hz must be > 0, got " + std::to_string(haptic_update_hz_));
+    }
+  }
+
   // Size the command filter to this arm's joint count. Built here rather than
   // where the knobs are parsed because the joint count is only known once the
   // driver is configured. Left default-constructed (size 0) when smoothing is
@@ -424,6 +465,63 @@ void TrossenArmComponent::apply_gripper_feedback(float follower_gripper_effort) 
   }
 }
 
+std::optional<float> TrossenArmComponent::read_contact_force() {
+  if (!driver_) return std::nullopt;
+  // First three elements are the spatial FORCE on the end effector in the base
+  // frame (N); the last three are the torque and are deliberately ignored —
+  // mixing N and N·m into one scalar would need a fudge factor with no physical
+  // meaning, and pushing on a surface shows up in the force term.
+  const auto& e = driver_->get_robot_output().cartesian.external_efforts;
+  const double fx = e[0];
+  const double fy = e[1];
+  const double fz = e[2];
+  return static_cast<float>(std::sqrt(fx * fx + fy * fy + fz * fz));
+}
+
+void TrossenArmComponent::apply_haptic_feedback(float follower_contact_force_n) {
+  if (!haptic_feedback_) return;
+
+  haptic_force_sum_ += static_cast<double>(follower_contact_force_n);
+  ++haptic_force_samples_;
+
+  // Zero means no push has happened yet, so the first call of a session is
+  // always overdue and renders immediately rather than after one silent
+  // interval. configure() rejects a non-positive rate whenever haptics are on,
+  // and this function returns above when they are off, so the division is safe.
+  const double now      = now_seconds();
+  const double interval = 1.0 / haptic_update_hz_;
+  if (haptic_last_push_s_ != 0.0 && now - haptic_last_push_s_ < interval) {
+    return;
+  }
+
+  const float mean = haptic_force_samples_ > 0
+    ? static_cast<float>(haptic_force_sum_ / haptic_force_samples_)
+    : 0.0f;
+  haptic_force_sum_     = 0.0;
+  haptic_force_samples_ = 0;
+  haptic_last_push_s_   = now;
+
+  // Through GlideSession rather than straight at this arm's own driver: the
+  // handle's LEDs and its motor share one InputCommand packet, and the session
+  // is what merges them so lighting a button cannot silence the buzz. It also
+  // swallows the write entirely when the intensity has not changed, which is
+  // what makes a steady lean cost one packet instead of one per interval.
+  glide::GlideSession::instance().set_vibration(
+    get_identifier(), haptic_curve_.intensity_for_force(mean));
+}
+
+void TrossenArmComponent::stop_haptic_feedback() {
+  if (!haptic_feedback_) return;
+  // Reset the accumulator first: a partially filled interval left behind would
+  // be averaged into the first push of the next session, so an arm that was in
+  // hard contact when teleop stopped would buzz on the next start-up before it
+  // had touched anything.
+  haptic_force_sum_     = 0.0;
+  haptic_force_samples_ = 0;
+  haptic_last_push_s_   = 0.0;
+  glide::GlideSession::instance().set_vibration(get_identifier(), 0);
+}
+
 void TrossenArmComponent::summon_joint(const std::vector<float>& cmd) {
   if (!driver_) return;
   if (cmd.size() != static_cast<size_t>(driver_->get_num_joints())) {
@@ -521,6 +619,13 @@ void TrossenArmComponent::prepare_for_teleop() {
 
 void TrossenArmComponent::end_teleop() {
   if (!driver_) return;
+  // Before anything else, and deliberately duplicating what the mirror loop
+  // already does on its way out. The loop only covers the case where it was
+  // running: end_teleop() is also reached with no teleop in flight at all (the
+  // hardware-test park step does exactly that), and the passive-leader branch
+  // below destroys the driver, after which the write is impossible. A latching
+  // motor earns the redundancy.
+  stop_haptic_feedback();
   if (!actuated_) {
     // Passive leader: arm joints have no actuators to neutralize. If the
     // gripper was actively rendering force feedback, release it (0 N, then

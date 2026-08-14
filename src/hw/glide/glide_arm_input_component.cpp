@@ -123,6 +123,12 @@ void GlideArmInputComponent::configure(const nlohmann::json& config) {
     // Outputs mirror the reader: same weak capture for the same lifetime
     // reason, same one-shot logging, same swallow. A handle whose LEDs cannot
     // be written is a cosmetic failure and must never take teleop down with it.
+    //
+    // Vibration rides the same packet and is swallowed the same way, with one
+    // consequence worth stating: the motor latches on whatever the LAST
+    // SUCCESSFUL write said. So a link that dies mid-buzz leaves the handle
+    // buzzing until it comes back — there is no host-side fix for that, and it
+    // is still not a reason to fault teleop.
     auto write_reported = std::make_shared<std::atomic<bool>>(false);
 
     session.register_writer(
@@ -138,13 +144,17 @@ void GlideArmInputComponent::configure(const nlohmann::json& config) {
             out.button_led_effects[i] = static_cast<uint8_t>(command.led_effects[i]);
           }
           out.button_led_brightness = command.led_brightness;
+          // Restated on every push, not just when it changes: the driver
+          // applies InputCommand whole, so leaving this at its default zero
+          // would make each LED update silence an active buzz.
+          out.vibration_intensity = command.vibration_intensity;
           driver->set_input_command(out);
           return true;
         } catch (const std::exception& e) {
           if (!write_reported->exchange(true)) {
             std::cerr << "GlideArmInputComponent: writing outputs to '" << arm_id
-                      << "' failed, its button LEDs will not update until it "
-                      << "recovers: " << e.what() << std::endl;
+                      << "' failed, its button LEDs and vibration will not "
+                      << "update until it recovers: " << e.what() << std::endl;
           }
           return false;
         }
