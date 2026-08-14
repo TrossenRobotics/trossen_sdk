@@ -12,6 +12,7 @@ import type { WsStatus } from '@/hooks/useReconnectingWebSocket';
 import { HwTestButton } from '@/app/components/HwTestButton';
 import { useConfirm } from '@/app/hooks/useConfirm';
 import { useHardwareTest } from '@/app/hooks/useHardwareTest';
+import { useLiveFeedWatchdog } from '@/app/hooks/useLiveFeedWatchdog';
 import type { WsMessage } from '@/lib/types';
 
 // Render text with any http(s) URLs turned into clickable links. Used to make
@@ -433,47 +434,19 @@ export function MonitorEpisodePage() {
   const MJPEG_PORT = 9877;
   const mjpegBase = `http://${window.location.hostname}:${MJPEG_PORT}`;
 
-  // A plain <img> MJPEG stream never auto-reconnects: if the recorder restarts
-  // (new session / resume / re-record) or the connection drops, the <img>
-  // freezes on its last frame until the URL changes (a normal reload can reuse
-  // the dead connection — only a hard refresh forced it before). We make the
-  // URL carry a reconnect token: `viewerEpoch` (bumped on every fresh recorder)
-  // plus a retry counter bumped on <img> error, so teardown/bringup is seamless
-  // with no manual refresh.
-  const [streamRetry, setStreamRetry] = useState(0);
-  useEffect(() => { setStreamRetry(0); }, [viewerEpoch]);
-  const retryTimer = useRef<number | null>(null);
-  const handleStreamError = useCallback(() => {
-    if (retryTimer.current != null) return; // coalesce a burst of img errors
-    retryTimer.current = window.setTimeout(() => {
-      retryTimer.current = null;
-      setStreamRetry(r => r + 1);
-    }, 1500);
-  }, []);
-  useEffect(() => () => {
-    if (retryTimer.current != null) window.clearTimeout(retryTimer.current);
-  }, []);
-
-  // Authoritative list of live camera streams, from the MJPEG server. Cameras
-  // appear once frames start flowing, so poll while Lite mode is showing a
-  // live feed; stop (and clear) as soon as the feed goes away.
-  const [liteCameras, setLiteCameras] = useState<string[]>([]);
-  useEffect(() => {
-    if (viewerMode !== 'lite' || !feedLive) {
-      setLiteCameras([]);
-      return;
-    }
-    let cancelled = false;
-    const poll = () => {
-      fetch(`${mjpegBase}/cameras`)
-        .then(r => r.json())
-        .then(d => { if (!cancelled) setLiteCameras(Array.isArray(d?.cameras) ? d.cameras : []); })
-        .catch(() => { if (!cancelled) setLiteCameras([]); });
-    };
-    poll();
-    const id = setInterval(poll, 2000);
-    return () => { cancelled = true; clearInterval(id); };
-  }, [viewerMode, feedLive, mjpegBase, streamRetry]);
+  // A plain <img> MJPEG stream never auto-reconnects, and — verified in
+  // Chromium — it never reports the failure either: a stream that dies fires no
+  // `error` (whether the socket closes or just goes quiet) and fires `load`
+  // only once ever, so there is no event to hang recovery on. The tile simply
+  // sits on its last frame, which is why the operators' only fix was
+  // ctrl+shift+R. The watchdog detects that from the pixels instead, and owns
+  // both the camera list and the per-camera reconnect token.
+  const liteFeed = useLiveFeedWatchdog({
+    base: mjpegBase,
+    enabled: viewerMode === 'lite' && feedLive,
+    epoch: String(viewerEpoch),
+  });
+  const liteCameras = liteFeed.cameras;
 
   // --- API calls ---
   const apiBase = `/api/sessions/${sessionId}`;
@@ -1555,7 +1528,7 @@ export function MonitorEpisodePage() {
               // low-res preview isn't rendered tiny; the cell — not the image's
               // intrinsic size — drives layout, keeping sizing stable across
               // reloads. The ?e=/r= token forces a fresh connection on recorder
-              // restart / stream error (see streamRetry) so it never sticks on a
+              // restart / stall (see liteFeed) so it never sticks on a
               // stale frame.
               liteCameras.length > 0 ? (
                 <div
@@ -1571,9 +1544,8 @@ export function MonitorEpisodePage() {
                       className="relative bg-black rounded overflow-hidden min-h-0 min-w-0"
                     >
                       <img
-                        src={`${mjpegBase}/stream/${encodeURIComponent(cam)}?e=${viewerEpoch}&r=${streamRetry}`}
+                        {...liteFeed.imgProps(cam)}
                         alt={cam}
-                        onError={handleStreamError}
                         className="w-full h-full object-contain"
                       />
                       <span className="absolute bottom-[4px] left-[6px] text-[10px] text-white/80 bg-black/50 px-[4px] rounded select-none">

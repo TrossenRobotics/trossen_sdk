@@ -515,6 +515,15 @@ _mjpeg_seq: dict[str, int] = {}
 # Retained for the process lifetime so the daemon server thread stays alive.
 _mjpeg_server: Any | None = None
 
+# Send timeout for an open /stream response. A viewer that stops reading — the
+# screen slept, Wi-Fi dropped, the tab died without a FIN — leaves this handler
+# blocked in write() forever once the socket buffer fills, pinning a thread and
+# spending airtime on frames nobody receives. (Seen on rivet-01: a screen that
+# was 100% unreachable still held three established sockets.) A timeout turns
+# that into an ordinary disconnect. Generous on purpose: a preview frame is
+# tens of KB, so any client still alive drains it in well under a second.
+_MJPEG_SEND_TIMEOUT_S = 15.0
+
 
 def _encode_jpeg(img: np.ndarray, encoding: str) -> bytes | None:
     """JPEG-encode an already-downscaled camera frame to bytes for the MJPEG feed.
@@ -577,15 +586,28 @@ class _MJPEGHandler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:  # noqa: N802
         path = unquote(self.path.split("?", 1)[0])
         if path in ("/", "/health"):
-            self._respond_json({"status": "ok", "cameras": sorted(_latest_jpeg)})
+            self._respond_json({"status": "ok", **self._camera_state()})
         elif path == "/cameras":
-            self._respond_json({"cameras": sorted(_latest_jpeg)})
+            self._respond_json(self._camera_state())
         elif path.startswith("/snapshot/"):
             self._serve_snapshot(path[len("/snapshot/"):])
         elif path.startswith("/stream/"):
             self._serve_stream(path[len("/stream/"):])
         else:
             self.send_error(404)
+
+    def _camera_state(self) -> dict[str, Any]:
+        """Live cameras plus each one's frame counter.
+
+        The counter is what lets a viewer tell its own stalled stream apart
+        from a camera that simply isn't producing. A frozen tile whose counter
+        is still climbing means the connection died and should be reopened; a
+        frozen tile whose counter is also frozen means there is nothing new to
+        show, and reconnecting would just loop. The /stream keepalive re-sends
+        the *same* frame, so pixels alone cannot make that distinction.
+        """
+        with _mjpeg_cond:
+            return {"cameras": sorted(_latest_jpeg), "seq": dict(_mjpeg_seq)}
 
     def _respond_json(self, obj: dict[str, Any]) -> None:
         body = json.dumps(obj).encode()
@@ -612,6 +634,8 @@ class _MJPEGHandler(BaseHTTPRequestHandler):
 
     def _serve_stream(self, cam: str) -> None:
         boundary = "frame"
+        # Bound every write on this connection; see _MJPEG_SEND_TIMEOUT_S.
+        self.connection.settimeout(_MJPEG_SEND_TIMEOUT_S)
         self.send_response(200)
         self.send_header(
             "Content-Type", f"multipart/x-mixed-replace; boundary={boundary}")
@@ -642,6 +666,11 @@ class _MJPEGHandler(BaseHTTPRequestHandler):
                 self.wfile.flush()
         except (BrokenPipeError, ConnectionResetError):
             return  # browser <img> went away — normal
+        except TimeoutError:
+            # Client stopped draining for _MJPEG_SEND_TIMEOUT_S. Treat it as
+            # gone: dropping the connection frees this thread and stops us
+            # transmitting to nobody. A viewer that is merely slow reconnects.
+            return
         except Exception:
             return
 
