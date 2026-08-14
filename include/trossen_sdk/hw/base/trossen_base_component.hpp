@@ -190,6 +190,41 @@ private:
   float estop_battery_percent_{0.0f};
 };
 
+/// @brief Read the base battery once, with nothing else running, and disconnect.
+///
+/// Exists so an idle robot can be asked "how much charge is left" without
+/// starting a session. Battery is otherwise only visible through
+/// TrossenBaseComponent::telemetry(), which needs a configured component, and
+/// configuring one connects, waits for ready, spins up a servicing thread and
+/// homes the swerve modules — the pivots physically move. Nobody should have to
+/// move the robot to read a number off it.
+///
+/// So this deliberately does the least the hardware allows: construct the
+/// driver (which opens CAN and requests init), tick update_base() until the
+/// first BMS frame lands, read, destruct. No homing, no velocity commands, no
+/// servicing thread — nothing moves. It also answers on an e-stopped base,
+/// where the full bring-up path never reaches a reading at all.
+///
+/// Returns the same JSON shape as TrossenBaseComponent::telemetry(), minus
+/// `pose` and `estop_battery_percent`: odometry means nothing on a base that
+/// has not moved, and the auto-stop threshold is component config that no
+/// probe can know. Same shape so one display can render either source.
+///
+/// FAILURE IS A TIMEOUT, NOT A THROW FROM THE DRIVER. The CAN socket open
+/// happens in the driver's constructor and merely logs when the interface is
+/// absent, so a machine with no base constructs a live-looking driver that
+/// never receives anything. A missing base, an unpowered base and a rig with no
+/// CAN interface therefore all surface here as "no BMS frame within
+/// `timeout_s`".
+///
+/// Requires exclusive use of the base: the caller must ensure no recorder is
+/// holding it.
+///
+/// @param timeout_s How long to wait for the first BMS frame. Seconds.
+/// @throws std::invalid_argument if `timeout_s` is not positive and finite.
+/// @throws std::runtime_error if no BMS frame arrives within `timeout_s`.
+nlohmann::json read_base_battery(double timeout_s = 10.0);
+
 }  // namespace trossen::hw::base
 
 #endif  // TROSSEN_SDK__HW__BASE__TROSSEN_BASE_COMPONENT_HPP_

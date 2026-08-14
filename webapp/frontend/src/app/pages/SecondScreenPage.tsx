@@ -4,7 +4,14 @@
  * A different product from the main UI, not a breakpoint of it. It is read from
  * one to two metres away, often mid-task with hands full, by someone who is not
  * the operator. So it answers a small number of questions in large type and
- * offers exactly one control: stop.
+ * offers one control WHILE RUNNING: stop.
+ *
+ * The idle screen is the exception, and it is a deliberate one. Base telemetry
+ * comes from the recorder child, so a parked robot shows no battery at all —
+ * exactly when someone is deciding whether to start a run. So when nothing is
+ * running the battery tile offers a check, which probes the base directly and
+ * holds the answer for 30s. It cannot appear next to STOP: a session is either
+ * running (live number, no button) or not (button, dead STOP).
  *
  * Mounted OUTSIDE the app Layout (like EmbeddedViewerPage) so it carries no nav
  * chrome — the display is bolted to a robot and has nowhere to go. The one
@@ -30,6 +37,18 @@ const POLL_MS = 1000;
 /** Consecutive poll failures before the link is declared down. One dropped
  *  request over WiFi is normal and must not make the screen flap. */
 const LINK_DOWN_AFTER = 3;
+
+/** How long a probed battery reading stays on screen before it clears itself.
+ *
+ *  It expires rather than persisting because a probe is a SNAPSHOT, not a feed:
+ *  nothing refreshes it, and a number left sitting on a status panel reads as
+ *  current. Thirty seconds is long enough to walk back from the robot and still
+ *  see it, short enough that it cannot be mistaken for live telemetry. */
+const PROBE_HOLD_MS = 30_000;
+
+/** Countdown redraw period. The reading is held for whole seconds, so a
+ *  sub-second tick keeps the number from appearing to skip. */
+const PROBE_TICK_MS = 250;
 
 type BaseTelemetry = {
   id?: string;
@@ -136,12 +155,65 @@ function Tile({
   );
 }
 
+/** The idle battery check.
+ *
+ *  Deliberately quiet: outlined, half the height of STOP, and inside the
+ *  battery tile rather than in the button row at the bottom. It is a convenience
+ *  on a panel whose one important control is red — anything here that competed
+ *  for attention with STOP would be a safety regression, not a feature.
+ *
+ *  Wide enough to hit with a glove from a metre away, which is the reason it is
+ *  not simply small. */
+function CheckBatteryButton({
+  busy,
+  onClick,
+  label = 'CHECK BATTERY',
+}: {
+  busy: boolean;
+  onClick: () => void;
+  label?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={busy}
+      className="w-full rounded-md text-center mt-3 transition-opacity"
+      style={{
+        background: 'transparent',
+        color: '#9fb4c7',
+        border: '1px solid #3a4a58',
+        padding: '1.4vh 0',
+        fontSize: 'clamp(13px,1.9vh,18px)',
+        letterSpacing: '0.05em',
+        cursor: busy ? 'progress' : 'pointer',
+        opacity: busy ? 0.6 : 1,
+      }}
+    >
+      {/* The wait is up to ~10s of listening on the CAN bus, so the busy label
+          says what is happening rather than just dimming. */}
+      {busy ? 'READING BASE…' : label}
+    </button>
+  );
+}
+
 export function SecondScreenPage() {
   const [snap, setSnap] = useState<Snapshot | null>(null);
   const [linkDown, setLinkDown] = useState(false);
   const [estopBusy, setEstopBusy] = useState(false);
   const [estopNote, setEstopNote] = useState<string | null>(null);
   const failures = useRef(0);
+
+  // A one-shot battery reading taken with nothing running, held until
+  // `expiresAt`. Separate from `snap` because it is a different kind of value:
+  // `snap` is a feed that refreshes itself, this is a snapshot that goes stale.
+  const [probe, setProbe] = useState<{
+    reading: BaseTelemetry;
+    expiresAt: number;
+  } | null>(null);
+  const [probeBusy, setProbeBusy] = useState(false);
+  const [probeError, setProbeError] = useState<string | null>(null);
+  const [probeLeftS, setProbeLeftS] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -192,8 +264,52 @@ export function SecondScreenPage() {
     }
   }, [session]);
 
-  const percent = base?.battery?.percent;
-  const estopped = base?.e_stopped === true;
+  // Probe the base directly and hold the answer. Idle-only, and the server
+  // enforces that too (409 while a session is active) — a live recorder holds
+  // the base, so the probe would be contending with it for the same CAN link.
+  const onCheckBattery = useCallback(async () => {
+    setProbeBusy(true);
+    setProbeError(null);
+    try {
+      const reading = await apiPost<BaseTelemetry>('/api/base/battery');
+      setProbe({ reading, expiresAt: Date.now() + PROBE_HOLD_MS });
+    } catch (err) {
+      setProbeError(describeError(err));
+    } finally {
+      setProbeBusy(false);
+    }
+  }, []);
+
+  // Drive the countdown and clear the reading when it runs out. Keyed on
+  // `expiresAt` rather than on the object so a re-check restarts the clock.
+  const probeExpiresAt = probe?.expiresAt;
+  useEffect(() => {
+    if (probeExpiresAt === undefined) {
+      setProbeLeftS(0);
+      return;
+    }
+    const tick = () => {
+      const left = probeExpiresAt - Date.now();
+      if (left <= 0) {
+        setProbe(null);
+        setProbeLeftS(0);
+        return;
+      }
+      setProbeLeftS(Math.ceil(left / 1000));
+    };
+    tick();
+    const timer = window.setInterval(tick, PROBE_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [probeExpiresAt]);
+
+  // The recorder's feed wins whenever it exists: it is live where a probe is a
+  // snapshot. So a session starting mid-hold silently takes the tile back over,
+  // and the orphaned reading expires on its own.
+  const shown = base ?? probe?.reading ?? null;
+  const shownIsProbe = base === null && probe !== null;
+
+  const percent = shown?.battery?.percent;
+  const estopped = shown?.e_stopped === true;
 
   return (
     <div
@@ -259,13 +375,15 @@ export function SecondScreenPage() {
       )}
 
       {/* Battery: the headline number, largest thing on an otherwise calm
-          screen. Absent (not zero) when the system has no base. */}
-      {base ? (
+          screen. Absent (not zero) when the system has no base.
+          Renders the recorder's live feed or a held probe reading — the probe
+          returns the same shape deliberately, so there is one tile, not two. */}
+      {shown ? (
         <Tile
           label="BATTERY"
           tone={
-            base.battery_reading_valid && percent !== undefined
-              ? batteryTone(percent, base.estop_battery_percent)
+            shown.battery_reading_valid && percent !== undefined
+              ? batteryTone(percent, shown.estop_battery_percent)
               : undefined
           }
         >
@@ -274,8 +392,8 @@ export function SecondScreenPage() {
               className="text-[clamp(48px,11vh,120px)] leading-none"
               style={{
                 color:
-                  base.battery_reading_valid && percent !== undefined
-                    ? batteryTone(percent, base.estop_battery_percent)
+                  shown.battery_reading_valid && percent !== undefined
+                    ? batteryTone(percent, shown.estop_battery_percent)
                     : undefined,
               }}
             >
@@ -283,49 +401,83 @@ export function SecondScreenPage() {
                   same distinction the auto-stop guard makes. Showing a dash
                   rather than 0% keeps the screen from implying the robot is
                   about to stop itself while it is merely still waking up. */}
-              {base.battery_reading_valid && percent !== undefined
+              {shown.battery_reading_valid && percent !== undefined
                 ? `${batteryPercent(percent)}%`
                 : '—'}
             </div>
             <div className="text-dim text-[clamp(12px,1.7vh,16px)] leading-snug">
-              {base.battery?.voltage !== undefined && (
-                <div>{base.battery.voltage.toFixed(1)} V</div>
+              {shown.battery?.voltage !== undefined && (
+                <div>{shown.battery.voltage.toFixed(1)} V</div>
               )}
-              {base.battery?.temp !== undefined && (
-                <div>{base.battery.temp.toFixed(0)} °C</div>
+              {shown.battery?.temp !== undefined && (
+                <div>{shown.battery.temp.toFixed(0)} °C</div>
               )}
-              {base.battery?.charging_state !== undefined && (
-                <div>{CHARGING_LABEL[base.battery.charging_state] ?? '—'}</div>
+              {shown.battery?.charging_state !== undefined && (
+                <div>{CHARGING_LABEL[shown.battery.charging_state] ?? '—'}</div>
               )}
             </div>
           </div>
           {/* State the trip line explicitly. An operator who can see the limit
               can plan around it; one who cannot just gets stopped mid-episode
-              by a number nobody showed them. */}
+              by a number nobody showed them.
+              A probe cannot say anything here: the threshold is component
+              config, which only a configured session knows. It says how old the
+              reading is instead -- the thing a snapshot has to admit. */}
           <div className="text-dim text-[clamp(11px,1.5vh,14px)] mt-2">
-            {base.estop_battery_percent && base.estop_battery_percent > 0
-              ? `Auto-stop at ${batteryPercent(base.estop_battery_percent)}%`
-              : 'Auto-stop disabled'}
-            {/* Two different reasons for a dash, and they need different
-                responses. `telemetry()` returns only {id, connected} when the
-                driver is absent, so `battery_reading_valid` is undefined rather
-                than false -- indistinguishable from "no BMS frame yet" unless
-                `connected` is checked first. Saying "waiting for first BMS
-                reading" about a base that is not connected sends the operator
-                off to wait for something that will never arrive. */}
-            {base.connected === false
-              ? ' · base not connected'
-              : !base.battery_reading_valid && ' · waiting for first BMS reading'}
+            {shownIsProbe ? (
+              `Checked just now · clears in ${probeLeftS}s`
+            ) : (
+              <>
+                {shown.estop_battery_percent && shown.estop_battery_percent > 0
+                  ? `Auto-stop at ${batteryPercent(shown.estop_battery_percent)}%`
+                  : 'Auto-stop disabled'}
+                {/* Two different reasons for a dash, and they need different
+                    responses. `telemetry()` returns only {id, connected} when the
+                    driver is absent, so `battery_reading_valid` is undefined rather
+                    than false -- indistinguishable from "no BMS frame yet" unless
+                    `connected` is checked first. Saying "waiting for first BMS
+                    reading" about a base that is not connected sends the operator
+                    off to wait for something that will never arrive. */}
+                {shown.connected === false
+                  ? ' · base not connected'
+                  : !shown.battery_reading_valid &&
+                    ' · waiting for first BMS reading'}
+              </>
+            )}
           </div>
+          {/* Re-check while a reading is held, so a robot on charge can be
+              watched without waiting out the expiry first. */}
+          {shownIsProbe && (
+            <CheckBatteryButton
+              busy={probeBusy}
+              onClick={onCheckBattery}
+              label="CHECK AGAIN"
+            />
+          )}
         </Tile>
       ) : (
         <Tile label="BATTERY">
           <div className="text-dim text-[clamp(14px,2vh,18px)]">
             {session
               ? 'No mobile base on this system'
-              : 'No session running — base telemetry unavailable'}
+              : 'No session running — check the base directly'}
           </div>
+          {/* Idle only. With a session running the tile above is showing a live
+              number, and with a session running but no base there is nothing to
+              probe -- the server refuses either way. */}
+          {!session && (
+            <CheckBatteryButton busy={probeBusy} onClick={onCheckBattery} />
+          )}
         </Tile>
+      )}
+
+      {probeError && (
+        <div
+          className="rounded-md px-4 py-3 text-[clamp(12px,1.7vh,16px)] leading-snug"
+          style={{ background: '#3a2a11', border: '1px solid #ffb020' }}
+        >
+          {probeError}
+        </div>
       )}
 
       {/* Odometry. Pose is measured; the base reports no velocity feedback, so
@@ -345,10 +497,12 @@ export function SecondScreenPage() {
         </Tile>
       )}
 
-      {base?.has_fault && (
-        <Tile label="FAULTS" tone={base.has_critical_fault ? '#ff4d4d' : '#ffb020'}>
+      {/* From either source: a fault latched in the base outlives the session
+          that caused it, so an idle probe finding one is worth showing. */}
+      {shown?.has_fault && (
+        <Tile label="FAULTS" tone={shown.has_critical_fault ? '#ff4d4d' : '#ffb020'}>
           <div className="text-[clamp(13px,1.9vh,17px)] leading-snug">
-            {(base.faults ?? []).map((f, i) => (
+            {(shown.faults ?? []).map((f, i) => (
               <div key={i} style={{ color: f.critical ? '#ff4d4d' : '#ffb020' }}>
                 {f.critical ? '[CRITICAL] ' : ''}
                 {f.description}

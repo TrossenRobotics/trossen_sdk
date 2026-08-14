@@ -534,6 +534,21 @@ PYBIND11_MODULE(trossen_sdk, m) {
          "the same bit, so this does not identify which one fired.")
     .def("telemetry", &base::TrossenBaseComponent::telemetry,
          "Live battery / pose / fault / e-stop snapshot for operator displays.");
+
+  m.def("read_base_battery", &base::read_base_battery,
+        py::arg("timeout_s") = 10.0,
+        // The probe ticks the driver for as long as it takes the first BMS frame
+        // to arrive, all of it synchronous C work; drop the GIL so the caller's
+        // event loop keeps running.
+        py::call_guard<py::gil_scoped_release>(),
+        "Read the base battery once on an idle robot, then disconnect. Opens "
+        "CAN, waits for the first BMS frame, and returns the same dict shape as "
+        "TrossenBaseComponent.telemetry() minus pose and estop_battery_percent. "
+        "Nothing moves -- no homing, no velocity commands -- and it answers on "
+        "an e-stopped base, where the full bring-up never gets a reading. "
+        "RAISES if no frame arrives within timeout_s, which is how a base that "
+        "is off, unplugged, held by a session, or simply not fitted reports "
+        "itself. The base must not be held by a running recorder.");
 #endif
 
   py::class_<HardwareRegistry>(m, "HardwareRegistry")

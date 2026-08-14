@@ -36,6 +36,7 @@ from app.db import apply_migrations
 from app.hw_test import stream_system_hardware_test
 from app.io_utils import is_safe_id
 from app.machine_identity import get_machine_name
+from app.base_battery import BaseBatteryError, read_base_battery
 from app.read_limits import ReadLimitsError, read_arm_joint_limits
 from app.recover import RecoverError, recover_hardware
 from app.paths import FRONTEND_DIST_DIR
@@ -720,6 +721,51 @@ async def read_arm_limits(body: ReadArmLimitsBody) -> dict[str, list[float]]:
     try:
         return await read_arm_joint_limits(body.model_dump())
     except ReadLimitsError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+
+
+@app.post("/api/base/battery")
+async def read_base_battery_endpoint() -> dict[str, Any]:
+    """Read the mobile base's battery once, on an idle robot.
+
+    Fills the gap the secondary screen has outside a session: base telemetry is
+    produced by the recorder child, so the panel shows a live battery number
+    while recording and nothing at all when parked. Deciding whether there is
+    enough charge for the next run should not require starting one.
+
+    Cheap and still, by design. It opens CAN, waits for the first BMS frame,
+    reads, and disconnects — no homing, so unlike a session bring-up the swerve
+    pivots do not move. It also answers on an e-stopped base, which never
+    reaches a reading through the bring-up path at all.
+
+    Takes no body: the base is reached over a fixed CAN interface, not an address
+    out of config, so there is nothing for the caller to specify.
+
+    Returns the `base` shape of /api/second-screen minus `pose` and
+    `estop_battery_percent` — odometry means nothing on a base that has not
+    moved, and the auto-stop threshold is component config no probe can know.
+
+    Refuses with 409 while a session is active, for the same reason
+    /api/arms/read-limits does: a live recorder holds the base, so this probe
+    would contend with it over the same CAN interface. Returns 502 when no
+    reading arrives, which is how a base that is powered off, unplugged, or not
+    fitted reports itself.
+    """
+    active = [s for s in list_sessions() if s.status == "active"]
+    if active:
+        names = ", ".join(s.name or s.id for s in active)
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Cannot read the base battery: session '{names}' is active and "
+                f"holds the base. Its live battery reading is already on the "
+                f"status panel."
+            ),
+        )
+
+    try:
+        return await read_base_battery()
+    except BaseBatteryError as exc:
         raise HTTPException(status_code=502, detail=str(exc))
 
 

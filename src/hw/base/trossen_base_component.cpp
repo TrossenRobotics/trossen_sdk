@@ -24,6 +24,14 @@ namespace ba = teleop::base_axis;
 
 namespace {
 
+/// Rate at which read_base_battery() services the driver while waiting for the
+/// first BMS frame. Same 15Hz as TrossenBaseComponent::kUpdateHz, for the same
+/// reason -- it is the connection heartbeat rate the base expects, and a probe
+/// that ticked slower would risk a comm-loss fault on the bus it is only
+/// reading from. Duplicated rather than shared because the component's copy is
+/// a private implementation detail of a class this free function is not part of.
+constexpr double kProbeHz = 15.0;
+
 /// Clamp to +/-limit, mapping a non-finite request to zero. A NaN reaching
 /// set_cmd_vels would be handed straight to the wheel controllers.
 float clamp_symmetric(float value, float limit) {
@@ -296,6 +304,84 @@ nlohmann::json TrossenBaseComponent::get_info() const {
     info["battery_percent"] = driver_->get_percent();
   }
   return info;
+}
+
+nlohmann::json read_base_battery(double timeout_s) {
+  if (!std::isfinite(timeout_s) || timeout_s <= 0.0) {
+    throw std::invalid_argument(
+      "read_base_battery: timeout_s must be a positive, finite number, got " +
+      std::to_string(timeout_s));
+  }
+
+  // Constructing the driver opens CAN and requests init. Note what it does NOT
+  // do: throw when the interface is missing. It logs and carries on with a dead
+  // socket, so reaching the loop below proves nothing about the base being
+  // there — only a BMS frame does.
+  trossen_base::TrossenBase driver;
+
+  const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+    std::chrono::duration<double>(1.0 / kProbeHz));
+  const auto deadline =
+    std::chrono::steady_clock::now() +
+    std::chrono::duration_cast<std::chrono::steady_clock::duration>(
+      std::chrono::duration<double>(timeout_s));
+
+  float percent = 0.0f;
+  auto next_tick = std::chrono::steady_clock::now();
+
+  while (std::chrono::steady_clock::now() < deadline) {
+    // Heartbeat plus a BMS refresh, which is the whole reason this loop exists:
+    // the reading is pulled from the last frame the receive thread cached, so
+    // there is nothing to read until one has arrived.
+    driver.update_base();
+
+    percent = driver.get_percent();
+    if (percent > 0.0f) break;
+
+    next_tick += period;
+    std::this_thread::sleep_until(next_tick);
+  }
+
+  // Zero means "no frame yet", not "flat" -- the same reading the auto-stop
+  // guard refuses to act on, for the same reason. Failing here rather than
+  // reporting 0% keeps a base that never answered from looking like one about
+  // to die.
+  if (percent <= 0.0f) {
+    throw std::runtime_error(
+      "read_base_battery: no battery reading within " +
+      std::to_string(timeout_s) + "s. Check that the base is powered on, that "
+      "its CAN link is up, and that no session is holding it.");
+  }
+
+  nlohmann::json t = nlohmann::json::object();
+
+  // A frame arrived, so both of these are settled facts rather than reads.
+  // Emitted anyway: this matches the shape of TrossenBaseComponent::telemetry()
+  // so one operator display can render either source without special-casing.
+  t["connected"] = true;
+  t["battery_reading_valid"] = true;
+
+  t["ready"] = driver.is_ready();
+  t["e_stopped"] = driver.is_e_stopped();
+
+  t["battery"] = {
+    {"percent", percent},
+    {"voltage", driver.get_voltage()},
+    {"current", driver.get_current()},
+    {"temp", driver.get_temp()},
+    {"charging_state", driver.get_charging_state()},
+  };
+
+  t["has_fault"] = driver.has_fault();
+  t["has_critical_fault"] = driver.has_critical_fault();
+  auto faults = nlohmann::json::array();
+  for (const auto& f : driver.get_faults()) {
+    faults.push_back({{"description", f.description}, {"critical", f.critical}});
+  }
+  t["faults"] = std::move(faults);
+
+  // driver's destructor closes the CAN socket and joins its receive thread.
+  return t;
 }
 
 REGISTER_HARDWARE(TrossenBaseComponent, "trossen_base")
