@@ -165,7 +165,11 @@
               "source": "buttons",
               "up_bit": 0,
               "down_bit": 2,
-              "max": 8000.0
+              "max": 8000.0,
+              "led": true,
+              "led_effect": "solid",
+              "led_brightness_idle": 40,
+              "led_brightness_active": 255
             }
           }
         },

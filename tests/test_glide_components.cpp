@@ -28,6 +28,8 @@ using trossen::hw::glide::GlideBaseComponent;
 using trossen::hw::glide::GlideInputSnapshot;
 using trossen::hw::glide::GlideSession;
 using trossen::hw::glide::GlideSessionControlComponent;
+using trossen::hw::glide::GlideLedEffect;
+using trossen::hw::glide::GlideOutputCommand;
 using trossen::hw::session_control::SessionControlEvent;
 
 namespace ba = trossen::hw::teleop::base_axis;
@@ -171,6 +173,114 @@ TEST_F(GlideComponentTest, BothLiftButtonsHeldCancels) {
   // end stop; cancelling is the safe reading.
   set_handle("glide_right", kStickCentre, kStickCentre, (1u << 0) | (1u << 2));
   EXPECT_FLOAT_EQ(base.read()[ba::kLift], 0.0f);
+}
+
+// ── Lift button LEDs ─────────────────────────────────────────────────────
+
+/// The real Rivet mapping plus the LED affordance: the two lift buttons on the
+/// right handle light up so the operator can see which ones move the lift.
+nlohmann::json lift_led_config(int idle = 40, int active = 255) {
+  return {{"axes", {{"lift", {
+    {"arm_id", "glide_right"},
+    {"source", "buttons"},
+    {"up_bit", 0},
+    {"down_bit", 2},
+    {"max", 8000.0f},
+    {"led", true},
+    {"led_effect", "solid"},
+    {"led_brightness_idle", idle},
+    {"led_brightness_active", active},
+  }}}}};
+}
+
+TEST_F(GlideComponentTest, ConfiguringLightsOnlyTheMappedLiftButtons) {
+  GlideBaseComponent base("base_leader");
+  base.configure(lift_led_config());
+
+  const auto cmd = GlideSession::instance().output_command("glide_right");
+  EXPECT_EQ(cmd.led_effects[0], GlideLedEffect::kSolid);   // lift up
+  EXPECT_EQ(cmd.led_effects[2], GlideLedEffect::kSolid);   // lift down
+  // The other two carry no mapping, so lighting them would promise something
+  // that does not exist.
+  EXPECT_EQ(cmd.led_effects[1], GlideLedEffect::kOff);
+  EXPECT_EQ(cmd.led_effects[3], GlideLedEffect::kOff);
+  EXPECT_EQ(cmd.led_brightness, 40);
+}
+
+TEST_F(GlideComponentTest, LiftButtonsAreDimAtRestAndBrightWhenHeld) {
+  GlideBaseComponent base("base_leader");
+  base.configure(lift_led_config());
+
+  set_handle("glide_right", kStickCentre, kStickCentre, 0);
+  base.read();
+  EXPECT_EQ(GlideSession::instance().output_command("glide_right").led_brightness, 40);
+
+  set_handle("glide_right", kStickCentre, kStickCentre, 1u << 0);
+  base.read();
+  EXPECT_EQ(GlideSession::instance().output_command("glide_right").led_brightness, 255);
+
+  set_handle("glide_right", kStickCentre, kStickCentre, 0);
+  base.read();
+  EXPECT_EQ(GlideSession::instance().output_command("glide_right").led_brightness, 40);
+}
+
+TEST_F(GlideComponentTest, EitherLiftDirectionBrightensTheLeds) {
+  GlideBaseComponent base("base_leader");
+  base.configure(lift_led_config());
+
+  set_handle("glide_right", kStickCentre, kStickCentre, 1u << 2);  // down
+  base.read();
+  EXPECT_EQ(GlideSession::instance().output_command("glide_right").led_brightness, 255);
+}
+
+TEST_F(GlideComponentTest, LedsFallBackToIdleWhenTheHandleGoesQuiet) {
+  GlideBaseComponent base("base_leader");
+  base.configure(lift_led_config());
+
+  set_handle("glide_right", kStickCentre, kStickCentre, 1u << 0);
+  base.read();
+  ASSERT_EQ(GlideSession::instance().output_command("glide_right").led_brightness, 255);
+
+  // No snapshot at all — the handle dropped mid-press. Latching bright would
+  // leave the lights claiming a button is held that nobody is touching.
+  GlideSession::instance().clear_test_snapshots();
+  base.read();
+  EXPECT_EQ(GlideSession::instance().output_command("glide_right").led_brightness, 40);
+}
+
+TEST_F(GlideComponentTest, LedsAreOffByDefault) {
+  GlideBaseComponent base("base_leader");
+  base.configure(lift_config());
+
+  const auto cmd = GlideSession::instance().output_command("glide_right");
+  EXPECT_EQ(cmd.led_effects[0], GlideLedEffect::kOff);
+  EXPECT_EQ(cmd.led_effects[2], GlideLedEffect::kOff);
+  EXPECT_EQ(cmd.led_brightness, 0);
+}
+
+TEST_F(GlideComponentTest, LedOnANonButtonAxisIsRejected) {
+  GlideBaseComponent base("base_leader");
+  nlohmann::json config = {{"axes", {{"angular", {
+    {"arm_id", "glide_right"},
+    {"source", "joystick_x"},
+    {"led", true},
+  }}}}};
+  EXPECT_THROW(base.configure(config), std::invalid_argument);
+}
+
+TEST_F(GlideComponentTest, OutOfRangeBrightnessIsRejected) {
+  GlideBaseComponent base("base_leader");
+  // 100 looks like a percentage; silently treating it as 100/255 would leave
+  // someone staring at a dim LED wondering why.
+  EXPECT_THROW(base.configure(lift_led_config(40, 300)), std::invalid_argument);
+  EXPECT_THROW(base.configure(lift_led_config(-1, 255)), std::invalid_argument);
+}
+
+TEST_F(GlideComponentTest, UnknownLedEffectIsRejected) {
+  GlideBaseComponent base("base_leader");
+  nlohmann::json config = lift_led_config();
+  config["axes"]["lift"]["led_effect"] = "strobe";
+  EXPECT_THROW(base.configure(config), std::invalid_argument);
 }
 
 // ── Swerve base: LEFT stick translates in 2D, RIGHT stick yaws ───────────

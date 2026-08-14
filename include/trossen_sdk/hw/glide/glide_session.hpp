@@ -6,6 +6,7 @@
 #ifndef TROSSEN_SDK__HW__GLIDE__GLIDE_SESSION_HPP_
 #define TROSSEN_SDK__HW__GLIDE__GLIDE_SESSION_HPP_
 
+#include <array>
 #include <cstdint>
 #include <functional>
 #include <initializer_list>
@@ -102,6 +103,47 @@ inline constexpr std::uint16_t kJoystickMax = 4095;
  */
 using GlideInputReader = std::function<std::optional<GlideInputSnapshot>()>;
 
+/// LED effect for one handle button. Values match the driver's encoding.
+enum class GlideLedEffect : std::uint8_t {
+  kOff     = 0,
+  kSolid   = 1,
+  kBreathe = 2,
+};
+
+/**
+ * @brief The outputs a handle can be driven with.
+ *
+ * SDK-owned POD for the same reason as GlideInputSnapshot: it keeps
+ * libtrossen_arm out of this header and gives tests something constructible.
+ *
+ * Note `brightness` is per HANDLE, not per button — the hardware has one
+ * brightness for all four LEDs. Only buttons whose effect is not kOff show it,
+ * so brightness changes are visible on exactly the lit buttons and no others.
+ */
+struct GlideOutputCommand {
+  /// Per-button effect, indexed by button bit (bit N is SEL_(N+1)).
+  std::array<GlideLedEffect, 4> led_effects{};
+
+  /// Shared LED brightness, 0-255.
+  std::uint8_t led_brightness{0};
+
+  bool operator==(const GlideOutputCommand& other) const {
+    return led_effects == other.led_effects && led_brightness == other.led_brightness;
+  }
+  bool operator!=(const GlideOutputCommand& other) const { return !(*this == other); }
+};
+
+/// Number of momentary buttons (and LEDs) a handle carries.
+inline constexpr int kGlideButtonCount = 4;
+
+/**
+ * @brief Applies outputs to one handle. Returns false if the write failed.
+ *
+ * The mirror image of GlideInputReader, and driver-agnostic for the same
+ * reason: only the component that owns the arm driver knows how to reach it.
+ */
+using GlideOutputWriter = std::function<bool(const GlideOutputCommand&)>;
+
 /**
  * @brief Process-wide input arbitration for Glide handles.
  *
@@ -182,6 +224,42 @@ public:
   void set_test_snapshot(const std::string& arm_id, const GlideInputSnapshot& snapshot);
   void clear_test_snapshots();
 
+  /**
+   * @brief Register the output sink for `arm_id`, replacing any previous one.
+   *
+   * Symmetric with register_reader, and registered by the same owner. If a
+   * command was already staged for this handle it is pushed immediately, so a
+   * component that configured its LEDs before the handle's driver came up does
+   * not need to re-apply them.
+   */
+  void register_writer(const std::string& arm_id, GlideOutputWriter writer);
+
+  /// Drop the writer for `arm_id`. Safe if none is registered.
+  void unregister_writer(const std::string& arm_id);
+
+  /**
+   * @brief Set one button's LED effect on `arm_id`.
+   *
+   * The session owns the composite command per handle and merges writes, so
+   * two components lighting different buttons cannot clobber each other — a
+   * whole-command API would have made the last writer win.
+   *
+   * The driver is only written when the merged command actually changes, which
+   * is what makes it safe to call this from a poll loop: a held button re-sends
+   * nothing. Out-of-range bits are ignored.
+   *
+   * @return false if a write was attempted and failed; true otherwise
+   *         (including when nothing changed and no write was needed).
+   */
+  bool set_button_led(const std::string& arm_id, int bit, GlideLedEffect effect);
+
+  /// Set the shared LED brightness for `arm_id`. Same change-detection and
+  /// return contract as set_button_led.
+  bool set_led_brightness(const std::string& arm_id, std::uint8_t brightness);
+
+  /// The command currently staged for `arm_id`. Diagnostics and tests.
+  GlideOutputCommand output_command(const std::string& arm_id) const;
+
   /// Drop all claims, readers, and test snapshots. Tests only — leaves the
   /// process-global table clean between cases so an earlier case cannot fail a
   /// later one.
@@ -215,10 +293,17 @@ private:
     }
   };
 
+  /// Shared body of set_button_led/set_led_brightness: mutate the staged
+  /// command under the lock, then push outside it if it changed.
+  bool apply_output(const std::string& arm_id,
+                    const std::function<void(GlideOutputCommand&)>& mutate);
+
   mutable std::mutex mutex_;
   std::unordered_map<ClaimKey, std::string, ClaimKeyHash> claims_;
   std::unordered_map<std::string, GlideInputReader> readers_;
   std::unordered_map<std::string, GlideInputSnapshot> test_snapshots_;
+  std::unordered_map<std::string, GlideOutputWriter> writers_;
+  std::unordered_map<std::string, GlideOutputCommand> outputs_;
 };
 
 /**

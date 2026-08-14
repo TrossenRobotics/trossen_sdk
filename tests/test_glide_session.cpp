@@ -7,6 +7,7 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "trossen_sdk/hw/glide/glide_session.hpp"
 
@@ -16,6 +17,8 @@ using trossen::hw::glide::GlideClaim;
 using trossen::hw::glide::GlideClaimLease;
 using trossen::hw::glide::GlideInput;
 using trossen::hw::glide::GlideInputSnapshot;
+using trossen::hw::glide::GlideLedEffect;
+using trossen::hw::glide::GlideOutputCommand;
 using trossen::hw::glide::GlideSession;
 using trossen::hw::glide::glide_button;
 
@@ -248,6 +251,126 @@ TEST_F(GlideSessionTest, TestSnapshotOverridesRegisteredReader) {
 
   session().clear_test_snapshots();
   EXPECT_EQ(session().read_inputs("glide_left")->joystick_x, 100);
+}
+
+// ── Handle outputs (button LEDs) ─────────────────────────────────────────
+
+TEST_F(GlideSessionTest, ButtonLedIsStagedAndPushedToTheWriter) {
+  std::vector<GlideOutputCommand> writes;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand& c) {
+    writes.push_back(c);
+    return true;
+  });
+
+  EXPECT_TRUE(session().set_button_led("glide_right", 0, GlideLedEffect::kSolid));
+
+  ASSERT_EQ(writes.size(), 1u);
+  EXPECT_EQ(writes[0].led_effects[0], GlideLedEffect::kSolid);
+  EXPECT_EQ(session().output_command("glide_right").led_effects[0], GlideLedEffect::kSolid);
+}
+
+TEST_F(GlideSessionTest, UnchangedOutputDoesNotReachTheDriver) {
+  int writes = 0;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand&) {
+    ++writes;
+    return true;
+  });
+
+  session().set_led_brightness("glide_right", 40);
+  EXPECT_EQ(writes, 1);
+
+  // The whole point of the change detection: a poll loop calling this every
+  // tick must not put a packet on the wire every tick.
+  for (int i = 0; i < 10; ++i) session().set_led_brightness("glide_right", 40);
+  EXPECT_EQ(writes, 1);
+
+  session().set_led_brightness("glide_right", 255);
+  EXPECT_EQ(writes, 2);
+}
+
+TEST_F(GlideSessionTest, TwoButtonsMergeIntoOneCommand) {
+  std::vector<GlideOutputCommand> writes;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand& c) {
+    writes.push_back(c);
+    return true;
+  });
+
+  session().set_button_led("glide_right", 0, GlideLedEffect::kSolid);
+  session().set_button_led("glide_right", 2, GlideLedEffect::kBreathe);
+
+  // Second write carries BOTH buttons. A whole-command API would have let the
+  // second caller wipe out the first one's button.
+  ASSERT_EQ(writes.size(), 2u);
+  EXPECT_EQ(writes[1].led_effects[0], GlideLedEffect::kSolid);
+  EXPECT_EQ(writes[1].led_effects[2], GlideLedEffect::kBreathe);
+  EXPECT_EQ(writes[1].led_effects[1], GlideLedEffect::kOff);
+  EXPECT_EQ(writes[1].led_effects[3], GlideLedEffect::kOff);
+}
+
+TEST_F(GlideSessionTest, OutputStagedBeforeWriterIsPushedOnRegistration) {
+  // Components configure in declaration order, so the base can light its
+  // buttons before the arm-input adapter has registered the handle's writer.
+  session().set_button_led("glide_right", 0, GlideLedEffect::kSolid);
+  session().set_led_brightness("glide_right", 40);
+
+  std::vector<GlideOutputCommand> writes;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand& c) {
+    writes.push_back(c);
+    return true;
+  });
+
+  ASSERT_EQ(writes.size(), 1u);
+  EXPECT_EQ(writes[0].led_effects[0], GlideLedEffect::kSolid);
+  EXPECT_EQ(writes[0].led_brightness, 40);
+}
+
+TEST_F(GlideSessionTest, RegisteringAWriterWithNothingStagedPushesNothing) {
+  int writes = 0;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand&) {
+    ++writes;
+    return true;
+  });
+  EXPECT_EQ(writes, 0);
+}
+
+TEST_F(GlideSessionTest, OutputWithNoWriterIsStagedNotLost) {
+  session().set_button_led("glide_right", 1, GlideLedEffect::kSolid);
+  EXPECT_EQ(session().output_command("glide_right").led_effects[1], GlideLedEffect::kSolid);
+}
+
+TEST_F(GlideSessionTest, FailedWriteIsReportedToTheCaller) {
+  session().register_writer("glide_right", [](const GlideOutputCommand&) { return false; });
+  EXPECT_FALSE(session().set_button_led("glide_right", 0, GlideLedEffect::kSolid));
+}
+
+TEST_F(GlideSessionTest, OutOfRangeButtonIsIgnored) {
+  int writes = 0;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand&) {
+    ++writes;
+    return true;
+  });
+  EXPECT_TRUE(session().set_button_led("glide_right", 4, GlideLedEffect::kSolid));
+  EXPECT_TRUE(session().set_button_led("glide_right", -1, GlideLedEffect::kSolid));
+  EXPECT_EQ(writes, 0);
+}
+
+TEST_F(GlideSessionTest, UnregisterWriterStopsDispatch) {
+  int writes = 0;
+  session().register_writer("glide_right", [&writes](const GlideOutputCommand&) {
+    ++writes;
+    return true;
+  });
+  session().set_led_brightness("glide_right", 10);
+  EXPECT_EQ(writes, 1);
+
+  session().unregister_writer("glide_right");
+  session().set_led_brightness("glide_right", 200);
+  EXPECT_EQ(writes, 1);
+}
+
+TEST_F(GlideSessionTest, OutputsAreIndependentPerHandle) {
+  session().set_button_led("glide_left", 0, GlideLedEffect::kSolid);
+  EXPECT_EQ(session().output_command("glide_right").led_effects[0], GlideLedEffect::kOff);
 }
 
 }  // namespace

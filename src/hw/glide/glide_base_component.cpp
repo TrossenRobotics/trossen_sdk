@@ -28,6 +28,22 @@ constexpr std::array<const char*, ba::kMaxSize> kAxisNames{
 };
 
 /**
+ * @brief Validate a configured LED brightness and narrow it to the wire type.
+ *
+ * Rejects rather than saturates: a value outside 0-255 means the config author
+ * had a different scale in mind (percent, say), and silently clamping 100 to
+ * 100/255 would leave them staring at a dim LED wondering why.
+ */
+std::uint8_t clamp_brightness(int value, const char* axis_name, const char* key) {
+  if (value < 0 || value > 255) {
+    throw std::invalid_argument(
+      std::string("GlideBaseComponent: axis '") + axis_name + "' has " + key + " " +
+      std::to_string(value) + "; must be 0-255");
+  }
+  return static_cast<std::uint8_t>(value);
+}
+
+/**
  * @brief Recentre a raw joystick count to -1..1.
  *
  * The handle reports 0..4095 with centre at the midpoint, so a resting stick is
@@ -167,6 +183,33 @@ void GlideBaseComponent::configure(const nlohmann::json& config) {
     axis.up_bit   = j.value("up_bit", -1);
     axis.down_bit = j.value("down_bit", -1);
 
+    axis.led = j.value("led", false);
+    if (axis.led) {
+      const auto effect = j.value("led_effect", std::string{"solid"});
+      if (effect == "off") {
+        axis.led_effect = GlideLedEffect::kOff;
+      } else if (effect == "solid") {
+        axis.led_effect = GlideLedEffect::kSolid;
+      } else if (effect == "breathe") {
+        axis.led_effect = GlideLedEffect::kBreathe;
+      } else {
+        throw std::invalid_argument(
+          std::string("GlideBaseComponent: axis '") + name + "' has unknown led_effect '" +
+          effect + "' (expected off, solid, or breathe)");
+      }
+      axis.led_brightness_idle =
+        clamp_brightness(j.value("led_brightness_idle", 40), name, "led_brightness_idle");
+      axis.led_brightness_active =
+        clamp_brightness(j.value("led_brightness_active", 255), name, "led_brightness_active");
+    }
+
+    if (axis.led && axis.source != AxisMap::Source::kButtons) {
+      throw std::invalid_argument(
+        std::string("GlideBaseComponent: axis '") + name +
+        "' sets 'led' but its source is not 'buttons'; only mapped buttons have "
+        "LEDs to light");
+    }
+
     if (axis.source == AxisMap::Source::kButtons &&
         axis.up_bit < 0 && axis.down_bit < 0) {
       throw std::invalid_argument(
@@ -213,6 +256,40 @@ void GlideBaseComponent::configure(const nlohmann::json& config) {
   axes_        = std::move(parsed);
   translation_ = std::move(translation);
   lease_       = std::move(lease);
+
+  apply_led_effects();
+}
+
+void GlideBaseComponent::apply_led_effects() const {
+  auto& session = GlideSession::instance();
+  for (const auto& axis : axes_) {
+    if (!axis.configured || !axis.led) continue;
+    for (const int bit : {axis.up_bit, axis.down_bit}) {
+      if (bit >= 0) session.set_button_led(axis.arm_id, bit, axis.led_effect);
+    }
+    // Rest state now, so the buttons are visibly live before anyone touches
+    // them. GlideSession stages this even if the handle's driver is not
+    // registered yet and pushes it when the writer arrives.
+    session.set_led_brightness(axis.arm_id, axis.led_brightness_idle);
+  }
+}
+
+void GlideBaseComponent::update_led_brightness(const SnapshotCache& cache) const {
+  auto& session = GlideSession::instance();
+  for (const auto& axis : axes_) {
+    if (!axis.configured || !axis.led) continue;
+
+    const auto it = cache.find(axis.arm_id);
+    // No snapshot means the handle went quiet. Fall back to idle rather than
+    // latching whatever brightness the last good tick left behind, so a dropped
+    // handle does not leave the lights stuck bright.
+    const bool held = it != cache.end() && it->second &&
+                      ((axis.up_bit   >= 0 && it->second->button(axis.up_bit)) ||
+                       (axis.down_bit >= 0 && it->second->button(axis.down_bit)));
+
+    session.set_led_brightness(
+      axis.arm_id, held ? axis.led_brightness_active : axis.led_brightness_idle);
+  }
 }
 
 float GlideBaseComponent::normalised_axis(const GlideInputSnapshot& snapshot,
@@ -327,6 +404,11 @@ std::vector<float> GlideBaseComponent::read() {
   for (std::size_t i = 0; i < ba::kMaxSize; ++i) {
     out[i] = sample_axis(axes_[i], cache);
   }
+
+  // Off the same snapshots the command came from, so the light matches the
+  // motion. Cheap to call every tick: GlideSession only reaches the driver when
+  // the value actually changes, so a held button re-sends nothing.
+  update_led_brightness(cache);
 
   if (translation_.configured) {
     const auto [forward, lateral] = sample_translation(cache);

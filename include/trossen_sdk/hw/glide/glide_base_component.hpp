@@ -190,6 +190,19 @@ private:
     /// Button bits for a `kButtons` axis. -1 means that direction is unmapped.
     int up_bit{-1};
     int down_bit{-1};
+
+    /// Light the mapped buttons so the operator can see which ones do this.
+    /// Only meaningful for a `kButtons` axis.
+    bool led{false};
+
+    /// Effect for the lit buttons (driver encoding: off/solid/breathe).
+    GlideLedEffect led_effect{GlideLedEffect::kSolid};
+
+    /// Brightness at rest and while a mapped button is held. Brightness is a
+    /// per-handle setting on the hardware, not per button, so these move every
+    /// lit LED on that handle together — including the axis's other direction.
+    std::uint8_t led_brightness_idle{40};
+    std::uint8_t led_brightness_active{255};
   };
 
   /// One stick treated as a 2D translation vector.
@@ -234,6 +247,13 @@ private:
 
   /// Evaluate the translation pair into `{forward, lateral}`.
   std::pair<float, float> sample_translation(const SnapshotCache& cache) const;
+
+  /// Light every LED-enabled axis's mapped buttons and set the resting
+  /// brightness. Called once at the end of configure().
+  void apply_led_effects() const;
+
+  /// Track brightness against whether a mapped button is held this tick.
+  void update_led_brightness(const SnapshotCache& cache) const;
 
   /// Indexed by the `base_axis::k*` constants, so the read() vector is built by
   /// position with no separate ordering to keep in sync.

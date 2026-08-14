@@ -256,8 +256,28 @@ unsigned probe(trossen_arm::TrossenArmDriver& driver) {
   return report.joystick_x + report.joystick_y + report.buttons;
 }
 " TROSSEN_HAVE_ARM_INPUT_REPORT)
+# Handle OUTPUTS (button LEDs, vibration) are a separate driver API from the
+# input report, so they get their own probe: a driver can have one without the
+# other, and the LED affordance must not gate joystick/button input.
+check_cxx_source_compiles("
+#include \"libtrossen_arm/trossen_arm.hpp\"
+void probe(trossen_arm::TrossenArmDriver& driver) {
+  trossen_arm::InputCommand command;
+  command.button_led_effects[0] = 1;
+  command.button_led_brightness = 255;
+  driver.set_input_command(command);
+}
+" TROSSEN_HAVE_ARM_INPUT_COMMAND)
 unset(CMAKE_TRY_COMPILE_TARGET_TYPE)
 unset(CMAKE_REQUIRED_INCLUDES)
+if(TROSSEN_HAVE_ARM_INPUT_COMMAND)
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_HAVE_ARM_INPUT_COMMAND)
+else()
+  message(STATUS
+    "libtrossen_arm has no input-command API — Glide handle button LEDs will "
+    "stay dark (build against a driver providing "
+    "TrossenArmDriver::set_input_command() to enable them)")
+endif()
 if(TROSSEN_HAVE_ARM_INPUT_REPORT)
   target_compile_definitions(trossen_sdk PRIVATE TROSSEN_HAVE_ARM_INPUT_REPORT)
 else()

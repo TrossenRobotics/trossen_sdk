@@ -146,11 +146,80 @@ void GlideSession::clear_test_snapshots() {
   test_snapshots_.clear();
 }
 
+void GlideSession::register_writer(const std::string& arm_id, GlideOutputWriter writer) {
+  GlideOutputWriter to_push;
+  GlideOutputCommand staged;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    writers_[arm_id] = std::move(writer);
+
+    // A component may have staged its LEDs before the handle's driver existed
+    // (components configure in declaration order, and the arm input adapter
+    // comes after the base). Push the staged state now so the ordering does not
+    // decide whether the lights come on.
+    auto it = outputs_.find(arm_id);
+    if (it != outputs_.end() && it->second != GlideOutputCommand{}) {
+      to_push = writers_[arm_id];
+      staged  = it->second;
+    }
+  }
+  if (to_push) to_push(staged);
+}
+
+void GlideSession::unregister_writer(const std::string& arm_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  writers_.erase(arm_id);
+}
+
+GlideOutputCommand GlideSession::output_command(const std::string& arm_id) const {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = outputs_.find(arm_id);
+  return it == outputs_.end() ? GlideOutputCommand{} : it->second;
+}
+
+bool GlideSession::apply_output(const std::string& arm_id,
+                                const std::function<void(GlideOutputCommand&)>& mutate) {
+  GlideOutputWriter writer;
+  GlideOutputCommand command;
+  {
+    std::lock_guard<std::mutex> lock(mutex_);
+    GlideOutputCommand& staged = outputs_[arm_id];
+    const GlideOutputCommand before = staged;
+    mutate(staged);
+    // Unchanged means nothing to send. This is what lets a poll loop call in
+    // every tick: only an actual edge reaches the wire.
+    if (staged == before) return true;
+
+    auto it = writers_.find(arm_id);
+    if (it == writers_.end()) return true;  // staged for whenever a writer lands
+    // Copy and invoke outside the lock, exactly as read_inputs does: a write
+    // talks to hardware and may block.
+    writer  = it->second;
+    command = staged;
+  }
+  return writer ? writer(command) : true;
+}
+
+bool GlideSession::set_button_led(const std::string& arm_id, int bit, GlideLedEffect effect) {
+  if (bit < 0 || bit >= kGlideButtonCount) return true;
+  return apply_output(arm_id, [bit, effect](GlideOutputCommand& cmd) {
+    cmd.led_effects[static_cast<std::size_t>(bit)] = effect;
+  });
+}
+
+bool GlideSession::set_led_brightness(const std::string& arm_id, std::uint8_t brightness) {
+  return apply_output(arm_id, [brightness](GlideOutputCommand& cmd) {
+    cmd.led_brightness = brightness;
+  });
+}
+
 void GlideSession::reset_for_test() {
   std::lock_guard<std::mutex> lock(mutex_);
   claims_.clear();
   readers_.clear();
   test_snapshots_.clear();
+  writers_.clear();
+  outputs_.clear();
 }
 
 }  // namespace trossen::hw::glide

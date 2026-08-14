@@ -26,6 +26,7 @@ void GlideArmInputComponent::unregister_all() {
   auto& session = GlideSession::instance();
   for (const auto& id : arm_ids_) {
     session.unregister_reader(id);
+    session.unregister_writer(id);
   }
   arm_ids_.clear();
 }
@@ -117,6 +118,38 @@ void GlideArmInputComponent::configure(const nlohmann::json& config) {
           return std::nullopt;
         }
       });
+
+#ifdef TROSSEN_HAVE_ARM_INPUT_COMMAND
+    // Outputs mirror the reader: same weak capture for the same lifetime
+    // reason, same one-shot logging, same swallow. A handle whose LEDs cannot
+    // be written is a cosmetic failure and must never take teleop down with it.
+    auto write_reported = std::make_shared<std::atomic<bool>>(false);
+
+    session.register_writer(
+      arm_id,
+      [weak_arm, arm_id, write_reported](const GlideOutputCommand& command) -> bool {
+        auto component = weak_arm.lock();
+        if (!component) return false;
+        auto driver = component->get_hardware();
+        if (!driver) return false;
+        try {
+          trossen_arm::InputCommand out;
+          for (std::size_t i = 0; i < command.led_effects.size(); ++i) {
+            out.button_led_effects[i] = static_cast<uint8_t>(command.led_effects[i]);
+          }
+          out.button_led_brightness = command.led_brightness;
+          driver->set_input_command(out);
+          return true;
+        } catch (const std::exception& e) {
+          if (!write_reported->exchange(true)) {
+            std::cerr << "GlideArmInputComponent: writing outputs to '" << arm_id
+                      << "' failed, its button LEDs will not update until it "
+                      << "recovers: " << e.what() << std::endl;
+          }
+          return false;
+        }
+      });
+#endif
 
     resolved.push_back(arm_id);
   }
