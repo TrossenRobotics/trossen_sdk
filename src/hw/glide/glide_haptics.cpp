@@ -88,11 +88,12 @@ void HapticBaseline::reset() {
 }
 
 bool command_clears_zero(const std::vector<float>& command, float threshold) {
-  if (command.empty()) return false;
-  for (const float q : command) {
-    if (!std::isfinite(q) || std::fabs(q) <= threshold) return false;
-  }
-  return true;
+  // Short vector rather than empty: a leader that published fewer joints than
+  // the gate expects is a malformed read, and the safe reading of "I cannot
+  // tell" is a silent handle.
+  if (command.size() <= kGateJointIndex) return false;
+  const float q = command[kGateJointIndex];
+  return std::isfinite(q) && std::fabs(q) > threshold;
 }
 
 void GlideHapticCurve::validate(const std::string& who) const {

@@ -6,6 +6,7 @@
 #ifndef TROSSEN_SDK__HW__GLIDE__GLIDE_HAPTICS_HPP_
 #define TROSSEN_SDK__HW__GLIDE__GLIDE_HAPTICS_HPP_
 
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -166,27 +167,38 @@ private:
   bool   measured_{false};
 };
 
+/// Index of the joint the haptic gate reads, in the driver's `joint.all`
+/// ordering (`joint_0` first, gripper last). `joint_1` is the shoulder, chosen
+/// because zero there means the arm is straight up: the parked pose sits at
+/// exactly 0.000, and no ordinary working posture holds it near zero.
+inline constexpr std::size_t kGateJointIndex = 1;
+
 /**
- * @brief True when EVERY element of `command` is further than `threshold` from
+ * @brief True when the gate joint of `command` is further than `threshold` from
  *        zero — the test for "this leader is commanding a real pose".
  *
- * Gates the haptic channel so a parked arm cannot buzz. An empty command is
- * false: the mirror treats an empty leader read as "nothing moved", so there is
- * no pose to feel.
+ * Gates the haptic channel so a parked arm cannot buzz. A command too short to
+ * contain the gate joint — including an empty one, which is how the mirror
+ * reports "nothing moved" — is false: there is no pose to feel.
  *
- * Every element, gripper included, and that strictness is the point rather than
- * an oversight — but it has two consequences worth knowing before tuning:
+ * Reads ONE joint rather than the whole vector, which is the fix for two ways
+ * an all-elements rule silenced the handle in the operator's hand:
  *
- *  - A closed gripper commands ~0, so grasping closes the gate and the operator
- *    feels nothing while holding something.
- *  - A single joint passing through zero in ordinary motion closes it for as
- *    long as it takes to cross, so the buzz can flicker.
+ *  - A closed gripper commands ~0, so grasping shut the gate and contact went
+ *    unfelt exactly while holding something. The gripper is now out of the test
+ *    entirely, which also gives `threshold` a single unit: radians. Under the
+ *    old rule it was compared against metres of gripper travel as well, so the
+ *    deployed 0.02 silently demanded 2 cm of opening.
+ *  - Any single joint passing through zero shut the gate for as long as the
+ *    crossing took, so the buzz flickered in ordinary motion.
  *
- * Relaxing to "any element clears the threshold" removes both and still
- * suppresses the parked pose, which is the case this exists for.
+ * The cost of reading one joint is that the gate is only as good as that joint:
+ * a pose holding `joint_1` near zero is silent whatever the other five do. That
+ * is why the sentinel is the shoulder and not the base joint, whose zero (arm
+ * pointing straight ahead) is a common working posture.
  *
- * A non-finite element is treated as not clearing the threshold, so a garbage
- * read closes the gate rather than opening it.
+ * A non-finite value is treated as not clearing the threshold, so a garbage read
+ * closes the gate rather than opening it.
  */
 bool command_clears_zero(const std::vector<float>& command, float threshold);
 

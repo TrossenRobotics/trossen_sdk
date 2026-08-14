@@ -363,14 +363,14 @@ private:
 
   /// @brief Whether this leader is commanding a real pose, so haptics should run.
   ///
-  /// True only when EVERY element of the last command clears
-  /// haptic_command_threshold_. See the definition for what that costs.
+  /// True only when the last command's gate joint (glide::kGateJointIndex, the
+  /// shoulder) clears haptic_command_threshold_. See the definition for why one
+  /// joint rather than all of them.
   bool haptic_command_gate_open() const;
 
-  /// Distance from zero, per element, that a commanded position must exceed for
-  /// the gate to open. Radians for arm joints, metres for the gripper — one
-  /// number for both, because it is a "is this pin at zero" test rather than a
-  /// physically meaningful distance.
+  /// Distance from zero that the gate joint's commanded position must exceed for
+  /// the gate to open, in radians. The gripper is not part of the test, so this
+  /// is a single unit rather than radians-or-metres depending on the element.
   float haptic_command_threshold_{0.002f};
 
   /// The last command this leader published, post-remap. Written by read() and

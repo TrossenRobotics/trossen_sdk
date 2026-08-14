@@ -399,6 +399,10 @@ TEST(HapticBaseline, ANonFiniteReadingIsDroppedAndDoesNotPoisonTheLevel) {
 // Measured on rivet-02: a parked follower sits at essentially zero
 // configuration (-0.006, 0.000, 0.003, -0.004, -0.003, -0.003, 0.000) while
 // reporting ~50 N of residual, which is the case this gate suppresses.
+//
+// The gate reads ONE joint — glide::kGateJointIndex, the shoulder. These pin
+// both halves of that: that the parked pose is still suppressed, and that the
+// rest of the vector, gripper included, can no longer silence the handle.
 
 TEST(CommandClearsZero, TheParkedPoseIsGated) {
   const std::vector<float> parked =
@@ -417,45 +421,61 @@ TEST(CommandClearsZero, AnEmptyCommandIsGated) {
   EXPECT_FALSE(command_clears_zero({}, 0.002f));
 }
 
-TEST(CommandClearsZero, AClosedGripperGatesTheWholeArm) {
-  // ACCEPTED COST of the all-elements rule, pinned here so it is a known
-  // behaviour rather than a surprise in the hand: a closed gripper commands ~0,
-  // so contact is not felt while grasping. Relaxing to "any element" is the fix
-  // if this turns out to matter.
-  const std::vector<float> grasping = {0.4f, -0.25f, 0.31f, -0.12f, 0.08f, 0.5f, 0.0f};
-  EXPECT_FALSE(command_clears_zero(grasping, 0.002f));
+TEST(CommandClearsZero, ACommandTooShortToHoldTheGateJointIsGated) {
+  // A leader publishing fewer joints than the gate reads is a malformed read.
+  // "I cannot tell" has to mean a silent handle, not an out-of-bounds read.
+  EXPECT_FALSE(command_clears_zero({0.5f}, 0.002f));
 }
 
-TEST(CommandClearsZero, OneJointCrossingZeroGatesTheWholeArm) {
-  // The other accepted cost: the buzz flickers as a joint passes through zero.
+TEST(CommandClearsZero, AClosedGripperNoLongerGatesTheArm) {
+  // THE BUG THIS FIXES. A closed gripper commands ~0, and under the old
+  // all-elements rule that silenced the handle for the whole arm — so contact
+  // went unfelt exactly while grasping something, which is when an operator most
+  // wants it. The gripper is not part of the test at all now.
+  const std::vector<float> grasping = {0.4f, -0.25f, 0.31f, -0.12f, 0.08f, 0.5f, 0.0f};
+  EXPECT_TRUE(command_clears_zero(grasping, 0.002f));
+}
+
+TEST(CommandClearsZero, AnotherJointCrossingZeroNoLongerGatesTheArm) {
+  // The old rule flickered the buzz off for as long as any joint took to cross
+  // zero. Only the gate joint can close the gate now.
   std::vector<float> moving = {0.4f, -0.25f, 0.31f, -0.12f, 0.08f, 0.5f, 0.03f};
   ASSERT_TRUE(command_clears_zero(moving, 0.002f));
   moving[3] = 0.001f;   // mid-crossing
-  EXPECT_FALSE(command_clears_zero(moving, 0.002f));
-  moving[3] = -0.05f;   // through and out the other side
   EXPECT_TRUE(command_clears_zero(moving, 0.002f));
+  moving[0] = 0.0f;     // the base joint at zero: arm pointing straight ahead
+  EXPECT_TRUE(command_clears_zero(moving, 0.002f));
+}
+
+TEST(CommandClearsZero, TheGateJointAloneDecides) {
+  // The accepted cost of reading one joint, pinned so it reads as a decision:
+  // a pose holding the shoulder at zero is silent whatever the rest is doing.
+  std::vector<float> reaching = {0.4f, 0.5f, 0.31f, -0.12f, 0.08f, 0.5f, 0.03f};
+  EXPECT_TRUE(command_clears_zero(reaching, 0.002f));
+  reaching[trossen::hw::glide::kGateJointIndex] = 0.0f;
+  EXPECT_FALSE(command_clears_zero(reaching, 0.002f));
 }
 
 TEST(CommandClearsZero, TheThresholdIsOnMagnitudeNotSign) {
   // A negative joint is just as much "away from zero" as a positive one.
-  EXPECT_TRUE(command_clears_zero({-0.5f, -0.5f}, 0.002f));
-  EXPECT_FALSE(command_clears_zero({-0.001f, -0.5f}, 0.002f));
+  EXPECT_TRUE(command_clears_zero({0.0f, -0.5f}, 0.002f));
+  EXPECT_FALSE(command_clears_zero({-0.5f, -0.001f}, 0.002f));
 }
 
 TEST(CommandClearsZero, TheBoundaryIsExclusive) {
   // Exactly at the threshold counts as still at zero, so a threshold of 0 does
   // not open the gate on a genuine 0.0.
-  EXPECT_FALSE(command_clears_zero({0.002f, 0.5f}, 0.002f));
-  EXPECT_TRUE(command_clears_zero({0.0021f, 0.5f}, 0.002f));
-  EXPECT_FALSE(command_clears_zero({0.0f, 0.5f}, 0.0f));
+  EXPECT_FALSE(command_clears_zero({0.5f, 0.002f}, 0.002f));
+  EXPECT_TRUE(command_clears_zero({0.5f, 0.0021f}, 0.002f));
+  EXPECT_FALSE(command_clears_zero({0.5f, 0.0f}, 0.0f));
 }
 
-TEST(CommandClearsZero, ANonFiniteElementGatesRatherThanOpens) {
+TEST(CommandClearsZero, ANonFiniteGateJointGatesRatherThanOpens) {
   // A garbage read must close the gate, not open it: comparisons against NaN are
   // false, so a naive test would have let it through.
-  EXPECT_FALSE(command_clears_zero({std::nanf(""), 0.5f}, 0.002f));
+  EXPECT_FALSE(command_clears_zero({0.5f, std::nanf("")}, 0.002f));
   EXPECT_FALSE(
-    command_clears_zero({std::numeric_limits<float>::infinity(), 0.5f}, 0.002f));
+    command_clears_zero({0.5f, std::numeric_limits<float>::infinity()}, 0.002f));
 }
 
 TEST(HapticBaseline, ARepeatedOrBackwardTimestampDoesNotCorruptTheLevel) {
