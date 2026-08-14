@@ -8,6 +8,7 @@
 
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -23,6 +24,12 @@ namespace trossen::hw {
  *
  * Lifecycle is tied to application scope (not session scope). Hardware
  * persists across multiple recording episodes.
+ *
+ * @note Thread-safe. Every method locks an internal mutex, so components may be
+ *       created concurrently -- which is how a multi-arm rig opens its devices
+ *       in parallel instead of one at a time. The lock covers map operations
+ *       only and is never held across a device open or a component destructor;
+ *       see the implementation for why both matter.
  */
 class ActiveHardwareRegistry {
 public:
@@ -111,8 +118,19 @@ private:
    * @return Reference to the static registry map
    *
    * @note Using a function-local static ensures proper initialization order
+   * @note Callers must hold get_mutex() for the duration of any access
    */
   static std::map<std::string, std::shared_ptr<HardwareComponent>>& get_registry();
+
+  /**
+   * @brief Get the mutex guarding the registry map
+   *
+   * @return Reference to the static mutex
+   *
+   * @note Non-recursive on purpose. Never hold it across a component's
+   *       configure() or destructor -- both can re-enter this class.
+   */
+  static std::mutex& get_mutex();
 };
 
 }  // namespace trossen::hw

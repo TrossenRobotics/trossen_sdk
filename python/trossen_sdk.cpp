@@ -558,17 +558,46 @@ PYBIND11_MODULE(trossen_sdk, m) {
   py::class_<HardwareRegistry>(m, "HardwareRegistry")
     .def_static("create", &HardwareRegistry::create,
                 py::arg("type"), py::arg("identifier"),
-                py::arg("config"), py::arg("mark_active") = true)
-    .def_static("is_registered", &HardwareRegistry::is_registered, py::arg("type"))
-    .def_static("get_registered_types", &HardwareRegistry::get_registered_types);
+                py::arg("config"), py::arg("mark_active") = true,
+                // create() is the whole cost of a bring-up -- the arm TCP
+                // handshake, the ZED open, the swerve base's ready-wait and
+                // mechanical homing -- and every second of it is synchronous C
+                // work with nothing for the interpreter to do.
+                //
+                // Holding the GIL across it, as this binding used to, had two
+                // consequences. Devices could only be opened one at a time from
+                // Python, so a rig's bring-up cost sum(devices) where it could
+                // cost max(devices); and the caller's event loop was starved
+                // for the duration, which is why every one of these operations
+                // had to be pushed into its own subprocess just to keep a
+                // progress stream alive.
+                //
+                // Safe to release because the registries are internally locked
+                // and neither lock is held across configure(); see
+                // HardwareRegistry::create() and ActiveHardwareRegistry.
+                py::call_guard<py::gil_scoped_release>())
+    .def_static("is_registered", &HardwareRegistry::is_registered, py::arg("type"),
+                py::call_guard<py::gil_scoped_release>())
+    .def_static("get_registered_types", &HardwareRegistry::get_registered_types,
+                py::call_guard<py::gil_scoped_release>());
 
   py::class_<ActiveHardwareRegistry>(m, "ActiveHardwareRegistry")
-    .def_static("get", &ActiveHardwareRegistry::get, py::arg("id"))
-    .def_static("get_all", &ActiveHardwareRegistry::get_all)
-    .def_static("get_ids", &ActiveHardwareRegistry::get_ids)
-    .def_static("is_registered", &ActiveHardwareRegistry::is_registered, py::arg("id"))
-    .def_static("clear", &ActiveHardwareRegistry::clear)
-    .def_static("count", &ActiveHardwareRegistry::count);
+    .def_static("get", &ActiveHardwareRegistry::get, py::arg("id"),
+                py::call_guard<py::gil_scoped_release>())
+    .def_static("get_all", &ActiveHardwareRegistry::get_all,
+                py::call_guard<py::gil_scoped_release>())
+    .def_static("get_ids", &ActiveHardwareRegistry::get_ids,
+                py::call_guard<py::gil_scoped_release>())
+    .def_static("is_registered", &ActiveHardwareRegistry::is_registered, py::arg("id"),
+                py::call_guard<py::gil_scoped_release>())
+    // clear() runs every driver's destructor: arms disconnecting, a ZED closing
+    // against CUDA. That is slow, blocking C work, and it is the last thing a
+    // runner does before declaring success -- so releasing here keeps a caller
+    // that is streaming progress responsive right through teardown.
+    .def_static("clear", &ActiveHardwareRegistry::clear,
+                py::call_guard<py::gil_scoped_release>())
+    .def_static("count", &ActiveHardwareRegistry::count,
+                py::call_guard<py::gil_scoped_release>());
 
   py::class_<ProducerStats>(m, "ProducerStats")
     .def_readwrite("produced", &ProducerStats::produced)
