@@ -34,7 +34,8 @@ protocol treats as failure markers.
 from __future__ import annotations
 
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any
@@ -95,6 +96,52 @@ EVERYTHING = BringUpSet()
 DEVICES_ONLY = BringUpSet(wiring_components=False)
 
 
+@dataclass(frozen=True)
+class Concurrency:
+    """Which device opens may overlap.
+
+    Orthogonal to `BringUpSet`: that says *what* to open, this says *how fast*.
+    Staged by confidence rather than turned on wholesale, because the three
+    device families carry very different risk.
+    """
+
+    devices: bool = True
+    """Arms and device components (a swerve base) open together.
+
+    The clear win, and the safe one. Each arm is an independent TCP connection to
+    its own controller with its own driver; the base is on a different bus
+    entirely. Nothing here shares state, so the cost of a bring-up drops from
+    sum(devices) to max(devices) -- on a 4-arm Rivet, four serial ~6s connects
+    become one, and the base's mechanical homing overlaps them instead of
+    following them.
+    """
+
+    cameras: bool = False
+    """Cameras open together. OFF by default, and it should stay that way until
+    someone measures it on the target rig.
+
+    Three reasons to be suspicious rather than optimistic here:
+
+      - a ZED's Camera::open() does GPU work (it loads and optimises a NEURAL
+        depth model), so three concurrent opens may contend on GPU memory rather
+        than overlap, and could be slower than serial;
+      - RealsenseCameraComponent's destructor heap-corrupts on librealsense 2.56,
+        and more concurrent lifecycle churn is not the way to find out how badly;
+      - an unclean exit leaks the ZED Argus CameraProvider, and the NEXT open
+        then fails with CANNOT_START_CAMERA_STREAM until the rig is rebooted.
+        The failure mode is a rig that cannot open its cameras at all, which is
+        far worse than a slow bring-up.
+    """
+
+
+#: The default: overlap the arms and the base, keep cameras serial.
+CONCURRENT = Concurrency()
+
+#: One device at a time. The old behaviour, kept as an escape hatch for
+#: bisecting a rig that misbehaves under concurrent bring-up.
+SERIAL = Concurrency(devices=False, cameras=False)
+
+
 @dataclass
 class BroughtUp:
     """What a bring-up produced.
@@ -116,6 +163,10 @@ class BroughtUp:
     """Ids from `components` that own a device. Recorded as they are created
     rather than re-derived afterwards: the component object exposes no type, so
     the only reliable source is the config entry we opened it from."""
+
+    wall_clock_s: float = 0.0
+    """How long the whole bring-up actually took. Distinct from the sum of
+    `timings`, and the gap between the two is what concurrency bought."""
 
     def summary(self) -> str:
         """One human line naming what was opened, for a success marker."""
@@ -144,11 +195,16 @@ def report_timings(brought: BroughtUp) -> None:
     print("[timing] breakdown:", flush=True)
     for label, seconds in brought.timings:
         print(f"[timing]   {label.ljust(widest)}  {seconds:6.2f}s", flush=True)
-    # `total` is the sum of the individual opens. Under concurrent bring-up it
-    # deliberately exceeds the wall-clock it took to do them, and the gap
-    # between the two IS the win — so print both rather than only the sum.
+    # Both numbers, because the gap between them IS the win: `total` is what the
+    # opens cost added up, `wall_clock` is what the operator actually waited.
+    # Serially they match; concurrently the wall clock approaches the slowest
+    # single device instead of the sum of all of them.
     print(f"[timing] sum of opens = {total:.2f}s "
           f"across {len(brought.timings)} device(s)", flush=True)
+    if brought.wall_clock_s > 0.0:
+        saved = total - brought.wall_clock_s
+        print(f"[timing] wall clock   = {brought.wall_clock_s:.2f}s "
+              f"({saved:+.2f}s vs. opening one at a time)", flush=True)
 
 
 @contextmanager
@@ -228,11 +284,46 @@ def is_device_component(comp_cfg: Any) -> bool:
     return comp_cfg.type in DEVICE_COMPONENT_TYPES
 
 
+def _run_all(
+    tasks: list[Callable[[], Any]],
+    *,
+    parallel: bool,
+    label: str,
+) -> list[Any]:
+    """Run every task and return the results in the order given.
+
+    `parallel` decides whether they overlap. Either way EVERY task is waited for
+    before anything is raised: letting a bring-up unwind while sibling threads
+    are still mid-open would tear the process down around drivers that are
+    part-way through opening a device, which is how an arm controller or a ZED is
+    left holding a connection nobody owns. The first exception is re-raised once
+    the dust settles, so a caller still sees the real cause.
+    """
+    if not parallel or len(tasks) <= 1:
+        return [task() for task in tasks]
+
+    with ThreadPoolExecutor(max_workers=len(tasks), thread_name_prefix=label) as pool:
+        futures = [pool.submit(task) for task in tasks]
+        results: list[Any] = []
+        first_exc: BaseException | None = None
+        for future in futures:
+            try:
+                results.append(future.result())
+            except BaseException as exc:  # noqa: BLE001 - re-raised below
+                results.append(None)
+                if first_exc is None:
+                    first_exc = exc
+    if first_exc is not None:
+        raise first_exc
+    return results
+
+
 def bring_up(
     cfg: Any,
     want: BringUpSet = EVERYTHING,
     *,
     arm_overrides: dict[str, Any] | None = None,
+    concurrency: Concurrency = CONCURRENT,
 ) -> BroughtUp:
     """Open the hardware `cfg` declares, in dependency order.
 
@@ -241,56 +332,126 @@ def bring_up(
     `teleop_moving_time_s` so its park-at-zero step always has the same
     wall-clock cost regardless of the operator's setting.
 
-    Order is load-bearing, and is the recorder's original order:
+    Three stages, and the boundaries between them are dependencies rather than
+    taste:
 
-      1. **arms** — nothing else can resolve them until they exist;
-      2. **device components** (a Rivet's swerve base) — independent of the arms
-         but needed before any wiring that pairs against them;
-      3. **wiring components** (`glide_arm_input`, `glide_base`,
-         `glide_session_control`) — in declared order, because each resolves
-         hardware created above out of the active registry;
-      4. **cameras** — depended on by nothing.
+      1. **arms + device components** (a Rivet's swerve base, a legacy
+         `hardware.base`). Mutually independent — separate controllers, separate
+         buses — so these open concurrently. This is where the latency win is.
+      2. **wiring components** (`glide_arm_input`, `glide_base`,
+         `glide_session_control`), serially and in declared order. Each resolves
+         hardware from stage 1 out of the active registry, so none of it can
+         start until stage 1 has finished, and reordering them can break a
+         component that resolves another.
+      3. **cameras**, serial unless `concurrency.cameras` — see `Concurrency`
+         for why that default is off.
 
     Raises whatever the SDK raises, unchanged. Callers that need a per-device
     verdict instead of fail-fast (recovery) drive `create_arm` themselves.
     """
     brought = BroughtUp()
+    started = time.perf_counter()
+
+    # --- stage 1: arms and device components, together ---------------------
+    #
+    # Built as a task list first so the concurrent and serial paths are the same
+    # code with one flag between them, rather than two traversals that can drift.
+    stage1: list[Callable[[], Any]] = []
 
     if want.arms:
         for arm_id, arm_cfg in cfg.hardware.arms.items():
             arm_json = arm_cfg.to_json()
             if arm_overrides:
                 arm_json.update(arm_overrides)
-            brought.arms[arm_id] = create_arm(
-                arm_id, arm_json, timings=brought.timings
+            stage1.append(
+                # Bind the loop variables as defaults: a closure over `arm_id`
+                # would see whatever the last iteration left behind, and every
+                # task would open the same arm.
+                lambda aid=arm_id, js=arm_json: (
+                    "arm", aid, create_arm(aid, js, timings=brought.timings)
+                )
             )
 
     if want.mobile_base and cfg.hardware.mobile_base is not None:
         # The legacy `hardware.base` slot. A decomposed config declares its base
         # as a component instead, which is why both paths exist.
-        with _timed("mobile_base slate_base", brought.timings):
-            brought.mobile_base = ts.HardwareRegistry.create(
-                "slate_base", "slate_base", cfg.hardware.mobile_base.to_json(), True
-            )
-
-    if want.any_components:
-        for comp_cfg in cfg.hardware.components:
-            device = is_device_component(comp_cfg)
-            if device and not want.device_components:
-                continue
-            if not device and not want.wiring_components:
-                continue
-            _create_component(comp_cfg, brought)
-
-    if want.cameras:
-        for cam_cfg in cfg.hardware.cameras:
-            with _timed(f"camera {cam_cfg.id} ({cam_cfg.type})", brought.timings):
-                brought.cameras[cam_cfg.id] = ts.HardwareRegistry.create(
-                    cam_cfg.type, cam_cfg.id, cam_cfg.to_json()
+        base_json = cfg.hardware.mobile_base.to_json()
+        stage1.append(
+            lambda js=base_json: (
+                "mobile_base", "slate_base", _create_timed(
+                    "slate_base", "slate_base", js,
+                    "mobile_base slate_base", brought.timings,
                 )
-            brought.camera_cfgs[cam_cfg.id] = cam_cfg
+            )
+        )
 
+    device_cfgs = (
+        [c for c in cfg.hardware.components if is_device_component(c)]
+        if want.device_components else []
+    )
+    for comp_cfg in device_cfgs:
+        stage1.append(
+            lambda cc=comp_cfg: ("component", cc.id, _create_component(cc, brought))
+        )
+
+    results = _run_all(stage1, parallel=concurrency.devices, label="bringup-device")
+
+    # Filed after joining, in config order, so the dicts and the summary read the
+    # same regardless of which thread finished first.
+    for kind, key, component in results:
+        if kind == "arm":
+            brought.arms[key] = component
+        elif kind == "mobile_base":
+            brought.mobile_base = component
+        # "component" entries file themselves in _create_component, which also
+        # records device-ness and session-control capability.
+
+    # --- stage 2: teleop wiring, serial and in declared order --------------
+    if want.wiring_components:
+        for comp_cfg in cfg.hardware.components:
+            if not is_device_component(comp_cfg):
+                _create_component(comp_cfg, brought)
+
+    # --- stage 3: cameras --------------------------------------------------
+    if want.cameras:
+        camera_tasks = [
+            (lambda cc=cam_cfg: (
+                cc.id, _create_timed(
+                    cc.type, cc.id, cc.to_json(),
+                    f"camera {cc.id} ({cc.type})", brought.timings,
+                    # Marked active like everything else: nothing else holds a
+                    # camera, so the ActiveHardwareRegistry is its only owner and
+                    # clear() is what closes it while CUDA is still up. Skipping
+                    # that leaves the close to static teardown, where a ZED fails
+                    # with "cuCtxSetCurrent failed (error 4)".
+                    mark_active=True,
+                )
+            ))
+            for cam_cfg in cfg.hardware.cameras
+        ]
+        opened = _run_all(
+            camera_tasks, parallel=concurrency.cameras, label="bringup-camera"
+        )
+        for (cam_id, component), cam_cfg in zip(opened, cfg.hardware.cameras):
+            brought.cameras[cam_id] = component
+            brought.camera_cfgs[cam_id] = cam_cfg
+
+    brought.wall_clock_s = time.perf_counter() - started
     return brought
+
+
+def _create_timed(
+    hw_type: str,
+    hw_id: str,
+    config: dict[str, Any],
+    label: str,
+    timings: list[tuple[str, float]],
+    *,
+    mark_active: bool = True,
+) -> Any:
+    """`HardwareRegistry.create` with the open timed under `label`."""
+    with _timed(label, timings):
+        return ts.HardwareRegistry.create(hw_type, hw_id, config, mark_active)
 
 
 def _create_component(comp_cfg: Any, brought: BroughtUp) -> None:

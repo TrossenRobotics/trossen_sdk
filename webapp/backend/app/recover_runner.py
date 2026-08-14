@@ -10,10 +10,11 @@ Exit 0 does NOT mean every device recovered. A device that is still faulted is
 a normal, reportable outcome — the operator needs to see *which* one and why,
 not a single boolean. Only a failure to attempt recovery at all is exit 2.
 
-Why a subprocess (same rationale as ``app.hw_test_runner`` and
-``app.read_limits_runner``): the SDK connect holds the GIL through synchronous
-C work, and a throwaway interpreter gives each short-lived driver a clean
-lifecycle — its destructor disconnects on process exit no matter what.
+Why a subprocess (same rationale as ``app.hw_test_runner``): a throwaway
+interpreter gives each short-lived driver a clean lifecycle — its destructor
+disconnects on process exit no matter what — and a C++ exception escaping an SDK
+thread would take the whole backend down in-process. The GIL argument that also
+used to apply no longer does; see ``app.hw_test_runner``.
 
 Why it runs at all, rather than the recorder recovering in place: by the time
 an operator presses Recover the faulted session has already ended and its child

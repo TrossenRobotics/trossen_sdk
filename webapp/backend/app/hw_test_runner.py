@@ -20,17 +20,18 @@ What is opened, and how, is `app.hw_bringup`'s decision, not this module's — t
 two used to be separate implementations and diverged, with the test skipping
 `hardware.components` entirely and so passing a Rivet whose base was unreachable.
 
-Why a subprocess at all, in order of durability:
+Why a subprocess at all, and why it is still one:
 
   - a throwaway interpreter guarantees every driver's destructor runs, on the
     failure path as much as the success one;
   - a C++ exception escaping an SDK thread would `std::terminate()` the whole
-    backend if this ran in-process;
-  - `HardwareRegistry.create()` holds the GIL through synchronous C work, which
-    starves the asyncio loop so no progress reaches the wire until it returns.
+    backend if this ran in-process.
 
-Only the third of those is about the GIL, so do not "simplify" the subprocess
-away if that one stops being true.
+There used to be a third reason -- `HardwareRegistry.create()` held the GIL
+through synchronous C work, starving the asyncio loop so no progress reached the
+wire until it returned. That one is GONE: the binding now releases the GIL, which
+is what lets this runner open its devices concurrently. The two above are not
+gone, so do not "simplify" the subprocess away on the strength of the third.
 
 Caller is expected to launch this under `stdbuf -oL -eL` so libc flushes each
 `\n`-terminated line to the pipe immediately — without that, SDK output sits in
