@@ -22,14 +22,14 @@ import sys
 
 import trossen_sdk as ts
 
-_RESULT_PREFIX = "__RESULT__: "
+from app import runner_proto
 
 
 def main() -> int:
     try:
         req = json.loads(sys.stdin.read())
     except json.JSONDecodeError as exc:
-        print(f"__ERROR__: invalid request JSON: {exc}", flush=True)
+        runner_proto.emit_error(f"invalid request JSON: {exc}")
         return 2
 
     try:
@@ -37,10 +37,8 @@ def main() -> int:
         end_effector = req["end_effector"]
         ip_address = req["ip_address"]
     except (KeyError, TypeError) as exc:
-        print(
-            "__ERROR__: request must include model, end_effector, ip_address: "
-            f"{exc}",
-            flush=True,
+        runner_proto.emit_error(
+            f"request must include model, end_effector, ip_address: {exc}"
         )
         return 2
 
@@ -56,11 +54,11 @@ def main() -> int:
             "effort_tolerance": list(limits.effort_tolerance),
         }
     except Exception as exc:  # pybind11 translates the C++ throw here
-        print(f"__ERROR__: {exc}", flush=True)
+        runner_proto.emit_error(str(exc))
         return 2
 
-    print(_RESULT_PREFIX + json.dumps(result), flush=True)
-    print("__SUCCESS__", flush=True)
+    runner_proto.emit_result(result)
+    runner_proto.emit_success()
     return 0
 
 

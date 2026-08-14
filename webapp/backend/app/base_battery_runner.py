@@ -24,41 +24,40 @@ import sys
 
 import trossen_sdk as ts
 
-_RESULT_PREFIX = "__RESULT__: "
+from app import runner_proto
 
 
 def main() -> int:
     try:
         req = json.loads(sys.stdin.read())
     except json.JSONDecodeError as exc:
-        print(f"__ERROR__: invalid request JSON: {exc}", flush=True)
+        runner_proto.emit_error(f"invalid request JSON: {exc}")
         return 2
 
     try:
         timeout_s = float(req["timeout_s"])
     except (KeyError, TypeError, ValueError) as exc:
-        print(f"__ERROR__: request must include a numeric timeout_s: {exc}", flush=True)
+        runner_proto.emit_error(f"request must include a numeric timeout_s: {exc}")
         return 2
 
     # Absent on a build without Rivet support, where there is no base to read
     # and no amount of retrying will produce one. Said plainly rather than let
     # the AttributeError surface as a generic failure.
     if not hasattr(ts, "read_base_battery"):
-        print(
-            "__ERROR__: this SDK build has no mobile base support "
-            "(built without TROSSEN_ENABLE_RIVET), so there is no battery to read.",
-            flush=True,
+        runner_proto.emit_error(
+            "this SDK build has no mobile base support "
+            "(built without TROSSEN_ENABLE_RIVET), so there is no battery to read."
         )
         return 2
 
     try:
         reading = ts.read_base_battery(timeout_s)
     except Exception as exc:  # pybind11 translates the C++ throw here
-        print(f"__ERROR__: {exc}", flush=True)
+        runner_proto.emit_error(str(exc))
         return 2
 
-    print(_RESULT_PREFIX + json.dumps(reading), flush=True)
-    print("__SUCCESS__", flush=True)
+    runner_proto.emit_result(reading)
+    runner_proto.emit_success()
     return 0
 
 

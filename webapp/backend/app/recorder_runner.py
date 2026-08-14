@@ -49,6 +49,8 @@ import numpy as np
 import rerun as rr
 import trossen_sdk as ts
 
+from app import hw_bringup
+
 _READY_PREFIX = "__READY__:"
 
 # Longest the software e-stop waits for one arm's homing move. Generous against
@@ -1151,58 +1153,18 @@ def _reconcile_empty_episodes(dataset_dir: str) -> int:
     return removed
 
 
-# An arm controller is single-client. If a prior run's connection wasn't
-# released yet — most commonly because a fault SIGKILLs the recorder child
-# before its arm driver can disconnect (see recorder.py's fatal-fault kill) —
-# the next TCP connect stalls its full ~20s timeout and throws. The stale
-# client clears controller-side shortly after, so retrying turns the old
-# "start fails → recover → try again" dance into a single successful start.
-# Two retries (three attempts) covers a controller that needs more than one
-# ~20s timeout cycle to release — e.g. recovering immediately after a crash
-# AND a just-finished hardware test both held the same arm. The bootstrap
-# wall-clock budget (recorder._BOOTSTRAP_TIMEOUT_S) is sized to allow this.
-_ARM_CONNECT_RETRIES = 2
-_ARM_RETRY_BACKOFF_S = 1.0
-
-
-def _create_arm_component(arm_id: str, arm_json: dict[str, Any]) -> Any:
-    """Create a trossen_arm component, retrying once on a transient connect
-    failure (a controller still holding a prior single-client connection)."""
-    last_exc: Exception | None = None
-    for attempt in range(_ARM_CONNECT_RETRIES + 1):
-        try:
-            return ts.HardwareRegistry.create("trossen_arm", arm_id, arm_json, True)
-        except Exception as exc:  # pybind11 surfaces the C++ throw here
-            last_exc = exc
-            low = str(exc).lower()
-            transient = (
-                "connect to the arm controller" in low
-                or "temporarily unavailable" in low
-                or ("within" in low and "second" in low)
-            )
-            if attempt >= _ARM_CONNECT_RETRIES or not transient:
-                raise
-            print(
-                f"arm '{arm_id}' connect failed (attempt {attempt + 1} of "
-                f"{_ARM_CONNECT_RETRIES + 1}) — the controller may still hold a "
-                f"prior client; retrying in {_ARM_RETRY_BACKOFF_S}s: {exc}",
-                flush=True,
-            )
-            time.sleep(_ARM_RETRY_BACKOFF_S)
-    assert last_exc is not None  # loop either returned or re-raised
-    raise last_exc
-
-
 def _build_session_manager(
     config: dict[str, Any],
 ) -> tuple[ts.SessionManager, list, list, str]:
     """Run the canonical SDK bootstrap from `trossen_solo_ai.py` and return
     `(manager, controllers, session_controls, mcap_root)`.
 
-    Steps mirror the previous in-process implementation:
+    Steps:
       1. SdkConfig.from_json(config) → cfg.populate_global_config()
       2. mkdir the MCAP root
-      3. Build hardware components (arms, cameras, mobile_base if present)
+      3. Open the hardware — delegated to `app.hw_bringup`, which the hardware
+         test also goes through, so the two cannot disagree about what a config
+         declares
       4. Instantiate SessionManager
       5. Register producers from cfg.producers
       6. Wire teleop start/stop into the lifecycle
@@ -1220,41 +1182,26 @@ def _build_session_manager(
 
     os.makedirs(cfg.mcap_backend.root, exist_ok=True)
 
-    arm_components = {}
-    for arm_id, arm_cfg in cfg.hardware.arms.items():
-        arm_components[arm_id] = _create_arm_component(arm_id, arm_cfg.to_json())
-
-    # Components declared generically by registry type — the Glide input reader
-    # and base leader, session control, the Rivet base. Each parses its own JSON
-    # in configure(), so a new REGISTER_HARDWARE type needs no change here.
+    # EVERYTHING: a session needs the teleop wiring components too, which a
+    # connectivity test deliberately skips. Ordering (arms, then components in
+    # declared order, then cameras) is `hw_bringup`'s responsibility and is
+    # load-bearing — glide_arm_input resolves the handle arms out of the active
+    # registry, so it cannot run before they exist.
     #
-    # After the arms and in declared order, both deliberately: glide_arm_input
-    # resolves the handle arms above out of the active registry, and a base
-    # follower has to exist before the teleop factory builds pairs against it.
-    # Session-control sources (the Glide handle buttons) are collected by
-    # interface, not by type, so another button source needs no change here.
-    # They are NOT attached to the SessionManager: this loop drives episodes from
-    # signal events, so the buttons are wired to those same events in main()
-    # instead — see _attach_session_controls. Attaching them to the
-    # SessionManager as well would give two independent drivers of one session.
-    component_components: dict[str, Any] = {}
-    session_controls: list[Any] = []
-    for comp_cfg in cfg.hardware.components:
-        component = ts.HardwareRegistry.create(
-            comp_cfg.type, comp_cfg.id, comp_cfg.raw, True
-        )
-        component_components[comp_cfg.id] = component
-        if isinstance(component, ts.SessionControlCapable):
-            session_controls.append(component)
-        print(f"component '{comp_cfg.id}' ({comp_cfg.type}) configured", flush=True)
+    # Session-control sources (the Glide handle buttons) come back collected by
+    # interface rather than by type, so another button source needs no change
+    # here. They are NOT attached to the SessionManager: this loop drives
+    # episodes from signal events and wires the buttons to those same events in
+    # main() — see _attach_session_controls. Attaching them to the
+    # SessionManager as well would give one session two independent drivers.
+    brought = hw_bringup.bring_up(cfg, hw_bringup.EVERYTHING)
+    hw_bringup.report_timings(brought)
 
-    camera_components = {}
-    camera_cfg_map = {}
-    for cam_cfg in cfg.hardware.cameras:
-        camera_components[cam_cfg.id] = ts.HardwareRegistry.create(
-            cam_cfg.type, cam_cfg.id, cam_cfg.to_json()
-        )
-        camera_cfg_map[cam_cfg.id] = cam_cfg
+    arm_components = brought.arms
+    component_components = brought.components
+    session_controls = brought.session_controls
+    camera_components = brought.cameras
+    camera_cfg_map = brought.camera_cfgs
 
     controllers = ts.create_teleop_controllers_from_global_config()
 

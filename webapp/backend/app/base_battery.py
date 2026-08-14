@@ -13,10 +13,9 @@ next run should not have to start a run to find out.
 
 from __future__ import annotations
 
-import asyncio
-import json
-import sys
 from typing import Any
+
+from app import runner_proto
 
 # How long the probe itself waits for the base's first BMS frame, in seconds.
 # Generous relative to how fast a healthy base answers (the frames are periodic
@@ -28,9 +27,6 @@ _PROBE_TIMEOUT_S = 10.0
 # request open forever. Interpreter start, the SDK import, the CAN open and the
 # driver teardown all sit outside the probe's own timeout, hence the margin.
 _TIMEOUT_S = _PROBE_TIMEOUT_S + 20.0
-
-_RESULT_PREFIX = "__RESULT__: "
-_ERROR_PREFIX = "__ERROR__: "
 
 # The battery sub-object's keys, coerced on the way out so the response shape is
 # predictable no matter what the runner emitted.
@@ -51,60 +47,24 @@ async def read_base_battery() -> dict[str, Any]:
     error — including a base that is powered off, has no CAN link, or is not
     fitted at all, all of which reach the runner as "no reading in time".
     """
-    cmd = [
-        # Line-buffer the child's stdout so its `__RESULT__` / `__ERROR__`
-        # marker lines reach us promptly (same reason as the limits read).
-        "stdbuf",
-        "-oL",
-        "-eL",
-        sys.executable,
-        "-m",
-        "app.base_battery_runner",
-    ]
+    outcome = await runner_proto.run_runner(
+        "app.base_battery_runner", {"timeout_s": _PROBE_TIMEOUT_S}, _TIMEOUT_S
+    )
 
-    try:
-        proc = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdin=asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT,
-        )
-    except Exception as exc:
-        raise BaseBatteryError(
-            f"Failed to launch the battery probe: {exc}"
-        ) from exc
+    if outcome.launch_error is not None:
+        raise BaseBatteryError(outcome.launch_error)
 
-    payload = json.dumps({"timeout_s": _PROBE_TIMEOUT_S}).encode()
-
-    try:
-        stdout, _ = await asyncio.wait_for(
-            proc.communicate(payload), timeout=_TIMEOUT_S
-        )
-    except asyncio.TimeoutError:
-        proc.kill()
-        await proc.wait()
+    if outcome.timed_out:
         raise BaseBatteryError(
             f"Timed out after {_TIMEOUT_S:.0f}s reading the base battery. Check "
             f"that the base is powered on, that its CAN link is up, and that no "
             f"session is holding it."
         )
 
-    text = stdout.decode(errors="replace")
-    result: dict[str, Any] | None = None
-    error: str | None = None
-    for line in text.splitlines():
-        if line.startswith(_RESULT_PREFIX):
-            try:
-                result = json.loads(line[len(_RESULT_PREFIX):])
-            except json.JSONDecodeError:
-                result = None
-        elif line.startswith(_ERROR_PREFIX):
-            error = line[len(_ERROR_PREFIX):]
+    if outcome.returncode == 0 and isinstance(outcome.result, dict):
+        return _clean(outcome.result)
 
-    if proc.returncode == 0 and isinstance(result, dict):
-        return _clean(result)
-
-    raise BaseBatteryError(_operator_readable(error))
+    raise BaseBatteryError(_operator_readable(outcome.error_message))
 
 
 def _operator_readable(error: str | None) -> str:
