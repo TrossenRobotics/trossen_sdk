@@ -1,3 +1,0 @@
-# Rivet Example
-
-TODO
