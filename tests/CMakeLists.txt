@@ -64,6 +64,9 @@ target_link_libraries(test_glide_haptics PRIVATE trossen_sdk GTest::gtest_main)
 add_executable(test_lerobot_depth_utils test_lerobot_depth_utils.cpp)
 target_link_libraries(test_lerobot_depth_utils PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_depth_quantization test_depth_quantization.cpp)
+target_link_libraries(test_depth_quantization PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_record_types test_record_types.cpp)
 target_link_libraries(test_record_types PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -195,6 +198,7 @@ if(TROSSEN_ENABLE_VR)
   trossen_discover_tests(test_vr_session_control_component)
 endif()
 trossen_discover_tests(test_lerobot_depth_utils)
+trossen_discover_tests(test_depth_quantization)
 trossen_discover_tests(test_record_types)
 trossen_discover_tests(test_config)
 trossen_discover_tests(test_lerobot_utils)
