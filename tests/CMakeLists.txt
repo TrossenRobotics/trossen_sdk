@@ -44,6 +44,9 @@ endif()
 add_executable(test_lerobot_depth_utils test_lerobot_depth_utils.cpp)
 target_link_libraries(test_lerobot_depth_utils PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_depth_quantization test_depth_quantization.cpp)
+target_link_libraries(test_depth_quantization PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_record_types test_record_types.cpp)
 target_link_libraries(test_record_types PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -159,6 +162,7 @@ if(TROSSEN_ENABLE_REALSENSE)
   gtest_discover_tests(test_realsense_push_producer_metadata)
 endif()
 gtest_discover_tests(test_lerobot_depth_utils)
+gtest_discover_tests(test_depth_quantization)
 gtest_discover_tests(test_record_types)
 gtest_discover_tests(test_config)
 gtest_discover_tests(test_lerobot_utils)
