@@ -9,6 +9,7 @@
 // between the config struct and this parse, so it lives in one place.
 #include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <iostream>
@@ -28,6 +29,74 @@ double now_seconds() {
   using std::chrono::steady_clock;
   return duration<double>(steady_clock::now().time_since_epoch()).count();
 }
+
+/// Resolve a model name against the driver's own Model <-> name map, so every
+/// model the installed driver knows is accepted and the set cannot drift when
+/// the driver adds one.
+///
+/// A narrower hardcoded list is exactly why `pro` followers and the Glide
+/// handles were unusable: their configs named those models, and the check
+/// rejected them before the driver ever saw them.
+trossen_arm::Model resolve_model(const std::string& name) {
+  for (const auto& [model, model_name] : trossen_arm::MODEL_NAME) {
+    if (model_name == name) return model;
+  }
+  std::string valid;
+  for (const auto& [_, model_name] : trossen_arm::MODEL_NAME) {
+    valid += (valid.empty() ? "" : ", ") + model_name;
+  }
+  throw std::runtime_error(
+    "TrossenArmComponent: Unknown model: " + name + " (valid: " + valid + ")");
+}
+
+/// One selectable end effector.
+///
+/// Tabled rather than looked up, because the driver publishes MODEL_NAME for
+/// models but has no equivalent for end effectors — they are `static constexpr`
+/// members with no names attached. So this list must be extended by hand when
+/// the driver adds a gripper, which is the opposite of resolve_model() above and
+/// worth knowing before wondering why the two differ.
+///
+/// `is_leader` selects gravity compensation over position mode in
+/// prepare_for_teleop(), so it is behaviour rather than a label: only the
+/// `_leader` variants are hand-guided. A `_base` or `_follower` gripper is
+/// commanded.
+struct EndEffectorEntry {
+  const char*                     name;
+  const trossen_arm::EndEffector* end_effector;
+  bool                            is_leader;
+};
+
+// Short alias purely to keep the table inside the 100-column limit; the
+// qualified name is trossen_arm::StandardEndEffector.
+using SEE = trossen_arm::StandardEndEffector;
+
+const std::array<EndEffectorEntry, 11> kEndEffectors{{
+  {"wxai_v0_base",     &SEE::wxai_v0_base,     false},
+  {"wxai_v0_leader",   &SEE::wxai_v0_leader,   true},
+  {"wxai_v0_follower", &SEE::wxai_v0_follower, false},
+  {"vxai_v0_base",     &SEE::vxai_v0_base,     false},
+  {"no_gripper",       &SEE::no_gripper,       false},
+  {"core_base",     &SEE::core_base,     false},
+  {"core_leader",   &SEE::core_leader,   true},
+  {"core_follower", &SEE::core_follower, false},
+  {"pro_base",      &SEE::pro_base,      false},
+  {"pro_leader",    &SEE::pro_leader,    true},
+  {"pro_follower",  &SEE::pro_follower,  false},
+}};
+
+const EndEffectorEntry& resolve_end_effector(const std::string& name) {
+  for (const auto& entry : kEndEffectors) {
+    if (name == entry.name) return entry;
+  }
+  std::string valid;
+  for (const auto& entry : kEndEffectors) {
+    valid += (valid.empty() ? "" : ", ");
+    valid += entry.name;
+  }
+  throw std::runtime_error(
+    "TrossenArmComponent: Unknown end_effector: " + name + " (valid: " + valid + ")");
+}
 }  // namespace
 
 void TrossenArmComponent::configure(const nlohmann::json& config) {
@@ -42,28 +111,16 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     throw std::runtime_error("TrossenArmComponent: 'model' is required in config");
   }
   model_str_ = config.at("model").get<std::string>();
-  trossen_arm::Model model;
-  if (model_str_ == "wxai_v0") {
-    model = trossen_arm::Model::wxai_v0;
-  } else {
-    throw std::runtime_error("TrossenArmComponent: Unknown model: " + model_str_);
-  }
+  const trossen_arm::Model model = resolve_model(model_str_);
 
   // Parse end effector
   if (!config.contains("end_effector")) {
     throw std::runtime_error("TrossenArmComponent: 'end_effector' is required in config");
   }
-  trossen_arm::EndEffector end_effector;
   end_effector_str_ = config.at("end_effector").get<std::string>();
-  if (end_effector_str_ == "wxai_v0_leader") {
-    end_effector = trossen_arm::StandardEndEffector::wxai_v0_leader;
-    is_leader_ = true;
-  } else if (end_effector_str_ == "wxai_v0_follower") {
-    end_effector = trossen_arm::StandardEndEffector::wxai_v0_follower;
-    is_leader_ = false;
-  } else {
-    throw std::runtime_error("TrossenArmComponent: Unknown end_effector: " + end_effector_str_);
-  }
+  const auto& ee_entry = resolve_end_effector(end_effector_str_);
+  const trossen_arm::EndEffector end_effector = *ee_entry.end_effector;
+  is_leader_ = ee_entry.is_leader;
 
   // Create and configure driver
   driver_ = std::make_shared<trossen_arm::TrossenArmDriver>();
