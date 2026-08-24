@@ -5,6 +5,7 @@
 
 #include "trossen_sdk/hw/glide/glide_base_component.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <stdexcept>
@@ -44,9 +45,9 @@ float normalise_stick(std::uint16_t raw) {
 /**
  * @brief Scale a single normalised axis, with the deadzone in output units.
  *
- * Each axis is treated independently, which is the right model for a
- * one-dimensional axis: yaw from a stick pushed sideways, or forward speed on a
- * differential-drive base that cannot strafe anyway.
+ * For a one-dimensional axis (yaw from a stick pushed sideways) a scalar
+ * deadzone is the right model. Two-dimensional translation must not use this —
+ * see `sample_translation()` for why.
  */
 float scale_axis(float normalised, float max, float deadzone) {
   const float scaled = normalised * max;
@@ -54,7 +55,8 @@ float scale_axis(float normalised, float max, float deadzone) {
   return scaled;
 }
 
-/// Shared by every axis, so one bad number reads the same wherever it appears.
+/// Shared by the translation block and each independent axis, so one bad number
+/// reads the same either way.
 void validate_range(float max, float deadzone, const std::string& what) {
   if (!std::isfinite(max) || max <= 0.0f) {
     throw std::invalid_argument(
@@ -71,13 +73,72 @@ void validate_range(float max, float deadzone, const std::string& what) {
 }  // namespace
 
 void GlideBaseComponent::configure(const nlohmann::json& config) {
-  if (!config.contains("axes") || !config.at("axes").is_object()) {
+  const bool has_axes = config.contains("axes") && config.at("axes").is_object();
+  const bool has_translation =
+    config.contains("translation") && config.at("translation").is_object();
+
+  if (!has_axes && !has_translation) {
     throw std::invalid_argument(
       "GlideBaseComponent '" + get_identifier() +
-      "': config requires an 'axes' object; with nothing mapped the component "
-      "would report zero velocity forever");
+      "': config requires an 'axes' object, a 'translation' object, or both; "
+      "with nothing mapped the component would report zero velocity forever");
   }
-  const nlohmann::json& axes_json = config.at("axes");
+
+  TranslationMap translation;
+  if (has_translation) {
+    const auto& j = config.at("translation");
+    translation.configured = true;
+
+    if (!j.contains("arm_id")) {
+      throw std::invalid_argument(
+        "GlideBaseComponent: 'translation' requires 'arm_id'");
+    }
+    translation.arm_id = j.at("arm_id").get<std::string>();
+
+    auto parse_source = [](const std::string& name, const char* field) {
+      if (name == "joystick_x") return AxisMap::Source::kJoystickX;
+      if (name == "joystick_y") return AxisMap::Source::kJoystickY;
+      throw std::invalid_argument(
+        std::string("GlideBaseComponent: translation '") + field +
+        "' must be joystick_x or joystick_y (got '" + name +
+        "'); a translation vector cannot come from buttons");
+    };
+    translation.forward_source =
+      parse_source(j.value("forward_source", std::string{"joystick_y"}), "forward_source");
+    translation.lateral_source =
+      parse_source(j.value("lateral_source", std::string{"joystick_x"}), "lateral_source");
+
+    if (translation.forward_source == translation.lateral_source) {
+      throw std::invalid_argument(
+        "GlideBaseComponent: translation forward_source and lateral_source are "
+        "both the same stick axis, which would make the base only ever drive "
+        "diagonally");
+    }
+
+    translation.forward_invert = j.value("forward_invert", false);
+    translation.lateral_invert = j.value("lateral_invert", false);
+    translation.max            = j.value("max", 1.0f);
+    translation.deadzone       = j.value("deadzone", 0.0f);
+
+    validate_range(translation.max, translation.deadzone, "translation");
+  }
+
+  // Bind to a real lvalue in both branches rather than a ternary temporary, so
+  // there is no lifetime subtlety and no copy of the axes object.
+  static const nlohmann::json kNoAxes = nlohmann::json::object();
+  const nlohmann::json& axes_json = has_axes ? config.at("axes") : kNoAxes;
+
+  if (has_translation) {
+    for (const char* owned : {"linear", "lateral"}) {
+      if (axes_json.contains(owned)) {
+        throw std::invalid_argument(
+          std::string("GlideBaseComponent '") + get_identifier() +
+          "': axis '" + owned + "' is set in 'axes' while 'translation' is also "
+          "configured. Translation owns both linear and lateral; remove one so "
+          "it is unambiguous which produces the command.");
+      }
+    }
+  }
 
   // Parse fully before claiming anything: a claim failure partway through would
   // otherwise leave this component holding inputs it never got to use.
@@ -165,6 +226,10 @@ void GlideBaseComponent::configure(const nlohmann::json& config) {
   // Claim every referenced input. Overlap with a DIFFERENT component surfaces as
   // a conflict from the claim table itself.
   GlideClaimLease lease;
+  if (translation.configured) {
+    lease.add(translation.arm_id, get_identifier(),
+              {GlideClaim{GlideInput::kJoystick}});
+  }
   for (std::size_t i = 0; i < ba::kMaxSize; ++i) {
     const AxisMap& axis = parsed[i];
     if (!axis.configured) continue;
@@ -183,8 +248,9 @@ void GlideBaseComponent::configure(const nlohmann::json& config) {
     }
   }
 
-  axes_  = std::move(parsed);
-  lease_ = std::move(lease);
+  axes_        = std::move(parsed);
+  translation_ = std::move(translation);
+  lease_       = std::move(lease);
 }
 
 float GlideBaseComponent::normalised_axis(const GlideInputSnapshot& snapshot,
@@ -218,6 +284,7 @@ GlideBaseComponent::SnapshotCache GlideBaseComponent::collect_snapshots() const 
     }
   };
 
+  if (translation_.configured) want(translation_.arm_id);
   for (const auto& axis : axes_) {
     if (axis.configured) want(axis.arm_id);
   }
@@ -246,6 +313,48 @@ float GlideBaseComponent::sample_axis(const AxisMap& axis,
                     axis.max, axis.deadzone);
 }
 
+std::pair<float, float> GlideBaseComponent::sample_translation(
+  const SnapshotCache& cache) const {
+  if (!translation_.configured) return {0.0f, 0.0f};
+
+  const auto it = cache.find(translation_.arm_id);
+  if (it == cache.end() || !it->second) return {0.0f, 0.0f};
+  const GlideInputSnapshot& snapshot = *it->second;
+
+  const float fwd = normalised_axis(snapshot, translation_.forward_source,
+                                    translation_.forward_invert);
+  const float lat = normalised_axis(snapshot, translation_.lateral_source,
+                                    translation_.lateral_invert);
+
+  // Treat the stick as a vector, not two numbers. Two things fall out of this
+  // that per-axis handling gets wrong on a holonomic base:
+  //
+  //  - The dead region is a circle, so the threshold to start moving is the
+  //    same in every direction. Per-axis deadzones make it a square, where a
+  //    diagonal nudge inside the corner reads as zero.
+  //  - Magnitude is clamped to `max`, so a full diagonal is exactly as fast as
+  //    a full push forward. Independent axes would reach max*sqrt(2) together,
+  //    making diagonals ~41% faster — a real surprise on a swerve base.
+  const float magnitude = std::hypot(fwd, lat);
+  if (magnitude <= 0.0f) return {0.0f, 0.0f};
+
+  // Deadzone is configured in output units (m/s) for consistency with the
+  // scalar axes, so convert to the normalised domain the magnitude lives in.
+  const float dead_norm = translation_.deadzone / translation_.max;
+  if (magnitude <= dead_norm) return {0.0f, 0.0f};
+
+  // Rescale the surviving range back onto 0..1 so output is continuous from
+  // zero at the deadzone edge rather than jumping to the deadzone value.
+  const float usable = 1.0f - dead_norm;
+  float scaled = usable > 0.0f ? (magnitude - dead_norm) / usable : 0.0f;
+  scaled = std::min(scaled, 1.0f);
+
+  // Preserve direction: divide by the original magnitude to get the unit
+  // vector, then apply the clamped speed.
+  const float speed = scaled * translation_.max;
+  return {fwd / magnitude * speed, lat / magnitude * speed};
+}
+
 std::vector<float> GlideBaseComponent::read() {
   // One read per handle for the whole tick, so rotation and translation cannot
   // come from different driver cycles.
@@ -254,6 +363,15 @@ std::vector<float> GlideBaseComponent::read() {
   std::vector<float> out(ba::kMaxSize, 0.0f);
   for (std::size_t i = 0; i < ba::kMaxSize; ++i) {
     out[i] = sample_axis(axes_[i], cache);
+  }
+
+  // After the per-axis pass, because translation owns kLinear and kLateral
+  // outright — configure() rejects a config that sets either alongside it, so
+  // this overwrites two values that are always zero.
+  if (translation_.configured) {
+    const auto [forward, lateral] = sample_translation(cache);
+    out[ba::kLinear]  = forward;
+    out[ba::kLateral] = lateral;
   }
 
   return out;
@@ -292,6 +410,17 @@ nlohmann::json GlideBaseComponent::get_info() const {
   }
   info["axes"] = std::move(axes);
 
+  if (translation_.configured) {
+    info["translation"] = {
+      {"arm_id", translation_.arm_id},
+      {"forward_source", source_name(translation_.forward_source)},
+      {"forward_invert", translation_.forward_invert},
+      {"lateral_source", source_name(translation_.lateral_source)},
+      {"lateral_invert", translation_.lateral_invert},
+      {"max", translation_.max},
+      {"deadzone", translation_.deadzone},
+    };
+  }
   return info;
 }
 
