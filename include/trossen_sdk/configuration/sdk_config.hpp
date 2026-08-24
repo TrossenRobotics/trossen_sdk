@@ -29,7 +29,8 @@
  *   "hardware": {
  *     "arms":    { "<id>": { "ip_address": "...", "model": "...", "end_effector": "..." }, ... },
  *     "cameras": [ { "id": "...", "type": "realsense_camera", "serial_number": "...", ... }, ... ],
- *     "mobile_base": { "reset_odometry": false, "enable_torque": false }
+ *     "mobile_base": { "reset_odometry": false, "enable_torque": false },
+ *     "controls": { "<id>": { "type": "glide_arm_input", "arms": ["<id>", ...] } }
  *   },
  *   "producers": [
  *     { "type": "trossen_arm",      "hardware_id": "<id>", "stream_id": "<id>", "poll_rate_hz": 30.0, "use_device_time": false },
@@ -65,6 +66,7 @@
 #ifndef TROSSEN_SDK__CONFIGURATION__SDK_CONFIG_HPP_
 #define TROSSEN_SDK__CONFIGURATION__SDK_CONFIG_HPP_
 
+#include <map>
 #include <optional>
 #include <string>
 #include <unordered_map>
@@ -75,6 +77,7 @@
 #include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/camera_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/mobile_base_config.hpp"
+#include "trossen_sdk/configuration/types/hardware/control_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/policy_client_config.hpp"
 #include "trossen_sdk/configuration/types/observers/observer_config.hpp"
 #include "trossen_sdk/configuration/types/producers/producer_config.hpp"
@@ -85,7 +88,7 @@
 namespace trossen::configuration {
 
 /**
- * @brief Hardware sub-configuration: arms, cameras, and optional mobile base
+ * @brief Hardware sub-configuration: arms, cameras, controls, and optional mobile base
  */
 struct HardwareConfig {
   /// @brief Named arm configs, keyed by logical id (e.g. "leader_left", "follower_right")
@@ -99,6 +102,13 @@ struct HardwareConfig {
 
   /// @brief Policy-client hardware configs (zero or more)
   std::vector<PolicyClientConfig> policy_clients;
+
+  /// @brief Operator control configs, keyed by logical id (e.g. "glide_inputs")
+  ///
+  /// Ordered rather than hashed, so construction runs in the same sequence on
+  /// every host — bring-up logs stay comparable, and a type that ever does turn
+  /// out to be order-sensitive does not depend on a hash seed.
+  std::map<std::string, ControlConfig> controls;
 
   static HardwareConfig from_json(const nlohmann::json& j);
 };
