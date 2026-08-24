@@ -25,12 +25,14 @@ using Space = trossen::hw::teleop::TeleopCapable::Space;
 TEST(TeleopSpaceHelpersTest, SpaceNameReturnsLowerCaseJsonName) {
   EXPECT_EQ(space_name(Space::Joint),     "joint");
   EXPECT_EQ(space_name(Space::Cartesian), "cartesian");
+  EXPECT_EQ(space_name(Space::Base),      "base");
 }
 
 // space_iface_name: every Space value returns the expected C++ interface name.
 TEST(TeleopSpaceHelpersTest, IfaceNameReturnsCppClassName) {
   EXPECT_EQ(space_iface_name(Space::Joint),     "JointSpaceTeleop");
   EXPECT_EQ(space_iface_name(Space::Cartesian), "CartesianSpaceTeleop");
+  EXPECT_EQ(space_iface_name(Space::Base),      "BaseSpaceTeleop");
 }
 
 // space_from_name: known names resolve to the matching Space value.
@@ -42,6 +44,10 @@ TEST(TeleopSpaceHelpersTest, FromNameResolvesKnownSpaces) {
   auto cart = space_from_name("cartesian");
   ASSERT_TRUE(cart.has_value());
   EXPECT_EQ(*cart, Space::Cartesian);
+
+  auto base = space_from_name("base");
+  ASSERT_TRUE(base.has_value());
+  EXPECT_EQ(*base, Space::Base);
 }
 
 // space_from_name: unknown inputs return nullopt, never fall through silently.
@@ -54,7 +60,7 @@ TEST(TeleopSpaceHelpersTest, FromNameReturnsNulloptForUnknown) {
 
 // Round-trip: for every known space, name → Space → name returns the same name.
 TEST(TeleopSpaceHelpersTest, RoundTripNameThroughEnum) {
-  for (const auto s : {Space::Joint, Space::Cartesian}) {
+  for (const auto s : {Space::Joint, Space::Cartesian, Space::Base}) {
     auto name = space_name(s);
     auto parsed = space_from_name(std::string{name});
     ASSERT_TRUE(parsed.has_value()) << "Failed to parse " << name;
