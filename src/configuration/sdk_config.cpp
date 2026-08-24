@@ -35,6 +35,21 @@ HardwareConfig HardwareConfig::from_json(const nlohmann::json& j) {
     c.mobile_base = MobileBaseConfig::from_json(j.at("mobile_base"));
   }
 
+  if (j.contains("controls")) {
+    if (!j.at("controls").is_object()) {
+      throw std::runtime_error(
+        "HardwareConfig: 'controls' must be an object keyed by component id");
+    }
+    for (const auto& [id, ctrl_j] : j.at("controls").items()) {
+      try {
+        c.controls[id] = ControlConfig::from_json(ctrl_j);
+      } catch (const std::exception& e) {
+        throw std::runtime_error(
+          "HardwareConfig: failed to parse controls['" + id + "']: " + e.what());
+      }
+    }
+  }
+
   if (j.contains("policy_clients")) {
     if (!j.at("policy_clients").is_array()) {
       throw std::runtime_error(
