@@ -5,13 +5,30 @@
 
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+// For parse_nullable_limits: the null-means-unclamped encoding has to agree
+// between the config struct and this parse, so it lives in one place.
+#include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cmath>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 namespace trossen::hw::arm {
+
+namespace {
+/// Monotonic seconds, for the command filter's sample timestamps. Only
+/// differences between successive calls matter, so the epoch is irrelevant —
+/// but the clock must be steady, since a wall-clock step (NTP, DST) would
+/// otherwise appear as a huge dt and momentarily disable the smoothing.
+double now_seconds() {
+  using std::chrono::duration;
+  using std::chrono::steady_clock;
+  return duration<double>(steady_clock::now().time_since_epoch()).count();
+}
+}  // namespace
 
 void TrossenArmComponent::configure(const nlohmann::json& config) {
   // Parse IP address
@@ -87,6 +104,136 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     }
   }
 
+  const size_t njoints = static_cast<size_t>(driver_->get_num_joints());
+
+  // ── Host-side command clamp ──────────────────────────────────────────────
+  // Bounds what teleop is allowed to ask for, independently of the arm's own
+  // operating limits. NaN entries (JSON null) mean "leave this joint alone", so
+  // unlike the tolerances below a partially-specified array is the normal case.
+  {
+    auto parse_clamp = [&](const char* key, std::vector<float>& dst) {
+      if (!config.contains(key)) return;
+      dst = configuration::ArmConfig::parse_nullable_limits(config.at(key));
+      if (!dst.empty() && dst.size() != njoints) {
+        throw std::runtime_error(
+          std::string("TrossenArmComponent: '") + key + "' length (" +
+          std::to_string(dst.size()) + ") must match joint count (" +
+          std::to_string(njoints) + ")");
+      }
+    };
+    parse_clamp("command_position_min", command_position_min_);
+    parse_clamp("command_position_max", command_position_max_);
+    // An inverted pair would clamp the joint to a single unreachable value and
+    // look like a dead axis at runtime, so reject it here where the key names
+    // are still available to say which joint is wrong.
+    for (size_t j = 0; j < njoints; ++j) {
+      const bool has_min =
+        j < command_position_min_.size() && !std::isnan(command_position_min_[j]);
+      const bool has_max =
+        j < command_position_max_.size() && !std::isnan(command_position_max_[j]);
+      if (has_min && has_max && command_position_min_[j] > command_position_max_[j]) {
+        throw std::runtime_error(
+          "TrossenArmComponent: command clamp for joint " + std::to_string(j) +
+          " has min (" + std::to_string(command_position_min_[j]) + ") above max (" +
+          std::to_string(command_position_max_[j]) + "), which would pin the joint");
+      }
+    }
+  }
+
+  // ── Controller limit tolerances ──────────────────────────────────────────
+  // Read the controller's current limits and override only the tolerance fields
+  // that were configured, so an unset field keeps its firmware default. The
+  // controller does not persist these across a power cycle, which is why they
+  // are pushed on every configure() rather than once at commissioning.
+  {
+    auto parse_tolerance = [&](const char* key, std::vector<float>& dst) {
+      if (!config.contains(key)) return;
+      dst = config.at(key).get<std::vector<float>>();
+      if (!dst.empty() && dst.size() != njoints) {
+        throw std::runtime_error(
+          std::string("TrossenArmComponent: '") + key + "' length (" +
+          std::to_string(dst.size()) + ") must match joint count (" +
+          std::to_string(njoints) + ")");
+      }
+    };
+    parse_tolerance("position_tolerance", position_tolerance_);
+    parse_tolerance("velocity_tolerance", velocity_tolerance_);
+    parse_tolerance("effort_tolerance", effort_tolerance_);
+
+    if (!position_tolerance_.empty() || !velocity_tolerance_.empty() ||
+        !effort_tolerance_.empty()) {
+      auto limits = driver_->get_joint_limits();
+      for (size_t j = 0; j < njoints && j < limits.size(); ++j) {
+        if (!position_tolerance_.empty()) {
+          limits[j].position_tolerance = position_tolerance_[j];
+        }
+        if (!velocity_tolerance_.empty()) {
+          limits[j].velocity_tolerance = velocity_tolerance_[j];
+        }
+        if (!effort_tolerance_.empty()) {
+          limits[j].effort_tolerance = effort_tolerance_[j];
+        }
+      }
+      try {
+        driver_->set_joint_limits(limits);
+      } catch (const std::exception& e) {
+        throw std::runtime_error(
+          "TrossenArmComponent: Failed to set joint limits: " + std::string(e.what()));
+      }
+    }
+  }
+
+  // ── Command smoothing ────────────────────────────────────────────────────
+  // Opt-in one-Euro low-pass on write_joint() commands. Off unless asked for:
+  // it trades lag for jitter rejection, which is only a good trade when the
+  // command source is genuinely noisy (a hand-held leader), not when it is an
+  // SDK-side trajectory or a policy.
+  if (config.contains("smoothing_enabled")) {
+    smoothing_enabled_ = config.at("smoothing_enabled").get<bool>();
+  }
+  if (config.contains("smoothing_gripper")) {
+    smoothing_gripper_ = config.at("smoothing_gripper").get<bool>();
+  }
+  {
+    // Validate the tuning whenever it is present, even if smoothing is
+    // currently off — a typo in a disabled block should still be reported
+    // rather than lying dormant until someone flips the feature on.
+    auto parse_positive = [&](const char* key, float& dst) {
+      if (!config.contains(key)) return;
+      dst = config.at(key).get<float>();
+      if (dst <= 0.0f || !std::isfinite(dst)) {
+        throw std::runtime_error(
+          std::string("TrossenArmComponent: '") + key + "' must be positive and finite");
+      }
+    };
+    // Zero is rejected rather than passed through: it makes the filter's alpha
+    // zero, which freezes the output at the first sample forever instead of
+    // failing.
+    parse_positive("smoothing_min_cutoff_hz", smoothing_min_cutoff_hz_);
+    parse_positive("smoothing_d_cutoff_hz", smoothing_d_cutoff_hz_);
+    // beta may legitimately be zero — that is a plain (non-adaptive) low-pass.
+    if (config.contains("smoothing_beta")) {
+      smoothing_beta_ = config.at("smoothing_beta").get<float>();
+      if (smoothing_beta_ < 0.0f || !std::isfinite(smoothing_beta_)) {
+        throw std::runtime_error(
+          "TrossenArmComponent: 'smoothing_beta' must be non-negative and finite");
+      }
+    }
+  }
+
+  // Size the command filter to this arm's joint count. Left default-constructed
+  // (size 0) when smoothing is off, so the disabled path allocates nothing.
+  //
+  // The gripper is excluded by sizing the filter one element short rather than
+  // by filtering and then discarding: VecOneEuroFilter only touches the first
+  // size() elements, so the gripper's raw command passes through untouched and
+  // no filter state is advanced for it.
+  if (smoothing_enabled_) {
+    const size_t nfilt = (smoothing_gripper_ || njoints == 0) ? njoints : njoints - 1;
+    cmd_filt_ = utils::VecOneEuroFilter(
+      nfilt, smoothing_min_cutoff_hz_, smoothing_beta_, smoothing_d_cutoff_hz_);
+  }
+
   // TODO(lukeschmitt-tr): Can do other configuration like joint characteristics here if needed
 }
 
@@ -118,7 +265,38 @@ void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
       std::to_string(cmd.size()));
   }
   std::vector<double> pos_d(cmd.begin(), cmd.end());
+  // Clamp BEFORE filtering, to keep the filter from winding up. Either order
+  // respects the band — clamping last trivially does — but filtering first lets
+  // the filter's state follow the command out past the bound, and when the
+  // leader comes back inside, the output stays pinned until that state has
+  // travelled back. Clamping first means the filter only ever sees in-band
+  // values, so the arm leaves the bound on the same tick the leader does.
+  //
+  // Measured against this filter, band ±1, leader parked at 3× the bound: 10 ms
+  // of stick at the shipped tuning (beta 0.9), and 175 ms at beta 0 — the
+  // adaptive term is what keeps the wrong order from being obviously broken,
+  // which is exactly why the ordering deserves a comment.
+  clamp_command(pos_d);
+  // Low-pass the commanded pose before handing it to the controller, so a
+  // jittery source (a hand-held leader) doesn't shake the arm. Adaptive: it
+  // filters hard while the operator holds still and backs off as they move, so
+  // fast motion stays responsive. This runs before the controller's own
+  // goal-time interpolation, which shapes the approach rather than the target.
+  if (smoothing_enabled_) {
+    cmd_filt_.filter(pos_d, now_seconds());
+  }
   driver_->set_all_positions(pos_d, write_moving_time_s_, false);
+}
+
+void TrossenArmComponent::clamp_command(std::vector<double>& pos) const {
+  for (size_t j = 0; j < pos.size(); ++j) {
+    if (j < command_position_min_.size() && !std::isnan(command_position_min_[j])) {
+      pos[j] = std::max(pos[j], static_cast<double>(command_position_min_[j]));
+    }
+    if (j < command_position_max_.size() && !std::isnan(command_position_max_[j])) {
+      pos[j] = std::min(pos[j], static_cast<double>(command_position_max_[j]));
+    }
+  }
 }
 
 std::vector<float> TrossenArmComponent::read_cartesian() {
@@ -150,6 +328,12 @@ void TrossenArmComponent::write_cartesian(const std::vector<float>& cmd) {
 
 void TrossenArmComponent::prepare_for_teleop() {
   if (!driver_) return;
+  // Drop filter history so a new teleop session doesn't take its first
+  // derivative against a pose left over from the previous one. That difference
+  // can be the whole workspace, which reads as an enormous velocity, opens the
+  // adaptive cutoff wide, and effectively disables the smoothing for the first
+  // ticks of the session — when the arm is nearest the operator.
+  cmd_filt_.reset();
   if (is_leader_) {
     // Leader: enable gravity compensation.
     driver_->set_all_modes(trossen_arm::Mode::external_effort);
