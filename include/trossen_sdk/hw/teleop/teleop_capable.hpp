@@ -2,7 +2,7 @@
  * @file teleop_capable.hpp
  * @brief Mixin interfaces for teleop-capable hardware.
  *
- * Teleop capability is structured around four interfaces:
+ * Teleop capability is structured around five interfaces:
  *
  *   - TeleopTypeIO          : pure IO contract (`read()` / `write()`) that
  *                              the controller's hot loop talks to.
@@ -12,6 +12,9 @@
  *                              nullptr if unsupported).
  *   - JointSpaceTeleop       : TeleopCapable + TeleopTypeIO for joint space.
  *   - CartesianSpaceTeleop   : TeleopCapable + TeleopTypeIO for cartesian space.
+ *   - BaseSpaceTeleop        : TeleopCapable + TeleopTypeIO for mobile-base
+ *                              velocity space (append-only axis vector led by
+ *                              [linear, angular] — see `base_axis`).
  *
  * A hardware component must implement at least one space child to be usable
  * by the teleop controller. The controller calls `as_space_io(cfg.space)`
@@ -51,6 +54,7 @@
 #define TROSSEN_SDK__HW__TELEOP__TELEOP_CAPABLE_HPP_
 
 #include <array>
+#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string_view>
@@ -113,7 +117,7 @@ public:
   /// `Count` is a sentinel (not a real space) used to make the descriptor
   /// table's compile-time check meaningful. When adding a new space,
   /// insert it before `Count` and add a matching row to `kSpaceDescriptors`.
-  enum class Space { Joint, Cartesian, Count };
+  enum class Space { Joint, Cartesian, Base, Count };
 
   virtual ~TeleopCapable() = default;
 
@@ -167,9 +171,10 @@ struct SpaceDescriptor {
   std::string_view     iface_name;  ///< C++ interface, e.g. "JointSpaceTeleop".
 };
 
-inline constexpr std::array<SpaceDescriptor, 2> kSpaceDescriptors{{
+inline constexpr std::array<SpaceDescriptor, 3> kSpaceDescriptors{{
   {TeleopCapable::Space::Joint,     "joint",     "JointSpaceTeleop"},
   {TeleopCapable::Space::Cartesian, "cartesian", "CartesianSpaceTeleop"},
+  {TeleopCapable::Space::Base,      "base",      "BaseSpaceTeleop"},
 }};
 
 // Compile-time check: every Space enum value has a descriptor row. The
@@ -231,6 +236,84 @@ class CartesianSpaceTeleop : public virtual TeleopCapable, public TeleopTypeIO {
 public:
   TeleopTypeIO* as_space_io(Space s) override {
     return s == Space::Cartesian ? static_cast<TeleopTypeIO*>(this) : nullptr;
+  }
+};
+
+// ── Base-space axis layout ───────────────────────────────────────────────
+//
+// Base commands are a variable-length vector whose axes are positional and
+// APPEND-ONLY. The first two are required and their meaning is frozen: a
+// differential-drive base (SLATE) and a holonomic base with a lift both start
+// `[linear, angular, ...]`, so a 2-element leader can drive a 4-axis follower
+// and vice versa — each side reads the axes it understands and ignores the rest.
+//
+// Axes are NOT reordered to group "translation" together, even though
+// `lateral` would sit more naturally beside `linear`: index 1 already means
+// angular in shipped SLATE and VR code, and renumbering would silently swap
+// yaw for strafe on hardware that is working today.
+//
+// SIGNS. The frame is right-handed with +x forward and +z up, so every axis
+// below is positive in the LEFT/UP/FORWARD sense: forward, counter-clockwise
+// (turning LEFT), lift up, strafe left. A raw joystick axis carries no
+// convention of its own, so which raw axis and which sign feeds each axis here
+// is a per-device MEASUREMENT, not something to derive — each base component
+// documents its own. Getting it wrong is invisible in code review and reads on
+// hardware as "rotate right turns it left" or "forward drives it sideways".
+namespace base_axis {
+
+/// Forward translational velocity along the base heading (m/s), positive
+/// forward. Required.
+inline constexpr std::size_t kLinear = 0;
+
+/// Yaw rate about the vertical axis (rad/s), positive counter-clockwise seen
+/// from above — i.e. positive turns the robot LEFT. Required.
+inline constexpr std::size_t kAngular = 1;
+
+/// Vertical lift / linear-actuator velocity, in the actuator's own units per
+/// second. Optional — absent on bases without a lift (SLATE).
+inline constexpr std::size_t kLift = 2;
+
+/// Lateral (strafe) velocity, positive left (m/s). Optional — meaningful only
+/// on holonomic bases; a differential-drive base cannot honour it.
+inline constexpr std::size_t kLateral = 3;
+
+/// Smallest valid base command: linear + angular.
+inline constexpr std::size_t kMinSize = 2;
+
+/// Largest layout currently defined. Longer vectors are not an error — a
+/// follower ignores axes past what its hardware supports — but nothing in the
+/// SDK produces them yet.
+inline constexpr std::size_t kMaxSize = 4;
+
+/// Read `axis` from `cmd`, or `fallback` if the vector is too short to carry
+/// it. The safe way to consume optional axes: a follower asks for kLift and
+/// gets 0 from a 2-element differential-drive leader instead of reading past
+/// the end.
+inline float get(const std::vector<float>& cmd, std::size_t axis,
+                 float fallback = 0.0f) {
+  return axis < cmd.size() ? cmd[axis] : fallback;
+}
+
+}  // namespace base_axis
+
+/**
+ * @brief Mobile-base velocity teleop interface.
+ *
+ * Commands carry `[linear_mps, angular_rps]` plus optional trailing axes —
+ * see the `base_axis` constants above for the layout and why it is
+ * append-only. Index by those names rather than by literal, and read optional
+ * axes through `base_axis::get()` so a short vector degrades to zero instead
+ * of reading out of bounds.
+ *
+ * Implementations advertise their own length from `read()` and tolerate any
+ * length in `write()`; there is deliberately no fixed size on this interface,
+ * because a 2-axis differential-drive base and a 4-axis holonomic one are both
+ * valid followers for the same leader.
+ */
+class BaseSpaceTeleop : public virtual TeleopCapable, public TeleopTypeIO {
+public:
+  TeleopTypeIO* as_space_io(Space s) override {
+    return s == Space::Base ? static_cast<TeleopTypeIO*>(this) : nullptr;
   }
 };
 
