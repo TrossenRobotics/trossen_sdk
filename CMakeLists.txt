@@ -20,6 +20,12 @@ option(TROSSEN_ENABLE_RERUN_OBSERVER "Build RerunObserver (depends on rerun-cpp 
 # server bridge flow: cmake -DTROSSEN_SDK_ENABLE_POLICY_CLIENT=ON ...
 option(TROSSEN_SDK_ENABLE_POLICY_CLIENT
   "Build PolicyClient (depends on IXWebSocket + msgpack-cxx)" OFF)
+# OFF by default: it requires the trossen_base drivetrain library to be installed,
+# which most hosts do not have. It gates that LIBRARY, not the robot -- the Glide
+# handle layer needs only libtrossen_arm and is built unconditionally, so a
+# Workbench runs the whole handle path with this off. Enable on a Rivet:
+#   cmake -DTROSSEN_ENABLE_RIVET=ON ...
+option(TROSSEN_ENABLE_RIVET "Enable Rivet mobile base support (requires trossen_base)" OFF)
 
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
@@ -130,6 +136,17 @@ find_package(BZip2 REQUIRED)
 find_package(Arrow REQUIRED)
 find_package(Parquet REQUIRED)
 find_package(libtrossen_arm REQUIRED)
+
+# Rivet's drivetrain library, consumed the same way as libtrossen_arm above: a
+# Trossen-shipped prebuilt, found rather than built. REQUIRED so a host without
+# it fails at configure time naming the package, instead of at link time naming
+# a symbol.
+if(TROSSEN_ENABLE_RIVET)
+  message(STATUS "Rivet mobile base support enabled")
+  find_package(trossen_base REQUIRED)
+  target_sources(trossen_sdk PRIVATE src/hw/base/trossen_base_component.cpp)
+  target_link_libraries(trossen_sdk PUBLIC trossen_base)
+endif()
 
 include(FetchContent)
 
