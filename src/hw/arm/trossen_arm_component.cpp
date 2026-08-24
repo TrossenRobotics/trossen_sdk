@@ -104,7 +104,31 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
     }
   }
 
+  if (config.contains("actuated")) {
+    actuated_ = config.at("actuated").get<bool>();
+  }
+
   const size_t njoints = static_cast<size_t>(driver_->get_num_joints());
+
+  // ── Gripper force feedback ───────────────────────────────────────────────
+  // Leader-only reverse channel: the follower's measured grasp effort is
+  // reflected onto this gripper through a cubic curve. Off by default.
+  if (config.contains("gripper_force_feedback")) {
+    gripper_force_feedback_ = config.at("gripper_force_feedback").get<bool>();
+  }
+  {
+    auto parse_curve = [&](const char* key, float& dst) {
+      if (!config.contains(key)) return;
+      dst = config.at(key).get<float>();
+      if (!std::isfinite(dst)) {
+        throw std::runtime_error(
+          std::string("TrossenArmComponent: '") + key + "' must be finite");
+      }
+    };
+    parse_curve("gripper_feedback_leader_max", gripper_feedback_leader_max_);
+    parse_curve("gripper_feedback_follower_max", gripper_feedback_follower_max_);
+    parse_curve("gripper_feedback_offset", gripper_feedback_offset_);
+  }
 
   // ── Host-side command clamp ──────────────────────────────────────────────
   // Bounds what teleop is allowed to ask for, independently of the arm's own
@@ -299,6 +323,33 @@ void TrossenArmComponent::clamp_command(std::vector<double>& pos) const {
   }
 }
 
+std::optional<float> TrossenArmComponent::read_gripper_effort() {
+  if (!driver_) return std::nullopt;
+  return static_cast<float>(driver_->get_gripper_effort());
+}
+
+void TrossenArmComponent::apply_gripper_feedback(float follower_gripper_effort) {
+  if (!driver_) return;
+  // Cubic curve (from the bilateral reference): more resistance at higher grip
+  // efforts, with an offset that keeps the leader gripper open when nothing is
+  // grasped. leader = leader_max·norm^3 + offset.
+  float norm = 0.0f;
+  if (gripper_feedback_follower_max_ != 0.0f) {
+    norm = std::abs(follower_gripper_effort) / gripper_feedback_follower_max_;
+    // std::abs already guarantees norm >= 0, so only the upper bound can fire.
+    norm = std::min(norm, 1.0f);
+  }
+  const double leader_effort =
+    gripper_feedback_leader_max_ * std::pow(norm, 3) + gripper_feedback_offset_;
+  // Ramp the rendered effort over 0.2s (linear interpolation) rather than
+  // applying it instantly. At the contact boundary the follower's measured
+  // effort flips rapidly between no-contact and contact; applying that to the
+  // leader instantly (goal_time 0) sets up a limit-cycle oscillation. The 0.2s
+  // ramp acts as a rate limiter that damps the chatter — matching the bilateral
+  // reference, which uses the same goal_time on this command.
+  driver_->set_gripper_effort(leader_effort, 0.2, false);
+}
+
 std::vector<float> TrossenArmComponent::read_cartesian() {
   if (!driver_) return {};
   const auto& out = driver_->get_robot_output();
@@ -334,6 +385,28 @@ void TrossenArmComponent::prepare_for_teleop() {
   // adaptive cutoff wide, and effectively disables the smoothing for the first
   // ticks of the session — when the arm is nearest the operator.
   cmd_filt_.reset();
+  if (!actuated_) {
+    // Passive leader: the arm joints have no motors, so putting them in
+    // position mode is harmless and keeps their positions readable. What we
+    // must NOT do is the gravity-compensation setup below — commanding
+    // external effort on joints that cannot act on it is a controller error,
+    // not a no-op.
+    driver_->set_all_modes(trossen_arm::Mode::position);
+    // The gripper is the one part of a passive leader that may have a motor,
+    // and it goes to effort mode rather than position: this gripper is an
+    // INPUT, read to drive the follower's, so it has to stay back-driveable.
+    // Position mode would hold its setpoint and fight the operator's hand.
+    // The neutral command is set explicitly, since a mode change alone would
+    // leave whatever setpoint was there before, and a stale non-zero one
+    // squeezes the gripper shut. With feedback on, that neutral value is the
+    // curve's resting offset, so the gripper holds open from before the first
+    // tick instead of going slack and then stiffening.
+    driver_->set_gripper_mode(trossen_arm::Mode::effort);
+    driver_->set_gripper_effort(
+      gripper_force_feedback_ ? gripper_feedback_offset_ : 0.0, 0.0, false);
+    gripper_effort_engaged_ = true;
+    return;
+  }
   if (is_leader_) {
     // Leader: enable gravity compensation.
     driver_->set_all_modes(trossen_arm::Mode::external_effort);
@@ -348,6 +421,26 @@ void TrossenArmComponent::prepare_for_teleop() {
 
 void TrossenArmComponent::end_teleop() {
   if (!driver_) return;
+  if (!actuated_) {
+    // Passive leader: nothing to hold and nowhere to drive it. Skipping
+    // straight to cleanup is not just an optimisation — the hold-and-rest
+    // sequence below commands positions, which a joint with no motor cannot
+    // reach, so the blocking move would wait out its full trajectory time and
+    // then report an arm that never arrived.
+    std::cout << "  [end_teleop] " << get_identifier()
+              << ": passive leader, nothing to rest" << std::endl;
+    // Release the gripper before the driver goes away: back to zero effort,
+    // then braked. Leaving it in effort mode would keep the last commanded
+    // value pressing on the operator's hand after the session has ended.
+    if (gripper_effort_engaged_) {
+      driver_->set_gripper_effort(0.0, 0.0, false);
+      driver_->set_gripper_mode(trossen_arm::Mode::idle);
+      gripper_effort_engaged_ = false;
+    }
+    driver_->cleanup();
+    driver_.reset();
+    return;
+  }
   std::cout << "  [end_teleop] " << get_identifier()
             << ": holding pose, then returning to rest over "
             << staging_time_s_ << "s..." << std::endl;
@@ -381,6 +474,7 @@ void TrossenArmComponent::on_pre_episode() {
 
 void TrossenArmComponent::stage() {
   if (!driver_) return;
+  if (!actuated_) return;  // passive leader cannot move to a staging pose
   if (staged_position_.empty()) {
     std::cout << "  [stage] " << get_identifier()
               << ": no staged_position configured, skipping" << std::endl;
