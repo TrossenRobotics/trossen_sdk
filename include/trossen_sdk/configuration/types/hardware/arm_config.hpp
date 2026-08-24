@@ -27,6 +27,13 @@ namespace trossen::configuration {
  *   "staging_time_s": 2.0,                                // optional
  *   "episode_lifecycle_enabled": true,                    // optional, default false
  *   "write_moving_time_s": 0.1,                           // optional, default 0.0
+ *   "actuated": false,                                    // optional, default true
+ *
+ *   // Leader gripper force feedback — optional, off by default
+ *   "gripper_force_feedback": true,
+ *   "gripper_feedback_leader_max":   27.0,
+ *   "gripper_feedback_follower_max": 87.5,
+ *   "gripper_feedback_offset":        8.0,
  *
  *   // Command smoothing — optional, all default off / to the values below
  *   "smoothing_enabled": true,
@@ -87,6 +94,31 @@ struct ArmConfig {
   /// is superseded before it is reached, so the arm perpetually chases a moving
   /// target and never settles.
   float write_moving_time_s{0.0f};
+
+  /// @brief Whether the arm has actuators. A passive leader (e.g. the
+  /// lightweight Trossen leader) only streams joint positions and cannot be
+  /// commanded, so teleop staging / mode setup / rest moves are skipped.
+  bool actuated{true};
+
+  /// @brief Leader-only: render gripper force feedback. When true, the teleop
+  /// loop reflects the FOLLOWER's measured gripper effort back onto this
+  /// gripper, so the operator feels the grasp. The leader's arm joints may
+  /// still be passive — only the gripper needs a motor. The follower gripper
+  /// stays plain position passthrough.
+  bool gripper_force_feedback{false};
+
+  /// @brief Cubic feedback constants (N), from the bilateral reference:
+  /// leader effort at full grip, the follower effort treated as full grip (the
+  /// normalizer), and a baseline opening offset that keeps the leader gripper
+  /// open when nothing is grasped.
+  ///
+  /// leader = leader_max·norm³ + offset, where
+  /// norm = clamp(|follower_effort| / follower_max, 0, 1). Cubic rather than
+  /// linear so light contact stays light and resistance builds sharply only
+  /// near a firm grip.
+  float gripper_feedback_leader_max{27.0f};
+  float gripper_feedback_follower_max{87.5f};
+  float gripper_feedback_offset{8.0f};
 
   /// @brief Opt-in one-Euro adaptive low-pass on the positions written by
   /// write_joint(). Off by default: it adds lag, and every arm commanded from a
@@ -217,6 +249,19 @@ struct ArmConfig {
     if (j.contains("write_moving_time_s")) {
       j.at("write_moving_time_s").get_to(c.write_moving_time_s);
     }
+    if (j.contains("actuated")) j.at("actuated").get_to(c.actuated);
+    if (j.contains("gripper_force_feedback")) {
+      j.at("gripper_force_feedback").get_to(c.gripper_force_feedback);
+    }
+    if (j.contains("gripper_feedback_leader_max")) {
+      j.at("gripper_feedback_leader_max").get_to(c.gripper_feedback_leader_max);
+    }
+    if (j.contains("gripper_feedback_follower_max")) {
+      j.at("gripper_feedback_follower_max").get_to(c.gripper_feedback_follower_max);
+    }
+    if (j.contains("gripper_feedback_offset")) {
+      j.at("gripper_feedback_offset").get_to(c.gripper_feedback_offset);
+    }
     if (j.contains("smoothing_enabled")) {
       j.at("smoothing_enabled").get_to(c.smoothing_enabled);
     }
@@ -257,8 +302,19 @@ struct ArmConfig {
       {"end_effector", end_effector},
       {"staging_time_s", staging_time_s},
       {"episode_lifecycle_enabled", episode_lifecycle_enabled},
-      {"write_moving_time_s", write_moving_time_s}
+      {"write_moving_time_s", write_moving_time_s},
+      {"actuated", actuated}
     };
+    // Emit the remap only when set, to keep ordinary arm configs clean.
+    // Emit the feedback curve only when the feature is on: the constants are
+    // meaningless while it is off, and emitting them would put four keys into
+    // every ordinary arm's config.
+    if (gripper_force_feedback) {
+      j["gripper_force_feedback"] = gripper_force_feedback;
+      j["gripper_feedback_leader_max"] = gripper_feedback_leader_max;
+      j["gripper_feedback_follower_max"] = gripper_feedback_follower_max;
+      j["gripper_feedback_offset"] = gripper_feedback_offset;
+    }
     // Emit staging only when configured. TrossenArmComponent::configure()
     // rejects a present-but-wrong-length staged_position, so an empty array
     // would break the no-staging case.
