@@ -40,4 +40,9 @@ message Odometry2D {
 
   // Body-frame twist
   Twist2D twist = 4;
+
+  // Vertical lift velocity in actuator units per second (0 on bases with no
+  // lift). Outside Twist2D because a lift is not planar motion; see the TODO on
+  // Odometry2DRecord in data/record.hpp for why carrying it here is provisional.
+  float lift_velocity = 5;
 }
