@@ -17,6 +17,14 @@ target_link_libraries(trossen_mobile_ai trossen_sdk libtrossen_arm)
 add_executable(trossen_workbench trossen_workbench/trossen_workbench.cpp)
 target_link_libraries(trossen_workbench trossen_sdk libtrossen_arm)
 
+# Trossen Rivet — the Workbench plus a holonomic swerve base with a lift.
+# Gated because the base needs the trossen_base library; the Glide handle layer
+# it shares with the Workbench is not gated and builds either way.
+if(TROSSEN_ENABLE_RIVET)
+  add_executable(trossen_rivet trossen_rivet/trossen_rivet.cpp)
+  target_link_libraries(trossen_rivet trossen_sdk libtrossen_arm)
+endif()
+
 # Trossen Stationary AI Policy — 2 followers + 4 cameras, policy-driven leaders.
 # Requires the PolicyClient gate (FetchContent of IXWebSocket + msgpack-cxx).
 #
