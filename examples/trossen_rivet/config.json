@@ -3,7 +3,7 @@
   "hardware": {
     "arms": {
       "glide_left": {
-        "ip_address": "192.168.0.3",
+        "ip_address": "192.168.5.13",
         "model": "glide_left",
         "end_effector": "wxai_v0_leader",
         "actuated": false,
@@ -13,7 +13,7 @@
         "gripper_feedback_offset": 6.5
       },
       "glide_right": {
-        "ip_address": "192.168.0.2",
+        "ip_address": "192.168.5.12",
         "model": "glide_right",
         "end_effector": "wxai_v0_leader",
         "actuated": false,
@@ -23,7 +23,7 @@
         "gripper_feedback_offset": 6.5
       },
       "follower_left": {
-        "ip_address": "192.168.1.4",
+        "ip_address": "192.168.1.15",
         "model": "pro",
         "end_effector": "pro_base",
         "write_moving_time_s": 0.3,
@@ -53,7 +53,7 @@
         ]
       },
       "follower_right": {
-        "ip_address": "192.168.1.5",
+        "ip_address": "192.168.1.14",
         "model": "pro",
         "end_effector": "pro_base",
         "write_moving_time_s": 0.3,
@@ -96,9 +96,9 @@
         "translation": {
           "arm_id": "glide_left",
           "forward_source": "joystick_x",
-          "forward_invert": false,
+          "forward_invert": true,
           "lateral_source": "joystick_y",
-          "lateral_invert": true,
+          "lateral_invert": false,
           "max": 0.6,
           "deadzone": 0.05
         },
@@ -106,7 +106,7 @@
           "angular": {
             "arm_id": "glide_right",
             "source": "joystick_x",
-            "invert": true,
+            "invert": false,
             "max": 1.2,
             "deadzone": 0.08
           },
@@ -154,7 +154,7 @@
       {
         "id": "camera_main",
         "type": "zed_camera",
-        "serial_number": "51287468",
+        "serial_number": "56066260",
         "resolution": "HD1200",
         "fps": 30,
         "use_depth": false
@@ -162,7 +162,7 @@
       {
         "id": "camera_left",
         "type": "zed_camera",
-        "serial_number": "97900849",
+        "serial_number": "99078701",
         "resolution": "HD1200",
         "fps": 30,
         "use_depth": false
@@ -170,7 +170,7 @@
       {
         "id": "camera_right",
         "type": "zed_camera",
-        "serial_number": "97525506",
+        "serial_number": "97839053",
         "resolution": "HD1200",
         "fps": 30,
         "use_depth": false

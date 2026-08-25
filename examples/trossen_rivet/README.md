@@ -179,23 +179,25 @@ chase it by flipping signs; a flip will only be right until the next restart.
 The handles and the followers are on **different subnets** — deliberate, and it
 matches the rig wiring, so check both before assuming a fault.
 
-| Arm | Role | Default IP |
-|---|---|---|
-| `glide_left` | Handle (passive leader) | `192.168.0.3` |
-| `glide_right` | Handle (passive leader) | `192.168.0.2` |
-| `follower_left` | Follower | `192.168.1.4` |
-| `follower_right` | Follower | `192.168.1.5` |
+| Arm | Role | Default IP | Interface |
+|---|---|---|---|
+| `glide_left` | Handle (passive leader) | `192.168.5.13` | wireless |
+| `glide_right` | Handle (passive leader) | `192.168.5.12` | wireless |
+| `follower_left` | Follower | `192.168.1.15` | wired |
+| `follower_right` | Follower | `192.168.1.14` | wired |
 
-These match `rivet-01`. **Other rigs differ** — `rivet-02` uses a different
-assignment — so confirm against the rig rather than assuming, and override
-without editing the file:
+These match `rivet-02`, the rig this example was brought up on. **Other rigs
+differ** — `rivet-01` uses a different assignment — so confirm against the rig
+rather than assuming, and override without editing the file:
 
 ```bash
 ./build/examples/trossen_rivet \
-  --set hardware.arms.glide_left.ip_address=192.168.5.13
+  --set hardware.arms.glide_left.ip_address=192.168.5.3
 ```
 
 > Arms do not answer ICMP, so `ping` is not a valid reachability test. Use `arp`.
+> On the wireless subnet the access point proxy-ARPs, so an ARP reply there
+> proves the address is routed, not that the handle is powered.
 
 The base is not on the network at all — it is reached over CAN.
 
