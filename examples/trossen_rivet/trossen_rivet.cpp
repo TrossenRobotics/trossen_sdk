@@ -31,6 +31,7 @@
 #include "trossen_sdk/configuration/cli_parser.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/configuration/sdk_config.hpp"
+#include "trossen_sdk/hw/active_hardware_registry.hpp"
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
 #include "trossen_sdk/hw/session_control/session_control_capable.hpp"
@@ -462,6 +463,14 @@ int main(int argc, char** argv) {
   };
   trossen::utils::print_final_summary(
     final_stats.total_episodes_completed, root, extra_info);
+
+  // HardwareRegistry::create() registered every component in the ActiveHardwareRegistry,
+  // whose backing map is a function-local static. Returning without this leaves that map
+  // holding the last shared_ptr to each component, so the destructors run during static
+  // destruction — after libcudart has unloaded. A ZED camera closing there fails every
+  // CUDA call with cudaErrorCudartUnloading and may leave the Argus provider claimed,
+  // which then breaks the *next* run's stream start. Release them while CUDA is alive.
+  trossen::hw::ActiveHardwareRegistry::clear();
 
   return 0;
 }
