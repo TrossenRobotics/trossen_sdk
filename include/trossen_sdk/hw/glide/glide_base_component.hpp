@@ -42,28 +42,35 @@ namespace trossen::hw::glide {
  * the whole mapping is declarative: discovering that "raise" is really bit 4 is
  * a config edit, not a rebuild.
  *
- * ### Which axis is which on a Rivet (2026-08-11)
+ * ### Which axis is which on a Rivet (2026-08-25)
  *
  * The driver reports each stick only as "0 to 4095" with no physical direction,
- * so every one of these flags was arrived at by driving the base and watching
- * it. What is solid is the axis ASSIGNMENT: on `glide_left` fore/aft lives on
- * `joystick_x` and left/right on `joystick_y` — swapped from what the config
- * originally assumed — while on `glide_right` yaw lives on `joystick_x`. The two
- * handles are different mirrored models and do not agree, so neither can be
- * inferred from the other; that inference is what produced two wrong signs
- * before the flags converged on what the Rivet preset ships:
+ * so these flags are established by driving the base and watching it.
  *
- *     angular:  joystick_x, invert true
- *     forward:  joystick_x, invert false
- *     lateral:  joystick_y, invert true
+ * They are not a property of the handle alone. The base controller's own axis
+ * convention sits underneath them, and it changed: base_controller 1fd57f2b
+ * moved the swerve geometry to ROS convention (X forward, Y left). Before that
+ * X was left and Y was backward, and this preset carried a transposition to
+ * compensate. Firmware containing 1fd57f2b removes the transposition, so the
+ * compensating preset drove fore/aft on the wrong stick axis until the sources
+ * were swapped back.
  *
- * The SIGNS are operator-verified, not probed — nobody has yet read the raw
- * counts while pushing the stick a known way. So treat them as "what the robot
- * did" rather than as a derivation, and do not re-derive other flags from them.
+ * Against firmware containing 1fd57f2b, operator-verified on 2026-08-25:
  *
- * If translation direction ever changes between BRINGUPS with nothing edited,
- * stop chasing these flags — that is the swerve modules' homed zero landing half
- * a turn out, and a sign flip will only be right until the next restart.
+ *     angular:  glide_right joystick_x, invert false
+ *     forward:  glide_left  joystick_y, invert true
+ *     lateral:  glide_left  joystick_x, invert true
+ *
+ * The two handles are mirrored models and do not agree, so neither can be
+ * inferred from the other.
+ *
+ * Check the firmware convention before changing a flag. A preset that
+ * transposes fore/aft and left/right is a base_controller axis convention
+ * change, not a handle problem, and no sign flip will fix it.
+ *
+ * If translation direction changes between BRINGUPS with nothing edited, that
+ * is the swerve modules' homed zero landing half a turn out, and a sign flip
+ * will only be right until the next restart.
  *
  * Expected JSON:
  * @code

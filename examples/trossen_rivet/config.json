@@ -95,10 +95,10 @@
         "type": "glide_base",
         "translation": {
           "arm_id": "glide_left",
-          "forward_source": "joystick_x",
+          "forward_source": "joystick_y",
           "forward_invert": true,
-          "lateral_source": "joystick_y",
-          "lateral_invert": false,
+          "lateral_source": "joystick_x",
+          "lateral_invert": true,
           "max": 0.6,
           "deadzone": 0.05
         },
