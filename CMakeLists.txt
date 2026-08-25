@@ -144,7 +144,10 @@ find_package(libtrossen_arm REQUIRED)
 if(TROSSEN_ENABLE_RIVET)
   message(STATUS "Rivet mobile base support enabled")
   find_package(trossen_base REQUIRED)
-  target_sources(trossen_sdk PRIVATE src/hw/base/trossen_base_component.cpp)
+  target_sources(trossen_sdk PRIVATE
+    src/hw/base/trossen_base_component.cpp
+    src/hw/base/trossen_base_producer.cpp
+  )
   target_link_libraries(trossen_sdk PUBLIC trossen_base)
 endif()
 

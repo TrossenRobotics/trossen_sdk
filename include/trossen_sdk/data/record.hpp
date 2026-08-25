@@ -112,6 +112,15 @@ struct JointStateRecord : public RecordBase {
 
 /**
  * @brief 2D odometry state (pose + velocity), mirroring nav_msgs/Odometry.
+ *
+ * TODO(shantanuparab-tr): Revisit this record's name and shape. `lift_velocity`
+ * below is not 2D odometry and does not mirror nav_msgs/Odometry either — it is
+ * vertical motion carried here because a base that reports it has nowhere else
+ * to put it, and the same argument would drag in every other non-planar thing a
+ * base measures. Either this becomes a record whose name admits it describes
+ * base state generally, or the non-planar axes move to a record of their own.
+ * Battery telemetry was proposed alongside the lift and deliberately left out
+ * for exactly this reason.
  */
 struct Odometry2DRecord : public RecordBase {
   /// @brief 2D pose in the odom frame.
@@ -133,6 +142,13 @@ struct Odometry2DRecord : public RecordBase {
     /// @brief Angular velocity around z (rad/s)
     float angular_z{0.f};
   } twist;
+
+  /// @brief Vertical lift velocity, in the actuator's own units per second.
+  ///
+  /// Outside the 2D twist above because a lift is not planar motion. Zero on
+  /// bases without one, so a consumer may read it unconditionally. See the TODO
+  /// on this record for why it sitting here at all is provisional.
+  float lift_velocity{0.f};
 };
 
 /**
