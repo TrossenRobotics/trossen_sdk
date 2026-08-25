@@ -16,6 +16,7 @@
 #include "gtest/gtest.h"
 
 #include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
@@ -229,4 +230,66 @@ TEST_F(TrossenMCAPBackendTest, ScanCountsLegacyAndNewEpisodeFiles) {
   auto backend = BackendRegistry::create("trossen_mcap");
   ASSERT_NE(backend, nullptr);
   EXPECT_EQ(backend->scan_existing_episodes(), 3u);
+}
+
+// lift_velocity is the one Odometry2D field a SLATE never sets, so a mistake in
+// either half of its path -- the .proto declaration or the write hunk -- is
+// invisible on every existing rig and only shows up as a silently zeroed column
+// in a Rivet dataset. Assert both halves against the bytes on disk.
+TEST_F(TrossenMCAPBackendTest, LiftVelocityReachesTheFile) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  RootDatasetRestorer restorer{cfg.get(), cfg->root, cfg->dataset_id};
+  const std::string saved_compression = cfg->compression;
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "lift_velocity_test";
+  // Uncompressed so the payload bytes below can be searched for directly; the
+  // restorer above does not cover this field. Empty rather than "none": the
+  // backend maps only the empty string to McapCompression::None, and any other
+  // unrecognised value warns before falling back to it.
+  cfg->compression = "";
+
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  // A value with no zero bytes in its IEEE-754 encoding, so the byte pattern
+  // searched for below cannot collide with padding or an unset field.
+  constexpr float kLift = 1234.5f;
+  trossen::data::Odometry2DRecord rec;
+  rec.id = "rivet_base";
+  rec.lift_velocity = kLift;
+  backend->write(rec);
+  backend->close();
+  cfg->compression = saved_compression;
+
+  std::filesystem::path mcap_path;
+  for (const auto& entry : std::filesystem::directory_iterator(episode_dir)) {
+    if (entry.is_regular_file() && entry.path().extension() == ".mcap") {
+      mcap_path = entry.path();
+    }
+  }
+  ASSERT_FALSE(mcap_path.empty()) << "No .mcap file was written";
+
+  std::ifstream mcap_file(mcap_path, std::ios::binary);
+  const std::string contents(
+    (std::istreambuf_iterator<char>(mcap_file)), std::istreambuf_iterator<char>());
+
+  // The embedded schema must declare the field, or a consumer cannot decode it
+  // however faithfully we serialise it.
+  EXPECT_NE(contents.find("lift_velocity"), std::string::npos)
+    << "Odometry2D schema in the .mcap does not declare lift_velocity";
+
+  // proto3 field 5, wire type 5 (32-bit) => tag byte 0x2d, then the float
+  // little-endian. Its presence proves write_odometry_2d_record() set it.
+  std::string expected(1, '\x2d');
+  expected.append(reinterpret_cast<const char*>(&kLift), sizeof(kLift));
+  EXPECT_NE(contents.find(expected), std::string::npos)
+    << "serialised Odometry2D message does not carry lift_velocity=" << kLift;
 }
