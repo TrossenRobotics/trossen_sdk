@@ -3,7 +3,7 @@
   "hardware": {
     "arms": {
       "glide_left": {
-        "ip_address": "192.168.0.3",
+        "ip_address": "192.168.7.3",
         "model": "glide_left",
         "end_effector": "wxai_v0_leader",
         "actuated": false,
@@ -13,7 +13,7 @@
         "gripper_feedback_offset": 6.5
       },
       "glide_right": {
-        "ip_address": "192.168.0.2",
+        "ip_address": "192.168.7.2",
         "model": "glide_right",
         "end_effector": "wxai_v0_leader",
         "actuated": false,
@@ -23,7 +23,7 @@
         "gripper_feedback_offset": 6.5
       },
       "follower_left": {
-        "ip_address": "192.168.1.4",
+        "ip_address": "192.168.8.5",
         "model": "pro",
         "end_effector": "pro_base",
         "write_moving_time_s": 0.3,
@@ -35,7 +35,7 @@
         "smoothing_d_cutoff_hz": 1.0
       },
       "follower_right": {
-        "ip_address": "192.168.1.5",
+        "ip_address": "192.168.8.4",
         "model": "pro",
         "end_effector": "pro_base",
         "write_moving_time_s": 0.3,
@@ -67,7 +67,7 @@
       {
         "id": "camera_main",
         "type": "zed_camera",
-        "serial_number": "51287468",
+        "serial_number": "55839703",
         "resolution": "HD1200",
         "fps": 30,
         "use_depth": false
@@ -75,7 +75,7 @@
       {
         "id": "camera_left",
         "type": "zed_camera",
-        "serial_number": "97900849",
+        "serial_number": "99926920",
         "resolution": "HD1200",
         "fps": 30,
         "use_depth": false
