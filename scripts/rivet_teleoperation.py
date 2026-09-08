@@ -45,9 +45,8 @@ MIN_JOYSTICK = 0        # Joystick min value
 MAX_JOYSTICK = 4095     # Joystick max value
 
 # Gripper home offset (rad) so the follower gripper matches the leader's at home
-GRIPPER_HOME_OFFSET_RIGHT = np.pi / 4
-GRIPPER_HOME_OFFSET_LEFT = -np.pi / 4
-
+GRIPPER_HOME_OFFSET_RIGHT = 0
+GRIPPER_HOME_OFFSET_LEFT = 0
 
 def scale(value, val_min, val_max, scaled_min, scaled_max, scaled_deadzone=None):
     """ Scale a value linearly from val_min..val_max to scaled_min..scaled_max.
@@ -134,7 +133,7 @@ def teleop_arm_step(leader, follower, gripper_home_offset, J0_min=None, J0_max=N
 
     # Feed the positions from the leader robot to the follower robot
     follower.set_arm_positions(
-        np.array([positions[0], positions[1], positions[2], -positions[3], -positions[4],
+        np.array([positions[0], positions[1], positions[2], positions[3], positions[4],
                 positions[5] + gripper_home_offset]),
         0.2,
         False,
@@ -202,7 +201,7 @@ if __name__ == "__main__":
             ################################### LEADER COMMANDS ####################################
             if ENABLE_RIGHT:
                 right_input = driver_right_leader.get_input_report()
-                base_velocity_angular_z = -scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
+                base_velocity_angular_z = scale(right_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
                                 BASE_MIN, BASE_MAX, BASE_DEADZONE)
 
                 right_up_btn = int(right_input.buttons & (1 << 0))
@@ -212,9 +211,9 @@ if __name__ == "__main__":
 
             if ENABLE_LEFT:
                 left_input = driver_left_leader.get_input_report()
-                base_velocity_linear_x = scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
+                base_velocity_linear_x = -scale(left_input.joystick_x, MIN_JOYSTICK, MAX_JOYSTICK,
                                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
-                base_velocity_linear_y = -scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
+                base_velocity_linear_y = scale(left_input.joystick_y, MIN_JOYSTICK, MAX_JOYSTICK,
                                                BASE_MIN, BASE_MAX, BASE_DEADZONE)
 
             ###################################### FOLLOWERS #######################################
