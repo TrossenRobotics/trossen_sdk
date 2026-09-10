@@ -5,7 +5,10 @@
 
 #include "trossen_sdk/utils/video_encoder.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <utility>
@@ -13,6 +16,7 @@
 
 extern "C" {
 #include <libavcodec/avcodec.h>
+#include <libavutil/imgutils.h>
 #include <libavutil/opt.h>
 #include <libswscale/swscale.h>
 }
@@ -357,6 +361,90 @@ std::unique_ptr<VideoEncoder> VideoEncoder::create(const Params& params) {
              << params.height << " @ " << params.fps << " fps)\n";
 
   return std::unique_ptr<VideoEncoder>(new VideoEncoder(std::move(impl)));
+}
+
+VideoEncoder::EncodedFrame VideoEncoder::encode(const uint8_t* data, size_t size) {
+  // impl is a local reference alias for *impl_, the same pattern used for `requested` in
+  // resolve_candidates(): it saves writing impl_-> repeatedly, with no extra object created.
+  Impl& impl = *impl_;
+  AVCodecContext* ctx = impl.ctx;
+
+  // The expected input size depends entirely on which pixel format create() configured this
+  // encoder for: BGR8 color is 3 bytes per pixel, packed 12-bit depth codes are 2 bytes per
+  // pixel (stored in a 16-bit little-endian container). Rejecting a mismatched buffer here,
+  // before touching any FFmpeg call, turns a caller bug into a clear error instead of a crash.
+  const bool is_depth = ctx->pix_fmt == AV_PIX_FMT_GRAY12LE;
+  const size_t bytes_per_pixel = is_depth ? 2 : 3;
+  const size_t expected_size =
+      static_cast<size_t>(ctx->width) * static_cast<size_t>(ctx->height) * bytes_per_pixel;
+  if (size != expected_size) {
+    std::cerr << "VideoEncoder::encode: expected " << expected_size << " bytes, got " << size
+               << '\n';
+    return {};
+  }
+
+  // FFmpeg's AVFrame buffers are reference-counted internally: the encoder may still be holding
+  // a reference to the data from a previous encode() call until it's fully done with it.
+  // av_frame_make_writable() gives this frame back exclusive, writable ownership before we
+  // overwrite its pixel data below, making a private copy first if the old reference is still
+  // in use.
+  if (av_frame_make_writable(impl.frame) < 0) {
+    std::cerr << "VideoEncoder::encode: frame buffer is not writable\n";
+    return {};
+  }
+
+  if (impl.sws != nullptr) {
+    // H264 color path: convert the caller's raw BGR8 buffer into the frame's YUV420P planes.
+    // sws_scale() takes arrays of source/destination plane pointers and row strides (to support
+    // multi-plane formats); BGR8 is one interleaved plane, so the source arrays here have a
+    // single element each.
+    const uint8_t* src_planes[1] = {data};
+    const int src_strides[1] = {static_cast<int>(ctx->width) * 3};
+    sws_scale(impl.sws, src_planes, src_strides, 0, ctx->height, impl.frame->data,
+              impl.frame->linesize);
+  } else {
+    // H265 depth path: the caller's buffer is already gray12le, so no conversion is needed, just
+    // a copy into the frame's single plane. This is done row by row rather than one big memcpy
+    // because frame->linesize[0] (the row stride FFmpeg actually allocated) can be larger than
+    // width * bytes_per_pixel: encoders often pad each row's memory for alignment, and that
+    // padding must be skipped over, not copied into.
+    const size_t row_bytes = static_cast<size_t>(ctx->width) * bytes_per_pixel;
+    for (int row = 0; row < ctx->height; ++row) {
+      std::memcpy(impl.frame->data[0] + static_cast<size_t>(row) * impl.frame->linesize[0],
+                  data + static_cast<size_t>(row) * row_bytes, row_bytes);
+    }
+  }
+
+  // Every frame gets the next tick on our monotonically increasing timestamp, in time_base units
+  // (set in create()). Post-increment: this frame uses the current value of pts, then pts moves
+  // on for the next call.
+  impl.frame->pts = impl.pts++;
+
+  if (avcodec_send_frame(ctx, impl.frame) < 0) {
+    std::cerr << "VideoEncoder::encode: avcodec_send_frame failed\n";
+    return {};
+  }
+
+  // Because max_b_frames is 0 (set in create()), the encoder never needs to hold a frame back to
+  // reorder it against a future one, so it always has exactly one packet ready per frame sent.
+  // The loop form is still correct general FFmpeg usage: drain every packet the encoder is ready
+  // to hand back before returning.
+  EncodedFrame result;
+  while (avcodec_receive_packet(ctx, impl.packet) == 0) {
+    // packet->data is uint8_t*; reinterpret_cast to const std::byte* is well-defined here since
+    // both are single-byte types, and it lets us insert directly into a std::vector<std::byte>
+    // without an intermediate copy into some other buffer type.
+    const auto* packet_bytes = reinterpret_cast<const std::byte*>(impl.packet->data);
+    result.data.insert(result.data.end(), packet_bytes, packet_bytes + impl.packet->size);
+    if ((impl.packet->flags & AV_PKT_FLAG_KEY) != 0) {
+      result.is_keyframe = true;
+    }
+    // Releases this packet's internal buffer so avcodec_receive_packet() can reuse impl.packet
+    // for the next iteration (or the next encode() call); it does not free impl.packet itself.
+    av_packet_unref(impl.packet);
+  }
+
+  return result;
 }
 
 const std::string& VideoEncoder::encoder_name() const { return impl_->encoder_name; }
