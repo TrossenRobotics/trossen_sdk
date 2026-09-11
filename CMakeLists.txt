@@ -343,6 +343,7 @@ set(TROSSEN_PROTO_FILES
   ${TROSSEN_PROTO_PATH}/Odometry2D.proto
   ${TROSSEN_PROTO_PATH}/RobotDescription.proto
   ${TROSSEN_PROTO_PATH}/Timestamp.proto
+  ${TROSSEN_PROTO_PATH}/CompressedVideo.proto  # reader-side only, see the .proto
 )
 
 # Generate protobuf files with proper import paths

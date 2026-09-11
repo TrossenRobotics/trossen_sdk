@@ -1,0 +1,27 @@
+// Foxglove's CompressedVideo schema, vendored for the reader side (the writer
+// uses foxglove::schemas::CompressedVideo, compiled into the Foxglove SDK).
+// Field numbers are load-bearing, verified against the SDK's own descriptor --
+// do not change them.
+// Upstream: https://github.com/foxglove/foxglove-sdk schemas/proto/foxglove/CompressedVideo.proto
+
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+
+package foxglove;
+
+// A single frame of a compressed video bitstream
+message CompressedVideo {
+  // Timestamp of video frame
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Frame of reference for the video.
+  string frame_id = 2;
+
+  // Compressed video frame data. Annex B for h264/h265, holding exactly enough
+  // packets to decode one frame, with parameter sets repeated on keyframes.
+  bytes data = 3;
+
+  // Video format. Supported values: `h264`, `h265`, `vp9`, `av1`.
+  string format = 4;
+}

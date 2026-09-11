@@ -25,6 +25,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -39,6 +41,7 @@
 #include <vector>
 
 #include "trossen_sdk/utils/app_utils.hpp"
+#include "CompressedVideo.pb.h"
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
 #include "RawImage.pb.h"
@@ -309,7 +312,10 @@ static void print_usage(const char* program) {
   std::cerr << "  5. Compute and update dataset statistics\n";
   std::cerr << "\nFolder structure: "
             << "root/repository_id/dataset_id/[data,images,videos,meta]\n";
-  std::cerr << "\nNote: Video encoding requires FFmpeg with libsvtav1 codec.\n";
+  std::cerr << "\nNote: Cameras recorded raw (image_encoding=\"raw\") are encoded to AV1 and\n"
+            << "  require FFmpeg with libsvtav1. Cameras recorded as compressed video\n"
+            << "  (image_encoding=\"video\") are remuxed as-is (h264/hevc) and need only ffmpeg\n"
+            << "  and ffprobe on PATH.\n";
 }
 
 int main(int argc, char** argv) {
@@ -1306,6 +1312,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
   std::map<std::string, size_t> camera_frame_indices;
   std::map<std::string, fs::path> camera_dirs;
+  // Video-mode cameras only (format + elementary-stream path); presence here,
+  // not a flag, routes a camera to the remux path instead of JPEG-sequence.
+  std::map<std::string, std::string> camera_video_format;
+  std::map<std::string, fs::path> camera_video_paths;
 
   if (cfg.extract_images && !camera_channels.empty()) {
     std::cout << "\nExtracting camera images...\n";
@@ -1343,6 +1353,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
 
     size_t images_saved = 0;
+    // Elementary-stream file handles for video-mode cameras, opened lazily.
+    std::map<std::string, std::ofstream> camera_video_ofstreams;
     for (const auto& messageView : image_reader.readMessages(onProblem)) {
       auto it = camera_channels.find(messageView.channel->id);
       if (it == camera_channels.end()) {
@@ -1350,6 +1362,45 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
 
       const std::string& camera_name = it->second;
+
+      // Already-compressed frames: append to a per-camera Annex B elementary
+      // stream; "Encode images to videos" below remuxes it with `-c copy`.
+      if (messageView.schema != nullptr &&
+          messageView.schema->name == "foxglove.CompressedVideo") {
+        foxglove::CompressedVideo video_msg;
+        if (!video_msg.ParseFromArray(messageView.message.data,
+                                      static_cast<int>(messageView.message.dataSize))) {
+          std::cerr << "Warning: Failed to parse CompressedVideo message for " << camera_name
+                    << " frame " << camera_frame_indices[camera_name] << "\n";
+          camera_frame_indices[camera_name]++;
+          continue;
+        }
+
+        auto fmt_it = camera_video_format.find(camera_name);
+        if (fmt_it == camera_video_format.end()) {
+          camera_video_format[camera_name] = video_msg.format();
+          // Extension picks ffmpeg's demuxer for a raw elementary stream.
+          const std::string ext = video_msg.format() == "h265" ? ".hevc" : ".h264";
+          fs::path stream_path = camera_dirs[camera_name] / (camera_name + ext);
+          camera_video_paths[camera_name] = stream_path;
+          camera_video_ofstreams[camera_name].open(stream_path, std::ios::binary);
+          if (!camera_video_ofstreams[camera_name]) {
+            std::cerr << "Error: Cannot open " << stream_path.string() << " for writing\n";
+            return 1;
+          }
+        } else if (fmt_it->second != video_msg.format()) {
+          // Can't remux a codec change mid-episode as one stream.
+          std::cerr << "Error: " << camera_name << " changed video format from " << fmt_it->second
+                    << " to " << video_msg.format() << " mid-episode\n";
+          return 1;
+        }
+
+        camera_video_ofstreams[camera_name].write(
+            video_msg.data().data(), static_cast<std::streamsize>(video_msg.data().size()));
+        camera_frame_indices[camera_name]++;
+        continue;
+      }
+
       size_t frame_idx = camera_frame_indices[camera_name];
 
       foxglove::RawImage raw_image;
@@ -1419,15 +1470,32 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
     }
 
+    for (auto& [camera_name, ofs] : camera_video_ofstreams) {
+      ofs.close();
+      if (!ofs) {
+        std::cerr << "Error: Failed writing video stream for " << camera_name << "\n";
+        return 1;
+      }
+    }
+
     std::cout << "\r  [ok] Saved " << images_saved << " images                    \n";
     for (const auto& [camera_name, count] : camera_frame_indices) {
-      std::cout << "    - " << camera_name << ": " << count << " images\n";
+      if (camera_video_format.count(camera_name) > 0) {
+        std::cout << "    - " << camera_name << ": " << count << " video frames ("
+                  << camera_video_format[camera_name] << ")\n";
+      } else {
+        std::cout << "    - " << camera_name << ": " << count << " images\n";
+      }
     }
   }
 
   // ──────────────────────────────────────────────────────────
   // Encode images to videos
   // ──────────────────────────────────────────────────────────
+
+  // Remuxed cameras only: true codec/pix_fmt, for the metadata step below.
+  std::map<std::string, std::string> camera_remuxed_codec;
+  std::map<std::string, std::string> camera_remuxed_pix_fmt;
 
   if (cfg.create_videos && !camera_dirs.empty()) {
     std::cout << "\nEncoding videos from images...\n";
@@ -1446,6 +1514,74 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       fs::path video_output =
           video_camera_dir /
           trossen::io::backends::format_video_filename(cfg.episode_index);
+
+      auto video_fmt_it = camera_video_format.find(camera_name);
+      if (video_fmt_it != camera_video_format.end()) {
+        // Already-compressed: remux with `-c copy` instead of re-encoding.
+        const std::string& format = video_fmt_it->second;
+        const fs::path& annexb_path = camera_video_paths.at(camera_name);
+
+        std::ostringstream remux_cmd;
+        // -r stamps container timestamps at the dataset rate; +genpts fills in
+        // presentation timestamps the elementary stream itself doesn't carry.
+        remux_cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << cfg.camera_fps << " -i "
+                  << annexb_path.string() << " -c copy -movflags +faststart "
+                  << video_output.string();
+
+        std::cout << "  Remuxing " << camera_name << " (" << format << ")...";
+        std::cout.flush();
+
+        auto remux_start = std::chrono::steady_clock::now();
+        int ret = std::system(remux_cmd.str().c_str());
+        auto remux_end = std::chrono::steady_clock::now();
+
+        if (ret != 0) {
+          std::cout << " [FAILED] Failed (exit code " << ret << ")\n";
+          std::cerr << "    Command: " << remux_cmd.str() << "\n";
+          continue;
+        }
+
+        // A frame-count mismatch would silently misalign images against joint
+        // states, so this is checked rather than trusted.
+        std::ostringstream probe_cmd;
+        probe_cmd << "ffprobe -v error -count_frames -select_streams v:0 "
+                  << "-show_entries stream=nb_read_frames -of default=nw=1:nk=1 "
+                  << video_output.string();
+        bool frame_count_ok = true;
+        if (FILE* pipe = popen(probe_cmd.str().c_str(), "r")) {
+          char buf[64] = {0};
+          const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
+          pclose(pipe);
+          if (read_ok) {
+            const int64_t muxed = std::strtoll(buf, nullptr, 10);
+            if (muxed > 0 && static_cast<size_t>(muxed) != camera_frame_indices[camera_name]) {
+              std::cout << " [FAILED] frame count mismatch\n";
+              std::cerr << "    Remuxed " << video_output.filename().string() << " has " << muxed
+                        << " frames but the recording had " << camera_frame_indices[camera_name]
+                        << " video messages; refusing to misalign frames against joint states\n";
+              frame_count_ok = false;
+            }
+          }
+        } else {
+          std::cerr << "Warning: could not probe remuxed video " << video_output.string() << "\n";
+        }
+        if (!frame_count_ok) {
+          continue;
+        }
+
+        // lerobot derives codec from the bitstream and rejects a mismatch.
+        camera_remuxed_codec[camera_name] = (format == "h265") ? "hevc" : "h264";
+        camera_remuxed_pix_fmt[camera_name] = (format == "h265") ? "gray12le" : "yuv420p";
+
+        auto duration =
+            std::chrono::duration_cast<std::chrono::milliseconds>(remux_end - remux_start).count();
+        std::cout << " [ok] (" << (duration / 1000.0) << "s)\n";
+        videos_created++;
+
+        std::error_code ec;
+        fs::remove(annexb_path, ec);  // The elementary stream is redundant once muxed.
+        continue;
+      }
 
       fs::path input_pattern = camera_dir / "image_%06d.jpg";
 
@@ -1604,6 +1740,15 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
         features[obs_key]["info"]["video.pix_fmt"] = "yuv420p";
         features[obs_key]["info"]["video.is_depth_map"] = false;
         features[obs_key]["info"]["has_audio"] = false;
+      }
+
+      // Override with ground truth for a remuxed camera: mcap_dataset_info is
+      // written by the producer, which can't know the backend's encoding.
+      auto codec_it = camera_remuxed_codec.find(camera_name);
+      if (codec_it != camera_remuxed_codec.end()) {
+        features[obs_key]["info"]["video.codec"] = codec_it->second;
+        features[obs_key]["info"]["video.pix_fmt"] = camera_remuxed_pix_fmt.at(camera_name);
+        features[obs_key]["info"]["video.is_depth_map"] = (codec_it->second == "hevc");
       }
     }
 
