@@ -133,6 +133,34 @@ static std::optional<uint64_t> read_recording_start_time(const std::filesystem::
 // Statistics computation functions
 // ──────────────────────────────────────────────────────────
 
+// Video-mode cameras remux straight to videos/ and delete their source
+// frames, so stats sample frames back out of the .mp4 instead of a JPEG dir.
+static std::vector<cv::Mat> sample_video_frames(const std::filesystem::path& video_path) {
+  cv::VideoCapture cap(video_path.string());
+  if (!cap.isOpened()) {
+    std::cerr << "  Warning: Failed to open video for stats: " << video_path.string() << "\n";
+    return {};
+  }
+
+  int frame_count = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
+  if (frame_count <= 0) return {};
+
+  std::vector<cv::Mat> images;
+  for (int idx : trossen::io::backends::sample_indices(frame_count)) {
+    if (!cap.set(cv::CAP_PROP_POS_FRAMES, idx)) continue;
+    cv::Mat frame;
+    if (!cap.read(frame) || frame.empty()) continue;
+    if (frame.channels() == 1) cv::cvtColor(frame, frame, cv::COLOR_GRAY2BGR);
+
+    cv::Mat downsampled = trossen::io::backends::auto_downsample(frame);
+    cv::Mat frame_float;
+    downsampled.convertTo(frame_float, CV_32F, 1.0 / 255.0);
+    images.push_back(frame_float);
+  }
+
+  return images;
+}
+
 /**
  * @brief Compute statistics for a single episode
  */
@@ -192,6 +220,29 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
     if (feature_info.contains("dtype") && feature_info["dtype"] == "video") {
       if (feature_name.find("observation.images.") == 0) {
         std::string camera_name = feature_name.substr(19);
+
+        // Video-mode: frames only ever exist inside the remuxed episode video.
+        fs::path videos_root = dataset_root / trossen::io::backends::VIDEO_DIR;
+        bool is_video_camera = false;
+        if (fs::exists(videos_root)) {
+          for (const auto& chunk_entry : fs::directory_iterator(videos_root)) {
+            if (!chunk_entry.is_directory()) continue;
+            fs::path candidate = chunk_entry.path() / feature_name /
+                trossen::io::backends::format_video_filename(episode_index);
+            if (!fs::exists(candidate)) continue;
+
+            is_video_camera = true;
+            auto images = sample_video_frames(candidate);
+            if (!images.empty()) {
+              stats[feature_name] = trossen::io::backends::compute_image_stats(images);
+            } else {
+              std::cerr << "  Warning: No valid frames sampled from video for camera: "
+                        << camera_name << "\n";
+            }
+            break;
+          }
+        }
+        if (is_video_camera) continue;
 
         // Construct the expected image directory path for this episode and camera
         std::string episode_folder_name =
