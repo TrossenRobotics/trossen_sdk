@@ -10,6 +10,8 @@
 #include <string_view>
 #include <vector>
 
+#include "trossen_sdk/utils/depth_quantization.hpp"
+
 namespace trossen::io::backends {
 
 namespace {
@@ -142,7 +144,58 @@ nlohmann::ordered_json build_features(
   features["action"]["shape"] = nlohmann::json::array({episode_action_dim(ep, signals)});
   features["action"]["names"] = action_names;
 
-  // TODO(shantanuparab-tr): add the observation.images.<camera> video features.
+  // observation.images.<camera> video features
+  for (const auto& camera : ep.cameras) {
+    // The episode already carries the LeRobot key; dataset_info is still keyed by the
+    // recording's own camera name.
+    const std::string& camera_name = camera.name;
+    const std::string& obs_key = camera.obs_key;
+    const bool is_depth = camera_is_depth(camera_name, ep.dataset_info);
+
+    features[obs_key]["dtype"] = "video";
+    features[obs_key]["names"] = nlohmann::json::array({"height", "width", "channels"});
+
+    // Depth is always encoded as 1-channel gray12le and color as 3-channel yuv420p.
+    const int ch = is_depth ? 1 : 3;
+    int h = DEFAULT_CAMERA_HEIGHT, w = DEFAULT_CAMERA_WIDTH;
+    bool has_audio = false;
+    if (ep.dataset_info.contains("cameras") && ep.dataset_info["cameras"].contains(camera_name)) {
+      const auto& cam = ep.dataset_info["cameras"][camera_name];
+      h = cam.value("height", h);
+      w = cam.value("width", w);
+      has_audio = cam.value("has_audio", false);
+    }
+    features[obs_key]["info"]["has_audio"] = has_audio;
+    features[obs_key]["shape"] = nlohmann::json::array({h, w, ch});
+    // Every output video, encoded or remuxed, is written at the dataset rate with one frame
+    // per row, so its rate is ep.fps rather than the camera's capture rate.
+    features[obs_key]["info"]["video.fps"] = static_cast<int>(ep.fps);
+    features[obs_key]["info"]["video.height"] = h;
+    features[obs_key]["info"]["video.width"] = w;
+    features[obs_key]["info"]["video.channels"] = ch;
+    // lerobot reads this unprefixed key to pick out depth features; the `video.` prefixed
+    // spelling it also accepts is its legacy name and is not written.
+    features[obs_key]["info"]["is_depth_map"] = is_depth;
+
+    if (is_depth) {
+      // Match lerobot 0.6.0 DepthEncoderConfig: HEVC Main 12 / gray12le, 12-bit log-quant.
+      features[obs_key]["info"]["video.codec"] = "hevc";
+      features[obs_key]["info"]["video.pix_fmt"] = "gray12le";
+      features[obs_key]["info"]["video.depth_min"] = utils::DEFAULT_DEPTH_MIN_M;  // quantum 0
+      features[obs_key]["info"]["video.depth_max"] = utils::DEFAULT_DEPTH_MAX_M;  // DEPTH_QMAX
+      features[obs_key]["info"]["video.shift"] = utils::DEFAULT_DEPTH_SHIFT_M;  // pre-log offset
+      features[obs_key]["info"]["video.use_log"] = true;
+      // lerobot reads the stored unit as info["depth_unit"] (no "video." prefix).
+      features[obs_key]["info"]["depth_unit"] = "mm";  // raw mono16 depth is millimeters
+    } else {
+      // video.codec holds the canonical bitstream name, which is what lerobot itself
+      // stores (video_utils.py reads it off the stream as codec.canonical_name) and
+      // what it maps back to an encoder through VIDEO_CODECS_ALIASES when re-encoding.
+      // Overridden per camera by the writer for a remuxed stream.
+      features[obs_key]["info"]["video.codec"] = "av1";
+      features[obs_key]["info"]["video.pix_fmt"] = "yuv420p";
+    }
+  }
 
   return features;
 }
