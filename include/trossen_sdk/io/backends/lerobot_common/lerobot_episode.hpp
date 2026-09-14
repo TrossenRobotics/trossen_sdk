@@ -150,6 +150,18 @@ int episode_action_dim(const AlignedEpisode& ep, const DatasetSignalOptions& sig
 int episode_obs_dim(const AlignedEpisode& ep, const DatasetSignalOptions& signals = {});
 
 /**
+ * @brief Check whether a camera is a depth map.
+ *
+ * The camera's boolean `is_depth_map` flag in dataset_info decides when present. A `_depth`
+ * name suffix is used only for a camera that has no such flag.
+ *
+ * @param camera_name Camera id as recorded, e.g. `cam_high_depth`.
+ * @param dataset_info The recording's dataset_info metadata; may be empty.
+ * @return True if the camera records depth, false if it records color.
+ */
+bool camera_is_depth(const std::string& camera_name, const nlohmann::json& dataset_info);
+
+/**
  * @brief Build the LeRobot `features` schema for an episode.
  *
  * Produces the observation.state / action / observation.images.<cam> entries with

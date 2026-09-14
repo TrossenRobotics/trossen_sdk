@@ -70,6 +70,8 @@ inline constexpr int DEFAULT_JPEG_QUALITY = 95;
 inline constexpr int DEFAULT_DEPTH_PNG_COMPRESSION_LEVEL = 1;
 inline constexpr char DEFAULT_ROBOT_NAME[] = "trossen_ai_stationary";
 inline constexpr float DEFAULT_DATASET_FPS = 30.0f;
+inline constexpr int DEFAULT_CAMERA_WIDTH = 640;
+inline constexpr int DEFAULT_CAMERA_HEIGHT = 480;
 inline constexpr uint64_t DEFAULT_MATCH_TOLERANCE_NS = 50'000'000;  // 50 ms
 
 }  // namespace trossen::io::backends
