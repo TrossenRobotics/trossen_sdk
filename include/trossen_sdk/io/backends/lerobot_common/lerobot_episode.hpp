@@ -153,8 +153,6 @@ int episode_obs_dim(const AlignedEpisode& ep, const DatasetSignalOptions& signal
 /**
  * @brief Build the LeRobot `features` schema for an episode.
  *
- * Declared here and implemented in #309; until then it returns an empty object.
- *
  * Produces the observation.state / action / observation.images.<cam> entries with
  * joint names (from dataset_info when present) and camera specs, plus the standard
  * scalar metadata features. The schema is identical between LeRobot v2.1 and v3.0.
