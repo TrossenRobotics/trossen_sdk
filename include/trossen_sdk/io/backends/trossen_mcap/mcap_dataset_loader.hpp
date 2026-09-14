@@ -75,7 +75,11 @@ bool load_aligned_episode(
 /**
  * @brief Write each dataset row's matched camera frame from an MCAP file as an image file.
  *
- * Not implemented yet: returns false and writes nothing.
+ * For every row, writes the frame chosen by CameraInfo::row_source_index as
+ * `image_%06d.jpg` (JPEG at DEFAULT_JPEG_QUALITY), or as a 16-bit `image_%06d.png` in
+ * millimeters for depth. Files are numbered by row, so a frame matched by two rows is written
+ * twice. Handles cameras stored as `foxglove.RawImage`; for `foxglove.CompressedVideo` use
+ * extract_camera_video().
  *
  * @param mcap_file Path to the input MCAP file.
  * @param channels Channel maps from load_aligned_episode() on the same file.
@@ -84,7 +88,8 @@ bool load_aligned_episode(
  *        create.
  * @param out_counts Output per-camera written-frame counts (one per dataset row).
  * @return true on success; false if a matched frame could not be decoded or written, or on
- *         a fatal read error (message logged to stderr).
+ *         a fatal read error (message logged to stderr). On failure the images this call
+ *         wrote are removed and @p out_counts is empty.
  */
 bool extract_camera_images(
   const std::string& mcap_file,
