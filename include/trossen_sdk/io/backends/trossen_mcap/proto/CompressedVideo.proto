@@ -1,0 +1,21 @@
+syntax = "proto3";
+package foxglove;
+
+import "google/protobuf/timestamp.proto";
+
+// A single frame of a compressed video bitstream, matching the Foxglove SDK schema at
+// https://github.com/foxglove/foxglove-sdk schemas/proto/foxglove/CompressedVideo.proto
+message CompressedVideo {
+  // Timestamp of video frame
+  google.protobuf.Timestamp timestamp = 1;
+
+  // Frame of reference for the video
+  string frame_id = 2;
+
+  // Compressed video frame data. Annex B for h264/h265, holding exactly enough
+  // packets to decode one frame, with parameter sets repeated on keyframes
+  bytes data = 3;
+
+  // Video format. Supported values: `h264`, `h265`, `vp9`, `av1`
+  string format = 4;
+}
