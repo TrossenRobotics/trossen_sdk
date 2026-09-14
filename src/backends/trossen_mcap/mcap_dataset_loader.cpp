@@ -34,6 +34,7 @@
 
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
+#include "CompressedVideo.pb.h"
 #include "RawImage.pb.h"
 
 namespace trossen::io::backends {
@@ -881,20 +882,153 @@ bool extract_camera_images(
 }
 
 bool extract_camera_video(
-  [[maybe_unused]] const std::string& mcap_file,
-  [[maybe_unused]] const McapChannelMap& channels,
-  [[maybe_unused]] const std::function<std::filesystem::path(const std::string& camera_name)>&
-    dir_for,
-  [[maybe_unused]] std::map<std::string, CameraVideoStream>& out_streams)
+  const std::string& mcap_file,
+  const McapChannelMap& channels,
+  const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
+  std::map<std::string, CameraVideoStream>& out_streams)
 {
-  // TODO(shantanuparab-tr): implement the Annex B elementary stream extraction (#308).
-  return false;
+  namespace fs = std::filesystem;
+  out_streams.clear();
+  if (channels.camera_channels.empty()) {
+    return true;
+  }
+
+  std::ifstream input(mcap_file, std::ios::binary);
+  mcap::McapReader reader;
+  auto status = reader.open(input);
+  if (!status.ok()) {
+    std::cerr << "Error: Failed to reopen MCAP file for video: " << status.message << "\n";
+    return false;
+  }
+  auto summary_status = reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+  if (!summary_status.ok()) {
+    std::cerr << "Error: Failed to read MCAP summary for video: " << summary_status.message << "\n";
+    return false;
+  }
+
+  // Opened lazily so a recording with no video channels creates no files.
+  std::map<std::string, std::ofstream> outputs;
+  // Handed to the caller only once every stream is complete.
+  std::map<std::string, CameraVideoStream> streams;
+
+  // A failed extraction removes the stream files it started, so no partial stream is left.
+  const auto fail = [&outputs, &streams]() {
+    for (auto& [camera_name, out] : outputs) out.close();
+    for (const auto& [camera_name, stream] : streams) {
+      if (stream.annexb_path.empty()) continue;
+      std::error_code ec;
+      fs::remove(stream.annexb_path, ec);
+    }
+    return false;
+  };
+
+  // The reader skips a damaged chunk and keeps going, which would drop frames from the
+  // middle of a copied stream, so any read problem fails the extraction.
+  bool read_failed = false;
+  const auto on_read_problem = [&read_failed](const mcap::Status& problem) {
+    on_problem(problem);
+    read_failed = true;
+  };
+
+  for (const auto& messageView : reader.readMessages(on_read_problem)) {
+    auto it = channels.camera_channels.find(messageView.channel->id);
+    if (it == channels.camera_channels.end()) continue;
+    // Only video channels here; RawImage cameras belong to extract_camera_images().
+    if (!messageView.schema || messageView.schema->name != "foxglove.CompressedVideo") {
+      continue;
+    }
+    const std::string& camera_name = it->second;
+    const auto found = streams.find(camera_name);
+    const size_t frame_index = found == streams.end() ? 0 : found->second.frame_count;
+
+    // One message is one frame. Skipping one would shift every later frame against the
+    // arrival indices the rows were matched to, so a frame that does not parse is fatal.
+    foxglove::CompressedVideo msg;
+    if (!parse_payload(msg, messageView.message)) {
+      std::cerr << "Error: Failed to parse CompressedVideo for " << camera_name << " frame "
+                << frame_index << "\n";
+      return fail();
+    }
+    // An empty payload would count as a frame without adding one to the stream.
+    if (msg.data().empty()) {
+      std::cerr << "Error: CompressedVideo for " << camera_name << " frame " << frame_index
+                << " has no data\n";
+      return fail();
+    }
+
+    auto& stream = streams[camera_name];
+    if (stream.frame_count == 0) {
+      stream.format = msg.format();
+      // ffmpeg infers the demuxer from the extension for raw elementary streams. Only
+      // h264 and h265 payloads are Annex B, so no other codec can be copied this way.
+      std::string ext;
+      if (stream.format == "h264") {
+        ext = ".h264";
+      } else if (stream.format == "h265") {
+        ext = ".hevc";
+      } else {
+        std::cerr << "Error: " << camera_name << " has video format '" << stream.format
+                  << "'; only h264 and h265 can be remuxed\n";
+        return fail();
+      }
+      const fs::path path = dir_for(camera_name) / (camera_name + ext);
+      outputs[camera_name].open(path, std::ios::binary);
+      if (!outputs[camera_name]) {
+        std::cerr << "Error: cannot open " << path.string() << " for writing\n";
+        return fail();
+      }
+      // Recorded only once the file is open, so fail() removes only files this call opened.
+      stream.annexb_path = path;
+    } else if (msg.format() != stream.format) {
+      // A camera that changed codec mid-episode cannot be remuxed as one stream.
+      std::cerr << "Error: " << camera_name << " changed format from " << stream.format << " to "
+                << msg.format() << " mid-episode\n";
+      return fail();
+    }
+
+    outputs[camera_name].write(msg.data().data(), static_cast<std::streamsize>(msg.data().size()));
+    ++stream.frame_count;
+  }
+
+  if (read_failed) {
+    std::cerr << "Error: " << mcap_file << " has unreadable data; video streams would be "
+              << "incomplete\n";
+    return fail();
+  }
+
+  for (auto& [camera_name, out] : outputs) {
+    out.close();
+    if (!out) {
+      std::cerr << "Error: failed writing video stream for " << camera_name << "\n";
+      return fail();
+    }
+  }
+
+  out_streams = std::move(streams);
+  if (!out_streams.empty()) {
+    std::cout << "  [ok] Extracted " << out_streams.size() << " compressed video stream(s)";
+    for (const auto& [name, s] : out_streams) {
+      std::cout << " " << name << "(" << s.format << ", " << s.frame_count << "f)";
+    }
+    std::cout << "\n";
+  }
+  return true;
 }
 
 void clamp_episode_to_video_frame_counts(
-  [[maybe_unused]] AlignedEpisode& ep,
-  [[maybe_unused]] const std::map<std::string, CameraVideoStream>& video_streams) {
-  // TODO(shantanuparab-tr): implement the trim to the shortest video-mode camera (#308).
+  AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams) {
+  size_t min_video_frames = std::numeric_limits<size_t>::max();
+  for (const auto& [name, vs] : video_streams) {
+    if (vs.frame_count > 0) min_video_frames = std::min(min_video_frames, vs.frame_count);
+  }
+  if (min_video_frames < ep.frames.size()) {
+    ep.frames.resize(min_video_frames);
+    for (auto& cam : ep.cameras) {
+      if (cam.row_source_index.size() > min_video_frames) {
+        cam.row_source_index.resize(min_video_frames);
+      }
+    }
+  }
 }
 
 }  // namespace trossen::io::backends
