@@ -22,6 +22,9 @@ target_link_libraries(test_backend_registry PRIVATE trossen_sdk GTest::gtest_mai
 
 add_executable(test_trossen_mcap_backend test_trossen_mcap_backend.cpp)
 target_link_libraries(test_trossen_mcap_backend PRIVATE trossen_sdk GTest::gtest_main)
+if(TROSSEN_ENABLE_VIDEO_ENCODE)
+  target_compile_definitions(test_trossen_mcap_backend PRIVATE TROSSEN_ENABLE_VIDEO_ENCODE)
+endif()
 
 add_executable(test_active_hardware_registry test_active_hardware_registry.cpp)
 target_link_libraries(test_active_hardware_registry PRIVATE trossen_sdk GTest::gtest_main)
