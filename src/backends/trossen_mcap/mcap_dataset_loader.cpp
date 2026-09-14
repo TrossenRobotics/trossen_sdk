@@ -308,7 +308,23 @@ bool load_aligned_episode(
     std::cout << "  Found " << channels.camera_channels.size() << " camera channel(s)\n";
   }
 
+  // A camera's size and depth flag come from the entry its producer writes into dataset_info
+  // (get_stream_info()); the features and the depth handling read them from there.
   const nlohmann::json& info = out.dataset_info;
+  for (const auto& [channel_id, camera_name] : channels.camera_channels) {
+    const bool described = info.contains("cameras") && info["cameras"].contains(camera_name) &&
+                           info["cameras"][camera_name].value("width", nlohmann::json())
+                             .is_number_integer() &&
+                           info["cameras"][camera_name].value("height", nlohmann::json())
+                             .is_number_integer() &&
+                           info["cameras"][camera_name].value("is_depth_map", nlohmann::json())
+                             .is_boolean();
+    if (!described) {
+      std::cerr << "Error: camera '" << camera_name << "' has no dataset_info entry with "
+                << "integer width and height and a boolean is_depth_map\n";
+      return false;
+    }
+  }
 
   // The base's two velocity columns are named by its producer (get_stream_info()).
   if (channels.has_mobile_base) {
