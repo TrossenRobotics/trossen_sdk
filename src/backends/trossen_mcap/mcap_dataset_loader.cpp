@@ -162,11 +162,18 @@ bool map_described_channels(mcap::McapReader& reader, const nlohmann::json& info
   }
 
   if (info.contains("mobile_base")) {
-    if (!info["mobile_base"].value("topic", json()).is_string()) {
-      std::cerr << "Error: the mobile base has no dataset_info topic\n";
+    const json& base = info["mobile_base"];
+    const json names = base.value("velocity_names", json());
+    const bool described = base.value("topic", json()).is_string() && names.is_array() &&
+                           names.size() == BASE_VELOCITY_WIDTH &&
+                           std::all_of(names.begin(), names.end(),
+                                       [](const json& name) { return name.is_string(); });
+    if (!described) {
+      std::cerr << "Error: the mobile base has no dataset_info topic and "
+                << BASE_VELOCITY_WIDTH << " velocity_names\n";
       return false;
     }
-    base_topic = info["mobile_base"]["topic"].get<std::string>();
+    base_topic = base["topic"].get<std::string>();
   }
 
   for (const auto& [channel_id, channel] : reader.channels()) {
