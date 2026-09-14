@@ -125,7 +125,11 @@ int episode_obs_dim(const AlignedEpisode& ep);
 /**
  * @brief Build the LeRobot `features` schema for an episode.
  *
- * Not implemented yet: returns an empty object.
+ * Produces the observation.state, action and observation.images.<cam> entries, with joint
+ * names `<side>_joint_<i>.pos` and the gripper as `<side>_left_carriage_joint.pos`. The
+ * standard scalar columns (timestamp, frame_index, episode_index, index, task_index) are not
+ * included; callers add them with add_standard_metadata_features(). The schema is identical
+ * between LeRobot v2.1 and v3.0.
  *
  * @param ep Aligned episode (provides streams, cameras, dataset_info).
  * @return The `features` object for info.json.
