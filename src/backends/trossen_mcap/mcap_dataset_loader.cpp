@@ -11,12 +11,26 @@
 
 #include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
 
+#include <iostream>
 #include <type_traits>
 
 namespace trossen::io::backends {
 
 static_assert(std::is_same_v<McapChannelId, mcap::ChannelId>,
               "McapChannelId must match the MCAP library's channel id type");
+
+namespace {
+
+/**
+ * @brief mcap reader callback: log a recoverable parsing issue and keep reading.
+ *
+ * @param problem Status the reader reports for the damaged record.
+ */
+void on_problem(const mcap::Status& problem) {
+  std::cerr << "Warning: MCAP parsing issue: " << problem.message << "\n";
+}
+
+}  // namespace
 
 bool load_aligned_episode(
   [[maybe_unused]] const std::string& mcap_file,
