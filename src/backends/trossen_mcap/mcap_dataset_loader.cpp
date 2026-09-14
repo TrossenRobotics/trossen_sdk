@@ -309,6 +309,20 @@ bool load_aligned_episode(
     std::cout << "  Found " << channels.camera_channels.size() << " camera channel(s)\n";
   }
 
+  const nlohmann::json& info = out.dataset_info;
+
+  // The base's two velocity columns are named by its producer (get_stream_info()).
+  if (channels.has_mobile_base) {
+    const auto names = info.value("base_velocity_names", nlohmann::json());
+    const bool named = names.is_array() && names.size() == 2 &&
+                       names[0].is_string() && names[1].is_string();
+    if (!named) {
+      std::cerr << "Error: the mobile base has no dataset_info base_velocity_names holding "
+                << "its two velocity names\n";
+      return false;
+    }
+  }
+
   // ── Single pass over the message stream: joint states and odometry are parsed into
   //    per-stream buffers, and every camera frame's log time is recorded ──
   std::cout << "\nParsing recorded messages...\n";
