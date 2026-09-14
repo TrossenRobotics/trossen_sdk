@@ -148,11 +148,15 @@ bool map_described_channels(mcap::McapReader& reader, const nlohmann::json& info
     const json storage = camera.value("storage", json());
     const bool described =
       camera.value("topic", json()).is_string() &&
+      camera.value("width", json()).is_number_integer() &&
+      camera.value("height", json()).is_number_integer() &&
+      camera.value("is_depth_map", json()).is_boolean() &&
       (storage == trossen_mcap_defs::kRawStorage || storage == trossen_mcap_defs::kH264Storage ||
        storage == trossen_mcap_defs::kH265Storage);
     if (!described) {
-      std::cerr << "Error: camera '" << name << "' has no dataset_info entry with a topic and "
-                << "a storage of '" << trossen_mcap_defs::kRawStorage << "', '"
+      std::cerr << "Error: camera '" << name << "' has no dataset_info entry with a topic, "
+                << "integer width and height, a boolean is_depth_map and a storage of '"
+                << trossen_mcap_defs::kRawStorage << "', '"
                 << trossen_mcap_defs::kH264Storage << "' or '" << trossen_mcap_defs::kH265Storage
                 << "'\n";
       return false;
