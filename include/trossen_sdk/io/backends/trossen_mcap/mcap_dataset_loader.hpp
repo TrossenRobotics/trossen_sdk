@@ -82,19 +82,20 @@ bool load_aligned_episode(
 /**
  * @brief Decode the row-matched camera frames from an MCAP file into caller-chosen directories.
  *
- * Not implemented until #307: it returns false.
- *
  * Re-opens the MCAP file and writes, for every dataset row, that row's matched frame
- * (CameraInfo::row_source_index) as `image_%06d.jpg` (JPEG quality 95, or 16-bit
+ * (CameraInfo::row_source_index) as `image_%06d.jpg` (JPEG at DEFAULT_JPEG_QUALITY, or 16-bit
  * `image_%06d.png` for depth) into the directory returned by
  * `dir_for(camera_name)`. Output frames are numbered by row, so frame *k* of the encoded
  * video is the observation belonging to data row *k*; a source frame matched by two
- * consecutive rows is written twice. The callback is invoked once per camera and is
- * responsible for creating the dir.
+ * consecutive rows is written twice. The callback is invoked once per RawImage camera and
+ * is responsible for creating the dir.
  *
- * Handles camera channels whose schema is `foxglove.RawImage`. Cameras stored as
- * `foxglove.CompressedVideo` are skipped here; use extract_camera_video() for those. A
- * recording may mix the two (color as video, depth as raw), so a caller should consult both.
+ * Depth frames are written in millimeters, rescaled from the channel's `depth_scale_m`
+ * metadata (meters per raw unit, taken as utils::DEFAULT_DEPTH_SCALE_M when absent).
+ *
+ * Handles recordings whose cameras are stored as `foxglove.RawImage`. A recording stores
+ * every camera the same way, so one stored as `foxglove.CompressedVideo` goes to
+ * extract_camera_video() instead.
  *
  * Both passes read the same file through the same reader, so a camera's arrival order here
  * is identical to the one load_aligned_episode() indexed into.
@@ -124,9 +125,8 @@ bool extract_camera_images(
  * elementary stream under `dir_for(camera_name)`. Nothing is decoded: the point
  * is to let the caller remux with `ffmpeg -c copy`.
  *
- * Cameras stored as `foxglove.RawImage` are ignored here; use
- * extract_camera_images() for those. A recording may legitimately mix the two
- * (color as video, depth as raw), so a caller should consult both.
+ * Cameras stored as `foxglove.RawImage` are ignored, so a raw recording yields no
+ * streams and goes to extract_camera_images() instead.
  *
  * @param mcap_file Path to the input MCAP file.
  * @param channels Channel maps from load_aligned_episode().
