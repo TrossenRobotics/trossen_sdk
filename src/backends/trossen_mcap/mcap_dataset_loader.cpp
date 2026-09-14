@@ -588,8 +588,151 @@ bool extract_camera_images(
   std::map<std::string, size_t>& out_counts,
   bool native_schema)
 {
-  // TODO(shantanuparab-tr): implement the per-row camera frame decode and write.
-  return false;
+  namespace fs = std::filesystem;
+  out_counts.clear();
+  if (channels.camera_channels.empty()) {
+    return true;
+  }
+
+  // Invert the per-row selection: source frame index → the rows that matched it. A frame
+  // matched by two consecutive rows is decoded once and written under both row numbers.
+  std::map<std::string, std::map<size_t, std::vector<size_t>>> rows_by_source;
+  std::map<std::string, size_t> expected_counts;
+  for (const auto& cam : episode.cameras) {
+    auto& mapping = rows_by_source[cam.name];
+    for (size_t row = 0; row < cam.row_source_index.size(); ++row) {
+      mapping[cam.row_source_index[row]].push_back(row);
+    }
+    expected_counts[cam.name] = cam.row_source_index.size();
+  }
+
+  std::map<std::string, fs::path> camera_dirs;
+  for (const auto& [channel_id, camera_name] : channels.camera_channels) {
+    camera_dirs[camera_name] = dir_for(camera_name);
+    out_counts[camera_name] = 0;
+  }
+
+  // Arrival counter per camera, mirroring the indices load_aligned_episode() assigned.
+  std::map<std::string, size_t> source_indices;
+
+  std::ifstream image_input(mcap_file, std::ios::binary);
+  mcap::McapReader image_reader;
+  auto img_status = image_reader.open(image_input);
+  if (!img_status.ok()) {
+    std::cerr << "Error: Failed to reopen MCAP file for images: " << img_status.message << "\n";
+    return false;
+  }
+  auto img_summary_status = image_reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+  if (!img_summary_status.ok()) {
+    std::cerr << "Error: Failed to read MCAP summary for images: " << img_summary_status.message
+              << "\n";
+    return false;
+  }
+
+  size_t images_saved = 0;
+  for (const auto& messageView : image_reader.readMessages(on_problem)) {
+    auto it = channels.camera_channels.find(messageView.channel->id);
+    if (it == channels.camera_channels.end()) continue;
+    // A recording may store some cameras as compressed video; those are handled
+    // by extract_camera_video(). Skipping them by schema keeps this path from
+    // reporting a parse failure per frame on a perfectly good recording.
+    if (messageView.schema && messageView.schema->name == "foxglove.CompressedVideo") {
+      continue;
+    }
+    const std::string& camera_name = it->second;
+    const size_t source_idx = source_indices[camera_name]++;
+
+    // Only frames some row matched are decoded; the rest are read past.
+    const auto& mapping = rows_by_source[camera_name];
+    auto rows_it = mapping.find(source_idx);
+    if (rows_it == mapping.end()) continue;
+    const std::vector<size_t>& target_rows = rows_it->second;
+
+    foxglove::RawImage raw_image;
+    if (!raw_image.ParseFromArray(messageView.message.data,
+                                  static_cast<int>(messageView.message.dataSize))) {
+      std::cerr << "Error: Failed to parse RawImage message for " << camera_name << " source frame "
+                << source_idx << " (needed by row " << target_rows.front() << ")\n";
+      return false;
+    }
+
+    int cv_type = -1;
+    if (raw_image.encoding() == "bgr8" || raw_image.encoding() == "8UC3") {
+      cv_type = CV_8UC3;
+    } else if (raw_image.encoding() == "rgb8") {
+      cv_type = CV_8UC3;
+    } else if (raw_image.encoding() == "rgba8") {
+      cv_type = CV_8UC4;
+    } else if (raw_image.encoding() == "bgra8") {
+      cv_type = CV_8UC4;
+    } else if (raw_image.encoding() == "mono8" || raw_image.encoding() == "8UC1") {
+      cv_type = CV_8UC1;
+    } else if (raw_image.encoding() == "mono16" || raw_image.encoding() == "16UC1") {
+      cv_type = CV_16UC1;
+    } else if (raw_image.encoding() == "32FC1") {
+      cv_type = CV_32FC1;
+    } else {
+      std::cerr << "Error: Unsupported encoding '" << raw_image.encoding() << "' for "
+                << camera_name << " source frame " << source_idx << "\n";
+      return false;
+    }
+
+    cv::Mat image(raw_image.height(), raw_image.width(), cv_type,
+                  const_cast<char*>(raw_image.data().data()), raw_image.step());
+
+    if (raw_image.encoding() == "rgb8") {
+      cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
+    } else if (raw_image.encoding() == "rgba8") {
+      cv::cvtColor(image, image, cv::COLOR_RGBA2BGR);
+    } else if (raw_image.encoding() == "bgra8") {
+      cv::cvtColor(image, image, cv::COLOR_BGRA2BGR);
+    }
+
+    cv::Mat image_copy = image.clone();
+    if (image_copy.empty()) {
+      std::cerr << "Error: Empty image for " << camera_name << " source frame " << source_idx
+                << "\n";
+      return false;
+    }
+
+    // Native schema preserves 16-bit depth losslessly as PNG (JPEG is 8-bit and would
+    // destroy the depth). RGB/8-bit stays JPEG. The writer picks its encode path by the
+    // frame extension it finds (.png → gray12le HEVC depth, .jpg → av1 RGB).
+    const bool depth_png = native_schema && cv_type == CV_16UC1;
+    std::vector<int> compression_params =
+      depth_png ? std::vector<int>{cv::IMWRITE_PNG_COMPRESSION, 1}
+                : std::vector<int>{cv::IMWRITE_JPEG_QUALITY, 95};
+
+    // Frames are numbered by row, not by arrival, so the encoded video lines up with the
+    // parquet rows one-for-one.
+    for (size_t row : target_rows) {
+      char namebuf[32];
+      std::snprintf(namebuf, sizeof(namebuf), depth_png ? "image_%06zu.png" : "image_%06zu.jpg",
+                    row);
+      fs::path image_path = camera_dirs[camera_name] / namebuf;
+      if (!cv::imwrite(image_path.string(), image_copy, compression_params)) {
+        std::cerr << "Error: Failed to save image: " << image_path.string() << "\n";
+        return false;
+      }
+      ++images_saved;
+      out_counts[camera_name]++;
+    }
+  }
+
+  // A short camera means the video would silently run out of frames before the rows do.
+  for (const auto& [camera_name, expected] : expected_counts) {
+    if (out_counts[camera_name] != expected) {
+      std::cerr << "Error: " << camera_name << " wrote " << out_counts[camera_name]
+                << " frames but " << expected << " rows need one\n";
+      return false;
+    }
+  }
+
+  std::cout << "  [ok] Saved " << images_saved << " images\n";
+  for (const auto& [camera_name, count] : out_counts) {
+    std::cout << "    - " << camera_name << ": " << count << " images\n";
+  }
+  return true;
 }
 
 bool extract_camera_video(
