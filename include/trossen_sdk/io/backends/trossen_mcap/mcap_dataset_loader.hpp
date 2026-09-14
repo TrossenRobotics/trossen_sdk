@@ -122,8 +122,6 @@ bool extract_camera_images(
 /**
  * @brief Extract already-compressed camera video straight out of an MCAP.
  *
- * Declared here and implemented in #308; until then it returns false.
- *
  * Handles camera channels whose schema is `foxglove.CompressedVideo`. Each
  * camera's message payloads are appended, in log-time order, to a single Annex B
  * elementary stream under `dir_for(camera_name)`. Nothing is decoded: the point
@@ -147,8 +145,6 @@ bool extract_camera_video(
 
 /**
  * @brief Trim an aligned episode to whatever every video-mode camera actually covers.
- *
- * Declared here and implemented in #308; until then it leaves the episode unchanged.
  *
  * Compressed camera streams are remuxed verbatim (extract_camera_video(), arrival order,
  * not row-aligned), so a camera that free-ran short ends up with fewer frames than the
