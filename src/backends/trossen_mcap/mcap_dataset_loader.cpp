@@ -19,17 +19,22 @@
 #include <iostream>
 #include <limits>
 #include <regex>
+#include <set>
 #include <string>
 #include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
+#include <opencv2/opencv.hpp>
+
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
+#include "trossen_sdk/utils/depth_quantization.hpp"
 
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
+#include "RawImage.pb.h"
 
 namespace trossen::io::backends {
 
@@ -615,16 +620,214 @@ bool load_aligned_episode(
 }
 
 bool extract_camera_images(
-  [[maybe_unused]] const std::string& mcap_file,
-  [[maybe_unused]] const McapChannelMap& channels,
-  [[maybe_unused]] const AlignedEpisode& episode,
-  [[maybe_unused]] const std::function<std::filesystem::path(const std::string& camera_name)>&
-    dir_for,
-  [[maybe_unused]] std::map<std::string, size_t>& out_counts,
-  [[maybe_unused]] bool native_schema)
+  const std::string& mcap_file,
+  const McapChannelMap& channels,
+  const AlignedEpisode& episode,
+  const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
+  std::map<std::string, size_t>& out_counts,
+  bool native_schema)
 {
-  // TODO(shantanuparab-tr): implement the per-row camera frame decode and write.
-  return false;
+  namespace fs = std::filesystem;
+  out_counts.clear();
+  if (channels.camera_channels.empty()) {
+    return true;
+  }
+
+  std::ifstream image_input(mcap_file, std::ios::binary);
+  mcap::McapReader image_reader;
+  auto img_status = image_reader.open(image_input);
+  if (!img_status.ok()) {
+    std::cerr << "Error: Failed to reopen MCAP file for images: " << img_status.message << "\n";
+    return false;
+  }
+  auto img_summary_status = image_reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+  if (!img_summary_status.ok()) {
+    std::cerr << "Error: Failed to read MCAP summary for images: " << img_summary_status.message
+              << "\n";
+    return false;
+  }
+
+  // Cameras stored as compressed video belong to extract_camera_video(); this pass writes
+  // and counts only the RawImage ones. A depth channel records the size of one raw unit, in
+  // meters, as its `depth_scale_m` metadata.
+  std::set<std::string> video_cameras;
+  std::map<std::string, std::string> depth_scale_text;
+  for (const auto& [channel_id, camera_name] : channels.camera_channels) {
+    const auto channel = image_reader.channel(channel_id);
+    const auto schema = channel ? image_reader.schema(channel->schemaId) : nullptr;
+    if (schema && schema->name == "foxglove.CompressedVideo") video_cameras.insert(camera_name);
+    if (!channel) continue;
+    auto scale_it = channel->metadata.find("depth_scale_m");
+    if (scale_it != channel->metadata.end()) depth_scale_text[camera_name] = scale_it->second;
+  }
+
+  // Millimeters per raw depth unit, per camera, resolved on its first depth frame.
+  std::map<std::string, double> mm_per_unit;
+
+  // Invert the per-row selection: source frame index → the rows that matched it. A frame
+  // matched by two consecutive rows is decoded once and written under both row numbers.
+  std::map<std::string, std::map<size_t, std::vector<size_t>>> rows_by_source;
+  std::map<std::string, size_t> expected_counts;
+  for (const auto& cam : episode.cameras) {
+    if (video_cameras.count(cam.name) > 0) continue;
+    // One selected frame per row; any other count would write images under the wrong rows.
+    if (cam.row_source_index.size() != episode.frames.size()) {
+      std::cerr << "Error: camera '" << cam.name << "' selects " << cam.row_source_index.size()
+                << " frames for " << episode.frames.size() << " rows\n";
+      return false;
+    }
+    auto& mapping = rows_by_source[cam.name];
+    for (size_t row = 0; row < cam.row_source_index.size(); ++row) {
+      mapping[cam.row_source_index[row]].push_back(row);
+    }
+    expected_counts[cam.name] = cam.row_source_index.size();
+  }
+
+  std::map<std::string, fs::path> camera_dirs;
+  for (const auto& [camera_name, expected] : expected_counts) {
+    camera_dirs[camera_name] = dir_for(camera_name);
+    out_counts[camera_name] = 0;
+  }
+
+  // Arrival counter per camera, mirroring the indices load_aligned_episode() assigned.
+  std::map<std::string, size_t> source_indices;
+
+  size_t images_saved = 0;
+  for (const auto& messageView : image_reader.readMessages(on_problem)) {
+    auto it = channels.camera_channels.find(messageView.channel->id);
+    if (it == channels.camera_channels.end()) continue;
+    const std::string& camera_name = it->second;
+    if (video_cameras.count(camera_name) > 0) continue;
+    const size_t source_idx = source_indices[camera_name]++;
+
+    // Only frames some row matched are decoded; the rest are read past.
+    const auto& mapping = rows_by_source[camera_name];
+    auto rows_it = mapping.find(source_idx);
+    if (rows_it == mapping.end()) continue;
+    const std::vector<size_t>& target_rows = rows_it->second;
+
+    foxglove::RawImage raw_image;
+    if (!raw_image.ParseFromArray(messageView.message.data,
+                                  static_cast<int>(messageView.message.dataSize))) {
+      std::cerr << "Error: Failed to parse RawImage message for " << camera_name << " source frame "
+                << source_idx << " (needed by row " << target_rows.front() << ")\n";
+      return false;
+    }
+
+    const std::string& encoding = raw_image.encoding();
+    int cv_type = -1;
+    if (encoding == "bgr8" || encoding == "rgb8" || encoding == "8UC3") {
+      cv_type = CV_8UC3;
+    } else if (encoding == "rgba8" || encoding == "bgra8") {
+      cv_type = CV_8UC4;
+    } else if (encoding == "mono8" || encoding == "8UC1") {
+      cv_type = CV_8UC1;
+    } else if (encoding == "mono16" || encoding == "16UC1" || encoding == "depth16") {
+      cv_type = CV_16UC1;
+    } else {
+      std::cerr << "Error: Unsupported encoding '" << encoding << "' for " << camera_name
+                << " source frame " << source_idx << "\n";
+      return false;
+    }
+
+    // 16-bit depth is only kept losslessly as PNG under the native schema; a JPEG would clip
+    // every value above 255 to white.
+    const bool depth_png = cv_type == CV_16UC1;
+    if (depth_png && !native_schema) {
+      std::cerr << "Error: " << camera_name << " records 16-bit depth, which needs the native "
+                << "schema; JPEG would clip it to 8 bits\n";
+      return false;
+    }
+
+    // LeRobot reads integer depth as millimeters, so raw units are rescaled to mm. A camera
+    // that recorded no scale is taken to be in DEFAULT_DEPTH_SCALE_M units.
+    if (depth_png && mm_per_unit.count(camera_name) == 0) {
+      double scale_m = trossen::utils::DEFAULT_DEPTH_SCALE_M;
+      auto text_it = depth_scale_text.find(camera_name);
+      if (text_it == depth_scale_text.end()) {
+        std::cerr << "Warning: " << camera_name << " records no depth_scale_m; assuming "
+                  << scale_m << " m per unit\n";
+      } else if (auto parsed = trossen::utils::parse_depth_scale_m(text_it->second)) {
+        scale_m = *parsed;
+      } else {
+        std::cerr << "Error: " << camera_name << " has an invalid depth_scale_m '"
+                  << text_it->second << "'\n";
+        return false;
+      }
+      mm_per_unit[camera_name] = scale_m * trossen::utils::MM_PER_METER;
+    }
+
+    // The payload must hold every row the header describes, else the view below reads past
+    // the end of the message.
+    const size_t width = raw_image.width();
+    const size_t height = raw_image.height();
+    const size_t row_bytes = width * static_cast<size_t>(CV_ELEM_SIZE(cv_type));
+    const size_t step = raw_image.step() == 0 ? row_bytes : raw_image.step();
+    if (width == 0 || height == 0 || step < row_bytes ||
+        raw_image.data().size() < step * (height - 1) + row_bytes) {
+      std::cerr << "Error: " << camera_name << " source frame " << source_idx << " holds "
+                << raw_image.data().size() << " bytes for a " << raw_image.width() << "x"
+                << raw_image.height() << " '" << encoding << "' image\n";
+      return false;
+    }
+
+    // A view over the message's bytes, not a copy; it is written out before raw_image goes
+    // out of scope. cv::Mat takes a non-const pointer but nothing writes through it.
+    cv::Mat image(raw_image.height(), raw_image.width(), cv_type,
+                  const_cast<char*>(raw_image.data().data()), step);
+
+    if (encoding == "rgb8") {
+      cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
+    } else if (encoding == "rgba8") {
+      cv::cvtColor(image, image, cv::COLOR_RGBA2BGR);
+    } else if (encoding == "bgra8") {
+      cv::cvtColor(image, image, cv::COLOR_BGRA2BGR);
+    }
+
+    // convertTo rounds to the nearest millimeter and saturates at 65535. It writes a new
+    // buffer, so the message bytes under the view stay untouched.
+    cv::Mat depth_mm;
+    if (depth_png && mm_per_unit[camera_name] != 1.0) {
+      image.convertTo(depth_mm, CV_16UC1, mm_per_unit[camera_name]);
+      image = depth_mm;
+    }
+
+    // The writer picks its encode path by the frame extension it finds (.png → gray12le
+    // HEVC depth, .jpg → av1 RGB).
+    std::vector<int> compression_params =
+      depth_png ? std::vector<int>{cv::IMWRITE_PNG_COMPRESSION, DEFAULT_DEPTH_PNG_COMPRESSION_LEVEL}
+                : std::vector<int>{cv::IMWRITE_JPEG_QUALITY, DEFAULT_JPEG_QUALITY};
+
+    // Frames are numbered by row, not by arrival, so the encoded video lines up with the
+    // parquet rows one-for-one.
+    for (size_t row : target_rows) {
+      char namebuf[32];
+      std::snprintf(namebuf, sizeof(namebuf), depth_png ? "image_%06zu.png" : "image_%06zu.jpg",
+                    row);
+      fs::path image_path = camera_dirs[camera_name] / namebuf;
+      if (!cv::imwrite(image_path.string(), image, compression_params)) {
+        std::cerr << "Error: Failed to save image: " << image_path.string() << "\n";
+        return false;
+      }
+      ++images_saved;
+      out_counts[camera_name]++;
+    }
+  }
+
+  // A short camera means the video would silently run out of frames before the rows do.
+  for (const auto& [camera_name, expected] : expected_counts) {
+    if (out_counts[camera_name] != expected) {
+      std::cerr << "Error: " << camera_name << " wrote " << out_counts[camera_name]
+                << " frames but " << expected << " rows need one\n";
+      return false;
+    }
+  }
+
+  std::cout << "  [ok] Saved " << images_saved << " images\n";
+  for (const auto& [camera_name, count] : out_counts) {
+    std::cout << "    - " << camera_name << ": " << count << " images\n";
+  }
+  return true;
 }
 
 bool extract_camera_video(

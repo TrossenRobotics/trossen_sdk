@@ -26,6 +26,9 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <optional>
+#include <string>
 #include <vector>
 
 namespace trossen::utils {
@@ -65,6 +68,24 @@ inline constexpr bool DEFAULT_DEPTH_USE_LOG = true;
 // at its definition site -- and the conversion itself is negligible next to
 // the log() calls below it.
 inline constexpr double MM_PER_METER = 1000.0;
+
+/// @brief Default size of one raw depth unit, in meters: 1 mm, the unit of the ZED and
+///   of most RealSense models. The D405 records 0.1 mm units instead, which its
+///   recordings carry as `depth_scale_m` channel metadata.
+inline constexpr double DEFAULT_DEPTH_SCALE_M = 0.001;
+
+/**
+ * @brief Parse a `depth_scale_m` channel metadata value (meters per raw depth unit).
+ *
+ * @param text The metadata value, e.g. "0.000100".
+ * @return The scale, or std::nullopt unless @p text starts with a finite number above zero.
+ */
+inline std::optional<double> parse_depth_scale_m(const std::string& text) {
+  char* end = nullptr;
+  const double value = std::strtod(text.c_str(), &end);
+  if (end == text.c_str() || !std::isfinite(value) || value <= 0.0) return std::nullopt;
+  return value;
+}
 
 /**
  * @brief Log- or linear-quantize one raw depth sample in millimeters to a
