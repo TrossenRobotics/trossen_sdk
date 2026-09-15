@@ -573,8 +573,12 @@ bool LeRobotV3DatasetWriter::place_or_concat_video(
 }
 
 int LeRobotV3DatasetWriter::task_index_for(const std::string& task_name) {
-  // TODO(shantanuparab-tr): map a task name to its row in the tasks table.
-  return 0;
+  auto it = task_to_index_.find(task_name);
+  if (it != task_to_index_.end()) return it->second;
+  int idx = static_cast<int>(task_list_.size());
+  task_list_.push_back(task_name);
+  task_to_index_[task_name] = idx;
+  return idx;
 }
 
 LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
@@ -583,14 +587,243 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
   const std::string& fallback_task,
   const fs::path& tmp_root) const
 {
-  // TODO(shantanuparab-tr): decode, extract and encode one episode on a worker thread.
-  return {};
+  PreparedEpisode out;
+  out.ep.episode_index = episode_index;
+
+  // ── Decode + align (independent per file: safe to run on a worker thread) ──
+  if (!load_aligned_episode(mcap_path.string(), episode_index, out.ep, out.channels)) {
+    std::cerr << "[FAILED] Could not load " << mcap_path.string() << "\n";
+    return out;  // ok == false
+  }
+  if (out.ep.frames.empty()) {
+    std::cerr << "[FAILED] No aligned frames in " << mcap_path.string() << "\n";
+    return out;
+  }
+  // Prefer the task embedded in this episode's MCAP; fall back to the config's.
+  out.task_name = out.ep.task_name.empty() ? fallback_task : out.ep.task_name;
+
+  out.tmp_dir = tmp_root / ("episode_" + std::to_string(episode_index));
+
+  // ── Camera video ──
+  //
+  // Recordings made with image_encoding="video" already hold compressed streams,
+  // so those are stream-copied into mp4 rather than decoded and re-encoded. A
+  // recording can legitimately mix the two (color as video, depth as raw), and
+  // pre-video recordings have none at all, so both paths run and each camera
+  // takes whichever applies to it.
+  std::map<std::string, CameraVideoStream> video_streams;
+  if (opts_.encode_videos && !opts_.reencode_av1 && !out.channels.camera_channels.empty()) {
+    if (!extract_camera_video(
+          mcap_path.string(), out.channels,
+          [&](const std::string& camera_name) -> fs::path {
+            fs::path dir = out.tmp_dir / camera_name;
+            fs::create_directories(dir);
+            return dir;
+          },
+          video_streams)) {
+      std::error_code ec;
+      fs::remove_all(out.tmp_dir, ec);
+      return out;  // ok == false
+    }
+
+    for (const auto& cam : out.ep.cameras) {
+      auto vs_it = video_streams.find(cam.name);
+      if (vs_it == video_streams.end() || vs_it->second.frame_count == 0) continue;
+      const CameraVideoStream& vs = vs_it->second;
+
+      PreparedEpisode::PreparedVideo pv;
+      pv.obs_key = cam.obs_key;
+      pv.episode_mp4 = out.tmp_dir / (cam.name + "_episode.mp4");
+      if (!remux_episode_video(vs.annexb_path, vs.frame_count, pv.episode_mp4)) {
+        std::error_code ec;
+        fs::remove_all(out.tmp_dir, ec);
+        return out;  // ok == false
+      }
+      pv.duration_s = static_cast<double>(vs.frame_count) / static_cast<double>(opts_.fps);
+      // lerobot names these canonically and validates them; "h265" is "hevc" there.
+      pv.codec = vs.format == "h265" ? "hevc" : "h264";
+      pv.pix_fmt = vs.format == "h265" ? "gray12le" : "yuv420p";
+
+      // 12-bit depth codes are not [0,1] RGB, so they are not sampled for image
+      // stats, matching how the raw-image path treats depth.
+      if (vs.format != "h265") {
+        pv.samples = sample_video_frames(pv.episode_mp4, vs.frame_count, out.tmp_dir);
+      }
+
+      out.videos.push_back(std::move(pv));
+
+      // The elementary stream is now redundant; the mp4 is what gets consumed.
+      std::error_code ec;
+      fs::remove(vs.annexb_path, ec);
+    }
+
+    clamp_episode_to_video_frame_counts(out.ep, video_streams);
+  }
+
+  // ── Raw-image cameras: extract frames, encode a per-episode mp4, sample stats ──
+  if (opts_.encode_videos && !out.channels.camera_channels.empty() &&
+      video_streams.size() < out.ep.cameras.size()) {
+    std::map<std::string, fs::path> camera_dirs;
+    std::map<std::string, size_t> camera_counts;
+    if (!extract_camera_images(
+          mcap_path.string(), out.channels, out.ep,
+          [&](const std::string& camera_name) -> fs::path {
+            fs::path dir = out.tmp_dir / camera_name;
+            fs::create_directories(dir);
+            camera_dirs[camera_name] = dir;
+            return dir;
+          },
+          camera_counts, opts_.native_schema)) {
+      std::cerr << "[FAILED] Could not extract camera frames from " << mcap_path.string() << "\n";
+      std::error_code ec;
+      fs::remove_all(out.tmp_dir, ec);
+      return out;  // ok == false
+    }
+
+    for (const auto& cam : out.ep.cameras) {
+      // Already remuxed from a compressed stream above.
+      if (video_streams.count(cam.name) > 0) continue;
+      auto dir_it = camera_dirs.find(cam.name);
+      auto cnt_it = camera_counts.find(cam.name);
+      if (dir_it == camera_dirs.end() || cnt_it == camera_counts.end() || cnt_it->second == 0) {
+        continue;
+      }
+
+      // Depth cams were extracted as 16-bit PNG (native schema); RGB as JPEG. The
+      // extension picks the encode path: gray12le HEVC for depth, av1 for RGB.
+      const bool is_depth = dir_has_png(dir_it->second);
+
+      PreparedEpisode::PreparedVideo pv;
+      pv.obs_key = cam.obs_key;
+      pv.episode_mp4 = out.tmp_dir / (cam.name + "_episode.mp4");
+      const bool encoded = is_depth
+        ? encode_depth_video(dir_it->second, cnt_it->second, pv.episode_mp4)
+        : encode_episode_video(dir_it->second, cnt_it->second, pv.episode_mp4);
+      if (!encoded) {
+        std::error_code ec;
+        fs::remove_all(out.tmp_dir, ec);
+        return out;  // ok == false: an encode failure fails the whole episode
+      }
+      pv.duration_s = static_cast<double>(cnt_it->second) / static_cast<double>(opts_.fps);
+
+      // Sample RGB frames for image stats before dropping the raw JPEGs. Depth frames
+      // are 12-bit codes, not RGB, so they are not sampled for [0,1] image stats.
+      std::vector<fs::path> paths;
+      if (!is_depth) {
+        for (const auto& entry : fs::directory_iterator(dir_it->second)) {
+          if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+            paths.push_back(entry.path());
+          }
+        }
+        std::sort(paths.begin(), paths.end());
+      }
+      pv.samples = trossen::io::backends::sample_images(paths);
+
+      out.videos.push_back(std::move(pv));
+
+      // Raw JPEGs are no longer needed; free the disk now, keep the encoded mp4.
+      std::error_code ec;
+      fs::remove_all(dir_it->second, ec);
+    }
+  }
+
+  out.ok = true;
+  return out;
 }
 
 bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
 {
-  // TODO(shantanuparab-tr): append a prepared episode to the aggregated files, in order.
-  return false;
+  const AlignedEpisode& ep = pe.ep;
+  if (ep.frames.empty()) {
+    std::cerr << "Warning: episode " << ep.episode_index << " has no frames; skipping.\n";
+    return true;
+  }
+
+  // Fix the schema + feature set from the first episode.
+  if (!schema_fixed_) {
+    action_dim_ = ep.action_dim;
+    obs_dim_ = ep.obs_dim;
+    data_schema_ = make_data_schema();
+    features_ = build_features(ep, opts_.native_schema);
+    // build_features() assumes this converter encoded the video, so it names the
+    // encoder defaults. Cameras whose stream was remuxed out of the recording
+    // carry whatever codec the recorder used, and lerobot derives video.codec
+    // from the stream itself -- a mismatch here is a dataset it rejects.
+    for (const auto& pv : pe.videos) {
+      if (!features_.contains(pv.obs_key)) continue;
+      features_[pv.obs_key]["info"]["video.codec"] = pv.codec;
+      features_[pv.obs_key]["info"]["video.pix_fmt"] = pv.pix_fmt;
+    }
+    trossen::io::backends::add_standard_metadata_features(features_);
+    action_values_.assign(action_dim_, {});
+    obs_values_.assign(obs_dim_, {});
+    schema_fixed_ = true;
+  }
+
+  const int task_index = task_index_for(pe.task_name);
+  const int64_t ep_frames = static_cast<int64_t>(ep.frames.size());
+
+  // The episode index is the position in the episodes table, assigned here rather than
+  // taken from the input file's position: LeRobot looks episodes up positionally
+  // (`meta.episodes[episode_index]`), so a skipped input must not leave a hole. A gap
+  // makes every later episode read another episode's video seek metadata.
+  const int episode_index = static_cast<int>(episodes_.size());
+
+  // ── Data parquet: roll if needed, then write this episode as one row group ──
+  if (!roll_data_file_if_needed(ep_frames)) return false;
+
+  EpisodeMeta meta;
+  meta.episode_index = episode_index;
+  meta.tasks = {pe.task_name};
+  meta.length = ep_frames;
+  meta.data_chunk_index = data_.chunk_index;
+  meta.data_file_index = data_.file_index;
+  meta.dataset_from_index = global_frame_index_;
+  meta.dataset_to_index = global_frame_index_ + ep_frames;
+
+  auto table = build_episode_table(ep, episode_index, task_index, global_frame_index_);
+  auto st = data_.writer->WriteTable(*table, table->num_rows());  // one row group / episode
+  if (!st.ok()) {
+    std::cerr << "Error: Failed to write data table: " << st.ToString() << "\n";
+    return false;
+  }
+  data_.frames_in_file += ep_frames;
+  global_frame_index_ += ep_frames;
+  total_frames_ += ep_frames;
+
+  // ── Accumulate global stats from this episode's frames ──
+  for (const auto& f : ep.frames) {
+    for (int d = 0; d < action_dim_ && d < static_cast<int>(f.action.size()); ++d) {
+      action_values_[d].push_back(static_cast<float>(f.action[d]));
+    }
+    for (int d = 0; d < obs_dim_ && d < static_cast<int>(f.observation.size()); ++d) {
+      obs_values_[d].push_back(static_cast<float>(f.observation[d]));
+    }
+    ts_values_.push_back(f.timestamp_s);
+  }
+
+  // ── Videos: place/concat each pre-encoded episode mp4 into the shared file ──
+  if (opts_.encode_videos) {
+    for (auto& pv : pe.videos) {
+      if (std::find(video_keys_.begin(), video_keys_.end(), pv.obs_key) == video_keys_.end()) {
+        video_keys_.push_back(pv.obs_key);
+      }
+
+      std::array<double, 4> slot{};
+      if (!place_or_concat_video(pv.obs_key, pv.episode_mp4, pv.duration_s, slot)) return false;
+      meta.videos[pv.obs_key] = slot;
+
+      // Accumulate sampled frames for image stats (cap total per key).
+      auto& bucket = image_samples_[pv.obs_key];
+      for (auto& img : pv.samples) {
+        if (bucket.size() >= kMaxImageSamplesPerKey) break;
+        if (!img.empty()) bucket.push_back(std::move(img));
+      }
+    }
+  }
+
+  episodes_.push_back(std::move(meta));
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::write_episodes_parquet() {
