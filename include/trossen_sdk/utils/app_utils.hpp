@@ -106,14 +106,14 @@ bool interruptible_sleep(std::chrono::duration<double> duration);
 /**
  * @brief Announce a message via text-to-speech (spd-say)
  *
- * Safe to call even if spd-say is not installed -- fails silently.
+ * Returns once the message has been handed to the speech daemon. Announcements are best
+ * effort: a missing spd-say, or a daemon that drops the message, is not reported to the
+ * caller.
  * Message is passed directly to spd-say via posix_spawn (no shell involved),
  * so all characters are safe and no sanitization is needed.
  *
  * @param message Text to speak; empty messages are ignored
- * @param block If true (default), blocks until speech finishes.
- *              If false, returns immediately while speech plays in background.
  */
-void announce(const std::string& message, bool block = true);
+void announce(const std::string& message);
 
 }  // namespace trossen::utils
