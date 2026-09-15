@@ -326,38 +326,250 @@ bool LeRobotV3DatasetWriter::roll_data_file_if_needed(int64_t next_ep_frames) {
 bool LeRobotV3DatasetWriter::encode_episode_video(
   const fs::path& image_dir, size_t frame_count, const fs::path& out_mp4) const
 {
-  // TODO(shantanuparab-tr): encode an episode's color frames to video.
-  return false;
+  fs::path input_pattern = image_dir / "image_%06d.jpg";
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -framerate " << opts_.fps << " -start_number 0"
+      << " -i " << input_pattern.string() << " -frames:v " << frame_count
+      << " -c:v libsvtav1 -crf 30 -g 30 -preset 6";
+  // SVT-AV1's level-of-parallelism. ffmpeg's -threads is silently ignored by this
+  // encoder, so lp= is the only way to stop each concurrent worker's encoder from
+  // sizing itself to the whole machine.
+  if (opts_.encoder_threads > 0) {
+    cmd << " -svtav1-params lp=" << opts_.encoder_threads;
+  }
+  cmd << " -pix_fmt yuv420p -r 30 " << out_mp4.string();
+  int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg encode failed (exit " << ret << "): " << cmd.str() << "\n";
+    return false;
+  }
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::encode_depth_video(
   const fs::path& image_dir, size_t frame_count, const fs::path& out_mp4) const
 {
-  // TODO(shantanuparab-tr): encode an episode's depth frames to video.
-  return false;
+  // 16-bit depth (mm) → 12-bit log-quantized codes → lossless HEVC gray12le. The
+  // mapping lives in trossen_sdk/utils/depth_quantization.hpp so this converter and
+  // the MCAP recorder (which can encode depth video at capture time) cannot drift
+  // apart, and a mismatch would decode to wrong distances without erroring.
+  const std::vector<uint16_t> lut = trossen::utils::build_depth_quantization_lut();
+
+  int width = 0, height = 0;
+  const fs::path raw_path = fs::path(out_mp4.string() + ".gray12.raw");
+  {
+    std::ofstream raw(raw_path, std::ios::binary);
+    if (!raw) {
+      std::cerr << "Error: cannot open depth raw temp: " << raw_path.string() << "\n";
+      return false;
+    }
+    std::vector<uint16_t> codes;
+    for (size_t f = 0; f < frame_count; ++f) {
+      char namebuf[32];
+      std::snprintf(namebuf, sizeof(namebuf), "image_%06zu.png", f);
+      cv::Mat img = cv::imread((image_dir / namebuf).string(), cv::IMREAD_UNCHANGED);
+      if (img.empty() || img.type() != CV_16UC1) {
+        std::cerr << "Error: depth frame missing or not 16-bit mono: " << namebuf << "\n";
+        return false;
+      }
+      if (width == 0) {
+        width = img.cols;
+        height = img.rows;
+      }
+      codes.resize(static_cast<size_t>(img.rows) * static_cast<size_t>(img.cols));
+      size_t k = 0;
+      for (int y = 0; y < img.rows; ++y) {
+        const uint16_t* row = img.ptr<uint16_t>(y);
+        for (int x = 0; x < img.cols; ++x) codes[k++] = lut[row[x]];
+      }
+      raw.write(reinterpret_cast<const char*>(codes.data()), codes.size() * sizeof(uint16_t));
+    }
+  }
+  if (width == 0 || height == 0) {
+    std::cerr << "Error: no depth frames read from " << image_dir.string() << "\n";
+    std::error_code ec;
+    fs::remove(raw_path, ec);
+    return false;
+  }
+
+  // x265 pools= caps its worker pool. ffmpeg's -threads only reaches x265's
+  // frame-threads, which leaves most of the pool uncapped, so use pools=.
+  std::ostringstream x265_params;
+  x265_params << "lossless=1:log-level=error";
+  if (opts_.encoder_threads > 0) {
+    x265_params << ":pools=" << opts_.encoder_threads;
+  }
+
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -f rawvideo -pix_fmt gray12le -s " << width << "x" << height
+      << " -framerate " << opts_.fps << " -i " << raw_path.string() << " -frames:v " << frame_count
+      << " -c:v libx265 -x265-params " << x265_params.str() << " -pix_fmt gray12le -r 30 "
+      << out_mp4.string();
+  int ret = std::system(cmd.str().c_str());
+  std::error_code ec;
+  fs::remove(raw_path, ec);
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg depth encode failed (exit " << ret << "): " << cmd.str() << "\n";
+    return false;
+  }
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::remux_episode_video(
   const fs::path& annexb, size_t frame_count, const fs::path& out_mp4) const
 {
-  // TODO(shantanuparab-tr): remux an already-compressed stream without re-encoding.
-  return false;
+  // -c copy: the bitstream goes through untouched. An elementary stream has no
+  // container timestamps, so -r stamps them at the dataset rate and +genpts
+  // fills in the presentation timestamps the mp4 muxer needs.
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << opts_.fps
+      << " -i " << annexb.string()
+      << " -c copy -movflags +faststart " << out_mp4.string();
+  const int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg remux failed (exit " << ret << "): " << cmd.str() << "\n";
+    return false;
+  }
+
+  // A frame count that disagrees with the message count silently shifts image/state
+  // alignment for every later frame.
+  std::ostringstream probe;
+  probe << "ffprobe -v error -count_frames -select_streams v:0 "
+        << "-show_entries stream=nb_read_frames -of default=nw=1:nk=1 "
+        << out_mp4.string();
+  FILE* pipe = popen(probe.str().c_str(), "r");
+  if (!pipe) {
+    std::cerr << "Warning: could not probe remuxed video " << out_mp4.string() << "\n";
+    return true;
+  }
+  char buf[64] = {0};
+  const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
+  pclose(pipe);
+  if (read_ok) {
+    const int64_t muxed = std::strtoll(buf, nullptr, 10);
+    if (muxed > 0 && static_cast<size_t>(muxed) != frame_count) {
+      std::cerr << "Error: remuxed " << out_mp4.filename().string() << " has " << muxed
+                << " frames but the recording had " << frame_count
+                << " video messages; refusing to misalign frames against joint states\n";
+      return false;
+    }
+  }
+  return true;
 }
 
 std::vector<cv::Mat> LeRobotV3DatasetWriter::sample_video_frames(
   const fs::path& mp4, size_t frame_count, const fs::path& tmp_dir) const
 {
-  // TODO(shantanuparab-tr): sample frames back out of a written video for pixel statistics.
-  return {};
+  if (frame_count == 0) return {};
+
+  const fs::path sample_dir = tmp_dir / "samples";
+  std::error_code ec;
+  fs::create_directories(sample_dir, ec);
+
+  // Decode roughly this many stills, evenly spread. Enough for stable global
+  // image statistics without decoding the whole stream.
+  constexpr size_t kTargetSamples = 30;
+  const size_t stride = std::max<size_t>(1, frame_count / kTargetSamples);
+
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -i " << mp4.string()
+      << " -vf \"select='not(mod(n\\," << stride << "))'\" -vsync 0 -q:v 2 "
+      << (sample_dir / "sample_%04d.jpg").string();
+  if (std::system(cmd.str().c_str()) != 0) {
+    std::cerr << "Warning: could not sample frames from " << mp4.string()
+              << "; image stats for this camera will be based on fewer frames\n";
+  }
+
+  std::vector<fs::path> paths;
+  if (fs::exists(sample_dir)) {
+    for (const auto& entry : fs::directory_iterator(sample_dir)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+        paths.push_back(entry.path());
+      }
+    }
+  }
+  std::sort(paths.begin(), paths.end());
+  std::vector<cv::Mat> samples = trossen::io::backends::sample_images(paths);
+  fs::remove_all(sample_dir, ec);
+  return samples;
 }
 
 bool LeRobotV3DatasetWriter::place_or_concat_video(
   const std::string& video_key, const fs::path& episode_mp4, double ep_duration_s,
   std::array<double, 4>& out_slot)
 {
-  // TODO(shantanuparab-tr): place the episode video, concatenating into the current file when it
-  // fits.
-  return false;
+  VideoFileState& st = videos_[video_key];
+
+  auto target_path = [&]() {
+    std::ostringstream rel;
+    rel << video_key << "/chunk-" << std::setfill('0') << std::setw(3) << st.chunk_index
+        << "/file-" << std::setfill('0') << std::setw(3) << st.file_index << ".mp4";
+    return videos_dir_ / rel.str();
+  };
+
+  auto start_new_file = [&]() -> bool {
+    fs::path target = target_path();
+    try {
+      fs::create_directories(target.parent_path());
+      fs::rename(episode_mp4, target);
+    } catch (const std::exception& e) {
+      // rename across filesystems can fail; fall back to copy.
+      try {
+        fs::copy_file(episode_mp4, target, fs::copy_options::overwrite_existing);
+        fs::remove(episode_mp4);
+      } catch (const std::exception& e2) {
+        std::cerr << "Error: Failed to place video: " << e2.what() << "\n";
+        return false;
+      }
+    }
+    st.path = target;
+    st.duration_s = ep_duration_s;
+    out_slot = {static_cast<double>(st.chunk_index), static_cast<double>(st.file_index), 0.0,
+                ep_duration_s};
+    return true;
+  };
+
+  if (st.path.empty()) {
+    return start_new_file();
+  }
+
+  double cur_mb = static_cast<double>(fs::file_size(st.path)) / 1e6;
+  double ep_mb = static_cast<double>(fs::file_size(episode_mp4)) / 1e6;
+  if (cur_mb + ep_mb >= static_cast<double>(opts_.video_files_size_in_mb)) {
+    update_chunk_file_indices(st.chunk_index, st.file_index, opts_.chunks_size);
+    return start_new_file();
+  }
+
+  // Concatenate episode_mp4 onto the current shared file (stream copy, no re-encode).
+  fs::path list_file = episode_mp4.parent_path() / "concat_list.txt";
+  {
+    std::ofstream lf(list_file);
+    lf << "file '" << st.path.string() << "'\n";
+    lf << "file '" << episode_mp4.string() << "'\n";
+  }
+  fs::path tmp_out = episode_mp4.parent_path() / "concat_out.mp4";
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -f concat -safe 0 -i " << list_file.string() << " -c copy "
+      << tmp_out.string();
+  int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg concat failed (exit " << ret << ")\n";
+    return false;
+  }
+  try {
+    fs::rename(tmp_out, st.path);
+    fs::remove(episode_mp4);
+    fs::remove(list_file);
+  } catch (const std::exception& e) {
+    std::cerr << "Error: Failed to replace shared video: " << e.what() << "\n";
+    return false;
+  }
+
+  double from_ts = st.duration_s;
+  st.duration_s += ep_duration_s;
+  out_slot = {static_cast<double>(st.chunk_index), static_cast<double>(st.file_index), from_ts,
+              st.duration_s};
+  return true;
 }
 
 int LeRobotV3DatasetWriter::task_index_for(const std::string& task_name) {
