@@ -381,7 +381,201 @@ bool load_aligned_episode(
     out.cameras.push_back(std::move(cam));
   }
 
-  // TODO(shantanuparab-tr): implement the nearest-timestamp row alignment.
+  // ── Align: for each reference timestamp, snap every stream to its nearest sample ──
+  std::map<std::string, size_t> stream_indices;
+  for (const auto& [stream_id, _] : messages_by_stream) {
+    stream_indices[stream_id] = 0;
+  }
+
+  const double frame_duration_s = 1.0 / alignment.fps;
+  size_t mobile_base_idx = 0;
+  int64_t frame_index = 0;
+  size_t rows_skipped = 0;
+  size_t rows_skipped_no_frame = 0;
+
+  // Per-camera search cursor. Rows are visited in increasing reference time, so each
+  // cursor only ever moves forward.
+  std::map<std::string, size_t> camera_cursors;
+  for (const auto& [camera_name, stamps] : camera_timestamps) camera_cursors[camera_name] = 0;
+
+  // Frame nearest `target`, or npos when the nearest is further away than the tolerance.
+  // Unlike the joint matcher (which snaps to the last sample at or before the target),
+  // this compares both neighbours, halving the worst-case pairing error from a full
+  // frame period to half of one.
+  auto nearest_frame = [&alignment](const std::vector<uint64_t>& stamps, uint64_t target,
+                                    size_t& cursor) -> size_t {
+    if (stamps.empty()) return std::numeric_limits<size_t>::max();
+    while (cursor + 1 < stamps.size() && stamps[cursor + 1] <= target) ++cursor;
+    size_t best = cursor;
+    auto distance = [target](uint64_t ts) {
+      return target > ts ? target - ts : ts - target;
+    };
+    if (cursor + 1 < stamps.size() && distance(stamps[cursor + 1]) < distance(stamps[cursor])) {
+      best = cursor + 1;
+    }
+    return distance(stamps[best]) > alignment.tolerance_ns ? std::numeric_limits<size_t>::max()
+                                                           : best;
+  };
+
+  // Records carry a dual (sec, nsec) Timestamp; the MCAP log time was written from the
+  // realtime half, so that is the key every comparison below uses.
+  auto log_ns = [](const data::RecordBase& rec) { return rec.ts.realtime.to_ns(); };
+
+  auto find_closest_message = [&](const std::string& stream_id, uint64_t target_ts,
+                                  size_t& idx) -> const data::JointStateRecord* {
+    auto it = messages_by_stream.find(stream_id);
+    if (it == messages_by_stream.end() || it->second.empty()) return nullptr;
+    const auto& messages = it->second;
+    if (idx >= messages.size()) return nullptr;
+    while (idx < messages.size() - 1 && log_ns(messages[idx + 1]) <= target_ts) {
+      ++idx;
+    }
+    if (std::abs(static_cast<int64_t>(log_ns(messages[idx]) - target_ts)) >
+        static_cast<int64_t>(alignment.tolerance_ns)) {
+      return nullptr;
+    }
+    return &messages[idx];
+  };
+
+  // Appends one stream's enabled signal blocks in the order build_features() names them:
+  // positions, then velocities, then efforts. A stream that recorded fewer values than it
+  // has joints is zero-filled so every row keeps the same width.
+  auto append_joint_signals = [&](std::vector<double>& dst, const data::JointStateRecord& sample,
+                                  bool with_velocity, bool with_effort) {
+    const size_t n = sample.positions.size();
+    // Each block contributes exactly n values: a short block is zero-filled and a long one
+    // is truncated, so every row matches the width build_features() declares.
+    auto append_block = [&](const std::vector<float>& src) {
+      const size_t take = std::min(n, src.size());
+      dst.insert(dst.end(), src.begin(), src.begin() + static_cast<std::ptrdiff_t>(take));
+      dst.resize(dst.size() + (n - take), 0.0);
+    };
+    append_block(sample.positions);
+    if (with_velocity) append_block(sample.velocities);
+    if (with_effort) append_block(sample.efforts);
+  };
+
+  out.frames.reserve(max_rows);
+  for (size_t ref_idx = 0; ref_idx < max_rows; ++ref_idx) {
+    const uint64_t timestamp_ns = log_ns(reference_messages[ref_idx]);
+
+    std::vector<double> actions;
+    bool have_all_leaders = true;
+    for (const auto& leader_stream : out.leader_streams) {
+      const auto* sample = find_closest_message(leader_stream, timestamp_ns,
+                                                stream_indices[leader_stream]);
+      if (sample) {
+        actions.insert(actions.end(), sample->positions.begin(), sample->positions.end());
+      } else {
+        have_all_leaders = false;
+        break;
+      }
+    }
+
+    std::vector<double> observations;
+    bool have_all_followers = true;
+    for (const auto& follower_stream : out.follower_streams) {
+      const auto* sample = find_closest_message(follower_stream, timestamp_ns,
+                                                stream_indices[follower_stream]);
+      if (sample) {
+        append_joint_signals(observations, *sample, signals.joint_velocity,
+                             signals.joint_effort);
+      } else {
+        have_all_followers = false;
+        break;
+      }
+    }
+
+    std::vector<double> base_values;
+    if (channels.has_mobile_base) {
+      while (mobile_base_idx < mobile_base_messages.size() - 1 &&
+             log_ns(mobile_base_messages[mobile_base_idx + 1]) <= timestamp_ns) {
+        ++mobile_base_idx;
+      }
+      if (mobile_base_idx < mobile_base_messages.size() &&
+          std::abs(static_cast<int64_t>(
+            log_ns(mobile_base_messages[mobile_base_idx]) - timestamp_ns)) <=
+            static_cast<int64_t>(alignment.tolerance_ns)) {
+        const auto& odom = mobile_base_messages[mobile_base_idx];
+        base_values.push_back(odom.twist.linear_x);
+        base_values.push_back(odom.twist.angular_z);
+        if (signals.base_lateral_velocity) base_values.push_back(odom.twist.linear_y);
+        if (signals.base_pose) {
+          base_values.push_back(odom.pose.x);
+          base_values.push_back(odom.pose.y);
+          base_values.push_back(odom.pose.theta);
+        }
+      }
+      if (base_values.empty()) {
+        base_values.assign(base_block_width, 0.0);
+      }
+    }
+
+    if (!have_all_leaders || !have_all_followers) {
+      ++rows_skipped;
+      continue;
+    }
+
+    // Every camera must offer a frame within tolerance, else the row would pair a joint
+    // state with a stale image. Selections are staged and only committed once the whole
+    // row is known good, so a late miss can't leave the cameras half-filled.
+    std::vector<size_t> staged_camera_frames;
+    staged_camera_frames.reserve(out.cameras.size());
+    for (const auto& cam : out.cameras) {
+      const size_t frame_idx = nearest_frame(camera_timestamps[cam.name], timestamp_ns,
+                                             camera_cursors[cam.name]);
+      if (frame_idx == std::numeric_limits<size_t>::max()) break;
+      staged_camera_frames.push_back(frame_idx);
+    }
+    if (staged_camera_frames.size() != out.cameras.size()) {
+      ++rows_skipped_no_frame;
+      continue;
+    }
+    for (size_t c = 0; c < out.cameras.size(); ++c) {
+      out.cameras[c].row_source_index.push_back(staged_camera_frames[c]);
+    }
+
+    if (channels.has_mobile_base) {
+      actions.insert(actions.end(), base_values.begin(), base_values.end());
+      observations.insert(observations.end(), base_values.begin(), base_values.end());
+    }
+
+    AlignedFrame frame;
+    frame.timestamp_s = static_cast<float>(static_cast<double>(frame_index) * frame_duration_s);
+    frame.reference_timestamp_ns = timestamp_ns;
+    frame.action = std::move(actions);
+    frame.observation = std::move(observations);
+    out.frames.push_back(std::move(frame));
+    ++frame_index;
+  }
+
+  std::cout << "  [ok] Aligned " << out.frames.size() << " frames";
+  if (rows_skipped > 0) std::cout << " (skipped " << rows_skipped << " misaligned)";
+  if (rows_skipped_no_frame > 0) {
+    std::cout << " (skipped " << rows_skipped_no_frame << " with no camera frame in tolerance)";
+  }
+  std::cout << "\n";
+
+  // How far each camera ends up from its rows: a large or growing offset means the camera
+  // clock is drifting away from the reference stream and is worth investigating.
+  for (const auto& cam : out.cameras) {
+    if (cam.row_source_index.empty()) continue;
+    const auto& stamps = camera_timestamps[cam.name];
+    double sum_abs_ms = 0.0;
+    double worst_ms = 0.0;
+    for (size_t row = 0; row < out.frames.size(); ++row) {
+      const int64_t delta = static_cast<int64_t>(stamps[cam.row_source_index[row]]) -
+                            static_cast<int64_t>(out.frames[row].reference_timestamp_ns);
+      const double delta_ms = static_cast<double>(delta) / 1e6;
+      sum_abs_ms += std::abs(delta_ms);
+      worst_ms = std::max(worst_ms, std::abs(delta_ms));
+    }
+    std::cout << "    - " << cam.name << ": " << stamps.size() << " frames, pairing offset mean "
+              << std::fixed << std::setprecision(1)
+              << (sum_abs_ms / static_cast<double>(out.frames.size())) << " ms, worst " << worst_ms
+              << " ms\n";
+  }
+  std::cout.unsetf(std::ios::floatfield);
 
   return true;
 }
