@@ -16,6 +16,7 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Stereolab
 - [Interactive Episode Controls](#interactive-episode-controls)
 - [Configuration Reference](#configuration-reference)
 - [Converting to LeRobot V2](#converting-to-lerobot-v2)
+- [Reading Recordings](#reading-recordings)
 - [Architecture Overview](#architecture-overview)
 - [Extending the SDK](#extending-the-sdk)
 - [Further Reading](#further-reading)
@@ -402,6 +403,49 @@ For full conversion options and format details see the [Conversion Tool Guide](s
 
 ---
 
+## Reading Recordings
+
+The SDK reads a TrossenMCAP recording back into memory, so a recording is not only an
+input to the bundled converters. Link `trossen_sdk` and include:
+
+```cpp
+#include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
+
+using namespace trossen::io::backends;
+
+AlignedEpisode ep;
+McapChannelMap channels;
+if (load_aligned_episode("episode.mcap", /*episode_index=*/0, ep, channels)) {
+  for (const AlignedFrame& f : ep.frames) {
+    // f.timestamp_s, f.action, f.observation
+  }
+}
+```
+
+`load_aligned_episode()` decodes the recording, auto-detects leader and follower joint
+streams, and nearest-timestamp aligns them into one frame per dataset row. The result is
+an `AlignedEpisode`: per-row `action` and `observation` vectors plus, for each camera, the
+source frame that row was matched to.
+
+Camera frames are not decoded by that call. Extract them separately, either as images or
+as the already-compressed video stream the recording stores:
+
+| Function | Produces |
+| --- | --- |
+| `extract_camera_images()` | one JPEG (or 16-bit PNG for depth) per dataset row |
+| `extract_camera_video()` | one Annex B elementary stream per camera, copied out verbatim |
+| `build_features()` | the LeRobot `features` schema for the episode |
+
+Every field a recording carries is decoded, including joint velocities and efforts and the
+full odometry pose and twist. `DatasetSignalOptions` selects which of them are assembled
+into the row vectors; the defaults are joint positions plus the planar base velocity pair.
+`AlignmentOptions` sets the row rate and the match tolerance, 30 fps and 50 ms by default.
+
+The MCAP reader is compiled into `trossen_sdk` and owns the single `MCAP_IMPLEMENTATION`
+translation unit, so a target linking the SDK must not define that macro itself.
+
+---
+
 ## Architecture Overview
 
 <p align="center">
@@ -503,6 +547,8 @@ The key headers are:
 - [`include/trossen_sdk/hw/producer_base.hpp`](include/trossen_sdk/hw/producer_base.hpp) — `PolledProducer` base class
 - [`include/trossen_sdk/runtime/producer_registry.hpp`](include/trossen_sdk/runtime/producer_registry.hpp) — `REGISTER_PRODUCER` macro
 - [`include/trossen_sdk/runtime/session_manager.hpp`](include/trossen_sdk/runtime/session_manager.hpp) — episode lifecycle API
+- [`include/trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp`](include/trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp) — reading a recording back into an `AlignedEpisode`
+- [`include/trossen_sdk/io/backends/lerobot_common/lerobot_episode.hpp`](include/trossen_sdk/io/backends/lerobot_common/lerobot_episode.hpp) — the episode model and the LeRobot `features` schema
 
 See the example scripts in `examples/` for complete, working implementations of hardware setup and episode recording loops.
 
