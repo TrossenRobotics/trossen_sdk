@@ -6,6 +6,7 @@
  * PATH is temporarily cleared so posix_spawnp cannot find spd-say.
  */
 
+#include <chrono>
 #include <cstdlib>
 #include <string>
 
@@ -34,12 +35,15 @@ TEST_F(SilentAnnounceTest, EmptyString_NoOp) {
   EXPECT_NO_THROW(announce(""));
 }
 
-// AN-02: announce with blocking mode doesn't crash
-TEST_F(SilentAnnounceTest, BlockingMode_NoCrash) {
-  EXPECT_NO_THROW(announce("test", true));
+// AN-02: announce with a message doesn't crash when spd-say cannot be found
+TEST_F(SilentAnnounceTest, MissingBinary_NoCrash) {
+  EXPECT_NO_THROW(announce("test"));
 }
 
-// AN-03: announce with non-blocking mode doesn't crash
-TEST_F(SilentAnnounceTest, NonBlockingMode_NoCrash) {
-  EXPECT_NO_THROW(announce("test", false));
+// AN-03: announce returns promptly rather than waiting on speech to finish
+TEST_F(SilentAnnounceTest, ReturnsPromptly) {
+  const auto start = std::chrono::steady_clock::now();
+  announce("test");
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+  EXPECT_LT(std::chrono::duration_cast<std::chrono::seconds>(elapsed).count(), 2);
 }
