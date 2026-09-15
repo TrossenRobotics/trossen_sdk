@@ -889,7 +889,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
           py::call_guard<py::gil_scoped_release>(),
           "Sleep that returns early if Ctrl+C pressed");
 
-    m.def("announce", &announce, py::arg("message"), py::arg("block") = true,
+    m.def("announce", &announce, py::arg("message"),
           "Announce a message via text-to-speech");
 
     py::enum_<KeyPress>(m, "KeyPress")
