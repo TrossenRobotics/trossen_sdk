@@ -268,14 +268,12 @@ bool interruptible_sleep(std::chrono::duration<double> duration) {
 }
 
 
-void announce(const std::string& message, bool block) {
+void announce(const std::string& message) {
   if (message.empty()) return;
 
-  // Spawn spd-say directly via posix_spawnp (no shell involved).
-  // When blocking, pass -w so spd-say itself waits for speech to finish.
-  const char* argv_block[] = {"spd-say", "-w", message.c_str(), nullptr};
-  const char* argv_async[] = {"spd-say", message.c_str(), nullptr};
-  const char** argv = block ? argv_block : argv_async;
+  // Spawn spd-say directly via posix_spawnp (no shell involved). The child submits the
+  // message to the speech daemon and exits.
+  const char* argv[] = {"spd-say", message.c_str(), nullptr};
 
   // Suppress stderr so missing spd-say doesn't print errors
   posix_spawn_file_actions_t actions;
@@ -291,7 +289,8 @@ void announce(const std::string& message, bool block) {
     const_cast<char**>(argv), environ);
   if (have_actions) posix_spawn_file_actions_destroy(&actions);
 
-  if (err == 0 && block) {
+  // Reap the child, which exits as soon as the message is submitted.
+  if (err == 0) {
     waitpid(pid, nullptr, 0);
   }
 }
