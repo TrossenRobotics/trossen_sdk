@@ -25,6 +25,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -34,15 +36,12 @@
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <optional>
-#include <regex>
 #include <string>
 #include <vector>
 
 #include "trossen_sdk/utils/app_utils.hpp"
-#include "JointState.pb.h"
-#include "Odometry2D.pb.h"
-#include "RawImage.pb.h"
 #include "mcap/reader.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
 #include "nlohmann/json.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_constants.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
@@ -57,19 +56,6 @@ constexpr char TOOL_NAME[] = "trossen_mcap_to_lerobot_v2";
 
 /// @brief Config file used when --config is not given, relative to the repository root
 constexpr char DEFAULT_CONFIG_PATH[] = "scripts/trossen_mcap_to_lerobot_v2/config.json";
-
-struct JointStateMessage {
-  uint64_t timestamp_ns;
-  std::vector<double> positions;
-  std::vector<double> velocities;
-  std::string stream_id;
-};
-
-struct Odometry2DMessage {
-  uint64_t timestamp_ns{0};
-  double vel_x{0.0};
-  double vel_theta{0.0};
-};
 
 /**
  * @brief Configuration for LeRobotV2 dataset conversion
@@ -86,10 +72,6 @@ struct ParquetConfig {
   std::string dataset_id = "mcap_converted_dataset";    // dataset_name in the folder structure
   std::string robot_name = "trossen_solo_ai";
   std::string task_name = "Pick and Place";
-  std::vector<std::string> leader_streams;
-  std::vector<std::string> follower_streams;
-  float fps = 30.0f;
-  float camera_fps = 30.0f;
   int episode_index = 0;
   int episode_chunk = 0;
   int chunk_size = 1000;
@@ -135,6 +117,34 @@ static std::optional<uint64_t> read_recording_start_time(const std::filesystem::
 // ──────────────────────────────────────────────────────────
 // Statistics computation functions
 // ──────────────────────────────────────────────────────────
+
+// Video-mode cameras remux straight to videos/ and delete their source
+// frames, so stats sample frames back out of the .mp4 instead of a JPEG dir.
+static std::vector<cv::Mat> sample_video_frames(const std::filesystem::path& video_path) {
+  cv::VideoCapture cap(video_path.string());
+  if (!cap.isOpened()) {
+    std::cerr << "  Warning: Failed to open video for stats: " << video_path.string() << "\n";
+    return {};
+  }
+
+  int frame_count = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
+  if (frame_count <= 0) return {};
+
+  std::vector<cv::Mat> images;
+  for (int idx : trossen::io::backends::sample_indices(frame_count)) {
+    if (!cap.set(cv::CAP_PROP_POS_FRAMES, idx)) continue;
+    cv::Mat frame;
+    if (!cap.read(frame) || frame.empty()) continue;
+    if (frame.channels() == 1) cv::cvtColor(frame, frame, cv::COLOR_GRAY2BGR);
+
+    cv::Mat downsampled = trossen::io::backends::auto_downsample(frame);
+    cv::Mat frame_float;
+    downsampled.convertTo(frame_float, CV_32F, 1.0 / 255.0);
+    images.push_back(frame_float);
+  }
+
+  return images;
+}
 
 /**
  * @brief Compute statistics for a single episode
@@ -195,6 +205,29 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
     if (feature_info.contains("dtype") && feature_info["dtype"] == "video") {
       if (feature_name.find("observation.images.") == 0) {
         std::string camera_name = feature_name.substr(19);
+
+        // Video-mode: frames only ever exist inside the remuxed episode video.
+        fs::path videos_root = dataset_root / trossen::io::backends::VIDEO_DIR;
+        bool is_video_camera = false;
+        if (fs::exists(videos_root)) {
+          for (const auto& chunk_entry : fs::directory_iterator(videos_root)) {
+            if (!chunk_entry.is_directory()) continue;
+            fs::path candidate = chunk_entry.path() / feature_name /
+                trossen::io::backends::format_video_filename(episode_index);
+            if (!fs::exists(candidate)) continue;
+
+            is_video_camera = true;
+            auto images = sample_video_frames(candidate);
+            if (!images.empty()) {
+              stats[feature_name] = trossen::io::backends::compute_image_stats(images);
+            } else {
+              std::cerr << "  Warning: No valid frames sampled from video for camera: "
+                        << camera_name << "\n";
+            }
+            break;
+          }
+        }
+        if (is_video_camera) continue;
 
         // Construct the expected image directory path for this episode and camera
         std::string episode_folder_name =
@@ -315,7 +348,10 @@ static void print_usage(const char* program) {
   std::cerr << "  5. Compute and update dataset statistics\n";
   std::cerr << "\nFolder structure: "
             << "root/repository_id/dataset_id/[data,images,videos,meta]\n";
-  std::cerr << "\nNote: Video encoding requires FFmpeg with libsvtav1 codec.\n";
+  std::cerr << "\nNote: Cameras recorded raw (image_encoding=\"raw\") are encoded to AV1 and\n"
+            << "  require FFmpeg with libsvtav1. Cameras recorded as compressed video\n"
+            << "  (image_encoding=\"video\") are remuxed as-is (h264/hevc) and need only ffmpeg\n"
+            << "  and ffprobe on PATH.\n";
 }
 
 int main(int argc, char** argv) {
@@ -612,6 +648,11 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
                       int64_t& global_index_offset) {
+  namespace fs = std::filesystem;
+  using trossen::io::backends::AlignedEpisode;
+  using trossen::io::backends::McapChannelMap;
+  using trossen::io::backends::CameraVideoStream;
+
   ParquetConfig cfg;
   cfg.mcap_file = mcap_file;
   cfg.dataset_root = dataset_root_dir;
@@ -619,7 +660,6 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   cfg.dataset_id = dataset_id;
   cfg.chunk_size = chunk_size;
 
-  namespace fs = std::filesystem;
   fs::path mcap_path(cfg.mcap_file);
 
   cfg.episode_index = episode_index;
@@ -638,10 +678,6 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     std::cerr << "Error: MCAP file not found: " << cfg.mcap_file << std::endl;
     return 1;
   }
-
-  // Leader/follower streams will be auto-detected from MCAP file
-  cfg.leader_streams = {};
-  cfg.follower_streams = {};
 
   std::vector<std::string> config_lines = {
       "Input MCAP:       " + cfg.mcap_file,
@@ -677,321 +713,89 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return 1;
   }
 
+  // ──────────────────────────────────────────────────────────
+  // Decode + align: shared with the v3 converter (scripts/common/mcap_dataset_loader).
+  // Reads the embedded dataset_info, auto-detects leader/follower streams, and pairs
+  // every joint/camera stream into one row per synced instant.
+  // ──────────────────────────────────────────────────────────
   std::cout << "\nReading MCAP file...\n";
 
-  std::ifstream input(cfg.mcap_file, std::ios::binary);
-  if (!input.is_open()) {
-    std::cerr << "Error: Failed to open MCAP file\n";
+  AlignedEpisode ep;
+  McapChannelMap channels;
+  if (!trossen::io::backends::load_aligned_episode(
+          cfg.mcap_file, cfg.episode_index, ep, channels)) {
+    return 1;
+  }
+  if (ep.frames.empty()) {
+    std::cerr << "Error: No aligned frames in " << cfg.mcap_file << "\n";
     return 1;
   }
 
-  mcap::McapReader reader;
-  auto status = reader.open(input);
-  if (!status.ok()) {
-    std::cerr << "Error: Failed to parse MCAP file: " << status.message << "\n";
-    return 1;
-  }
+  cfg.robot_name = ep.robot_name;
+  // Prefer the task embedded in this episode's MCAP; fall back to the config's.
+  const std::string task_name = ep.task_name.empty() ? cfg.task_name : ep.task_name;
 
-  auto summary_status = reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
-  if (!summary_status.ok()) {
-    std::cerr << "Error: Failed to read MCAP summary: " << summary_status.message << "\n";
-    return 1;
-  }
+  // ──────────────────────────────────────────────────────────
+  // Extract camera video (compressed streams, remuxed) + images (raw streams)
+  // ──────────────────────────────────────────────────────────
 
-  // ────────────────────────────────────────────────────────────────────────────
-  // PHASE 1: Extract embedded metadata from MCAP file
-  // ────────────────────────────────────────────────────────────────────────────
-  // The MCAP file may contain a "trossen_sdk_recording" metadata record with a
-  // "dataset_info" JSON blob. This includes:
-  //   - robot_name: e.g., "trossen_solo_ai", "trossen_mobile_ai"
-  //   - streams: per-stream joint names (e.g., streams.leader_left.joint_names)
-  //   - cameras: per-camera specs (height, width, fps, codec)
-  //   - base_velocity_names: names for mobile base velocity dimensions
-  // If present, this metadata is used to populate info.json with accurate names
-  // instead of generic placeholders like "joint_0", "joint_1", etc.
-  // ────────────────────────────────────────────────────────────────────────────
-  nlohmann::json mcap_dataset_info;
-  auto* data_source = reader.dataSource();
-  const auto& meta_indexes = reader.metadataIndexes();
+  std::map<std::string, fs::path> camera_dirs;
+  std::map<std::string, CameraVideoStream> video_streams;
+  std::map<std::string, size_t> image_counts;
 
-  // Find all metadata records named "trossen_sdk_recording"
-  auto range = meta_indexes.equal_range("trossen_sdk_recording");
-  for (auto it = range.first; it != range.second; ++it) {
-    // Read the raw record from the MCAP file at the indexed offset
-    mcap::Record raw_record;
-    auto rs = mcap::McapReader::ReadRecord(*data_source, it->second.offset, &raw_record);
-    if (!rs.ok()) continue;
-
-    // Parse the raw record into a structured Metadata object
-    mcap::Metadata meta_record;
-    rs = mcap::McapReader::ParseMetadata(raw_record, &meta_record);
-    if (!rs.ok()) continue;
-
-    // Look for the "dataset_info" key within the metadata key-value pairs
-    auto info_it = meta_record.metadata.find("dataset_info");
-    if (info_it != meta_record.metadata.end()) {
-      try {
-        // Parse the JSON string into our mcap_dataset_info object
-        mcap_dataset_info = nlohmann::json::parse(info_it->second);
-        std::cout << "  [ok] Found MCAP dataset_info metadata\n";
-        if (mcap_dataset_info.contains("robot_name")) {
-          cfg.robot_name = mcap_dataset_info["robot_name"].get<std::string>();
-          std::cout << "    Robot name from MCAP: " << cfg.robot_name << "\n";
-        }
-      } catch (const std::exception& e) {
-        std::cerr << "  Warning: Failed to parse dataset_info metadata: " << e.what() << "\n";
-      }
-    }
-  }
-
-  // ────────────────────────────────────────────────────────────────────────────
-  // PHASE 2: Initialize channel tracking maps for message routing
-  // ────────────────────────────────────────────────────────────────────────────
-  // These maps associate MCAP channel IDs with semantic stream identifiers:
-  //   - channel_id_to_stream: Joint state channels → stream names (e.g., "leader_left")
-  //   - camera_channels: Image channels → camera names (e.g., "cam_high")
-  //   - slate_base_channel_id: Mobile base odometry channel (if present)
-  // The leader/follower vectors accumulate detected arm streams for later use
-  // in determining which streams provide actions vs. observations.
-  // ────────────────────────────────────────────────────────────────────────────
-  std::map<mcap::ChannelId, std::string> channel_id_to_stream;  // Joint channels
-  std::map<mcap::ChannelId, std::string> camera_channels;       // Camera channels
-  mcap::ChannelId slate_base_channel_id = 0;                    // Mobile base channel
-  bool has_slate_base = false;                                  // Is this a mobile robot?
-  std::vector<std::string> detected_leader_streams;             // Teleoperation input arms
-  std::vector<std::string> detected_follower_streams;           // Robot output arms
-
-  std::cout << "  Available channels:\n";
-  for (const auto& [channel_id, channel_ptr] : reader.channels()) {
-    std::string topic = channel_ptr->topic;
-    std::cout << "    - Topic: '" << topic << "'\n";
-
-    size_t odom_pos = topic.find("/odom/state");
-    if (odom_pos != std::string::npos) {
-      std::string stream_id = topic.substr(0, odom_pos);
-      if (!stream_id.empty() && stream_id[0] == '/') {
-        stream_id = stream_id.substr(1);
-      }
-      slate_base_channel_id = channel_id;
-      has_slate_base = true;
-      std::cout << "    [ok] Found odometry stream for mobile robot: " << stream_id << "\n";
-      continue;
+  if (cfg.extract_images && !channels.camera_channels.empty()) {
+    std::string episode_name = trossen::io::backends::format_episode_folder(cfg.episode_index);
+    for (const auto& [channel_id, camera_name] : channels.camera_channels) {
+      std::string obs_key = "observation.images." + camera_name;
+      camera_dirs[camera_name] = images_dir / obs_key / episode_name;
     }
 
-    size_t pos = topic.find("/joints/state");
-    if (pos != std::string::npos) {
-      std::string stream_id = topic.substr(0, pos);
-      // Remove leading slash if present
-      if (!stream_id.empty() && stream_id[0] == '/') {
-        stream_id = stream_id.substr(1);
-      }
-      channel_id_to_stream[channel_id] = stream_id;
-
-      if (stream_id.find("leader") != std::string::npos) {
-        detected_leader_streams.push_back(stream_id);
-        std::cout << "    [ok] Detected leader stream: " << stream_id << "\n";
-      } else if (stream_id.find("follower") != std::string::npos) {
-        detected_follower_streams.push_back(stream_id);
-        std::cout << "    [ok] Detected follower stream: " << stream_id << "\n";
-      }
-    }
-
-    // Topic format: /cameras/<camera_name>/image
-    {
-      static const std::regex camera_topic_re("^/cameras/(.+)/image$");
-      std::smatch m;
-      if (std::regex_match(topic, m, camera_topic_re)) {
-        camera_channels[channel_id] = m[1].str();
-      }
-    }
-  }
-
-  if (channel_id_to_stream.empty()) {
-    std::cerr << "Error: No joint state channels found in MCAP file\n";
-    return 1;
-  }
-
-  // Configure leader/follower streams based on detection
-  if (!detected_leader_streams.empty() && !detected_follower_streams.empty()) {
-    // Sort for consistent ordering
-    std::sort(detected_leader_streams.begin(), detected_leader_streams.end());
-    std::sort(detected_follower_streams.begin(), detected_follower_streams.end());
-    cfg.leader_streams = detected_leader_streams;
-    cfg.follower_streams = detected_follower_streams;
-    std::cout << "\n  [ok] Auto-detected configuration:\n";
-    std::cout << "    Leader streams (" << cfg.leader_streams.size() << "): ";
-    for (const auto& s : cfg.leader_streams) std::cout << s << " ";
-    std::cout << "\n    Follower streams (" << cfg.follower_streams.size() << "): ";
-    for (const auto& s : cfg.follower_streams) std::cout << s << " ";
-    std::cout << "\n";
-  } else {
-    // Fallback: treat all non-slate_base streams as both leader and follower (single robot mode)
-    std::vector<std::string> all_streams;
-    for (const auto& [channel_id, stream_id] : channel_id_to_stream) {
-      if (stream_id != "slate_base") {
-        all_streams.push_back(stream_id);
-      }
-    }
-    std::sort(all_streams.begin(), all_streams.end());
-    all_streams.erase(std::unique(all_streams.begin(), all_streams.end()), all_streams.end());
-
-    if (!all_streams.empty()) {
-      cfg.leader_streams = all_streams;
-      cfg.follower_streams = all_streams;
-      std::cout << "\n  [ok] Single robot mode detected " << all_streams.size()
-                << " stream(s):\n    ";
-      for (const auto& s : all_streams) std::cout << s << " ";
-      std::cout << "\n";
-    } else {
-      std::cerr << "Error: No usable joint state streams found\n";
+    std::cout << "\nExtracting camera video (compressed streams)...\n";
+    if (!trossen::io::backends::extract_camera_video(
+            cfg.mcap_file, channels,
+            [&](const std::string& camera_name) -> fs::path {
+              fs::path dir = camera_dirs[camera_name];
+              fs::create_directories(dir);
+              return dir;
+            },
+            video_streams)) {
       return 1;
     }
-  }
 
-  if (!camera_channels.empty()) {
-    std::cout << "  Found " << camera_channels.size() << " camera channel(s)\n";
-  }
+    // A camera that free-ran short would otherwise leave more parquet rows than its
+    // remuxed video has frames; trim the whole episode to whatever every video-mode
+    // camera actually covers (shared with the v3 converter).
+    trossen::io::backends::clamp_episode_to_video_frame_counts(ep, video_streams);
 
-  std::cout << "\nParsing joint state messages...\n";
-  std::map<std::string, std::vector<JointStateMessage>> messages_by_stream;
-  std::vector<Odometry2DMessage> slate_base_messages;
-  std::map<std::string, size_t> camera_image_counts;
-  std::map<std::string, std::vector<uint64_t>> camera_timestamps;
-
-  auto onProblem = [](const mcap::Status& problem) {
-    std::cerr << "Warning: MCAP parsing issue: " << problem.message << "\n";
-  };
-
-  size_t total_messages = 0;
-  size_t total_images = 0;
-
-  for (const auto& messageView : reader.readMessages(onProblem)) {
-    if (has_slate_base && messageView.channel->id == slate_base_channel_id) {
-      trossen_sdk::msg::Odometry2D odom_msg;
-      if (!odom_msg.ParseFromArray(reinterpret_cast<const char*>(messageView.message.data),
-                                   messageView.message.dataSize)) {
-        std::cerr << "Warning: Failed to parse Odometry2D message\n";
-        continue;
+    if (video_streams.size() < channels.camera_channels.size()) {
+      std::cout << "\nExtracting camera images (raw streams)...\n";
+      if (!trossen::io::backends::extract_camera_images(
+              cfg.mcap_file, channels, ep,
+              [&](const std::string& camera_name) -> fs::path {
+                fs::path dir = camera_dirs[camera_name];
+                fs::create_directories(dir);
+                return dir;
+              },
+              image_counts)) {
+        return 1;
       }
-      Odometry2DMessage msg;
-      msg.timestamp_ns = messageView.message.logTime;
-      msg.vel_x = static_cast<double>(odom_msg.twist().linear_x());
-      msg.vel_theta = static_cast<double>(odom_msg.twist().angular_z());
-      slate_base_messages.push_back(msg);
-      ++total_messages;
-      continue;
-    }
-
-    auto joint_it = channel_id_to_stream.find(messageView.channel->id);
-    if (joint_it != channel_id_to_stream.end()) {
-      const std::string& stream_id = joint_it->second;
-
-      trossen_sdk::msg::JointState js_msg;
-      if (!js_msg.ParseFromArray(reinterpret_cast<const char*>(messageView.message.data),
-                                 messageView.message.dataSize)) {
-        std::cerr << "Warning: Failed to parse message for " << stream_id << "\n";
-        continue;
-      }
-
-      JointStateMessage msg;
-      msg.timestamp_ns = messageView.message.logTime;
-      msg.stream_id = stream_id;
-      for (auto v : js_msg.positions()) {
-        msg.positions.push_back(static_cast<double>(v));
-      }
-      for (auto v : js_msg.velocities()) {
-        msg.velocities.push_back(static_cast<double>(v));
-      }
-
-      messages_by_stream[stream_id].push_back(msg);
-      ++total_messages;
-      continue;
-    }
-
-    auto camera_it = camera_channels.find(messageView.channel->id);
-    if (camera_it != camera_channels.end()) {
-      camera_image_counts[camera_it->second]++;
-      camera_timestamps[camera_it->second].push_back(messageView.message.logTime);
-      ++total_images;
-    }
-  }
-
-  std::cout << "  [ok] Parsed " << total_messages << " joint state messages\n";
-  for (const auto& [stream_id, messages] : messages_by_stream) {
-    std::cout << "    - " << stream_id << ": " << messages.size() << " messages\n";
-  }
-  if (has_slate_base) {
-    std::cout << "    - slate_base: " << slate_base_messages.size() << " messages (velocities)\n";
-  }
-
-  if (total_images > 0) {
-    std::cout << "  [ok] Found " << total_images << " camera images\n";
-    for (const auto& [camera_name, count] : camera_image_counts) {
-      std::cout << "    - " << camera_name << ": " << count << " images\n";
-    }
-  }
-
-  // Force both joint state and camera fps to exactly 30.0 for perfect timestamp synchronization
-  cfg.fps = 30.0f;
-  cfg.camera_fps = 30.0f;
-
-  if (!messages_by_stream.empty()) {
-    const auto& first_stream_messages = messages_by_stream.begin()->second;
-    if (first_stream_messages.size() >= 2) {
-      uint64_t first_ts = first_stream_messages.front().timestamp_ns;
-      uint64_t last_ts = first_stream_messages.back().timestamp_ns;
-      double duration_s = (last_ts - first_ts) / 1e9;
-      double actual_fps = (first_stream_messages.size() - 1) / duration_s;
-      std::cout << "  [ok] Detected joint state frequency: " << std::fixed << std::setprecision(1)
-                << actual_fps << " Hz (using 30.0 Hz for sync)\n";
-    }
-  }
-
-  if (!camera_timestamps.empty()) {
-    const auto& first_camera_timestamps = camera_timestamps.begin()->second;
-    if (first_camera_timestamps.size() >= 2) {
-      uint64_t first_ts = first_camera_timestamps.front();
-      uint64_t last_ts = first_camera_timestamps.back();
-      double duration_s = (last_ts - first_ts) / 1e9;
-      double actual_camera_fps = (first_camera_timestamps.size() - 1) / duration_s;
-      std::cout << "  [ok] Detected camera frequency: " << std::fixed << std::setprecision(1)
-                << actual_camera_fps << " fps (using 30.0 fps for sync)\n";
     }
   }
 
   std::cout << "\nCreating Parquet file...\n";
-
-  // Calculate dimensions based on detected streams
-  int joints_per_stream = 0;
-  for (const auto& [stream_id, messages] : messages_by_stream) {
-    if (!messages.empty()) {
-      joints_per_stream = messages[0].positions.size();
-      break;
-    }
-  }
-
-  int action_dim = cfg.leader_streams.size() * joints_per_stream;
-  int obs_dim = cfg.follower_streams.size() * joints_per_stream;
-
-  // Add 2 dimensions for mobile base velocities (linear, angular) if present
-  if (has_slate_base) {
-    action_dim += 2;
-    obs_dim += 2;
-  }
-
-  std::cout << "  Joint dimensions per stream: " << joints_per_stream << "\n";
-  std::cout << "  Action dimension: " << action_dim << " (" << cfg.leader_streams.size()
-            << " stream(s) x " << joints_per_stream;
-  if (has_slate_base) std::cout << " + 2 base velocities";
+  std::cout << "  Joint dimensions per stream: " << ep.joints_per_stream << "\n";
+  std::cout << "  Action dimension: " << ep.action_dim << " ("
+            << ep.leader_streams.size() << " stream(s) x " << ep.joints_per_stream;
+  if (ep.has_mobile_base) std::cout << " + 2 base velocities";
   std::cout << ")\n";
-  std::cout << "  Observation dimension: " << obs_dim << " (" << cfg.follower_streams.size()
-            << " stream(s) x " << joints_per_stream;
-  if (has_slate_base) std::cout << " + 2 base velocities";
+  std::cout << "  Observation dimension: " << ep.obs_dim << " ("
+            << ep.follower_streams.size() << " stream(s) x " << ep.joints_per_stream;
+  if (ep.has_mobile_base) std::cout << " + 2 base velocities";
   std::cout << ")\n";
 
   auto schema = arrow::schema({
-      arrow::field("action", arrow::fixed_size_list(arrow::float32(), action_dim)),
-      arrow::field("observation.state", arrow::fixed_size_list(arrow::float32(), obs_dim)),
+      arrow::field("action", arrow::fixed_size_list(arrow::float32(), ep.action_dim)),
+      arrow::field("observation.state", arrow::fixed_size_list(arrow::float32(), ep.obs_dim)),
       arrow::field("timestamp", arrow::float32()),
       arrow::field("frame_index", arrow::int64()),
       arrow::field("episode_index", arrow::int64()),
@@ -1024,173 +828,23 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
   std::cout << "Writing data to Parquet...\n";
 
-  std::string reference_stream;
-  for (const auto& stream : cfg.follower_streams) {
-    if (messages_by_stream.find(stream) != messages_by_stream.end() &&
-        !messages_by_stream[stream].empty()) {
-      reference_stream = stream;
-      break;
-    }
-  }
-
-  if (reference_stream.empty()) {
-    for (const auto& [stream_id, msgs] : messages_by_stream) {
-      if (!msgs.empty()) {
-        reference_stream = stream_id;
-        std::cout << "  Note: Using single-robot mode with stream: " << stream_id << "\n";
-        cfg.leader_streams = {stream_id};
-        cfg.follower_streams = {stream_id};
-        break;
-      }
-    }
-  }
-
-  if (reference_stream.empty()) {
-    std::cerr << "Error: No joint state streams found in MCAP file\n";
-    return 1;
-  }
-
-  const auto& reference_messages = messages_by_stream[reference_stream];
-  std::cout << "  Using " << reference_stream << " as reference (" << reference_messages.size()
-            << " messages)\n";
-
-  // Determine the maximum number of rows to write based on available camera frames
-  size_t max_rows = reference_messages.size();
-  if (!camera_image_counts.empty()) {
-    // Find the minimum camera frame count to ensure we don't exceed available frames
-    size_t min_camera_frames = std::numeric_limits<size_t>::max();
-    for (const auto& [camera_name, count] : camera_image_counts) {
-      min_camera_frames = std::min(min_camera_frames, count);
-    }
-    max_rows = std::min(max_rows, min_camera_frames);
-    std::cout << "  Limiting to " << max_rows << " rows to match camera frame count\n";
-  }
-
-  std::map<std::string, size_t> stream_indices;
-  for (const auto& [stream_id, _] : messages_by_stream) {
-    stream_indices[stream_id] = 0;
-  }
-
-  int64_t frame_index = 0;
   int64_t global_index = global_index_offset;
   size_t rows_written = 0;
-  size_t rows_skipped = 0;
 
-  // Use double precision for consistent timestamp calculation, then cast to float32
-  const double frame_duration_s = 1.0 / 30.0;
-
-  // Index for slate_base messages
-  size_t slate_base_idx = 0;
-
-  auto find_closest_message = [&](const std::string& stream_id, uint64_t target_ts,
-                                  size_t& idx) -> std::vector<double>* {
-    auto it = messages_by_stream.find(stream_id);
-    if (it == messages_by_stream.end() || it->second.empty()) {
-      return nullptr;
-    }
-
-    const auto& messages = it->second;
-
-    if (idx >= messages.size()) {
-      return nullptr;
-    }
-
-    while (idx < messages.size() - 1 && messages[idx + 1].timestamp_ns <= target_ts) {
-      ++idx;
-    }
-
-    const uint64_t tolerance_ns = 50000000;
-    if (std::abs(static_cast<int64_t>(messages[idx].timestamp_ns - target_ts)) >
-        static_cast<int64_t>(tolerance_ns)) {
-      return nullptr;
-    }
-
-    return const_cast<std::vector<double>*>(&messages[idx].positions);
-  };
-
-  for (size_t ref_idx = 0; ref_idx < max_rows; ++ref_idx) {
-    const auto& ref_msg = reference_messages[ref_idx];
-    uint64_t timestamp_ns = ref_msg.timestamp_ns;
-
-    std::vector<double> actions;
-    bool have_all_leaders = true;
-    for (const auto& leader_stream : cfg.leader_streams) {
-      auto* positions =
-          find_closest_message(leader_stream, timestamp_ns, stream_indices[leader_stream]);
-      if (positions) {
-        actions.insert(actions.end(), positions->begin(), positions->end());
-      } else {
-        have_all_leaders = false;
-        break;
-      }
-    }
-
-    std::vector<double> observations;
-    bool have_all_followers = true;
-    for (const auto& follower_stream : cfg.follower_streams) {
-      auto* positions =
-          find_closest_message(follower_stream, timestamp_ns, stream_indices[follower_stream]);
-      if (positions) {
-        observations.insert(observations.end(), positions->begin(), positions->end());
-      } else {
-        have_all_followers = false;
-        break;
-      }
-    }
-
-    // Find and append slate base velocities (linear, angular) if mobile
-    std::vector<double> base_velocities;
-    if (has_slate_base) {
-      // Find closest slate_base message
-      while (slate_base_idx < slate_base_messages.size() - 1 &&
-             slate_base_messages[slate_base_idx + 1].timestamp_ns <= timestamp_ns) {
-        ++slate_base_idx;
-      }
-
-      const uint64_t tolerance_ns = 50000000;
-      if (slate_base_idx < slate_base_messages.size() &&
-          std::abs(static_cast<int64_t>(
-              slate_base_messages[slate_base_idx].timestamp_ns - timestamp_ns)) <=
-              static_cast<int64_t>(tolerance_ns)) {
-        const auto& odom = slate_base_messages[slate_base_idx];
-        base_velocities.push_back(odom.vel_x);      // linear velocity
-        base_velocities.push_back(odom.vel_theta);  // angular velocity
-      }
-
-      // If we didn't get base velocities, use zeros
-      if (base_velocities.empty()) {
-        base_velocities = {0.0, 0.0};
-      }
-    }
-
-    if (!have_all_leaders || !have_all_followers) {
-      ++rows_skipped;
-      continue;
-    }
-
-    // Append base velocities at the end for mobile robots
-    if (has_slate_base) {
-      actions.insert(actions.end(), base_velocities.begin(), base_velocities.end());
-      observations.insert(observations.end(), base_velocities.begin(), base_velocities.end());
-    }
-
+  for (const auto& frame : ep.frames) {
     arrow::FloatBuilder ts_builder;
     auto obs_value_builder = std::make_shared<arrow::FloatBuilder>();
     arrow::FixedSizeListBuilder obs_builder(
-        arrow::default_memory_pool(), obs_value_builder, obs_dim);
+        arrow::default_memory_pool(), obs_value_builder, ep.obs_dim);
     auto act_value_builder = std::make_shared<arrow::FloatBuilder>();
     arrow::FixedSizeListBuilder act_builder(
-        arrow::default_memory_pool(), act_value_builder, action_dim);
+        arrow::default_memory_pool(), act_value_builder, ep.action_dim);
     arrow::Int64Builder epi_idx_builder, frame_idx_builder, index_builder, task_idx_builder;
 
     auto* obs_val = static_cast<arrow::FloatBuilder*>(obs_builder.value_builder());
     auto* act_val = static_cast<arrow::FloatBuilder*>(act_builder.value_builder());
 
-    // Generate synthetic timestamps at exactly 30fps using double precision for consistency
-    // Calculate in double precision then cast to float32 for storage
-    float timestamp_s = static_cast<float>(static_cast<double>(frame_index) * frame_duration_s);
-
-    if (!ts_builder.Append(timestamp_s).ok()) {
+    if (!ts_builder.Append(frame.timestamp_s).ok()) {
       std::cerr << "Error: Failed to append timestamp\n";
       return 1;
     }
@@ -1199,7 +853,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       std::cerr << "Error: Failed to append observation list\n";
       return 1;
     }
-    for (auto v : observations) {
+    for (auto v : frame.observation) {
       if (!obs_val->Append(v).ok()) {
         std::cerr << "Error: Failed to append observation value\n";
         return 1;
@@ -1210,7 +864,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       std::cerr << "Error: Failed to append action list\n";
       return 1;
     }
-    for (auto v : actions) {
+    for (auto v : frame.action) {
       if (!act_val->Append(v).ok()) {
         std::cerr << "Error: Failed to append action value\n";
         return 1;
@@ -1218,8 +872,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
 
     if (!epi_idx_builder.Append(cfg.episode_index).ok() ||
-        !frame_idx_builder.Append(frame_index).ok() || !index_builder.Append(global_index).ok() ||
-        !task_idx_builder.Append(0).ok()) {
+        !frame_idx_builder.Append(static_cast<int64_t>(rows_written)).ok() ||
+        !index_builder.Append(global_index).ok() || !task_idx_builder.Append(0).ok()) {
       std::cerr << "Error: Failed to append scalar values\n";
       return 1;
     }
@@ -1242,7 +896,6 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       return 1;
     }
 
-    ++frame_index;
     ++global_index;
     ++rows_written;
 
@@ -1251,11 +904,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     }
   }
 
-  std::cout << "\r  [ok] Wrote " << rows_written << " rows";
-  if (rows_skipped > 0) {
-    std::cout << " (skipped " << rows_skipped << " misaligned)";
-  }
-  std::cout << "                    \n";
+  std::cout << "\r  [ok] Wrote " << rows_written << " rows                    \n";
 
   if (!writer->Close().ok()) {
     std::cerr << "Error: Failed to close Parquet writer\n";
@@ -1277,178 +926,32 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   // Advance the global index offset now that parquet is committed to disk.
   // This ensures post-parquet failures (image extraction, metadata) don't
   // cause overlapping indices in subsequent episodes.
-  global_index_offset += rows_written;
+  global_index_offset += static_cast<int64_t>(rows_written);
 
   std::cout << "\n[ok] Successfully created Parquet file: " << cfg.output_file << "\n";
   std::cout << "\nSummary:\n";
   std::cout << "  Total frames:      " << rows_written << "\n";
   std::cout << "  Episode index:     " << cfg.episode_index << "\n";
-  if (rows_written > 0) {
-    size_t actions_per_row = 0;
-    size_t obs_per_row = 0;
-    for (const auto& leader : cfg.leader_streams) {
-      auto it = messages_by_stream.find(leader);
-      if (it != messages_by_stream.end() && !it->second.empty()) {
-        actions_per_row += it->second[0].positions.size();
-      }
-    }
-    for (const auto& follower : cfg.follower_streams) {
-      auto it = messages_by_stream.find(follower);
-      if (it != messages_by_stream.end() && !it->second.empty()) {
-        obs_per_row += it->second[0].positions.size();
-      }
-    }
-    if (has_slate_base) {
-      actions_per_row += 2;  // Add base velocities
-      obs_per_row += 2;      // Add base velocities
-    }
-    std::cout << "  Actions per row:   " << actions_per_row;
-    if (has_slate_base) std::cout << " (incl. 2 base velocities)";
-    std::cout << "\n";
-    std::cout << "  Observations/row:  " << obs_per_row;
-    if (has_slate_base) std::cout << " (incl. 2 base velocities)";
-    std::cout << "\n";
-  }
-
-  // ──────────────────────────────────────────────────────────
-  // Extract camera images
-  // ──────────────────────────────────────────────────────────
-
-  std::map<std::string, size_t> camera_frame_indices;
-  std::map<std::string, fs::path> camera_dirs;
-
-  if (cfg.extract_images && !camera_channels.empty()) {
-    std::cout << "\nExtracting camera images...\n";
-
-    fs::path images_root = images_dir;
-
-    std::string episode_name = trossen::io::backends::format_episode_folder(cfg.episode_index);
-
-    for (const auto& [channel_id, camera_name] : camera_channels) {
-      std::string obs_key = "observation.images." + camera_name;
-      fs::path camera_episode_dir = images_root / obs_key / episode_name;
-      try {
-        fs::create_directories(camera_episode_dir);
-        camera_dirs[camera_name] = camera_episode_dir;
-        camera_frame_indices[camera_name] = 0;
-        std::cout << "  Created directory: " << camera_episode_dir.string() << "\n";
-      } catch (const std::exception& e) {
-        std::cerr << "  Error creating directory for " << camera_name << ": " << e.what() << "\n";
-      }
-    }
-
-    std::ifstream image_input(cfg.mcap_file, std::ios::binary);
-    mcap::McapReader image_reader;
-    auto img_status = image_reader.open(image_input);
-    if (!img_status.ok()) {
-      std::cerr << "Error: Failed to reopen MCAP file for images: " << img_status.message << "\n";
-      return 1;
-    }
-
-    auto img_summary_status = image_reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
-    if (!img_summary_status.ok()) {
-      std::cerr << "Error: Failed to read MCAP summary for images: " << img_summary_status.message
-                << "\n";
-      return 1;
-    }
-
-    size_t images_saved = 0;
-    for (const auto& messageView : image_reader.readMessages(onProblem)) {
-      auto it = camera_channels.find(messageView.channel->id);
-      if (it == camera_channels.end()) {
-        continue;
-      }
-
-      const std::string& camera_name = it->second;
-      size_t frame_idx = camera_frame_indices[camera_name];
-
-      foxglove::RawImage raw_image;
-      if (!raw_image.ParseFromArray(messageView.message.data,
-                                    static_cast<int>(messageView.message.dataSize))) {
-        std::cerr << "Warning: Failed to parse RawImage message for " << camera_name << " frame "
-                  << frame_idx << "\n";
-        camera_frame_indices[camera_name]++;
-        continue;
-      }
-
-      int cv_type = -1;
-      if (raw_image.encoding() == "bgr8" || raw_image.encoding() == "8UC3") {
-        cv_type = CV_8UC3;
-      } else if (raw_image.encoding() == "rgb8") {
-        cv_type = CV_8UC3;
-      } else if (raw_image.encoding() == "rgba8") {
-        cv_type = CV_8UC4;
-      } else if (raw_image.encoding() == "bgra8") {
-        cv_type = CV_8UC4;
-      } else if (raw_image.encoding() == "mono8" || raw_image.encoding() == "8UC1") {
-        cv_type = CV_8UC1;
-      } else if (raw_image.encoding() == "mono16" || raw_image.encoding() == "16UC1") {
-        cv_type = CV_16UC1;
-      } else if (raw_image.encoding() == "32FC1") {
-        cv_type = CV_32FC1;
-      } else {
-        std::cerr << "Warning: Unsupported encoding '" << raw_image.encoding() << "' for "
-                  << camera_name << " frame " << frame_idx << "\n";
-        camera_frame_indices[camera_name]++;
-        continue;
-      }
-
-      cv::Mat image(raw_image.height(), raw_image.width(), cv_type,
-                    const_cast<char*>(raw_image.data().data()), raw_image.step());
-
-      if (raw_image.encoding() == "rgb8") {
-        cv::cvtColor(image, image, cv::COLOR_RGB2BGR);
-      } else if (raw_image.encoding() == "rgba8") {
-        cv::cvtColor(image, image, cv::COLOR_RGBA2BGR);
-      } else if (raw_image.encoding() == "bgra8") {
-        cv::cvtColor(image, image, cv::COLOR_BGRA2BGR);
-      }
-
-      cv::Mat image_copy = image.clone();
-
-      if (image_copy.empty()) {
-        std::cerr << "Warning: Empty image for " << camera_name << " frame " << frame_idx << "\n";
-        camera_frame_indices[camera_name]++;
-        continue;
-      }
-
-      fs::path image_path = camera_dirs[camera_name] /
-                            trossen::io::backends::format_image_filename(frame_idx);
-
-      std::vector<int> compression_params = {cv::IMWRITE_JPEG_QUALITY, 95};
-      if (cv::imwrite(image_path.string(), image_copy, compression_params)) {
-        ++images_saved;
-        camera_frame_indices[camera_name]++;
-
-        if (images_saved % 50 == 0) {
-          std::cout << "\r  Progress: " << images_saved << " images saved    " << std::flush;
-        }
-      } else {
-        std::cerr << "Warning: Failed to save image: " << image_path.string() << "\n";
-        camera_frame_indices[camera_name]++;
-      }
-    }
-
-    std::cout << "\r  [ok] Saved " << images_saved << " images                    \n";
-    for (const auto& [camera_name, count] : camera_frame_indices) {
-      std::cout << "    - " << camera_name << ": " << count << " images\n";
-    }
-  }
+  std::cout << "  Actions per row:   " << ep.action_dim;
+  if (ep.has_mobile_base) std::cout << " (incl. 2 base velocities)";
+  std::cout << "\n";
+  std::cout << "  Observations/row:  " << ep.obs_dim;
+  if (ep.has_mobile_base) std::cout << " (incl. 2 base velocities)";
+  std::cout << "\n";
 
   // ──────────────────────────────────────────────────────────
   // Encode images to videos
   // ──────────────────────────────────────────────────────────
+
+  // Remuxed cameras only: true codec/pix_fmt, for the metadata step below.
+  std::map<std::string, std::string> camera_remuxed_codec;
+  std::map<std::string, std::string> camera_remuxed_pix_fmt;
 
   if (cfg.create_videos && !camera_dirs.empty()) {
     std::cout << "\nEncoding videos from images...\n";
 
     int videos_created = 0;
     for (const auto& [camera_name, camera_dir] : camera_dirs) {
-      if (camera_frame_indices[camera_name] == 0) {
-        std::cout << "  Skipping " << camera_name << " (no images)\n";
-        continue;
-      }
-
       std::string video_key = "observation.images." + camera_name;
       fs::path video_camera_dir = videos_dir / video_key;
       fs::create_directories(video_camera_dir);
@@ -1457,13 +960,82 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
           video_camera_dir /
           trossen::io::backends::format_video_filename(cfg.episode_index);
 
+      auto vs_it = video_streams.find(camera_name);
+      if (vs_it != video_streams.end() && vs_it->second.frame_count > 0) {
+        // Already-compressed: remux with `-c copy` instead of re-encoding.
+        const CameraVideoStream& vs = vs_it->second;
+
+        std::ostringstream remux_cmd;
+        // -r stamps container timestamps at the dataset rate; +genpts fills in
+        // presentation timestamps the elementary stream itself doesn't carry.
+        remux_cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << ep.fps << " -i "
+                  << vs.annexb_path.string() << " -c copy -movflags +faststart "
+                  << video_output.string();
+
+        std::cout << "  Remuxing " << camera_name << " (" << vs.format << ")...";
+        std::cout.flush();
+
+        auto remux_start = std::chrono::steady_clock::now();
+        int ret = std::system(remux_cmd.str().c_str());
+        auto remux_end = std::chrono::steady_clock::now();
+
+        if (ret != 0) {
+          std::cout << " [FAILED] Failed (exit code " << ret << ")\n";
+          std::cerr << "    Command: " << remux_cmd.str() << "\n";
+          continue;
+        }
+
+        // A frame-count mismatch would silently misalign images against joint
+        // states, so this is checked rather than trusted.
+        std::ostringstream probe_cmd;
+        probe_cmd << "ffprobe -v error -count_frames -select_streams v:0 "
+                  << "-show_entries stream=nb_read_frames -of default=nw=1:nk=1 "
+                  << video_output.string();
+        bool frame_count_ok = true;
+        if (FILE* pipe = popen(probe_cmd.str().c_str(), "r")) {
+          char buf[64] = {0};
+          const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
+          pclose(pipe);
+          if (read_ok) {
+            const int64_t muxed = std::strtoll(buf, nullptr, 10);
+            if (muxed > 0 && static_cast<size_t>(muxed) != vs.frame_count) {
+              std::cout << " [FAILED] frame count mismatch\n";
+              std::cerr << "    Remuxed " << video_output.filename().string() << " has " << muxed
+                        << " frames but the recording had " << vs.frame_count
+                        << " video messages; refusing to misalign frames against joint states\n";
+              frame_count_ok = false;
+            }
+          }
+        } else {
+          std::cerr << "Warning: could not probe remuxed video " << video_output.string() << "\n";
+        }
+        if (!frame_count_ok) {
+          continue;
+        }
+
+        // lerobot derives codec from the bitstream and rejects a mismatch.
+        camera_remuxed_codec[camera_name] = (vs.format == "h265") ? "hevc" : "h264";
+        camera_remuxed_pix_fmt[camera_name] = (vs.format == "h265") ? "gray12le" : "yuv420p";
+
+        auto duration =
+            std::chrono::duration_cast<std::chrono::milliseconds>(remux_end - remux_start).count();
+        std::cout << " [ok] (" << (duration / 1000.0) << "s)\n";
+        videos_created++;
+        continue;
+      }
+
+      auto cnt_it = image_counts.find(camera_name);
+      if (cnt_it == image_counts.end() || cnt_it->second == 0) {
+        std::cout << "  Skipping " << camera_name << " (no images)\n";
+        continue;
+      }
+
       fs::path input_pattern = camera_dir / "image_%06d.jpg";
 
       std::ostringstream ffmpeg_cmd;
       // Force output to exactly 30fps for perfect timestamp alignment
-      ffmpeg_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps << " -start_number 0"
-                 << " -i " << input_pattern.string() << " -frames:v "
-                 << camera_frame_indices[camera_name]
+      ffmpeg_cmd << "ffmpeg -y -loglevel error -framerate " << ep.fps << " -start_number 0"
+                 << " -i " << input_pattern.string() << " -frames:v " << cnt_it->second
                  << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p -r 30 "
                  << video_output.string();
 
@@ -1504,117 +1076,17 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   if (!fs::exists(info_path)) {
     std::cout << "  Creating initial info.json...\n";
 
-    nlohmann::ordered_json features;
+    nlohmann::ordered_json features =
+        trossen::io::backends::build_features(ep, /*native_schema=*/false);
 
-    // Determine joint dimensions from messages
-    int joints_per_stream = 7;
-    for (const auto& [stream_id, messages] : messages_by_stream) {
-      if (!messages.empty()) {
-        joints_per_stream = messages[0].positions.size();
-        break;
-      }
-    }
-
-    // Helper: get joint names for a stream from MCAP metadata, or fall back to positional names
-    auto get_joint_names = [&](const std::string& stream_id, int n) -> nlohmann::json {
-      if (!mcap_dataset_info.empty() &&
-          mcap_dataset_info.contains("streams") &&
-          mcap_dataset_info["streams"].contains(stream_id) &&
-          mcap_dataset_info["streams"][stream_id].contains("joint_names")) {
-        return mcap_dataset_info["streams"][stream_id]["joint_names"];
-      }
-      // Fallback: generate positional names prefixed with arm name (stripped of role prefix)
-      nlohmann::json names = nlohmann::json::array();
-      std::string arm_name = stream_id;
-      size_t underscore_pos = arm_name.find('_');
-      if (underscore_pos != std::string::npos) {
-        arm_name = arm_name.substr(underscore_pos + 1);
-      }
-      for (int i = 0; i < n; ++i) {
-        names.push_back(arm_name + "_joint_" + std::to_string(i));
-      }
-      return names;
-    };
-
-    // Base velocity names (from MCAP metadata or default)
-    std::vector<std::string> base_vel_names = {"linear_vel", "angular_vel"};
-    if (!mcap_dataset_info.empty() && mcap_dataset_info.contains("base_velocity_names")) {
-      base_vel_names = mcap_dataset_info["base_velocity_names"].get<std::vector<std::string>>();
-    }
-
-    // Build observation.state feature
-    nlohmann::json obs_names = nlohmann::json::array();
-    for (const auto& follower_stream : cfg.follower_streams) {
-      for (const auto& n : get_joint_names(follower_stream, joints_per_stream)) {
-        obs_names.push_back(n);
-      }
-    }
-
-    int obs_state_dim = cfg.follower_streams.size() * joints_per_stream;
-
-    // Add base velocities at the end if mobile robot
-    if (has_slate_base) {
-      for (const auto& n : base_vel_names) obs_names.push_back(n);
-      obs_state_dim += static_cast<int>(base_vel_names.size());
-    }
-
-    features["observation.state"]["dtype"] = "float32";
-    features["observation.state"]["shape"] = nlohmann::json::array({obs_state_dim});
-    features["observation.state"]["names"] = obs_names;
-
-    // Build action feature
-    nlohmann::json action_names = nlohmann::json::array();
-    for (const auto& leader_stream : cfg.leader_streams) {
-      for (const auto& n : get_joint_names(leader_stream, joints_per_stream)) {
-        action_names.push_back(n);
-      }
-    }
-
-    int action_dim = cfg.leader_streams.size() * joints_per_stream;
-
-    // Add base velocities at the end if mobile robot
-    if (has_slate_base) {
-      for (const auto& n : base_vel_names) action_names.push_back(n);
-      action_dim += static_cast<int>(base_vel_names.size());
-    }
-    features["action"]["dtype"] = "float32";
-    features["action"]["shape"] = nlohmann::json::array({action_dim});
-    features["action"]["names"] = action_names;
-
-    // Build video features for cameras
-    for (const auto& [channel_id, camera_name] : camera_channels) {
+    // Override with ground truth for a remuxed camera: dataset_info is written by the
+    // producer, which can't know the backend's chosen encoding.
+    for (const auto& [camera_name, codec] : camera_remuxed_codec) {
       std::string obs_key = "observation.images." + camera_name;
-      features[obs_key]["dtype"] = "video";
-      features[obs_key]["names"] = nlohmann::json::array({"height", "width", "channels"});
-
-      // Use camera specs from MCAP metadata if available, otherwise fall back to defaults
-      if (!mcap_dataset_info.empty() &&
-          mcap_dataset_info.contains("cameras") &&
-          mcap_dataset_info["cameras"].contains(camera_name)) {
-        const auto& cam = mcap_dataset_info["cameras"][camera_name];
-        int h = cam.value("height", 480);
-        int w = cam.value("width", 640);
-        int ch = cam.value("channels", 3);
-        features[obs_key]["shape"] = nlohmann::json::array({h, w, ch});
-        features[obs_key]["info"]["video.fps"] = cam.value("fps", 30);
-        features[obs_key]["info"]["video.height"] = h;
-        features[obs_key]["info"]["video.width"] = w;
-        features[obs_key]["info"]["video.channels"] = ch;
-        features[obs_key]["info"]["video.codec"] = cam.value("codec", "av1");
-        features[obs_key]["info"]["video.pix_fmt"] = cam.value("pix_fmt", "yuv420p");
-        features[obs_key]["info"]["video.is_depth_map"] = cam.value("is_depth_map", false);
-        features[obs_key]["info"]["has_audio"] = cam.value("has_audio", false);
-      } else {
-        features[obs_key]["shape"] = nlohmann::json::array({480, 640, 3});
-        features[obs_key]["info"]["video.fps"] = 30.0;
-        features[obs_key]["info"]["video.height"] = 480;
-        features[obs_key]["info"]["video.width"] = 640;
-        features[obs_key]["info"]["video.channels"] = 3;
-        features[obs_key]["info"]["video.codec"] = "av1";
-        features[obs_key]["info"]["video.pix_fmt"] = "yuv420p";
-        features[obs_key]["info"]["video.is_depth_map"] = false;
-        features[obs_key]["info"]["has_audio"] = false;
-      }
+      if (!features.contains(obs_key)) continue;
+      features[obs_key]["info"]["video.codec"] = codec;
+      features[obs_key]["info"]["video.pix_fmt"] = camera_remuxed_pix_fmt.at(camera_name);
+      features[obs_key]["info"]["is_depth_map"] = (codec == "hevc");
     }
 
     // Add standard metadata features (timestamp, frame_index, episode_index, index, task_index)
@@ -1622,7 +1094,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
     // Use helper function to create initial info.json with custom features
     if (!trossen::io::backends::create_initial_info_json(
-            meta_dir, cfg.robot_name, features, static_cast<int>(cfg.fps),
+            meta_dir, cfg.robot_name, features, static_cast<int>(ep.fps),
             trossen::io::backends::CODEBASE_VERSION, cfg.chunk_size)) {
       std::cerr << "  Error: Failed to create " << info_path.string() << "\n";
       return 1;
@@ -1632,10 +1104,11 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   // Use utility functions to write metadata
-  int num_cameras = camera_channels.size();
+  int num_cameras = static_cast<int>(channels.camera_channels.size());
 
   if (trossen::io::backends::write_episode_metadata(
-          meta_dir, cfg.episode_index, cfg.task_name, 0, rows_written, num_cameras)) {
+          meta_dir, cfg.episode_index, task_name, 0, static_cast<int>(rows_written),
+          num_cameras)) {
     std::cout << "  [ok] Updated " << info_path.string() << "\n";
     std::cout << "  [ok] Created/Updated "
               << (meta_dir / trossen::io::backends::JSONL_TASKS).string() << "\n";
