@@ -27,6 +27,15 @@
 
 namespace trossen::io::backends {
 
+namespace {
+
+/// @brief mcap reader callback: log a recoverable parsing issue and keep reading.
+void on_problem(const mcap::Status& problem) {
+  std::cerr << "Warning: MCAP parsing issue: " << problem.message << "\n";
+}
+
+}  // namespace
+
 bool load_aligned_episode(
   const std::string& mcap_file,
   int episode_index,
