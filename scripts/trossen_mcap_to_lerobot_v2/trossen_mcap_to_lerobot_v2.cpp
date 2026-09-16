@@ -765,7 +765,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     // A camera that free-ran short would otherwise leave more parquet rows than its
     // remuxed video has frames; trim the whole episode to whatever every video-mode
     // camera actually covers (shared with the v3 converter).
-    trossen::io::backends::clamp_episode_to_video_frame_counts(ep, video_streams);
+    trossen::io::backends::report_unaligned_video_streams(ep, video_streams,
+                                                           /*start_offset_applied=*/false);
+    trossen::io::backends::clamp_episode_to_video_frame_counts(ep, video_streams,
+                                                                /*start_offset_applied=*/false);
 
     if (video_streams.size() < channels.camera_channels.size()) {
       std::cout << "\nExtracting camera images (raw streams)...\n";

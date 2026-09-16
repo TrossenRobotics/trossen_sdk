@@ -109,6 +109,14 @@ public:
       std::string obs_key;                  ///< LeRobot video key (observation.images.<cam>)
       std::filesystem::path episode_mp4;    ///< encoded per-episode mp4 (consumed by concat)
       double duration_s{0.0};               ///< episode video duration (frame_count / fps)
+      /**
+       * @brief Seconds of recorded video before the frame matched to row 0.
+       *
+       * A stream-copied video begins at the camera's first frame, which can precede the
+       * episode's first row. Added to `from_timestamp` so row 0 reads the matched frame.
+       * Zero for re-encoded video, which is written from the matched frames only.
+       */
+      double start_offset_s{0.0};
       std::vector<cv::Mat> samples;         ///< frames sampled for global image stats
       /**
        * @brief Codec of `episode_mp4`, as LeRobot names it in info.json.
@@ -255,7 +263,7 @@ private:
 
   bool place_or_concat_video(
     const std::string& video_key, const std::filesystem::path& episode_mp4,
-    double ep_duration_s, std::array<double, 4>& out_slot);
+    double ep_duration_s, double start_offset_s, std::array<double, 4>& out_slot);
 
   int task_index_for(const std::string& task_name);
 

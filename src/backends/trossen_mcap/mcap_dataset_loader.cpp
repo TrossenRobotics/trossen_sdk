@@ -16,6 +16,8 @@
 #include <iostream>
 #include <limits>
 #include <regex>
+#include <set>
+#include <sstream>
 #include <string_view>
 
 #include <opencv2/opencv.hpp>
@@ -304,6 +306,43 @@ bool load_aligned_episode(
     }
   }
 
+  // Records carry a dual (sec, nsec) Timestamp; the MCAP log time was written from the
+  // realtime half, so that is the key every comparison below uses.
+  auto log_ns_of = [](const data::RecordBase& rec) { return rec.ts.realtime.to_ns(); };
+
+  // Every stream must be in log-time order: the window reads each stream's first and last
+  // sample as its earliest and latest, and rows are matched with cursors that only move
+  // forward. The realtime clock can step backwards (an NTP correction), which would break
+  // both without any error, so an out-of-order stream rejects the episode.
+  auto check_time_order = [](const std::string& name, size_t count,
+                             const auto& stamp_at) -> bool {
+    for (size_t i = 1; i < count; ++i) {
+      if (stamp_at(i) < stamp_at(i - 1)) {
+        std::cerr << "Error: " << name << " timestamps go backwards at message " << i << " ("
+                  << (stamp_at(i - 1) - stamp_at(i)) << " ns earlier than message " << (i - 1)
+                  << "). The recording clock stepped, so rows cannot be matched.\n";
+        return false;
+      }
+    }
+    return true;
+  };
+  for (const auto& [stream_id, messages] : messages_by_stream) {
+    if (!check_time_order(stream_id, messages.size(),
+                          [&](size_t i) { return log_ns_of(messages[i]); })) {
+      return false;
+    }
+  }
+  if (!check_time_order("mobile base", mobile_base_messages.size(),
+                        [&](size_t i) { return log_ns_of(mobile_base_messages[i]); })) {
+    return false;
+  }
+  for (const auto& [camera_name, stamps] : camera_timestamps) {
+    const auto stamp_at = [&stamps](size_t i) { return stamps[i]; };
+    if (!check_time_order(camera_name, stamps.size(), stamp_at)) {
+      return false;
+    }
+  }
+
   // ── Compute action/observation dimensions from the detected streams ──
   out.joints_per_stream = 0;
   for (const auto& [stream_id, messages] : messages_by_stream) {
@@ -334,36 +373,31 @@ bool load_aligned_episode(
     out.obs_dim += base_block_width;
   }
 
-  // ── Select the reference (master-clock) stream ──
-  std::string reference_stream;
+  // ── Require joint data: a follower stream, or failing that any stream (single-robot) ──
+  bool have_follower_data = false;
   for (const auto& stream : out.follower_streams) {
     auto it = messages_by_stream.find(stream);
     if (it != messages_by_stream.end() && !it->second.empty()) {
-      reference_stream = stream;
+      have_follower_data = true;
       break;
     }
   }
-  if (reference_stream.empty()) {
+  if (!have_follower_data) {
+    bool have_any_data = false;
     for (const auto& [stream_id, msgs] : messages_by_stream) {
       if (!msgs.empty()) {
-        reference_stream = stream_id;
+        have_any_data = true;
         std::cout << "  Note: Using single-robot mode with stream: " << stream_id << "\n";
         out.leader_streams = {stream_id};
         out.follower_streams = {stream_id};
         break;
       }
     }
+    if (!have_any_data) {
+      std::cerr << "Error: No joint state streams found in MCAP file\n";
+      return false;
+    }
   }
-  if (reference_stream.empty()) {
-    std::cerr << "Error: No joint state streams found in MCAP file\n";
-    return false;
-  }
-
-  const auto& reference_messages = messages_by_stream[reference_stream];
-  std::cout << "  Using " << reference_stream << " as reference (" << reference_messages.size()
-            << " messages)\n";
-
-  const size_t max_rows = reference_messages.size();
 
   // Record the cameras present. Built before the row loop so each row can store the frame
   // it matched; frame_count is filled in by extract_camera_images().
@@ -377,11 +411,72 @@ bool load_aligned_episode(
     // and the LeRobot observation column alike.
     cam.name = camera_name;
     cam.obs_key = "observation.images." + camera_name;
-    cam.row_source_index.reserve(max_rows);
     out.cameras.push_back(std::move(cam));
   }
 
-  // ── Align: for each reference timestamp, snap every stream to its nearest sample ──
+  // Rows sit on a uniform grid at the dataset rate, spanning the window where every
+  // stream has data. A LeRobot episode plays row k back at k/fps, so uniform spacing is
+  // what makes that stored timestamp describe the row.
+  const uint64_t row_period_ns =
+    static_cast<uint64_t>(static_cast<double>(data::S_TO_NS) / alignment.fps);
+
+  // The streams that set each edge are kept so a window that closes can be reported.
+  uint64_t window_start = 0;
+  uint64_t window_end = std::numeric_limits<uint64_t>::max();
+  std::string last_to_start;
+  std::string first_to_end;
+  auto narrow_window = [&](const std::string& name, uint64_t first, uint64_t last) {
+    if (first >= window_start) {
+      window_start = first;
+      last_to_start = name;
+    }
+    if (last <= window_end) {
+      window_end = last;
+      first_to_end = name;
+    }
+  };
+
+  for (const auto& stream_id : out.leader_streams) {
+    const auto it = messages_by_stream.find(stream_id);
+    if (it == messages_by_stream.end() || it->second.empty()) continue;
+    narrow_window(stream_id, log_ns_of(it->second.front()), log_ns_of(it->second.back()));
+  }
+  for (const auto& stream_id : out.follower_streams) {
+    const auto it = messages_by_stream.find(stream_id);
+    if (it == messages_by_stream.end() || it->second.empty()) continue;
+    narrow_window(stream_id, log_ns_of(it->second.front()), log_ns_of(it->second.back()));
+  }
+  for (const auto& cam : out.cameras) {
+    const auto& stamps = camera_timestamps[cam.name];
+    if (stamps.empty()) continue;
+    narrow_window(cam.name, stamps.front(), stamps.back());
+  }
+
+  // At least one joint stream has data, so the window always has a finite end. A window
+  // that closed means one stream stopped before another started, and no row can hold a
+  // sample from both.
+  if (window_end <= window_start) {
+    std::cerr << "Error: no stretch of time has data from every stream. " << first_to_end
+              << " ends " << static_cast<double>(window_start - window_end) / 1e6
+              << " ms before " << last_to_start << " starts.\n";
+    return false;
+  }
+
+  const uint64_t span_ns = window_end - window_start;
+  const size_t row_count = static_cast<size_t>(span_ns / row_period_ns) + 1;
+  std::vector<uint64_t> row_times;
+  row_times.reserve(row_count);
+  for (size_t k = 0; k < row_count; ++k) {
+    row_times.push_back(window_start + k * row_period_ns);
+  }
+  std::cout << "  Rows run on a " << alignment.fps << " Hz grid over "
+            << static_cast<double>(span_ns) / static_cast<double>(data::S_TO_NS) << " s ("
+            << row_times.size() << " rows)\n";
+
+  const size_t max_rows = row_times.size();
+  for (auto& cam : out.cameras) cam.row_source_index.reserve(max_rows);
+
+  // ── Align: for each row time, snap every stream to its nearest sample ──
   std::map<std::string, size_t> stream_indices;
   for (const auto& [stream_id, _] : messages_by_stream) {
     stream_indices[stream_id] = 0;
@@ -393,48 +488,69 @@ bool load_aligned_episode(
   size_t rows_skipped = 0;
   size_t rows_skipped_no_frame = 0;
 
-  // Per-camera search cursor. Rows are visited in increasing reference time, so each
-  // cursor only ever moves forward.
+  // A row dropped between two kept rows is a gap. Rows are stamped by position, so every
+  // row after a gap plays one period early per dropped row. Rows dropped before the first
+  // kept row or after the last one only shorten the episode and are not gaps.
+  // Each gap keeps the stream that had no sample in its first dropped row.
+  struct Gap {
+    size_t first_row;
+    size_t length;
+    std::string missing_stream;
+    bool missing_is_camera;
+  };
+  std::vector<Gap> gaps;
+  Gap pending_gap{};
+  auto note_skipped_row = [&](size_t row, const std::string& missing, bool is_camera) {
+    if (out.frames.empty()) return;
+    if (pending_gap.length == 0) pending_gap = {row, 0, missing, is_camera};
+    ++pending_gap.length;
+  };
+
+  // Per-camera search cursor. Rows are visited in increasing time, so each cursor only
+  // ever moves forward.
   std::map<std::string, size_t> camera_cursors;
   for (const auto& [camera_name, stamps] : camera_timestamps) camera_cursors[camera_name] = 0;
 
-  // Frame nearest `target`, or npos when the nearest is further away than the tolerance.
-  // Unlike the joint matcher (which snaps to the last sample at or before the target),
-  // this compares both neighbours, halving the worst-case pairing error from a full
-  // frame period to half of one.
-  auto nearest_frame = [&alignment](const std::vector<uint64_t>& stamps, uint64_t target,
+  // Index of the entry nearest `target` in a time-ordered sequence of `count` entries, or
+  // npos when the nearest is further away than the tolerance. `stamp_at(i)` returns entry
+  // i's time. Both neighbors are compared: snapping only to the last entry at or before
+  // the target biases every row backwards by up to a full sample period, and a bias does
+  // not average out the way jitter does. Shared by joint, mobile base and camera streams
+  // so they all pair rows the same way.
+  auto nearest_index = [&alignment](size_t count, const auto& stamp_at, uint64_t target,
                                     size_t& cursor) -> size_t {
-    if (stamps.empty()) return std::numeric_limits<size_t>::max();
-    while (cursor + 1 < stamps.size() && stamps[cursor + 1] <= target) ++cursor;
-    size_t best = cursor;
+    if (cursor >= count) return std::numeric_limits<size_t>::max();
+    // Scan forward to the last entry whose time is at or before the target.
+    while (cursor + 1 < count && stamp_at(cursor + 1) <= target) ++cursor;
     auto distance = [target](uint64_t ts) {
       return target > ts ? target - ts : ts - target;
     };
-    if (cursor + 1 < stamps.size() && distance(stamps[cursor + 1]) < distance(stamps[cursor])) {
+    // Pick whichever is closer to the target: that entry, or the next one past it.
+    size_t best = cursor;
+    if (cursor + 1 < count && distance(stamp_at(cursor + 1)) < distance(stamp_at(cursor))) {
       best = cursor + 1;
     }
-    return distance(stamps[best]) > alignment.tolerance_ns ? std::numeric_limits<size_t>::max()
-                                                           : best;
+    // Accept the closer entry only if it is within the tolerance.
+    return distance(stamp_at(best)) > alignment.tolerance_ns ? std::numeric_limits<size_t>::max()
+                                                             : best;
   };
 
-  // Records carry a dual (sec, nsec) Timestamp; the MCAP log time was written from the
-  // realtime half, so that is the key every comparison below uses.
-  auto log_ns = [](const data::RecordBase& rec) { return rec.ts.realtime.to_ns(); };
+  // Frame nearest `target`, or npos when the nearest is outside the tolerance.
+  auto nearest_frame = [&](const std::vector<uint64_t>& stamps, uint64_t target,
+                           size_t& cursor) -> size_t {
+    return nearest_index(
+      stamps.size(), [&](size_t i) { return stamps[i]; }, target, cursor);
+  };
 
+  // Joint sample nearest `target_ts`, or nullptr when the nearest is outside the tolerance.
   auto find_closest_message = [&](const std::string& stream_id, uint64_t target_ts,
                                   size_t& idx) -> const data::JointStateRecord* {
     auto it = messages_by_stream.find(stream_id);
-    if (it == messages_by_stream.end() || it->second.empty()) return nullptr;
+    if (it == messages_by_stream.end()) return nullptr;
     const auto& messages = it->second;
-    if (idx >= messages.size()) return nullptr;
-    while (idx < messages.size() - 1 && log_ns(messages[idx + 1]) <= target_ts) {
-      ++idx;
-    }
-    if (std::abs(static_cast<int64_t>(log_ns(messages[idx]) - target_ts)) >
-        static_cast<int64_t>(alignment.tolerance_ns)) {
-      return nullptr;
-    }
-    return &messages[idx];
+    const size_t best = nearest_index(
+      messages.size(), [&](size_t i) { return log_ns_of(messages[i]); }, target_ts, idx);
+    return best == std::numeric_limits<size_t>::max() ? nullptr : &messages[best];
   };
 
   // Appends one stream's enabled signal blocks in the order build_features() names them:
@@ -457,7 +573,10 @@ bool load_aligned_episode(
 
   out.frames.reserve(max_rows);
   for (size_t ref_idx = 0; ref_idx < max_rows; ++ref_idx) {
-    const uint64_t timestamp_ns = log_ns(reference_messages[ref_idx]);
+    const uint64_t timestamp_ns = row_times[ref_idx];
+
+    // First stream without a sample within tolerance, if the row is dropped.
+    std::string missing_stream;
 
     std::vector<double> actions;
     bool have_all_leaders = true;
@@ -468,6 +587,7 @@ bool load_aligned_episode(
         actions.insert(actions.end(), sample->positions.begin(), sample->positions.end());
       } else {
         have_all_leaders = false;
+        missing_stream = leader_stream;
         break;
       }
     }
@@ -482,21 +602,20 @@ bool load_aligned_episode(
                              signals.joint_effort);
       } else {
         have_all_followers = false;
+        if (missing_stream.empty()) missing_stream = follower_stream;
         break;
       }
     }
 
     std::vector<double> base_values;
     if (channels.has_mobile_base) {
-      while (mobile_base_idx < mobile_base_messages.size() - 1 &&
-             log_ns(mobile_base_messages[mobile_base_idx + 1]) <= timestamp_ns) {
-        ++mobile_base_idx;
-      }
-      if (mobile_base_idx < mobile_base_messages.size() &&
-          std::abs(static_cast<int64_t>(
-            log_ns(mobile_base_messages[mobile_base_idx]) - timestamp_ns)) <=
-            static_cast<int64_t>(alignment.tolerance_ns)) {
-        const auto& odom = mobile_base_messages[mobile_base_idx];
+      // A base channel with no messages yields npos here, so the row is zero-filled below.
+      const size_t base_idx = nearest_index(
+        mobile_base_messages.size(),
+        [&](size_t i) { return log_ns_of(mobile_base_messages[i]); }, timestamp_ns,
+        mobile_base_idx);
+      if (base_idx != std::numeric_limits<size_t>::max()) {
+        const auto& odom = mobile_base_messages[base_idx];
         base_values.push_back(odom.twist.linear_x);
         base_values.push_back(odom.twist.angular_z);
         if (signals.base_lateral_velocity) base_values.push_back(odom.twist.linear_y);
@@ -513,6 +632,7 @@ bool load_aligned_episode(
 
     if (!have_all_leaders || !have_all_followers) {
       ++rows_skipped;
+      note_skipped_row(ref_idx, missing_stream, /*is_camera=*/false);
       continue;
     }
 
@@ -524,11 +644,15 @@ bool load_aligned_episode(
     for (const auto& cam : out.cameras) {
       const size_t frame_idx = nearest_frame(camera_timestamps[cam.name], timestamp_ns,
                                              camera_cursors[cam.name]);
-      if (frame_idx == std::numeric_limits<size_t>::max()) break;
+      if (frame_idx == std::numeric_limits<size_t>::max()) {
+        missing_stream = cam.name;
+        break;
+      }
       staged_camera_frames.push_back(frame_idx);
     }
     if (staged_camera_frames.size() != out.cameras.size()) {
       ++rows_skipped_no_frame;
+      note_skipped_row(ref_idx, missing_stream, /*is_camera=*/true);
       continue;
     }
     for (size_t c = 0; c < out.cameras.size(); ++c) {
@@ -540,9 +664,14 @@ bool load_aligned_episode(
       observations.insert(observations.end(), base_values.begin(), base_values.end());
     }
 
+    if (pending_gap.length > 0) {
+      gaps.push_back(pending_gap);
+      pending_gap = Gap{};
+    }
+
     AlignedFrame frame;
     frame.timestamp_s = static_cast<float>(static_cast<double>(frame_index) * frame_duration_s);
-    frame.reference_timestamp_ns = timestamp_ns;
+    frame.row_time_ns = timestamp_ns;
     frame.action = std::move(actions);
     frame.observation = std::move(observations);
     out.frames.push_back(std::move(frame));
@@ -556,8 +685,65 @@ bool load_aligned_episode(
   }
   std::cout << "\n";
 
+  if (!gaps.empty()) {
+    auto gap_ms = [row_period_ns](size_t rows) {
+      return static_cast<double>(rows * row_period_ns) / 1e6;
+    };
+    size_t gap_rows = 0;
+    size_t longest_gap = 0;
+    for (const auto& gap : gaps) {
+      gap_rows += gap.length;
+      longest_gap = std::max(longest_gap, gap.length);
+    }
+    const double gap_fraction =
+      static_cast<double>(gap_rows) / static_cast<double>(row_times.size());
+    const bool gap_too_long = gap_ms(longest_gap) > alignment.max_single_gap_ms;
+    const bool too_many_gaps = gap_fraction > alignment.max_gap_fraction;
+
+    const std::ios::fmtflags saved_flags = std::cerr.flags();
+    const std::streamsize saved_precision = std::cerr.precision();
+    std::cerr << (gap_too_long || too_many_gaps ? "Error: " : "Warning: ") << gap_rows
+              << " row(s) dropped mid-episode (" << std::fixed << std::setprecision(2)
+              << gap_fraction * 100.0 << "% of the grid), so every row after each gap "
+              << "plays early:\n";
+    for (const auto& gap : gaps) {
+      std::cerr << "    - " << gap.length << " row(s) (" << gap_ms(gap.length) << " ms) at "
+                << static_cast<double>(row_times[gap.first_row] - row_times.front()) /
+                     static_cast<double>(data::S_TO_NS)
+                << " s, " << gap.missing_stream << " had no sample\n";
+    }
+
+    // A camera stall is a recording fault. Dropping its rows drops them for every camera,
+    // so each stream-copied video that kept recording lags its joints from the gap on, and
+    // no conversion step can restore the frames the stalled camera never captured.
+    std::set<std::string> stalled_cameras;
+    for (const auto& gap : gaps) {
+      if (gap.missing_is_camera) stalled_cameras.insert(gap.missing_stream);
+    }
+    if (!stalled_cameras.empty()) {
+      std::cerr << "  BAD EPISODE: camera stall during recording (";
+      for (auto it = stalled_cameras.begin(); it != stalled_cameras.end(); ++it) {
+        std::cerr << (it == stalled_cameras.begin() ? "" : ", ") << *it;
+      }
+      std::cerr << "). Rows were dropped for every camera, so the video of any camera that "
+                << "kept recording lags its joints after each gap. Conversion cannot repair "
+                << "this; discard or re-record the episode.\n";
+    }
+    if (gap_too_long) {
+      std::cerr << "  The longest gap, " << gap_ms(longest_gap) << " ms, is over the "
+                << alignment.max_single_gap_ms << " ms limit; rejecting the episode.\n";
+    }
+    if (too_many_gaps) {
+      std::cerr << "  Dropped rows are over the " << alignment.max_gap_fraction * 100.0
+                << "% limit; rejecting the episode.\n";
+    }
+    std::cerr.flags(saved_flags);
+    std::cerr.precision(saved_precision);
+    if (gap_too_long || too_many_gaps) return false;
+  }
+
   // How far each camera ends up from its rows: a large or growing offset means the camera
-  // clock is drifting away from the reference stream and is worth investigating.
+  // clock is drifting away from the row grid and is worth investigating.
   for (const auto& cam : out.cameras) {
     if (cam.row_source_index.empty()) continue;
     const auto& stamps = camera_timestamps[cam.name];
@@ -565,7 +751,7 @@ bool load_aligned_episode(
     double worst_ms = 0.0;
     for (size_t row = 0; row < out.frames.size(); ++row) {
       const int64_t delta = static_cast<int64_t>(stamps[cam.row_source_index[row]]) -
-                            static_cast<int64_t>(out.frames[row].reference_timestamp_ns);
+                            static_cast<int64_t>(out.frames[row].row_time_ns);
       const double delta_ms = static_cast<double>(delta) / 1e6;
       sum_abs_ms += std::abs(delta_ms);
       worst_ms = std::max(worst_ms, std::abs(delta_ms));
@@ -821,17 +1007,82 @@ bool extract_camera_video(
   return true;
 }
 
-void clamp_episode_to_video_frame_counts(
-  AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams) {
-  size_t min_video_frames = std::numeric_limits<size_t>::max();
-  for (const auto& [name, vs] : video_streams) {
-    if (vs.frame_count > 0) min_video_frames = std::min(min_video_frames, vs.frame_count);
+size_t video_start_offset(const CameraInfo& cam) {
+  return cam.row_source_index.empty() ? 0 : cam.row_source_index.front();
+}
+
+void report_unaligned_video_streams(
+  const AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams,
+  bool start_offset_applied) {
+  // A video stream is copied out packet by packet in recording order, starting at the
+  // camera's first frame, and muxed at a constant rate. The copy cannot start mid-stream,
+  // because every frame after a keyframe is stored as a change from the one before it.
+  // Row n therefore plays frame n + offset only when the writer moves the video's start
+  // to the frame matched to row 0; otherwise row n plays frame n. A change in the step is
+  // a dropped or duplicated frame, which shifts every later row's image and nothing
+  // downstream can tell.
+  for (const auto& cam : ep.cameras) {
+    auto it = video_streams.find(cam.name);
+    if (it == video_streams.end() || it->second.frame_count == 0) continue;
+    if (cam.row_source_index.empty()) continue;
+
+    const size_t offset = video_start_offset(cam);
+    if (offset > 0 && !start_offset_applied) {
+      std::ostringstream lag_ms;
+      lag_ms << std::fixed << std::setprecision(1)
+             << static_cast<double>(offset) * 1000.0 / static_cast<double>(ep.fps);
+      std::cerr << "\n  WARNING: " << cam.name << " video is offset by " << offset
+                << " frame(s) (" << lag_ms.str() << " ms). Row 0 was matched to frame "
+                << offset << ", but the copied video starts at frame 0, so every image "
+                << "lags its joint state by " << lag_ms.str() << " ms. This format "
+                << "cannot start a copied video mid-stream; convert with "
+                << "trossen_mcap_to_lerobot_v3 for offset-correct video.\n\n";
+    }
+
+    size_t first_mismatch = cam.row_source_index.size();
+    for (size_t row = 1; row < cam.row_source_index.size(); ++row) {
+      if (cam.row_source_index[row] != offset + row) {
+        first_mismatch = row;
+        break;
+      }
+    }
+    const size_t covered = ep.frames.size() + offset;
+    const size_t extra =
+      it->second.frame_count > covered ? it->second.frame_count - covered : 0;
+    if (first_mismatch == cam.row_source_index.size() && extra == 0) continue;
+
+    std::cerr << "Warning: " << cam.name << " video is not row aligned. ";
+    if (first_mismatch < cam.row_source_index.size()) {
+      std::cerr << "row " << first_mismatch << " wanted frame "
+                << cam.row_source_index[first_mismatch] << ", not "
+                << (offset + first_mismatch) << ". ";
+    }
+    if (extra > 0) {
+      std::cerr << extra << " frame(s) past the last row. ";
+    }
+    std::cerr << "Copying the stream as recorded pairs row n with frame n + "
+              << (start_offset_applied ? offset : 0)
+              << ", so the images drift from the joint data.\n";
   }
-  if (min_video_frames < ep.frames.size()) {
-    ep.frames.resize(min_video_frames);
+}
+
+void clamp_episode_to_video_frame_counts(
+  AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams,
+  bool start_offset_applied) {
+  size_t playable_frames = std::numeric_limits<size_t>::max();
+  for (const auto& cam : ep.cameras) {
+    auto it = video_streams.find(cam.name);
+    if (it == video_streams.end() || it->second.frame_count == 0) continue;
+    // Frames before the one matched to row 0 are never played once the start is moved.
+    const size_t skipped = start_offset_applied ? video_start_offset(cam) : 0;
+    const size_t frames = it->second.frame_count;
+    playable_frames = std::min(playable_frames, frames > skipped ? frames - skipped : 0);
+  }
+  if (playable_frames < ep.frames.size()) {
+    ep.frames.resize(playable_frames);
     for (auto& cam : ep.cameras) {
-      if (cam.row_source_index.size() > min_video_frames) {
-        cam.row_source_index.resize(min_video_frames);
+      if (cam.row_source_index.size() > playable_frames) {
+        cam.row_source_index.resize(playable_frames);
       }
     }
   }
