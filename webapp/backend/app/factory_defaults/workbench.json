@@ -8,24 +8,6 @@
           "ip_address": "192.168.0.3",
           "model": "glide_left",
           "end_effector": "wxai_v0_leader",
-          "joint_signs": [
-            1,
-            1,
-            1,
-            -1,
-            -1,
-            1,
-            1
-          ],
-          "joint_offsets": [
-            0,
-            0,
-            0,
-            0,
-            0,
-            -0.7854,
-            0
-          ],
           "gripper_feedback_leader_max": 20.0,
           "gripper_feedback_follower_max": 100.0,
           "gripper_feedback_offset": 6.5,
@@ -37,24 +19,6 @@
           "ip_address": "192.168.0.2",
           "model": "glide_right",
           "end_effector": "wxai_v0_leader",
-          "joint_signs": [
-            1,
-            1,
-            1,
-            -1,
-            -1,
-            1,
-            1
-          ],
-          "joint_offsets": [
-            0,
-            0,
-            0,
-            0,
-            0,
-            0.7854,
-            0
-          ],
           "gripper_feedback_leader_max": 20.0,
           "gripper_feedback_follower_max": 100.0,
           "gripper_feedback_offset": 6.5,
