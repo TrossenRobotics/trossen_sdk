@@ -218,6 +218,7 @@
       }
     ],
     "backend": {
+      "image_encoding": "video",
       "root": "~/.trossen_sdk",
       "dataset_id": "workbench_dataset",
       "compression": "",

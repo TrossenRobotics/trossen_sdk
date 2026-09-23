@@ -141,6 +141,7 @@
       }
     ],
     "backend": {
+      "image_encoding": "video",
       "root": "~/trossen_data",
       "dataset_id": "solo_glide_dataset",
       "compression": "",

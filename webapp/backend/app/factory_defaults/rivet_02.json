@@ -292,6 +292,7 @@
       }
     ],
     "backend": {
+      "image_encoding": "video",
       "root": "~/.trossen_sdk",
       "dataset_id": "rivet_dataset",
       "compression": "",
