@@ -231,7 +231,6 @@ void SdkConfig::populate_global_config() const {
     bj["compression"] = b.compression;
     bj["dataset_id"] = b.dataset_id;
     bj["episode_index"] = b.episode_index;
-    bj["task_description"] = b.task_description;
     bj["image_encoding"] = b.image_encoding;
     bj["video_bitrate_kbps"] = b.video_bitrate_kbps;
     bj["video_keyframe_interval"] = b.video_keyframe_interval;

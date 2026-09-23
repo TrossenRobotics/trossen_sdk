@@ -74,7 +74,6 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
     if (j.contains("compression")) j.at("compression").get_to(c.compression);
     if (j.contains("dataset_id")) j.at("dataset_id").get_to(c.dataset_id);
     if (j.contains("episode_index")) j.at("episode_index").get_to(c.episode_index);
-    if (j.contains("task_description")) j.at("task_description").get_to(c.task_description);
     if (j.contains("image_encoding")) j.at("image_encoding").get_to(c.image_encoding);
     if (j.contains("video_bitrate_kbps")) j.at("video_bitrate_kbps").get_to(c.video_bitrate_kbps);
     if (j.contains("video_keyframe_interval"))
