@@ -32,6 +32,9 @@ struct McapChannelMap {
   std::map<mcap::ChannelId, std::string> joint_channels;
   /// @brief Image channels → camera name (e.g. "cam_high").
   std::map<mcap::ChannelId, std::string> camera_channels;
+  /// @brief Per-frame timing channels (/cameras/<name>/meta) → camera name. Empty for
+  ///        recordings made before the SDK wrote them.
+  std::map<mcap::ChannelId, std::string> camera_meta_channels;
   /// @brief Mobile-base odometry channel (valid only when has_mobile_base is true).
   mcap::ChannelId mobile_base_channel_id{0};
   /// @brief Whether a mobile-base odometry channel was found.
