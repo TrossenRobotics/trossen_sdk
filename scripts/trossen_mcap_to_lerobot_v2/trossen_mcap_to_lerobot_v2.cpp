@@ -52,6 +52,12 @@
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/configuration/types/backends/lerobot_v2_backend_config.hpp"
 
+/// @brief Name of this converter, credited in the generated dataset README
+constexpr char TOOL_NAME[] = "trossen_mcap_to_lerobot_v2";
+
+/// @brief Config file used when --config is not given, relative to the repository root
+constexpr char DEFAULT_CONFIG_PATH[] = "scripts/trossen_mcap_to_lerobot_v2/config.json";
+
 struct JointStateMessage {
   uint64_t timestamp_ns;
   std::vector<double> positions;
@@ -288,7 +294,7 @@ static void print_usage(const char* program) {
   std::cerr << "\nOptions:\n";
   std::cerr << "  --config <path>              Config JSON file\n";
   std::cerr << "                               "
-            << "(default: scripts/trossen_mcap_to_lerobot_v2/config.json)\n";
+            << "(default: " << DEFAULT_CONFIG_PATH << ")\n";
   std::cerr << "  --set KEY=VALUE              Override a config value (repeatable)\n";
   std::cerr << "                               e.g. --set lerobot_v2_backend.dataset_id=my_ds\n";
   std::cerr << "  --dump-config                Print resolved config and exit\n";
@@ -301,8 +307,8 @@ static void print_usage(const char* program) {
             << " --set lerobot_v2_backend.root=~/out"
             << " --set lerobot_v2_backend.dataset_id=my_ds\n";
   std::cerr << "\nThe script will:\n";
-  std::cerr << "  1. Load settings from scripts/trossen_mcap_to_lerobot_v2/config.json "
-            << "(lerobot_v2_backend section)\n";
+  std::cerr << "  1. Load settings from " << DEFAULT_CONFIG_PATH
+            << " (lerobot_v2_backend section)\n";
   std::cerr << "  2. Convert TrossenMCAP recordings to LeRobotV2 Parquet format\n";
   std::cerr << "  3. Extract camera images and encode MP4 videos\n";
   std::cerr << "  4. Generate metadata files (info.json, tasks.jsonl, episodes.jsonl)\n";
@@ -324,7 +330,7 @@ int main(int argc, char** argv) {
 
   // Load config before positional check so --dump-config works without an input path
   const std::string config_path =
-      cli.get_string("config", "scripts/trossen_mcap_to_lerobot_v2/config.json");
+      cli.get_string("config", DEFAULT_CONFIG_PATH);
 
   if (!fs::exists(config_path)) {
     std::cerr << "Error: config file not found: " << config_path << "\n";
@@ -578,7 +584,11 @@ int main(int argc, char** argv) {
   }
 
   // Generate HuggingFace Hub compatibility files
-  if (trossen::io::backends::generate_dataset_readme(full_dataset_path, license)) {
+  const std::filesystem::path info_json_path =
+      std::filesystem::path(trossen::io::backends::METADATA_DIR) /
+      trossen::io::backends::JSON_INFO;
+  if (trossen::io::backends::generate_dataset_readme(
+          full_dataset_path, info_json_path, TOOL_NAME, license)) {
     std::cout << "  [ok] Generated README.md\n";
   } else {
     std::cerr << "  Warning: Failed to generate README.md\n";
