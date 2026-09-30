@@ -1,7 +1,8 @@
 # replay_trossen_mcap_jointstate
 
 Replays joint state data from a TrossenMCAP episode file back to connected robot arms
-and/or a SLATE mobile base. Useful for verifying recorded trajectories on hardware.
+and/or a mobile base: a SLATE base, or a Rivet swerve base and its lift. Useful for
+verifying recorded trajectories on hardware.
 
 ---
 
@@ -41,7 +42,7 @@ Example:
 ```jsonc
 {
   "replay": {
-    "playback_speed": 1.0,        // 1.0 = real-time, 0.5 = half speed
+    "playback_speed": 1.0,        // 1.0 = real-time, 0.5 = half speed, at most 2.0
     "arms": [
       {
         "stream_id": "follower",  // must match the stream_id in the MCAP file
@@ -67,11 +68,44 @@ Each entry in `arms` must have a `stream_id` that matches a joint state channel 
 MCAP file (e.g., `follower/joints/state` → `stream_id: "follower"`). Arms not listed in
 the config are skipped.
 
+### Rivet base and lift
+
+A Rivet episode records its base as a `trossen_base/odom/state` channel. List it under
+`trossen_bases` to replay the recorded base and lift velocities; `config_rivet.json` is a
+complete Rivet config:
+
+```jsonc
+"trossen_bases": [
+  {
+    "stream_id": "trossen_base",   // must match the base stream_id in the MCAP file
+    "max_linear_mps": 0.6,         // every key except stream_id is passed to the
+    "max_angular_rps": 1.2,        // trossen_base hardware component unchanged, so
+    "max_lift_mps": 0.05,          // the limits, homing and command timeout match
+    "home_on_configure": true,     // a recording session
+    "command_timeout_ms": 500.0
+  }
+]
+```
+
+This needs a build with `-DTROSSEN_ENABLE_RIVET=ON`. Without it, a `trossen_bases` entry is
+reported and skipped. The recorded twist and lift velocity are what the base was commanded
+during recording, so replay repeats the commands, not the measured motion.
+
 ---
 
 ## Notes
 
-- The tool reads `log_time` (monotonic) timestamps from the MCAP file to pace playback.
-  `playback_speed` scales the inter-frame delay.
-- Arms are moved to the recorded starting position before playback begins.
+- Each stream is sent on its own recorded monotonic capture timestamps (the MCAP
+  `log_time` for a recording without them), measured from the earliest sample of a
+  stream with hardware configured, so streams recorded at different rates stay in step.
+  If playback falls behind, only the newest due sample of a stream is sent.
+- `playback_speed` (above 0, at most 2) scales the timeline. Base and lift velocities
+  and the arm goal time are scaled with it, so the base still covers the recorded
+  distance. A speed that pushes a Rivet base more than 5% past its limits is refused.
+- Ctrl+C, `SIGTERM` and `SIGHUP` all stop the base and return the arms to rest, as
+  does an error during playback.
+- Arms move from wherever they are to the recorded starting position over 2 seconds
+  before playback begins.
+- A Rivet base homes its swerve modules when it connects, unless `home_on_configure` is
+  false, which takes tens of seconds.
 - The tool requires `libtrossen_arm` to be installed for arm control.

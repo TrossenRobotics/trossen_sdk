@@ -17,6 +17,11 @@ target_include_directories(replay_trossen_mcap_jointstate PRIVATE
 )
 target_compile_definitions(replay_trossen_mcap_jointstate PRIVATE MCAP_IMPLEMENTATION)
 target_link_libraries(replay_trossen_mcap_jointstate trossen_sdk libtrossen_arm zstd lz4)
+# Rivet base replay needs the trossen_base library, which trossen_sdk links only
+# with this option on.
+if(TROSSEN_ENABLE_RIVET)
+  target_compile_definitions(replay_trossen_mcap_jointstate PRIVATE TROSSEN_ENABLE_RIVET)
+endif()
 
 # TrossenMCAP → LeRobotV2 conversion tool
 add_executable(trossen_mcap_to_lerobot_v2 trossen_mcap_to_lerobot_v2/trossen_mcap_to_lerobot_v2.cpp)
