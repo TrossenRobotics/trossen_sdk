@@ -1,0 +1,32 @@
+{
+  "replay": {
+    "playback_speed": 1.0,
+    "arms": [
+      {
+        "stream_id":    "follower_left",
+        "ip_address":   "192.168.1.15",
+        "model":        "pro",
+        "end_effector": "pro_base",
+        "goal_time":    0.066
+      },
+      {
+        "stream_id":    "follower_right",
+        "ip_address":   "192.168.1.14",
+        "model":        "pro",
+        "end_effector": "pro_base",
+        "goal_time":    0.066
+      }
+    ],
+    "trossen_bases": [
+      {
+        "stream_id":          "trossen_base",
+        "max_linear_mps":     0.6,
+        "max_angular_rps":    1.2,
+        "max_lift_mps":       0.05,
+        "ready_timeout_s":    60.0,
+        "home_on_configure":  true,
+        "command_timeout_ms": 500.0
+      }
+    ]
+  }
+}

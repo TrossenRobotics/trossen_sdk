@@ -2,7 +2,7 @@
 Replay
 ======
 
-The ``replay_trossen_mcap_jointstate`` tool reads joint state data from a recorded TrossenMCAP episode and plays it back onto connected arms (and optionally a SLATE mobile base).
+The ``replay_trossen_mcap_jointstate`` tool reads joint state data from a recorded TrossenMCAP episode and plays it back onto connected arms, and optionally a mobile base: a SLATE base, or a Rivet swerve base and its lift.
 It is the fastest way to verify a recorded trajectory on hardware.
 
 .. contents::
@@ -167,8 +167,9 @@ Key fields:
     * - Field
       - Meaning
     * - ``playback_speed``
-      - Multiplier on the inter-frame delay.
+      - Scales the replay timeline, above 0 and at most ``2.0``.
         ``1.0`` plays in real time, ``0.5`` plays at half speed.
+        Base and lift velocities and the arm goal time are scaled with it, so the base still covers the recorded distance.
     * - ``arms[].stream_id``
       - Must match a joint-state channel in the MCAP file.
     * - ``arms[].ip_address``
@@ -179,13 +180,22 @@ Key fields:
     * - ``slates[]``
       - Include one entry per mobile base stream to replay recorded velocities.
         Omit for solo or stationary episodes.
+    * - ``trossen_bases[]``
+      - Include one entry per Rivet base stream to replay the recorded base and lift velocities.
+        Every key except ``stream_id`` is passed to the ``trossen_base`` hardware component, the same keys as in a recording config.
+        Needs a build with ``-DTROSSEN_ENABLE_RIVET=ON``.
+        ``scripts/replay_trossen_mcap_jointstate/config_rivet.json`` is a complete Rivet config.
 
 Playback Behavior
 =================
 
--   Playback is paced using ``log_time`` (monotonic) timestamps in the MCAP file.
-    ``playback_speed`` scales the inter-frame delay.
--   Before playback begins, the tool moves each listed arm to the recorded starting position so the trajectory starts from a known state.
+-   Each stream is sent on its own recorded monotonic capture timestamps (the MCAP ``log_time`` for a recording without them), measured from the earliest sample of a stream with hardware configured, so streams recorded at different rates stay in step.
+    ``playback_speed`` scales the timeline.
+-   A speed that would push a Rivet base's recorded peak velocity more than 5% past its configured limit is refused.
+-   Ctrl+C, ``SIGTERM`` and ``SIGHUP`` all stop the base and return the arms to rest, as does an error during playback.
+-   Before playback begins, the tool moves each listed arm from its current pose to the recorded starting position over 2 seconds, so the trajectory starts from a known state.
+-   A Rivet base homes its swerve modules when it connects, unless ``home_on_configure`` is false.
+    The replayed base and lift velocities are the measured velocities recorded during the episode.
 -   The tool requires ``libtrossen_arm`` to be installed for arm control.
     This is the same library the SDK uses for recording.
 -   For episodes containing mobile-base streams, the tool uses ``trossen_slate`` to drive the base.

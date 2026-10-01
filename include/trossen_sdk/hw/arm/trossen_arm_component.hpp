@@ -7,6 +7,7 @@
 #define TROSSEN_SDK__HW__ARM__TROSSEN_ARM_COMPONENT_HPP_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -14,6 +15,7 @@
 
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/teleop/teleop_capable.hpp"
+#include "trossen_sdk/utils/one_euro_filter.hpp"
 
 namespace trossen::hw::arm {
 
@@ -54,8 +56,31 @@ public:
    *   "end_effector": "wxai_v0_follower",
    *   "staged_position": [0, 1.0, 0.5, 0.6, 0, 0, 0],  // optional, joint-space
    *   "staging_time_s": 2.0,       // optional, default 2.0 (stage / rest move)
-   *   "write_moving_time_s": 0.1   // optional, default 0.0 (per-tick smoothing)
+   *   "write_moving_time_s": 0.1,  // optional, default 0.0 (per-tick smoothing)
+   *   "actuated": false,           // optional, default true (false = read-only arm)
+   *
+   *   // Host-side clamp on outgoing position commands. Optional; one entry per
+   *   // joint, null leaves that joint unclamped. Applied before smoothing.
+   *   "command_position_min": [-1.1, null, null, ...],
+   *   "command_position_max": [ 0.8, 3.1066861, ...],
+   *
+   *   // Controller limit tolerances. Optional; one entry per joint, omit an
+   *   // array to leave that field at the controller's firmware default.
+   *   "position_tolerance": [...],
+   *   "velocity_tolerance": [...],
+   *   "effort_tolerance":   [...],
+   *
+   *   // One-Euro low-pass on outgoing position commands.
+   *   // All ignored unless "smoothing_enabled" is true.
+   *   "smoothing_enabled": false,      // optional, default false
+   *   "smoothing_gripper": false,      // optional, default false (arm joints only)
+   *   "smoothing_min_cutoff_hz": 1.0,  // optional, default 1.0, must be > 0
+   *   "smoothing_beta": 0.9,           // optional, default 0.9, must be >= 0
+   *   "smoothing_d_cutoff_hz": 1.0     // optional, default 1.0, must be > 0
    * }
+   *
+   * See configuration::ArmConfig for what the clamp bounds mean and how the
+   * Rivet's values are derived.
    *
    * @param config JSON configuration object
    * @throws std::runtime_error if configuration fails
@@ -97,6 +122,8 @@ public:
     switch (space) {
       case Space::Joint:     return &joint_view_;
       case Space::Cartesian: return &cart_view_;
+      case Space::Base:      return nullptr;
+      case Space::Count:     return nullptr;
     }
     return nullptr;
   }
@@ -113,8 +140,21 @@ private:
   std::vector<float> read_joint();
   void               write_joint(const std::vector<float>& cmd);
 
+  /// Follower role: current measured gripper effort (N), or nullopt without a
+  /// driver. A sensor read, valid regardless of the gripper's control mode.
+  std::optional<float> read_gripper_effort();
+
+  /// Leader role: render gripper force feedback from the follower's measured
+  /// gripper effort (N) via the cubic curve. Only meaningful when
+  /// gripper_force_feedback_ is set.
+  void apply_gripper_feedback(float follower_gripper_effort);
+
   std::vector<float> read_cartesian();
   void               write_cartesian(const std::vector<float>& cmd);
+
+  /// Clamp `pos` in place to command_position_min_ / command_position_max_.
+  /// No-op when both are empty, and per joint when that entry is NaN.
+  void clamp_command(std::vector<double>& pos) const;
 
   // Adapter views: implement the space child classes and forward to the
   // private helpers above. See the class-level docstring for why this
@@ -127,6 +167,17 @@ private:
     }
     void write(const std::vector<float>& cmd) override {
       self->write_joint(cmd);
+    }
+    // Gripper force-feedback channel. Only the joint view carries it: the
+    // reflected force is a gripper effort, which has no cartesian analogue.
+    bool renders_gripper_feedback() const override {
+      return self->gripper_force_feedback_;
+    }
+    std::optional<float> read_gripper_effort() override {
+      return self->read_gripper_effort();
+    }
+    void apply_gripper_feedback(float follower_gripper_effort) override {
+      self->apply_gripper_feedback(follower_gripper_effort);
     }
   };
 
@@ -154,6 +205,27 @@ private:
   /// or position-mode alignment (follower).
   bool is_leader_{false};
 
+  /// Whether this arm has actuators. A passive leader is read-only: it streams
+  /// joint positions and cannot be commanded, so stage(), the teleop mode
+  /// setup, and the end_teleop() rest move are all skipped. Parsed from
+  /// "actuated" in configure(); defaults true, so every existing arm keeps its
+  /// current behaviour.
+  bool actuated_{true};
+
+  /// Leader-only: whether to reflect the follower's grasp onto this gripper,
+  /// and the cubic curve that shapes it. See configuration::ArmConfig.
+  bool gripper_force_feedback_{false};
+  float gripper_feedback_leader_max_{27.0f};
+  float gripper_feedback_follower_max_{87.5f};
+  float gripper_feedback_offset_{8.0f};
+
+  /// Whether prepare_for_teleop() put this arm's gripper into effort mode, so
+  /// end_teleop() releases it only when it was actually engaged. Not merely
+  /// tidiness: end_teleop() can be called with no preceding
+  /// prepare_for_teleop() — the hardware-test park step does exactly that — and
+  /// commanding effort on a gripper still in idle mode is a controller error.
+  bool gripper_effort_engaged_{false};
+
   /// Joint-space pose this arm moves to at session start (via stage()).
   /// Empty = no staging.
   std::vector<float> staged_position_;
@@ -172,6 +244,43 @@ private:
   /// goal_time < 0.001s as no-interpolation). Non-zero values smooth the
   /// per-tick motion between successive write_joint() calls.
   float write_moving_time_s_{0.0f};
+
+  /// Optional per-joint tolerances on the controller's limit checks, pushed in
+  /// configure() right after the driver connects. Each, when non-empty, has one
+  /// entry per joint; empty leaves the firmware default for that field. The
+  /// controller resets these on power cycle, so they are re-applied on every
+  /// reconnect rather than assumed to have survived.
+  std::vector<float> position_tolerance_;
+  std::vector<float> velocity_tolerance_;
+  std::vector<float> effort_tolerance_;
+
+  /// Optional per-joint clamp on outgoing commands, applied in write_joint()
+  /// before smoothing. Empty = no clamping at all; a NaN entry = that joint is
+  /// unclamped. See configuration::ArmConfig for why this is separate from the
+  /// controller-side position limits, and how the Rivet's bounds are derived.
+  std::vector<float> command_position_min_;
+  std::vector<float> command_position_max_;
+
+  /// Opt-in one-Euro low-pass on the commands written by write_joint(), and
+  /// whether it extends to the gripper channel. Both off by default; see
+  /// configuration::ArmConfig for the rationale. Parsed in configure().
+  bool smoothing_enabled_{false};
+  bool smoothing_gripper_{false};
+
+  /// One-Euro tuning shared by every per-joint filter in cmd_filt_.
+  /// See utils::OneEuroFilter for parameter semantics. configure() rejects a
+  /// non-positive cutoff, which would otherwise freeze the output silently.
+  float smoothing_min_cutoff_hz_{1.0f};
+  float smoothing_beta_{0.9f};
+  float smoothing_d_cutoff_hz_{1.0f};
+
+  /// Per-joint command filters, sized to the arm's joint count in configure()
+  /// and only constructed when smoothing is enabled. Reset in
+  /// prepare_for_teleop() so filter history never bridges a stopped and
+  /// restarted teleop session — stale history would otherwise have the first
+  /// tick of a new session compute a derivative against a pose from minutes ago,
+  /// spiking the adaptive cutoff exactly when the arm is nearest the operator.
+  utils::VecOneEuroFilter cmd_filt_;
 };
 
 }  // namespace trossen::hw::arm
