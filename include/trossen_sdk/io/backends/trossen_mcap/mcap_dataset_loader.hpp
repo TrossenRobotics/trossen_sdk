@@ -44,6 +44,15 @@ struct AlignmentOptions {
   double fps{30.0};
   /// @brief Largest gap, in nanoseconds, allowed between a row and the sample it matches.
   uint64_t tolerance_ns{50000000};
+  /// @brief Longest single gap, in milliseconds, allowed between two kept rows. The rows
+  ///        either side of a gap are stamped one period apart but were recorded further
+  ///        apart, so a long gap is a jump in the trajectory; an episode holding one is
+  ///        rejected. Measured in time so the limit holds at any fps.
+  double max_single_gap_ms{200.0};
+  /// @brief Largest share of the grid's rows, from 0 to 1, that may be dropped between the
+  ///        first and last kept row. Scales with episode length: 0.02 allows 36 rows in a
+  ///        60 s episode at 30 fps. Past it the episode is rejected.
+  double max_gap_fraction{0.02};
 };
 
 /**
@@ -51,12 +60,17 @@ struct AlignmentOptions {
  *
  * Decodes the embedded dataset_info metadata, auto-detects leader/follower joint
  * streams by topic name (falling back to single-robot mode), parses all joint and
- * odometry messages, and produces one AlignedFrame per dataset row via
- * nearest-timestamp matching. Camera frames are matched the same way: each row records
- * the nearest frame per camera in CameraInfo::row_source_index, so images and joint
- * states in a row share an instant rather than a position. Rows where any stream or
- * camera has no sample within tolerance are dropped. Camera frames are NOT decoded
- * here; call extract_camera_images() for that.
+ * odometry messages, and produces one AlignedFrame per dataset row. Rows sit on a
+ * uniform grid at `alignment.fps` spanning the time every joint stream and camera has
+ * data, and each row takes every stream's nearest sample. Camera frames are matched the
+ * same way: each row records the nearest frame per camera in
+ * CameraInfo::row_source_index, so images and joint states in a row share an instant
+ * rather than a position. Rows where any stream or camera has no sample within tolerance
+ * are dropped. Camera frames are NOT decoded here; call extract_camera_images() for that.
+ *
+ * Fails when a stream's timestamps go backwards, when no stretch of time has data from
+ * every stream, or when the rows dropped between the first and last kept row exceed
+ * `alignment.max_single_gap_ms` in any one gap or `alignment.max_gap_fraction` in total.
  *
  * Camera keys keep the name the recording gave them.
  *
@@ -65,7 +79,7 @@ struct AlignmentOptions {
  * @param out Output episode (overwritten on success).
  * @param channels Output channel maps (reused by extract_camera_images()).
  * @param signals Selects which decoded joint and base signals enter the row vectors.
- * @param alignment Row rate and match tolerance used to build the frame sequence.
+ * @param alignment Row rate, match tolerance and allowed mid-episode gap.
  * @return true on success; false on a fatal error (message logged to stderr).
  */
 bool load_aligned_episode(
@@ -136,6 +150,37 @@ bool extract_camera_video(
   std::map<std::string, CameraVideoStream>& out_streams);
 
 /**
+ * @brief Source frames a camera recorded before the episode's first row
+ *
+ * The row grid starts once every stream is live, so a camera that started earlier than
+ * the last stream has already recorded this many frames by row 0. A stream-copied video
+ * still begins at the camera's first frame, so these frames sit in front of the row data.
+ *
+ * @param cam Camera with its per-row frame selections
+ * @return Index of the frame matched to row 0, or 0 when no row matched a frame
+ */
+size_t video_start_offset(const CameraInfo& cam);
+
+/**
+ * @brief Warn when a camera's video cannot be paired with the rows by index
+ *
+ * Stream-copied video is written in recording order starting at the camera's first frame.
+ * When the writer moves each video's start to the frame matched to row 0 (LeRobot v3 does
+ * this through `from_timestamp`), row n plays frame n + offset; otherwise row n plays
+ * frame n and a nonzero offset is reported as a constant image lag. Also reports every
+ * camera whose matched frames do not advance one per row, or which holds frames past the
+ * last row.
+ *
+ * @param ep Aligned episode carrying the per-row frame selections
+ * @param video_streams Extracted video streams keyed by camera name
+ * @param start_offset_applied Whether the writer starts each video at the frame matched
+ *   to row 0
+ */
+void report_unaligned_video_streams(
+  const AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams,
+  bool start_offset_applied);
+
+/**
  * @brief Trim an aligned episode to whatever every video-mode camera actually covers.
  *
  * Compressed camera streams are remuxed verbatim (extract_camera_video(), arrival order,
@@ -149,9 +194,12 @@ bool extract_camera_video(
  *   episode already is.
  * @param video_streams Per-camera compressed video streams from extract_camera_video(),
  *   keyed by camera name (AlignedEpisode::cameras[i].name).
+ * @param start_offset_applied Whether the writer starts each video at the frame matched
+ *   to row 0, in which case the frames before it are never played and do not count.
  */
 void clamp_episode_to_video_frame_counts(
-  AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams);
+  AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams,
+  bool start_offset_applied);
 
 }  // namespace trossen::io::backends
 
