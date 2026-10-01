@@ -10,6 +10,7 @@
 # Run all tools from the repository root so relative config paths resolve:
 #   ./build/scripts/replay_trossen_mcap_jointstate <mcap_file>
 #   ./build/scripts/trossen_mcap_to_lerobot_v2 <mcap_file_or_folder>
+#   ./build/scripts/trossen_mcap_to_lerobot_v3 <mcap_file_or_folder>
 # ──────────────────────────────────────────────────────────────────────────────
 
 # TrossenMCAP joint-state replay tool
@@ -21,3 +22,11 @@ target_link_libraries(replay_trossen_mcap_jointstate trossen_sdk libtrossen_arm)
 add_executable(trossen_mcap_to_lerobot_v2 trossen_mcap_to_lerobot_v2/trossen_mcap_to_lerobot_v2.cpp)
 target_include_directories(trossen_mcap_to_lerobot_v2 PRIVATE ${CMAKE_BINARY_DIR})
 target_link_libraries(trossen_mcap_to_lerobot_v2 trossen_sdk arrow parquet protobuf ${OpenCV_LIBS})
+
+# TrossenMCAP → LeRobotV3 conversion tool
+# Threads: the v3 converter prepares episodes (decode/extract/encode) on a
+# worker pool while the writer aggregates them single-threaded and in order.
+find_package(Threads REQUIRED)
+add_executable(trossen_mcap_to_lerobot_v3 trossen_mcap_to_lerobot_v3/trossen_mcap_to_lerobot_v3.cpp)
+target_include_directories(trossen_mcap_to_lerobot_v3 PRIVATE ${CMAKE_BINARY_DIR})
+target_link_libraries(trossen_mcap_to_lerobot_v3 trossen_sdk arrow parquet protobuf ${OpenCV_LIBS} Threads::Threads)
