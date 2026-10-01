@@ -3,11 +3,38 @@ package trossen_sdk;
 
 import "google/protobuf/timestamp.proto";
 
-// Timestamp message containing both monotonic and realtime timestamps
+// Clock a device timestamp is expressed in. A device timestamp is only comparable
+// to another from the same clock, and an uptime counter cannot be told apart from a
+// UTC epoch by value alone.
+enum DeviceClock {
+  // No device timestamp available; the device field is meaningless.
+  DEVICE_CLOCK_NONE = 0;
+
+  // Nanoseconds since the device powered on or was configured. Can restart or wrap.
+  DEVICE_CLOCK_UPTIME = 1;
+
+  // Nanoseconds since the Unix epoch, as reported by the device.
+  DEVICE_CLOCK_EPOCH = 2;
+
+  // Device clock the vendor SDK has already mapped onto the host realtime clock
+  // (nanoseconds since the Unix epoch).
+  DEVICE_CLOCK_HOST_MAPPED = 3;
+}
+
+// Timestamps carried with every sample. The monotonic and realtime clocks are read
+// on the host when the sample is received, so they measure delivery. The device
+// clock is the instant the device itself reports, which for a camera is the exposure
+// and for an arm is the controller's sample time.
 message Timestamp {
-  // Monotonic clock timestamp (steady_clock)
+  // Monotonic clock timestamp (steady_clock), read on the host at delivery
   google.protobuf.Timestamp monotonic = 1;
 
-  // Realtime clock timestamp (system_clock UTC)
+  // Realtime clock timestamp (system_clock UTC), read on the host at delivery
   google.protobuf.Timestamp realtime = 2;
+
+  // Device-reported time, valid only when device_clock is not DEVICE_CLOCK_NONE
+  google.protobuf.Timestamp device = 3;
+
+  // Which clock the device field is expressed in
+  DeviceClock device_clock = 4;
 }

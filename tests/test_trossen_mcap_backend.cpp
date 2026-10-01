@@ -313,6 +313,65 @@ TEST_F(TrossenMCAPBackendTest, RecordsCompressedVideoForColorCameras) {
     << "video_format metadata should record h264 for a color stream";
 }
 
+// Every camera frame gets a companion message on <camera>/meta carrying the device
+// capture time, which the Foxglove image schemas have no field for.
+TEST_F(TrossenMCAPBackendTest, WritesDeviceTimestampOnCameraMetaTopic) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "frame_meta_test";
+  cfg->image_encoding = "video";
+  cfg->video_encoder = "x264";
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  trossen::data::ImageRecord img;
+  img.id = "cam_color";
+  img.width = 64;
+  img.height = 48;
+  img.channels = 3;
+  img.encoding = "bgr8";
+  img.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+  img.ts.realtime = trossen::data::now_real();
+  img.ts.monotonic = trossen::data::now_mono();
+  img.ts.device = trossen::data::Timespec::from_ns(1'234'567'890ull);
+  img.ts.device_clock = trossen::data::DeviceClock::Uptime;
+
+  constexpr int kFrames = 5;
+  for (int i = 0; i < kFrames; ++i) {
+    img.seq = static_cast<uint64_t>(i);
+    backend->write(img);
+  }
+  backend->close();
+
+  std::filesystem::path mcap_path;
+  for (const auto& entry : std::filesystem::directory_iterator(episode_dir)) {
+    if (entry.path().extension() == ".mcap") {
+      mcap_path = entry.path();
+      break;
+    }
+  }
+  ASSERT_FALSE(mcap_path.empty());
+  std::ifstream mcap_file(mcap_path, std::ios::binary);
+  const std::string contents(
+    (std::istreambuf_iterator<char>(mcap_file)), std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("/cameras/cam_color/meta"), std::string::npos)
+    << "a parallel meta topic should exist for the camera";
+  EXPECT_NE(contents.find("FrameMeta"), std::string::npos)
+    << "the meta channel should be registered with the FrameMeta schema";
+  EXPECT_NE(contents.find("DeviceClock"), std::string::npos)
+    << "the schema should carry the device clock enum so the domain is readable";
+}
+
 // A record that carries a companion depth_image alongside its primary color frame
 // must land in its own lossless H.265 video channel, distinct from the color
 // stream's H.264 channel.

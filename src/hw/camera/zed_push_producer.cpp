@@ -29,6 +29,14 @@
 #include "trossen_sdk/hw/camera/zed_push_producer.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 
+// TIME_REFERENCE::IMAGE_CENTER_OF_EXPOSURE first shipped in ZED SDK 5.5.
+#if defined(ZED_SDK_MAJOR_VERSION) && \
+  (ZED_SDK_MAJOR_VERSION * 100 + ZED_SDK_MINOR_VERSION >= 505)
+#define TROSSEN_ZED_HAS_CENTER_OF_EXPOSURE 1
+#else
+#define TROSSEN_ZED_HAS_CENTER_OF_EXPOSURE 0
+#endif
+
 namespace trossen::hw::camera {
 
 /// Maximum valid depth value (millimetres) when quantizing F32 → U16.
@@ -151,9 +159,16 @@ ZedPushProducer::ZedPushProducer(
       "[ZedPushProducer] Unsupported color encoding: " + cfg_.color_encoding +
       ". Valid: bgr8, rgb8");
   }
-  // ZED cameras do not expose a true sensor-exposure timestamp;
-  // TIME_REFERENCE::IMAGE is host-side.  Default to false.
-  cfg_.use_device_time = config.value("use_device_time", false);
+  // The device clock is the middle of each frame's exposure, which the SDK reports from
+  // 5.5 onward on GMSL models (ZED X family). TIME_REFERENCE::IMAGE is not used: it is
+  // stamped after the Jetson ISP, about one frame after readout starts.
+  cfg_.use_device_time = config.value("use_device_time", true);
+#if !TROSSEN_ZED_HAS_CENTER_OF_EXPOSURE
+  if (cfg_.use_device_time) {
+    std::cerr << "[ZedPushProducer] use_device_time needs ZED SDK 5.5 or newer for the "
+              << "center-of-exposure timestamp; frames carry host clocks only\n";
+  }
+#endif
   cfg_.timeout_ms = config.value("timeout_ms", 3000);
   if (cfg_.timeout_ms <= 0) {
     cfg_.timeout_ms = 3000;
@@ -228,6 +243,35 @@ void ZedPushProducer::stop() {
 // ─────────────────────────────────────────────────────────────
 // Grab loop
 // ─────────────────────────────────────────────────────────────
+
+void ZedPushProducer::stamp_center_of_exposure(data::Timestamp& ts) {
+#if TROSSEN_ZED_HAS_CENTER_OF_EXPOSURE
+  // Zero on inputs that carry no per-frame exposure (USB and HDR models).
+  const uint64_t exposure_ns =
+    camera_->getTimestamp(sl::TIME_REFERENCE::IMAGE_CENTER_OF_EXPOSURE).getNanoseconds();
+  if (exposure_ns != 0) {
+    ts.device = data::Timespec::from_ns(exposure_ns);
+    // The SDK does not document this timestamp's clock. A value within a second of the
+    // host realtime clock is taken as mapped onto it; anything else is the camera's own
+    // counter, which still aligns once an offset against the host is fitted.
+    constexpr uint64_t kHostMappedWindowNs = data::S_TO_NS;
+    const uint64_t real_ns = ts.realtime.to_ns();
+    const uint64_t distance =
+      real_ns > exposure_ns ? real_ns - exposure_ns : exposure_ns - real_ns;
+    ts.device_clock =
+      distance <= kHostMappedWindowNs ? data::DeviceClock::HostMapped : data::DeviceClock::Uptime;
+  }
+  if (!device_clock_logged_ || ts.device_clock != last_device_clock_) {
+    std::cout << "[zed:" << cfg_.stream_id << "] device timestamp: "
+              << (ts.has_device() ? "center of exposure" : "none (no per-frame exposure)")
+              << " (" << data::to_string(ts.device_clock) << ")" << std::endl;
+    last_device_clock_ = ts.device_clock;
+    device_clock_logged_ = true;
+  }
+#else
+  (void)ts;
+#endif
+}
 
 void ZedPushProducer::push_loop(
   const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
@@ -319,22 +363,17 @@ void ZedPushProducer::push_loop(
     }
 
     // ── Timestamp ──
+    // The host clocks record delivery; the device clock, when available, is the middle
+    // of the exposure and is kept beside them, never over them.
     uint64_t mono_now = data::now_mono().to_ns();
     data::Timestamp ts;
-    if (cfg_.use_device_time) {
-      // NOTE: despite the name, TIME_REFERENCE::IMAGE is a host-side
-      // timestamp (Unix epoch ns) captured when the frame arrived in PC
-      // memory — the ZED SDK does not expose a true sensor-exposure
-      // timestamp.  It is still more consistent than now_mono() because
-      // it is stamped inside the SDK's receive path, before our grab()
-      // returns, so it excludes any scheduling jitter in our thread.
-      uint64_t device_ts_ns =
-        camera_->getTimestamp(sl::TIME_REFERENCE::IMAGE).getNanoseconds();
-      ts.monotonic = data::Timespec::from_ns(device_ts_ns);
-    } else {
-      ts.monotonic = data::now_mono();
-    }
+    ts.monotonic = data::Timespec::from_ns(mono_now);
     ts.realtime = data::now_real();
+#if TROSSEN_ZED_HAS_CENTER_OF_EXPOSURE
+    if (cfg_.use_device_time) {
+      stamp_center_of_exposure(ts);
+    }
+#endif
 
     // Inter-frame timing
     if (last_capture_mono_ != 0) {
