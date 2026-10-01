@@ -3,6 +3,10 @@
 Converts TrossenMCAP episode files (`.mcap`) to LeRobot V2 format (Parquet + MP4) for use
 with the [LeRobot](https://github.com/huggingface/lerobot) training framework.
 
+> **Rivet recordings are not supported yet.** They convert, with a warning, but only for
+> inspection: the base keeps its linear and angular velocity and drops the lateral
+> velocity and the lift, and no LeRobot robot can train on or replay the result.
+
 ---
 
 ## Building
@@ -91,8 +95,8 @@ the order defined in `info.json`.
   "robot_type": "<robot_name>",
   "fps": 30,
   "features": {
-    "observation.state": { "dtype": "float32", "shape": [<N>], "names": ["joint_0", ...] },
-    "action":            { "dtype": "float32", "shape": [<N>], "names": ["joint_0", ...] },
+    "observation.state": { "dtype": "float32", "shape": [<N>], "names": ["follower_left.joint_0", ...] },
+    "action":            { "dtype": "float32", "shape": [<N>], "names": ["leader_left.joint_0", ...] },
     "observation.images.<camera_id>": {
       "dtype": "video",
       "shape": [<H>, <W>, 3],
@@ -123,6 +127,20 @@ Per-episode statistics appended after each conversion:
   }
 }
 ```
+
+### Compressed video cameras
+
+Cameras recorded with `image_encoding="video"` are stream-copied into the episode mp4, not
+re-encoded. A stream copy always starts at the camera's first recorded frame, while the
+episode's first row starts once every stream is live. A camera that started before the last
+stream therefore has frames in front of row 0, and LeRobot v2 has no per-episode start
+offset to skip them.
+
+- This converter does not guarantee image/joint offset matching for such cameras.
+- Each offset camera is reported with a `WARNING: <camera> video is offset by N frame(s)`
+  line giving the resulting image lag in ms.
+- `trossen_mcap_to_lerobot_v3` applies the offset through `from_timestamp` and is
+  offset-correct.
 
 ---
 

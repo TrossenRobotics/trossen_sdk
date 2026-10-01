@@ -12,6 +12,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # and opt-in dependencies?
 option(TROSSEN_ENABLE_REALSENSE "Enable RealSense camera support" ON)
 option(TROSSEN_ENABLE_ZED "Enable StereoLabs ZED camera support" OFF)
+# OFF by default: this is the only part of the SDK that needs libavcodec/libavutil/
+# libswscale headers, and nothing on the default path uses it yet. Turning it on adds
+# an ffmpeg dev dependency to the build, so it stays opt-in until the recorder can
+# actually write video.
+option(TROSSEN_ENABLE_VIDEO_ENCODE "Enable H.264/H.265 video encoding support" OFF)
 # OFF by default: rerun-cpp adds ~50 MB of download and a multi-minute first build, and is
 # only needed by the stationary-demo ReRun viewer flow. Enable explicitly when building
 # that demo: cmake -DTROSSEN_ENABLE_RERUN_OBSERVER=ON ...
@@ -23,7 +28,12 @@ option(TROSSEN_SDK_ENABLE_POLICY_CLIENT
 
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
+  src/backends/lerobot_common/lerobot_episode.cpp
+  src/backends/lerobot_common/lerobot_stats_utils.cpp
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
+  src/backends/lerobot_v3/lerobot_v3_writer.cpp
+  src/backends/trossen_mcap/mcap_dataset_loader.cpp
+  src/backends/trossen_mcap/mcap_video_transcoder.cpp
   src/backends/trossen_mcap/trossen_mcap_backend.cpp
   src/backends/null/null_backend.cpp
   src/configuration/global_config.cpp
@@ -66,6 +76,23 @@ if(TROSSEN_ENABLE_REALSENSE)
   find_package(fastcdr REQUIRED)
   find_package(fastrtps REQUIRED)
   find_package(realsense2 REQUIRED)
+endif()
+
+if(TROSSEN_ENABLE_VIDEO_ENCODE)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(FFMPEG_ENC REQUIRED IMPORTED_TARGET
+    libavcodec libavutil libswscale)
+  message(STATUS
+    "Video encoding enabled (libavcodec ${FFMPEG_ENC_libavcodec_VERSION})")
+  target_sources(trossen_sdk PRIVATE src/utils/video_encoder.cpp)
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_VIDEO_ENCODE)
+  # PRIVATE: the ffmpeg headers stay confined to video_encoder.cpp, so consumers
+  # of trossen_sdk do not need libavcodec headers on their include path.
+  target_link_libraries(trossen_sdk PRIVATE PkgConfig::FFMPEG_ENC)
+else()
+  # The backend holds std::unique_ptr<VideoEncoder> in every build, so the
+  # destructor must still be defined without FFmpeg.
+  target_sources(trossen_sdk PRIVATE src/utils/video_encoder_stub.cpp)
 endif()
 
 if(TROSSEN_ENABLE_ZED)
@@ -225,6 +252,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(mcap)
 
+# The MCAP reader is compiled into trossen_sdk (src/backends/trossen_mcap/
+# mcap_dataset_loader.cpp owns the single MCAP_IMPLEMENTATION translation unit), so a
+# target linking trossen_sdk must not define the macro. zstd and lz4 are the reader's
+# chunk-decompression codecs.
+target_include_directories(trossen_sdk PUBLIC ${mcap_SOURCE_DIR}/cpp/mcap/include)
+target_link_libraries(trossen_sdk PUBLIC zstd lz4)
+
 # Find all Foxglove SDK source files
 file(GLOB FOXGLOVE_SOURCES CONFIGURE_DEPENDS
   "${foxglove_SOURCE_DIR}/src/*.cpp"
@@ -325,9 +359,14 @@ set(TROSSEN_PROTO_FILES
   ${TROSSEN_PROTO_PATH}/Odometry2D.proto
   ${TROSSEN_PROTO_PATH}/RobotDescription.proto
   ${TROSSEN_PROTO_PATH}/Timestamp.proto
+  ${TROSSEN_PROTO_PATH}/CompressedVideo.proto
+  ${TROSSEN_PROTO_PATH}/FrameMeta.proto
 )
 
-# Generate protobuf files with proper import paths
+# Generate protobuf files with proper import paths.
+# FrameMeta.proto uses proto3 `optional` fields. protoc 3.12 to 3.14, which is what
+# Ubuntu 22.04 ships, rejects them without --experimental_allow_proto3_optional;
+# 3.15 and newer accept the flag and ignore it.
 foreach(PROTO_FILE ${TROSSEN_PROTO_FILES})
   get_filename_component(PROTO_NAME ${PROTO_FILE} NAME_WE)
   set(PROTO_SRC ${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.pb.cc)
@@ -337,6 +376,7 @@ foreach(PROTO_FILE ${TROSSEN_PROTO_FILES})
     COMMAND ${Protobuf_PROTOC_EXECUTABLE}
     ARGS --cpp_out=${CMAKE_CURRENT_BINARY_DIR}
          --proto_path=${TROSSEN_PROTO_PATH}
+         --experimental_allow_proto3_optional
          ${PROTO_FILE}
     DEPENDS ${PROTO_FILE}
     COMMENT "Running cpp protocol buffer compiler on ${PROTO_FILE}"

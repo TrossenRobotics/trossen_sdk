@@ -22,6 +22,9 @@ target_link_libraries(test_backend_registry PRIVATE trossen_sdk GTest::gtest_mai
 
 add_executable(test_trossen_mcap_backend test_trossen_mcap_backend.cpp)
 target_link_libraries(test_trossen_mcap_backend PRIVATE trossen_sdk GTest::gtest_main)
+if(TROSSEN_ENABLE_VIDEO_ENCODE)
+  target_compile_definitions(test_trossen_mcap_backend PRIVATE TROSSEN_ENABLE_VIDEO_ENCODE)
+endif()
 
 add_executable(test_active_hardware_registry test_active_hardware_registry.cpp)
 target_link_libraries(test_active_hardware_registry PRIVATE trossen_sdk GTest::gtest_main)
@@ -44,6 +47,17 @@ endif()
 add_executable(test_lerobot_depth_utils test_lerobot_depth_utils.cpp)
 target_link_libraries(test_lerobot_depth_utils PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_depth_quantization test_depth_quantization.cpp)
+target_link_libraries(test_depth_quantization PRIVATE trossen_sdk GTest::gtest_main)
+
+# Guarded as a whole rather than compiled to an empty binary: every test in this
+# file drives VideoEncoder, which does not exist without the ffmpeg-backed build.
+if(TROSSEN_ENABLE_VIDEO_ENCODE)
+  add_executable(test_video_encoder test_video_encoder.cpp)
+  target_link_libraries(test_video_encoder PRIVATE trossen_sdk GTest::gtest_main)
+  target_compile_definitions(test_video_encoder PRIVATE TROSSEN_ENABLE_VIDEO_ENCODE)
+endif()
+
 add_executable(test_record_types test_record_types.cpp)
 target_link_libraries(test_record_types PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -64,6 +78,9 @@ target_link_libraries(test_sink PRIVATE trossen_sdk GTest::gtest_main)
 
 add_executable(test_scheduler test_scheduler.cpp)
 target_link_libraries(test_scheduler PRIVATE trossen_sdk GTest::gtest_main)
+
+add_executable(test_lerobot_v3_layout test_lerobot_v3_layout.cpp)
+target_link_libraries(test_lerobot_v3_layout PRIVATE trossen_sdk GTest::gtest_main)
 
 add_executable(test_session_manager test_session_manager.cpp)
 target_link_libraries(test_session_manager PRIVATE trossen_sdk GTest::gtest_main)
@@ -159,6 +176,10 @@ if(TROSSEN_ENABLE_REALSENSE)
   gtest_discover_tests(test_realsense_push_producer_metadata)
 endif()
 gtest_discover_tests(test_lerobot_depth_utils)
+gtest_discover_tests(test_depth_quantization)
+if(TROSSEN_ENABLE_VIDEO_ENCODE)
+  gtest_discover_tests(test_video_encoder)
+endif()
 gtest_discover_tests(test_record_types)
 gtest_discover_tests(test_config)
 gtest_discover_tests(test_lerobot_utils)
@@ -166,6 +187,7 @@ gtest_discover_tests(test_queue_adapter)
 gtest_discover_tests(test_producer_registry)
 gtest_discover_tests(test_sink)
 gtest_discover_tests(test_scheduler)
+gtest_discover_tests(test_lerobot_v3_layout)
 gtest_discover_tests(test_session_manager)
 gtest_discover_tests(test_session_manager_discard)
 gtest_discover_tests(test_keyboard_input_utils)

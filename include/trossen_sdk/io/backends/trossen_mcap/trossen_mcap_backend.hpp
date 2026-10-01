@@ -25,11 +25,12 @@
 #include "foxglove/foxglove.hpp"
 #include "foxglove/mcap.hpp"
 #include "foxglove/schemas.hpp"
-
+#include "trossen_sdk/configuration/types/backends/trossen_mcap_backend_config.hpp"
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
-#include "trossen_sdk/configuration/types/backends/trossen_mcap_backend_config.hpp"
+#include "trossen_sdk/utils/depth_quantization.hpp"
+#include "trossen_sdk/utils/video_encoder.hpp"
 
 namespace trossen::io::backends {
 
@@ -228,11 +229,82 @@ private:
   foxglove::RawChannel* ensure_odometry_2d_channel(const std::string& stream_id);
 
   /**
+   * @brief Ensure the per-frame metadata channel exists for a camera stream
+   *
+   * @param stream_id Camera stream identifier (e.g., "camera_high", "camera_high_depth")
+   * @return Pointer to the channel, or nullptr on failure
+   */
+  foxglove::RawChannel* ensure_camera_meta_channel(const std::string& stream_id);
+
+  /**
+   * @brief Write one frame's timing to the camera's metadata channel
+   *
+   * The image topics use Foxglove schemas, which carry a single timestamp and cannot
+   * hold a device capture time. This writes the full clock set for the same frame on a
+   * parallel topic. Call it only after the frame itself was written: each message carries
+   * the frame's position in this episode's stream, which readers join on.
+   *
+   * @param stream_id Camera stream identifier, matching the image topic
+   * @param ts Timestamps for the frame
+   * @param seq Producer sequence number of the frame
+   * @param device_frame_number The camera's own frame counter, when it reports one
+   */
+  void write_camera_meta_record(const std::string& stream_id, const data::Timestamp& ts,
+                                uint64_t seq, std::optional<uint64_t> device_frame_number);
+
+  /**
    * @brief Write an image record
    *
    * @param img Image record to write
    */
   void write_image_record(const data::ImageRecord& img);
+
+  /**
+   * @brief Get or lazily create the video encoder for one camera stream
+   *
+   * @param img Image record identifying the stream and its geometry
+   * @param depth True for a lossless H.265 depth encoder, false for H.264 color
+   * @return Pointer to the encoder, or nullptr on failure
+   */
+  utils::VideoEncoder* ensure_video_encoder(const data::ImageRecord& img, bool depth);
+
+  /**
+   * @brief Encode one frame and log it as foxglove.CompressedVideo
+   *
+   * @param img Image record to encode
+   * @param depth True for a depth frame, false for color
+   * @param channel Channel to log the message to
+   * @return true if the frame was logged; false if it was dropped
+   */
+  bool write_video_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
+
+  /**
+   * @brief Serialize one cv::Mat as foxglove.RawImage and log it
+   *
+   * @param image Pixel data to serialize
+   * @param frame_id Frame id to stamp on the message
+   * @param width Image width in pixels
+   * @param height Image height in pixels
+   * @param encoding Pixel encoding string (e.g. "bgr8")
+   * @param ts Capture timestamp
+   * @param channel Channel to log the message to
+   * @param counter Stats counter bumped on success
+   * @return true if the frame was logged; false if it was dropped
+   */
+  bool write_raw_image_message(const cv::Mat& image, const std::string& frame_id, uint32_t width,
+                               uint32_t height, const std::string& encoding,
+                               const data::Timespec& ts, foxglove::RawChannel* channel,
+                               uint64_t* counter);
+
+  /**
+   * @brief Write one frame as video or raw image, depending on `records_video()`
+   *
+   * @param img Image record to write
+   * @param depth True for a depth frame, false for color
+   * @param channel Channel to log the message to
+   * @return true if the frame was logged; false if it was dropped
+   */
+  bool write_image_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
 
   /**
    * @brief Write a joint state record
@@ -265,6 +337,9 @@ private:
   /// @brief Serialised FileDescriptorSet for the Odometry2D protobuf schema
   std::string schema_data_odom2d_;
 
+  /// @brief Serialised FileDescriptorSet for the FrameMeta protobuf schema
+  std::string schema_data_frame_meta_;
+
   /// @brief Output file path
   std::filesystem::path path_;
 
@@ -276,6 +351,21 @@ private:
 
   /// @brief Map of image channels by camera name
   std::unordered_map<std::string, foxglove::RawChannel> image_channels_;
+
+  /// @brief Per-camera frame metadata channels, keyed by stream id
+  std::unordered_map<std::string, foxglove::RawChannel> camera_meta_channels_;
+
+  /// @brief Frames written so far this episode, per camera stream; the next frame's index
+  std::unordered_map<std::string, uint64_t> camera_meta_frame_index_;
+
+  /// @brief Per-camera video encoders, keyed by ImageRecord::id
+  std::unordered_map<std::string, std::unique_ptr<utils::VideoEncoder>> video_encoders_;
+
+  /// @brief Cameras already reported as failing to encode
+  std::unordered_map<std::string, bool> video_encode_failed_;
+
+  /// @brief Lookup table for depth quantization, built lazily on first depth frame
+  std::vector<uint16_t> depth_quant_lut_;
 
   /// @brief Helper to identify depth topics
   static bool is_depth_topic(const std::string& topic);
