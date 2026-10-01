@@ -29,7 +29,7 @@
  *   "hardware": {
  *     "arms":    { "<id>": { "ip_address": "...", "model": "...", "end_effector": "..." }, ... },
  *     "cameras": [ { "id": "...", "type": "realsense_camera", "serial_number": "...", ... }, ... ],
- *     "mobile_base": { "reset_odometry": false, "enable_torque": false },
+ *     "mobile_base": { "type": "slate_base", "reset_odometry": false, "enable_torque": false },
  *     "controls": { "<id>": { "type": "glide_arm_input", "arms": ["<id>", ...] } }
  *   },
  *   "producers": [
