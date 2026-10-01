@@ -91,8 +91,8 @@ the order defined in `info.json`.
   "robot_type": "<robot_name>",
   "fps": 30,
   "features": {
-    "observation.state": { "dtype": "float32", "shape": [<N>], "names": ["joint_0", ...] },
-    "action":            { "dtype": "float32", "shape": [<N>], "names": ["joint_0", ...] },
+    "observation.state": { "dtype": "float32", "shape": [<N>], "names": ["follower_left.joint_0", ...] },
+    "action":            { "dtype": "float32", "shape": [<N>], "names": ["leader_left.joint_0", ...] },
     "observation.images.<camera_id>": {
       "dtype": "video",
       "shape": [<H>, <W>, 3],

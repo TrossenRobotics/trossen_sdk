@@ -194,6 +194,19 @@ bool load_aligned_episode(
     return false;
   }
 
+  // A leader device need not carry the leader token (the Glide records as glide_left /
+  // glide_right), so when only followers are named, every other arm stream leads.
+  if (detected_leader_streams.empty() && !detected_follower_streams.empty()) {
+    for (const auto& [channel_id, stream_id] : channels.joint_channels) {
+      if (stream_id != "slate_base" &&
+          std::find(detected_follower_streams.begin(), detected_follower_streams.end(),
+                    stream_id) == detected_follower_streams.end()) {
+        detected_leader_streams.push_back(stream_id);
+        std::cout << "    [ok] Inferred leader stream: " << stream_id << "\n";
+      }
+    }
+  }
+
   if (!detected_leader_streams.empty() && !detected_follower_streams.empty()) {
     std::sort(detected_leader_streams.begin(), detected_leader_streams.end());
     std::sort(detected_follower_streams.begin(), detected_follower_streams.end());
