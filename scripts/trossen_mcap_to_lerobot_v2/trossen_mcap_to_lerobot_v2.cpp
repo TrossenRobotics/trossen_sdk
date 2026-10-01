@@ -36,6 +36,7 @@
 #include <memory>
 #include <opencv2/opencv.hpp>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -307,13 +308,66 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
 /// @param dataset_id Dataset name within the repository
 /// @param chunk_size Number of episodes per chunk directory
 /// @param global_index_offset In/out parameter tracking the next available
-///   global row index across episodes. Pass 0 for a fresh conversion; on
-///   successful return the value is advanced by the number of rows written.
+///   global row index across episodes. Advanced by the number of rows written only
+///   when the whole episode succeeds; left unchanged on failure.
 /// @return 0 on success, non-zero on failure
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
                       int64_t& global_index_offset);
+
+/// @brief The episodes an earlier run already wrote, read back from meta/episodes.jsonl.
+struct ConvertedEpisodes {
+  /// Entries in episodes.jsonl, which is also the next free episode index.
+  int count{0};
+  /// Sum of their lengths, which is also the next free global row index.
+  int64_t total_rows{0};
+  /// Their `source_file` values.
+  std::set<std::string> sources;
+  /// Entries with no `source_file`, written by a converter that did not record it.
+  int unsourced{0};
+};
+
+/// @brief Read meta/episodes.jsonl; a missing file reads as an empty dataset.
+/// @throws nlohmann::json::exception if a line is not valid JSON
+ConvertedEpisodes read_converted_episodes(const std::filesystem::path& meta_dir) {
+  ConvertedEpisodes out;
+  std::ifstream in(meta_dir / trossen::io::backends::JSONL_EPISODES);
+  std::string line;
+  while (std::getline(in, line)) {
+    if (line.empty()) continue;
+    const auto entry = nlohmann::json::parse(line);
+    ++out.count;
+    out.total_rows += entry.value("length", 0);
+    if (entry.contains("source_file")) {
+      out.sources.insert(entry["source_file"].get<std::string>());
+    } else {
+      ++out.unsourced;
+    }
+  }
+  return out;
+}
+
+/// @brief Delete the parquet, videos and extracted images a failed conversion left at
+/// episode_index, so the next recording can take that index.
+void remove_episode_outputs(const std::filesystem::path& dataset_path, int episode_index,
+                            int chunk_size) {
+  namespace fs = std::filesystem;
+  namespace be = trossen::io::backends;
+  const std::string chunk = be::format_chunk_dir(episode_index / chunk_size);
+  std::error_code ec;
+  fs::remove(dataset_path / be::DATA_PATH_DIR / chunk / be::format_episode_parquet(episode_index),
+             ec);
+  // Videos and images are laid out one directory per camera.
+  const fs::path videos_dir = dataset_path / be::VIDEO_DIR / chunk;
+  for (const auto& camera : fs::directory_iterator(videos_dir, ec)) {
+    fs::remove(camera.path() / be::format_video_filename(episode_index), ec);
+  }
+  const fs::path images_dir = dataset_path / be::IMAGES_DIR / chunk;
+  for (const auto& camera : fs::directory_iterator(images_dir, ec)) {
+    fs::remove_all(camera.path() / be::format_episode_folder(episode_index), ec);
+  }
+}
 
 // ──────────────────────────────────────────────────────────
 // Main entry point
@@ -474,47 +528,47 @@ int main(int argc, char** argv) {
   int successful = 0;
   int skipped = 0;
   int failed = 0;
-  int64_t global_index_offset = 0;
 
   fs::path full_dataset_path_check = fs::path(dataset_root_dir) / repository_id / dataset_id;
 
+  // Resume after whatever an earlier run wrote. Indices are handed out only to
+  // recordings that convert, so a rejected recording leaves no gap, and a re-run
+  // recognizes finished recordings by name rather than by their position in the folder.
+  ConvertedEpisodes converted;
+  try {
+    converted = read_converted_episodes(full_dataset_path_check /
+                                        trossen::io::backends::METADATA_DIR);
+  } catch (const std::exception& e) {
+    std::cerr << "Error: Failed to read the existing "
+              << trossen::io::backends::JSONL_EPISODES << ": " << e.what() << "\n";
+    return 1;
+  }
+  if (converted.unsourced > 0) {
+    std::cerr << "Error: " << converted.unsourced << " episode(s) in "
+              << full_dataset_path_check.string()
+              << " do not record their source recording, so a re-run cannot tell which "
+              << "recordings are already converted. Convert into a new dataset_id.\n";
+    return 1;
+  }
+  int next_episode_index = converted.count;
+  int64_t global_index_offset = converted.total_rows;
+
   for (size_t i = 0; i < mcap_files.size(); ++i) {
     const auto& mcap_path = mcap_files[i];
+    const std::string source_file = mcap_path.filename().string();
 
-    // MCAP filenames are UUIDs, so the episode index is no longer encoded in the
-    // name. Assign LeRobot episode indices from the chronological processing order
-    // established above (by recorded start time).
-    int episode_index = static_cast<int>(i);
-
-    // Idempotent: skip episodes whose parquet already exists
-    int ep_chunk = episode_index / chunk_size;
-    fs::path expected_parquet = full_dataset_path_check / "data" /
-                                trossen::io::backends::format_chunk_dir(ep_chunk) /
-                                trossen::io::backends::format_episode_parquet(episode_index);
-
-    if (fs::exists(expected_parquet)) {
-      // Advance global index past the skipped episode's rows.
-      // If the parquet is corrupt / unreadable, delete it and fall through
-      // to re-convert so we don't end up with overlapping indices.
-      try {
-        auto reader = parquet::ParquetFileReader::OpenFile(expected_parquet.string(), false);
-        global_index_offset += reader->metadata()->num_rows();
-        std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
-                  << episode_index << " (already converted): "
-                  << mcap_path.filename().string() << "\n";
-        ++skipped;
-        continue;
-      } catch (const std::exception& e) {
-        std::cerr << "\n[" << (i + 1) << "/" << mcap_files.size()
-                  << "] Corrupt parquet for episode " << episode_index
-                  << ", deleting and re-converting: " << e.what() << "\n";
-        fs::remove(expected_parquet);
-      }
+    if (converted.sources.count(source_file) > 0) {
+      std::cout << "\n[" << (i + 1) << "/" << mcap_files.size()
+                << "] Skipping (already converted): " << source_file << "\n";
+      ++skipped;
+      continue;
     }
+
+    const int episode_index = next_episode_index;
 
     std::cout << "\n" << std::string(70, '=') << "\n";
     std::cout << "Processing file " << (i + 1) << "/" << mcap_files.size() << ": "
-              << mcap_path.filename().string() << "\n";
+              << source_file << "\n";
     std::cout << std::string(70, '=') << "\n";
 
     int result = process_mcap_file(mcap_path.string(), dataset_root_dir, episode_index,
@@ -523,8 +577,12 @@ int main(int argc, char** argv) {
 
     if (result == 0) {
       successful++;
+      ++next_episode_index;
     } else {
       failed++;
+      // The next recording takes this index and these rows, so nothing of this one
+      // may stay behind.
+      remove_episode_outputs(full_dataset_path_check, episode_index, chunk_size);
       std::cerr << "\n[FAILED] Failed to process: " << mcap_path.string() << "\n";
     }
   }
@@ -926,11 +984,6 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return 1;
   }
 
-  // Advance the global index offset now that parquet is committed to disk.
-  // This ensures post-parquet failures (image extraction, metadata) don't
-  // cause overlapping indices in subsequent episodes.
-  global_index_offset += static_cast<int64_t>(rows_written);
-
   std::cout << "\n[ok] Successfully created Parquet file: " << cfg.output_file << "\n";
   std::cout << "\nSummary:\n";
   std::cout << "  Total frames:      " << rows_written << "\n";
@@ -1110,11 +1163,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   // Use utility functions to write metadata
-  int num_cameras = static_cast<int>(channels.camera_channels.size());
-
   if (trossen::io::backends::write_episode_metadata(
           meta_dir, cfg.episode_index, task_name, 0, static_cast<int>(rows_written),
-          num_cameras)) {
+          videos_created, nlohmann::json(), mcap_path.filename().string())) {
     std::cout << "  [ok] Updated " << info_path.string() << "\n";
     std::cout << "  [ok] Created/Updated "
               << (meta_dir / trossen::io::backends::JSONL_TASKS).string() << "\n";
@@ -1127,6 +1178,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     std::cerr << "  Error: Failed to write metadata files\n";
     return 1;
   }
+
+  // Only a fully written episode claims its rows; after a failure the caller deletes
+  // what was written and the next recording reuses the same rows.
+  global_index_offset += static_cast<int64_t>(rows_written);
 
   std::cout << "\n[ok] Successfully created LeRobotV2 dataset episode!\n";
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
