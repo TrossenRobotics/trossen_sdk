@@ -12,6 +12,7 @@
 #include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
@@ -112,6 +113,20 @@ std::string join_ids(const std::vector<std::string>& ids) {
     joined += id;
   }
   return joined;
+}
+
+/// @brief Warn, once per process, that Rivet recordings have no LeRobot support yet.
+///
+/// The episode still converts, but only the planar linear and angular base velocity
+/// reach the dataset (no lateral velocity, no lift), and no LeRobot robot consumes the
+/// result. Printed once because a folder run loads every episode, some on worker threads.
+void warn_rivet_unsupported() {
+  static std::atomic<bool> warned{false};
+  if (warned.exchange(true)) return;
+  std::cerr << "\nWARNING: LeRobot conversion does not support Rivet recordings yet. The "
+            << "dataset is written for inspection only: the base keeps its linear and "
+            << "angular velocity but drops the lateral velocity and the lift, and no LeRobot "
+            << "robot can train on or replay it.\n\n";
 }
 
 }  // namespace
@@ -259,6 +274,9 @@ bool load_aligned_episode(
     std::cout << "    Task from MCAP: " << out.task_name << "\n";
   }
 
+  // The Rivet example records on robot `trossen_rivet`, with or without its base.
+  if (out.robot_name == "trossen_rivet") warn_rivet_unsupported();
+
   // ── PHASE 2: Map channels to streams; detect leader/follower arms by name ──
   std::vector<std::string> detected_leader_streams;
   std::vector<std::string> detected_follower_streams;
@@ -288,9 +306,11 @@ bool load_aligned_episode(
       channels.mobile_base_channel_id = channel_id;
       channels.has_mobile_base = true;
       mobile_base_topic = topic;
-      std::cout << "    [ok] Found odometry stream for mobile robot: "
-                << stream_id_from_topic(topic, trossen_mcap_defs::kOdometry2DTopicSuffix)
-                << "\n";
+      const std::string stream_id =
+        stream_id_from_topic(topic, trossen_mcap_defs::kOdometry2DTopicSuffix);
+      std::cout << "    [ok] Found odometry stream for mobile robot: " << stream_id << "\n";
+      // The Rivet example records its base as `trossen_base`.
+      if (stream_id == "trossen_base") warn_rivet_unsupported();
       continue;
     }
 
