@@ -188,7 +188,12 @@ inline bool create_initial_info_json(
   }
 
   info_file << info_json.dump(4);
+  // Closed before the check, so a failed flush is reported too.
   info_file.close();
+  if (info_file.fail()) {
+    std::cerr << "Error: Failed to write " << info_path << "\n";
+    return false;
+  }
   return true;
 }
 
@@ -302,7 +307,12 @@ inline bool update_info_json(
   }
 
   info_file << info_json.dump(4);
+  // Closed before the check, so a failed flush is reported too.
   info_file.close();
+  if (info_file.fail()) {
+    std::cerr << "Error: Failed to write " << info_path << "\n";
+    return false;
+  }
   return true;
 }
 
@@ -313,13 +323,16 @@ inline bool update_info_json(
  * @param episode_index Episode index
  * @param task_name Task name
  * @param episode_length Number of frames in the episode
+ * @param source_file Name of the recording the episode came from; written as
+ *   `source_file` when non-empty, so a re-run can tell which recordings are done
  * @return true on success, false on failure
  */
 inline bool write_episode_entry(
     const std::filesystem::path& meta_dir,
     int episode_index,
     const std::string& task_name,
-    int episode_length) {
+    int episode_length,
+    const std::string& source_file = {}) {
   namespace fs = std::filesystem;
 
   // Append mode: episodes.jsonl holds one JSON object per line, one line per episode.
@@ -335,9 +348,15 @@ inline bool write_episode_entry(
   episode_entry["episode_index"] = episode_index;
   episode_entry["tasks"] = nlohmann::json::array({task_name});
   episode_entry["length"] = episode_length;
+  if (!source_file.empty()) episode_entry["source_file"] = source_file;
 
   episodes_file << episode_entry.dump() << "\n";
+  // Closed before the check, so a failed flush is reported too.
   episodes_file.close();
+  if (episodes_file.fail()) {
+    std::cerr << "Error: Failed to write " << episodes_path << "\n";
+    return false;
+  }
   return true;
 }
 
@@ -371,7 +390,12 @@ inline bool write_task_entry(
   task_entry["task"] = task_name;
 
   tasks_file << task_entry.dump() << "\n";
+  // Closed before the check, so a failed flush is reported too.
   tasks_file.close();
+  if (tasks_file.fail()) {
+    std::cerr << "Error: Failed to write " << tasks_path << "\n";
+    return false;
+  }
   return true;
 }
 
@@ -521,7 +545,12 @@ inline bool write_episode_stats(
   }
 
   stats_file << stats_entry.dump() << "\n";
+  // Closed before the check, so a failed flush is reported too.
   stats_file.close();
+  if (stats_file.fail()) {
+    std::cerr << "Error: Failed to write " << stats_path << "\n";
+    return false;
+  }
   return true;
 }
 
@@ -552,7 +581,12 @@ inline bool write_episode_stats_with_data(
   stats_entry["stats"] = stats;
 
   stats_file << stats_entry.dump() << "\n";
+  // Closed before the check, so a failed flush is reported too.
   stats_file.close();
+  if (stats_file.fail()) {
+    std::cerr << "Error: Failed to write " << stats_path << "\n";
+    return false;
+  }
   return true;
 }
 
@@ -567,6 +601,7 @@ inline bool write_episode_stats_with_data(
  * @param episode_length Number of frames in the episode
  * @param num_videos Number of videos in the episode
  * @param stats Optional statistics JSON object
+ * @param source_file Name of the recording the episode came from (see write_episode_entry)
  * @return true on success, false on failure
  */
 inline bool write_episode_metadata(
@@ -575,14 +610,15 @@ inline bool write_episode_metadata(
     const std::string& task_name,
     int episode_length,
     int num_videos,
-    const nlohmann::json& stats = nlohmann::json()) {
+    const nlohmann::json& stats = nlohmann::json(),
+    const std::string& source_file = {}) {
   // Write task entry (if doesn't exist)
   if (!write_task_entry(meta_dir, task_name)) {
     return false;
   }
 
   // Write episode entry
-  if (!write_episode_entry(meta_dir, episode_index, task_name, episode_length)) {
+  if (!write_episode_entry(meta_dir, episode_index, task_name, episode_length, source_file)) {
     return false;
   }
 
