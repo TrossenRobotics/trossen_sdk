@@ -268,13 +268,16 @@ inline bool update_info_json(
  * @param episode_index Episode index
  * @param task_name Task name
  * @param episode_length Number of frames in the episode
+ * @param source_file Name of the recording the episode came from; written as
+ *   `source_file` when non-empty, so a re-run can tell which recordings are done
  * @return true on success, false on failure
  */
 inline bool write_episode_entry(
     const std::filesystem::path& meta_dir,
     int episode_index,
     const std::string& task_name,
-    int episode_length) {
+    int episode_length,
+    const std::string& source_file = {}) {
   namespace fs = std::filesystem;
 
   // Append mode: episodes.jsonl holds one JSON object per line, one line per episode.
@@ -290,6 +293,7 @@ inline bool write_episode_entry(
   episode_entry["episode_index"] = episode_index;
   episode_entry["tasks"] = nlohmann::json::array({task_name});
   episode_entry["length"] = episode_length;
+  if (!source_file.empty()) episode_entry["source_file"] = source_file;
 
   episodes_file << episode_entry.dump() << "\n";
   episodes_file.close();
@@ -525,6 +529,7 @@ inline bool write_episode_stats_with_data(
  * @param episode_length Number of frames in the episode
  * @param num_videos Number of videos in the episode
  * @param stats Optional statistics JSON object
+ * @param source_file Name of the recording the episode came from (see write_episode_entry)
  * @return true on success, false on failure
  */
 inline bool write_episode_metadata(
@@ -534,14 +539,15 @@ inline bool write_episode_metadata(
     int task_index,
     int episode_length,
     int num_videos,
-    const nlohmann::json& stats = nlohmann::json()) {
+    const nlohmann::json& stats = nlohmann::json(),
+    const std::string& source_file = {}) {
   // Write task entry (if doesn't exist)
   if (!write_task_entry(meta_dir, task_index, task_name)) {
     return false;
   }
 
   // Write episode entry
-  if (!write_episode_entry(meta_dir, episode_index, task_name, episode_length)) {
+  if (!write_episode_entry(meta_dir, episode_index, task_name, episode_length, source_file)) {
     return false;
   }
 
