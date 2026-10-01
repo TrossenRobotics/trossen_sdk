@@ -7,6 +7,7 @@
 #define TROSSEN_SDK__HW__ARM__TROSSEN_ARM_COMPONENT_HPP_
 
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -56,6 +57,7 @@ public:
    *   "staged_position": [0, 1.0, 0.5, 0.6, 0, 0, 0],  // optional, joint-space
    *   "staging_time_s": 2.0,       // optional, default 2.0 (stage / rest move)
    *   "write_moving_time_s": 0.1,  // optional, default 0.0 (per-tick smoothing)
+   *   "actuated": false,           // optional, default true (false = read-only arm)
    *
    *   // Host-side clamp on outgoing position commands. Optional; one entry per
    *   // joint, null leaves that joint unclamped. Applied before smoothing.
@@ -138,6 +140,15 @@ private:
   std::vector<float> read_joint();
   void               write_joint(const std::vector<float>& cmd);
 
+  /// Follower role: current measured gripper effort (N), or nullopt without a
+  /// driver. A sensor read, valid regardless of the gripper's control mode.
+  std::optional<float> read_gripper_effort();
+
+  /// Leader role: render gripper force feedback from the follower's measured
+  /// gripper effort (N) via the cubic curve. Only meaningful when
+  /// gripper_force_feedback_ is set.
+  void apply_gripper_feedback(float follower_gripper_effort);
+
   std::vector<float> read_cartesian();
   void               write_cartesian(const std::vector<float>& cmd);
 
@@ -156,6 +167,17 @@ private:
     }
     void write(const std::vector<float>& cmd) override {
       self->write_joint(cmd);
+    }
+    // Gripper force-feedback channel. Only the joint view carries it: the
+    // reflected force is a gripper effort, which has no cartesian analogue.
+    bool renders_gripper_feedback() const override {
+      return self->gripper_force_feedback_;
+    }
+    std::optional<float> read_gripper_effort() override {
+      return self->read_gripper_effort();
+    }
+    void apply_gripper_feedback(float follower_gripper_effort) override {
+      self->apply_gripper_feedback(follower_gripper_effort);
     }
   };
 
@@ -182,6 +204,27 @@ private:
   /// whether prepare_for_teleop() enters gravity-compensation mode (leader)
   /// or position-mode alignment (follower).
   bool is_leader_{false};
+
+  /// Whether this arm has actuators. A passive leader is read-only: it streams
+  /// joint positions and cannot be commanded, so stage(), the teleop mode
+  /// setup, and the end_teleop() rest move are all skipped. Parsed from
+  /// "actuated" in configure(); defaults true, so every existing arm keeps its
+  /// current behaviour.
+  bool actuated_{true};
+
+  /// Leader-only: whether to reflect the follower's grasp onto this gripper,
+  /// and the cubic curve that shapes it. See configuration::ArmConfig.
+  bool gripper_force_feedback_{false};
+  float gripper_feedback_leader_max_{27.0f};
+  float gripper_feedback_follower_max_{87.5f};
+  float gripper_feedback_offset_{8.0f};
+
+  /// Whether prepare_for_teleop() put this arm's gripper into effort mode, so
+  /// end_teleop() releases it only when it was actually engaged. Not merely
+  /// tidiness: end_teleop() can be called with no preceding
+  /// prepare_for_teleop() — the hardware-test park step does exactly that — and
+  /// commanding effort on a gripper still in idle mode is a controller error.
+  bool gripper_effort_engaged_{false};
 
   /// Joint-space pose this arm moves to at session start (via stage()).
   /// Empty = no staging.
