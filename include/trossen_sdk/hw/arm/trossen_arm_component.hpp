@@ -53,7 +53,7 @@ public:
    * {
    *   "ip_address": "192.168.1.100",
    *   "model": "wxai_v0",
-   *   "end_effector": "wxai_v0_follower",
+   *   "end_effector": "wxai_v0_follower",  // "no_gripper" when nothing is at the flange
    *   "staged_position": [0, 1.0, 0.5, 0.6, 0, 0, 0],  // optional, joint-space
    *   "staging_time_s": 2.0,       // optional, default 2.0 (stage / rest move)
    *   "write_moving_time_s": 0.1,  // optional, default 0.0 (per-tick smoothing)
@@ -156,6 +156,14 @@ private:
   /// No-op when both are empty, and per joint when that entry is NaN.
   void clamp_command(std::vector<double>& pos) const;
 
+  /// Set the control mode of every joint, or of the arm joints only when this
+  /// arm has no gripper (there is no gripper motor to put in a mode).
+  void set_modes(trossen_arm::Mode mode);
+
+  /// Command joint positions, `positions` sized to get_num_joints(). Without
+  /// a gripper the last (gripper) entry is dropped and only the arm moves.
+  void command_positions(const std::vector<double>& positions, double goal_time, bool blocking);
+
   // Adapter views: implement the space child classes and forward to the
   // private helpers above. See the class-level docstring for why this
   // indirection is necessary.
@@ -204,6 +212,11 @@ private:
   /// whether prepare_for_teleop() enters gravity-compensation mode (leader)
   /// or position-mode alignment (follower).
   bool is_leader_{false};
+
+  /// False for the `no_gripper` end effector. Modes and positions then go
+  /// through the arm-only driver calls, the gripper entry of a joint command
+  /// is ignored, and no gripper effort is read or rendered.
+  bool has_gripper_{true};
 
   /// Whether this arm has actuators. A passive leader is read-only: it streams
   /// joint positions and cannot be commanded, so stage(), the teleop mode
