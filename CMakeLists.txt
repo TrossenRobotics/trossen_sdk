@@ -99,6 +99,22 @@ if(TROSSEN_ENABLE_VIDEO_ENCODE)
   # PRIVATE: the ffmpeg headers stay confined to video_encoder.cpp, so consumers
   # of trossen_sdk do not need libavcodec headers on their include path.
   target_link_libraries(trossen_sdk PRIVATE PkgConfig::FFMPEG_ENC)
+
+  # Optional: NVIDIA Jetson's hardware H.264 encoder. JetPack exposes it only
+  # through its own GStreamer plugin (nvv4l2h264enc); libavcodec's h264_nvenc
+  # needs the desktop driver's libnvidia-encode, which Jetson does not ship. The
+  # headers are all that is needed to build; whether the plugin exists is probed
+  # at runtime, so a desktop build with GStreamer installed simply skips it.
+  pkg_check_modules(GST_ENC QUIET IMPORTED_TARGET
+    gstreamer-1.0 gstreamer-app-1.0 gstreamer-video-1.0)
+  if(GST_ENC_FOUND)
+    message(STATUS
+      "Jetson hardware video encode path enabled (GStreamer ${GST_ENC_gstreamer-1.0_VERSION})")
+    target_compile_definitions(trossen_sdk PRIVATE TROSSEN_HAVE_GST_VIDEO_ENCODE)
+    target_link_libraries(trossen_sdk PRIVATE PkgConfig::GST_ENC)
+  else()
+    message(STATUS "GStreamer not found: Jetson hardware video encode path disabled")
+  endif()
 else()
   # The backend holds std::unique_ptr<VideoEncoder> in every build, so the
   # destructor must still be defined without FFmpeg.
