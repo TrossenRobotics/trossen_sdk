@@ -55,7 +55,7 @@
       "follower_right": {
         "ip_address": "192.168.1.14",
         "model": "pro",
-        "end_effector": "pro_base",
+        "end_effector": "no_gripper",
         "write_moving_time_s": 0.3,
         "staging_time_s": 2.0,
         "smoothing_enabled": true,
@@ -118,6 +118,15 @@
             "max": 0.05
           }
         }
+      },
+      "vacuum_right": {
+        "type": "lcus_vacuum",
+        "device": "/dev/serial/by-id/SET_TO_THE_VACUUM_RELAY",
+        "vacuum_channel": 2,
+        "vent_channel": 1,
+        "toggle_button": { "arm_id": "glide_right", "bit": 3 },
+        "poll_rate_hz": 50.0,
+        "debounce_ms": 40
       },
       "session_control": {
         "type": "glide_session_control",
@@ -226,6 +235,12 @@
       "stream_id": "glide_right",
       "poll_rate_hz": 30.0,
       "use_device_time": false
+    },
+    {
+      "type": "lcus_vacuum",
+      "hardware_id": "vacuum_right",
+      "stream_id": "vacuum_right",
+      "poll_rate_hz": 30.0
     },
     {
       "type": "trossen_base",
