@@ -32,6 +32,9 @@ inline constexpr int TROSSEN_MCAP_VIDEO_NOMINAL_FPS = 30;
 // Frames each camera stream may hold waiting to be encoded; one second at 30 fps
 inline constexpr int TROSSEN_MCAP_DEFAULT_VIDEO_QUEUE_FRAMES = 30;
 
+// Rate of the slot grid video frames are placed on; 0 records frames as they arrive
+inline constexpr double TROSSEN_MCAP_DEFAULT_VIDEO_GRID_FPS = 0.0;
+
 struct TrossenMCAPBackendConfig : public BaseConfig {
   std::string root{trossen::io::backends::get_default_root_path().string()};
   std::string robot_name{trossen::io::backends::DEFAULT_ROBOT_NAME};
@@ -57,6 +60,13 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
   /// Frames each camera stream may hold waiting to be encoded. When encoding falls behind, newer
   /// frames are dropped and counted rather than held in memory; a 1920x1200 BGR frame is 6.9 MB.
   int video_queue_frames{TROSSEN_MCAP_DEFAULT_VIDEO_QUEUE_FRAMES};
+
+  /// Place each video stream's frames on a fixed grid at this rate, shared by every camera in
+  /// the episode. A slot the camera missed repeats the previous frame (marked `repeat` in its
+  /// FrameMeta), and a second frame landing in a slot already written is dropped, so frame k of
+  /// every stream belongs to slot k and a stream-copied video stays in step with rows at this
+  /// rate. 0 records frames as they arrive, which drifts from the rows whenever a camera skips.
+  double video_grid_fps{TROSSEN_MCAP_DEFAULT_VIDEO_GRID_FPS};
 
   /// True when camera frames should be stored as compressed video.
   bool records_video() const { return image_encoding == TROSSEN_MCAP_IMAGE_ENCODING_VIDEO; }
@@ -89,6 +99,7 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
       j.at("video_keyframe_interval").get_to(c.video_keyframe_interval);
     if (j.contains("video_encoder")) j.at("video_encoder").get_to(c.video_encoder);
     if (j.contains("video_queue_frames")) j.at("video_queue_frames").get_to(c.video_queue_frames);
+    if (j.contains("video_grid_fps")) j.at("video_grid_fps").get_to(c.video_grid_fps);
 
     return c;
   }

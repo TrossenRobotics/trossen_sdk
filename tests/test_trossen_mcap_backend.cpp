@@ -14,7 +14,10 @@
 #include <thread>
 
 #include "gtest/gtest.h"
+#include "mcap/reader.hpp"
 #include "opencv2/core.hpp"
+
+#include "FrameMeta.pb.h"
 
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/data/record.hpp"
@@ -360,6 +363,89 @@ TEST_F(TrossenMCAPBackendTest, DropsVideoFramesWhenEncodeQueueIsFull) {
   EXPECT_GT(stats.video_frames_dropped, 0u);
   EXPECT_GE(stats.images_written, 2u) << "queued frames are still encoded on close";
   EXPECT_EQ(stats.images_written + stats.video_frames_dropped, kFrames);
+}
+
+// With video_grid_fps set, frame k of a stream is slot k of a fixed grid: a slot the camera
+// skipped repeats the previous frame, and a second frame in a slot already written is
+// dropped. Feeds slots 0, 1, 4, 4 (late duplicate), 5 and expects 0, 1, 2r, 3r, 4, 5.
+TEST_F(TrossenMCAPBackendTest, VideoGridRepeatsSkippedSlotsAndDropsDoubles) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+  const double saved_grid_fps = cfg->video_grid_fps;
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "video_grid_test";
+  cfg->image_encoding = "video";
+  cfg->video_encoder = "x264";
+  cfg->video_grid_fps = 30.0;
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  auto mcap_backend =
+    std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
+  ASSERT_NE(mcap_backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  trossen::data::ImageRecord img;
+  img.id = "cam_color";
+  img.width = 64;
+  img.height = 48;
+  img.channels = 3;
+  img.encoding = "bgr8";
+
+  constexpr double kPeriodNs = 1e9 / 30.0;
+  const uint64_t origin_ns = trossen::data::now_real().to_ns();
+  const uint64_t mono_ns = trossen::data::now_mono().to_ns();
+  // Capture offsets in periods, with jitter that still rounds to the intended slot.
+  const std::vector<double> periods{0.0, 1.1, 3.9, 4.2, 5.05};
+  for (size_t i = 0; i < periods.size(); ++i) {
+    const auto offset = static_cast<uint64_t>(periods[i] * kPeriodNs);
+    img.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(10.0 * i, 60, 90));
+    img.seq = i;
+    img.ts.realtime = trossen::data::Timespec::from_ns(origin_ns + offset);
+    img.ts.monotonic = trossen::data::Timespec::from_ns(mono_ns + offset);
+    backend->write(img);
+  }
+  backend->close();
+  cfg->video_grid_fps = saved_grid_fps;
+
+  EXPECT_EQ(mcap_backend->stats().images_written, 6u) << "slots 0..5, two of them repeats";
+
+  std::filesystem::path mcap_path;
+  for (const auto& entry : std::filesystem::directory_iterator(episode_dir)) {
+    if (entry.path().extension() == ".mcap") mcap_path = entry.path();
+  }
+  ASSERT_FALSE(mcap_path.empty());
+  mcap::McapReader reader;
+  ASSERT_TRUE(reader.open(mcap_path.string()).ok());
+  std::vector<uint64_t> image_times;
+  std::vector<bool> repeats;
+  for (const auto& view : reader.readMessages()) {
+    if (view.channel->topic == "/cameras/cam_color/image") {
+      image_times.push_back(view.message.logTime);
+    } else if (view.channel->topic == "/cameras/cam_color/meta") {
+      trossen_sdk::msg::FrameMeta meta;
+      ASSERT_TRUE(meta.ParseFromArray(view.message.data,
+                                      static_cast<int>(view.message.dataSize)));
+      EXPECT_EQ(meta.frame_index(), repeats.size());
+      repeats.push_back(meta.repeat());
+    }
+  }
+  reader.close();
+
+  EXPECT_EQ(repeats, (std::vector<bool>{false, false, true, true, false, false}));
+  ASSERT_EQ(image_times.size(), 6u);
+  for (size_t k = 0; k < image_times.size(); ++k) {
+    const double expected = static_cast<double>(origin_ns) + static_cast<double>(k) * kPeriodNs;
+    EXPECT_NEAR(static_cast<double>(image_times[k]), expected, 1.0)
+      << "frame " << k << " should be logged at slot " << k << "'s time";
+  }
 }
 
 // Every camera frame gets a companion message on <camera>/meta carrying the device

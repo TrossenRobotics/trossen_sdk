@@ -30,4 +30,10 @@ message FrameMeta {
   // increments once per captured frame, so a jump of more than one between consecutive
   // messages means frames were lost on the camera side, whatever the host clocks show.
   optional uint64 device_frame_number = 5;
+
+  // True when this frame repeats the previous one to fill a slot the camera missed, which
+  // happens only when the backend places video on a grid (video_grid_fps). A repeated
+  // frame carries the slot's time in ts, no device clock and no device_frame_number, and
+  // the seq of the frame it repeats.
+  bool repeat = 6;
 }

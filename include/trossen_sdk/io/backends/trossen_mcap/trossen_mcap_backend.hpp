@@ -254,9 +254,12 @@ private:
    * @param ts Timestamps for the frame
    * @param seq Producer sequence number of the frame
    * @param device_frame_number The camera's own frame counter, when it reports one
+   * @param log_time_ns MCAP log time, the same one the frame was logged at
+   * @param repeat True when the frame repeats the previous one to fill a grid slot
    */
   void write_camera_meta_record(const std::string& stream_id, const data::Timestamp& ts,
-                                uint64_t seq, std::optional<uint64_t> device_frame_number);
+                                uint64_t seq, std::optional<uint64_t> device_frame_number,
+                                uint64_t log_time_ns, bool repeat = false);
 
   /**
    * @brief Write an image record
@@ -271,6 +274,9 @@ private:
     data::ImageRecord img;
     bool depth{false};
     foxglove::RawChannel* channel{nullptr};
+    /// Grid slot the frame was captured in, counted from the episode's grid origin; may be
+    /// negative for a frame captured before it. Unset when the backend has no grid.
+    std::optional<int64_t> slot;
   };
 
   /**
@@ -293,6 +299,15 @@ private:
     uint64_t dropped{0};           ///< Frames dropped on a full queue; guarded by writer_mutex_.
     std::vector<uint16_t> depth_quant_lut;  ///< Built on the first depth frame.
     std::thread thread;
+
+    // Grid placement. Fixed at creation, then touched only by this stream's thread; the
+    // counters are read after the thread is joined.
+    uint64_t grid_origin_ns{0};        ///< Realtime of slot 0, shared by every stream.
+    double grid_period_ns{0.0};        ///< Slot length; 0 when the backend has no grid.
+    std::optional<int64_t> next_slot;  ///< First slot not yet written.
+    std::optional<data::ImageRecord> last_frame;  ///< Last frame written; repeated into gaps.
+    uint64_t repeated{0};    ///< Slots filled by repeating the previous frame.
+    uint64_t superseded{0};  ///< Frames dropped because their slot was already written.
   };
 
   /**
@@ -332,11 +347,29 @@ private:
    * @param packet Encoded frame
    * @param codec Codec the packet was encoded with
    * @param channel Channel to log the message to
+   * @param time_ns Message timestamp and MCAP log time: the capture time, or the slot time
+   *        when the stream is on a grid
    * @return true if the frame was logged; false if it was dropped
    */
   bool log_video_frame(const data::ImageRecord& img, bool depth,
                        const utils::VideoEncoder::EncodedFrame& packet, utils::VideoCodec codec,
-                       foxglove::RawChannel* channel);
+                       foxglove::RawChannel* channel, uint64_t time_ns);
+
+  /**
+   * @brief Encode one frame and log it with its metadata. Runs on the stream's thread.
+   *
+   * @param stream The stream the frame belongs to
+   * @param job The frame, its depth flag and channel
+   * @param time_ns Log time for the packet and its metadata
+   * @param repeat True when the frame repeats the previous one into a missed grid slot
+   */
+  void encode_and_log(VideoStream& stream, const VideoJob& job, uint64_t time_ns, bool repeat);
+
+  /**
+   * @brief Time a frame was captured, on the realtime clock: the exposure time when the
+   *        camera's clock is mapped onto realtime, else the host delivery time.
+   */
+  static uint64_t capture_time_ns(const data::Timestamp& ts);
 
   /**
    * @brief Stop and join every stream's encoder thread.
@@ -435,6 +468,10 @@ private:
 
   /// @brief Streams whose encoder could not be created; their frames are dropped
   std::unordered_map<std::string, bool> video_encode_failed_;
+
+  /// @brief Capture time of the episode's first video frame from any camera, which is slot 0
+  /// of the shared grid. Guarded by writer_mutex_; cleared when the episode closes.
+  std::optional<uint64_t> grid_origin_ns_;
 
   /// @brief Helper to identify depth topics
   static bool is_depth_topic(const std::string& topic);

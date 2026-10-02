@@ -79,6 +79,11 @@ void TrossenMCAPBackend::stop_video_streams(bool drain) {
       std::cerr << "Video: dropped " << stream->dropped << " frames for " << id
                 << " this episode; the encoder could not keep up\n";
     }
+    if (stream->grid_period_ns > 0.0) {
+      std::cout << "Video grid " << id << ": " << stream->repeated
+                << " slot(s) filled by repeating the previous frame, " << stream->superseded
+                << " frame(s) dropped as second in their slot\n";
+    }
   }
 }
 
@@ -254,6 +259,7 @@ void TrossenMCAPBackend::close_resources() {
   // close() and discard_episode() have already stopped and joined their threads.
   video_streams_.clear();
   video_encode_failed_.clear();
+  grid_origin_ns_.reset();
   opened_ = false;
 }
 
@@ -488,7 +494,7 @@ foxglove::RawChannel* TrossenMCAPBackend::ensure_camera_meta_channel(
 
 void TrossenMCAPBackend::write_camera_meta_record(
   const std::string& stream_id, const data::Timestamp& ts, uint64_t seq,
-  std::optional<uint64_t> device_frame_number) {
+  std::optional<uint64_t> device_frame_number, uint64_t log_time_ns, bool repeat) {
   auto* channel = ensure_camera_meta_channel(stream_id);
   if (!channel) {
     return;
@@ -500,14 +506,15 @@ void TrossenMCAPBackend::write_camera_meta_record(
   out.set_stream_id(stream_id);
   out.set_frame_index(camera_meta_frame_index_[stream_id]++);
   if (device_frame_number) out.set_device_frame_number(*device_frame_number);
+  out.set_repeat(repeat);
 
   std::string payload;
   out.SerializeToString(&payload);
 
-  // Logged at the same host time as the image itself, so the two topics interleave in
-  // log order and a reader scanning by time sees them together.
+  // Logged at the same time as the image itself, so the two topics interleave in log
+  // order and a reader scanning by time sees them together.
   auto st = channel->log(reinterpret_cast<const std::byte*>(payload.data()), payload.size(),
-                         ts.realtime.to_ns());
+                         log_time_ns);
   if (st != foxglove::FoxgloveError::Ok) {
     std::cerr << "Failed to write frame meta for " << stream_id << ": "
               << foxglove::strerror(st) << "\n";
@@ -661,6 +668,19 @@ bool TrossenMCAPBackend::write_raw_image_message(const cv::Mat& image, const std
 void TrossenMCAPBackend::submit_video_frame(const data::ImageRecord& img, bool depth,
                                             foxglove::RawChannel* channel) {
 #ifdef TROSSEN_ENABLE_VIDEO_ENCODE
+  // Every camera shares one grid, anchored on the first video frame of the episode, so slot
+  // k is the same instant on every stream. Slots come from capture time, not arrival order:
+  // a frame delivered late still lands in the slot it was taken in.
+  const double grid_period_ns = cfg_->video_grid_fps > 0.0 ? 1e9 / cfg_->video_grid_fps : 0.0;
+  std::optional<int64_t> slot;
+  if (grid_period_ns > 0.0) {
+    const uint64_t captured = capture_time_ns(img.ts);
+    if (!grid_origin_ns_) grid_origin_ns_ = captured;
+    const double offset_ns =
+      static_cast<double>(static_cast<int64_t>(captured - *grid_origin_ns_));
+    slot = std::llround(offset_ns / grid_period_ns);
+  }
+
   auto it = video_streams_.find(img.id);
   if (it == video_streams_.end()) {
     if (video_encode_failed_[img.id]) return;
@@ -695,6 +715,8 @@ void TrossenMCAPBackend::submit_video_frame(const data::ImageRecord& img, bool d
     }
     auto stream = std::make_unique<VideoStream>();
     stream->encoder = std::move(encoder);
+    stream->grid_origin_ns = grid_origin_ns_.value_or(0);
+    stream->grid_period_ns = grid_period_ns;
     VideoStream* raw = stream.get();
     stream->thread = std::thread([this, raw]() { video_stream_loop(*raw); });
     it = video_streams_.emplace(img.id, std::move(stream)).first;
@@ -714,7 +736,9 @@ void TrossenMCAPBackend::submit_video_frame(const data::ImageRecord& img, bool d
       ++stats_.video_frames_dropped;
       return;
     }
-    stream.queue.push_back(VideoJob{img, depth, channel});
+    // A frame dropped here leaves a gap in its slot, which the stream thread fills by
+    // repeating the previous frame, so the grid survives the encoder falling behind.
+    stream.queue.push_back(VideoJob{img, depth, channel, slot});
   }
   stream.cv.notify_one();
 #else
@@ -735,17 +759,74 @@ void TrossenMCAPBackend::video_stream_loop(VideoStream& stream) {
       stream.queue.pop_front();
     }
 
-    const utils::VideoEncoder::EncodedFrame packet = encode_video_frame(stream, job.img, job.depth);
-    if (packet.data.empty()) continue;
-
-    std::scoped_lock lk(writer_mutex_);
-    if (!opened_) continue;
-    // Meta is written only for a frame that reached the file, so the nth meta message on a
-    // stream always describes the nth recorded frame.
-    if (log_video_frame(job.img, job.depth, packet, stream.encoder->codec(), job.channel)) {
-      write_camera_meta_record(job.img.id, job.img.ts, job.img.seq, job.img.device_frame_number);
+    if (!job.slot) {
+      encode_and_log(stream, job, job.img.ts.realtime.to_ns(), /*repeat=*/false);
+      continue;
     }
+
+    // On a grid, frame k of the stream is slot k. A frame whose slot is already written is
+    // the second in that slot, or late and out of order; it is dropped, keeping the first.
+    const int64_t slot = *job.slot;
+    if (stream.next_slot && slot < *stream.next_slot) {
+      ++stream.superseded;
+      continue;
+    }
+    auto slot_time_ns = [&stream](int64_t s) {
+      return static_cast<uint64_t>(static_cast<int64_t>(stream.grid_origin_ns) +
+                                   std::llround(static_cast<double>(s) * stream.grid_period_ns));
+    };
+    // Slots the camera skipped get the previous frame again. It encodes to a near-empty
+    // packet, and keeps every later frame in its own slot. A stream's first frame starts it
+    // wherever it lands, so a camera that started late is not padded back to slot 0.
+    if (stream.next_slot && stream.last_frame) {
+      VideoJob fill{*stream.last_frame, job.depth, job.channel, std::nullopt};
+      for (int64_t s = *stream.next_slot; s < slot; ++s) {
+        encode_and_log(stream, fill, slot_time_ns(s), /*repeat=*/true);
+        ++stream.repeated;
+      }
+    }
+    encode_and_log(stream, job, slot_time_ns(slot), /*repeat=*/false);
+    stream.next_slot = slot + 1;
+    stream.last_frame = job.img;
   }
+}
+
+void TrossenMCAPBackend::encode_and_log(VideoStream& stream, const VideoJob& job,
+                                        uint64_t time_ns, bool repeat) {
+  const utils::VideoEncoder::EncodedFrame packet = encode_video_frame(stream, job.img, job.depth);
+  if (packet.data.empty()) return;
+
+  // A repeat is not a new capture: its metadata carries the slot's time on both host clocks,
+  // shifted together from the frame it repeats, and no device clock or device frame number,
+  // so nothing downstream mistakes it for a frame the camera took.
+  data::Timestamp ts = job.img.ts;
+  std::optional<uint64_t> device_frame_number = job.img.device_frame_number;
+  if (repeat) {
+    const int64_t shift_ns =
+      static_cast<int64_t>(time_ns) - static_cast<int64_t>(job.img.ts.realtime.to_ns());
+    ts.realtime = data::Timespec::from_ns(time_ns);
+    ts.monotonic = data::Timespec::from_ns(
+      static_cast<uint64_t>(static_cast<int64_t>(job.img.ts.monotonic.to_ns()) + shift_ns));
+    ts.device = {};
+    ts.device_clock = data::DeviceClock::None;
+    device_frame_number.reset();
+  }
+
+  std::scoped_lock lk(writer_mutex_);
+  if (!opened_) return;
+  // Meta is written only for a frame that reached the file, so the nth meta message on a
+  // stream always describes the nth recorded frame.
+  if (log_video_frame(job.img, job.depth, packet, stream.encoder->codec(), job.channel,
+                      time_ns)) {
+    write_camera_meta_record(job.img.id, ts, job.img.seq, device_frame_number, time_ns, repeat);
+  }
+}
+
+uint64_t TrossenMCAPBackend::capture_time_ns(const data::Timestamp& ts) {
+  // A host-mapped device time is already on the realtime clock and marks the exposure
+  // itself; the delivery time is later by however long the frame spent in transit.
+  if (ts.device_clock == data::DeviceClock::HostMapped) return ts.device.to_ns();
+  return ts.realtime.to_ns();
 }
 
 utils::VideoEncoder::EncodedFrame TrossenMCAPBackend::encode_video_frame(
@@ -810,11 +891,12 @@ utils::VideoEncoder::EncodedFrame TrossenMCAPBackend::encode_video_frame(
 
 bool TrossenMCAPBackend::log_video_frame(const data::ImageRecord& img, bool depth,
                                          const utils::VideoEncoder::EncodedFrame& packet,
-                                         utils::VideoCodec codec, foxglove::RawChannel* channel) {
+                                         utils::VideoCodec codec, foxglove::RawChannel* channel,
+                                         uint64_t time_ns) {
+  const data::Timespec stamp = data::Timespec::from_ns(time_ns);
   foxglove::schemas::CompressedVideo vmsg;
-  vmsg.timestamp =
-      foxglove::schemas::Timestamp{.sec = static_cast<uint32_t>(img.ts.realtime.sec),
-                                   .nsec = static_cast<uint32_t>(img.ts.realtime.nsec)};
+  vmsg.timestamp = foxglove::schemas::Timestamp{.sec = static_cast<uint32_t>(stamp.sec),
+                                                .nsec = static_cast<uint32_t>(stamp.nsec)};
   vmsg.frame_id = img.id;
   vmsg.format = utils::video_codec_format(codec);
   vmsg.data.assign(packet.data.begin(), packet.data.end());
@@ -831,8 +913,7 @@ bool TrossenMCAPBackend::log_video_frame(const data::ImageRecord& img, bool dept
     return false;
   }
 
-  auto st = channel->log(reinterpret_cast<const std::byte*>(payload.data()), encoded_len,
-                         img.ts.realtime.to_ns());
+  auto st = channel->log(reinterpret_cast<const std::byte*>(payload.data()), encoded_len, time_ns);
   if (st != foxglove::FoxgloveError::Ok) {
     std::cerr << "Failed to write video frame: " << foxglove::strerror(st) << "\n";
     return false;
@@ -856,7 +937,8 @@ void TrossenMCAPBackend::write_image_frame(const data::ImageRecord& img, bool de
   if (write_raw_image_message(img.image, img.id, img.width, img.height, img.encoding,
                               img.ts.realtime, channel,
                               depth ? &stats_.depth_images_written : &stats_.images_written)) {
-    write_camera_meta_record(img.id, img.ts, img.seq, img.device_frame_number);
+    write_camera_meta_record(img.id, img.ts, img.seq, img.device_frame_number,
+                             img.ts.realtime.to_ns());
   }
 }
 
