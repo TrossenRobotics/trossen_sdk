@@ -274,9 +274,10 @@ private:
     data::ImageRecord img;
     bool depth{false};
     foxglove::RawChannel* channel{nullptr};
-    /// Grid slot the frame was captured in, counted from the episode's grid origin; may be
-    /// negative for a frame captured before it. Unset when the backend has no grid.
-    std::optional<int64_t> slot;
+    /// Capture time in grid slots from the episode's grid origin, unrounded: 3.4 is 40% of a
+    /// period after slot 3, and a frame captured before the origin is negative. The stream
+    /// thread decides which slot the frame takes. Unset when the backend has no grid.
+    std::optional<double> slot_position;
   };
 
   /**

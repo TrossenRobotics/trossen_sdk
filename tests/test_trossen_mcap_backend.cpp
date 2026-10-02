@@ -4,6 +4,8 @@
  */
 
 #include <chrono>
+#include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -441,11 +443,78 @@ TEST_F(TrossenMCAPBackendTest, VideoGridRepeatsSkippedSlotsAndDropsDoubles) {
 
   EXPECT_EQ(repeats, (std::vector<bool>{false, false, true, true, false, false}));
   ASSERT_EQ(image_times.size(), 6u);
+  // In integer nanoseconds: a double near 1.8e18 only resolves 256 ns.
   for (size_t k = 0; k < image_times.size(); ++k) {
-    const double expected = static_cast<double>(origin_ns) + static_cast<double>(k) * kPeriodNs;
-    EXPECT_NEAR(static_cast<double>(image_times[k]), expected, 1.0)
+    const int64_t expected =
+      static_cast<int64_t>(origin_ns) + std::llround(static_cast<double>(k) * kPeriodNs);
+    EXPECT_LE(std::llabs(static_cast<int64_t>(image_times[k]) - expected), 1)
       << "frame " << k << " should be logged at slot " << k << "'s time";
   }
+}
+
+// A camera whose frames land near the boundary between slots, with jitter either side of it,
+// must still fill one slot per frame. Rounding each frame alone sends the early ones back into
+// a written slot and leaves the next empty, a drop and a repeat for every flip; on a Rivet
+// that replaced about 5% of one camera's frames over 10 minutes.
+TEST_F(TrossenMCAPBackendTest, VideoGridAbsorbsJitterAtSlotBoundaries) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+  const double saved_grid_fps = cfg->video_grid_fps;
+  const int saved_queue_frames = cfg->video_queue_frames;
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "video_grid_jitter_test";
+  cfg->image_encoding = "video";
+  cfg->video_encoder = "x264";
+  cfg->video_grid_fps = 30.0;
+  // Frames are written far faster than real time; room for all of them keeps the encode
+  // queue from dropping any, so every count below is the grid's doing.
+  cfg->video_queue_frames = 100;
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  auto mcap_backend =
+    std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
+  ASSERT_NE(mcap_backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  trossen::data::ImageRecord img;
+  img.id = "cam_color";
+  img.width = 64;
+  img.height = 48;
+  img.channels = 3;
+  img.encoding = "bgr8";
+  img.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+
+  // Another camera anchors the grid at slot 0; this one runs half a period out of phase, at
+  // k + 0.5 plus or minus 0.1 of a period, alternating.
+  constexpr double kPeriodNs = 1e9 / 30.0;
+  const uint64_t origin_ns = trossen::data::now_real().to_ns();
+  trossen::data::ImageRecord anchor = img;
+  anchor.id = "cam_anchor";
+  anchor.ts.realtime = trossen::data::Timespec::from_ns(origin_ns);
+  backend->write(anchor);
+  constexpr int kFrames = 40;
+  for (int k = 0; k < kFrames; ++k) {
+    const double position = k + 0.5 + (k % 2 == 0 ? -0.1 : 0.1);
+    img.seq = static_cast<uint64_t>(k);
+    img.ts.realtime =
+      trossen::data::Timespec::from_ns(origin_ns + static_cast<uint64_t>(position * kPeriodNs));
+    backend->write(img);
+  }
+  backend->close();
+  cfg->video_grid_fps = saved_grid_fps;
+  cfg->video_queue_frames = saved_queue_frames;
+
+  // Every frame got a slot of its own: nothing repeated, nothing dropped.
+  EXPECT_EQ(mcap_backend->stats().video_frames_dropped, 0u);
+  EXPECT_EQ(mcap_backend->stats().images_written, static_cast<uint64_t>(kFrames + 1));
 }
 
 // Every camera frame gets a companion message on <camera>/meta carrying the device

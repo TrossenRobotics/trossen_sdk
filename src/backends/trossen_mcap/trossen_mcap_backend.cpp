@@ -672,13 +672,13 @@ void TrossenMCAPBackend::submit_video_frame(const data::ImageRecord& img, bool d
   // k is the same instant on every stream. Slots come from capture time, not arrival order:
   // a frame delivered late still lands in the slot it was taken in.
   const double grid_period_ns = cfg_->video_grid_fps > 0.0 ? 1e9 / cfg_->video_grid_fps : 0.0;
-  std::optional<int64_t> slot;
+  std::optional<double> slot_position;
   if (grid_period_ns > 0.0) {
     const uint64_t captured = capture_time_ns(img.ts);
     if (!grid_origin_ns_) grid_origin_ns_ = captured;
     const double offset_ns =
       static_cast<double>(static_cast<int64_t>(captured - *grid_origin_ns_));
-    slot = std::llround(offset_ns / grid_period_ns);
+    slot_position = offset_ns / grid_period_ns;
   }
 
   auto it = video_streams_.find(img.id);
@@ -738,7 +738,7 @@ void TrossenMCAPBackend::submit_video_frame(const data::ImageRecord& img, bool d
     }
     // A frame dropped here leaves a gap in its slot, which the stream thread fills by
     // repeating the previous frame, so the grid survives the encoder falling behind.
-    stream.queue.push_back(VideoJob{img, depth, channel, slot});
+    stream.queue.push_back(VideoJob{img, depth, channel, slot_position});
   }
   stream.cv.notify_one();
 #else
@@ -759,17 +759,27 @@ void TrossenMCAPBackend::video_stream_loop(VideoStream& stream) {
       stream.queue.pop_front();
     }
 
-    if (!job.slot) {
+    if (!job.slot_position) {
       encode_and_log(stream, job, job.img.ts.realtime.to_ns(), /*repeat=*/false);
       continue;
     }
 
-    // On a grid, frame k of the stream is slot k. A frame whose slot is already written is
-    // the second in that slot, or late and out of order; it is dropped, keeping the first.
-    const int64_t slot = *job.slot;
-    if (stream.next_slot && slot < *stream.next_slot) {
-      ++stream.superseded;
-      continue;
+    // On a grid, frame k of the stream is slot k. Rounding each frame to its nearest slot is
+    // not enough: a camera running slightly off the grid rate drifts through every phase, and
+    // near a slot boundary a millisecond of jitter sends one frame back into a written slot
+    // and leaves the next one empty. So a frame within kSlotTolerance of the next slot takes
+    // it, early or late. Only a frame later than that skips slots, which are then repeated,
+    // and only one earlier than that is dropped as a second frame for a written slot.
+    constexpr double kSlotTolerance = 0.75;
+    const double position = *job.slot_position;
+    int64_t slot = std::llround(position);
+    if (stream.next_slot) {
+      const double lead = position - static_cast<double>(*stream.next_slot);
+      if (lead < -kSlotTolerance) {
+        ++stream.superseded;
+        continue;
+      }
+      if (lead < kSlotTolerance) slot = *stream.next_slot;
     }
     auto slot_time_ns = [&stream](int64_t s) {
       return static_cast<uint64_t>(static_cast<int64_t>(stream.grid_origin_ns) +
