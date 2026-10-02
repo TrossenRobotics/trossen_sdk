@@ -61,10 +61,16 @@ trossen_arm::Model resolve_model(const std::string& name) {
 /// prepare_for_teleop(), so it is behaviour rather than a label: only the
 /// `_leader` variants are hand-guided. A `_base` or `_follower` gripper is
 /// commanded.
+///
+/// `has_gripper` is false only for `no_gripper`, which tells the controller
+/// that nothing is mounted at the flange. The driver still reports 7 joints
+/// then, but the gripper channel takes no commands and reads back nothing
+/// useful, so every command path switches to the arm-only calls.
 struct EndEffectorEntry {
   const char*                     name;
   const trossen_arm::EndEffector* end_effector;
   bool                            is_leader;
+  bool                            has_gripper;
 };
 
 // Short alias purely to keep the table inside the 100-column limit; the
@@ -72,17 +78,17 @@ struct EndEffectorEntry {
 using SEE = trossen_arm::StandardEndEffector;
 
 const std::array<EndEffectorEntry, 11> kEndEffectors{{
-  {"wxai_v0_base",     &SEE::wxai_v0_base,     false},
-  {"wxai_v0_leader",   &SEE::wxai_v0_leader,   true},
-  {"wxai_v0_follower", &SEE::wxai_v0_follower, false},
-  {"vxai_v0_base",     &SEE::vxai_v0_base,     false},
-  {"no_gripper",       &SEE::no_gripper,       false},
-  {"core_base",     &SEE::core_base,     false},
-  {"core_leader",   &SEE::core_leader,   true},
-  {"core_follower", &SEE::core_follower, false},
-  {"pro_base",      &SEE::pro_base,      false},
-  {"pro_leader",    &SEE::pro_leader,    true},
-  {"pro_follower",  &SEE::pro_follower,  false},
+  {"wxai_v0_base",     &SEE::wxai_v0_base,     false, true},
+  {"wxai_v0_leader",   &SEE::wxai_v0_leader,   true, true},
+  {"wxai_v0_follower", &SEE::wxai_v0_follower, false, true},
+  {"vxai_v0_base",     &SEE::vxai_v0_base,     false, true},
+  {"no_gripper",       &SEE::no_gripper,       false, false},
+  {"core_base",     &SEE::core_base,     false, true},
+  {"core_leader",   &SEE::core_leader,   true, true},
+  {"core_follower", &SEE::core_follower, false, true},
+  {"pro_base",      &SEE::pro_base,      false, true},
+  {"pro_leader",    &SEE::pro_leader,    true, true},
+  {"pro_follower",  &SEE::pro_follower,  false, true},
 }};
 
 const EndEffectorEntry& resolve_end_effector(const std::string& name) {
@@ -121,6 +127,7 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
   const auto& ee_entry = resolve_end_effector(end_effector_str_);
   const trossen_arm::EndEffector end_effector = *ee_entry.end_effector;
   is_leader_ = ee_entry.is_leader;
+  has_gripper_ = ee_entry.has_gripper;
 
   // Create and configure driver
   driver_ = std::make_shared<trossen_arm::TrossenArmDriver>();
@@ -177,6 +184,11 @@ void TrossenArmComponent::configure(const nlohmann::json& config) {
   // leader sets up. An actuated arm keeps its gripper in position mode (follower)
   // or external-effort mode (leader), and the driver rejects every effort command
   // in either, which would stop the teleop mirror on its first tick.
+  if (gripper_force_feedback_ && !has_gripper_) {
+    throw std::runtime_error(
+      "TrossenArmComponent: 'gripper_force_feedback' needs a gripper, and this arm is "
+      "configured as 'no_gripper'");
+  }
   if (gripper_force_feedback_ && actuated_) {
     throw std::runtime_error(
       "TrossenArmComponent: 'gripper_force_feedback' needs a passive leader "
@@ -375,7 +387,28 @@ void TrossenArmComponent::write_joint(const std::vector<float>& cmd) {
   if (smoothing_enabled_) {
     cmd_filt_.filter(pos_d, now_seconds());
   }
-  driver_->set_all_positions(pos_d, write_moving_time_s_, false);
+  command_positions(pos_d, write_moving_time_s_, false);
+}
+
+void TrossenArmComponent::set_modes(trossen_arm::Mode mode) {
+  if (has_gripper_) {
+    driver_->set_all_modes(mode);
+  } else {
+    driver_->set_arm_modes(mode);
+  }
+}
+
+void TrossenArmComponent::command_positions(
+  const std::vector<double>& positions, double goal_time, bool blocking) {
+  if (has_gripper_) {
+    driver_->set_all_positions(positions, goal_time, blocking);
+    return;
+  }
+  // The gripper is the last joint. A command still carries it when the leader
+  // has a gripper (a Glide handle driving a gripperless follower), so it is
+  // dropped here rather than rejected.
+  driver_->set_arm_positions(
+    std::vector<double>(positions.begin(), positions.end() - 1), goal_time, blocking);
 }
 
 void TrossenArmComponent::clamp_command(std::vector<double>& pos) const {
@@ -390,7 +423,7 @@ void TrossenArmComponent::clamp_command(std::vector<double>& pos) const {
 }
 
 std::optional<float> TrossenArmComponent::read_gripper_effort() {
-  if (!driver_) return std::nullopt;
+  if (!driver_ || !has_gripper_) return std::nullopt;
   return static_cast<float>(driver_->get_gripper_effort());
 }
 
@@ -436,7 +469,7 @@ void TrossenArmComponent::write_cartesian(const std::vector<float>& cmd) {
   driver_->set_cartesian_positions(
     goal, trossen_arm::InterpolationSpace::cartesian, 0.0, false);
   // Optional 7th element drives the gripper opening directly.
-  if (cmd.size() >= 7) {
+  if (cmd.size() >= 7 && has_gripper_) {
     driver_->set_gripper_position(static_cast<double>(cmd[6]), 0.0, false);
   }
 }
@@ -467,6 +500,7 @@ void TrossenArmComponent::prepare_for_teleop() {
     // squeezes the gripper shut. With feedback on, that neutral value is the
     // curve's resting offset, so the gripper holds open from before the first
     // tick instead of going slack and then stiffening.
+    if (!has_gripper_) return;
     driver_->set_gripper_mode(trossen_arm::Mode::effort);
     driver_->set_gripper_effort(
       gripper_force_feedback_ ? gripper_feedback_offset_ : 0.0, 0.0, false);
@@ -474,7 +508,8 @@ void TrossenArmComponent::prepare_for_teleop() {
     return;
   }
   if (is_leader_) {
-    // Leader: enable gravity compensation.
+    // Leader: enable gravity compensation. Only a `_leader` end effector gets
+    // here, and every one of those has a gripper.
     driver_->set_all_modes(trossen_arm::Mode::external_effort);
     std::vector<double> zeros(driver_->get_num_joints(), 0.0);
     driver_->set_all_external_efforts(zeros, 0.0, false);
@@ -482,7 +517,7 @@ void TrossenArmComponent::prepare_for_teleop() {
   }
   // Follower: enter position mode. The mirror loop drives the follower's
   // joints from here.
-  driver_->set_all_modes(trossen_arm::Mode::position);
+  set_modes(trossen_arm::Mode::position);
 }
 
 void TrossenArmComponent::end_teleop() {
@@ -517,14 +552,12 @@ void TrossenArmComponent::end_teleop() {
   // setpoint to where the arm actually is, so it holds. Then drive it to rest
   // over the configured trajectory time.
   const std::vector<float> current = read_joint();
-  driver_->set_all_modes(trossen_arm::Mode::position);
+  set_modes(trossen_arm::Mode::position);
   if (!current.empty()) {
-    driver_->set_all_positions(
-      std::vector<double>(current.begin(), current.end()), 0.0, true);
+    command_positions(std::vector<double>(current.begin(), current.end()), 0.0, true);
   }
-  driver_->set_all_positions(
-    std::vector<double>(driver_->get_num_joints(), 0.0),
-    staging_time_s_, true);
+  command_positions(
+    std::vector<double>(driver_->get_num_joints(), 0.0), staging_time_s_, true);
   driver_->cleanup();
   driver_.reset();
   std::cout << "  [end_teleop] " << get_identifier() << ": done" << std::endl;
@@ -548,11 +581,11 @@ void TrossenArmComponent::stage() {
   }
   std::cout << "  [stage] " << get_identifier() << ": moving to home over "
             << staging_time_s_ << "s" << std::endl;
-  driver_->set_all_modes(trossen_arm::Mode::position);
+  set_modes(trossen_arm::Mode::position);
   std::vector<double> pos_d(staged_position_.begin(), staged_position_.end());
   // Blocking so the arm reaches home before the caller hands it to teleop
   // (gravity-comp) or starts recording; this mirrors end_teleop()'s rest move.
-  driver_->set_all_positions(pos_d, staging_time_s_, true);
+  command_positions(pos_d, staging_time_s_, true);
 }
 
 REGISTER_HARDWARE(TrossenArmComponent, "trossen_arm")
