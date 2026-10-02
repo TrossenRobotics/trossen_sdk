@@ -27,10 +27,14 @@ namespace trossen::hw::vacuum {
  * @brief A vacuum gripper whose pump and vent are two channels of an LCUS-2
  *        USB relay board, switched on and off by one Glide handle button.
  *
- * One press turns suction on, the next turns it off. ON closes the vent before
- * starting the pump and OFF stops the pump before closing the vent, so the
- * pump never runs against an open vent. OFF does not pulse the vent to blow
- * the part off; the part drops as the cup loses vacuum.
+ * One press of the toggle button turns suction on, the next turns it off. ON
+ * closes the vent before starting the pump and OFF stops the pump before
+ * closing the vent, so the pump never runs against an open vent. OFF does not
+ * pulse the vent; the part drops as the cup loses vacuum.
+ *
+ * The release button is for letting go at once: it stops the pump, opens the
+ * vent for `release_pulse_ms` to push air back into the cup, then switches both
+ * relays off. Suction is off afterwards, so the next toggle press turns it on.
  *
  * The relay speaks a 4-byte frame at 9600 baud, `A0 <channel> <state> <sum>`,
  * with the sum `0xA0 + channel + state`. The device is opened for each switch
@@ -50,13 +54,16 @@ namespace trossen::hw::vacuum {
  *   "vacuum_channel": 2,
  *   "vent_channel": 1,
  *   "toggle_button": { "arm_id": "glide_right", "bit": 3 },
+ *   "release_button": { "arm_id": "glide_right", "bit": 1 },
+ *   "release_pulse_ms": 400,
  *   "poll_rate_hz": 50.0,
  *   "debounce_ms": 40
  * }
  * @endcode
  *
- * `vacuum_channel` and `vent_channel` default to 2 and 1, and `toggle_button`
- * is optional (without it nothing switches the relay but set_on()). Prefer the
+ * `vacuum_channel` and `vent_channel` default to 2 and 1, and
+ * `release_pulse_ms` to 400. Both buttons are optional; without either,
+ * nothing switches the relay but set_on() and release(). Prefer the
  * `/dev/serial/by-id/` path: `/dev/ttyUSB0` is whichever USB serial device
  * enumerated first, and the ZED cameras and other adapters can take it.
  *
@@ -100,6 +107,15 @@ public:
   /// Flip the suction: off, or unknown, goes on; on goes off.
   bool toggle();
 
+  /**
+   * @brief Drop a held part: pump off, vent open for `release_pulse_ms`, then
+   *        both relays off. Both are switched off even if the first write fails.
+   *
+   * @return true if every write reached the relay. On failure the state
+   *         becomes unknown and the error is printed.
+   */
+  bool release();
+
   /// Last state the relay accepted; nullopt before the first command and after
   /// a failed one.
   std::optional<bool> commanded_on() const;
@@ -117,11 +133,20 @@ private:
   int vacuum_channel_{2};
   int vent_channel_{1};
 
+  enum class Action { kToggle, kRelease };
+
+  /// One button binding, plus its debounce state. Touched only by the poller
+  /// once it has started.
   struct Button {
     std::string arm_id;
     int bit{-1};
+    Action action{Action::kToggle};
+    bool was_pressed{false};
+    bool pending{false};
+    std::chrono::steady_clock::time_point changed_at{};
   };
-  std::optional<Button> button_;
+  std::vector<Button> buttons_;
+  std::chrono::milliseconds release_pulse_{std::chrono::milliseconds(400)};
   double poll_rate_hz_{50.0};
   std::chrono::milliseconds debounce_{std::chrono::milliseconds(40)};
 

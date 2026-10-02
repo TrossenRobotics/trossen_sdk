@@ -170,6 +170,72 @@ TEST(LcusVacuumTest, ButtonTogglesOnEachPress) {
   GlideSession::instance().unregister_reader("test_handle");
 }
 
+// Release stops the pump before opening the vent, holds the vent for the pulse,
+// and leaves both relays off.
+TEST(LcusVacuumTest, ReleasePulsesTheVentThenSwitchesBothOff) {
+  FakeRelay relay;
+  LcusVacuumComponent vac("vac_release");
+  vac.configure({{"device", relay.path()}, {"release_pulse_ms", 200}});
+  ASSERT_TRUE(vac.set_on(true));
+  relay.drain();
+
+  const auto start = std::chrono::steady_clock::now();
+  ASSERT_TRUE(vac.release());
+  const auto elapsed = std::chrono::steady_clock::now() - start;
+
+  EXPECT_EQ(relay.drain(), frames({{2, false}, {1, true}, {2, false}, {1, false}}));
+  EXPECT_EQ(vac.commanded_on(), std::optional<bool>(false));
+  EXPECT_GE(elapsed, std::chrono::milliseconds(200));
+}
+
+TEST(LcusVacuumTest, RejectsOneButtonForBothActions) {
+  LcusVacuumComponent vac("vac_same_button");
+  EXPECT_THROW(
+    vac.configure({{"device", "/dev/null"},
+                   {"toggle_button", {{"arm_id", "test_handle"}, {"bit", 3}}},
+                   {"release_button", {{"arm_id", "test_handle"}, {"bit", 3}}}}),
+    std::invalid_argument);
+}
+
+TEST(LcusVacuumTest, ReleaseButtonDropsSuction) {
+  FakeRelay relay;
+  std::atomic<std::uint32_t> buttons{0};
+  GlideSession::instance().register_reader("test_handle_release", [&]() {
+    GlideInputSnapshot s;
+    s.buttons = buttons.load();
+    return std::optional<GlideInputSnapshot>(s);
+  });
+
+  {
+    LcusVacuumComponent vac("vac_release_button");
+    vac.configure({{"device", relay.path()},
+                   {"toggle_button", {{"arm_id", "test_handle_release"}, {"bit", 3}}},
+                   {"release_button", {{"arm_id", "test_handle_release"}, {"bit", 1}}},
+                   {"release_pulse_ms", 100},
+                   {"poll_rate_hz", 200.0},
+                   {"debounce_ms", 0}});
+
+    auto press = [&](int bit) {
+      buttons = 1u << bit;
+      std::this_thread::sleep_for(std::chrono::milliseconds(400));
+      buttons = 0;
+      std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    };
+
+    press(3);
+    EXPECT_EQ(vac.commanded_on(), std::optional<bool>(true));
+    press(1);
+    EXPECT_EQ(vac.commanded_on(), std::optional<bool>(false));
+    EXPECT_EQ(relay.drain(), frames({{1, false}, {2, true},
+                                     {2, false}, {1, true}, {2, false}, {1, false}}));
+    // Off after a release, so the toggle turns suction back on.
+    press(3);
+    EXPECT_EQ(vac.commanded_on(), std::optional<bool>(true));
+    relay.drain();
+  }
+  GlideSession::instance().unregister_reader("test_handle_release");
+}
+
 TEST(VacuumProducerTest, EmitsCommandedState) {
   FakeRelay relay;
   auto vac = std::make_shared<LcusVacuumComponent>("vac_prod");

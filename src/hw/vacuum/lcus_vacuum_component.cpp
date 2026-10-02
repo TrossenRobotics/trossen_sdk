@@ -88,20 +88,42 @@ void LcusVacuumComponent::configure(const nlohmann::json& config) {
   }
   debounce_ = std::chrono::milliseconds(debounce_ms);
 
-  if (config.contains("toggle_button")) {
-    const auto& b = config.at("toggle_button");
+  const int release_pulse_ms = config.value("release_pulse_ms", 400);
+  if (release_pulse_ms < 0) {
+    throw std::invalid_argument(
+      "LcusVacuumComponent: 'release_pulse_ms' must not be negative");
+  }
+  release_pulse_ = std::chrono::milliseconds(release_pulse_ms);
+
+  // Parse both bindings before claiming either, so a bad entry cannot leave
+  // this component holding a button it never bound.
+  std::vector<Button> parsed;
+  for (const auto& [key, action] : {std::pair{"toggle_button", Action::kToggle},
+                                    std::pair{"release_button", Action::kRelease}}) {
+    if (!config.contains(key)) continue;
+    const auto& b = config.at(key);
     if (!b.contains("arm_id") || !b.contains("bit")) {
       throw std::invalid_argument(
-        "LcusVacuumComponent: 'toggle_button' requires arm_id and bit");
+        std::string("LcusVacuumComponent: '") + key + "' requires arm_id and bit");
     }
-    Button button{b.at("arm_id").get<std::string>(), b.at("bit").get<int>()};
-    glide::GlideClaimLease lease;
-    lease.add(button.arm_id, get_identifier(), {glide::glide_button(button.bit)});
-    lease_ = std::move(lease);
-    button_ = std::move(button);
+    parsed.push_back({b.at("arm_id").get<std::string>(), b.at("bit").get<int>(), action});
+  }
+  // The claim table cannot catch this: repeated claims from one component are
+  // accepted, so one press would both toggle and release.
+  if (parsed.size() == 2 && parsed[0].arm_id == parsed[1].arm_id &&
+      parsed[0].bit == parsed[1].bit) {
+    throw std::invalid_argument(
+      "LcusVacuumComponent: 'toggle_button' and 'release_button' are the same button");
   }
 
-  if (button_ && !running_.exchange(true)) {
+  glide::GlideClaimLease lease;
+  for (const auto& button : parsed) {
+    lease.add(button.arm_id, get_identifier(), {glide::glide_button(button.bit)});
+  }
+  lease_ = std::move(lease);
+  buttons_ = std::move(parsed);
+
+  if (!buttons_.empty() && !running_.exchange(true)) {
     poll_thread_ = std::thread(&LcusVacuumComponent::poll_loop, this);
   }
 }
@@ -151,6 +173,34 @@ bool LcusVacuumComponent::set_on(bool on) {
   return true;
 }
 
+bool LcusVacuumComponent::release() {
+  std::lock_guard<std::mutex> lock(relay_mutex_);
+  try {
+    try {
+      // Pump off before the vent opens, then the vent pulse pushes air back
+      // into the cup so the part lets go at once instead of sliding off.
+      write_relay({{vacuum_channel_, false}, {vent_channel_, true}});
+      std::this_thread::sleep_for(release_pulse_);
+    } catch (...) {
+      // Still try to leave both relays off after a failed or partial write.
+      try {
+        write_relay({{vacuum_channel_, false}, {vent_channel_, false}});
+      } catch (...) {
+        // The original failure is the one worth reporting; it is rethrown below.
+      }
+      throw;
+    }
+    write_relay({{vacuum_channel_, false}, {vent_channel_, false}});
+  } catch (const std::exception& e) {
+    state_ = -1;
+    std::cerr << "[" << get_identifier() << "] vacuum RELEASE failed: " << e.what() << std::endl;
+    return false;
+  }
+  state_ = 0;
+  std::cout << "[" << get_identifier() << "] vacuum RELEASE" << std::endl;
+  return true;
+}
+
 bool LcusVacuumComponent::toggle() {
   return set_on(state_.load() != 1);
 }
@@ -164,26 +214,30 @@ std::optional<bool> LcusVacuumComponent::commanded_on() const {
 void LcusVacuumComponent::poll_loop() {
   const auto period = std::chrono::duration_cast<std::chrono::steady_clock::duration>(
     std::chrono::duration<double>(1.0 / poll_rate_hz_));
-  bool was_pressed = false;
-  bool pending = false;
-  auto changed_at = std::chrono::steady_clock::now();
-  auto next_tick = changed_at;
+  auto next_tick = std::chrono::steady_clock::now();
 
   while (running_.load(std::memory_order_relaxed)) {
-    const auto now = std::chrono::steady_clock::now();
-    const auto snapshot = glide::GlideSession::instance().read_inputs(button_->arm_id);
-    if (snapshot) {
-      const bool pressed = snapshot->button(button_->bit);
-      if (pressed == was_pressed) {
-        pending = false;
-      } else if (!pending && debounce_.count() > 0) {
-        pending = true;
-        changed_at = now;
-      } else if (!pending || now - changed_at >= debounce_) {
-        was_pressed = pressed;
-        pending = false;
-        // Rising edge only: one press is one toggle, however long it is held.
-        if (pressed) toggle();
+    for (auto& button : buttons_) {
+      const auto now = std::chrono::steady_clock::now();
+      const auto snapshot = glide::GlideSession::instance().read_inputs(button.arm_id);
+      if (!snapshot) continue;
+      const bool pressed = snapshot->button(button.bit);
+      if (pressed == button.was_pressed) {
+        button.pending = false;
+      } else if (!button.pending && debounce_.count() > 0) {
+        button.pending = true;
+        button.changed_at = now;
+      } else if (!button.pending || now - button.changed_at >= debounce_) {
+        button.was_pressed = pressed;
+        button.pending = false;
+        // Rising edge only: one press is one action, however long it is held.
+        if (pressed) {
+          if (button.action == Action::kToggle) {
+            toggle();
+          } else {
+            release();
+          }
+        }
       }
     }
     next_tick += period;
@@ -198,8 +252,12 @@ nlohmann::json LcusVacuumComponent::get_info() const {
     {"device", device_},
     {"vacuum_channel", vacuum_channel_},
     {"vent_channel", vent_channel_},
+    {"release_pulse_ms", release_pulse_.count()},
   };
-  if (button_) info["toggle_button"] = {{"arm_id", button_->arm_id}, {"bit", button_->bit}};
+  for (const auto& button : buttons_) {
+    const char* key = button.action == Action::kToggle ? "toggle_button" : "release_button";
+    info[key] = {{"arm_id", button.arm_id}, {"bit", button.bit}};
+  }
   return info;
 }
 
