@@ -16,6 +16,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <regex>
@@ -373,6 +374,47 @@ bool load_aligned_episode(
     std::cout << "  [ok] Found " << total_images << " camera images\n";
     for (const auto& [camera_name, stamps] : camera_timestamps) {
       std::cout << "    - " << camera_name << ": " << stamps.size() << " frames\n";
+    }
+  }
+
+  // Every leader and follower block is joints_per_stream wide, so a joint stream of
+  // another width (a one-value vacuum state, say) would shift every column after it. Such
+  // a stream is set aside: it stays in the MCAP but goes into neither action nor
+  // observation.state. The arm width is taken from the followers, the streams the
+  // observation is built from.
+  {
+    size_t arm_width = 0;
+    for (const auto& id : out.follower_streams) {
+      auto it = messages_by_stream.find(id);
+      if (it != messages_by_stream.end() && !it->second.empty()) {
+        arm_width = it->second.front().positions.size();
+        break;
+      }
+    }
+    auto set_aside = [&](std::vector<std::string>& streams) {
+      streams.erase(
+        std::remove_if(streams.begin(), streams.end(), [&](const std::string& id) {
+          auto it = messages_by_stream.find(id);
+          if (arm_width == 0 || it == messages_by_stream.end() || it->second.empty()) {
+            return false;
+          }
+          const size_t width = it->second.front().positions.size();
+          if (width == arm_width) return false;
+          std::cout << "  Setting aside " << id << ": " << width
+                    << " value(s) per sample, the arms have " << arm_width << "\n";
+          return true;
+        }),
+        streams.end());
+    };
+    set_aside(out.leader_streams);
+    set_aside(out.follower_streams);
+    for (auto it = messages_by_stream.begin(); it != messages_by_stream.end();) {
+      const bool used =
+        std::find(out.leader_streams.begin(), out.leader_streams.end(), it->first) !=
+          out.leader_streams.end() ||
+        std::find(out.follower_streams.begin(), out.follower_streams.end(), it->first) !=
+          out.follower_streams.end();
+      it = used ? std::next(it) : messages_by_stream.erase(it);
     }
   }
 
