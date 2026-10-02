@@ -125,6 +125,8 @@
         "vacuum_channel": 2,
         "vent_channel": 1,
         "toggle_button": { "arm_id": "glide_right", "bit": 3 },
+        "release_button": { "arm_id": "glide_right", "bit": 1 },
+        "release_pulse_ms": 400,
         "poll_rate_hz": 50.0,
         "debounce_ms": 40
       },
