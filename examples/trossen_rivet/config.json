@@ -263,7 +263,8 @@
     "root": "~/trossen_data",
     "dataset_id": "rivet_dataset",
     "compression": "",
-    "chunk_size_bytes": 4194304
+    "chunk_size_bytes": 4194304,
+    "image_encoding": "video"
   },
   "session": {
     "max_duration": 50.0,
