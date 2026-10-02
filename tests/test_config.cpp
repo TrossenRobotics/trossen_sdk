@@ -16,6 +16,7 @@
 #include "trossen_sdk/configuration/config_registry.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/sdk_config.hpp"
+#include "trossen_sdk/configuration/types/backends/trossen_mcap_backend_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
 #include "trossen_sdk/configuration/types/runtime/session_manager_config.hpp"
 
@@ -240,4 +241,43 @@ TEST(ArmConfigTest, ToJson_OmitsEmptyStagedPosition) {
   EXPECT_FALSE(j.contains("staged_position"));
   EXPECT_TRUE(j.contains("staging_time_s"));
   EXPECT_FLOAT_EQ(j.at("staging_time_s").get<float>(), 2.0f);
+}
+
+// ============================================================================
+// CFG-11: every "backend" field survives SdkConfig into the global config
+// ============================================================================
+
+// populate_global_config() rebuilds the backend JSON field by field, so a field it does not
+// copy silently reverts to its default in the backend. Set each one away from its default
+// and read it back where the backend reads it.
+TEST(SdkConfigTest, BackendFieldsReachTheGlobalConfig) {
+  const nlohmann::json j = {
+    {"robot_name", "test_robot"},
+    {"backend",
+     {{"root", "/tmp/sdk_config_test"},
+      {"dataset_id", "cfg11"},
+      {"chunk_size_bytes", 1234},
+      {"compression", "zstd"},
+      {"task_description", "stack the cups"},
+      {"image_encoding", "video"},
+      {"video_bitrate_kbps", 18000},
+      {"video_keyframe_interval", 2},
+      {"video_encoder", "x264"},
+      {"video_queue_frames", 7},
+      {"video_grid_fps", 30.0}}}};
+  SdkConfig::from_json(j).populate_global_config();
+
+  auto b = GlobalConfig::instance()
+             .get_as<trossen::configuration::TrossenMCAPBackendConfig>("trossen_mcap_backend");
+  ASSERT_NE(b, nullptr);
+  EXPECT_EQ(b->dataset_id, "cfg11");
+  EXPECT_EQ(b->chunk_size_bytes, 1234);
+  EXPECT_EQ(b->compression, "zstd");
+  EXPECT_EQ(b->task_description, "stack the cups");
+  EXPECT_EQ(b->image_encoding, "video");
+  EXPECT_EQ(b->video_bitrate_kbps, 18000);
+  EXPECT_EQ(b->video_keyframe_interval, 2);
+  EXPECT_EQ(b->video_encoder, "x264");
+  EXPECT_EQ(b->video_queue_frames, 7);
+  EXPECT_DOUBLE_EQ(b->video_grid_fps, 30.0);
 }
