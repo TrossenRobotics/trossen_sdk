@@ -60,6 +60,8 @@ add_library(trossen_sdk SHARED
   src/hw/glide/glide_base_component.cpp
   src/hw/glide/glide_session.cpp
   src/hw/glide/glide_session_control_component.cpp
+  src/hw/vacuum/lcus_vacuum_component.cpp
+  src/hw/vacuum/vacuum_producer.cpp
   src/hw/teleop/teleop_controller.cpp
   src/hw/teleop/teleop_factory.cpp
   src/hw/camera/opencv_camera_component.cpp
