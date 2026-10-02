@@ -384,6 +384,14 @@ int main(int argc, char** argv) {
     if (cam.use_depth) ++depth_cameras;
   }
 
+  // Every non-camera producer polls at the joint rate: the arms, and also the
+  // base and the vacuum. Counting only the arms under-expects by one stream per
+  // extra producer and fails the check on a healthy episode.
+  int joint_rate_streams = 0;
+  for (const auto& p : cfg.producers) {
+    if (!camera_cfg_map.count(p.hardware_id)) ++joint_rate_streams;
+  }
+
   // After each episode: print a summary and run sanity checks. (Teleop reset and
   // arm re-homing are owned by the SessionManager.)
   mgr.on_episode_ended([&](const trossen::runtime::SessionManager::Stats& stats) {
@@ -391,7 +399,7 @@ int main(int argc, char** argv) {
 
     trossen::utils::SanityCheckConfig sanity_cfg{
       stats.elapsed.count(),
-      static_cast<int>(cfg.hardware.arms.size()),
+      joint_rate_streams,
       joint_rate_hz,
       static_cast<int>(cfg.hardware.cameras.size()),
       static_cast<int>(camera_fps),
