@@ -37,9 +37,13 @@ Usage
 
 .. code-block:: bash
 
-    ./build/scripts/replay_trossen_mcap_jointstate <path/to/episode.mcap> [config.json]
+    ./build/scripts/replay_trossen_mcap_jointstate <path/to/episode.mcap> [--config <config.json>] [--speed <factor>] [--set KEY=VALUE]
 
-If no config file is specified, the tool loads ``scripts/replay_trossen_mcap_jointstate/config.json`` from the repository root.
+Without ``--config``, the tool loads ``scripts/replay_trossen_mcap_jointstate/config.json`` from the repository root.
+The config must be passed with ``--config``: a config path given as a second positional argument is ignored, and the default config is used instead.
+The header the tool prints on startup shows which config it loaded.
+
+``--speed`` overrides ``playback_speed`` from the config, and ``--set`` overrides any other config key by its dotted path.
 
 Example:
 
@@ -51,7 +55,7 @@ Example:
 
             ./build/scripts/replay_trossen_mcap_jointstate \
                 ~/.trossen_sdk/solo_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
-                scripts/replay_trossen_mcap_jointstate/config.json
+                --config scripts/replay_trossen_mcap_jointstate/config.json
 
     .. group-tab:: Stationary
 
@@ -59,7 +63,7 @@ Example:
 
             ./build/scripts/replay_trossen_mcap_jointstate \
                 ~/.trossen_sdk/stationary_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
-                scripts/replay_trossen_mcap_jointstate/config.json
+                --config scripts/replay_trossen_mcap_jointstate/config.json
 
     .. group-tab:: Mobile
 
@@ -67,7 +71,15 @@ Example:
 
             ./build/scripts/replay_trossen_mcap_jointstate \
                 ~/.trossen_sdk/mobile_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
-                scripts/replay_trossen_mcap_jointstate/config.json
+                --config scripts/replay_trossen_mcap_jointstate/config.json
+
+    .. group-tab:: Rivet
+
+        .. code-block:: bash
+
+            ./build/scripts/replay_trossen_mcap_jointstate \
+                ~/trossen_data/rivet_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
+                --config scripts/replay_trossen_mcap_jointstate/config_rivet.json
 
 Configuring the Replay
 ======================

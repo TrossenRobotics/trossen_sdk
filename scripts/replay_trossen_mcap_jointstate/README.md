@@ -19,18 +19,31 @@ The tool is always built as part of the standard SDK build.
 ## Usage
 
 ```bash
-./build/scripts/replay_trossen_mcap_jointstate <path/to/episode.mcap> [config.json]
+./build/scripts/replay_trossen_mcap_jointstate <path/to/episode.mcap> [--config <config.json>] [--speed <factor>] [--set KEY=VALUE]
 ```
 
-If no config file is specified, a default config is expected at
-`scripts/replay_trossen_mcap_jointstate/config.json` relative to the repository root.
+Without `--config`, the tool loads `scripts/replay_trossen_mcap_jointstate/config.json`
+relative to the repository root. The config must be passed with `--config`: a config path
+given as a second positional argument is ignored, and the default config is used instead.
+The header printed on startup shows which config was loaded.
+
+`--speed` overrides `playback_speed` from the config, and `--set` overrides any other config
+key by its dotted path.
 
 Example:
 
 ```bash
 ./build/scripts/replay_trossen_mcap_jointstate \
     ~/.trossen_sdk/my_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
-    scripts/replay_trossen_mcap_jointstate/config.json
+    --config scripts/replay_trossen_mcap_jointstate/config.json
+```
+
+On a Rivet:
+
+```bash
+./build/scripts/replay_trossen_mcap_jointstate \
+    ~/trossen_data/rivet_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
+    --config scripts/replay_trossen_mcap_jointstate/config_rivet.json
 ```
 
 ---

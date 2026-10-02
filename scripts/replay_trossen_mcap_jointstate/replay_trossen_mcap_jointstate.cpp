@@ -11,7 +11,8 @@
  *   ./replay_trossen_mcap_jointstate <path_to_mcap_file> [options]
  *
  * Options:
- *   --config <path>   Config JSON file (default: scripts/replay_config.json)
+ *   --config <path>   Config JSON file
+ *                     (default: scripts/replay_trossen_mcap_jointstate/config.json)
  *   --set KEY=VALUE   Override a config value (repeatable)
  *   --speed <float>   Playback speed multiplier (default: from config)
  *   --help            Show this help message
