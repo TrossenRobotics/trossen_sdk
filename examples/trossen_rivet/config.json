@@ -121,7 +121,7 @@
       },
       "vacuum_right": {
         "type": "lcus_vacuum",
-        "device": "/dev/serial/by-id/SET_TO_THE_VACUUM_RELAY",
+        "device": "/dev/serial/by-id/usb-1a86_USB_Serial-if00-port0",
         "vacuum_channel": 2,
         "vent_channel": 1,
         "toggle_button": { "arm_id": "glide_right", "bit": 3 },
