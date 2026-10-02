@@ -264,7 +264,9 @@
     "dataset_id": "rivet_dataset",
     "compression": "",
     "chunk_size_bytes": 4194304,
-    "image_encoding": "video"
+    "image_encoding": "video",
+    "video_keyframe_interval": 2,
+    "video_bitrate_kbps": 18000
   },
   "session": {
     "max_duration": 30.0,
