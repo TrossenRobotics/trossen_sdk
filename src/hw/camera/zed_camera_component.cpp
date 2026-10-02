@@ -101,6 +101,13 @@ void ZedCameraComponent::configure(const nlohmann::json& config) {
     : sl::DEPTH_MODE::NONE;
   init.coordinate_units = sl::UNIT::MILLIMETER;
 
+  // The ZED SDK image validity check is enabled by default in C++. It rejects
+  // frames with blur, partial occlusion, or mismatched left/right views as
+  // CORRUPTED_FRAME, which drops good frames whenever the arms move close to
+  // a camera, and its per-frame cost lowers the delivered frame rate.
+  // 0 disables it; 1 to 3 select increasingly thorough checks.
+  init.enable_image_validity_check = config.value("image_validity_check", 0);
+
   // Identify camera by serial number
   unsigned int sn_uint = 0;
   try {

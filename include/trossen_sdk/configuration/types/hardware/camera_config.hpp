@@ -57,9 +57,13 @@ namespace trossen::configuration {
  *   "fps": 30,
  *   "resolution": "HD720",
  *   "use_depth": true,
- *   "depth_mode": "NEURAL"
+ *   "depth_mode": "NEURAL",
+ *   "image_validity_check": 0
  * }
  * @endcode
+ *
+ * ZED @c "image_validity_check": 0 (default) disables the ZED SDK's frame validity
+ * check; 1 to 3 enable increasingly thorough checks.
  */
 struct CameraConfig {
   /// @brief Hardware registry key - "zed_camera", "realsense_camera", or "opencv_camera"
