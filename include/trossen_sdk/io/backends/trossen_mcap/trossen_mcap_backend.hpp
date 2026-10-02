@@ -7,7 +7,9 @@
 #define TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP_BACKEND_HPP
 
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <iomanip>
 #include <memory>
@@ -18,6 +20,7 @@
 #include <span>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <unordered_map>
 #include <vector>
 
@@ -97,6 +100,9 @@ public:
 
     /// @brief Number of depth images written
     uint64_t depth_images_written{0};
+
+    /// @brief Video frames dropped because a stream's encode queue was full
+    uint64_t video_frames_dropped{0};
   };
 
   /**
@@ -259,24 +265,87 @@ private:
    */
   void write_image_record(const data::ImageRecord& img);
 
-  /**
-   * @brief Get or lazily create the video encoder for one camera stream
-   *
-   * @param img Image record identifying the stream and its geometry
-   * @param depth True for a lossless H.265 depth encoder, false for H.264 color
-   * @return Pointer to the encoder, or nullptr on failure
-   */
-  utils::VideoEncoder* ensure_video_encoder(const data::ImageRecord& img, bool depth);
+  /// @brief One frame waiting to be encoded. The record is a copy, but its cv::Mat shares the
+  /// producer's pixel buffer, so queuing a frame does not copy its pixels.
+  struct VideoJob {
+    data::ImageRecord img;
+    bool depth{false};
+    foxglove::RawChannel* channel{nullptr};
+  };
 
   /**
-   * @brief Encode one frame and log it as foxglove.CompressedVideo
+   * @brief One camera stream's encoder and the thread that runs it.
+   *
+   * A hardware encode round trip takes longer than a camera frame period, so streams sharing one
+   * thread cannot keep up with several cameras. Each stream therefore encodes on its own thread,
+   * outside writer_mutex_, which it takes only to log the finished packet. The queue is bounded:
+   * when encoding falls behind, new frames are dropped and counted instead of accumulating in
+   * memory without limit.
+   */
+  struct VideoStream {
+    std::unique_ptr<utils::VideoEncoder> encoder;
+    std::mutex mutex;              ///< Guards queue, stopping, drain.
+    std::condition_variable cv;    ///< Signalled on a new job or a stop request.
+    std::deque<VideoJob> queue;    ///< Frames waiting to be encoded, oldest first.
+    bool stopping{false};          ///< Set by stop_video_streams().
+    bool drain{true};              ///< On stop: encode what is queued (true) or abandon it.
+    bool failure_reported{false};  ///< An encode failure on this stream was already logged.
+    uint64_t dropped{0};           ///< Frames dropped on a full queue; guarded by writer_mutex_.
+    std::vector<uint16_t> depth_quant_lut;  ///< Built on the first depth frame.
+    std::thread thread;
+  };
+
+  /**
+   * @brief Queue one frame on its stream's encoder thread, creating the stream on first use.
+   *
+   * Caller must hold writer_mutex_.
    *
    * @param img Image record to encode
+   * @param depth True for a lossless H.265 depth stream, false for H.264 color
+   * @param channel Channel the encoded frame is logged to
+   */
+  void submit_video_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
+
+  /**
+   * @brief Body of a stream's encoder thread: encode queued frames until stopped.
+   *
+   * @param stream The stream this thread serves
+   */
+  void video_stream_loop(VideoStream& stream);
+
+  /**
+   * @brief Convert and encode one frame. Runs on the stream's thread without writer_mutex_.
+   *
+   * @param stream The stream the frame belongs to
+   * @param img Image record to encode
    * @param depth True for a depth frame, false for color
+   * @return The encoded frame; empty data if the frame could not be encoded
+   */
+  utils::VideoEncoder::EncodedFrame encode_video_frame(VideoStream& stream,
+                                                       const data::ImageRecord& img, bool depth);
+
+  /**
+   * @brief Log one encoded frame as foxglove.CompressedVideo. Caller must hold writer_mutex_.
+   *
+   * @param img Image record the packet was encoded from
+   * @param depth True for a depth frame, false for color
+   * @param packet Encoded frame
+   * @param codec Codec the packet was encoded with
    * @param channel Channel to log the message to
    * @return true if the frame was logged; false if it was dropped
    */
-  bool write_video_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
+  bool log_video_frame(const data::ImageRecord& img, bool depth,
+                       const utils::VideoEncoder::EncodedFrame& packet, utils::VideoCodec codec,
+                       foxglove::RawChannel* channel);
+
+  /**
+   * @brief Stop and join every stream's encoder thread.
+   *
+   * Caller must NOT hold writer_mutex_: a draining thread needs it to log what it encodes.
+   *
+   * @param drain true to encode and log every queued frame first, false to abandon them
+   */
+  void stop_video_streams(bool drain);
 
   /**
    * @brief Serialize one cv::Mat as foxglove.RawImage and log it
@@ -299,12 +368,14 @@ private:
   /**
    * @brief Write one frame as video or raw image, depending on `records_video()`
    *
+   * A raw frame and its frame metadata are logged immediately. A video frame is queued on its
+   * stream's encoder thread, which logs both once it is encoded.
+   *
    * @param img Image record to write
    * @param depth True for a depth frame, false for color
    * @param channel Channel to log the message to
-   * @return true if the frame was logged; false if it was dropped
    */
-  bool write_image_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
+  void write_image_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
 
   /**
    * @brief Write a joint state record
@@ -358,14 +429,12 @@ private:
   /// @brief Frames written so far this episode, per camera stream; the next frame's index
   std::unordered_map<std::string, uint64_t> camera_meta_frame_index_;
 
-  /// @brief Per-camera video encoders, keyed by ImageRecord::id
-  std::unordered_map<std::string, std::unique_ptr<utils::VideoEncoder>> video_encoders_;
+  /// @brief Per-stream video encoders and their threads, keyed by ImageRecord::id.
+  /// Guarded by writer_mutex_; every entry is stopped and joined before the episode closes.
+  std::unordered_map<std::string, std::unique_ptr<VideoStream>> video_streams_;
 
-  /// @brief Cameras already reported as failing to encode
+  /// @brief Streams whose encoder could not be created; their frames are dropped
   std::unordered_map<std::string, bool> video_encode_failed_;
-
-  /// @brief Lookup table for depth quantization, built lazily on first depth frame
-  std::vector<uint16_t> depth_quant_lut_;
 
   /// @brief Helper to identify depth topics
   static bool is_depth_topic(const std::string& topic);

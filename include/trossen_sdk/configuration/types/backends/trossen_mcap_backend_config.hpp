@@ -29,6 +29,9 @@ inline constexpr char TROSSEN_MCAP_DEFAULT_VIDEO_ENCODER[] = "auto";
 // Nominal frame rate for the encoder's stream time base only
 inline constexpr int TROSSEN_MCAP_VIDEO_NOMINAL_FPS = 30;
 
+// Frames each camera stream may hold waiting to be encoded; one second at 30 fps
+inline constexpr int TROSSEN_MCAP_DEFAULT_VIDEO_QUEUE_FRAMES = 30;
+
 struct TrossenMCAPBackendConfig : public BaseConfig {
   std::string root{trossen::io::backends::get_default_root_path().string()};
   std::string robot_name{trossen::io::backends::DEFAULT_ROBOT_NAME};
@@ -50,6 +53,10 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
 
   /// Encoder preference: "auto", "nvenc", "vaapi", "x264"/"x265", or a literal name.
   std::string video_encoder{TROSSEN_MCAP_DEFAULT_VIDEO_ENCODER};
+
+  /// Frames each camera stream may hold waiting to be encoded. When encoding falls behind, newer
+  /// frames are dropped and counted rather than held in memory; a 1920x1200 BGR frame is 6.9 MB.
+  int video_queue_frames{TROSSEN_MCAP_DEFAULT_VIDEO_QUEUE_FRAMES};
 
   /// True when camera frames should be stored as compressed video.
   bool records_video() const { return image_encoding == TROSSEN_MCAP_IMAGE_ENCODING_VIDEO; }
@@ -81,6 +88,7 @@ struct TrossenMCAPBackendConfig : public BaseConfig {
     if (j.contains("video_keyframe_interval"))
       j.at("video_keyframe_interval").get_to(c.video_keyframe_interval);
     if (j.contains("video_encoder")) j.at("video_encoder").get_to(c.video_encoder);
+    if (j.contains("video_queue_frames")) j.at("video_queue_frames").get_to(c.video_queue_frames);
 
     return c;
   }

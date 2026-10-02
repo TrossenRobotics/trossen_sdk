@@ -204,6 +204,7 @@ void SdkConfig::populate_global_config() const {
     bj["video_bitrate_kbps"] = b.video_bitrate_kbps;
     bj["video_keyframe_interval"] = b.video_keyframe_interval;
     bj["video_encoder"] = b.video_encoder;
+    bj["video_queue_frames"] = b.video_queue_frames;
     gc_json["trossen_mcap_backend"] = bj;
   }
 

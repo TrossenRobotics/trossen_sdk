@@ -314,6 +314,54 @@ TEST_F(TrossenMCAPBackendTest, RecordsCompressedVideoForColorCameras) {
     << "video_format metadata should record h264 for a color stream";
 }
 
+// Frames arriving faster than a stream can encode them must be dropped and counted once its
+// queue is full, not held in memory: every frame is either written or counted as dropped.
+TEST_F(TrossenMCAPBackendTest, DropsVideoFramesWhenEncodeQueueIsFull) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+  const int saved_queue_frames = cfg->video_queue_frames;
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "video_queue_test";
+  cfg->image_encoding = "video";
+  cfg->video_encoder = "x264";
+  cfg->video_queue_frames = 2;
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  auto mcap_backend =
+    std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
+  ASSERT_NE(mcap_backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  // Full camera resolution, so each encode takes far longer than one write() call.
+  trossen::data::ImageRecord img;
+  img.id = "cam_color";
+  img.width = 1920;
+  img.height = 1200;
+  img.channels = 3;
+  img.encoding = "bgr8";
+  img.image = cv::Mat(1200, 1920, CV_8UC3, cv::Scalar(30, 60, 90));
+
+  constexpr uint64_t kFrames = 100;
+  for (uint64_t i = 0; i < kFrames; ++i) {
+    backend->write(img);
+  }
+  backend->close();
+  cfg->video_queue_frames = saved_queue_frames;
+
+  const auto stats = mcap_backend->stats();
+  EXPECT_GT(stats.video_frames_dropped, 0u);
+  EXPECT_GE(stats.images_written, 2u) << "queued frames are still encoded on close";
+  EXPECT_EQ(stats.images_written + stats.video_frames_dropped, kFrames);
+}
+
 // Every camera frame gets a companion message on <camera>/meta carrying the device
 // capture time, which the Foxglove image schemas have no field for.
 TEST_F(TrossenMCAPBackendTest, WritesDeviceTimestampOnCameraMetaTopic) {

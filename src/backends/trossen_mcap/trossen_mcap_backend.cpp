@@ -3,6 +3,7 @@
  * @brief Implementation of TrossenMCAPBackend for Trossen SDK.
  */
 
+#include <algorithm>
 #include <chrono>
 #include <iostream>
 #include <unordered_set>
@@ -55,6 +56,31 @@ TrossenMCAPBackend::TrossenMCAPBackend(
   std::cout << "======================================================" << std::endl;
   }
 TrossenMCAPBackend::~TrossenMCAPBackend() { close(); }
+
+void TrossenMCAPBackend::stop_video_streams(bool drain) {
+  // Take the streams out under the lock, then join without it: a draining thread takes
+  // writer_mutex_ to log each frame it finishes.
+  std::unordered_map<std::string, std::unique_ptr<VideoStream>> streams;
+  {
+    std::scoped_lock lk(writer_mutex_);
+    streams.swap(video_streams_);
+  }
+  for (auto& [id, stream] : streams) {
+    {
+      std::scoped_lock lk(stream->mutex);
+      stream->stopping = true;
+      stream->drain = drain;
+    }
+    stream->cv.notify_one();
+  }
+  for (auto& [id, stream] : streams) {
+    if (stream->thread.joinable()) stream->thread.join();
+    if (stream->dropped > 0) {
+      std::cerr << "Video: dropped " << stream->dropped << " frames for " << id
+                << " this episode; the encoder could not keep up\n";
+    }
+  }
+}
 
 void TrossenMCAPBackend::preprocess_episode()
 {
@@ -225,17 +251,22 @@ void TrossenMCAPBackend::close_resources() {
   // Encoders hold per-stream state (reference frames, GOP position), so they
   // must not survive into the next episode: a stream that begins mid-GOP is not
   // independently decodable, which is exactly what a per-episode file has to be.
-  video_encoders_.clear();
+  // close() and discard_episode() have already stopped and joined their threads.
+  video_streams_.clear();
   video_encode_failed_.clear();
   opened_ = false;
 }
 
 void TrossenMCAPBackend::close() {
+  // Every queued frame is encoded and logged before the file is closed.
+  stop_video_streams(/*drain=*/true);
   std::scoped_lock lk(writer_mutex_);
   close_resources();
 }
 
 void TrossenMCAPBackend::discard_episode() {
+  // The file is about to be deleted, so queued frames are abandoned rather than encoded.
+  stop_video_streams(/*drain=*/false);
   std::scoped_lock lk(writer_mutex_);
   close_resources();
 
@@ -627,79 +658,119 @@ bool TrossenMCAPBackend::write_raw_image_message(const cv::Mat& image, const std
   return true;
 }
 
-utils::VideoEncoder* TrossenMCAPBackend::ensure_video_encoder(const data::ImageRecord& img,
-                                                              bool depth) {
+void TrossenMCAPBackend::submit_video_frame(const data::ImageRecord& img, bool depth,
+                                            foxglove::RawChannel* channel) {
 #ifdef TROSSEN_ENABLE_VIDEO_ENCODE
-  auto it = video_encoders_.find(img.id);
-  if (it != video_encoders_.end()) {
-    return it->second.get();
+  auto it = video_streams_.find(img.id);
+  if (it == video_streams_.end()) {
+    if (video_encode_failed_[img.id]) return;
+
+    utils::VideoEncoder::Params p;
+    p.width = static_cast<int>(img.width);
+    p.height = static_cast<int>(img.height);
+    // Nominal rate, for the encoder's stream time base only. True frame timing
+    // lives in each message's MCAP log time, the capture stamp, which is what
+    // the converter aligns on, so this need not match the camera's actual rate.
+    p.fps = trossen::configuration::TROSSEN_MCAP_VIDEO_NOMINAL_FPS;
+    p.gop_size = cfg_->video_keyframe_interval;
+    p.encoder = cfg_->video_encoder;
+    if (depth) {
+      // 12-bit depth codes cannot survive an 8-bit codec, and quantization has
+      // already discarded everything that can be spared, so encode losslessly.
+      p.codec = utils::VideoCodec::H265;
+      p.lossless = true;
+    } else {
+      p.codec = utils::VideoCodec::H264;
+      p.bitrate_kbps = cfg_->video_bitrate_kbps;
+    }
+
+    // Created here, before the stream's first frame is queued, so the queue does not fill
+    // while a hardware pipeline starts.
+    auto encoder = utils::VideoEncoder::create(p);
+    if (!encoder) {
+      video_encode_failed_[img.id] = true;
+      std::cerr << "Failed to create video encoder for camera " << img.id
+                << "; dropping its frames\n";
+      return;
+    }
+    auto stream = std::make_unique<VideoStream>();
+    stream->encoder = std::move(encoder);
+    VideoStream* raw = stream.get();
+    stream->thread = std::thread([this, raw]() { video_stream_loop(*raw); });
+    it = video_streams_.emplace(img.id, std::move(stream)).first;
   }
 
-  utils::VideoEncoder::Params p;
-  p.width = static_cast<int>(img.width);
-  p.height = static_cast<int>(img.height);
-  // Nominal rate, for the encoder's stream time base only. True frame timing
-  // lives in each message's MCAP log time, the capture stamp, which is what
-  // the converter aligns on, so this need not match the camera's actual rate.
-  p.fps = trossen::configuration::TROSSEN_MCAP_VIDEO_NOMINAL_FPS;
-  p.gop_size = cfg_->video_keyframe_interval;
-  p.encoder = cfg_->video_encoder;
-  if (depth) {
-    // 12-bit depth codes cannot survive an 8-bit codec, and quantization has
-    // already discarded everything that can be spared, so encode losslessly.
-    p.codec = utils::VideoCodec::H265;
-    p.lossless = true;
-  } else {
-    p.codec = utils::VideoCodec::H264;
-    p.bitrate_kbps = cfg_->video_bitrate_kbps;
+  VideoStream& stream = *it->second;
+  const size_t capacity = static_cast<size_t>(std::max(1, cfg_->video_queue_frames));
+  {
+    std::scoped_lock lk(stream.mutex);
+    if (stream.queue.size() >= capacity) {
+      // Dropping is what keeps memory bounded when encoding falls behind. A dropped frame
+      // writes neither a packet nor frame metadata, so the two topics stay paired.
+      if (stream.dropped++ == 0) {
+        std::cerr << "Video: encode queue for " << img.id << " is full (" << capacity
+                  << " frames); dropping frames until it catches up\n";
+      }
+      ++stats_.video_frames_dropped;
+      return;
+    }
+    stream.queue.push_back(VideoJob{img, depth, channel});
   }
-
-  auto encoder = utils::VideoEncoder::create(p);
-  if (!encoder) {
-    std::cerr << "Failed to create video encoder for camera " << img.id << "\n";
-    return nullptr;
-  }
-  auto [inserted, _] = video_encoders_.emplace(img.id, std::move(encoder));
-  return inserted->second.get();
+  stream.cv.notify_one();
 #else
   (void)img;
   (void)depth;
-  return nullptr;
+  (void)channel;
 #endif
 }
 
-bool TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool depth,
-                                           foxglove::RawChannel* channel) {
-#ifdef TROSSEN_ENABLE_VIDEO_ENCODE
-  auto* encoder = ensure_video_encoder(img, depth);
-  if (!encoder) {
-    if (!video_encode_failed_[img.id]) {
-      video_encode_failed_[img.id] = true;
-      std::cerr << "Dropping frames for " << img.id << ": no video encoder\n";
+void TrossenMCAPBackend::video_stream_loop(VideoStream& stream) {
+  while (true) {
+    VideoJob job;
+    {
+      std::unique_lock lk(stream.mutex);
+      stream.cv.wait(lk, [&]() { return stream.stopping || !stream.queue.empty(); });
+      if (stream.queue.empty() || (stream.stopping && !stream.drain)) return;
+      job = std::move(stream.queue.front());
+      stream.queue.pop_front();
     }
-    return false;
-  }
 
+    const utils::VideoEncoder::EncodedFrame packet = encode_video_frame(stream, job.img, job.depth);
+    if (packet.data.empty()) continue;
+
+    std::scoped_lock lk(writer_mutex_);
+    if (!opened_) continue;
+    // Meta is written only for a frame that reached the file, so the nth meta message on a
+    // stream always describes the nth recorded frame.
+    if (log_video_frame(job.img, job.depth, packet, stream.encoder->codec(), job.channel)) {
+      write_camera_meta_record(job.img.id, job.img.ts, job.img.seq, job.img.device_frame_number);
+    }
+  }
+}
+
+utils::VideoEncoder::EncodedFrame TrossenMCAPBackend::encode_video_frame(
+    VideoStream& stream, const data::ImageRecord& img, bool depth) {
+#ifdef TROSSEN_ENABLE_VIDEO_ENCODE
   // Color is handed over as BGR8; depth is log-quantized to 12-bit codes first
   // so the stored stream is exactly what LeRobot's depth decoder expects.
   cv::Mat source;
   if (depth) {
     if (img.image.type() != CV_16UC1) {
-      if (!video_encode_failed_[img.id]) {
-        video_encode_failed_[img.id] = true;
+      if (!stream.failure_reported) {
+        stream.failure_reported = true;
         std::cerr << "Depth video for " << img.id << " needs CV_16UC1, got type "
                   << img.image.type() << "\n";
       }
-      return false;
+      return {};
     }
-    if (depth_quant_lut_.empty()) {
-      depth_quant_lut_ = utils::build_depth_quantization_lut();
+    if (stream.depth_quant_lut.empty()) {
+      stream.depth_quant_lut = utils::build_depth_quantization_lut();
     }
     source.create(img.image.rows, img.image.cols, CV_16UC1);
     for (int y = 0; y < img.image.rows; ++y) {
       const uint16_t* src = img.image.ptr<uint16_t>(y);
       uint16_t* dst = source.ptr<uint16_t>(y);
-      for (int x = 0; x < img.image.cols; ++x) dst[x] = depth_quant_lut_[src[x]];
+      for (int x = 0; x < img.image.cols; ++x) dst[x] = stream.depth_quant_lut[src[x]];
     }
   } else {
     // The encoder converts BGR to YUV itself, so anything else is normalized
@@ -719,25 +790,33 @@ bool TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
 
   const auto* src_data = reinterpret_cast<const uint8_t*>(source.data);
   const size_t src_size = source.total() * source.elemSize();
-  const utils::VideoEncoder::EncodedFrame packet = encoder->encode(src_data, src_size);
-  if (packet.data.empty()) {
+  utils::VideoEncoder::EncodedFrame packet = stream.encoder->encode(src_data, src_size);
+  if (packet.data.empty() && !stream.failure_reported) {
     // One packet per frame is an invariant, not a nicety: the converter pairs
     // camera frames to joint samples, so a dropped packet shifts every later
     // frame's alignment. Report it rather than letting it pass quietly.
-    if (!video_encode_failed_[img.id]) {
-      video_encode_failed_[img.id] = true;
-      std::cerr << "Video encoder produced no packet for " << img.id
-                << "; frame alignment would drift, dropping frame\n";
-    }
-    return false;
+    stream.failure_reported = true;
+    std::cerr << "Video encoder produced no packet for " << img.id
+              << "; frame alignment would drift, dropping frame\n";
   }
+  return packet;
+#else
+  (void)stream;
+  (void)img;
+  (void)depth;
+  return {};
+#endif
+}
 
+bool TrossenMCAPBackend::log_video_frame(const data::ImageRecord& img, bool depth,
+                                         const utils::VideoEncoder::EncodedFrame& packet,
+                                         utils::VideoCodec codec, foxglove::RawChannel* channel) {
   foxglove::schemas::CompressedVideo vmsg;
   vmsg.timestamp =
       foxglove::schemas::Timestamp{.sec = static_cast<uint32_t>(img.ts.realtime.sec),
                                    .nsec = static_cast<uint32_t>(img.ts.realtime.nsec)};
   vmsg.frame_id = img.id;
-  vmsg.format = utils::video_codec_format(encoder->codec());
+  vmsg.format = utils::video_codec_format(codec);
   vmsg.data.assign(packet.data.begin(), packet.data.end());
 
   std::vector<uint8_t> payload(TROSSEN_MCAP_INITIAL_ENCODED_BUFFER_SIZE);
@@ -764,22 +843,21 @@ bool TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
     ++stats_.images_written;
   }
   return true;
-#else
-  (void)img;
-  (void)depth;
-  (void)channel;
-  return false;
-#endif
 }
 
-bool TrossenMCAPBackend::write_image_frame(const data::ImageRecord& img, bool depth,
+void TrossenMCAPBackend::write_image_frame(const data::ImageRecord& img, bool depth,
                                            foxglove::RawChannel* channel) {
   if (cfg_ && cfg_->records_video()) {
-    return write_video_frame(img, depth, channel);
+    submit_video_frame(img, depth, channel);
+    return;
   }
-  return write_raw_image_message(img.image, img.id, img.width, img.height, img.encoding,
-                                 img.ts.realtime, channel,
-                                 depth ? &stats_.depth_images_written : &stats_.images_written);
+  // Meta is written only for a frame that reached the file, so the nth meta message on a
+  // stream always describes the nth recorded frame.
+  if (write_raw_image_message(img.image, img.id, img.width, img.height, img.encoding,
+                              img.ts.realtime, channel,
+                              depth ? &stats_.depth_images_written : &stats_.images_written)) {
+    write_camera_meta_record(img.id, img.ts, img.seq, img.device_frame_number);
+  }
 }
 
 void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
@@ -811,11 +889,7 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
     return;
   }
 
-  // Meta is written only for a frame that reached the file, so the nth meta message on a
-  // stream always describes the nth recorded frame.
-  if (write_image_frame(img, depth, channel)) {
-    write_camera_meta_record(img.id, img.ts, img.seq, img.device_frame_number);
-  }
+  write_image_frame(img, depth, channel);
 
   // Write optional depth image to a separate channel when ImageRecord carries depth
   if (img.has_depth()) {
@@ -837,9 +911,7 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
       drec.encoding = "16UC1";
       drec.width = static_cast<uint32_t>(img.depth_image->cols);
       drec.height = static_cast<uint32_t>(img.depth_image->rows);
-      if (write_image_frame(drec, /*depth=*/true, depth_channel)) {
-        write_camera_meta_record(depth_topic_id, drec.ts, drec.seq, drec.device_frame_number);
-      }
+      write_image_frame(drec, /*depth=*/true, depth_channel);
     }
   }
 }
