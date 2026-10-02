@@ -267,8 +267,8 @@
     "image_encoding": "video"
   },
   "session": {
-    "max_duration": 50.0,
-    "max_episodes": 40,
+    "max_duration": 30.0,
+    "max_episodes": 5,
     "backend_type": "trossen_mcap",
     "reset_duration": 5.0
   }

@@ -229,11 +229,12 @@ wheels re-asserting their last command.
 
 | Setting | Value |
 |---|---|
-| Episode duration | 50 seconds |
-| Max episodes | 40 |
+| Episode duration | 30 seconds |
+| Max episodes | 5 |
 | Reset window | 5 seconds |
 | Joint / base poll rate | 30 Hz |
 | Camera frame rate | 30 Hz @ HD1200 |
+| Camera recording | H.264 video (`backend.image_encoding: "video"`) |
 | Teleop rate | 1000 Hz |
 | Output directory | `~/trossen_data` |
 | Dataset ID | `rivet_dataset` |
