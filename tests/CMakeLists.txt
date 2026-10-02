@@ -163,6 +163,9 @@ target_link_libraries(test_action_chunk PRIVATE trossen_sdk GTest::gtest_main)
 
 # Enable CTest integration
 include(GoogleTest)
+add_executable(test_lcus_vacuum test_lcus_vacuum.cpp)
+target_link_libraries(test_lcus_vacuum PRIVATE trossen_sdk GTest::gtest_main util)
+
 gtest_discover_tests(test_timestamp)
 gtest_discover_tests(test_record)
 gtest_discover_tests(test_null_backend)
@@ -215,3 +218,4 @@ if(TROSSEN_SDK_ENABLE_POLICY_CLIENT)
   gtest_discover_tests(test_lerobot_codec)
   gtest_discover_tests(test_lerobot_grpc_transport)
 endif()
+gtest_discover_tests(test_lcus_vacuum)
