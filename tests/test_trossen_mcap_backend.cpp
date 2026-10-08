@@ -20,6 +20,7 @@
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 
 using trossen::io::BackendRegistry;
 
@@ -120,6 +121,34 @@ TEST(EpisodeId, IsTimeOrdered) {
   std::this_thread::sleep_for(std::chrono::milliseconds(2));
   const std::string later = trossen::io::backends::generate_episode_id();
   EXPECT_LT(earlier, later) << earlier << " should sort before " << later;
+}
+
+// Arm stream ids carry their role as `role` or `role_<side>`; anything else has no role.
+TEST(StreamRole, LeaderAndFollowerNames) {
+  using trossen::trossen_mcap_defs::is_follower_stream_id;
+  using trossen::trossen_mcap_defs::is_leader_stream_id;
+
+  EXPECT_TRUE(is_leader_stream_id("leader"));
+  EXPECT_TRUE(is_leader_stream_id("leader_left"));
+  EXPECT_TRUE(is_follower_stream_id("follower"));
+  EXPECT_TRUE(is_follower_stream_id("follower_right"));
+
+  EXPECT_FALSE(is_leader_stream_id("follower_left"));
+  EXPECT_FALSE(is_follower_stream_id("leader_left"));
+}
+
+// Names that only resemble a role (a dangling `_`, no separator, or the role mid-name)
+// are rejected rather than guessed at.
+TEST(StreamRole, RejectsNamesWithoutTheRolePrefix) {
+  using trossen::trossen_mcap_defs::is_follower_stream_id;
+  using trossen::trossen_mcap_defs::is_leader_stream_id;
+
+  EXPECT_FALSE(is_leader_stream_id("glide_left"));
+  EXPECT_FALSE(is_leader_stream_id("leader_"));
+  EXPECT_FALSE(is_leader_stream_id("leaderleft"));
+  EXPECT_FALSE(is_leader_stream_id("my_leader_arm"));
+  EXPECT_FALSE(is_follower_stream_id("policy_action"));
+  EXPECT_FALSE(is_follower_stream_id(""));
 }
 
 // Restores GlobalConfig root/dataset_id on scope exit so a test can't leak state.
