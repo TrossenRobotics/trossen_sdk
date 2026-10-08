@@ -39,6 +39,7 @@
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/base/slate_base_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/configuration/cli_parser.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 
@@ -286,7 +287,7 @@ int main(int argc, char** argv) {
   for (const auto& [channel_id, channel_ptr] : reader.channels()) {
     const std::string& topic = channel_ptr->topic;
 
-    size_t pos = topic.find("/joints/state");
+    size_t pos = topic.find(trossen::trossen_mcap_defs::kJointStateTopicSuffix);
     if (pos != std::string::npos) {
       std::string stream_id = topic.substr(0, pos);
       channel_id_to_stream[channel_id] = stream_id;
@@ -295,7 +296,7 @@ int main(int argc, char** argv) {
       continue;
     }
 
-    pos = topic.find("/odom/state");
+    pos = topic.find(trossen::trossen_mcap_defs::kOdometry2DTopicSuffix);
     if (pos != std::string::npos) {
       std::string stream_id = topic.substr(0, pos);
       odom_channel_id_to_stream[channel_id] = stream_id;
@@ -307,7 +308,9 @@ int main(int argc, char** argv) {
 
   if (channel_id_to_stream.empty() && odom_channel_id_to_stream.empty()) {
     std::cerr << "Error: No replayable channels found in MCAP file\n";
-    std::cerr << "Expected topics: '{stream_id}/joints/state' or '{stream_id}/odom/state'\n";
+    std::cerr << "Expected topics: '{stream_id}"
+              << trossen::trossen_mcap_defs::kJointStateTopicSuffix << "' or '{stream_id}"
+              << trossen::trossen_mcap_defs::kOdometry2DTopicSuffix << "'\n";
     return 1;
   }
 

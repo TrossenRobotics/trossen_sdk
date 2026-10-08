@@ -15,6 +15,39 @@ namespace trossen::trossen_mcap_defs {
 // Joint state topic: <robot_name>/joints/state (e.g., "/robots/default/joints/state")
 // Optional per-camera metadata: /cameras/<camera_name>/meta
 
+/// @brief Prefix every camera topic sits under.
+inline constexpr char kCameraTopicPrefix[] = "/cameras/";
+
+/// @brief Suffix marking a camera topic as the image stream.
+inline constexpr char kImageTopicSuffix[] = "/image";
+
+/// @brief Suffix marking a camera topic as the per-camera metadata stream.
+inline constexpr char kCameraMetaTopicSuffix[] = "/meta";
+
+/// @brief Suffix a stream id carries when the topic holds its joint states.
+inline constexpr char kJointStateTopicSuffix[] = "/joints/state";
+
+/// @brief Suffix a stream id carries when the topic holds its planar odometry.
+inline constexpr char kOdometry2DTopicSuffix[] = "/odom/state";
+
+/// @brief Role a leader arm's stream id is named with: `leader` or `leader_<side>`.
+inline constexpr char kLeaderStreamToken[] = "leader";
+
+/// @brief Role a follower arm's stream id is named with: `follower` or `follower_<side>`.
+inline constexpr char kFollowerStreamToken[] = "follower";
+
+/// @brief Name of the file-level metadata record written once per recording.
+inline constexpr char kRecordingMetadataName[] = "trossen_sdk_recording";
+
+/// @brief Key inside that record holding the dataset_info JSON blob.
+inline constexpr char kDatasetInfoKey[] = "dataset_info";
+
+/// @brief Key inside that record holding the recording start, in nanoseconds since epoch.
+inline constexpr char kRecordingStartTimeKey[] = "recording_start_time";
+
+/// @brief Key inside that record holding the episode's task prompt, when one was set.
+inline constexpr char kTaskDescriptionKey[] = "task_description";
+
 /**
  * @brief Get topic name for a given camera's image stream
  *
@@ -22,7 +55,7 @@ namespace trossen::trossen_mcap_defs {
  * @return Topic name for the camera's image stream
  */
 inline std::string image_topic(const std::string& camera_name) {
-    return "/cameras/" + camera_name + "/image";
+    return kCameraTopicPrefix + camera_name + kImageTopicSuffix;
 }
 
 /**
@@ -32,7 +65,7 @@ inline std::string image_topic(const std::string& camera_name) {
  * @return Topic name for the camera's metadata stream
  */
 inline std::string camera_meta_topic(const std::string& camera_name) {
-    return "/cameras/" + camera_name + "/meta";
+    return kCameraTopicPrefix + camera_name + kCameraMetaTopicSuffix;
 }
 
 /**
@@ -42,7 +75,7 @@ inline std::string camera_meta_topic(const std::string& camera_name) {
  * @return Topic name for the robot's joint state stream
  */
 inline std::string joint_state_topic(const std::string& robot_name) {
-  return robot_name + "/joints/state";
+  return robot_name + kJointStateTopicSuffix;
 }
 
 /**
@@ -52,7 +85,7 @@ inline std::string joint_state_topic(const std::string& robot_name) {
  * @return Topic name for the 2D odometry stream
  */
 inline std::string odometry_2d_topic(const std::string& stream_id) {
-  return stream_id + "/odom/state";
+  return stream_id + kOdometry2DTopicSuffix;
 }
 
 }  // namespace trossen::trossen_mcap_defs
