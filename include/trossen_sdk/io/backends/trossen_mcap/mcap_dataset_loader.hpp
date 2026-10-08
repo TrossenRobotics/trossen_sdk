@@ -26,12 +26,14 @@ namespace trossen::io::backends {
 /// here so this header does not expose the MCAP library.
 using McapChannelId = std::uint16_t;
 
-/// @brief Maps from MCAP channel id to semantic stream, populated during detection.
+/// @brief Maps from MCAP channel id to stream, filled from the recording's dataset_info.
 struct McapChannelMap {
   /// @brief Joint-state channel id to stream id (e.g. "leader", "follower_left").
   std::map<McapChannelId, std::string> joint_channels;
   /// @brief Image channel id to camera name (e.g. "cam_high").
   std::map<McapChannelId, std::string> camera_channels;
+  /// @brief Camera name to how its frames are stored: "raw", "h264" or "h265".
+  std::map<std::string, std::string> camera_storage;
   /// @brief Mobile-base odometry channel (valid only when has_mobile_base is true).
   McapChannelId mobile_base_channel_id{0};
   /// @brief Whether a mobile-base odometry channel was found.
@@ -49,7 +51,8 @@ struct AlignmentOptions {
 /**
  * @brief Read an MCAP file and align its joint/camera streams into a frame sequence.
  *
- * Not implemented yet: returns false.
+ * Row alignment is not implemented yet: on success it maps each channel to the stream its
+ * dataset_info describes and returns true with no frames.
  *
  * @param mcap_file Path to the input MCAP file.
  * @param episode_index Zero-based episode index to stamp on the episode.
