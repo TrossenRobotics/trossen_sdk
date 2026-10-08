@@ -29,12 +29,14 @@ namespace trossen::io::backends {
 /// here so this header does not expose the MCAP library.
 using McapChannelId = std::uint16_t;
 
-/// @brief Maps from MCAP channel id to semantic stream, populated during detection.
+/// @brief Maps from MCAP channel id to stream, filled from the recording's dataset_info.
 struct McapChannelMap {
   /// @brief Joint-state channel id to stream id (e.g. "leader", "follower_left").
   std::map<McapChannelId, std::string> joint_channels;
   /// @brief Image channel id to camera name (e.g. "cam_high").
   std::map<McapChannelId, std::string> camera_channels;
+  /// @brief Camera name to how its frames are stored: "raw", "h264" or "h265".
+  std::map<std::string, std::string> camera_storage;
   /// @brief Mobile-base odometry channel (valid only when has_mobile_base is true).
   McapChannelId mobile_base_channel_id{0};
   /// @brief Whether a mobile-base odometry channel was found.
@@ -52,10 +54,11 @@ struct AlignmentOptions {
 /**
  * @brief Read an MCAP file and align its joint/camera streams into a frame sequence.
  *
- * Not implemented until #319: it returns false.
+ * Row alignment is not implemented until #319: on success it maps the streams and returns
+ * true with no frames.
  *
- * Decodes the embedded dataset_info metadata, auto-detects leader/follower joint
- * streams by topic name (falling back to single-robot mode), parses all joint and
+ * Decodes the embedded dataset_info metadata, maps each channel to the stream it
+ * describes (leader and follower joint streams by their `role`), parses all joint and
  * odometry messages, and produces one AlignedFrame per dataset row via
  * nearest-timestamp matching. Camera frames are matched the same way: each row records
  * the nearest frame per camera in CameraInfo::row_source_index, so images and joint
