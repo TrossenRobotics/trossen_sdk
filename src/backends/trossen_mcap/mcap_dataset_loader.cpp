@@ -12,8 +12,10 @@
 #include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <regex>
 #include <string>
 #include <string_view>
@@ -21,7 +23,11 @@
 #include <utility>
 #include <vector>
 
+#include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
+
+#include "JointState.pb.h"
+#include "Odometry2D.pb.h"
 
 namespace trossen::io::backends {
 
@@ -37,6 +43,19 @@ namespace {
  */
 void on_problem(const mcap::Status& problem) {
   std::cerr << "Warning: MCAP parsing issue: " << problem.message << "\n";
+}
+
+/**
+ * @brief Parse a protobuf message from an MCAP message payload.
+ *
+ * @param msg Message to fill.
+ * @param payload MCAP message whose data holds the serialized @p msg.
+ * @return False if the payload does not parse or is larger than protobuf's int size limit.
+ */
+template <typename Message>
+bool parse_payload(Message& msg, const mcap::Message& payload) {
+  if (payload.dataSize > static_cast<uint64_t>(std::numeric_limits<int>::max())) return false;
+  return msg.ParseFromArray(payload.data, static_cast<int>(payload.dataSize));
 }
 
 /**
@@ -285,6 +304,139 @@ bool load_aligned_episode(
   if (!channels.camera_channels.empty()) {
     std::cout << "  Found " << channels.camera_channels.size() << " camera channel(s)\n";
   }
+
+  // ── Single pass over the message stream: joint states and odometry are parsed into
+  //    per-stream buffers, and every camera frame's log time is recorded ──
+  std::cout << "\nParsing recorded messages...\n";
+  std::map<std::string, std::vector<data::JointStateRecord>> messages_by_stream;
+  std::vector<data::Odometry2DRecord> mobile_base_messages;
+  // Per camera, the log time of every frame in arrival order. The index into this vector is
+  // the same source index extract_camera_images() counts up as it re-reads the file.
+  std::map<std::string, std::vector<uint64_t>> camera_timestamps;
+
+  size_t total_messages = 0;
+  size_t total_images = 0;
+
+  for (const auto& messageView : reader.readMessages(on_problem)) {
+    if (channels.has_mobile_base && messageView.channel->id == channels.mobile_base_channel_id) {
+      trossen_sdk::msg::Odometry2D odom_msg;
+      if (!parse_payload(odom_msg, messageView.message)) {
+        std::cerr << "Warning: Failed to parse Odometry2D message\n";
+        continue;
+      }
+      data::Odometry2DRecord rec;
+      rec.ts.realtime = data::Timespec::from_ns(messageView.message.logTime);
+      rec.seq = odom_msg.seq();
+      rec.pose.x = odom_msg.pose().x();
+      rec.pose.y = odom_msg.pose().y();
+      rec.pose.theta = odom_msg.pose().theta();
+      rec.twist.linear_x = odom_msg.twist().linear_x();
+      rec.twist.linear_y = odom_msg.twist().linear_y();
+      rec.twist.angular_z = odom_msg.twist().angular_z();
+      mobile_base_messages.push_back(std::move(rec));
+      continue;
+    }
+
+    auto joint_it = channels.joint_channels.find(messageView.channel->id);
+    if (joint_it != channels.joint_channels.end()) {
+      const std::string& stream_id = joint_it->second;
+      trossen_sdk::msg::JointState js_msg;
+      if (!parse_payload(js_msg, messageView.message)) {
+        std::cerr << "Warning: Failed to parse message for " << stream_id << "\n";
+        continue;
+      }
+
+      data::JointStateRecord rec;
+      rec.ts.realtime = data::Timespec::from_ns(messageView.message.logTime);
+      rec.seq = js_msg.seq();
+      rec.id = stream_id;
+      rec.positions.assign(js_msg.positions().begin(), js_msg.positions().end());
+      rec.velocities.assign(js_msg.velocities().begin(), js_msg.velocities().end());
+      rec.efforts.assign(js_msg.efforts().begin(), js_msg.efforts().end());
+      messages_by_stream[stream_id].push_back(std::move(rec));
+      ++total_messages;
+      continue;
+    }
+
+    auto camera_it = channels.camera_channels.find(messageView.channel->id);
+    if (camera_it != channels.camera_channels.end()) {
+      camera_timestamps[camera_it->second].push_back(messageView.message.logTime);
+      ++total_images;
+    }
+  }
+
+  std::cout << "  [ok] Parsed " << total_messages << " joint state messages\n";
+  for (const auto& [stream_id, messages] : messages_by_stream) {
+    std::cout << "    - " << stream_id << ": " << messages.size() << " messages\n";
+  }
+  if (channels.has_mobile_base) {
+    std::cout << "    - mobile base: " << mobile_base_messages.size() << " messages (velocities)\n";
+  }
+  if (total_images > 0) {
+    std::cout << "  [ok] Found " << total_images << " camera images\n";
+    for (const auto& [camera_name, stamps] : camera_timestamps) {
+      std::cout << "    - " << camera_name << ": " << stamps.size() << " frames\n";
+    }
+  }
+
+  // ── Detect the joint count and mobile base; episode_action_dim() and episode_obs_dim()
+  //    derive the row widths from them ──
+  out.joints_per_stream = 0;
+  for (const auto& [stream_id, messages] : messages_by_stream) {
+    if (!messages.empty()) {
+      out.joints_per_stream = static_cast<int>(messages[0].positions.size());
+      break;
+    }
+  }
+  // Every row is sized from that one count, so every sample of every arm must match it.
+  for (const auto& [stream_id, messages] : messages_by_stream) {
+    for (size_t i = 0; i < messages.size(); ++i) {
+      const size_t joints = messages[i].positions.size();
+      if (joints == 0 || static_cast<int>(joints) != out.joints_per_stream) {
+        std::cerr << "Error: joint stream '" << stream_id << "' sample " << i << " has " << joints
+                  << " positions; every arm must report " << out.joints_per_stream << "\n";
+        return false;
+      }
+    }
+  }
+  out.has_mobile_base = channels.has_mobile_base;
+
+  // ── Require joint data from at least one follower stream ──
+  bool have_follower_data = false;
+  for (const auto& stream : out.follower_streams) {
+    auto it = messages_by_stream.find(stream);
+    if (it != messages_by_stream.end() && !it->second.empty()) {
+      have_follower_data = true;
+      break;
+    }
+  }
+  if (!have_follower_data) {
+    std::cerr << "Error: No follower stream recorded any joint state messages\n";
+    return false;
+  }
+
+  // Record the cameras present. Built before the row loop so each row can store the frame
+  // it matched; frame_count is filled in by extract_camera_images().
+  for (const auto& [channel_id, camera_name] : channels.camera_channels) {
+    if (camera_timestamps[camera_name].empty()) {
+      std::cerr << "Error: camera '" << camera_name << "' has a channel but no frames\n";
+      return false;
+    }
+    CameraInfo cam;
+    // The recording's own camera name keys the extraction dirs, the dataset_info lookups
+    // and the LeRobot observation column alike.
+    cam.name = camera_name;
+    cam.obs_key = "observation.images." + camera_name;
+    out.cameras.push_back(std::move(cam));
+  }
+
+  // Times at which rows are sampled, in MCAP log time.
+  // TODO(shantanuparab-tr): fill with a uniform grid at alignment.fps over the window where
+  // every stream has data (#358). Until then no rows are produced.
+  std::vector<uint64_t> row_times;
+
+  const size_t max_rows = row_times.size();
+  for (auto& cam : out.cameras) cam.row_source_index.reserve(max_rows);
 
   // TODO(shantanuparab-tr): implement the nearest-timestamp row alignment (#319).
 
