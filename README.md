@@ -16,6 +16,7 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Stereolab
 - [Interactive Episode Controls](#interactive-episode-controls)
 - [Configuration Reference](#configuration-reference)
 - [Converting to LeRobot V2](#converting-to-lerobot-v2)
+- [Reading Recordings](#reading-recordings)
 - [Architecture Overview](#architecture-overview)
 - [Extending the SDK](#extending-the-sdk)
 - [Further Reading](#further-reading)
@@ -399,6 +400,48 @@ lerobot_datasets/
 ```
 
 For full conversion options and format details see the [Conversion Tool Guide](scripts/trossen_mcap_to_lerobot_v2/README.md).
+
+---
+
+## Reading Recordings
+
+`trossen_sdk` reads a TrossenMCAP recording into memory. Link `trossen_sdk` and include:
+
+```cpp
+#include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
+
+using namespace trossen::io::backends;
+
+AlignedEpisode ep;
+McapChannelMap channels;
+if (load_aligned_episode("episode.mcap", /*episode_index=*/0, ep, channels)) {
+  for (const AlignedFrame& f : ep.frames) {
+    // f.timestamp_s, f.action, f.observation
+  }
+}
+```
+
+`load_aligned_episode()` decodes the recording, detects the leader and follower joint
+streams, and aligns them by nearest timestamp into one frame per dataset row. It fills an
+`AlignedEpisode`: per-row `action` and `observation` vectors, plus the source frame each
+camera contributes to each row.
+
+`load_aligned_episode()` does not decode camera frames. These functions take the loaded
+episode further:
+
+| Function | Produces |
+| --- | --- |
+| `extract_camera_images()` | one JPEG per dataset row and camera (16-bit PNG for depth with `native_schema`) |
+| `extract_camera_video()` | one Annex B elementary stream per camera, copied out verbatim |
+| `build_features()` | the LeRobot `features` schema for the episode |
+
+The loader decodes every field a recording carries, including joint velocities and efforts
+and the full odometry pose and twist. `DatasetSignalOptions` selects which fields go into
+the row vectors; by default, joint positions and the planar base velocity pair.
+`AlignmentOptions` sets the row rate and the match tolerance, 30 fps and 50 ms by default.
+
+`trossen_sdk` compiles the MCAP reader and defines `MCAP_IMPLEMENTATION` in its own
+translation unit, so a target that links `trossen_sdk` must not define the macro.
 
 ---
 
