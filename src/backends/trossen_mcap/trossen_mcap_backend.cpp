@@ -18,6 +18,7 @@
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/version.hpp"
 
 namespace trossen::io::backends {
@@ -146,9 +147,9 @@ bool TrossenMCAPBackend::open() {
   // identity is queryable from metadata, not only its name.
   metadata["episode_id"] = path_.stem().string();
   auto now = trossen::data::now_real();
-  metadata["recording_start_time"] = std::to_string(now.to_ns());
+  metadata[trossen_mcap_defs::kRecordingStartTimeKey] = std::to_string(now.to_ns());
   if (!cfg_->task_description.empty()) {
-    metadata["task_description"] = cfg_->task_description;
+    metadata[trossen_mcap_defs::kTaskDescriptionKey] = cfg_->task_description;
   }
 
   // Build dataset_info JSON from producer metadata (joint names, camera specs, etc.)
@@ -181,9 +182,10 @@ bool TrossenMCAPBackend::open() {
     }
   }
 
-  metadata["dataset_info"] = dataset_info.dump();
+  metadata[trossen_mcap_defs::kDatasetInfoKey] = dataset_info.dump();
 
-  auto st = writer_->writeMetadata("trossen_sdk_recording", metadata.begin(), metadata.end());
+  auto st = writer_->writeMetadata(
+    trossen_mcap_defs::kRecordingMetadataName, metadata.begin(), metadata.end());
   if (st != foxglove::FoxgloveError::Ok) {
     std::cerr << "Failed to write metadata: " << foxglove::strerror(st) << "\n";
   }
