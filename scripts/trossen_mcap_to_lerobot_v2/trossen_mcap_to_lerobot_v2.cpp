@@ -47,6 +47,7 @@
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_constants.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/configuration/cli_parser.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
@@ -114,13 +115,13 @@ static std::optional<uint64_t> read_recording_start_time(const std::filesystem::
 
   auto* data_source = reader.dataSource();
   const auto& meta_indexes = reader.metadataIndexes();
-  auto range = meta_indexes.equal_range("trossen_sdk_recording");
+  auto range = meta_indexes.equal_range(trossen::trossen_mcap_defs::kRecordingMetadataName);
   for (auto it = range.first; it != range.second; ++it) {
     mcap::Record raw_record;
     if (!mcap::McapReader::ReadRecord(*data_source, it->second.offset, &raw_record).ok()) continue;
     mcap::Metadata meta_record;
     if (!mcap::McapReader::ParseMetadata(raw_record, &meta_record).ok()) continue;
-    auto ts_it = meta_record.metadata.find("recording_start_time");
+    auto ts_it = meta_record.metadata.find(trossen::trossen_mcap_defs::kRecordingStartTimeKey);
     if (ts_it != meta_record.metadata.end()) {
       try {
         return static_cast<uint64_t>(std::stoull(ts_it->second));
@@ -716,7 +717,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   const auto& meta_indexes = reader.metadataIndexes();
 
   // Find all metadata records named "trossen_sdk_recording"
-  auto range = meta_indexes.equal_range("trossen_sdk_recording");
+  auto range = meta_indexes.equal_range(trossen::trossen_mcap_defs::kRecordingMetadataName);
   for (auto it = range.first; it != range.second; ++it) {
     // Read the raw record from the MCAP file at the indexed offset
     mcap::Record raw_record;
