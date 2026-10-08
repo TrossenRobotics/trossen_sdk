@@ -28,6 +28,7 @@ option(TROSSEN_SDK_ENABLE_POLICY_CLIENT
 
 add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
+  src/backends/lerobot_common/lerobot_episode.cpp
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
   src/backends/trossen_mcap/trossen_mcap_backend.cpp
   src/backends/null/null_backend.cpp
