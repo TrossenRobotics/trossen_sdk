@@ -76,6 +76,83 @@ bool load_aligned_episode(
   const DatasetSignalOptions& signals = {},
   const AlignmentOptions& alignment = {});
 
+/**
+ * @brief Decode the row-matched camera frames from an MCAP file into caller-chosen directories.
+ *
+ * Re-opens the MCAP file and writes, for every dataset row, that row's matched frame
+ * (CameraInfo::row_source_index) as `image_%06d.jpg` (JPEG quality 95, or 16-bit
+ * `image_%06d.png` for depth under the native schema) into the directory returned by
+ * `dir_for(camera_name)`. Output frames are numbered by row, so frame *k* of the encoded
+ * video is the observation belonging to data row *k*; a source frame matched by two
+ * consecutive rows is written twice. The callback is invoked once per camera and is
+ * responsible for creating the dir.
+ *
+ * Handles camera channels whose schema is `foxglove.RawImage`. Cameras stored as
+ * `foxglove.CompressedVideo` are skipped here; use extract_camera_video() for those. A
+ * recording may mix the two (color as video, depth as raw), so a caller should consult both.
+ *
+ * Both passes read the same file through the same reader, so a camera's arrival order here
+ * is identical to the one load_aligned_episode() indexed into.
+ *
+ * @param mcap_file Path to the input MCAP file.
+ * @param channels Channel maps from load_aligned_episode().
+ * @param episode Aligned episode supplying the per-row frame selection.
+ * @param dir_for Maps a camera name to the directory its frames are written to.
+ * @param out_counts Output per-camera written-frame counts (one per dataset row).
+ * @param native_schema Preserve 16-bit depth losslessly as PNG instead of 8-bit JPEG.
+ * @return true on success; false if a matched frame could not be decoded or written, or on
+ *         a fatal read error (message logged to stderr).
+ */
+bool extract_camera_images(
+  const std::string& mcap_file,
+  const McapChannelMap& channels,
+  const AlignedEpisode& episode,
+  const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
+  std::map<std::string, size_t>& out_counts,
+  bool native_schema = false);
+
+/**
+ * @brief Extract already-compressed camera video straight out of an MCAP.
+ *
+ * Handles camera channels whose schema is `foxglove.CompressedVideo`. Each
+ * camera's message payloads are appended, in log-time order, to a single Annex B
+ * elementary stream under `dir_for(camera_name)`. Nothing is decoded: the point
+ * is to let the caller remux with `ffmpeg -c copy`.
+ *
+ * Cameras stored as `foxglove.RawImage` are ignored here; use
+ * extract_camera_images() for those. A recording may legitimately mix the two
+ * (color as video, depth as raw), so a caller should consult both.
+ *
+ * @param mcap_file Path to the input MCAP file.
+ * @param channels Channel maps from load_aligned_episode().
+ * @param dir_for Maps a camera name to a directory to write into (created by the callback).
+ * @param out_streams Output per-camera video streams; empty when the recording has none.
+ * @return true on success; false on a fatal read error (message logged to stderr).
+ */
+bool extract_camera_video(
+  const std::string& mcap_file,
+  const McapChannelMap& channels,
+  const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
+  std::map<std::string, CameraVideoStream>& out_streams);
+
+/**
+ * @brief Trim an aligned episode to whatever every video-mode camera actually covers.
+ *
+ * Compressed camera streams are remuxed verbatim (extract_camera_video(), arrival order,
+ * not row-aligned), so a camera that free-ran short ends up with fewer frames than the
+ * joint-aligned episode has rows: lerobot then queries that video by row timestamp and
+ * walks off the end. Raw-image cameras always yield exactly one frame per row, because
+ * extract_camera_images() writes each row's matched source frame and writes it again when
+ * two rows match the same one, so only video-mode cameras are considered here.
+ *
+ * @param ep Aligned episode to trim in place; a no-op if no camera is shorter than the
+ *   episode already is.
+ * @param video_streams Per-camera compressed video streams from extract_camera_video(),
+ *   keyed by camera name (AlignedEpisode::cameras[i].name).
+ */
+void clamp_episode_to_video_frame_counts(
+  AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams);
+
 }  // namespace trossen::io::backends
 
 #endif  // TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__MCAP_DATASET_LOADER_HPP_
