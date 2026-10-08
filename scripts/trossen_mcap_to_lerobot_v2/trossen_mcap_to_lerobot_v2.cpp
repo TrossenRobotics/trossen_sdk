@@ -47,6 +47,7 @@
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_constants.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/configuration/cli_parser.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
@@ -114,13 +115,13 @@ static std::optional<uint64_t> read_recording_start_time(const std::filesystem::
 
   auto* data_source = reader.dataSource();
   const auto& meta_indexes = reader.metadataIndexes();
-  auto range = meta_indexes.equal_range("trossen_sdk_recording");
+  auto range = meta_indexes.equal_range(trossen::trossen_mcap_defs::kRecordingMetadataName);
   for (auto it = range.first; it != range.second; ++it) {
     mcap::Record raw_record;
     if (!mcap::McapReader::ReadRecord(*data_source, it->second.offset, &raw_record).ok()) continue;
     mcap::Metadata meta_record;
     if (!mcap::McapReader::ParseMetadata(raw_record, &meta_record).ok()) continue;
-    auto ts_it = meta_record.metadata.find("recording_start_time");
+    auto ts_it = meta_record.metadata.find(trossen::trossen_mcap_defs::kRecordingStartTimeKey);
     if (ts_it != meta_record.metadata.end()) {
       try {
         return static_cast<uint64_t>(std::stoull(ts_it->second));
@@ -716,7 +717,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   const auto& meta_indexes = reader.metadataIndexes();
 
   // Find all metadata records named "trossen_sdk_recording"
-  auto range = meta_indexes.equal_range("trossen_sdk_recording");
+  auto range = meta_indexes.equal_range(trossen::trossen_mcap_defs::kRecordingMetadataName);
   for (auto it = range.first; it != range.second; ++it) {
     // Read the raw record from the MCAP file at the indexed offset
     mcap::Record raw_record;
@@ -729,7 +730,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     if (!rs.ok()) continue;
 
     // Look for the "dataset_info" key within the metadata key-value pairs
-    auto info_it = meta_record.metadata.find("dataset_info");
+    auto info_it = meta_record.metadata.find(trossen::trossen_mcap_defs::kDatasetInfoKey);
     if (info_it != meta_record.metadata.end()) {
       try {
         // Parse the JSON string into our mcap_dataset_info object
@@ -767,7 +768,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     std::string topic = channel_ptr->topic;
     std::cout << "    - Topic: '" << topic << "'\n";
 
-    size_t odom_pos = topic.find("/odom/state");
+    size_t odom_pos = topic.find(trossen::trossen_mcap_defs::kOdometry2DTopicSuffix);
     if (odom_pos != std::string::npos) {
       std::string stream_id = topic.substr(0, odom_pos);
       if (!stream_id.empty() && stream_id[0] == '/') {
@@ -779,7 +780,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       continue;
     }
 
-    size_t pos = topic.find("/joints/state");
+    size_t pos = topic.find(trossen::trossen_mcap_defs::kJointStateTopicSuffix);
     if (pos != std::string::npos) {
       std::string stream_id = topic.substr(0, pos);
       // Remove leading slash if present
@@ -788,10 +789,11 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       }
       channel_id_to_stream[channel_id] = stream_id;
 
-      if (stream_id.find("leader") != std::string::npos) {
+      if (stream_id.find(trossen::trossen_mcap_defs::kLeaderStreamToken) != std::string::npos) {
         detected_leader_streams.push_back(stream_id);
         std::cout << "    [ok] Detected leader stream: " << stream_id << "\n";
-      } else if (stream_id.find("follower") != std::string::npos) {
+      } else if (stream_id.find(trossen::trossen_mcap_defs::kFollowerStreamToken) !=
+                 std::string::npos) {
         detected_follower_streams.push_back(stream_id);
         std::cout << "    [ok] Detected follower stream: " << stream_id << "\n";
       }
@@ -799,7 +801,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
     // Topic format: /cameras/<camera_name>/image
     {
-      static const std::regex camera_topic_re("^/cameras/(.+)/image$");
+      static const std::regex camera_topic_re(
+        std::string("^") + trossen::trossen_mcap_defs::kCameraTopicPrefix + "(.+)" +
+        trossen::trossen_mcap_defs::kImageTopicSuffix + "$");
       std::smatch m;
       if (std::regex_match(topic, m, camera_topic_re)) {
         camera_channels[channel_id] = m[1].str();
