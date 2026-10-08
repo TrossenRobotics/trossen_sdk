@@ -222,7 +222,8 @@ int main(int argc, char** argv) {
   std::string format_version;
   nlohmann::json dataset_info;
   const auto& metadata_indexes = reader.metadataIndexes();
-  const auto record_it = metadata_indexes.find("trossen_sdk_recording");
+  const auto record_it =
+    metadata_indexes.find(trossen::trossen_mcap_defs::kRecordingMetadataName);
   if (record_it != metadata_indexes.end()) {
     mcap::Record raw_record;
     mcap::Metadata record;
@@ -234,7 +235,7 @@ int main(int argc, char** argv) {
           it != fields.end()) {
         format_version = it->second;
       }
-      if (const auto it = fields.find("dataset_info");
+      if (const auto it = fields.find(trossen::trossen_mcap_defs::kDatasetInfoKey);
           it != fields.end()) {
         dataset_info = nlohmann::json::parse(it->second, nullptr, /*allow_exceptions=*/false);
       }
