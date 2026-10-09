@@ -59,6 +59,10 @@ if(TROSSEN_ENABLE_VIDEO_ENCODE)
   add_executable(test_video_encoder test_video_encoder.cpp)
   target_link_libraries(test_video_encoder PRIVATE trossen_sdk GTest::gtest_main)
   target_compile_definitions(test_video_encoder PRIVATE TROSSEN_ENABLE_VIDEO_ENCODE)
+  # The Jetson tests expect the encoder to open only when the SDK was built with it.
+  if(GST_ENC_FOUND)
+    target_compile_definitions(test_video_encoder PRIVATE TROSSEN_HAVE_GST_VIDEO_ENCODE)
+  endif()
 endif()
 
 add_executable(test_record_types test_record_types.cpp)
