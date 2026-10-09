@@ -11,6 +11,7 @@
 #   ./build/scripts/replay_trossen_mcap_jointstate <mcap_file>
 #   ./build/scripts/trossen_mcap_to_lerobot_v2 <mcap_file_or_folder>
 #   ./build/scripts/trossen_mcap_to_lerobot_v3 <mcap_file_or_folder>
+#   ./build/scripts/trossen_mcap_transcode_video <mcap_file_or_folder>
 # ──────────────────────────────────────────────────────────────────────────────
 
 # TrossenMCAP joint-state replay tool
@@ -30,3 +31,11 @@ find_package(Threads REQUIRED)
 add_executable(trossen_mcap_to_lerobot_v3 trossen_mcap_to_lerobot_v3/trossen_mcap_to_lerobot_v3.cpp)
 target_include_directories(trossen_mcap_to_lerobot_v3 PRIVATE ${CMAKE_BINARY_DIR})
 target_link_libraries(trossen_mcap_to_lerobot_v3 trossen_sdk arrow parquet protobuf ${OpenCV_LIBS} Threads::Threads)
+
+# Raw-image → compressed-video MCAP transcode tool
+# Needs the SDK built with -DTROSSEN_ENABLE_VIDEO_ENCODE=ON; without it the tool builds
+# but reports that the build has no encoder.
+add_executable(trossen_mcap_transcode_video
+  trossen_mcap_transcode_video/trossen_mcap_transcode_video.cpp)
+target_include_directories(trossen_mcap_transcode_video PRIVATE ${CMAKE_BINARY_DIR})
+target_link_libraries(trossen_mcap_transcode_video trossen_sdk protobuf ${OpenCV_LIBS})
