@@ -24,7 +24,10 @@ RUN \
     wget \
   && rm -rf /var/lib/apt/lists/*
 
-# Install Arrow C++ from official repository
+# Install Arrow C++ from official repository. The apt source always serves the
+# newest Arrow, and a new major release can remove APIs the SDK calls, so the
+# version is pinned; bump it deliberately.
+ARG ARROW_VERSION=26.0.0-1
 RUN \
   wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb && \
   apt-get update && \
@@ -32,8 +35,8 @@ RUN \
     ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb && \
   apt-get update && \
   apt-get install -yqq --no-install-recommends \
-    libarrow-dev \
-    libparquet-dev && \
+    libarrow-dev=${ARROW_VERSION} \
+    libparquet-dev=${ARROW_VERSION} && \
   rm -rf /var/lib/apt/lists/* && \
   rm apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 
