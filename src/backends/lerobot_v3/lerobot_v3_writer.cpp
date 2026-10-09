@@ -41,8 +41,46 @@ bool LeRobotV3DatasetWriter::open() {
   return false;
 }
 
+std::shared_ptr<arrow::Schema> LeRobotV3DatasetWriter::make_data_schema() const {
+  // TODO(shantanuparab-tr): build the arrow schema for a v3.0 data file.
+  return nullptr;
+}
+
+std::shared_ptr<arrow::Table> LeRobotV3DatasetWriter::build_episode_table(
+  const AlignedEpisode& ep, int episode_index, int task_index, int64_t global_from) const
+{
+  // TODO(shantanuparab-tr): build one episode's arrow table.
+  return nullptr;
+}
+
+bool LeRobotV3DatasetWriter::open_data_writer(const std::shared_ptr<arrow::Schema>& schema) {
+  // TODO(shantanuparab-tr): open a new size-rolled parquet data file.
+  return false;
+}
+
 void LeRobotV3DatasetWriter::close_data_writer() {
   // TODO(shantanuparab-tr): close the open parquet data file.
+}
+
+bool LeRobotV3DatasetWriter::roll_data_file_if_needed(int64_t next_ep_frames) {
+  // TODO(shantanuparab-tr): roll to the next data file when the size budget is crossed.
+  return false;
+}
+
+LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
+  const fs::path& mcap_path,
+  int episode_index,
+  const std::string& fallback_task,
+  const fs::path& tmp_root) const
+{
+  // TODO(shantanuparab-tr): decode, extract and encode one episode on a worker thread.
+  return {};
+}
+
+bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
+{
+  // TODO(shantanuparab-tr): append a prepared episode to the aggregated files, in order.
+  return false;
 }
 
 bool LeRobotV3DatasetWriter::finalize() {
