@@ -165,6 +165,77 @@ size_t encode_message(Message& msg, std::vector<uint8_t>& buffer) {
   return encoded_len;
 }
 
+/// @brief Key holding the episode's identity in the recording metadata record.
+constexpr char kEpisodeIdKey[] = "episode_id";
+
+/// @brief Key the recorder writes the task prompt under today.
+constexpr char kTaskDescriptionKey[] = "task_description";
+
+/// @brief The key older recordings wrote the same prompt under.
+constexpr char kLegacyTaskKey[] = "task";
+
+/**
+ * @brief Make one recording's metadata agree with the name of the file it is in.
+ *
+ * @param fields Metadata of the recording record, edited in place.
+ * @param episode_id Identity to write, normally the file's stem.
+ * @return true when anything changed.
+ */
+bool rewrite_recording_metadata(mcap::KeyValueMap& fields, const std::string& episode_id) {
+  bool changed = false;
+
+  auto id = fields.find(kEpisodeIdKey);
+  if (id == fields.end() || id->second != episode_id) {
+    fields[kEpisodeIdKey] = episode_id;
+    changed = true;
+  }
+
+  // The prompt moves rather than being copied, so a reader cannot find two of
+  // them and have to guess which one the recorder meant.
+  auto legacy = fields.find(kLegacyTaskKey);
+  if (legacy != fields.end()) {
+    if (fields.find(kTaskDescriptionKey) == fields.end()) {
+      fields[kTaskDescriptionKey] = legacy->second;
+    }
+    fields.erase(legacy);
+    changed = true;
+  }
+  return changed;
+}
+
+/// @brief Copy every file-level metadata record from the input to the output.
+/// @return Number of records copied.
+size_t copy_metadata_records(mcap::McapReader& reader, foxglove::McapWriter& writer,
+                             const std::string& episode_id, bool* rewritten) {
+  size_t copied = 0;
+  auto* data_source = reader.dataSource();
+  if (!data_source) return copied;
+
+  for (const auto& [name, index] : reader.metadataIndexes()) {
+    mcap::Record raw_record;
+    if (!mcap::McapReader::ReadRecord(*data_source, index.offset, &raw_record).ok()) continue;
+
+    mcap::Metadata record;
+    if (!mcap::McapReader::ParseMetadata(raw_record, &record).ok()) continue;
+
+    if (!episode_id.empty() && name == trossen_mcap_defs::kRecordingMetadataName) {
+      if (rewrite_recording_metadata(record.metadata, episode_id)) {
+        *rewritten = true;
+      }
+    }
+
+    // The map is unordered_map<string, string>; writeMetadata only iterates it.
+    auto status = writer.writeMetadata(name, record.metadata.begin(), record.metadata.end());
+    if (status != foxglove::FoxgloveError::Ok) {
+      std::cerr << "Warning: Failed to copy metadata record '" << name
+                << "': " << foxglove::strerror(status) << "\n";
+      continue;
+    }
+    ++copied;
+  }
+  return copied;
+}
+
 /// @brief Translate a compression name to the writer's enum, defaulting to none.
 foxglove::McapCompression compression_from(const std::string& name) {
   if (name == "zstd") return foxglove::McapCompression::Zstd;
@@ -280,6 +351,15 @@ bool transcode_images_to_video(
   }
   auto writer = std::move(writer_result.value());
 
+  // The file's own name is the episode's identity, so that is what the metadata
+  // is made to say. An explicit id wins, for a caller that renames as it goes.
+  std::string episode_id;
+  if (options.rewrite_episode_metadata) {
+    episode_id = options.episode_id.empty() ? output.stem().string() : options.episode_id;
+  }
+  stats.metadata_records_copied =
+    copy_metadata_records(reader, writer, episode_id, &stats.metadata_rewritten);
+
   // Plan every channel before the first message, so a channel that only needs copying is
   // advertised in the output even if the recording never logged to it.
   std::map<mcap::ChannelId, ChannelPlan> plans;
@@ -297,10 +377,12 @@ bool transcode_images_to_video(
 
     ChannelPlan plan;
     plan.metadata.insert(channel->metadata.begin(), channel->metadata.end());
-    plan.copy = !(is_camera_image_topic(channel->topic) && schema_name == kRawImageSchema);
+    plan.copy = options.metadata_only ||
+                !(is_camera_image_topic(channel->topic) && schema_name == kRawImageSchema);
 
     if (plan.copy) {
-      if (is_camera_image_topic(channel->topic) && schema_name == kCompressedVideoSchema) {
+      if (is_camera_image_topic(channel->topic) &&
+          (options.metadata_only || schema_name == kCompressedVideoSchema)) {
         ++stats.cameras_passthrough;
       }
       auto created = foxglove::RawChannel::create(

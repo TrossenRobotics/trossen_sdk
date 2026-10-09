@@ -33,6 +33,30 @@ struct VideoTranscodeOptions {
   std::string compression{"zstd"};
   /// @brief Overwrite the output file when it already exists.
   bool overwrite{false};
+
+  /**
+   * @brief Bring the recording's own metadata in line with its filename.
+   *
+   * Recordings written before the SDK named episodes by UUID carry an
+   * `episode_index` that was only ever unique inside the folder they were
+   * recorded into, and name the prompt `task` rather than `task_description`.
+   * Once such files sit in one flat directory the index identifies nothing, so
+   * the transcode writes `episode_id` from the filename and renames the prompt.
+   * `episode_index` is left as recorded; it is what the recorder observed.
+   */
+  bool rewrite_episode_metadata{true};
+
+  /// @brief Episode id to write; empty means the output file's own stem.
+  std::string episode_id;
+
+  /**
+   * @brief Copy the recording as it is, changing only its metadata.
+   *
+   * Camera frames are passed through in whatever form they were stored, so a
+   * raw recording stays raw. For fixing the metadata of files that are keeping
+   * their original format, at the cost of rewriting each one.
+   */
+  bool metadata_only{false};
 };
 
 /// @brief What one transcode run produced.
@@ -45,8 +69,13 @@ struct VideoTranscodeStats {
   size_t depth_frames_encoded{0};
   /// @brief Camera streams converted from raw images to video.
   size_t cameras_transcoded{0};
-  /// @brief Camera streams copied through untouched, because they already held video.
+  /// @brief Camera streams copied through untouched, because they already held
+  ///        video or because only the metadata is being changed.
   size_t cameras_passthrough{0};
+  /// @brief File-level metadata records copied.
+  size_t metadata_records_copied{0};
+  /// @brief Whether the recording's metadata was rewritten to match its name.
+  bool metadata_rewritten{false};
 };
 
 /**
