@@ -18,6 +18,8 @@ Leave `fps` at 30.
 1. [Usage](#1-usage)
 2. [The pipeline](#2-the-pipeline)
 3. [The parallelism model](#3-the-parallelism-model)
+4. [Configuration reference](#4-configuration-reference)
+5. [Tuning for speed](#5-tuning-for-speed)
 
 ---
 
@@ -97,6 +99,128 @@ This stage appends parquet rows and, at each video rollover, joins the staged ep
 **Output is independent of `--jobs`.**
 The writer sees episodes in the same order regardless of how many workers fed it, so `--jobs 1` and `--jobs 8` produce the same data.
 That is worth knowing when you are chasing a difference between two conversions.
+
+---
+
+## 4. Configuration reference
+
+Every key sits under `lerobot_v3_backend`.
+That object must also contain `"type": "lerobot_v3_backend"`; without it the object is not loaded as the backend config.
+The "Omitted" column is the value used when a key is missing from the config file.
+The "config.json" column is the value the shipped `scripts/trossen_mcap_to_lerobot_v3/config.json` sets, which is what a run without `--config` uses.
+
+### Output identity
+
+| Key | Omitted | config.json | Meaning |
+|---|---|---|---|
+| `root` | `~/.cache/trossen_sdk` | `~/.cache/huggingface/lerobot` | Output root |
+| `repository_id` | `TrossenRoboticsCommunity` | `TrossenRoboticsCommunity` | First path component under root |
+| `dataset_id` | `dataset_<YYYYMMDD_HHMMSS>` | `mcap_converted_dataset_v3` | Second path component; the dataset name |
+| `robot_name` | `trossen_ai_stationary` | `bi_widowxai_follower_robot` | `robot_type` in `info.json` |
+| `license` | `apache-2.0` | `apache-2.0` | Written to the dataset card (`README.md` front matter and body) |
+
+Output lands in `<root>/<repository_id>/<dataset_id>/`.
+
+> [!IMPORTANT]
+> The shipped config sets a fixed `dataset_id`, so every run targets the same path.
+> Give each dataset its own name with `--set lerobot_v3_backend.dataset_id=<name>`.
+
+### Behavior
+
+| Key | Omitted | config.json | Meaning |
+|---|---|---|---|
+| `task_name` | `perform a generic task` | `perform a generic task` | **Fallback only**: used for episodes whose MCAP embeds no task |
+| `overwrite_existing` | `false` | `false` | Delete an existing dataset first. Without it, an existing dataset stops the run before anything is written |
+| `encode_videos` | `true` | `true` | Encode and concatenate camera video |
+| `fps` | `30` | `30` | See section 6.1; **not** a working knob |
+
+### File partitioning
+
+| Key | Omitted | config.json | Meaning |
+|---|---|---|---|
+| `chunks_size` | `1000` | `1000` | Files per `chunk-NNN/` directory before rolling to the next |
+| `data_files_size_in_mb` | `100` | `100` | Roll to a new data parquet past this projected size |
+| `video_files_size_in_mb` | `200` | `200` | Start a new shared video file past this size |
+
+### Parallelism
+
+| Key | Omitted | config.json | Meaning |
+|---|---|---|---|
+| `jobs` | `min(cores, 8)` | not set | Worker threads that prepare episodes (section 5.1) |
+| `encoder_threads` | `max(1, cores / jobs)` | not set | Parallelism cap per video encoder; `0` = uncapped (section 5.1) |
+
+`--jobs` and `--encoder-threads` override these keys for one run.
+
+---
+
+## 5. Tuning for speed
+
+### 5.1 `--jobs`: the worker count
+
+Default `min(cores, 8)`.
+This is the first knob to reach for.
+
+- **Each encoder is capped.**
+  `--encoder-threads` defaults to `max(1, cores / jobs)`, and the writer passes it to SVT-AV1 as `lp=` and to x265 as `pools=`, so with `--jobs` at or below the core count the encoders together fill the machine without oversubscribing it.
+  Above the core count each encoder still gets at least one thread, so the machine is oversubscribed.
+  `pools=` caps x265's worker pool but not its frame threads, so depth encoders can use somewhat more than the cap.
+  The cap covers only these encoders: MCAP decode, frame extraction, and the ffmpeg decode that samples color frames for statistics are not limited by it.
+  `--encoder-threads 0` removes the cap, and every encoder then sizes itself to the whole machine.
+- **Lower it when sharing the machine.**
+  The default encoder cap is `cores / jobs`, so a lower `--jobs` alone still lets one conversion use the whole machine.
+  Set `--encoder-threads` too, so that `jobs x encoder-threads` stays within the cores you want to give it.
+  That bounds the encoders only approximately, so leave headroom, especially for compressed-video recordings, which skip the encoders entirely.
+  The same applies when converting while a recording session is running.
+- It is clamped to the episode count, so a 3-episode dataset uses 3 workers.
+
+> [!WARNING]
+> On a 24-core machine, `--jobs 12` crashed with SIGSEGV once a dataset reached the video concat step, and `--jobs 8` was clean.
+> Stay at 8 or below.
+
+### 5.2 `video_files_size_in_mb`: how episodes share a video file
+
+Each episode's mp4 is moved into a staging folder next to its camera's shared file.
+When the next episode would take the staged total to the budget, the staged mp4s are joined once with `ffmpeg -f concat -c copy` into the shared file, and a new file starts; `finalize()` joins whatever is still staged.
+A file holding a single episode is renamed into place without running ffmpeg.
+No re-encoding happens, and each episode's video is written into its shared file once.
+Joining still reads and writes every grouped episode one more time, while a file holding a single episode costs only a rename, so a budget of 0 (one episode per file) does the least video I/O.
+
+- **Larger values mean fewer, larger video files.** Any file holding more than one episode costs one extra read and write of those episodes, however many it holds; only a budget small enough to give each episode its own file avoids it.
+- A file holds at least one episode, so an episode larger than the budget gets a file of its own.
+- Each camera has its own shared file and its own budget, so a camera's per-episode mp4 size sets how many episodes fit in that camera's file; shorter episodes put more in each.
+
+### 5.3 `encode_videos=false`: the big hammer
+
+Skips both encoding and concatenation, leaving MCAP decode plus parquet writing: minutes rather than hours.
+The dataset gets joint data, metadata, and statistics but no camera video, so it will not train a vision policy.
+It is useful for checking that the streams' timestamps align, that joint data looks sane, or that the tasks came through, before committing to a full run.
+It does not check camera data beyond timestamps: images are not extracted, and compressed streams and video frame counts are not checked, so a camera problem only shows up in a full run.
+
+### 5.4 Disk
+
+For raw-image recordings, the pipeline writes the camera frame matched to each dataset row to disk as JPEG or PNG (unmatched frames are skipped, and a frame matched to several rows is written for each), encodes from those files, then deletes them.
+That is a large amount of small-file I/O on top of the encoding.
+Depth cameras also write an uncompressed 12-bit intermediate at 2 bytes per pixel before encoding: about 66 GB per hour of 640x480 depth at 30 fps, for each episode encoding at once, so leave room for it.
+Compressed-video recordings skip it: each camera's stream is written to disk once and remuxed with `-c copy`.
+
+> [!WARNING]
+> Do not convert directly off a network share.
+> Copy the recordings to local disk, convert, then upload the result.
+> The temp directory lives under the *output* dataset root (`<dataset>/.tmp_convert`), so the output path must be fast local disk too.
+
+### 5.5 Input compression
+
+Reading `zstd` or `lz4` MCAP costs CPU to inflate and saves read time when the data compresses well, as raw images and joint data do.
+Recordings that already hold H.264 or H.265 video shrink little further, so on fast storage the decompression can cost more than it saves; measure both on your own recordings and disk.
+
+### 5.6 `data_files_size_in_mb`
+
+Rarely worth touching.
+The roll decision projects from the schema's fixed row width, `(action_dim + obs_dim) x 4 + 36` bytes: 148 B per frame for a 14+14 DOF bimanual robot.
+A megabyte here is 1,000,000 bytes, so the 100 MB default holds about 676k frames, or about 6.3 hours of 30 Hz recording, in one file.
+Files roll only between episodes, so a single episode longer than the budget still goes into one file.
+Parquet compresses the rows, so files usually come out well under the projected size: an 83-episode, 4-camera dataset produced a single 6.4 MB data file.
+It only becomes relevant on very large datasets.
 
 ---
 
