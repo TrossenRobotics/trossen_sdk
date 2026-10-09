@@ -180,6 +180,35 @@ nlohmann::ordered_json build_features(
   const AlignedEpisode& ep,
   const DatasetSignalOptions& signals = {});
 
+/// @brief Codec and pixel format of one output video, as written to info.json.
+struct VideoCodecInfo {
+  /// @brief Canonical codec name: "av1", "h264" or "hevc".
+  std::string codec;
+  /// @brief Pixel format: "yuv420p" (color) or "gray12le" (depth).
+  std::string pix_fmt;
+};
+
+/**
+ * @brief Codec and pixel format of a camera stream copied out of a recording.
+ *
+ * "h264" maps to h264/yuv420p (color) and "h265" to hevc/gray12le (depth).
+ *
+ * @param format CompressedVideo format as recorded: "h264" or "h265".
+ * @return The codec and pixel format of the copied stream.
+ * @throws std::invalid_argument For any other format.
+ */
+VideoCodecInfo copied_stream_codec(const std::string& format);
+
+/**
+ * @brief Overwrite a camera's codec and pixel format in its `features` entry.
+ *
+ * @param features The `features` object from build_features().
+ * @param obs_key Camera feature key, `observation.images.<camera>`; a missing key is a no-op.
+ * @param codec Codec and pixel format of the camera's video.
+ */
+void set_video_codec(
+  nlohmann::ordered_json& features, const std::string& obs_key, const VideoCodecInfo& codec);
+
 }  // namespace trossen::io::backends
 
 #endif  // TROSSEN_SDK__IO__BACKENDS__LEROBOT_COMMON__LEROBOT_EPISODE_HPP_
