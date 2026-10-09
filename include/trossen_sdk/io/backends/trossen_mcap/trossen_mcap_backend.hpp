@@ -229,6 +229,30 @@ private:
   foxglove::RawChannel* ensure_odometry_2d_channel(const std::string& stream_id);
 
   /**
+   * @brief Ensure the per-frame metadata channel exists for a camera stream
+   *
+   * @param stream_id Camera stream identifier (e.g., "camera_high", "camera_high_depth")
+   * @return Pointer to the channel, or nullptr on failure
+   */
+  foxglove::RawChannel* ensure_camera_meta_channel(const std::string& stream_id);
+
+  /**
+   * @brief Write one frame's timing to the camera's metadata channel
+   *
+   * The image topics use Foxglove schemas, which carry a single timestamp and cannot
+   * hold a device capture time. This writes the full clock set for the same frame on a
+   * parallel topic. Call it only after the frame itself was written: each message carries
+   * the frame's position in this episode's stream, which readers join on.
+   *
+   * @param stream_id Camera stream identifier, matching the image topic
+   * @param ts Timestamps for the frame
+   * @param seq Producer sequence number of the frame
+   * @param device_frame_number The camera's own frame counter, when it reports one
+   */
+  void write_camera_meta_record(const std::string& stream_id, const data::Timestamp& ts,
+                                uint64_t seq, std::optional<uint64_t> device_frame_number);
+
+  /**
    * @brief Write an image record
    *
    * @param img Image record to write
@@ -313,6 +337,9 @@ private:
   /// @brief Serialised FileDescriptorSet for the Odometry2D protobuf schema
   std::string schema_data_odom2d_;
 
+  /// @brief Serialised FileDescriptorSet for the FrameMeta protobuf schema
+  std::string schema_data_frame_meta_;
+
   /// @brief Output file path
   std::filesystem::path path_;
 
@@ -324,6 +351,12 @@ private:
 
   /// @brief Map of image channels by camera name
   std::unordered_map<std::string, foxglove::RawChannel> image_channels_;
+
+  /// @brief Per-camera frame metadata channels, keyed by stream id
+  std::unordered_map<std::string, foxglove::RawChannel> camera_meta_channels_;
+
+  /// @brief Frames written so far this episode, per camera stream; the next frame's index
+  std::unordered_map<std::string, uint64_t> camera_meta_frame_index_;
 
   /// @brief Per-camera video encoders, keyed by ImageRecord::id
   std::unordered_map<std::string, std::unique_ptr<utils::VideoEncoder>> video_encoders_;
