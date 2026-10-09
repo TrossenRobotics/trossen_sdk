@@ -986,23 +986,80 @@ bool LeRobotV3DatasetWriter::write_tasks_parquet() {
 }
 
 bool LeRobotV3DatasetWriter::write_stats_json() {
-  // TODO(shantanuparab-tr): write the aggregated dataset statistics.
-  return false;
+  nlohmann::ordered_json stats;
+  stats["action"] = vector_stats(action_values_, total_frames_);
+  stats["observation.state"] = vector_stats(obs_values_, total_frames_);
+  stats["timestamp"] = vector_stats({ts_values_}, total_frames_);
+  for (const auto& key : video_keys_) {
+    auto it = image_samples_.find(key);
+    if (it != image_samples_.end() && !it->second.empty()) {
+      stats[key] = image_stats(it->second, static_cast<int64_t>(it->second.size()));
+    }
+  }
+
+  fs::path out_path = opts_.dataset_root / v3::STATS_PATH;
+  std::ofstream f(out_path);
+  if (!f.is_open()) {
+    std::cerr << "Error: Failed to write stats.json\n";
+    return false;
+  }
+  f << stats.dump(2) << "\n";
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::write_info_json() {
-  // TODO(shantanuparab-tr): write the v3.0 info.json.
-  return false;
+  nlohmann::ordered_json info;
+  info["codebase_version"] = v3::CODEBASE_VERSION;
+  info["robot_type"] = opts_.robot_name;
+  info["total_episodes"] = static_cast<int>(episodes_.size());
+  info["total_frames"] = total_frames_;
+  info["total_tasks"] = static_cast<int>(task_list_.size());
+  info["fps"] = static_cast<int>(opts_.fps);
+  info["chunks_size"] = opts_.chunks_size;
+  info["data_files_size_in_mb"] = opts_.data_files_size_in_mb;
+  info["video_files_size_in_mb"] = opts_.video_files_size_in_mb;
+  info["data_path"] = v3::INFO_DATA_PATH;
+  if (!video_keys_.empty()) {
+    info["video_path"] = v3::INFO_VIDEO_PATH;
+  } else {
+    info["video_path"] = nullptr;
+  }
+  info["splits"] = {{"train", "0:" + std::to_string(episodes_.size())}};
+  info["features"] = features_;
+
+  fs::path out_path = opts_.dataset_root / v3::INFO_PATH;
+  std::ofstream f(out_path);
+  if (!f.is_open()) {
+    std::cerr << "Error: Failed to write info.json\n";
+    return false;
+  }
+  f << info.dump(2) << "\n";
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::write_readme() {
-  // TODO(shantanuparab-tr): write the dataset README.
-  return false;
+  return trossen::io::backends::generate_dataset_readme(
+      opts_.dataset_root, v3::INFO_PATH, "trossen_mcap_to_lerobot_v3", opts_.license);
 }
 
 bool LeRobotV3DatasetWriter::finalize() {
-  // TODO(shantanuparab-tr): write every metadata file once all episodes are in.
-  return false;
+  close_data_writer();
+
+  if (episodes_.empty()) {
+    std::cerr << "Error: no episodes were written; nothing to finalize.\n";
+    return false;
+  }
+
+  bool ok = true;
+  ok = write_episodes_parquet() && ok;
+  ok = write_tasks_parquet() && ok;
+  ok = write_stats_json() && ok;
+  ok = write_info_json() && ok;
+  // README is best-effort and must run after info.json exists.
+  if (!write_readme()) {
+    std::cerr << "  Warning: Failed to generate README.md\n";
+  }
+  return ok;
 }
 
 }  // namespace trossen::io::backends
