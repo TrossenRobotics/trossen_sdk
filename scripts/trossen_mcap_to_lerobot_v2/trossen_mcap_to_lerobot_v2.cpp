@@ -733,6 +733,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   cfg.robot_name = ep.robot_name;
+  // Prefer the task embedded in this episode's MCAP; fall back to the config's.
+  const std::string task_name = ep.task_name.empty() ? cfg.task_name : ep.task_name;
 
   // Width of every action and observation.state row.
   const int action_dim = trossen::io::backends::episode_action_dim(ep);
@@ -1113,7 +1115,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   int num_cameras = static_cast<int>(channels.camera_channels.size());
 
   if (trossen::io::backends::write_episode_metadata(
-          meta_dir, cfg.episode_index, cfg.task_name, 0, static_cast<int>(rows_written),
+          meta_dir, cfg.episode_index, task_name, 0, static_cast<int>(rows_written),
           num_cameras)) {
     std::cout << "  [ok] Updated " << info_path.string() << "\n";
     std::cout << "  [ok] Created/Updated "
