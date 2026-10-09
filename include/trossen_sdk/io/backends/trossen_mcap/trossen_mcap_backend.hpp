@@ -175,6 +175,9 @@ public:
   std::string current_output_path() const override { return path_.string(); }
 
 private:
+  /// @brief Gives the unit tests access to the private frame writers.
+  friend class TrossenMCAPBackendTestPeer;
+
   /**
    * @brief Close all channels and writer without deleting files.
    *
@@ -250,8 +253,9 @@ private:
    * @param img Image record to encode
    * @param depth True for a depth frame, false for color
    * @param channel Channel to log the message to
+   * @return true if the frame was logged; false if it was dropped
    */
-  void write_video_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
+  bool write_video_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
 
   /**
    * @brief Serialize one cv::Mat as foxglove.RawImage and log it
@@ -264,8 +268,9 @@ private:
    * @param ts Capture timestamp
    * @param channel Channel to log the message to
    * @param counter Stats counter bumped on success
+   * @return true if the frame was logged; false if it was dropped
    */
-  void write_raw_image_message(const cv::Mat& image, const std::string& frame_id, uint32_t width,
+  bool write_raw_image_message(const cv::Mat& image, const std::string& frame_id, uint32_t width,
                                uint32_t height, const std::string& encoding,
                                const data::Timespec& ts, foxglove::RawChannel* channel,
                                uint64_t* counter);
@@ -276,8 +281,9 @@ private:
    * @param img Image record to write
    * @param depth True for a depth frame, false for color
    * @param channel Channel to log the message to
+   * @return true if the frame was logged; false if it was dropped
    */
-  void write_image_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
+  bool write_image_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
 
   /**
    * @brief Write a joint state record
