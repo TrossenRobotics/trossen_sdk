@@ -37,6 +37,7 @@
 #include <iomanip>
 #include <iostream>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -192,6 +193,48 @@ inline bool create_initial_info_json(
 }
 
 /**
+ * @brief Read the tasks listed in tasks.jsonl
+ *
+ * @param meta_dir Path to the meta directory
+ * @return Task names in task_index order; empty when tasks.jsonl does not exist
+ * @throws std::runtime_error when tasks.jsonl cannot be opened or a line is not a task entry
+ */
+inline std::vector<std::string> read_tasks(const std::filesystem::path& meta_dir) {
+  const std::filesystem::path tasks_path = meta_dir / JSONL_TASKS;
+  std::vector<std::string> tasks;
+  if (!std::filesystem::exists(tasks_path)) {
+    return tasks;
+  }
+  std::ifstream tasks_file(tasks_path);
+  if (!tasks_file.is_open()) {
+    throw std::runtime_error("Failed to open " + tasks_path.string() + " for reading");
+  }
+  std::string line;
+  for (int line_number = 1; std::getline(tasks_file, line); ++line_number) {
+    if (line.empty()) continue;
+    try {
+      tasks.push_back(nlohmann::json::parse(line).at("task").get<std::string>());
+    } catch (const nlohmann::json::exception& e) {
+      throw std::runtime_error(
+          tasks_path.string() + " line " + std::to_string(line_number) + ": " + e.what());
+    }
+  }
+  return tasks;
+}
+
+/**
+ * @brief Index of a task in tasks.jsonl
+ *
+ * @param meta_dir Path to the meta directory
+ * @param task_name Task name
+ * @return The task's index, or the index write_task_entry() gives it when it is not listed
+ */
+inline int find_task_index(const std::filesystem::path& meta_dir, const std::string& task_name) {
+  const auto tasks = read_tasks(meta_dir);
+  return static_cast<int>(std::find(tasks.begin(), tasks.end(), task_name) - tasks.begin());
+}
+
+/**
  * @brief Update info.json with episode counts, frames, videos, and train split
  *
  * @param meta_dir Path to the meta directory
@@ -229,6 +272,8 @@ inline bool update_info_json(
 
   // Update total frames
   info_json["total_frames"] = info_json.value("total_frames", 0) + episode_frame_count;
+
+  info_json["total_tasks"] = read_tasks(meta_dir).size();
 
   // Recompute total_chunks = ceil(total_episodes / chunks_size)
   int chunks_size = info_json.value("chunks_size", 1000);
@@ -297,34 +342,32 @@ inline bool write_episode_entry(
 }
 
 /**
- * @brief Write a task entry to tasks.jsonl if it doesn't exist
+ * @brief Append a task to tasks.jsonl, at the next index, unless it is already listed
  *
  * @param meta_dir Path to the meta directory
- * @param task_index Task index
  * @param task_name Task name
  * @return true on success, false on failure
  */
 inline bool write_task_entry(
     const std::filesystem::path& meta_dir,
-    int task_index,
     const std::string& task_name) {
   namespace fs = std::filesystem;
 
   fs::path tasks_path = meta_dir / JSONL_TASKS;
 
-  // Only create if it doesn't exist
-  if (fs::exists(tasks_path)) {
-    return true;  // Already exists, nothing to do
+  const auto tasks = read_tasks(meta_dir);
+  if (std::find(tasks.begin(), tasks.end(), task_name) != tasks.end()) {
+    return true;
   }
 
-  std::ofstream tasks_file(tasks_path);
+  std::ofstream tasks_file(tasks_path, std::ios::app);
   if (!tasks_file.is_open()) {
     std::cerr << "Error: Failed to open " << tasks_path << " for writing\n";
     return false;
   }
 
   nlohmann::ordered_json task_entry;
-  task_entry["task_index"] = task_index;
+  task_entry["task_index"] = tasks.size();
   task_entry["task"] = task_name;
 
   tasks_file << task_entry.dump() << "\n";
@@ -521,7 +564,6 @@ inline bool write_episode_stats_with_data(
  * @param meta_dir Path to the meta directory
  * @param episode_index Episode index
  * @param task_name Task name
- * @param task_index Task index (default: 0)
  * @param episode_length Number of frames in the episode
  * @param num_videos Number of videos in the episode
  * @param stats Optional statistics JSON object
@@ -531,12 +573,11 @@ inline bool write_episode_metadata(
     const std::filesystem::path& meta_dir,
     int episode_index,
     const std::string& task_name,
-    int task_index,
     int episode_length,
     int num_videos,
     const nlohmann::json& stats = nlohmann::json()) {
   // Write task entry (if doesn't exist)
-  if (!write_task_entry(meta_dir, task_index, task_name)) {
+  if (!write_task_entry(meta_dir, task_name)) {
     return false;
   }
 
