@@ -462,6 +462,54 @@ void TrossenMCAPBackend::write_odometry_2d_record(const data::Odometry2DRecord& 
   }
 }
 
+void TrossenMCAPBackend::write_raw_image_message(const cv::Mat& image, const std::string& frame_id,
+                                                 uint32_t width, uint32_t height,
+                                                 const std::string& encoding,
+                                                 const data::Timespec& ts,
+                                                 foxglove::RawChannel* channel, uint64_t* counter) {
+  foxglove::schemas::RawImage msg;
+  msg.timestamp = foxglove::schemas::Timestamp{.sec = static_cast<uint32_t>(ts.sec),
+                                               .nsec = static_cast<uint32_t>(ts.nsec)};
+  msg.frame_id = frame_id;
+  msg.width = width;
+  msg.height = height;
+  msg.encoding = encoding;
+  msg.step = static_cast<uint32_t>(image.step);
+  // Copy image data to std::vector<std::byte>
+  const std::byte* data_ptr = reinterpret_cast<const std::byte*>(image.data);
+  const size_t data_size = image.total() * image.elemSize();
+  msg.data.assign(data_ptr, data_ptr + data_size);
+
+  // Encode to buffer
+  std::vector<uint8_t> payload(TROSSEN_MCAP_INITIAL_ENCODED_BUFFER_SIZE);
+  size_t encoded_len = 0;
+  auto encode_result = msg.encode(payload.data(), payload.size(), &encoded_len);
+  if (encode_result == foxglove::FoxgloveError::BufferTooShort) {
+    // Resize and try again
+    payload.resize(encoded_len);
+    encode_result = msg.encode(payload.data(), payload.size(), &encoded_len);
+  }
+  if (encode_result != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to encode image for " << frame_id << ": "
+              << foxglove::strerror(encode_result) << "\n";
+    return;
+  }
+
+  auto st =
+      channel->log(reinterpret_cast<const std::byte*>(payload.data()), encoded_len, ts.to_ns());
+  if (st != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to write image for " << frame_id << ": " << foxglove::strerror(st) << "\n";
+  } else {
+    ++(*counter);
+  }
+}
+
+void TrossenMCAPBackend::write_image_frame(const data::ImageRecord& img, bool depth,
+                                           foxglove::RawChannel* channel) {
+  write_raw_image_message(img.image, img.id, img.width, img.height, img.encoding, img.ts.realtime,
+                          channel, depth ? &stats_.depth_images_written : &stats_.images_written);
+}
+
 void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
   // Determine if this is a depth frame based on encoding or topic
   const bool depth =
@@ -490,51 +538,8 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
   if (!channel) {
     return;
   }
-  foxglove::schemas::RawImage imsg;
-  imsg.timestamp = foxglove::schemas::Timestamp{
-    .sec = static_cast<uint32_t>(img.ts.realtime.sec),
-    .nsec = static_cast<uint32_t>(img.ts.realtime.nsec)
-  };
-  imsg.frame_id = img.id;
-  imsg.width = img.width;
-  imsg.height = img.height;
-  imsg.encoding = img.encoding;
-  imsg.step = static_cast<uint32_t>(img.image.step);
-  // Copy image data to std::vector<std::byte>
-  const std::byte* data_ptr = reinterpret_cast<const std::byte*>(img.image.data);
-  size_t data_size = img.image.total() * img.image.elemSize();
-  imsg.data.assign(data_ptr, data_ptr + data_size);
 
-  // Encode to buffer
-  std::vector<uint8_t> payload(TROSSEN_MCAP_INITIAL_ENCODED_BUFFER_SIZE);
-  size_t encoded_len = 0;
-  auto encode_result = imsg.encode(payload.data(), payload.size(), &encoded_len);
-
-  if (encode_result == foxglove::FoxgloveError::BufferTooShort) {
-    // Resize and try again
-    payload.resize(encoded_len);
-    encode_result = imsg.encode(payload.data(), payload.size(), &encoded_len);
-  }
-
-  if (encode_result != foxglove::FoxgloveError::Ok) {
-    std::cerr << "Failed to encode image: " << foxglove::strerror(encode_result) << "\n";
-    return;
-  }
-
-  auto st = channel->log(
-    reinterpret_cast<const std::byte*>(payload.data()),
-    encoded_len,
-    img.ts.realtime.to_ns());
-
-  if (st != foxglove::FoxgloveError::Ok) {
-    std::cerr << "Failed to write image: " << foxglove::strerror(st) << "\n";
-  } else {
-    if (depth) {
-      ++stats_.depth_images_written;
-    } else {
-      ++stats_.images_written;
-    }
-  }
+  write_image_frame(img, depth, channel);
 
   // Write optional depth image to a separate channel when ImageRecord carries depth
   if (img.has_depth()) {
@@ -546,47 +551,17 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
       md["depth_scale_m"] = std::to_string(img.depth_scale.value());
     }
 
-    foxglove::RawChannel* depth_channel =
-      ensure_image_channel_with_metadata(depth_topic_id, md);
+    foxglove::RawChannel* depth_channel = ensure_image_channel_with_metadata(depth_topic_id, md);
     if (depth_channel) {
-      foxglove::schemas::RawImage dmsg;
-      dmsg.timestamp = foxglove::schemas::Timestamp{
-        .sec = static_cast<uint32_t>(img.ts.realtime.sec),
-        .nsec = static_cast<uint32_t>(img.ts.realtime.nsec)
-      };
-      dmsg.frame_id = depth_topic_id;
-      dmsg.width = static_cast<uint32_t>(img.depth_image->cols);
-      dmsg.height = static_cast<uint32_t>(img.depth_image->rows);
-      dmsg.encoding = "16UC1";
-      dmsg.step = static_cast<uint32_t>(img.depth_image->step);
-      const std::byte* dptr =
-        reinterpret_cast<const std::byte*>(img.depth_image->data);
-      const size_t dsize = img.depth_image->total() * img.depth_image->elemSize();
-      dmsg.data.assign(dptr, dptr + dsize);
-
-      std::vector<uint8_t> dpayload(TROSSEN_MCAP_INITIAL_ENCODED_BUFFER_SIZE);
-      size_t dencoded_len = 0;
-      auto dencode_result = dmsg.encode(dpayload.data(), dpayload.size(), &dencoded_len);
-
-      if (dencode_result == foxglove::FoxgloveError::BufferTooShort) {
-        dpayload.resize(dencoded_len);
-        dencode_result = dmsg.encode(dpayload.data(), dpayload.size(), &dencoded_len);
-      }
-
-      if (dencode_result != foxglove::FoxgloveError::Ok) {
-        std::cerr << "Failed to encode depth image: "
-                  << foxglove::strerror(dencode_result) << "\n";
-      } else {
-        auto dst = depth_channel->log(
-          reinterpret_cast<const std::byte*>(dpayload.data()),
-          dencoded_len,
-          img.ts.realtime.to_ns());
-        if (dst != foxglove::FoxgloveError::Ok) {
-          std::cerr << "Failed to write depth image: " << foxglove::strerror(dst) << "\n";
-        } else {
-          ++stats_.depth_images_written;
-        }
-      }
+      // Build a lightweight ImageRecord view over the depth plane so it gets
+      // its own encoder/channel; color and depth must never share either.
+      data::ImageRecord drec = img;
+      drec.id = depth_topic_id;
+      drec.image = *img.depth_image;
+      drec.encoding = "16UC1";
+      drec.width = static_cast<uint32_t>(img.depth_image->cols);
+      drec.height = static_cast<uint32_t>(img.depth_image->rows);
+      write_image_frame(drec, /*depth=*/true, depth_channel);
     }
   }
 }

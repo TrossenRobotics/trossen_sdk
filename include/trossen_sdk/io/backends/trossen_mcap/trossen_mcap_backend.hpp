@@ -235,6 +235,32 @@ private:
   void write_image_record(const data::ImageRecord& img);
 
   /**
+   * @brief Serialize one cv::Mat as foxglove.RawImage and log it
+   *
+   * @param image Pixel data to serialize
+   * @param frame_id Frame id to stamp on the message
+   * @param width Image width in pixels
+   * @param height Image height in pixels
+   * @param encoding Pixel encoding string (e.g. "bgr8")
+   * @param ts Capture timestamp
+   * @param channel Channel to log the message to
+   * @param counter Stats counter bumped on success
+   */
+  void write_raw_image_message(const cv::Mat& image, const std::string& frame_id, uint32_t width,
+                               uint32_t height, const std::string& encoding,
+                               const data::Timespec& ts, foxglove::RawChannel* channel,
+                               uint64_t* counter);
+
+  /**
+   * @brief Write one frame as foxglove.RawImage
+   *
+   * @param img Image record to write
+   * @param depth True for a depth frame, false for color
+   * @param channel Channel to log the message to
+   */
+  void write_image_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
+
+  /**
    * @brief Write a joint state record
    *
    * @param js Joint state record to write
