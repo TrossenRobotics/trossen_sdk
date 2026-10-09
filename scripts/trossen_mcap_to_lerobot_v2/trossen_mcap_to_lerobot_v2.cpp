@@ -71,7 +71,7 @@ struct ParquetConfig {
   std::string repository_id = "TrossenRoboticsCommunity";  // repo_id in the folder structure
   std::string dataset_id = "mcap_converted_dataset";    // dataset_name in the folder structure
   std::string robot_name = trossen::io::backends::DEFAULT_ROBOT_NAME;
-  std::string task_name = "Pick and Place";
+  std::string task_name;
   int episode_index = 0;
   int episode_chunk = 0;
   int chunk_size = 1000;
@@ -312,6 +312,7 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
 /// @param repository_id HuggingFace-style repository ID for the folder structure
 /// @param dataset_id Dataset name within the repository
 /// @param chunk_size Number of episodes per chunk directory
+/// @param default_task Task for an episode whose recording embeds none
 /// @param global_index_offset In/out parameter tracking the next available
 ///   global row index across episodes. Pass 0 for a fresh conversion; on
 ///   successful return the value is advanced by the number of rows written.
@@ -319,7 +320,7 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
 bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
                     int episode_index, const std::string& repository_id,
                     const std::string& dataset_id, int chunk_size,
-                    int64_t& global_index_offset);
+                    const std::string& default_task, int64_t& global_index_offset);
 
 // ──────────────────────────────────────────────────────────
 // Main entry point
@@ -530,7 +531,8 @@ int main(int argc, char** argv) {
     PreparedEpisode prepared;
     const bool ok = prepare_episode(mcap_path, static_cast<int>(i), tmp_dir, prepared) &&
                     commit_episode(prepared, dataset_root_dir, episode_index, repository_id,
-                                   dataset_id, chunk_size, global_index_offset);
+                                   dataset_id, chunk_size, lerobot_config->task_name,
+                                   global_index_offset);
     std::error_code tmp_ec;
     fs::remove_all(tmp_dir, tmp_ec);
 
@@ -838,7 +840,7 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
 bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
                     int episode_index, const std::string& repository_id,
                     const std::string& dataset_id, int chunk_size,
-                    int64_t& global_index_offset) {
+                    const std::string& default_task, int64_t& global_index_offset) {
   namespace fs = std::filesystem;
 
   trossen::io::backends::AlignedEpisode& ep = pe.ep;
@@ -851,6 +853,7 @@ bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
   cfg.repository_id = repository_id;
   cfg.dataset_id = dataset_id;
   cfg.chunk_size = chunk_size;
+  cfg.task_name = default_task;
   cfg.robot_name = ep.robot_name;
 
   cfg.episode_index = episode_index;
@@ -899,6 +902,11 @@ bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
     return false;
   }
 
+  // Prefer the task embedded in this episode's MCAP; fall back to the config's.
+  const std::string task_name = ep.task_name.empty() ? cfg.task_name : ep.task_name;
+  // A new task is appended to tasks.jsonl at this index once the episode is written.
+  const int task_index = trossen::io::backends::find_task_index(meta_dir, task_name);
+
   // Width of every action and observation.state row.
   const int action_dim = trossen::io::backends::episode_action_dim(ep);
   const int obs_dim = trossen::io::backends::episode_obs_dim(ep);
@@ -916,7 +924,7 @@ bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
 
   // prepare_episode() rejects an episode without rows, so the table is never empty.
   const auto table = trossen::io::backends::build_episode_table(
-    ep, action_dim, obs_dim, cfg.episode_index, /*task_index=*/0, global_index_offset);
+    ep, action_dim, obs_dim, cfg.episode_index, task_index, global_index_offset);
   if (!table ||
       !trossen::io::backends::write_parquet_file(*table, cfg.output_file, /*store_schema=*/true)) {
     return false;
@@ -1009,7 +1017,7 @@ bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
   int num_cameras = static_cast<int>(channels.camera_channels.size());
 
   if (trossen::io::backends::write_episode_metadata(
-          meta_dir, cfg.episode_index, cfg.task_name, 0, static_cast<int>(rows_written),
+          meta_dir, cfg.episode_index, task_name, static_cast<int>(rows_written),
           num_cameras)) {
     std::cout << "  [ok] Updated " << info_path.string() << "\n";
     std::cout << "  [ok] Created/Updated "
