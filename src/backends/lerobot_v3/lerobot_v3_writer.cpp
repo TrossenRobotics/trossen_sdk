@@ -5,6 +5,7 @@
 
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_writer.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -20,7 +21,10 @@
 
 #include <arrow/io/api.h>
 
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_stats_utils.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_video.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/utils/depth_quantization.hpp"
 
 namespace trossen::io::backends {
@@ -76,6 +80,20 @@ struct RemoveOnExit {
   ~RemoveOnExit() {
     std::error_code ec;
     fs::remove(path, ec);
+  }
+};
+
+/// @brief Removes a directory tree when it goes out of scope, unless `keep` is true by then.
+struct RemoveTreeUnlessKept {
+  /// @brief Directory to remove.
+  fs::path path;
+  /// @brief Leaves the directory in place when true.
+  const bool& keep;
+
+  ~RemoveTreeUnlessKept() {
+    if (keep) return;
+    std::error_code ec;
+    fs::remove_all(path, ec);
   }
 };
 
@@ -279,6 +297,13 @@ bool LeRobotV3DatasetWriter::encode_depth_video(
     return false;
   }
 
+  return encode_depth_codes(raw_path, width, height, frame_count, out_mp4);
+}
+
+bool LeRobotV3DatasetWriter::encode_depth_codes(
+  const fs::path& raw_path, int width, int height, size_t frame_count,
+  const fs::path& out_mp4) const
+{
   // x265 pools= caps its worker pool. ffmpeg's -threads only reaches x265's
   // frame-threads, which leaves most of the pool uncapped, so use pools=.
   std::ostringstream x265_params;
@@ -473,9 +498,189 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
   int episode_index,
   const std::string& fallback_task,
   const fs::path& tmp_root) const
-{
-  // TODO(shantanuparab-tr): decode, extract and encode one episode on a worker thread (#364).
-  return {};
+try {
+  PreparedEpisode out;
+  McapChannelMap channels;
+  out.ep.episode_index = episode_index;
+  out.tmp_dir = tmp_root / ("episode_" + std::to_string(episode_index));
+  // Removes the episode's partial output on every failure, thrown exceptions included.
+  const RemoveTreeUnlessKept tmp_guard{out.tmp_dir, out.ok};
+
+  // Decode and align (independent per file: safe to run on a worker thread).
+  // Not up for review, changes in #358.
+  if (!load_aligned_episode(mcap_path.string(), episode_index, out.ep, channels)) {
+    std::cerr << "[FAILED] Could not load " << mcap_path.string() << "\n";
+    return out;  // ok == false
+  }
+  if (out.ep.frames.empty()) {
+    std::cerr << "[FAILED] No aligned frames in " << mcap_path.string() << "\n";
+    return out;
+  }
+  // Prefer the task embedded in this episode's MCAP; fall back to the config's.
+  out.task_name = out.ep.task_name.empty() ? fallback_task : out.ep.task_name;
+  // Without video output the cameras are not features of the dataset.
+  if (!opts_.encode_videos) out.ep.cameras.clear();
+
+  // Extracted streams and frames get their own subtree, so no camera name can collide
+  // with the per-episode mp4s or the stats sampling folder.
+  const fs::path extract_root = out.tmp_dir / "extracted";
+
+  // Camera video.
+  //
+  // A video camera recorded at the row rate is stream-copied into mp4 rather than decoded
+  // and re-encoded. One recorded at another rate is decoded and re-encoded one frame per
+  // row, since LeRobot plays one frame per row. A recording stores every camera the same
+  // way, as its recorded storage says; a raw recording takes the raw-image path below.
+  const bool video = std::any_of(
+    channels.camera_storage.begin(), channels.camera_storage.end(),
+    [](const auto& entry) { return entry.second != trossen_mcap_defs::kRawStorage; });
+  std::map<std::string, CameraVideoStream> video_streams;
+  if (opts_.encode_videos && !channels.camera_channels.empty() && video) {
+    if (!extract_camera_video(
+          mcap_path.string(), channels,
+          [&](const std::string& camera_name) -> fs::path {
+            fs::path dir = extract_root / camera_name;
+            fs::create_directories(dir);
+            return dir;
+          },
+          video_streams)) {
+      return out;  // ok == false
+    }
+
+    const auto& described = out.ep.dataset_info.at("cameras");
+    std::map<std::string, CameraVideoStream> copied;
+    for (const auto& [name, vs] : video_streams) {
+      if (described.at(name).at("fps").get<double>() == opts_.fps) copied.emplace(name, vs);
+    }
+    // Not up for review, changes in #360.
+    clamp_episode_to_video_frame_counts(out.ep, copied);
+
+    for (const auto& cam : out.ep.cameras) {
+      auto vs_it = video_streams.find(cam.name);
+      if (vs_it == video_streams.end() || vs_it->second.frame_count == 0) continue;
+      const CameraVideoStream& vs = vs_it->second;
+      const bool is_depth = camera_is_depth(cam.name, out.ep.dataset_info);
+
+      PreparedEpisode::PreparedVideo pv;
+      pv.obs_key = cam.obs_key;
+      pv.episode_mp4 = out.tmp_dir / (cam.name + "_episode.mp4");
+      const size_t rows = out.ep.frames.size();
+
+      if (copied.count(cam.name) == 0) {
+        const fs::path dir = vs.annexb_path.parent_path();
+        const auto& spec = described.at(cam.name);
+        const int width = spec.at("width").get<int>();
+        const int height = spec.at("height").get<int>();
+        if (!decode_video_rows(vs.annexb_path, vs.format, width, height, cam.row_source_index,
+                               dir)) {
+          return out;  // ok == false
+        }
+        const bool encoded =
+          is_depth ? encode_depth_codes(dir / kDepthCodesFile, width, height, rows,
+                                        pv.episode_mp4)
+                   : encode_episode_video(dir, rows, opts_.fps, opts_.encoder_threads,
+                                          pv.episode_mp4);
+        if (!encoded) return out;  // ok == false
+        pv.duration_s = static_cast<double>(rows) / static_cast<double>(opts_.fps);
+        pv.codec = is_depth ? kDepthCodec : kColorCodec;
+        pv.pix_fmt = is_depth ? kDepthPixFmt : kColorPixFmt;
+        if (!is_depth) pv.samples = sample_video_frames(pv.episode_mp4, 0, rows, out.tmp_dir);
+        out.videos.push_back(std::move(pv));
+        std::error_code ec;
+        fs::remove_all(dir, ec);
+        continue;
+      }
+
+      if (!remux_episode_video(vs.annexb_path, vs.frame_count, opts_.fps, pv.episode_mp4)) {
+        return out;  // ok == false
+      }
+      // Not up for review, changes in #360.
+      pv.duration_s = static_cast<double>(vs.frame_count) / static_cast<double>(opts_.fps);
+      const VideoCodecInfo codec = copied_stream_codec(vs.format);
+      pv.codec = codec.codec;
+      pv.pix_fmt = codec.pix_fmt;
+
+      // 12-bit depth codes are not [0,1] RGB, so they are not sampled for image
+      // stats, matching how the raw-image path treats depth.
+      if (!is_depth) {
+        pv.samples = sample_video_frames(pv.episode_mp4, 0, vs.frame_count, out.tmp_dir);
+      }
+
+      out.videos.push_back(std::move(pv));
+
+      // The elementary stream is now redundant; the mp4 is what gets consumed.
+      std::error_code ec;
+      fs::remove(vs.annexb_path, ec);
+    }
+  }
+
+  // Raw-image cameras: extract frames, encode a per-episode mp4, sample stats.
+  if (opts_.encode_videos && !channels.camera_channels.empty() && !video) {
+    std::map<std::string, fs::path> camera_dirs;
+    std::map<std::string, size_t> camera_counts;
+    if (!extract_camera_images(
+          mcap_path.string(), channels, out.ep,
+          [&](const std::string& camera_name) -> fs::path {
+            fs::path dir = extract_root / camera_name;
+            fs::create_directories(dir);
+            camera_dirs[camera_name] = dir;
+            return dir;
+          },
+          camera_counts)) {
+      std::cerr << "[FAILED] Could not extract camera frames from " << mcap_path.string() << "\n";
+      return out;  // ok == false
+    }
+
+    for (const auto& cam : out.ep.cameras) {
+      auto dir_it = camera_dirs.find(cam.name);
+      auto cnt_it = camera_counts.find(cam.name);
+      if (dir_it == camera_dirs.end() || cnt_it == camera_counts.end() || cnt_it->second == 0) {
+        continue;
+      }
+
+      // Depth is encoded as gray12le HEVC and color as AV1.
+      const bool is_depth = camera_is_depth(cam.name, out.ep.dataset_info);
+
+      PreparedEpisode::PreparedVideo pv;
+      pv.obs_key = cam.obs_key;
+      pv.episode_mp4 = out.tmp_dir / (cam.name + "_episode.mp4");
+      const bool encoded = is_depth
+        ? encode_depth_video(dir_it->second, cnt_it->second, pv.episode_mp4)
+        : encode_episode_video(dir_it->second, cnt_it->second, opts_.fps,
+                               opts_.encoder_threads, pv.episode_mp4);
+      if (!encoded) {
+        return out;  // ok == false: an encode failure fails the whole episode
+      }
+      pv.duration_s = static_cast<double>(cnt_it->second) / static_cast<double>(opts_.fps);
+      pv.codec = is_depth ? kDepthCodec : kColorCodec;
+      pv.pix_fmt = is_depth ? kDepthPixFmt : kColorPixFmt;
+
+      // Sample RGB frames for image stats before dropping the raw JPEGs. Depth frames
+      // are 12-bit codes, not RGB, so they are not sampled for [0,1] image stats.
+      std::vector<fs::path> paths;
+      if (!is_depth) {
+        for (const auto& entry : fs::directory_iterator(dir_it->second)) {
+          if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+            paths.push_back(entry.path());
+          }
+        }
+        std::sort(paths.begin(), paths.end());
+      }
+      pv.samples = trossen::io::backends::sample_images(paths);
+
+      out.videos.push_back(std::move(pv));
+
+      // Raw JPEGs are no longer needed; free the disk now, keep the encoded mp4.
+      std::error_code ec;
+      fs::remove_all(dir_it->second, ec);
+    }
+  }
+
+  out.ok = true;
+  return out;
+} catch (const std::exception& e) {
+  std::cerr << "[FAILED] Could not prepare " << mcap_path.string() << ": " << e.what() << "\n";
+  return {};  // ok == false
 }
 
 bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
