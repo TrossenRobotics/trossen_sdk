@@ -72,7 +72,7 @@ struct ParquetConfig {
   std::string repository_id = "TrossenRoboticsCommunity";  // repo_id in the folder structure
   std::string dataset_id = "mcap_converted_dataset";    // dataset_name in the folder structure
   std::string robot_name = trossen::io::backends::DEFAULT_ROBOT_NAME;
-  std::string task_name = "Pick and Place";
+  std::string task_name;
   int episode_index = 0;
   int episode_chunk = 0;
   int chunk_size = 1000;
@@ -306,6 +306,7 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
 /// @param repository_id HuggingFace-style repository ID for the folder structure
 /// @param dataset_id Dataset name within the repository
 /// @param chunk_size Number of episodes per chunk directory
+/// @param default_task Task for an episode whose recording embeds none
 /// @param global_index_offset In/out parameter tracking the next available
 ///   global row index across episodes. Pass 0 for a fresh conversion; on
 ///   successful return the value is advanced by the number of rows written.
@@ -313,7 +314,7 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
-                      int64_t& global_index_offset);
+                      const std::string& default_task, int64_t& global_index_offset);
 
 // ──────────────────────────────────────────────────────────
 // Main entry point
@@ -519,7 +520,7 @@ int main(int argc, char** argv) {
 
     int result = process_mcap_file(mcap_path.string(), dataset_root_dir, episode_index,
                                     repository_id, dataset_id, chunk_size,
-                                    global_index_offset);
+                                    lerobot_config->task_name, global_index_offset);
 
     if (result == 0) {
       successful++;
@@ -647,7 +648,7 @@ int main(int argc, char** argv) {
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
-                      int64_t& global_index_offset) {
+                      const std::string& default_task, int64_t& global_index_offset) {
   namespace fs = std::filesystem;
   using trossen::io::backends::AlignedEpisode;
   using trossen::io::backends::McapChannelMap;
@@ -659,6 +660,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   cfg.repository_id = repository_id;
   cfg.dataset_id = dataset_id;
   cfg.chunk_size = chunk_size;
+  cfg.task_name = default_task;
 
   fs::path mcap_path(cfg.mcap_file);
 
@@ -742,6 +744,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   std::erase_if(channels.camera_channels, [&](const auto& entry) {
     return trossen::io::backends::camera_is_depth(entry.second, ep.dataset_info);
   });
+  // Prefer the task embedded in this episode's MCAP; fall back to the config's.
+  const std::string task_name = ep.task_name.empty() ? cfg.task_name : ep.task_name;
+  // A new task is appended to tasks.jsonl at this index once the episode is written.
+  const int task_index = trossen::io::backends::find_task_index(meta_dir, task_name);
 
   // Width of every action and observation.state row.
   const int action_dim = trossen::io::backends::episode_action_dim(ep);
@@ -880,7 +886,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
     if (!epi_idx_builder.Append(cfg.episode_index).ok() ||
         !frame_idx_builder.Append(static_cast<int64_t>(rows_written)).ok() ||
-        !index_builder.Append(global_index).ok() || !task_idx_builder.Append(0).ok()) {
+        !index_builder.Append(global_index).ok() || !task_idx_builder.Append(task_index).ok()) {
       std::cerr << "Error: Failed to append scalar values\n";
       return 1;
     }
@@ -1114,7 +1120,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   int num_cameras = static_cast<int>(channels.camera_channels.size());
 
   if (trossen::io::backends::write_episode_metadata(
-          meta_dir, cfg.episode_index, cfg.task_name, 0, static_cast<int>(rows_written),
+          meta_dir, cfg.episode_index, task_name, static_cast<int>(rows_written),
           num_cameras)) {
     std::cout << "  [ok] Updated " << info_path.string() << "\n";
     std::cout << "  [ok] Created/Updated "
