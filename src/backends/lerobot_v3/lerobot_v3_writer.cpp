@@ -32,7 +32,158 @@ namespace v3 = trossen::io::backends::lerobot_v3;
 
 namespace {
 
+constexpr size_t kMaxImageSamplesPerKey = 1000;  // cap pixel-stat sampling per camera
+const std::vector<double> kQuantiles = {0.01, 0.10, 0.50, 0.90, 0.99};
+const std::vector<std::string> kQuantileKeys = {"q01", "q10", "q50", "q90", "q99"};
+
 using v3::update_chunk_file_indices;
+
+/// @brief True if the directory holds any `.png` frame (depth cams; RGB cams use `.jpg`).
+///
+/// @param dir Directory of extracted frames to scan; must exist.
+/// @return true if at least one regular `.png` file is present, false otherwise.
+bool dir_has_png(const fs::path& dir) {
+  for (const auto& entry : fs::directory_iterator(dir)) {
+    if (entry.is_regular_file() && entry.path().extension() == ".png") return true;
+  }
+  return false;
+}
+
+/// @brief Linear-interpolated quantile of a sorted sample (numpy's default method).
+///
+/// @param sorted Sample values in ascending order; every caller sorts before calling.
+/// @param q Quantile to take, in [0, 1].
+/// @return The interpolated value, or 0 for an empty sample.
+float quantile_of(const std::vector<float>& sorted, double q) {
+  if (sorted.empty()) return 0.0f;
+  if (sorted.size() == 1) return sorted[0];
+  double pos = q * (static_cast<double>(sorted.size()) - 1.0);
+  size_t lo = static_cast<size_t>(std::floor(pos));
+  size_t hi = static_cast<size_t>(std::ceil(pos));
+  double frac = pos - static_cast<double>(lo);
+  return static_cast<float>(sorted[lo] * (1.0 - frac) + sorted[hi] * frac);
+}
+
+/// @brief Per-dimension stats for a vector feature → nested JSON (lists of length D).
+///
+/// @param per_dim One value column per feature dimension, accumulated across every episode.
+/// @param count Row count to report as `count`; the caller's dataset total, not a column length.
+/// @return JSON holding min, max, mean, std and one entry per key in kQuantileKeys, each a
+///         list of length D.
+nlohmann::ordered_json vector_stats(const std::vector<std::vector<float>>& per_dim,
+                                    int64_t count) {
+  nlohmann::ordered_json out;
+  nlohmann::json mn = nlohmann::json::array(), mx = nlohmann::json::array(),
+                 me = nlohmann::json::array(), sd = nlohmann::json::array();
+  std::vector<nlohmann::json> q(kQuantiles.size());
+  for (auto& qa : q) qa = nlohmann::json::array();
+
+  for (const auto& col : per_dim) {
+    double sum = 0.0, sumsq = 0.0;
+    float lo = std::numeric_limits<float>::max(), hi = std::numeric_limits<float>::lowest();
+    for (float v : col) {
+      sum += v;
+      sumsq += static_cast<double>(v) * v;
+      lo = std::min(lo, v);
+      hi = std::max(hi, v);
+    }
+    double n = col.empty() ? 1.0 : static_cast<double>(col.size());
+    double mean = sum / n;
+    double var = std::max(0.0, sumsq / n - mean * mean);
+    mn.push_back(col.empty() ? 0.0f : lo);
+    mx.push_back(col.empty() ? 0.0f : hi);
+    me.push_back(static_cast<float>(mean));
+    sd.push_back(static_cast<float>(std::sqrt(var)));
+
+    std::vector<float> sorted = col;
+    std::sort(sorted.begin(), sorted.end());
+    for (size_t k = 0; k < kQuantiles.size(); ++k) {
+      q[k].push_back(quantile_of(sorted, kQuantiles[k]));
+    }
+  }
+
+  out["min"] = mn;
+  out["max"] = mx;
+  out["mean"] = me;
+  out["std"] = sd;
+  out["count"] = nlohmann::json::array({count});
+  for (size_t k = 0; k < kQuantiles.size(); ++k) out[kQuantileKeys[k]] = q[k];
+  return out;
+}
+
+/// @brief Wrap three per-channel scalars as a LeRobot image-stat tensor of shape [3,1,1].
+///
+/// @param rgb One value per channel, in RGB order.
+/// @return Nested JSON array shaped [3][1][1].
+nlohmann::json channels_to_chw(const std::array<float, 3>& rgb) {
+  nlohmann::json t = nlohmann::json::array();
+  for (int c = 0; c < 3; ++c) t.push_back(nlohmann::json::array({nlohmann::json::array({rgb[c]})}));
+  return t;
+}
+
+/// @brief Per-channel (RGB, normalized to [0,1]) stats over sampled images → [3,1,1] JSON.
+///
+/// @param images Samples from sample_images(): CV_32FC3, BGR, already scaled to [0,1].
+/// @param count Number of images the stats were computed over (LeRobot's `count` for image
+///        features is the sample count, not the episode frame count).
+/// @return JSON holding min, max, mean, std and one entry per key in kQuantileKeys, each a
+///         [3,1,1] tensor.
+nlohmann::ordered_json image_stats(const std::vector<cv::Mat>& images, int64_t count) {
+  // Collect per-channel pixel values (RGB order) across all samples.
+  std::array<std::vector<float>, 3> chan;
+  for (const auto& img : images) {
+    if (img.empty()) continue;
+    // sample_images() hands back float32 BGR in [0,1]. Reading these as 8-bit would
+    // reinterpret the mantissa bytes as pixels and yield uniform-noise statistics.
+    if (img.type() != CV_32FC3) {
+      std::cerr << "Warning: skipping image sample with unexpected type " << img.type()
+                << " (expected CV_32FC3)\n";
+      continue;
+    }
+    for (int y = 0; y < img.rows; ++y) {
+      const cv::Vec3f* row = img.ptr<cv::Vec3f>(y);
+      for (int x = 0; x < img.cols; ++x) {
+        // OpenCV is BGR; store as RGB.
+        chan[0].push_back(row[x][2]);
+        chan[1].push_back(row[x][1]);
+        chan[2].push_back(row[x][0]);
+      }
+    }
+  }
+
+  std::array<float, 3> mn{}, mx{}, me{}, sd{};
+  std::array<std::array<float, 3>, 5> q{};  // [quantile][channel]
+  for (int c = 0; c < 3; ++c) {
+    auto& col = chan[c];
+    if (col.empty()) continue;
+    double sum = 0.0, sumsq = 0.0;
+    float lo = std::numeric_limits<float>::max(), hi = std::numeric_limits<float>::lowest();
+    for (float v : col) {
+      sum += v;
+      sumsq += static_cast<double>(v) * v;
+      lo = std::min(lo, v);
+      hi = std::max(hi, v);
+    }
+    double n = static_cast<double>(col.size());
+    double mean = sum / n;
+    double var = std::max(0.0, sumsq / n - mean * mean);
+    mn[c] = lo;
+    mx[c] = hi;
+    me[c] = static_cast<float>(mean);
+    sd[c] = static_cast<float>(std::sqrt(var));
+    std::sort(col.begin(), col.end());
+    for (size_t k = 0; k < kQuantiles.size(); ++k) q[k][c] = quantile_of(col, kQuantiles[k]);
+  }
+
+  nlohmann::ordered_json out;
+  out["min"] = channels_to_chw(mn);
+  out["max"] = channels_to_chw(mx);
+  out["mean"] = channels_to_chw(me);
+  out["std"] = channels_to_chw(sd);
+  out["count"] = nlohmann::json::array({count});
+  for (size_t k = 0; k < kQuantiles.size(); ++k) out[kQuantileKeys[k]] = channels_to_chw(q[k]);
+  return out;
+}
 
 }  // namespace
 
