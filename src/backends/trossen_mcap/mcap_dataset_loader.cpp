@@ -10,6 +10,7 @@
 #include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
 
 #include <algorithm>
+#include <atomic>
 #include <cmath>
 #include <cstdint>
 #include <fstream>
@@ -40,6 +41,20 @@ namespace {
 /// @brief mcap reader callback: log a recoverable parsing issue and keep reading.
 void on_problem(const mcap::Status& problem) {
   std::cerr << "Warning: MCAP parsing issue: " << problem.message << "\n";
+}
+
+/// @brief Warn, once per process, that Rivet recordings have no LeRobot support yet.
+///
+/// The episode still converts, but only the planar linear and angular base velocity
+/// reach the dataset (no lateral velocity, no lift), and no LeRobot robot consumes the
+/// result. Printed once because a folder run loads every episode, some on worker threads.
+void warn_rivet_unsupported() {
+  static std::atomic<bool> warned{false};
+  if (warned.exchange(true)) return;
+  std::cerr << "\nWARNING: LeRobot conversion does not support Rivet recordings yet. The "
+            << "dataset is written for inspection only: the base keeps its linear and "
+            << "angular velocity but drops the lateral velocity and the lift, and no LeRobot "
+            << "robot can train on or replay it.\n\n";
 }
 
 }  // namespace
@@ -136,6 +151,10 @@ bool load_aligned_episode(
       channels.mobile_base_channel_id = channel_id;
       channels.has_mobile_base = true;
       std::cout << "    [ok] Found odometry stream for mobile robot: " << stream_id << "\n";
+      // The Rivet example records its base as `trossen_base` on robot `trossen_rivet`.
+      if (stream_id == "trossen_base" || out.robot_name == "trossen_rivet") {
+        warn_rivet_unsupported();
+      }
       continue;
     }
 
