@@ -10,6 +10,8 @@
 #include <filesystem>
 #include <string>
 
+#include <unistd.h>
+#include <opencv2/core.hpp>
 #include <opencv2/imgcodecs.hpp>
 
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_video.hpp"
@@ -18,6 +20,8 @@ namespace fs = std::filesystem;
 using trossen::io::backends::count_video_packets;
 using trossen::io::backends::encode_episode_video;
 using trossen::io::backends::kColorFramePattern;
+using trossen::io::backends::remux_episode_video;
+using trossen::io::backends::sample_video_frames;
 
 namespace {
 
@@ -33,6 +37,17 @@ fs::path fresh_dir(const std::string& name) {
   fs::remove_all(dir);
   fs::create_directories(dir);
   return dir;
+}
+
+/// @brief True when file permissions bind this process; root ignores them.
+bool permissions_apply() { return geteuid() != 0; }
+
+/// @brief Encode `frames` frames of a 64x64 test pattern at 30 fps as H.264 mp4.
+bool make_test_video(const fs::path& mp4, int frames) {
+  const std::string cmd =
+    "ffmpeg -y -loglevel error -f lavfi -i testsrc=size=64x64:rate=30 -frames:v " +
+    std::to_string(frames) + " -c:v libx264 -pix_fmt yuv420p '" + mp4.string() + "'";
+  return std::system(cmd.c_str()) == 0;
 }
 
 /// @brief Frame rate of the first video stream as ffprobe prints it, such as "15/1".
@@ -110,5 +125,96 @@ TEST(LeRobotVideo, ColorEncodeReportsTheExitCode) {
   const int code = std::atoi(err.c_str() + at + 6);
   EXPECT_GT(code, 0);
   EXPECT_LT(code, 256);
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotVideo, RemuxRequiresTheExactFrameCount) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_remux_test");
+  const fs::path annexb = dir / "camera.h264";
+  const std::string make_stream =
+    "ffmpeg -y -loglevel error -f lavfi -i testsrc=size=64x64:rate=30 -frames:v 5 "
+    "-c:v libx264 -f h264 '" + annexb.string() + "'";
+  ASSERT_EQ(std::system(make_stream.c_str()), 0);
+
+  EXPECT_TRUE(remux_episode_video(annexb, 5, 30.0, dir / "match.mp4"));
+  EXPECT_FALSE(remux_episode_video(annexb, 6, 30.0, dir / "more.mp4"));
+  EXPECT_FALSE(remux_episode_video(annexb, 4, 30.0, dir / "fewer.mp4"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotVideo, SampleVideoFramesKeepsEveryStrideThFrame) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_sample_test");
+  // Even frame n is gray level 100 + 2n and odd frames are black, so each still shows
+  // which frame it came from. Lossless encoding keeps the levels exact.
+  const std::string level = "if(mod(N\\,2)\\,0\\,100+2*N)";
+  const std::string cmd =
+    "ffmpeg -y -loglevel error -f lavfi -i \"color=black:s=64x64:r=30,format=rgb24,geq=r='" +
+    level + "':g='" + level + "':b='" + level + "'\" -frames:v 60 -c:v libx264 -qp 0 "
+    "-pix_fmt yuv444p '" + (dir / "camera.mp4").string() + "'";
+  ASSERT_EQ(std::system(cmd.c_str()), 0);
+
+  // 60 frames at a target of 30 samples: every second frame, starting at frame 0.
+  const auto samples = sample_video_frames(dir / "camera.mp4", 0, 60, dir);
+  ASSERT_EQ(samples.size(), 30u);
+  for (size_t i = 0; i < samples.size(); ++i) {
+    const double expected = (100.0 + 4.0 * static_cast<double>(i)) / 255.0;
+    EXPECT_NEAR(cv::mean(samples[i])[0], expected, 2.0 / 255.0) << "sample " << i;
+  }
+  EXPECT_FALSE(fs::exists(dir / "samples"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotVideo, SampleVideoFramesSkipsFramesOutsideTheRange) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_sample_range_test");
+  // Even frame n is gray level 2n and odd frames are black, so each still shows which
+  // frame it came from.
+  const std::string level = "if(mod(N\\,2)\\,0\\,2*N)";
+  const std::string cmd =
+    "ffmpeg -y -loglevel error -f lavfi -i \"color=black:s=64x64:r=30,format=rgb24,geq=r='" +
+    level + "':g='" + level + "':b='" + level + "'\" -frames:v 100 -c:v libx264 -qp 0 "
+    "-pix_fmt yuv444p '" + (dir / "camera.mp4").string() + "'";
+  ASSERT_EQ(std::system(cmd.c_str()), 0);
+
+  // Frames 30 to 89 at a target of 30 samples: every second frame from 30 to 88. The 30
+  // frames before the range and the 10 after it are never sampled.
+  const auto samples = sample_video_frames(dir / "camera.mp4", 30, 60, dir);
+  ASSERT_EQ(samples.size(), 30u);
+  for (size_t i = 0; i < samples.size(); ++i) {
+    const double expected = (60.0 + 4.0 * static_cast<double>(i)) / 255.0;
+    EXPECT_NEAR(cv::mean(samples[i])[0], expected, 2.0 / 255.0) << "sample " << i;
+  }
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotVideo, SampleVideoFramesIgnoresStillsFromAnEarlierRun) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_sample_stale_test");
+  ASSERT_TRUE(make_test_video(dir / "camera.mp4", 60));
+  fs::create_directories(dir / "samples");
+  ASSERT_TRUE(cv::imwrite((dir / "samples" / "sample_9999.jpg").string(),
+                          cv::Mat(64, 64, CV_8UC3, cv::Scalar(0, 0, 0))));
+
+  const auto samples = sample_video_frames(dir / "camera.mp4", 0, 60, dir);
+  EXPECT_EQ(samples.size(), 30u);
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotVideo, SampleVideoFramesSkipsAFolderItCannotEmpty) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  if (!permissions_apply()) GTEST_SKIP() << "running as root";
+  const fs::path dir = fresh_dir("trossen_lerobot_sample_locked_test");
+  ASSERT_TRUE(make_test_video(dir / "camera.mp4", 60));
+  ASSERT_EQ(sample_video_frames(dir / "camera.mp4", 0, 60, dir).size(), 30u);
+
+  fs::create_directories(dir / "samples");
+  ASSERT_TRUE(cv::imwrite((dir / "samples" / "sample_0001.jpg").string(),
+                          cv::Mat(64, 64, CV_8UC3, cv::Scalar(0, 0, 0))));
+  fs::permissions(dir / "samples", fs::perms::owner_read | fs::perms::owner_exec);
+  const auto samples = sample_video_frames(dir / "camera.mp4", 0, 60, dir);
+  fs::permissions(dir / "samples", fs::perms::owner_all);
+  EXPECT_TRUE(samples.empty());
   fs::remove_all(dir);
 }
