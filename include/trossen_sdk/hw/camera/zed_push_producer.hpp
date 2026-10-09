@@ -48,7 +48,7 @@ public:
   struct Config {
     std::string stream_id{"zed_camera"};
     std::string color_encoding{"bgr8"};
-    bool use_device_time{false};
+    bool use_device_time{true};
     int timeout_ms{3000};
     int fps{30};
     bool remove_saturated_areas{false};  ///< SDK 5.x default is false
@@ -96,6 +96,15 @@ private:
   /// @brief Main grab + emit loop (runs on push_thread_)
   void push_loop(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit);
 
+  /**
+   * @brief Set the device timestamp to the middle of the last grabbed frame's exposure
+   *
+   * Needs ZED SDK 5.5 or newer and a GMSL camera; otherwise the device clock stays unset.
+   *
+   * @param ts Timestamp whose device fields are set
+   */
+  void stamp_center_of_exposure(data::Timestamp& ts);
+
   Config cfg_;
   ZedPushProducerMetadata metadata_;
   std::thread push_thread_;
@@ -110,6 +119,12 @@ private:
   /// @brief Reusable sl::Mat buffers to avoid per-frame GPU allocation
   sl::Mat sl_color_;
   sl::Mat sl_depth_;
+
+  /// @brief Device clock of the previous frame, so a change is reported once
+  data::DeviceClock last_device_clock_{data::DeviceClock::None};
+
+  /// @brief Whether the device timestamp source has been reported yet
+  bool device_clock_logged_{false};
 };
 
 }  // namespace trossen::hw::camera
