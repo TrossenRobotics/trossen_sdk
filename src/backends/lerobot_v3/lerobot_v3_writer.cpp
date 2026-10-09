@@ -27,6 +27,48 @@ bool LeRobotV3DatasetWriter::close_data_writer() {
   return true;
 }
 
+bool LeRobotV3DatasetWriter::encode_episode_video(
+  const fs::path& image_dir, size_t frame_count, const fs::path& out_mp4) const
+{
+  // TODO(shantanuparab-tr): encode an episode's color frames to video (#354).
+  return false;
+}
+
+bool LeRobotV3DatasetWriter::encode_depth_video(
+  const fs::path& image_dir, size_t frame_count, const fs::path& out_mp4) const
+{
+  // TODO(shantanuparab-tr): encode an episode's depth frames to video (#354).
+  return false;
+}
+
+bool LeRobotV3DatasetWriter::remux_episode_video(
+  const fs::path& annexb, size_t frame_count, const fs::path& out_mp4) const
+{
+  // TODO(shantanuparab-tr): remux an already-compressed stream without re-encoding (#354).
+  return false;
+}
+
+std::vector<cv::Mat> LeRobotV3DatasetWriter::sample_video_frames(
+  const fs::path& mp4, size_t frame_count, const fs::path& tmp_dir) const
+{
+  // TODO(shantanuparab-tr): sample frames back out of a written video for pixel statistics (#355).
+  return {};
+}
+
+bool LeRobotV3DatasetWriter::place_or_concat_video(
+  const std::string& video_key, const fs::path& episode_mp4, double ep_duration_s,
+  std::array<double, 4>& out_slot)
+{
+  // TODO(shantanuparab-tr): place the episode video, concatenating into the current file when it
+  // fits (#355).
+  return false;
+}
+
+int LeRobotV3DatasetWriter::task_index_for(const std::string& task_name) {
+  // TODO(shantanuparab-tr): map a task name to its row in the tasks table (#365).
+  return 0;
+}
+
 LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
   const fs::path& mcap_path,
   int episode_index,
@@ -40,6 +82,31 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
 bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
 {
   // TODO(shantanuparab-tr): append a prepared episode to the aggregated files, in order (#365).
+  return false;
+}
+
+bool LeRobotV3DatasetWriter::write_episodes_parquet() {
+  // TODO(shantanuparab-tr): write the per-episode metadata table (#374).
+  return false;
+}
+
+bool LeRobotV3DatasetWriter::write_tasks_parquet() {
+  // TODO(shantanuparab-tr): write the tasks table (#374).
+  return false;
+}
+
+bool LeRobotV3DatasetWriter::write_stats_json() {
+  // TODO(shantanuparab-tr): write the aggregated dataset statistics (#375).
+  return false;
+}
+
+bool LeRobotV3DatasetWriter::write_info_json() {
+  // TODO(shantanuparab-tr): write the v3.0 info.json (#375).
+  return false;
+}
+
+bool LeRobotV3DatasetWriter::write_readme() {
+  // TODO(shantanuparab-tr): write the dataset README (#375).
   return false;
 }
 
