@@ -38,14 +38,14 @@
       "hardware_id":     "leader",
       "stream_id":       "leader",
       "poll_rate_hz":    30.0,
-      "use_device_time": false
+      "use_device_time": true
     },
     {
       "type":            "trossen_arm",
       "hardware_id":     "follower",
       "stream_id":       "follower",
       "poll_rate_hz":    30.0,
-      "use_device_time": false
+      "use_device_time": true
     },
     {
       "type":            "realsense_camera",

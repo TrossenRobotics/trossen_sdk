@@ -26,7 +26,7 @@ namespace trossen::configuration {
  *   "hardware_id":     "leader",        // references hardware config id
  *   "stream_id":       "leader",        // data stream name written to the backend
  *   "poll_rate_hz":    30.0,
- *   "use_device_time": false,
+ *   "use_device_time": true,
  *   "encoding":        "bgr8"           // camera producers only
  * }
  * @endcode
@@ -52,7 +52,8 @@ struct ProducerConfig {
   /// @brief Polling frequency in Hz
   float poll_rate_hz{30.0f};
 
-  /// @brief Use hardware device timestamp when available
+  /// @brief Use hardware device timestamp when available. from_json defaults it to true for
+  ///        arm and camera producers.
   bool use_device_time{false};
 
   /// @brief Pixel encoding - camera producers only (e.g. "bgr8", "rgb8", "mono8")
@@ -61,6 +62,8 @@ struct ProducerConfig {
   static ProducerConfig from_json(const nlohmann::json& j) {
     ProducerConfig c;
     if (j.contains("type"))            j.at("type").get_to(c.type);
+    c.use_device_time = c.type == "trossen_arm" || c.type == "realsense_camera" ||
+                        c.type == "zed_camera" || c.type == "opencv_camera";
     if (j.contains("hardware_id"))     j.at("hardware_id").get_to(c.hardware_id);
     if (j.contains("stream_id"))       j.at("stream_id").get_to(c.stream_id);
     if (j.contains("poll_rate_hz"))    j.at("poll_rate_hz").get_to(c.poll_rate_hz);

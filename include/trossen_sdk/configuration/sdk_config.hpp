@@ -32,7 +32,7 @@
  *     "mobile_base": { "reset_odometry": false, "enable_torque": false }
  *   },
  *   "producers": [
- *     { "type": "trossen_arm",      "hardware_id": "<id>", "stream_id": "<id>", "poll_rate_hz": 30.0, "use_device_time": false },
+ *     { "type": "trossen_arm",      "hardware_id": "<id>", "stream_id": "<id>", "poll_rate_hz": 30.0, "use_device_time": true },
  *     { "type": "realsense_camera", "hardware_id": "<id>", "stream_id": "<id>", "poll_rate_hz": 30.0, "encoding": "bgr8", "use_device_time": true },
  *     { "type": "slate_base",       "hardware_id": "slate_base", "stream_id": "slate_base", "poll_rate_hz": 30.0, "use_device_time": false }
  *   ],

@@ -66,28 +66,28 @@
       "hardware_id":     "leader_left",
       "stream_id":       "leader_left",
       "poll_rate_hz":    30.0,
-      "use_device_time": false
+      "use_device_time": true
     },
     {
       "type":            "trossen_arm",
       "hardware_id":     "leader_right",
       "stream_id":       "leader_right",
       "poll_rate_hz":    30.0,
-      "use_device_time": false
+      "use_device_time": true
     },
     {
       "type":            "trossen_arm",
       "hardware_id":     "follower_left",
       "stream_id":       "follower_left",
       "poll_rate_hz":    30.0,
-      "use_device_time": false
+      "use_device_time": true
     },
     {
       "type":            "trossen_arm",
       "hardware_id":     "follower_right",
       "stream_id":       "follower_right",
       "poll_rate_hz":    30.0,
-      "use_device_time": false
+      "use_device_time": true
     },
     {
       "type":            "realsense_camera",

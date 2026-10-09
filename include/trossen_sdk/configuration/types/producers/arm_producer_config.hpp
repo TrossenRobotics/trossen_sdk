@@ -16,7 +16,7 @@ namespace trossen::configuration {
  * JSON format (under "producers.arms"):
  * {
  *   "poll_rate_hz": 30.0,
- *   "use_device_time": false
+ *   "use_device_time": true
  * }
  */
 struct ArmProducerConfig {
@@ -24,7 +24,7 @@ struct ArmProducerConfig {
   float poll_rate_hz{30.0f};
 
   /// @brief Use hardware device timestamp when available
-  bool use_device_time{false};
+  bool use_device_time{true};
 
   static ArmProducerConfig from_json(const nlohmann::json& j) {
     ArmProducerConfig c;

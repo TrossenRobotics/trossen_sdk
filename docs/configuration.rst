@@ -142,7 +142,7 @@ Add one producer per arm, one per camera, and one per mobile base.
       "hardware_id":    "leader",           // Must match a key in hardware
       "stream_id":      "leader",           // Label used inside the MCAP file
       "poll_rate_hz":   30.0,
-      "use_device_time": false,
+      "use_device_time": true,
       "encoding":       "bgr8"              // Cameras only
     }
 

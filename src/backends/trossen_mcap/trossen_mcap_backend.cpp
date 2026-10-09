@@ -385,6 +385,43 @@ foxglove::RawChannel* TrossenMCAPBackend::ensure_image_channel_with_metadata(
   return &inserted_it->second;
 }
 
+namespace {
+
+/// @brief Copy all three clocks of a record's timestamp into its protobuf form.
+///        The device clock is written only when the producer supplied one, so a reader
+///        can tell "no device timestamp" from "device timestamp of zero".
+void fill_timestamp(trossen_sdk::Timestamp* out, const data::Timestamp& ts) {
+  auto* mono = out->mutable_monotonic();
+  mono->set_seconds(ts.monotonic.sec);
+  mono->set_nanos(static_cast<int32_t>(ts.monotonic.nsec));
+
+  auto* real = out->mutable_realtime();
+  real->set_seconds(ts.realtime.sec);
+  real->set_nanos(static_cast<int32_t>(ts.realtime.nsec));
+
+  switch (ts.device_clock) {
+    case data::DeviceClock::Uptime:
+      out->set_device_clock(trossen_sdk::DEVICE_CLOCK_UPTIME);
+      break;
+    case data::DeviceClock::Epoch:
+      out->set_device_clock(trossen_sdk::DEVICE_CLOCK_EPOCH);
+      break;
+    case data::DeviceClock::HostMapped:
+      out->set_device_clock(trossen_sdk::DEVICE_CLOCK_HOST_MAPPED);
+      break;
+    case data::DeviceClock::None:
+    default:
+      out->set_device_clock(trossen_sdk::DEVICE_CLOCK_NONE);
+      return;
+  }
+
+  auto* dev = out->mutable_device();
+  dev->set_seconds(ts.device.sec);
+  dev->set_nanos(static_cast<int32_t>(ts.device.nsec));
+}
+
+}  // namespace
+
 void TrossenMCAPBackend::write_jointstate_record(const data::JointStateRecord& js) {
   auto* channel = ensure_jointstate_channel(js.id);
   if (!channel) {
@@ -392,17 +429,7 @@ void TrossenMCAPBackend::write_jointstate_record(const data::JointStateRecord& j
   }
 
   trossen_sdk::msg::JointState out;
-  auto* ts = out.mutable_ts();
-
-  // Set monotonic timestamp
-  auto* mono = ts->mutable_monotonic();
-  mono->set_seconds(js.ts.monotonic.sec);
-  mono->set_nanos(js.ts.monotonic.nsec);
-
-  // Set realtime timestamp
-  auto* real = ts->mutable_realtime();
-  real->set_seconds(js.ts.realtime.sec);
-  real->set_nanos(js.ts.realtime.nsec);
+  fill_timestamp(out.mutable_ts(), js.ts);
 
   out.set_seq(js.seq);
   out.mutable_positions()->Reserve(js.positions.size());
@@ -464,15 +491,7 @@ void TrossenMCAPBackend::write_odometry_2d_record(const data::Odometry2DRecord& 
   }
 
   trossen_sdk::msg::Odometry2D out;
-  auto* ts = out.mutable_ts();
-
-  auto* mono = ts->mutable_monotonic();
-  mono->set_seconds(odom.ts.monotonic.sec);
-  mono->set_nanos(odom.ts.monotonic.nsec);
-
-  auto* real = ts->mutable_realtime();
-  real->set_seconds(odom.ts.realtime.sec);
-  real->set_nanos(odom.ts.realtime.nsec);
+  fill_timestamp(out.mutable_ts(), odom.ts);
 
   out.set_seq(odom.seq);
 
