@@ -96,9 +96,9 @@ inline std::optional<double> parse_depth_scale_m(const std::string& text) {
  * norm = (d - min) / (max - min)                                          [use_log=false]
  * code = clamp(round(norm * DEPTH_QMAX), 0, DEPTH_QMAX)
  *
- * @param depth_mm Raw depth in millimeters (mono16/Z16 sensor units). 0 is
- *   the sensor's standard "invalid pixel" value and is handled safely
- *   (clamps to code 0).
+ * @param depth_mm Depth in millimeters, possibly fractional (a sensor with
+ *   sub-millimeter units). 0 is the sensor's standard "invalid pixel" value
+ *   and is handled safely (clamps to code 0).
  * @param depth_min_m Depth in meters mapped to code 0.
  * @param depth_max_m Depth in meters mapped to code DEPTH_QMAX.
  * @param depth_shift_m Pre-log offset in meters, keeping ln() away from zero.
@@ -106,7 +106,7 @@ inline std::optional<double> parse_depth_scale_m(const std::string& text) {
  *   close up, matching real sensor accuracy); if false, quantize linearly.
  * @return Code in [0, DEPTH_QMAX].
  */
-inline uint16_t quantize_depth_mm(uint16_t depth_mm,
+inline uint16_t quantize_depth_mm(double depth_mm,
                                   double depth_min_m = DEFAULT_DEPTH_MIN_M,
                                   double depth_max_m = DEFAULT_DEPTH_MAX_M,
                                   double depth_shift_m = DEFAULT_DEPTH_SHIFT_M,
@@ -133,12 +133,12 @@ inline uint16_t quantize_depth_mm(uint16_t depth_mm,
     // ln(shift) is not. Taking the log also compresses far distances
     // and preserves resolution close up, matching where a real
     // depth sensor's own accuracy degrades.
-    norm = (std::log(static_cast<double>(depth_mm) + shift_mm) - log_min) /
+    norm = (std::log(depth_mm + shift_mm) - log_min) /
            (log_max - log_min);
   } else {
     // Plain proportion: equal meter-widths map to equal code-widths, no
     // compression. Only used when use_log is explicitly disabled.
-    norm = (static_cast<double>(depth_mm) - min_mm) / (max_mm - min_mm);
+    norm = (depth_mm - min_mm) / (max_mm - min_mm);
   }
   // Scale the unitless [0,1] fraction up to an actual 12-bit integer.
   // llround (not a truncation cast) rounds to the nearest code instead of
@@ -195,30 +195,35 @@ inline double dequantize_depth_m(uint16_t code,
 }
 
 /**
- * @brief Precompute quantize_depth_mm() for every possible raw depth value.
+ * @brief Precompute the 12-bit code for every possible raw depth value.
  *
- * depth_mm is a uint16_t, so its entire domain is only 65536 values. Rather
+ * A raw depth sample is a uint16_t, so its entire domain is only 65536 values. Rather
  * than paying for std::log() on every pixel of every frame (~9.2M calls/sec
  * for a VGA depth stream at 30 Hz), compute the answer for every possible
  * input once and store it -- turning each later lookup into a single array
  * read instead of a log()-based computation.
  *
- * The table is only valid for the exact (depth_min_m, depth_max_m,
- * depth_shift_m, use_log) it was built with; a different configuration
- * needs its own table.
+ * The table is only valid for the exact (depth_scale_m, depth_min_m,
+ * depth_max_m, depth_shift_m, use_log) it was built with; a different
+ * configuration needs its own table.
  *
+ * @param depth_scale_m Size of one raw unit in meters: 0.001 for millimeter
+ *   sensors, 0.0001 for the D405. Raw value d is quantized as d * depth_scale_m
+ *   meters.
  * @param depth_min_m Depth in meters mapped to code 0.
  * @param depth_max_m Depth in meters mapped to code DEPTH_QMAX.
  * @param depth_shift_m Pre-log offset in meters, keeping ln() away from zero.
  * @param use_log If true (default), quantize in log space; if false, linearly.
- * @return Table indexed by raw millimeter value (0-65535), yielding the
+ * @return Table indexed by raw sensor value (0-65535), yielding the
  *   corresponding 12-bit code.
  */
-inline std::vector<uint16_t> build_depth_quantization_lut(double depth_min_m = DEFAULT_DEPTH_MIN_M,
+inline std::vector<uint16_t> build_depth_quantization_lut(
+                             double depth_scale_m = DEFAULT_DEPTH_SCALE_M,
+                             double depth_min_m = DEFAULT_DEPTH_MIN_M,
                              double depth_max_m = DEFAULT_DEPTH_MAX_M,
                              double depth_shift_m = DEFAULT_DEPTH_SHIFT_M,
                              bool use_log = DEFAULT_DEPTH_USE_LOG) {
-  // depth_mm's entire domain is 0-65535 (uint16_t), so a 65536-entry table
+  // A raw sample's entire domain is 0-65535 (uint16_t), so a 65536-entry table
   // covers every possible input exactly once. Heap-allocated via std::vector
   // (128 KiB) rather than a stack array, and value-initialized to 0.
   std::vector<uint16_t> lut(65536);
@@ -228,12 +233,11 @@ inline std::vector<uint16_t> build_depth_quantization_lut(double depth_min_m = D
   // wraparound, not UB) -- "d < 65536" would then be true forever, since a
   // uint16_t can never actually hold 65536. int easily covers 0..65536, so
   // the loop terminates normally.
+  const double mm_per_unit = depth_scale_m * MM_PER_METER;
   for (int d = 0; d < 65536; ++d) {
-    // Only cast down to uint16_t here, at the boundary where
-    // quantize_depth_mm() actually needs that exact type -- this is the one
-    // expensive call (the log()s) that this whole table exists to avoid
-    // paying for again at runtime.
-    lut[d] = quantize_depth_mm(static_cast<uint16_t>(d), depth_min_m, depth_max_m,
+    // quantize_depth_mm() is the one expensive call (the log()s) that this
+    // whole table exists to avoid paying for again at runtime.
+    lut[d] = quantize_depth_mm(static_cast<double>(d) * mm_per_unit, depth_min_m, depth_max_m,
                                 depth_shift_m, use_log);
   }
 
