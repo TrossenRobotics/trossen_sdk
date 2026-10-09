@@ -12,6 +12,7 @@
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
 
+#include "FrameMeta.pb.h"
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
 #include "nlohmann/json.hpp"
@@ -206,6 +207,9 @@ void TrossenMCAPBackend::close_resources() {
   for (auto& [name, channel] : image_channels_) {
     channel.close();
   }
+  for (auto& [name, channel] : camera_meta_channels_) {
+    channel.close();
+  }
   if (writer_) {
     auto st = writer_->close();
     if (st != foxglove::FoxgloveError::Ok) {
@@ -214,6 +218,8 @@ void TrossenMCAPBackend::close_resources() {
   }
   joint_channels_.clear();
   image_channels_.clear();
+  camera_meta_channels_.clear();
+  camera_meta_frame_index_.clear();
   odometry_2d_channels_.clear();
 
   // Encoders hold per-stream state (reference frames, GOP position), so they
@@ -421,6 +427,61 @@ void fill_timestamp(trossen_sdk::Timestamp* out, const data::Timestamp& ts) {
 }
 
 }  // namespace
+
+foxglove::RawChannel* TrossenMCAPBackend::ensure_camera_meta_channel(
+  const std::string& stream_id) {
+  auto it = camera_meta_channels_.find(stream_id);
+  if (it != camera_meta_channels_.end()) {
+    return &it->second;
+  }
+
+  foxglove::Schema schema;
+  schema.name = "trossen_sdk.msg.FrameMeta";
+  schema.encoding = "protobuf";
+  schema.data = reinterpret_cast<const std::byte*>(schema_data_frame_meta_.data());
+  schema.data_len = schema_data_frame_meta_.size();
+
+  auto channel_result = foxglove::RawChannel::create(
+    trossen_mcap_defs::camera_meta_topic(stream_id), "protobuf", schema, context_);
+
+  if (!channel_result.has_value()) {
+    std::cerr << "Failed to create camera meta channel: "
+              << foxglove::strerror(channel_result.error()) << "\n";
+    return nullptr;
+  }
+
+  auto [inserted_it, _] =
+    camera_meta_channels_.emplace(stream_id, std::move(channel_result.value()));
+  return &inserted_it->second;
+}
+
+void TrossenMCAPBackend::write_camera_meta_record(
+  const std::string& stream_id, const data::Timestamp& ts, uint64_t seq,
+  std::optional<uint64_t> device_frame_number) {
+  auto* channel = ensure_camera_meta_channel(stream_id);
+  if (!channel) {
+    return;
+  }
+
+  trossen_sdk::msg::FrameMeta out;
+  fill_timestamp(out.mutable_ts(), ts);
+  out.set_seq(seq);
+  out.set_stream_id(stream_id);
+  out.set_frame_index(camera_meta_frame_index_[stream_id]++);
+  if (device_frame_number) out.set_device_frame_number(*device_frame_number);
+
+  std::string payload;
+  out.SerializeToString(&payload);
+
+  // Logged at the same host time as the image itself, so the two topics interleave in
+  // log order and a reader scanning by time sees them together.
+  auto st = channel->log(reinterpret_cast<const std::byte*>(payload.data()), payload.size(),
+                         ts.realtime.to_ns());
+  if (st != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to write frame meta for " << stream_id << ": "
+              << foxglove::strerror(st) << "\n";
+  }
+}
 
 void TrossenMCAPBackend::write_jointstate_record(const data::JointStateRecord& js) {
   auto* channel = ensure_jointstate_channel(js.id);
@@ -748,7 +809,11 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
     return;
   }
 
-  write_image_frame(img, depth, channel);
+  // Meta is written only for a frame that reached the file, so the nth meta message on a
+  // stream always describes the nth recorded frame.
+  if (write_image_frame(img, depth, channel)) {
+    write_camera_meta_record(img.id, img.ts, img.seq, img.device_frame_number);
+  }
 
   // Write optional depth image to a separate channel when ImageRecord carries depth
   if (img.has_depth()) {
@@ -770,7 +835,9 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
       drec.encoding = "16UC1";
       drec.width = static_cast<uint32_t>(img.depth_image->cols);
       drec.height = static_cast<uint32_t>(img.depth_image->rows);
-      write_image_frame(drec, /*depth=*/true, depth_channel);
+      if (write_image_frame(drec, /*depth=*/true, depth_channel)) {
+        write_camera_meta_record(depth_topic_id, drec.ts, drec.seq, drec.device_frame_number);
+      }
     }
   }
 }
@@ -814,6 +881,8 @@ void TrossenMCAPBackend::register_schemas_once() {
     "trossen_sdk/io/backends/trossen_mcap/proto/JointState.proto");
   schema_data_odom2d_ = build_schema_blob(
     "trossen_sdk/io/backends/trossen_mcap/proto/Odometry2D.proto");
+  schema_data_frame_meta_ = build_schema_blob(
+    "trossen_sdk/io/backends/trossen_mcap/proto/FrameMeta.proto");
 }
 
 bool TrossenMCAPBackend::is_depth_topic(const std::string& topic) {
