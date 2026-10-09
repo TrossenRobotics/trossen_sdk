@@ -12,6 +12,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # and opt-in dependencies?
 option(TROSSEN_ENABLE_REALSENSE "Enable RealSense camera support" ON)
 option(TROSSEN_ENABLE_ZED "Enable StereoLabs ZED camera support" OFF)
+# OFF by default: this is the only part of the SDK that needs libavcodec/libavutil/
+# libswscale headers, and nothing on the default path uses it yet. Turning it on adds
+# an ffmpeg dev dependency to the build, so it stays opt-in until the recorder can
+# actually write video.
+option(TROSSEN_ENABLE_VIDEO_ENCODE "Enable H.264/H.265 video encoding support" OFF)
 # OFF by default: rerun-cpp adds ~50 MB of download and a multi-minute first build, and is
 # only needed by the stationary-demo ReRun viewer flow. Enable explicitly when building
 # that demo: cmake -DTROSSEN_ENABLE_RERUN_OBSERVER=ON ...
@@ -66,6 +71,19 @@ if(TROSSEN_ENABLE_REALSENSE)
   find_package(fastcdr REQUIRED)
   find_package(fastrtps REQUIRED)
   find_package(realsense2 REQUIRED)
+endif()
+
+if(TROSSEN_ENABLE_VIDEO_ENCODE)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(FFMPEG_ENC REQUIRED IMPORTED_TARGET
+    libavcodec libavutil libswscale)
+  message(STATUS
+    "Video encoding enabled (libavcodec ${FFMPEG_ENC_libavcodec_VERSION})")
+  target_sources(trossen_sdk PRIVATE src/utils/video_encoder.cpp)
+  target_compile_definitions(trossen_sdk PRIVATE TROSSEN_ENABLE_VIDEO_ENCODE)
+  # PRIVATE: the ffmpeg headers stay confined to video_encoder.cpp, so consumers
+  # of trossen_sdk do not need libavcodec headers on their include path.
+  target_link_libraries(trossen_sdk PRIVATE PkgConfig::FFMPEG_ENC)
 endif()
 
 if(TROSSEN_ENABLE_ZED)
