@@ -472,9 +472,7 @@ void LeRobotV2Backend::compute_statistics() const {
     return;
   }
 
-  // Write task entry (will only create if doesn't exist)
-  // TODO(shantanuparab-tr): Use proper task_index instead of episode_index
-  if (!write_task_entry(meta_root_, episode_index_, cfg_->task_name)) {
+  if (!write_task_entry(meta_root_, cfg_->task_name)) {
     std::cerr << "Failed to write task entry." << std::endl;
     return;
   }
