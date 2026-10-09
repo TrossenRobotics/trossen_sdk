@@ -52,6 +52,8 @@ public:
     std::map<std::string, std::filesystem::path> image_dirs;
     /// @brief Episode video of each camera, under the scratch folder.
     std::map<std::string, std::filesystem::path> videos;
+    /// @brief Codec and pixel format of each remuxed camera, which keeps the recorder's codec.
+    std::map<std::string, VideoCodecInfo> remuxed_codecs;
   };
 
   /**
