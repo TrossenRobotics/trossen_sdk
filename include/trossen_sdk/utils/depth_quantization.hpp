@@ -128,6 +128,49 @@ inline uint16_t quantize_depth_mm(uint16_t depth_mm,
   return static_cast<uint16_t>(std::clamp<int64_t>(code, 0, DEPTH_QMAX));
 }
 
+/**
+ * @brief Recover an approximate depth in meters from a 12-bit code.
+ *
+ * Inverse of quantize_depth_mm(): undoes the scale-to-code step, then the
+ * normalize step, then (in log mode) the log itself via exp().
+ * @param code 12-bit code in [0, DEPTH_QMAX], as produced by
+ * quantize_depth_mm().
+ * @param depth_min_m Depth in meters mapped to code 0. Must match the value
+ * used to encode this code, or the recovered depth will be silently wrong.
+ * @param depth_max_m Depth in meters mapped to DEPTH_QMAX. Must match the
+ * encoder.
+ * @param depth_shift_m Pre-log offset in meters used during encoding. Must
+ * match.
+ * @param use_log Must match the mode (log vs. linear) used to encode this code.
+ * @return Approximate depth in meters.
+ */
+inline double dequantize_depth_m(uint16_t code,
+                                 double depth_min_m = DEFAULT_DEPTH_MIN_M,
+                                 double depth_max_m = DEFAULT_DEPTH_MAX_M,
+                                 double depth_shift_m = DEFAULT_DEPTH_SHIFT_M,
+                                 bool use_log = DEFAULT_DEPTH_USE_LOG) {
+  // code / DEPTH_QMAX recovers norm, the [0,1] fraction quantize_depth_mm
+  // produced. Cast to double first -- code and DEPTH_QMAX are both integer
+  // types, so plain integer division would truncate to 0 for any code below
+  // DEPTH_QMAX.
+  const double norm = static_cast<double>(code) / DEPTH_QMAX;
+
+  double depth_m;
+
+  if (use_log) {
+    // Inverse of the log-mode forward math, run backwards: undo the
+    // normalization (scale by the log range, add back log_min), then undo
+    // the log with exp(), then undo the shift.
+    const double log_min = std::log(depth_min_m + depth_shift_m);
+    const double log_max = std::log(depth_max_m + depth_shift_m);
+    depth_m = std::exp(log_min + norm * (log_max - log_min)) - depth_shift_m;
+  } else {
+    // Inverse of the plain linear proportion.
+    depth_m = depth_min_m + norm * (depth_max_m - depth_min_m);
+  }
+  return depth_m;
+}
+
 }  // namespace trossen::utils
 
 #endif  // TROSSEN_SDK__UTILS__DEPTH_QUANTIZATION_HPP_
