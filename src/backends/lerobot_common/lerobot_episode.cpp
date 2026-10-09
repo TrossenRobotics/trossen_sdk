@@ -14,15 +14,17 @@ namespace trossen::io::backends {
 
 namespace {
 
-/// @brief Strip the `follower_`/`leader_` prefix from a stream id, leaving the side name.
+/// @brief Strip the role prefix (`follower_`, `leader_`, `glide_`, ...) from a stream id,
+/// leaving the side name, so a leader and its follower share column names.
 ///
-/// A stream id carrying neither prefix is reported and used whole, so its joint columns
-/// are still named after something traceable back to the recording.
+/// A stream id with no `_` is reported and used whole, so its joint columns are still
+/// named after something traceable back to the recording.
 std::string stream_side(const std::string& stream_id) {
-  for (std::string_view p : {"follower_", "leader_"}) {
-    if (stream_id.rfind(p, 0) == 0) return stream_id.substr(p.size());
+  const size_t underscore = stream_id.find('_');
+  if (underscore != std::string::npos && underscore + 1 < stream_id.size()) {
+    return stream_id.substr(underscore + 1);
   }
-  std::cerr << "Warning: stream '" << stream_id << "' has no 'follower_' or 'leader_' prefix; "
+  std::cerr << "Warning: stream '" << stream_id << "' has no role prefix; "
             << "naming its joint columns after the full stream id\n";
   return stream_id;
 }
@@ -85,7 +87,13 @@ nlohmann::ordered_json build_features(
     if (!ep.dataset_info.empty() && ep.dataset_info.contains("streams") &&
         ep.dataset_info["streams"].contains(stream_id) &&
         ep.dataset_info["streams"][stream_id].contains("joint_names")) {
-      return ep.dataset_info["streams"][stream_id]["joint_names"];
+      // The recorded names repeat across arms (joint_0 on every arm), so each is
+      // prefixed with its stream id to keep the columns unique.
+      nlohmann::json names = nlohmann::json::array();
+      for (const auto& n : ep.dataset_info["streams"][stream_id]["joint_names"]) {
+        names.push_back(stream_id + "." + n.get<std::string>());
+      }
+      return names;
     }
     nlohmann::json names = nlohmann::json::array();
     std::string arm_name = stream_id;
