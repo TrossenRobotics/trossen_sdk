@@ -26,6 +26,9 @@ inline constexpr char kJointStateTopicSuffix[] = "/joints/state";
 /// @brief Suffix a stream id carries when the topic holds its planar odometry.
 inline constexpr char kOdometry2DTopicSuffix[] = "/odom/state";
 
+/// @brief MCAP header profile of a TrossenMCAP file.
+inline constexpr char kMcapProfile[] = "trossen";
+
 /// @brief Name of the file-level metadata record written once per recording.
 inline constexpr char kRecordingMetadataName[] = "trossen_sdk_recording";
 
