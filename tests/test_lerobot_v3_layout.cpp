@@ -776,3 +776,17 @@ TEST(LeRobotV3Writer, FlushJoinsEpisodesAtTheirVideoDurations) {
   EXPECT_EQ(probe_packet_count(out), 25);
   fs::remove_all(dir);
 }
+
+TEST(LeRobotV3Writer, PrepareEpisodeFailsOnAMissingRecording) {
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_prepare_missing_test");
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+  // Stale output in the episode's temp dir must be removed on failure.
+  fs::create_directories(dir / "episode_3");
+  std::ofstream(dir / "episode_3" / "stale.mp4") << "x";
+
+  const auto pe = writer.prepare_episode(dir / "missing.mcap", 3, "task", dir);
+  EXPECT_FALSE(pe.ok);
+  EXPECT_TRUE(pe.videos.empty());
+  EXPECT_FALSE(fs::exists(dir / "episode_3"));
+  fs::remove_all(dir);
+}
