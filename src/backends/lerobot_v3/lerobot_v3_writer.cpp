@@ -575,8 +575,12 @@ bool LeRobotV3DatasetWriter::place_or_concat_video(
 }
 
 int LeRobotV3DatasetWriter::task_index_for(const std::string& task_name) {
-  // TODO(shantanuparab-tr): map a task name to its row in the tasks table.
-  return 0;
+  auto it = task_to_index_.find(task_name);
+  if (it != task_to_index_.end()) return it->second;
+  int idx = static_cast<int>(task_list_.size());
+  task_list_.push_back(task_name);
+  task_to_index_[task_name] = idx;
+  return idx;
 }
 
 LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
@@ -733,8 +737,97 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
 
 bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
 {
-  // TODO(shantanuparab-tr): append a prepared episode to the aggregated files, in order.
-  return false;
+  const AlignedEpisode& ep = pe.ep;
+  if (ep.frames.empty()) {
+    std::cerr << "Warning: episode " << ep.episode_index << " has no frames; skipping.\n";
+    return true;
+  }
+
+  // Fix the schema + feature set from the first episode.
+  if (!schema_fixed_) {
+    action_dim_ = episode_action_dim(ep);
+    obs_dim_ = episode_obs_dim(ep);
+    data_schema_ = make_data_schema();
+    features_ = build_features(ep, opts_.native_schema);
+    // build_features() assumes this converter encoded the video, so it names the
+    // encoder defaults. Cameras whose stream was remuxed out of the recording
+    // carry whatever codec the recorder used, and lerobot derives video.codec
+    // from the stream itself -- a mismatch here is a dataset it rejects.
+    for (const auto& pv : pe.videos) {
+      if (!features_.contains(pv.obs_key)) continue;
+      features_[pv.obs_key]["info"]["video.codec"] = pv.codec;
+      features_[pv.obs_key]["info"]["video.pix_fmt"] = pv.pix_fmt;
+    }
+    trossen::io::backends::add_standard_metadata_features(features_);
+    action_values_.assign(action_dim_, {});
+    obs_values_.assign(obs_dim_, {});
+    schema_fixed_ = true;
+  }
+
+  const int task_index = task_index_for(pe.task_name);
+  const int64_t ep_frames = static_cast<int64_t>(ep.frames.size());
+
+  // The episode index is the position in the episodes table, assigned here rather than
+  // taken from the input file's position: LeRobot looks episodes up positionally
+  // (`meta.episodes[episode_index]`), so a skipped input must not leave a hole. A gap
+  // makes every later episode read another episode's video seek metadata.
+  const int episode_index = static_cast<int>(episodes_.size());
+
+  // ── Data parquet: roll if needed, then write this episode as one row group ──
+  if (!roll_data_file_if_needed(ep_frames)) return false;
+
+  EpisodeMeta meta;
+  meta.episode_index = episode_index;
+  meta.tasks = {pe.task_name};
+  meta.length = ep_frames;
+  meta.data_chunk_index = data_.chunk_index;
+  meta.data_file_index = data_.file_index;
+  meta.dataset_from_index = global_frame_index_;
+  meta.dataset_to_index = global_frame_index_ + ep_frames;
+
+  auto table = build_episode_table(ep, episode_index, task_index, global_frame_index_);
+  auto st = data_.writer->WriteTable(*table, table->num_rows());  // one row group / episode
+  if (!st.ok()) {
+    std::cerr << "Error: Failed to write data table: " << st.ToString() << "\n";
+    return false;
+  }
+  data_.frames_in_file += ep_frames;
+  global_frame_index_ += ep_frames;
+  total_frames_ += ep_frames;
+
+  // ── Accumulate global stats from this episode's frames ──
+  for (const auto& f : ep.frames) {
+    for (int d = 0; d < action_dim_ && d < static_cast<int>(f.action.size()); ++d) {
+      action_values_[d].push_back(static_cast<float>(f.action[d]));
+    }
+    for (int d = 0; d < obs_dim_ && d < static_cast<int>(f.observation.size()); ++d) {
+      obs_values_[d].push_back(static_cast<float>(f.observation[d]));
+    }
+    ts_values_.push_back(f.timestamp_s);
+  }
+
+  // ── Videos: place/concat each pre-encoded episode mp4 into the shared file ──
+  if (opts_.encode_videos) {
+    for (auto& pv : pe.videos) {
+      if (std::find(video_keys_.begin(), video_keys_.end(), pv.obs_key) == video_keys_.end()) {
+        video_keys_.push_back(pv.obs_key);
+      }
+
+      std::array<double, 4> slot{};
+      if (!place_or_concat_video(pv.obs_key, pv.episode_mp4, pv.duration_s, slot)) return false;
+      meta.videos[pv.obs_key] = slot;
+
+      // Accumulate sampled frames for image stats (cap total per key).
+      auto& bucket = image_samples_[pv.obs_key];
+      for (auto& img : pv.samples) {
+        if (bucket.size() >= kMaxImageSamplesPerKey) break;
+        if (!img.empty()) bucket.push_back(std::move(img));
+      }
+    }
+  }
+
+  episodes_.push_back(std::move(meta));
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::write_episodes_parquet() {
