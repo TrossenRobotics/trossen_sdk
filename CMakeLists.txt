@@ -33,6 +33,7 @@ add_library(trossen_sdk SHARED
   src/backends/lerobot_common/lerobot_table.cpp
   src/backends/lerobot_common/lerobot_video.cpp
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
+  src/backends/lerobot_v3/lerobot_v3_writer.cpp
   src/backends/trossen_mcap/mcap_dataset_loader.cpp
   src/backends/trossen_mcap/trossen_mcap_backend.cpp
   src/backends/null/null_backend.cpp
