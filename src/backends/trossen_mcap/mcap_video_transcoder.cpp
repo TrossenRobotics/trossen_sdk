@@ -93,6 +93,10 @@ struct ChannelPlan {
   std::optional<foxglove::RawChannel> channel;
   /// @brief Encoder for this camera, built once the first frame gives its dimensions.
   std::unique_ptr<utils::VideoEncoder> encoder;
+  /// @brief Frames this camera has encoded, used to recognize a first-frame failure.
+  size_t frames_encoded{0};
+  /// @brief Whether this camera already fell back to the software encoder.
+  bool software_fallback{false};
 };
 
 /// @brief Build the encoder parameters for one camera stream.
@@ -400,6 +404,26 @@ bool transcode_images_to_video(
     auto packet = plan.encoder->encode(reinterpret_cast<const uint8_t*>(frame.data),
                                        frame.total() * frame.elemSize());
 
+    // Some hardware encoders hold the first frames in a queue and return nothing for them,
+    // which this tool cannot use: each packet is written at its own frame's log time, so a
+    // delayed one would carry the wrong timestamp. Nothing has been written for this camera
+    // yet, so the stream simply restarts on the software encoder, which emits one packet per
+    // frame. The bitstream format is unchanged, so the channel metadata still holds.
+    if (packet.data.empty() && plan.frames_encoded == 0 && !plan.software_fallback) {
+      std::cerr << "Warning: " << plan.encoder->encoder_name() << " returned no packet for "
+                << plan.camera << " frame 0; falling back to the software encoder\n";
+      plan.software_fallback = true;
+      plan.encoder = utils::VideoEncoder::create(
+        encoder_params_for(frame.cols, frame.rows, plan.depth, plan.depth ? "x265" : "x264",
+                           options));
+      if (!plan.encoder) {
+        std::cerr << "Error: Failed to create a software encoder for " << plan.camera << "\n";
+        return false;
+      }
+      packet = plan.encoder->encode(reinterpret_cast<const uint8_t*>(frame.data),
+                                    frame.total() * frame.elemSize());
+    }
+
     if (packet.data.empty()) {
       // One packet per frame is an invariant, not a nicety: readers pair frame n of the
       // video with the nth frame-meta message, so a dropped packet shifts every later
@@ -427,6 +451,7 @@ bool transcode_images_to_video(
                 << foxglove::strerror(st) << "\n";
       return false;
     }
+    ++plan.frames_encoded;
     if (plan.depth) {
       ++stats.depth_frames_encoded;
     } else {
