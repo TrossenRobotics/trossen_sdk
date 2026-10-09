@@ -48,7 +48,7 @@ Install the base build toolchain and runtime libraries required by the SDK and i
 Apache Parquet
 --------------
 
-The LeRobot V2 conversion tool writes Parquet files, so Apache Arrow and Parquet development libraries are required.
+The LeRobot V2 and V3 conversion tools write Parquet files, so Apache Arrow and Parquet development libraries are required.
 Install them from the Apache Arrow APT repository.
 
 .. code-block:: bash
@@ -133,7 +133,7 @@ Standard Build
 The build produces:
 
 -   The example recording binaries in ``build/examples/``.
--   The conversion tool ``build/scripts/trossen_mcap_to_lerobot_v2``.
+-   The conversion tools ``build/scripts/trossen_mcap_to_lerobot_v2`` and ``build/scripts/trossen_mcap_to_lerobot_v3``.
 -   The replay tool ``build/scripts/replay_trossen_mcap_jointstate``.
 
 Enabling Stereolabs ZED Support
