@@ -250,3 +250,16 @@ TEST(DepthQuantizationTest, RejectsInvalidDepthScale) {
   EXPECT_FALSE(parse_depth_scale_m("inf").has_value());
   EXPECT_FALSE(parse_depth_scale_m("nan").has_value());
 }
+
+// ============================================================================
+// build_depth_quantization_lut() with a sensor's own depth unit
+// ============================================================================
+
+// A D405 records 0.1 mm units, so raw 6000 is 600 mm and must get 600 mm's code.
+TEST(DepthQuantizationTest, LutAppliesDepthScale) {
+  const std::vector<uint16_t> lut = build_depth_quantization_lut(0.0001);
+  for (int raw : {0, 100, 6000, 9999, 20000, 65535}) {
+    EXPECT_EQ(lut[raw], quantize_depth_mm(raw / 10.0)) << "at raw " << raw;
+  }
+  EXPECT_EQ(lut[6000], build_depth_quantization_lut()[600]);
+}
