@@ -210,6 +210,10 @@ private:
   bool encode_depth_video(
     const std::filesystem::path& image_dir, size_t frame_count,
     const std::filesystem::path& out_mp4) const;
+  /// @brief Encode a file of gray12le depth codes, one frame per row, as lossless HEVC.
+  bool encode_depth_codes(
+    const std::filesystem::path& raw_path, int width, int height, size_t frame_count,
+    const std::filesystem::path& out_mp4) const;
   /**
    * @brief Stage one episode's video for its camera's shared mp4 and report its seek span.
    *

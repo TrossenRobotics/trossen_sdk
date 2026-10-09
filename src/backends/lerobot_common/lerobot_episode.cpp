@@ -11,6 +11,7 @@
 #include <string_view>
 #include <vector>
 
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_video.hpp"
 #include "trossen_sdk/utils/depth_quantization.hpp"
 
 namespace trossen::io::backends {
@@ -141,8 +142,8 @@ nlohmann::ordered_json build_features(const AlignedEpisode& ep) {
 
     if (is_depth) {
       // Match lerobot 0.6.0 DepthEncoderConfig: HEVC Main 12 / gray12le, 12-bit log-quant.
-      features[obs_key]["info"]["video.codec"] = "hevc";
-      features[obs_key]["info"]["video.pix_fmt"] = "gray12le";
+      features[obs_key]["info"]["video.codec"] = kDepthCodec;
+      features[obs_key]["info"]["video.pix_fmt"] = kDepthPixFmt;
       features[obs_key]["info"]["video.depth_min"] = utils::DEFAULT_DEPTH_MIN_M;  // quantum 0
       features[obs_key]["info"]["video.depth_max"] = utils::DEFAULT_DEPTH_MAX_M;  // DEPTH_QMAX
       features[obs_key]["info"]["video.shift"] = utils::DEFAULT_DEPTH_SHIFT_M;  // pre-log offset
@@ -153,8 +154,9 @@ nlohmann::ordered_json build_features(const AlignedEpisode& ep) {
       // video.codec holds the canonical bitstream name, which is what lerobot itself
       // stores (video_utils.py reads it off the stream as codec.canonical_name) and
       // what it maps back to an encoder through VIDEO_CODECS_ALIASES when re-encoding.
-      features[obs_key]["info"]["video.codec"] = "av1";
-      features[obs_key]["info"]["video.pix_fmt"] = "yuv420p";
+      // Overridden per camera by the writer for a remuxed stream.
+      features[obs_key]["info"]["video.codec"] = kColorCodec;
+      features[obs_key]["info"]["video.pix_fmt"] = kColorPixFmt;
     }
   }
 
@@ -162,8 +164,8 @@ nlohmann::ordered_json build_features(const AlignedEpisode& ep) {
 }
 
 VideoCodecInfo copied_stream_codec(const std::string& format) {
-  if (format == "h264") return {"h264", "yuv420p"};
-  if (format == "h265") return {"hevc", "gray12le"};
+  if (format == "h264") return {"h264", kColorPixFmt};
+  if (format == "h265") return {kDepthCodec, kDepthPixFmt};
   throw std::invalid_argument("copied_stream_codec: unsupported video format '" + format + "'");
 }
 
