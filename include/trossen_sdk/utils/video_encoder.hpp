@@ -45,7 +45,6 @@ class VideoEncoder {
      * @brief Preferred encoder name, or "auto" to probe hardware then software.
      * Accepted: "auto", "nvenc", "vaapi", "x264"/"x265", or a literal encoder name (e.g.
      * "h264_nvenc", or "nvv4l2h264enc" for NVIDIA Jetson's hardware encoder, H264 only).
-     * The Jetson encoder opens and closes, but encode() returns no packet for it yet.
      */
     std::string encoder{"auto"};
     /// @brief Lossless mode (depth): disables rate control, requires H265.
