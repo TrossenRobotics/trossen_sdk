@@ -53,6 +53,12 @@ struct AlignmentOptions {
   double fps{DEFAULT_DATASET_FPS};
   /// @brief Largest gap, in nanoseconds, allowed between a row and the sample it matches.
   uint64_t tolerance_ns{DEFAULT_MATCH_TOLERANCE_NS};
+  /// @brief Longest single gap, in milliseconds, between two kept rows; an episode with a
+  ///        longer one is rejected.
+  double max_single_gap_ms{DEFAULT_MAX_SINGLE_GAP_MS};
+  /// @brief Largest share of the grid's rows, from 0 to 1, dropped between the first and
+  ///        last kept row; past it the episode is rejected.
+  double max_gap_fraction{DEFAULT_MAX_GAP_FRACTION};
   /// @brief Leave depth cameras out of the episode before they are checked or aligned, for
   ///        a format that cannot store depth. A depth camera then cannot reject the episode
   ///        or cost it rows.
@@ -148,6 +154,45 @@ struct StreamWindow {
  */
 std::vector<uint64_t> row_grid(uint64_t start, uint64_t end, uint64_t period_ns);
 
+/// @brief Rows dropped between the first and last kept row, measured against the limits in
+///        AlignmentOptions.
+struct GapSummary {
+  /// @brief Rows dropped across every gap.
+  size_t dropped_rows{0};
+  /// @brief Length of the longest gap, in rows.
+  size_t longest_gap_rows{0};
+  /// @brief `dropped_rows` as a share of the grid's rows, from 0 to 1.
+  double dropped_fraction{0.0};
+  /// @brief Whether the longest gap is over AlignmentOptions::max_single_gap_ms.
+  bool gap_too_long{false};
+  /// @brief Whether `dropped_fraction` is over AlignmentOptions::max_gap_fraction.
+  bool too_many_gaps{false};
+};
+
+/**
+ * @brief Total and longest mid-episode gap, and whether either is over its limit.
+ *
+ * A gap exactly at a limit is accepted.
+ *
+ * @param gap_lengths Length of each gap, in rows.
+ * @param grid_rows Number of rows on the episode's grid; must be above zero.
+ * @param row_period_ns Spacing between rows, in nanoseconds.
+ * @param alignment Supplies `max_single_gap_ms` and `max_gap_fraction`.
+ * @return The totals and the limit checks.
+ */
+GapSummary summarize_gaps(
+  const std::vector<size_t>& gap_lengths, size_t grid_rows, uint64_t row_period_ns,
+  const AlignmentOptions& alignment);
+
+/**
+ * @brief Duration of a run of rows, in milliseconds.
+ *
+ * @param rows Number of rows.
+ * @param row_period_ns Spacing between rows, in nanoseconds.
+ * @return The duration, in milliseconds.
+ */
+double rows_to_ms(size_t rows, uint64_t row_period_ns);
+
 /**
  * @brief Largest distance, in nanoseconds, at which a camera frame is matched to a row.
  *
@@ -183,11 +228,14 @@ void drop_depth_cameras(McapChannelMap& channels, const nlohmann::json& dataset_
  * `role`. A row with no sample within `alignment.tolerance_ns` for any stream or camera
  * is dropped. Camera keys keep the names the recording gave them.
  *
+ * Fails on a recording it cannot align, or whose dropped rows exceed the gap limits in
+ * `alignment`.
+ *
  * @param mcap_file Path to the input MCAP file.
  * @param episode_index Zero-based episode index to stamp on the episode.
  * @param out Output episode (overwritten on success).
  * @param channels Output channel maps (reused by extract_camera_images()).
- * @param alignment Row rate and match tolerance used to build the frame sequence.
+ * @param alignment Row rate, match tolerance and allowed mid-episode gap.
  * @return true on success; false on a fatal error (message logged to stderr).
  */
 bool load_aligned_episode(
