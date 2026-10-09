@@ -186,12 +186,84 @@ private:
     int64_t frames_in_file{0};
   };
 
+  /// @brief Running state for one camera's shared video stream.
+  struct VideoFileState {
+    int chunk_index{0};
+    int file_index{0};
+    std::filesystem::path path;       // current shared mp4 (empty until first episode)
+    double duration_s{0.0};           // running end timestamp within the current file
+  };
+
+  /// @brief One episode's seek metadata, buffered until finalize().
+  struct EpisodeMeta {
+    int episode_index{0};
+    std::vector<std::string> tasks;
+    int64_t length{0};
+    int data_chunk_index{0};
+    int data_file_index{0};
+    int64_t dataset_from_index{0};
+    int64_t dataset_to_index{0};
+    // Per video key: {chunk_index, file_index, from_timestamp, to_timestamp}.
+    std::map<std::string, std::array<double, 4>> videos;
+  };
+
   bool roll_data_file_if_needed(int64_t next_ep_frames);
   bool open_data_writer(const std::shared_ptr<arrow::Schema>& schema);
   void close_data_writer();
   std::shared_ptr<arrow::Schema> make_data_schema() const;
   std::shared_ptr<arrow::Table> build_episode_table(
     const AlignedEpisode& ep, int episode_index, int task_index, int64_t global_from) const;
+
+  // Video helpers (defined in the .cpp; shell out to ffmpeg/ffprobe).
+  bool encode_episode_video(
+    const std::filesystem::path& image_dir, size_t frame_count,
+    const std::filesystem::path& out_mp4) const;
+  /// @brief Encode 16-bit depth PNGs as lerobot-0.6.0-native HEVC gray12le (12-bit log-quant).
+  bool encode_depth_video(
+    const std::filesystem::path& image_dir, size_t frame_count,
+    const std::filesystem::path& out_mp4) const;
+  /**
+   * @brief Wrap an already-compressed Annex B stream in mp4 without re-encoding.
+   *
+   * The bitstream is copied through verbatim (`-c copy`), so the recorded frames
+   * reach LeRobot exactly as captured. Timestamps are generated at the dataset
+   * fps because an elementary stream carries none.
+   *
+   * @param annexb Input elementary stream (`.h264` / `.hevc`).
+   * @param frame_count Expected frame count, checked against the muxed result.
+   * @param out_mp4 Output mp4.
+   * @return true on success.
+   */
+  bool remux_episode_video(
+    const std::filesystem::path& annexb, size_t frame_count,
+    const std::filesystem::path& out_mp4) const;
+
+  /**
+   * @brief Decode evenly spaced frames from an mp4 for global image statistics.
+   *
+   * Used on the remux path, where no decoded frames pass through the converter
+   * at all. Only a sample is decoded, not the whole stream.
+   *
+   * @param mp4 Video to sample.
+   * @param frame_count Total frames in the video.
+   * @param tmp_dir Scratch directory for the extracted stills.
+   * @return Sampled frames (empty on failure; stats degrade rather than fail).
+   */
+  std::vector<cv::Mat> sample_video_frames(
+    const std::filesystem::path& mp4, size_t frame_count,
+    const std::filesystem::path& tmp_dir) const;
+
+  bool place_or_concat_video(
+    const std::string& video_key, const std::filesystem::path& episode_mp4,
+    double ep_duration_s, std::array<double, 4>& out_slot);
+
+  int task_index_for(const std::string& task_name);
+
+  bool write_episodes_parquet();
+  bool write_tasks_parquet();
+  bool write_stats_json();
+  bool write_info_json();
+  bool write_readme();
 
   Options opts_;
   std::filesystem::path meta_dir_;
@@ -205,6 +277,22 @@ private:
   nlohmann::ordered_json features_;  // LeRobot features (built from first episode)
 
   DataFileState data_;
+  std::map<std::string, VideoFileState> videos_;  // keyed by video_key
+  std::vector<std::string> video_keys_;            // stable order, first-seen
+
+  std::vector<EpisodeMeta> episodes_;
+  std::vector<std::string> task_list_;             // task_index → task string
+  std::map<std::string, int> task_to_index_;
+
+  int64_t total_frames_{0};
+  int64_t global_frame_index_{0};
+
+  // Global stat accumulators (computed at finalize → meta/stats.json).
+  std::vector<std::vector<float>> action_values_;       // per-dim flattened
+  std::vector<std::vector<float>> obs_values_;          // per-dim flattened
+  std::vector<float> ts_values_;
+  // Sampled images per video key for image stats (capped).
+  std::map<std::string, std::vector<cv::Mat>> image_samples_;
 };
 
 }  // namespace trossen::io::backends
