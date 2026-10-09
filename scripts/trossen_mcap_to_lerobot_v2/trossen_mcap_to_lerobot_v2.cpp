@@ -238,8 +238,8 @@ int main(int argc, char** argv) {
   int skipped = 0;
   int failed = 0;
 
-  trossen::io::backends::LeRobotV2DatasetWriter writer({dataset_root_dir, repository_id,
-                                                        dataset_id, license, chunk_size});
+  trossen::io::backends::LeRobotV2DatasetWriter writer(
+    {dataset_root_dir, repository_id, dataset_id, license, chunk_size, lerobot_config->task_name});
   // Each recording is prepared in its own folder here, on the dataset's filesystem so that
   // committing it is a rename.
   const fs::path tmp_root = writer.dataset_path() / ".tmp_convert";

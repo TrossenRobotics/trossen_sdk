@@ -38,6 +38,8 @@ public:
     std::string license;
     /// @brief Episodes per chunk folder.
     int chunk_size{1000};
+    /// @brief Task for an episode whose recording embeds none.
+    std::string task_name;
   };
 
   /// @brief One recording converted into a scratch folder, not yet part of the dataset.
@@ -58,7 +60,7 @@ public:
 
   /**
    * @brief Store the options; nothing is written until a write call.
-   * @param opts Dataset location, license and chunk size.
+   * @param opts Dataset location, license, chunk size and default task.
    */
   explicit LeRobotV2DatasetWriter(Options opts);
 

@@ -49,7 +49,7 @@ struct ParquetConfig {
   std::string repository_id = "TrossenRoboticsCommunity";  // repo_id in the folder structure
   std::string dataset_id = "mcap_converted_dataset";    // dataset_name in the folder structure
   std::string robot_name = trossen::io::backends::DEFAULT_ROBOT_NAME;
-  std::string task_name = "Pick and Place";
+  std::string task_name;
   int episode_index = 0;
   int episode_chunk = 0;
   int chunk_size = 1000;
@@ -300,6 +300,7 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe, int episode_in
   cfg.repository_id = opts_.repository_id;
   cfg.dataset_id = opts_.dataset_id;
   cfg.chunk_size = opts_.chunk_size;
+  cfg.task_name = opts_.task_name;
   cfg.robot_name = ep.robot_name;
 
   cfg.episode_index = episode_index;
@@ -348,6 +349,11 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe, int episode_in
     return false;
   }
 
+  // Prefer the task embedded in this episode's MCAP; fall back to the config's.
+  const std::string task_name = ep.task_name.empty() ? cfg.task_name : ep.task_name;
+  // A new task is appended to tasks.jsonl at this index once the episode is written.
+  const int task_index = trossen::io::backends::find_task_index(meta_dir, task_name);
+
   // Width of every action and observation.state row.
   const int action_dim = trossen::io::backends::episode_action_dim(ep);
   const int obs_dim = trossen::io::backends::episode_obs_dim(ep);
@@ -365,7 +371,7 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe, int episode_in
 
   // prepare_episode() rejects an episode without rows, so the table is never empty.
   const auto table = trossen::io::backends::build_episode_table(
-    ep, action_dim, obs_dim, cfg.episode_index, /*task_index=*/0, global_index_offset_);
+    ep, action_dim, obs_dim, cfg.episode_index, task_index, global_index_offset_);
   if (!table ||
       !trossen::io::backends::write_parquet_file(*table, cfg.output_file, /*store_schema=*/true)) {
     return false;
@@ -482,7 +488,7 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe, int episode_in
   int num_cameras = static_cast<int>(channels.camera_channels.size());
 
   if (trossen::io::backends::write_episode_metadata(
-          meta_dir, cfg.episode_index, cfg.task_name, 0, static_cast<int>(rows_written),
+          meta_dir, cfg.episode_index, task_name, static_cast<int>(rows_written),
           num_cameras, stats)) {
     std::cout << "  [ok] Updated " << info_path.string() << "\n";
     std::cout << "  [ok] Created/Updated "
