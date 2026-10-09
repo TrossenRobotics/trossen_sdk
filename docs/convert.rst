@@ -1,6 +1,6 @@
-=======
-Convert
-=======
+=====================
+Convert to LeRobot V2
+=====================
 
 Convert TrossenMCAP episodes to LeRobot V2 format (Parquet + MP4) using the ``trossen_mcap_to_lerobot_v2`` tool that ships with the SDK.
 The resulting dataset is usable directly with the `LeRobot <https://github.com/huggingface/lerobot>`_ framework.
