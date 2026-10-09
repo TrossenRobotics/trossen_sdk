@@ -168,8 +168,13 @@ Supported producer types:
 
 .. tip::
 
-    Set ``use_device_time: true`` for cameras so the timestamp attached to each image is the sensor capture time rather than the host-side poll time.
-    For arms, ``false`` is usually fine because the host-side timestamp matches the joint-state read.
+    ``use_device_time: true`` records the device's own capture time in each record's ``device`` timestamp, beside the host ``monotonic`` and ``realtime`` clocks, which always record delivery.
+    The host clocks are never replaced.
+
+    - ``realsense_camera``: the mid-exposure sensor timestamp when the kernel exposes UVC metadata, otherwise the frame timestamp. Default ``true``.
+    - ``zed_camera``: the center of exposure, on GMSL models (ZED X family) with ZED SDK 5.5 or newer. Default ``true``.
+    - ``trossen_arm``: the controller's sample time. Default ``false``.
+    - ``opencv_camera`` and ``slate_base`` record no device time.
 
 Teleop
 ------
