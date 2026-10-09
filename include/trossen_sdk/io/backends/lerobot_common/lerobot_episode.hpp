@@ -49,9 +49,9 @@ struct DatasetSignalOptions {
 struct AlignedFrame {
   /// @brief Frame timestamp in seconds (synthetic, generated at the dataset fps).
   float timestamp_s{0.0f};
-  /// @brief Reference-stream log time this row was sampled at, in nanoseconds. The instant
-  /// every stream in the row was matched against; kept for alignment diagnostics.
-  uint64_t reference_timestamp_ns{0};
+  /// @brief Grid time this row was sampled at, as an MCAP log time in nanoseconds. The
+  /// instant every stream in the row was matched against; kept for alignment diagnostics.
+  uint64_t row_time_ns{0};
   /// @brief Leader joints (+ base velocities for mobile robots), the LeRobot `action`.
   /// Its length is episode_action_dim().
   std::vector<double> action;

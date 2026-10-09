@@ -52,12 +52,13 @@ struct AlignmentOptions {
  *
  * Decodes the embedded dataset_info metadata, auto-detects leader/follower joint
  * streams by topic name (falling back to single-robot mode), parses all joint and
- * odometry messages, and produces one AlignedFrame per dataset row via
- * nearest-timestamp matching. Camera frames are matched the same way: each row records
- * the nearest frame per camera in CameraInfo::row_source_index, so images and joint
- * states in a row share an instant rather than a position. Rows where any stream or
- * camera has no sample within tolerance are dropped. Camera frames are NOT decoded
- * here; call extract_camera_images() for that.
+ * odometry messages, and produces one AlignedFrame per dataset row. Rows sit on a
+ * uniform grid at `alignment.fps` spanning the time every joint stream and camera has
+ * data, and each row takes every stream's nearest sample. Camera frames are matched the
+ * same way: each row records the nearest frame per camera in
+ * CameraInfo::row_source_index, so images and joint states in a row share an instant
+ * rather than a position. Rows where any stream or camera has no sample within tolerance
+ * are dropped. Camera frames are NOT decoded here; call extract_camera_images() for that.
  *
  * Camera keys keep the name the recording gave them.
  *

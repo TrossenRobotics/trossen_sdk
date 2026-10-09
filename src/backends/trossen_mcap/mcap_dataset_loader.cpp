@@ -352,36 +352,31 @@ bool load_aligned_episode(
   }
   out.has_mobile_base = channels.has_mobile_base;
 
-  // ── Select the reference (master-clock) stream ──
-  std::string reference_stream;
+  // ── Require joint data: a follower stream, or failing that any stream (single-robot) ──
+  bool have_follower_data = false;
   for (const auto& stream : out.follower_streams) {
     auto it = messages_by_stream.find(stream);
     if (it != messages_by_stream.end() && !it->second.empty()) {
-      reference_stream = stream;
+      have_follower_data = true;
       break;
     }
   }
-  if (reference_stream.empty()) {
+  if (!have_follower_data) {
+    bool have_any_data = false;
     for (const auto& [stream_id, msgs] : messages_by_stream) {
       if (!msgs.empty()) {
-        reference_stream = stream_id;
+        have_any_data = true;
         std::cout << "  Note: Using single-robot mode with stream: " << stream_id << "\n";
         out.leader_streams = {stream_id};
         out.follower_streams = {stream_id};
         break;
       }
     }
+    if (!have_any_data) {
+      std::cerr << "Error: No joint state streams found in MCAP file\n";
+      return false;
+    }
   }
-  if (reference_stream.empty()) {
-    std::cerr << "Error: No joint state streams found in MCAP file\n";
-    return false;
-  }
-
-  const auto& reference_messages = messages_by_stream[reference_stream];
-  std::cout << "  Using " << reference_stream << " as reference (" << reference_messages.size()
-            << " messages)\n";
-
-  const size_t max_rows = reference_messages.size();
 
   // Record the cameras present. Built before the row loop so each row can store the frame
   // it matched; frame_count is filled in by extract_camera_images().
@@ -395,11 +390,72 @@ bool load_aligned_episode(
     // and the LeRobot observation column alike.
     cam.name = camera_name;
     cam.obs_key = "observation.images." + camera_name;
-    cam.row_source_index.reserve(max_rows);
     out.cameras.push_back(std::move(cam));
   }
 
-  // ── Align: for each reference timestamp, snap every stream to its nearest sample ──
+  // Rows sit on a uniform grid at the dataset rate, spanning the window where every
+  // stream has data. A LeRobot episode plays row k back at k/fps, so uniform spacing is
+  // what makes that stored timestamp describe the row.
+  const uint64_t row_period_ns =
+    static_cast<uint64_t>(static_cast<double>(data::S_TO_NS) / alignment.fps);
+
+  // The streams that set each edge are kept so a window that closes can be reported.
+  uint64_t window_start = 0;
+  uint64_t window_end = std::numeric_limits<uint64_t>::max();
+  std::string last_to_start;
+  std::string first_to_end;
+  auto narrow_window = [&](const std::string& name, uint64_t first, uint64_t last) {
+    if (first >= window_start) {
+      window_start = first;
+      last_to_start = name;
+    }
+    if (last <= window_end) {
+      window_end = last;
+      first_to_end = name;
+    }
+  };
+
+  for (const auto& stream_id : out.leader_streams) {
+    const auto it = messages_by_stream.find(stream_id);
+    if (it == messages_by_stream.end() || it->second.empty()) continue;
+    narrow_window(stream_id, log_ns_of(it->second.front()), log_ns_of(it->second.back()));
+  }
+  for (const auto& stream_id : out.follower_streams) {
+    const auto it = messages_by_stream.find(stream_id);
+    if (it == messages_by_stream.end() || it->second.empty()) continue;
+    narrow_window(stream_id, log_ns_of(it->second.front()), log_ns_of(it->second.back()));
+  }
+  for (const auto& cam : out.cameras) {
+    const auto& stamps = camera_timestamps[cam.name];
+    if (stamps.empty()) continue;
+    narrow_window(cam.name, stamps.front(), stamps.back());
+  }
+
+  // At least one joint stream has data, so the window always has a finite end. A window
+  // that closed means one stream stopped before another started, and no row can hold a
+  // sample from both.
+  if (window_end <= window_start) {
+    std::cerr << "Error: no stretch of time has data from every stream. " << first_to_end
+              << " ends " << static_cast<double>(window_start - window_end) / 1e6
+              << " ms before " << last_to_start << " starts.\n";
+    return false;
+  }
+
+  const uint64_t span_ns = window_end - window_start;
+  const size_t row_count = static_cast<size_t>(span_ns / row_period_ns) + 1;
+  std::vector<uint64_t> row_times;
+  row_times.reserve(row_count);
+  for (size_t k = 0; k < row_count; ++k) {
+    row_times.push_back(window_start + k * row_period_ns);
+  }
+  std::cout << "  Rows run on a " << alignment.fps << " Hz grid over "
+            << static_cast<double>(span_ns) / static_cast<double>(data::S_TO_NS) << " s ("
+            << row_times.size() << " rows)\n";
+
+  const size_t max_rows = row_times.size();
+  for (auto& cam : out.cameras) cam.row_source_index.reserve(max_rows);
+
+  // ── Align: for each row time, snap every stream to its nearest sample ──
   std::map<std::string, size_t> stream_indices;
   for (const auto& [stream_id, _] : messages_by_stream) {
     stream_indices[stream_id] = 0;
@@ -478,7 +534,7 @@ bool load_aligned_episode(
 
   out.frames.reserve(max_rows);
   for (size_t ref_idx = 0; ref_idx < max_rows; ++ref_idx) {
-    const uint64_t timestamp_ns = log_ns_of(reference_messages[ref_idx]);
+    const uint64_t timestamp_ns = row_times[ref_idx];
 
     std::vector<double> actions;
     bool have_all_leaders = true;
@@ -561,7 +617,7 @@ bool load_aligned_episode(
 
     AlignedFrame frame;
     frame.timestamp_s = static_cast<float>(static_cast<double>(frame_index) * frame_duration_s);
-    frame.reference_timestamp_ns = timestamp_ns;
+    frame.row_time_ns = timestamp_ns;
     frame.action = std::move(actions);
     frame.observation = std::move(observations);
     out.frames.push_back(std::move(frame));
@@ -576,7 +632,7 @@ bool load_aligned_episode(
   std::cout << "\n";
 
   // How far each camera ends up from its rows: a large or growing offset means the camera
-  // clock is drifting away from the reference stream and is worth investigating.
+  // clock is drifting away from the row grid and is worth investigating.
   for (const auto& cam : out.cameras) {
     if (cam.row_source_index.empty()) continue;
     const auto& stamps = camera_timestamps[cam.name];
@@ -584,7 +640,7 @@ bool load_aligned_episode(
     double worst_ms = 0.0;
     for (size_t row = 0; row < out.frames.size(); ++row) {
       const int64_t delta = static_cast<int64_t>(stamps[cam.row_source_index[row]]) -
-                            static_cast<int64_t>(out.frames[row].reference_timestamp_ns);
+                            static_cast<int64_t>(out.frames[row].row_time_ns);
       const double delta_ms = static_cast<double>(delta) / 1e6;
       sum_abs_ms += std::abs(delta_ms);
       worst_ms = std::max(worst_ms, std::abs(delta_ms));
