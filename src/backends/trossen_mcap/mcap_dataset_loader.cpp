@@ -17,6 +17,7 @@
 #include <limits>
 #include <regex>
 #include <set>
+#include <sstream>
 #include <string_view>
 
 #include <opencv2/opencv.hpp>
@@ -993,17 +994,82 @@ bool extract_camera_video(
   return true;
 }
 
-void clamp_episode_to_video_frame_counts(
-  AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams) {
-  size_t min_video_frames = std::numeric_limits<size_t>::max();
-  for (const auto& [name, vs] : video_streams) {
-    if (vs.frame_count > 0) min_video_frames = std::min(min_video_frames, vs.frame_count);
+size_t video_start_offset(const CameraInfo& cam) {
+  return cam.row_source_index.empty() ? 0 : cam.row_source_index.front();
+}
+
+void report_unaligned_video_streams(
+  const AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams,
+  bool start_offset_applied) {
+  // A video stream is copied out packet by packet in recording order, starting at the
+  // camera's first frame, and muxed at a constant rate. The copy cannot start mid-stream,
+  // because every frame after a keyframe is stored as a change from the one before it.
+  // Row n therefore plays frame n + offset only when the writer moves the video's start
+  // to the frame matched to row 0; otherwise row n plays frame n. A change in the step is
+  // a dropped or duplicated frame, which shifts every later row's image and nothing
+  // downstream can tell.
+  for (const auto& cam : ep.cameras) {
+    auto it = video_streams.find(cam.name);
+    if (it == video_streams.end() || it->second.frame_count == 0) continue;
+    if (cam.row_source_index.empty()) continue;
+
+    const size_t offset = video_start_offset(cam);
+    if (offset > 0 && !start_offset_applied) {
+      std::ostringstream lag_ms;
+      lag_ms << std::fixed << std::setprecision(1)
+             << static_cast<double>(offset) * 1000.0 / static_cast<double>(ep.fps);
+      std::cerr << "\n  WARNING: " << cam.name << " video is offset by " << offset
+                << " frame(s) (" << lag_ms.str() << " ms). Row 0 was matched to frame "
+                << offset << ", but the copied video starts at frame 0, so every image "
+                << "lags its joint state by " << lag_ms.str() << " ms. This format "
+                << "cannot start a copied video mid-stream; convert with "
+                << "trossen_mcap_to_lerobot_v3 for offset-correct video.\n\n";
+    }
+
+    size_t first_mismatch = cam.row_source_index.size();
+    for (size_t row = 1; row < cam.row_source_index.size(); ++row) {
+      if (cam.row_source_index[row] != offset + row) {
+        first_mismatch = row;
+        break;
+      }
+    }
+    const size_t covered = ep.frames.size() + offset;
+    const size_t extra =
+      it->second.frame_count > covered ? it->second.frame_count - covered : 0;
+    if (first_mismatch == cam.row_source_index.size() && extra == 0) continue;
+
+    std::cerr << "Warning: " << cam.name << " video is not row aligned. ";
+    if (first_mismatch < cam.row_source_index.size()) {
+      std::cerr << "row " << first_mismatch << " wanted frame "
+                << cam.row_source_index[first_mismatch] << ", not "
+                << (offset + first_mismatch) << ". ";
+    }
+    if (extra > 0) {
+      std::cerr << extra << " frame(s) past the last row. ";
+    }
+    std::cerr << "Copying the stream as recorded pairs row n with frame n + "
+              << (start_offset_applied ? offset : 0)
+              << ", so the images drift from the joint data.\n";
   }
-  if (min_video_frames < ep.frames.size()) {
-    ep.frames.resize(min_video_frames);
+}
+
+void clamp_episode_to_video_frame_counts(
+  AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams,
+  bool start_offset_applied) {
+  size_t playable_frames = std::numeric_limits<size_t>::max();
+  for (const auto& cam : ep.cameras) {
+    auto it = video_streams.find(cam.name);
+    if (it == video_streams.end() || it->second.frame_count == 0) continue;
+    // Frames before the one matched to row 0 are never played once the start is moved.
+    const size_t skipped = start_offset_applied ? video_start_offset(cam) : 0;
+    const size_t frames = it->second.frame_count;
+    playable_frames = std::min(playable_frames, frames > skipped ? frames - skipped : 0);
+  }
+  if (playable_frames < ep.frames.size()) {
+    ep.frames.resize(playable_frames);
     for (auto& cam : ep.cameras) {
-      if (cam.row_source_index.size() > min_video_frames) {
-        cam.row_source_index.resize(min_video_frames);
+      if (cam.row_source_index.size() > playable_frames) {
+        cam.row_source_index.resize(playable_frames);
       }
     }
   }
