@@ -15,9 +15,13 @@
 
 #include <filesystem>
 #include <string>
+#include <vector>
+
+#include <opencv2/opencv.hpp>
 
 #include "trossen_sdk/configuration/types/backends/lerobot_v3_backend_config.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_episode.hpp"
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_constants.hpp"
 
 namespace trossen::io::backends {
@@ -25,7 +29,10 @@ namespace trossen::io::backends {
 /**
  * @brief Writes a LeRobot v3.0 dataset by aggregating episodes into shared files.
  *
- * Usage: construct with Options, call open(), then finalize() once.
+ * Usage: construct with Options, call open(), then per episode prepare_episode() followed by
+ * consume_episode(), then finalize() once. prepare_episode() touches no writer state and may
+ * run concurrently on any thread. consume_episode() must be called once per episode, in
+ * ascending episode order, from the thread that constructed the writer.
  */
 class LeRobotV3DatasetWriter {
 public:
@@ -65,10 +72,73 @@ public:
   LeRobotV3DatasetWriter& operator=(const LeRobotV3DatasetWriter&) = delete;
 
   /**
-   * @brief Create the dataset directory skeleton. Must be called before the first episode.
+   * @brief Result of prepare_episode(): the aligned episode, the resolved task, and one
+   *        encoded per-episode video with sampled stat frames per camera.
+   *
+   * Holds no writer state. `ok` is false when preparation failed (episode skipped).
+   */
+  struct PreparedEpisode {
+    /// @brief One camera's encoded per-episode video + sampled stat frames.
+    struct PreparedVideo {
+      std::string obs_key;                  ///< video key (observation.images.<cam>)
+      std::filesystem::path episode_mp4;    ///< encoded per-episode mp4 (consumed by concat)
+      double duration_s{0.0};               ///< episode video duration (frame_count / fps)
+      std::vector<cv::Mat> samples;         ///< frames sampled for global image stats
+      /// @brief Codec of `episode_mp4` as written to info.json: "av1", "h264" or "hevc".
+      /// Matches the bitstream.
+      std::string codec{"av1"};
+      /// @brief Pixel format of `episode_mp4`: "yuv420p" (color) or "gray12le" (depth).
+      std::string pix_fmt{"yuv420p"};
+    };
+    /// @brief Decoded episode with every stream aligned onto the dataset's rows.
+    AlignedEpisode ep;
+    /// @brief Task of the episode: the one embedded in the MCAP, else the fallback task.
+    std::string task_name;
+    std::filesystem::path tmp_dir;          ///< per-episode temp dir; caller removes after consume
+    std::vector<PreparedVideo> videos;      ///< first-seen camera order preserved
+    /// @brief True when preparation succeeded and the episode can be consumed.
+    bool ok{false};
+  };
+
+  /**
+   * @brief Create the dataset directory skeleton. Must be called before consume_episode().
    * @return true on success.
    */
   bool open();
+
+  /**
+   * @brief Load and align one MCAP and encode each camera's per-episode video.
+   *
+   * Writes each camera's mp4 in a per-episode temp dir under @p tmp_root and samples frames
+   * for image stats; extracted frames are deleted, leaving only the mp4s. Reads only Options,
+   * so it is safe to call concurrently for different episodes.
+   *
+   * @param mcap_path Input MCAP file.
+   * @param episode_index Zero-based input index; names the temp dir. consume_episode()
+   *        assigns the output index.
+   * @param fallback_task Task used when the MCAP embeds none.
+   * @param tmp_root Root under which the per-episode temp dir is created.
+   * @return A PreparedEpisode; on any failure `ok` is false and its temp dir is removed.
+   */
+  PreparedEpisode prepare_episode(
+    const std::filesystem::path& mcap_path,
+    int episode_index,
+    const std::string& fallback_task,
+    const std::filesystem::path& tmp_root) const;
+
+  /**
+   * @brief Fold one prepared episode into the dataset (the sequential stage).
+   *
+   * Writes the episode's rows into the current (or freshly rolled) data parquet,
+   * concatenates each camera's already-encoded video, accumulates stats,
+   * registers the task, and buffers the episode's seek-metadata row. Mutates
+   * writer state; call once per episode, in ascending order, from the thread that
+   * constructed the writer.
+   *
+   * @param pe Prepared episode from prepare_episode(); its sampled frames are moved out.
+   * @return true on success.
+   */
+  bool consume_episode(PreparedEpisode& pe);
 
   /**
    * @brief Flush episodes/tasks parquet, global stats.json, info.json, and README.
@@ -77,8 +147,8 @@ public:
   bool finalize();
 
 private:
-  /// @brief Close the open data parquet file, if any.
-  void close_data_writer();
+  /// @brief Close the open data file, if any. @return false when closing it fails.
+  bool close_data_writer();
 
   /// @brief Options given at construction.
   Options opts_;
