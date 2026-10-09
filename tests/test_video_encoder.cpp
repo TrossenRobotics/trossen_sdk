@@ -398,6 +398,20 @@ TEST(VideoEncoderJetsonTest, ReportsResolvedEncoderName) {
   EXPECT_EQ(encoder->codec(), VideoCodec::H264);
 }
 
+// Where the Jetson encoder works, "auto" must pick it over libx264: that is the
+// whole point of adding it, and a probe-order regression would silently put
+// the recorder back on the CPU.
+TEST(VideoEncoderJetsonTest, AutoPrefersJetson) {
+  if (!VideoEncoder::create(jetson_params())) {
+    GTEST_SKIP() << "Jetson hardware encoder not available";
+  }
+  VideoEncoder::Params p = jetson_params();
+  p.encoder = "auto";
+  auto encoder = VideoEncoder::create(p);
+  ASSERT_NE(encoder, nullptr);
+  EXPECT_EQ(encoder->encoder_name(), "nvv4l2h264enc");
+}
+
 TEST(VideoEncoderJetsonTest, RejectsDepth) {
   // No lossless 12-bit mode on Jetson's encoder, so asking for it must fail
   // cleanly rather than produce a lossy depth stream.
