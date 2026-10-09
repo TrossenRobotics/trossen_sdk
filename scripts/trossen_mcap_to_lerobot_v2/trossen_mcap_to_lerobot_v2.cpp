@@ -25,6 +25,8 @@
 #include <chrono>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -116,6 +118,34 @@ static std::optional<uint64_t> read_recording_start_time(const std::filesystem::
 // Statistics computation functions
 // ──────────────────────────────────────────────────────────
 
+// Video-mode cameras remux straight to videos/ and delete their source
+// frames, so stats sample frames back out of the .mp4 instead of a JPEG dir.
+static std::vector<cv::Mat> sample_video_frames(const std::filesystem::path& video_path) {
+  cv::VideoCapture cap(video_path.string());
+  if (!cap.isOpened()) {
+    std::cerr << "  Warning: Failed to open video for stats: " << video_path.string() << "\n";
+    return {};
+  }
+
+  int frame_count = static_cast<int>(cap.get(cv::CAP_PROP_FRAME_COUNT));
+  if (frame_count <= 0) return {};
+
+  std::vector<cv::Mat> images;
+  for (int idx : trossen::io::backends::sample_indices(frame_count)) {
+    if (!cap.set(cv::CAP_PROP_POS_FRAMES, idx)) continue;
+    cv::Mat frame;
+    if (!cap.read(frame) || frame.empty()) continue;
+    if (frame.channels() == 1) cv::cvtColor(frame, frame, cv::COLOR_GRAY2BGR);
+
+    cv::Mat downsampled = trossen::io::backends::auto_downsample(frame);
+    cv::Mat frame_float;
+    downsampled.convertTo(frame_float, CV_32F, 1.0 / 255.0);
+    images.push_back(frame_float);
+  }
+
+  return images;
+}
+
 /**
  * @brief Compute statistics for a single episode
  */
@@ -176,6 +206,29 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
     if (feature_info.contains("dtype") && feature_info["dtype"] == "video") {
       if (feature_name.find("observation.images.") == 0) {
         std::string camera_name = feature_name.substr(19);
+
+        // Video-mode: frames only ever exist inside the remuxed episode video.
+        fs::path videos_root = dataset_root / trossen::io::backends::VIDEO_DIR;
+        bool is_video_camera = false;
+        if (fs::exists(videos_root)) {
+          for (const auto& chunk_entry : fs::directory_iterator(videos_root)) {
+            if (!chunk_entry.is_directory()) continue;
+            fs::path candidate = chunk_entry.path() / feature_name /
+                trossen::io::backends::format_video_filename(episode_index);
+            if (!fs::exists(candidate)) continue;
+
+            is_video_camera = true;
+            auto images = sample_video_frames(candidate);
+            if (!images.empty()) {
+              stats[feature_name] = trossen::io::backends::compute_image_stats(images);
+            } else {
+              std::cerr << "  Warning: No valid frames sampled from video for camera: "
+                        << camera_name << "\n";
+            }
+            break;
+          }
+        }
+        if (is_video_camera) continue;
 
         // Construct the expected image directory path for this episode and camera
         std::string episode_folder_name =
@@ -296,7 +349,10 @@ static void print_usage(const char* program) {
   std::cerr << "  5. Compute and update dataset statistics\n";
   std::cerr << "\nFolder structure: "
             << "root/repository_id/dataset_id/[data,images,videos,meta]\n";
-  std::cerr << "\nNote: Video encoding requires FFmpeg with libsvtav1 codec.\n";
+  std::cerr << "\nNote: Cameras recorded raw (image_encoding=\"raw\") are encoded to AV1 and\n"
+            << "  require FFmpeg with libsvtav1. Cameras recorded as compressed video\n"
+            << "  (image_encoding=\"video\") are remuxed as-is (h264/hevc) and need only ffmpeg\n"
+            << "  and ffprobe on PATH.\n";
 }
 
 int main(int argc, char** argv) {
@@ -596,6 +652,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   namespace fs = std::filesystem;
   using trossen::io::backends::AlignedEpisode;
   using trossen::io::backends::McapChannelMap;
+  using trossen::io::backends::CameraVideoStream;
 
   ParquetConfig cfg;
   cfg.mcap_file = mcap_file;
@@ -682,10 +739,11 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   const int obs_dim = trossen::io::backends::episode_obs_dim(ep);
 
   // ──────────────────────────────────────────────────────────
-  // Extract camera images
+  // Extract camera video (compressed streams, remuxed) + images (raw streams)
   // ──────────────────────────────────────────────────────────
 
   std::map<std::string, fs::path> camera_dirs;
+  std::map<std::string, CameraVideoStream> video_streams;
   std::map<std::string, size_t> image_counts;
 
   if (cfg.extract_images && !channels.camera_channels.empty()) {
@@ -695,16 +753,35 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       camera_dirs[camera_name] = images_dir / obs_key / episode_name;
     }
 
-    std::cout << "\nExtracting camera images...\n";
-    if (!trossen::io::backends::extract_camera_images(
-            cfg.mcap_file, channels, ep,
+    std::cout << "\nExtracting camera video (compressed streams)...\n";
+    if (!trossen::io::backends::extract_camera_video(
+            cfg.mcap_file, channels,
             [&](const std::string& camera_name) -> fs::path {
               fs::path dir = camera_dirs[camera_name];
               fs::create_directories(dir);
               return dir;
             },
-            image_counts)) {
+            video_streams)) {
       return 1;
+    }
+
+    // A camera that free-ran short would otherwise leave more parquet rows than its
+    // remuxed video has frames; trim the whole episode to whatever every video-mode
+    // camera actually covers (shared with the v3 converter).
+    trossen::io::backends::clamp_episode_to_video_frame_counts(ep, video_streams);
+
+    if (video_streams.size() < channels.camera_channels.size()) {
+      std::cout << "\nExtracting camera images (raw streams)...\n";
+      if (!trossen::io::backends::extract_camera_images(
+              cfg.mcap_file, channels, ep,
+              [&](const std::string& camera_name) -> fs::path {
+                fs::path dir = camera_dirs[camera_name];
+                fs::create_directories(dir);
+                return dir;
+              },
+              image_counts)) {
+        return 1;
+      }
     }
   }
 
@@ -869,6 +946,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   // Encode images to videos
   // ──────────────────────────────────────────────────────────
 
+  // Remuxed cameras only: true codec/pix_fmt, for the metadata step below.
+  std::map<std::string, std::string> camera_remuxed_codec;
+  std::map<std::string, std::string> camera_remuxed_pix_fmt;
+
   // A camera whose video fails fails the whole episode: the parquet rows would otherwise
   // point at frames that do not exist, or at frames from the wrong instant.
   int videos_created = 0;
@@ -883,6 +964,70 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       fs::path video_output =
           video_camera_dir /
           trossen::io::backends::format_video_filename(cfg.episode_index);
+
+      auto vs_it = video_streams.find(camera_name);
+      if (vs_it != video_streams.end() && vs_it->second.frame_count > 0) {
+        // Already-compressed: remux with `-c copy` instead of re-encoding.
+        const CameraVideoStream& vs = vs_it->second;
+
+        std::ostringstream remux_cmd;
+        // -r stamps container timestamps at the dataset rate; +genpts fills in
+        // presentation timestamps the elementary stream itself doesn't carry.
+        remux_cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << ep.fps << " -i "
+                  << vs.annexb_path.string() << " -c copy -movflags +faststart "
+                  << video_output.string();
+
+        std::cout << "  Remuxing " << camera_name << " (" << vs.format << ")...";
+        std::cout.flush();
+
+        auto remux_start = std::chrono::steady_clock::now();
+        int ret = std::system(remux_cmd.str().c_str());
+        auto remux_end = std::chrono::steady_clock::now();
+
+        if (ret != 0) {
+          std::cout << " [FAILED] Failed (exit code " << ret << ")\n";
+          std::cerr << "    Command: " << remux_cmd.str() << "\n";
+          return 1;
+        }
+
+        // A frame-count mismatch would silently misalign images against joint
+        // states, so this is checked rather than trusted.
+        std::ostringstream probe_cmd;
+        probe_cmd << "ffprobe -v error -count_frames -select_streams v:0 "
+                  << "-show_entries stream=nb_read_frames -of default=nw=1:nk=1 "
+                  << video_output.string();
+        bool frame_count_ok = true;
+        if (FILE* pipe = popen(probe_cmd.str().c_str(), "r")) {
+          char buf[64] = {0};
+          const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
+          pclose(pipe);
+          if (read_ok) {
+            const int64_t muxed = std::strtoll(buf, nullptr, 10);
+            if (muxed > 0 && static_cast<size_t>(muxed) != vs.frame_count) {
+              std::cout << " [FAILED] frame count mismatch\n";
+              std::cerr << "    Remuxed " << video_output.filename().string() << " has " << muxed
+                        << " frames but the recording had " << vs.frame_count
+                        << " video messages; refusing to misalign frames against joint states\n";
+              frame_count_ok = false;
+            }
+          }
+        } else {
+          std::cerr << "Warning: could not probe remuxed video " << video_output.string() << "\n";
+        }
+        if (!frame_count_ok) {
+          return 1;
+        }
+
+        // lerobot derives codec from the bitstream and rejects a mismatch.
+        camera_remuxed_codec[camera_name] = (vs.format == "h265") ? "hevc" : "h264";
+        camera_remuxed_pix_fmt[camera_name] = (vs.format == "h265") ? "gray12le" : "yuv420p";
+
+        auto duration =
+            std::chrono::duration_cast<std::chrono::milliseconds>(remux_end - remux_start).count();
+        std::cout << " [ok] (" << (duration / 1000.0) << "s)\n";
+        videos_created++;
+        continue;
+      }
 
       auto cnt_it = image_counts.find(camera_name);
       if (cnt_it == image_counts.end() || cnt_it->second == 0) {
@@ -939,6 +1084,16 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
     nlohmann::ordered_json features =
         trossen::io::backends::build_features(ep, /*native_schema=*/false);
+
+    // Override with ground truth for a remuxed camera: dataset_info is written by the
+    // producer, which can't know the backend's chosen encoding.
+    for (const auto& [camera_name, codec] : camera_remuxed_codec) {
+      std::string obs_key = "observation.images." + camera_name;
+      if (!features.contains(obs_key)) continue;
+      features[obs_key]["info"]["video.codec"] = codec;
+      features[obs_key]["info"]["video.pix_fmt"] = camera_remuxed_pix_fmt.at(camera_name);
+      features[obs_key]["info"]["is_depth_map"] = (codec == "hevc");
+    }
 
     // Add standard metadata features (timestamp, frame_index, episode_index, index, task_index)
     trossen::io::backends::add_standard_metadata_features(features);
