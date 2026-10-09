@@ -43,8 +43,8 @@ class VideoEncoder {
     VideoCodec codec{VideoCodec::H264};
     /**
      * @brief Preferred encoder name, or "auto" to probe hardware then software.
-     * Accepted: "auto", "nvenc", "vaapi", "x264"/"x265", or a literal libavcodec encoder name
-     * (e.g. "h264_nvenc").
+     * Accepted: "auto", "jetson"/"nvv4l2" (NVIDIA Jetson's hardware encoder, H264 only), "nvenc",
+     * "vaapi", "x264"/"x265", or a literal encoder name (e.g. "h264_nvenc", "nvv4l2h264enc").
      */
     std::string encoder{"auto"};
     /// @brief Lossless mode (depth): disables rate control, requires H265.
@@ -75,7 +75,7 @@ class VideoEncoder {
    */
   EncodedFrame encode(const uint8_t* data, size_t size);
 
-  /// @brief Name of the libavcodec encoder actually opened (e.g. "libx264", "h264_nvenc").
+  /// @brief Name of the encoder actually opened (e.g. "libx264", "h264_nvenc", "nvv4l2h264enc").
   const std::string& encoder_name() const;
 
   /// @brief Which codec this encoder was built for.

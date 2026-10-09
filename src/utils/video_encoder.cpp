@@ -1,6 +1,7 @@
 /**
  * @file video_encoder.cpp
- * @brief libavcodec implementation of the per-frame Annex B video encoder.
+ * @brief Per-frame Annex B video encoder: libavcodec, plus NVIDIA Jetson's hardware H.264
+ * encoder through GStreamer when built with TROSSEN_HAVE_GST_VIDEO_ENCODE.
  */
 
 #include "trossen_sdk/utils/video_encoder.hpp"
@@ -11,6 +12,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -22,8 +24,18 @@ extern "C" {
 #include <libswscale/swscale.h>
 }
 
+#ifdef TROSSEN_HAVE_GST_VIDEO_ENCODE
+#include <gst/app/gstappsink.h>
+#include <gst/app/gstappsrc.h>
+#include <gst/gst.h>
+#include <gst/video/video.h>
+#endif
+
 namespace trossen::utils {
 namespace {
+
+/// @brief Candidate name for Jetson's hardware H.264 encoder (the GStreamer element's name).
+constexpr char kJetsonH264[] = "nvv4l2h264enc";
 
 /**
  * @brief Hardware-first candidate encoder names to try for a codec, in order.
@@ -63,6 +75,11 @@ std::vector<std::string> resolve_candidates(const VideoEncoder::Params& params) 
 
   const bool is_h264 = params.codec == VideoCodec::H264;
 
+  if (requested == "jetson" || requested == "nvv4l2") {
+    // H264 only: Jetson's encoder has no lossless 12-bit mode for the H265 depth path.
+    if (!is_h264) return {};
+    return {kJetsonH264};
+  }
   if (requested == "nvenc") {
     return {is_h264 ? "h264_nvenc" : "hevc_nvenc"};
   }
@@ -101,6 +118,89 @@ bool try_set_opt(AVCodecContext* ctx, const char* key, const char* value) {
   return true;
 }
 
+#ifdef TROSSEN_HAVE_GST_VIDEO_ENCODE
+
+/**
+ * @brief Initialize GStreamer once per process.
+ *
+ * @return true if GStreamer is usable. The result is computed on first call only; a function-
+ * local static is initialized exactly once even when several cameras open encoders concurrently.
+ */
+bool gst_ready() {
+  static const bool ready = [] {
+    GError* error = nullptr;
+    const bool ok = gst_init_check(nullptr, nullptr, &error) != FALSE;
+    if (!ok) {
+      std::cerr << "VideoEncoder: GStreamer init failed: "
+                << (error != nullptr ? error->message : "unknown error") << '\n';
+    }
+    g_clear_error(&error);
+    return ok;
+  }();
+  return ready;
+}
+
+/// @brief True if a GStreamer element factory of this name is installed.
+bool has_gst_element(const char* name) {
+  GstElementFactory* factory = gst_element_factory_find(name);
+  if (factory == nullptr) return false;
+  gst_object_unref(factory);
+  return true;
+}
+
+/**
+ * @brief Pop the first queued error off a pipeline's bus, if any.
+ *
+ * @param pipeline The pipeline whose bus to drain.
+ * @return The error text, or empty when no error is queued.
+ */
+std::string pop_gst_error(GstElement* pipeline) {
+  GstBus* bus = gst_element_get_bus(pipeline);
+  GstMessage* message = gst_bus_pop_filtered(bus, GST_MESSAGE_ERROR);
+  gst_object_unref(bus);
+  if (message == nullptr) return {};
+  GError* error = nullptr;
+  gst_message_parse_error(message, &error, nullptr);
+  std::string text = error != nullptr ? error->message : "unknown GStreamer error";
+  g_clear_error(&error);
+  gst_message_unref(message);
+  return text;
+}
+
+/**
+ * @brief The gst_parse_launch() description of the Jetson encode pipeline.
+ *
+ * I420 frames in system memory go to nvvidconv, which copies them into NVMM (the hardware
+ * engines' buffer memory) as NV12 on the VIC engine, then to nvv4l2h264enc on the NVENC engine.
+ * The appsink takes byte-stream, access-unit-aligned output: Annex B, one buffer per frame.
+ *
+ *  - insert-sps-pps: repeat parameter sets on every IDR, as CompressedVideo and remux need.
+ *  - iframeinterval == idrinterval: every keyframe is an IDR, so any GOP decodes on its own.
+ *  - num-B-Frames=0: one packet per frame, in order.
+ *  - control-rate=1: constant bitrate, matching the software path's fixed-rate target.
+ *  - maxperf-enable: keeps the encoder clocked up, trading power for per-frame latency.
+ *  - appsink async=false: the pipeline reaches PLAYING without waiting for a first frame,
+ *    so create() can confirm it started; sync=false: hand packets over as soon as they exist.
+ */
+std::string jetson_pipeline_description(const VideoEncoder::Params& params) {
+  const std::string gop = std::to_string(params.gop_size);
+  return "appsrc name=src format=time is-live=false do-timestamp=false "
+         "caps=\"video/x-raw,format=I420,width=" + std::to_string(params.width) +
+         ",height=" + std::to_string(params.height) +
+         ",framerate=" + std::to_string(params.fps) + "/1\" "
+         "! nvvidconv "
+         // Standalone caps filters must be unquoted: the parser takes quotes only around a
+         // property value (as for appsrc's caps= above) and rejects a quoted filter outright.
+         "! video/x-raw(memory:NVMM),format=NV12 "
+         "! nvv4l2h264enc bitrate=" + std::to_string(params.bitrate_kbps * 1000) +
+         " control-rate=1 iframeinterval=" + gop + " idrinterval=" + gop +
+         " insert-sps-pps=true num-B-Frames=0 maxperf-enable=true "
+         "! video/x-h264,stream-format=byte-stream,alignment=au "
+         "! appsink name=sink sync=false async=false max-buffers=0 emit-signals=false";
+}
+
+#endif  // TROSSEN_HAVE_GST_VIDEO_ENCODE
+
 }  // namespace
 
 const char* video_codec_format(VideoCodec codec) {
@@ -117,8 +217,11 @@ const char* video_codec_format(VideoCodec codec) {
 /**
  * @brief Owns every libavcodec/libavutil/libswscale resource for one open encoder.
  *
- * Kept out of the public header (PIMPL) so consumers of VideoEncoder never need FFmpeg's headers
- * on their include path.
+ * Kept out of the public header (PIMPL) so consumers of VideoEncoder never need FFmpeg's or
+ * GStreamer's headers on their include path.
+ *
+ * Exactly one backend is live per encoder: libavcodec (`ctx` set) or, when built with GStreamer,
+ * Jetson's hardware encoder (`pipeline` set). `sws` serves both, since each takes YUV420P/I420.
  */
 struct VideoEncoder::Impl {
   const AVCodec* codec = nullptr;  ///< Static library-owned descriptor; borrowed, never freed.
@@ -127,8 +230,17 @@ struct VideoEncoder::Impl {
   AVPacket* packet = nullptr;      ///< Reusable packet buffer filled by avcodec_receive_packet().
   SwsContext* sws = nullptr;       ///< BGR->YUV420P converter for H264; unused (nullptr) for H265.
   int64_t pts = 0;                 ///< Monotonically increasing presentation timestamp.
-  std::string encoder_name;        ///< Resolved libavcodec encoder name (e.g. "libx264").
+  std::string encoder_name;        ///< Resolved encoder name (e.g. "libx264", "nvv4l2h264enc").
   VideoCodec video_codec = VideoCodec::H264;  ///< Which codec this encoder was opened for.
+  int width = 0;                   ///< Frame width every encode() input must match.
+  int height = 0;                  ///< Frame height every encode() input must match.
+  int fps = 30;                    ///< Nominal rate, for the Jetson path's buffer timestamps.
+#ifdef TROSSEN_HAVE_GST_VIDEO_ENCODE
+  GstElement* pipeline = nullptr;  ///< Jetson encode pipeline; owned.
+  GstElement* appsrc = nullptr;    ///< Pipeline input; owned reference from gst_bin_get_by_name().
+  GstElement* appsink = nullptr;   ///< Pipeline output; owned reference, as above.
+  GstVideoInfo input_info{};       ///< I420 plane offsets/strides for buffers pushed to appsrc.
+#endif
 
   /**
    * @brief Frees every owned FFmpeg resource, in reverse order of allocation.
@@ -140,6 +252,16 @@ struct VideoEncoder::Impl {
    * a borrowed pointer into libavcodec's own static registry, not something we allocated.
    */
   ~Impl() {
+#ifdef TROSSEN_HAVE_GST_VIDEO_ENCODE
+    // The element references first, then the pipeline: NULL state stops the pipeline's
+    // streaming threads before the elements they run go away.
+    if (pipeline != nullptr) {
+      gst_element_set_state(pipeline, GST_STATE_NULL);
+    }
+    if (appsrc != nullptr) gst_object_unref(appsrc);
+    if (appsink != nullptr) gst_object_unref(appsink);
+    if (pipeline != nullptr) gst_object_unref(pipeline);
+#endif
     sws_freeContext(sws);
     av_packet_free(&packet);
     av_frame_free(&frame);
@@ -211,6 +333,70 @@ std::unique_ptr<VideoEncoder> VideoEncoder::create(const Params& params) {
     // fault: "auto" deliberately probes nvenc and vaapi on every box. Only the last candidate
     // is the one whose failure means no encoder at all, so it keeps normal logging.
     const bool is_last_candidate = i + 1 == candidates.size();
+
+#ifdef TROSSEN_HAVE_GST_VIDEO_ENCODE
+    // Jetson's hardware encoder is not a libavcodec codec, so it is opened here as a GStreamer
+    // pipeline and returned directly; everything below this block is libavcodec-only.
+    if (name == kJetsonH264) {
+      // Absent plugins are the normal case on anything but a Jetson: skip quietly.
+      if (params.codec != VideoCodec::H264 || !gst_ready() || !has_gst_element(kJetsonH264) ||
+          !has_gst_element("nvvidconv")) {
+        continue;
+      }
+      // Owning the pipeline through an Impl from the start means every early `continue` below
+      // tears down whatever was built so far, via ~Impl().
+      auto impl = std::make_unique<Impl>();
+      GError* error = nullptr;
+      impl->pipeline = gst_parse_launch(jetson_pipeline_description(params).c_str(), &error);
+      // gst_parse_launch() can return a pipeline *and* set an error for a recoverable problem
+      // (an unknown property, say); either one means the pipeline is not the one described.
+      if (impl->pipeline == nullptr || error != nullptr) {
+        if (is_last_candidate) {
+          std::cerr << "VideoEncoder::create: Jetson pipeline rejected: "
+                    << (error != nullptr ? error->message : "unknown error") << '\n';
+        }
+        g_clear_error(&error);
+        continue;
+      }
+      impl->appsrc = gst_bin_get_by_name(GST_BIN(impl->pipeline), "src");
+      impl->appsink = gst_bin_get_by_name(GST_BIN(impl->pipeline), "sink");
+      gst_video_info_set_format(&impl->input_info, GST_VIDEO_FORMAT_I420,
+                                static_cast<guint>(params.width),
+                                static_cast<guint>(params.height));
+      // The same BGR->YUV420P conversion as the software path, on the CPU. I420 is YUV420P's
+      // GStreamer name, so colors come out identical to libx264's for the same input.
+      impl->sws = sws_getContext(params.width, params.height, AV_PIX_FMT_BGR24, params.width,
+                                 params.height, AV_PIX_FMT_YUV420P, SWS_BILINEAR, nullptr,
+                                 nullptr, nullptr);
+      if (impl->appsrc == nullptr || impl->appsink == nullptr || impl->sws == nullptr) {
+        if (is_last_candidate) {
+          std::cerr << "VideoEncoder::create: Jetson pipeline setup failed\n";
+        }
+        continue;
+      }
+      // NULL->READY opens the encoder device, so a busy or missing /dev/v4l2-nvenc fails here,
+      // synchronously, rather than on the first frame.
+      if (gst_element_set_state(impl->pipeline, GST_STATE_PLAYING) == GST_STATE_CHANGE_FAILURE ||
+          gst_element_get_state(impl->pipeline, nullptr, nullptr, 5 * GST_SECOND) !=
+              GST_STATE_CHANGE_SUCCESS) {
+        if (is_last_candidate) {
+          std::cerr << "VideoEncoder::create: Jetson pipeline failed to start: "
+                    << pop_gst_error(impl->pipeline) << '\n';
+        }
+        continue;
+      }
+
+      impl->encoder_name = kJetsonH264;
+      impl->video_codec = params.codec;
+      impl->width = params.width;
+      impl->height = params.height;
+      impl->fps = params.fps;
+      std::cout << "  [ok] Video encoder '" << kJetsonH264 << "' (" << params.width << "x"
+                << params.height << " @ " << params.fps << " fps)\n";
+      return std::unique_ptr<VideoEncoder>(new VideoEncoder(std::move(impl)));
+    }
+#endif
+
     // AVCodec is libavcodec's read-only descriptor for one named encoder implementation (e.g.
     // "libx264" or "h264_nvenc"). avcodec_find_encoder_by_name() looks it up in libavcodec's own
     // built-in registry by name; it returns nullptr if this build of FFmpeg wasn't compiled with
@@ -392,6 +578,9 @@ std::unique_ptr<VideoEncoder> VideoEncoder::create(const Params& params) {
   impl->sws = sws;
   impl->encoder_name = codec->name;
   impl->video_codec = params.codec;
+  impl->width = params.width;
+  impl->height = params.height;
+  impl->fps = params.fps;
 
   // Informational, not a fault: on stdout so it does not read as an error next to the
   // diagnostics above, which stay on stderr.
@@ -405,6 +594,13 @@ VideoEncoder::EncodedFrame VideoEncoder::encode(const uint8_t* data, size_t size
   // impl is a local reference alias for *impl_, the same pattern used for `requested` in
   // resolve_candidates(): it saves writing impl_-> repeatedly, with no extra object created.
   Impl& impl = *impl_;
+
+#ifdef TROSSEN_HAVE_GST_VIDEO_ENCODE
+  if (impl.pipeline != nullptr) {
+    std::cerr << "VideoEncoder::encode: Jetson frame encoding is not available\n";
+    return {};
+  }
+#endif
   AVCodecContext* ctx = impl.ctx;
 
   // The expected input size depends entirely on which pixel format create() configured this
