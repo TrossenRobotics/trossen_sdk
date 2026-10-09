@@ -585,8 +585,150 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
   const std::string& fallback_task,
   const fs::path& tmp_root) const
 {
-  // TODO(shantanuparab-tr): decode, extract and encode one episode on a worker thread.
-  return {};
+  PreparedEpisode out;
+  out.ep.episode_index = episode_index;
+
+  // ── Decode + align (independent per file: safe to run on a worker thread) ──
+  if (!load_aligned_episode(mcap_path.string(), episode_index, out.ep, out.channels)) {
+    std::cerr << "[FAILED] Could not load " << mcap_path.string() << "\n";
+    return out;  // ok == false
+  }
+  if (out.ep.frames.empty()) {
+    std::cerr << "[FAILED] No aligned frames in " << mcap_path.string() << "\n";
+    return out;
+  }
+  // Prefer the task embedded in this episode's MCAP; fall back to the config's.
+  out.task_name = out.ep.task_name.empty() ? fallback_task : out.ep.task_name;
+
+  out.tmp_dir = tmp_root / ("episode_" + std::to_string(episode_index));
+
+  // ── Camera video ──
+  //
+  // Recordings made with image_encoding="video" already hold compressed streams,
+  // so those are stream-copied into mp4 rather than decoded and re-encoded. A
+  // recording can legitimately mix the two (color as video, depth as raw), and
+  // pre-video recordings have none at all, so both paths run and each camera
+  // takes whichever applies to it.
+  std::map<std::string, CameraVideoStream> video_streams;
+  if (opts_.encode_videos && !opts_.reencode_av1 && !out.channels.camera_channels.empty()) {
+    if (!extract_camera_video(
+          mcap_path.string(), out.channels,
+          [&](const std::string& camera_name) -> fs::path {
+            fs::path dir = out.tmp_dir / camera_name;
+            fs::create_directories(dir);
+            return dir;
+          },
+          video_streams)) {
+      std::error_code ec;
+      fs::remove_all(out.tmp_dir, ec);
+      return out;  // ok == false
+    }
+
+    for (const auto& cam : out.ep.cameras) {
+      auto vs_it = video_streams.find(cam.name);
+      if (vs_it == video_streams.end() || vs_it->second.frame_count == 0) continue;
+      const CameraVideoStream& vs = vs_it->second;
+
+      PreparedEpisode::PreparedVideo pv;
+      pv.obs_key = cam.obs_key;
+      pv.episode_mp4 = out.tmp_dir / (cam.name + "_episode.mp4");
+      if (!remux_episode_video(vs.annexb_path, vs.frame_count, pv.episode_mp4)) {
+        std::error_code ec;
+        fs::remove_all(out.tmp_dir, ec);
+        return out;  // ok == false
+      }
+      pv.duration_s = static_cast<double>(vs.frame_count) / static_cast<double>(opts_.fps);
+      // lerobot names these canonically and validates them; "h265" is "hevc" there.
+      pv.codec = vs.format == "h265" ? "hevc" : "h264";
+      pv.pix_fmt = vs.format == "h265" ? "gray12le" : "yuv420p";
+
+      // 12-bit depth codes are not [0,1] RGB, so they are not sampled for image
+      // stats, matching how the raw-image path treats depth.
+      if (vs.format != "h265") {
+        pv.samples = sample_video_frames(pv.episode_mp4, vs.frame_count, out.tmp_dir);
+      }
+
+      out.videos.push_back(std::move(pv));
+
+      // The elementary stream is now redundant; the mp4 is what gets consumed.
+      std::error_code ec;
+      fs::remove(vs.annexb_path, ec);
+    }
+
+    clamp_episode_to_video_frame_counts(out.ep, video_streams);
+  }
+
+  // ── Raw-image cameras: extract frames, encode a per-episode mp4, sample stats ──
+  if (opts_.encode_videos && !out.channels.camera_channels.empty() &&
+      video_streams.size() < out.ep.cameras.size()) {
+    std::map<std::string, fs::path> camera_dirs;
+    std::map<std::string, size_t> camera_counts;
+    if (!extract_camera_images(
+          mcap_path.string(), out.channels, out.ep,
+          [&](const std::string& camera_name) -> fs::path {
+            fs::path dir = out.tmp_dir / camera_name;
+            fs::create_directories(dir);
+            camera_dirs[camera_name] = dir;
+            return dir;
+          },
+          camera_counts, opts_.native_schema)) {
+      std::cerr << "[FAILED] Could not extract camera frames from " << mcap_path.string() << "\n";
+      std::error_code ec;
+      fs::remove_all(out.tmp_dir, ec);
+      return out;  // ok == false
+    }
+
+    for (const auto& cam : out.ep.cameras) {
+      // Already remuxed from a compressed stream above.
+      if (video_streams.count(cam.name) > 0) continue;
+      auto dir_it = camera_dirs.find(cam.name);
+      auto cnt_it = camera_counts.find(cam.name);
+      if (dir_it == camera_dirs.end() || cnt_it == camera_counts.end() || cnt_it->second == 0) {
+        continue;
+      }
+
+      // Depth cams were extracted as 16-bit PNG (native schema); RGB as JPEG. The
+      // extension picks the encode path: gray12le HEVC for depth, av1 for RGB.
+      const bool is_depth = dir_has_png(dir_it->second);
+
+      PreparedEpisode::PreparedVideo pv;
+      pv.obs_key = cam.obs_key;
+      pv.episode_mp4 = out.tmp_dir / (cam.name + "_episode.mp4");
+      const bool encoded = is_depth
+        ? encode_depth_video(dir_it->second, cnt_it->second, pv.episode_mp4)
+        : encode_episode_video(dir_it->second, cnt_it->second, pv.episode_mp4);
+      if (!encoded) {
+        std::error_code ec;
+        fs::remove_all(out.tmp_dir, ec);
+        return out;  // ok == false: an encode failure fails the whole episode
+      }
+      pv.duration_s = static_cast<double>(cnt_it->second) / static_cast<double>(opts_.fps);
+      pv.codec = is_depth ? "hevc" : "av1";
+      pv.pix_fmt = is_depth ? "gray12le" : "yuv420p";
+
+      // Sample RGB frames for image stats before dropping the raw JPEGs. Depth frames
+      // are 12-bit codes, not RGB, so they are not sampled for [0,1] image stats.
+      std::vector<fs::path> paths;
+      if (!is_depth) {
+        for (const auto& entry : fs::directory_iterator(dir_it->second)) {
+          if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+            paths.push_back(entry.path());
+          }
+        }
+        std::sort(paths.begin(), paths.end());
+      }
+      pv.samples = trossen::io::backends::sample_images(paths);
+
+      out.videos.push_back(std::move(pv));
+
+      // Raw JPEGs are no longer needed; free the disk now, keep the encoded mp4.
+      std::error_code ec;
+      fs::remove_all(dir_it->second, ec);
+    }
+  }
+
+  out.ok = true;
+  return out;
 }
 
 bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
