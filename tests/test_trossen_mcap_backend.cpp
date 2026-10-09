@@ -21,8 +21,28 @@
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
+#include "trossen_sdk/utils/video_encoder.hpp"
 
 using trossen::io::BackendRegistry;
+
+namespace trossen::io::backends {
+
+/// @brief Calls TrossenMCAPBackend's private frame writers.
+class TrossenMCAPBackendTestPeer {
+public:
+  /// @brief Write one frame on the camera's channel, set up as the backend sets up a color or
+  ///        depth channel, and return the writer's status.
+  static bool write_frame(TrossenMCAPBackend& backend, const data::ImageRecord& img, bool depth) {
+    foxglove::RawChannel* channel =
+      depth ? backend.ensure_image_channel_with_metadata(img.id, {{"stream_type", "depth"}})
+            : backend.ensure_image_channel(img.id);
+    return channel != nullptr && backend.write_image_frame(img, depth, channel);
+  }
+};
+
+}  // namespace trossen::io::backends
+
+using trossen::io::backends::TrossenMCAPBackendTestPeer;
 
 // Test fixture to load configuration before running tests
 class TrossenMCAPBackendTest : public ::testing::Test {
@@ -261,6 +281,35 @@ TEST_F(TrossenMCAPBackendTest, ScanCountsLegacyAndNewEpisodeFiles) {
   EXPECT_EQ(backend->scan_existing_episodes(), 3u);
 }
 
+// A raw frame that reaches the file reports success.
+TEST_F(TrossenMCAPBackendTest, RawFrameWriteReportsTheFrameLogged) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  ASSERT_FALSE(cfg->records_video());
+  RootDatasetRestorer restorer{cfg.get(), cfg->root, cfg->dataset_id};
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "raw_write_status_test";
+  std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
+
+  auto backend = std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(
+    BackendRegistry::create("trossen_mcap"));
+  ASSERT_NE(backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  trossen::data::ImageRecord img;
+  img.id = "cam_color";
+  img.width = 64;
+  img.height = 48;
+  img.channels = 3;
+  img.encoding = "bgr8";
+  img.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+  EXPECT_TRUE(TrossenMCAPBackendTestPeer::write_frame(*backend, img, /*depth=*/false));
+  backend->close();
+  EXPECT_EQ(backend->stats().images_written, 1u);
+}
+
 #ifdef TROSSEN_ENABLE_VIDEO_ENCODE
 // Restores every video-related config field a test below touches, on top of what
 // RootDatasetRestorer already covers -- so a video test can't leak "image_encoding
@@ -402,5 +451,61 @@ TEST_F(TrossenMCAPBackendTest, RecordsDepthPlaneAsLosslessVideoChannel) {
     (std::istreambuf_iterator<char>(mcap_file)), std::istreambuf_iterator<char>());
   EXPECT_NE(contents.find("h264"), std::string::npos) << "color channel should be h264";
   EXPECT_NE(contents.find("h265"), std::string::npos) << "depth channel should be h265";
+}
+
+// A video frame that is encoded and logged reports success; a depth frame of the wrong
+// type is dropped and reports failure.
+TEST_F(TrossenMCAPBackendTest, VideoFrameWriteReportsLoggedAndDroppedFrames) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "video_write_status_test";
+  cfg->image_encoding = "video";
+  cfg->video_encoder = "x264";
+  std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
+
+  auto backend = std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(
+    BackendRegistry::create("trossen_mcap"));
+  ASSERT_NE(backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  trossen::data::ImageRecord color;
+  color.id = "cam_color";
+  color.width = 64;
+  color.height = 48;
+  color.channels = 3;
+  color.encoding = "bgr8";
+  color.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+  EXPECT_TRUE(TrossenMCAPBackendTestPeer::write_frame(*backend, color, /*depth=*/false));
+
+  // The backend opens depth streams as lossless H.265 with the configured encoder.
+  trossen::utils::VideoEncoder::Params depth_params;
+  depth_params.width = 64;
+  depth_params.height = 48;
+  depth_params.fps = trossen::configuration::TROSSEN_MCAP_VIDEO_NOMINAL_FPS;
+  depth_params.codec = trossen::utils::VideoCodec::H265;
+  depth_params.lossless = true;
+  depth_params.encoder = cfg->video_encoder;
+  if (!trossen::utils::VideoEncoder::create(depth_params)) {
+    backend->close();
+    GTEST_SKIP() << "no lossless H.265 encoder in this ffmpeg build";
+  }
+
+  // A valid depth frame opens the depth stream first, so the dropped frame below fails on
+  // its type and not on a missing encoder. Depth video needs CV_16UC1.
+  trossen::data::ImageRecord depth = color;
+  depth.id = "cam_depth";
+  depth.encoding = "16UC1";
+  depth.image = cv::Mat(48, 64, CV_16UC1, cv::Scalar(1000));
+  ASSERT_TRUE(TrossenMCAPBackendTestPeer::write_frame(*backend, depth, /*depth=*/true));
+  depth.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+  EXPECT_FALSE(TrossenMCAPBackendTestPeer::write_frame(*backend, depth, /*depth=*/true));
+  backend->close();
+  EXPECT_EQ(backend->stats().images_written, 1u);
+  EXPECT_EQ(backend->stats().depth_images_written, 1u);
 }
 #endif  // TROSSEN_ENABLE_VIDEO_ENCODE

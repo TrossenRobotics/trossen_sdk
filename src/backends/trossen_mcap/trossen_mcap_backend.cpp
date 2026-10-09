@@ -502,7 +502,7 @@ void TrossenMCAPBackend::write_odometry_2d_record(const data::Odometry2DRecord& 
   }
 }
 
-void TrossenMCAPBackend::write_raw_image_message(const cv::Mat& image, const std::string& frame_id,
+bool TrossenMCAPBackend::write_raw_image_message(const cv::Mat& image, const std::string& frame_id,
                                                  uint32_t width, uint32_t height,
                                                  const std::string& encoding,
                                                  const data::Timespec& ts,
@@ -532,16 +532,17 @@ void TrossenMCAPBackend::write_raw_image_message(const cv::Mat& image, const std
   if (encode_result != foxglove::FoxgloveError::Ok) {
     std::cerr << "Failed to encode image for " << frame_id << ": "
               << foxglove::strerror(encode_result) << "\n";
-    return;
+    return false;
   }
 
   auto st =
       channel->log(reinterpret_cast<const std::byte*>(payload.data()), encoded_len, ts.to_ns());
   if (st != foxglove::FoxgloveError::Ok) {
     std::cerr << "Failed to write image for " << frame_id << ": " << foxglove::strerror(st) << "\n";
-  } else {
-    ++(*counter);
+    return false;
   }
+  ++(*counter);
+  return true;
 }
 
 utils::VideoEncoder* TrossenMCAPBackend::ensure_video_encoder(const data::ImageRecord& img,
@@ -585,7 +586,7 @@ utils::VideoEncoder* TrossenMCAPBackend::ensure_video_encoder(const data::ImageR
 #endif
 }
 
-void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool depth,
+bool TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool depth,
                                            foxglove::RawChannel* channel) {
 #ifdef TROSSEN_ENABLE_VIDEO_ENCODE
   auto* encoder = ensure_video_encoder(img, depth);
@@ -594,7 +595,7 @@ void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
       video_encode_failed_[img.id] = true;
       std::cerr << "Dropping frames for " << img.id << ": no video encoder\n";
     }
-    return;
+    return false;
   }
 
   // Color is handed over as BGR8; depth is log-quantized to 12-bit codes first
@@ -607,7 +608,7 @@ void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
         std::cerr << "Depth video for " << img.id << " needs CV_16UC1, got type "
                   << img.image.type() << "\n";
       }
-      return;
+      return false;
     }
     if (depth_quant_lut_.empty()) {
       depth_quant_lut_ = utils::build_depth_quantization_lut();
@@ -646,7 +647,7 @@ void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
       std::cerr << "Video encoder produced no packet for " << img.id
                 << "; frame alignment would drift, dropping frame\n";
     }
-    return;
+    return false;
   }
 
   foxglove::schemas::CompressedVideo vmsg;
@@ -666,35 +667,37 @@ void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
   }
   if (encode_result != foxglove::FoxgloveError::Ok) {
     std::cerr << "Failed to encode CompressedVideo: " << foxglove::strerror(encode_result) << "\n";
-    return;
+    return false;
   }
 
   auto st = channel->log(reinterpret_cast<const std::byte*>(payload.data()), encoded_len,
                          img.ts.realtime.to_ns());
   if (st != foxglove::FoxgloveError::Ok) {
     std::cerr << "Failed to write video frame: " << foxglove::strerror(st) << "\n";
-  } else {
-    if (depth) {
-      ++stats_.depth_images_written;
-    } else {
-      ++stats_.images_written;
-    }
+    return false;
   }
+  if (depth) {
+    ++stats_.depth_images_written;
+  } else {
+    ++stats_.images_written;
+  }
+  return true;
 #else
   (void)img;
   (void)depth;
   (void)channel;
+  return false;
 #endif
 }
 
-void TrossenMCAPBackend::write_image_frame(const data::ImageRecord& img, bool depth,
+bool TrossenMCAPBackend::write_image_frame(const data::ImageRecord& img, bool depth,
                                            foxglove::RawChannel* channel) {
   if (cfg_ && cfg_->records_video()) {
-    write_video_frame(img, depth, channel);
-    return;
+    return write_video_frame(img, depth, channel);
   }
-  write_raw_image_message(img.image, img.id, img.width, img.height, img.encoding, img.ts.realtime,
-                          channel, depth ? &stats_.depth_images_written : &stats_.images_written);
+  return write_raw_image_message(img.image, img.id, img.width, img.height, img.encoding,
+                                 img.ts.realtime, channel,
+                                 depth ? &stats_.depth_images_written : &stats_.images_written);
 }
 
 void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
