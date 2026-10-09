@@ -14,11 +14,13 @@
 
 #include <cmath>
 #include <cstdint>
+#include <vector>
 
 #include "gtest/gtest.h"
 
 #include "trossen_sdk/utils/depth_quantization.hpp"
 
+using trossen::utils::build_depth_quantization_lut;
 using trossen::utils::dequantize_depth_m;
 using trossen::utils::DEFAULT_DEPTH_MAX_M;
 using trossen::utils::DEFAULT_DEPTH_MIN_M;
@@ -101,6 +103,25 @@ TEST(DepthQuantizationTest, ResolutionIsFinerNearThanFar) {
   const int codes_near = quantize_depth_mm(1100) - quantize_depth_mm(1000);
   const int codes_far = quantize_depth_mm(9100) - quantize_depth_mm(9000);
   EXPECT_GT(codes_near, codes_far);
+}
+
+// ============================================================================
+// Lookup table
+// ============================================================================
+
+TEST(DepthQuantizationTest, LutCoversTheFullMono16Domain) {
+  const std::vector<uint16_t> lut = build_depth_quantization_lut();
+  ASSERT_EQ(lut.size(), 65536u);
+}
+
+// The LUT exists only as a speed optimization over the scalar function, so it
+// must agree with it exactly — not approximately.
+TEST(DepthQuantizationTest, LutMatchesScalarFunctionExactly) {
+  const std::vector<uint16_t> lut = build_depth_quantization_lut();
+  for (int d = 0; d < 65536; ++d) {
+    ASSERT_EQ(lut[d], quantize_depth_mm(static_cast<uint16_t>(d)))
+      << "LUT disagrees with quantize_depth_mm at " << d << " mm";
+  }
 }
 
 // ============================================================================

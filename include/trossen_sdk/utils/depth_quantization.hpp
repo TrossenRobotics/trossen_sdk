@@ -26,6 +26,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
+#include <vector>
 
 namespace trossen::utils {
 
@@ -169,6 +170,54 @@ inline double dequantize_depth_m(uint16_t code,
     depth_m = depth_min_m + norm * (depth_max_m - depth_min_m);
   }
   return depth_m;
+}
+
+/**
+ * @brief Precompute quantize_depth_mm() for every possible raw depth value.
+ *
+ * depth_mm is a uint16_t, so its entire domain is only 65536 values. Rather
+ * than paying for std::log() on every pixel of every frame (~9.2M calls/sec
+ * for a VGA depth stream at 30 Hz), compute the answer for every possible
+ * input once and store it -- turning each later lookup into a single array
+ * read instead of a log()-based computation.
+ *
+ * The table is only valid for the exact (depth_min_m, depth_max_m,
+ * depth_shift_m, use_log) it was built with; a different configuration
+ * needs its own table.
+ *
+ * @param depth_min_m Depth in meters mapped to code 0.
+ * @param depth_max_m Depth in meters mapped to code DEPTH_QMAX.
+ * @param depth_shift_m Pre-log offset in meters, keeping ln() away from zero.
+ * @param use_log If true (default), quantize in log space; if false, linearly.
+ * @return Table indexed by raw millimeter value (0-65535), yielding the
+ *   corresponding 12-bit code.
+ */
+inline std::vector<uint16_t> build_depth_quantization_lut(double depth_min_m = DEFAULT_DEPTH_MIN_M,
+                             double depth_max_m = DEFAULT_DEPTH_MAX_M,
+                             double depth_shift_m = DEFAULT_DEPTH_SHIFT_M,
+                             bool use_log = DEFAULT_DEPTH_USE_LOG) {
+  // depth_mm's entire domain is 0-65535 (uint16_t), so a 65536-entry table
+  // covers every possible input exactly once. Heap-allocated via std::vector
+  // (128 KiB) rather than a stack array, and value-initialized to 0.
+  std::vector<uint16_t> lut(65536);
+
+  // Loop counter must be wider than uint16_t. If d were uint16_t, then at
+  // d == 65535 the "++d" wraps back to 0 (unsigned overflow is well-defined
+  // wraparound, not UB) -- "d < 65536" would then be true forever, since a
+  // uint16_t can never actually hold 65536. int easily covers 0..65536, so
+  // the loop terminates normally.
+  for (int d = 0; d < 65536; ++d) {
+    // Only cast down to uint16_t here, at the boundary where
+    // quantize_depth_mm() actually needs that exact type -- this is the one
+    // expensive call (the log()s) that this whole table exists to avoid
+    // paying for again at runtime.
+    lut[d] = quantize_depth_mm(static_cast<uint16_t>(d), depth_min_m, depth_max_m,
+                                depth_shift_m, use_log);
+  }
+
+  // Moved out, not copied -- returning a local std::vector by value doesn't
+  // duplicate the 65536 entries.
+  return lut;
 }
 
 }  // namespace trossen::utils
