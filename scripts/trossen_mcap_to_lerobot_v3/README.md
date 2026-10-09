@@ -14,6 +14,11 @@ For setup, configuration and the output format, read the [v3 conversion guide](.
 3. [The parallelism model](#3-the-parallelism-model)
 4. [Configuration reference](#4-configuration-reference)
 5. [Tuning for speed](#5-tuning-for-speed)
+6. [Settings that affect correctness](#6-settings-that-affect-correctness)
+7. [Video encoding details](#7-video-encoding-details)
+8. [Memory and disk footprint](#8-memory-and-disk-footprint)
+9. [Output layout](#9-output-layout)
+10. [Troubleshooting](#10-troubleshooting)
 
 ---
 
@@ -205,7 +210,126 @@ The setting only matters for very large datasets.
 
 ---
 
+## 6. Settings that affect correctness
+
+### 6.1 `fps`: leave it at 30
+
+The converter does not pass `fps` to the loader, so rows are generated at the `AlignmentOptions` default of 30 Hz, and the match tolerance stays at 50 ms.
+The config's `fps` value reaches:
+
+1. the encode and remux frame rates (`-framerate` and `-r`),
+2. each episode's video duration in the seek metadata,
+3. the `fps` field in `info.json`.
+
+So `fps=60` keeps 30 Hz rows but writes the videos and `info.json` at 60, which is an internally inconsistent dataset.
+
+### 6.2 `task_name` is a fallback, not an override
+
+The task is stored per episode inside the MCAP at recording time.
+The writer de-duplicates tasks into `meta/tasks.parquet` and stamps a `task_index` on every frame, which is what makes a multi-task dataset.
+`task_name` fills in only for episodes that carry none; setting it does not relabel episodes that already have one.
+
+### 6.3 `overwrite_existing` and the no-append rule
+
+v3 aggregates episodes into shared files whose offsets are computed as the conversion proceeds, so a second run into an existing dataset cannot append to it.
+Without `overwrite_existing=true`, the converter stops before writing anything when the dataset already exists.
+With it, the dataset directory is deleted first.
+
+To add episodes to a dataset, add the MCAP files to the input folder and convert the whole set again.
+
+---
+
+## 7. Video encoding details
+
+Requires ffmpeg and ffprobe on `PATH`.
+What else each camera needs depends on how the recording stored its images.
+
+### 7.1 Raw-image recordings
+
+Color frames are extracted as JPEG (quality 95) and encoded to AV1 with `libsvtav1`.
+Depth frames are extracted as 16-bit PNG and encoded to lossless HEVC with `libx265`.
+There is no fallback: if an encoder is missing, encoding fails and the episode is skipped.
+
+Color:
+
+```
+ffmpeg -framerate <fps> -start_number 0 -i image_%06d.jpg -frames:v <n> \
+       -c:v libsvtav1 -crf 30 -g 30 -preset 6 [-svtav1-params lp=<encoder_threads>] \
+       -pix_fmt yuv420p -r <fps> out.mp4
+```
+
+The color path is lossy twice: once to JPEG, once to AV1.
+`crf 30` and `preset 6` are compiled in, not configurable.
+Preset 6 is SVT-AV1's mid-range speed and quality point; a lower preset is slower and smaller.
+
+Depth:
+
+```
+ffmpeg -f rawvideo -pix_fmt gray12le -s <W>x<H> -framerate <fps> -i <temp>.gray12.raw -frames:v <n> \
+       -c:v libx265 -x265-params lossless=1[:pools=<encoder_threads>] -pix_fmt gray12le -r <fps> out.mp4
+```
+
+16-bit depth is log-quantized to 12-bit codes through a precomputed 65536-entry lookup table, then encoded losslessly.
+The quantization uses lerobot 0.6.0's `DepthEncoderConfig` values: shift 3.5 m, range 0.01 to 10 m, 4095 codes.
+Raw depth is in millimeters, so the parameters are scaled by 1000.
+Lossless HEVC makes depth video much larger than color, so budget disk for it.
+
+### 7.2 Compressed-video recordings
+
+Recordings made with `image_encoding="video"` already hold H.264 (color) or H.265 (depth) streams.
+A camera recorded at the row rate has its stream copied into an MP4 without a decode or re-encode, so the video keeps the quality it was recorded with:
+
+```
+ffmpeg -fflags +genpts -r <fps> -i <stream> -c copy -movflags +faststart out.mp4
+```
+
+`ffprobe -count_packets` then counts the MP4's frames, and the episode fails unless the count equals the number of video messages in the recording.
+
+A camera recorded at another rate than the rows cannot be copied this way, since its stream holds one frame per recorded frame and LeRobot plays one per row.
+Its stream is decoded, each row's matched frame is written in row order (a slower camera's frames repeat, a faster camera's are skipped, as LeRobot's recorder does), and the result is encoded as in 7.1.
+
+---
+
+## 8. Memory and disk footprint
+
+Peak memory is about `jobs + 2` prepared episodes held at once.
+One prepared episode holds its aligned frames plus sampled frames for image statistics, per color camera: about `N^0.75` of its `N` frames (at least 100, at most 10000) for raw-image recordings, and about 30 for compressed-video recordings.
+Across the whole dataset the writer keeps at most 1000 samples per camera.
+Lower `jobs` if the machine starts swapping.
+
+At `finalize()`, quantiles are computed by fully sorting a per-dimension array containing every value in the dataset.
+For 28 dimensions and 100k frames that is fine; it grows linearly with dataset size and is held in memory all at once.
+
+Temp disk lives at `<dataset_root>/.tmp_convert/<episode>/`.
+For raw-image recordings, each in-flight episode holds all its extracted frames until its video is encoded, so transient usage is roughly `jobs + 2` episodes of raw frames: tens of GB with 8 workers and 8 streams.
+It is removed after each episode is consumed, and the root is removed at the end, including after a failure.
+
+---
+
+## 9. Output layout
+
+The dataset tree is shown under Output Layout in the [v3 conversion guide](../../docs/convert_v3.rst).
+Every episode's row in `meta/episodes/` records which data file holds it, its `from`/`to` row indices, and per camera the file plus start and end timestamps inside the shared video.
+That is what lets a loader seek to one episode inside an aggregated file.
+
+---
+
+## 10. Troubleshooting
+
+Missing encoders, failed episodes, an existing dataset and the default task are covered under Troubleshooting in the [v3 conversion guide](../../docs/convert_v3.rst).
+
+**Conversion is far slower than expected.**
+For raw-image recordings, video encoding takes most of the time; check `jobs` and `encoder_threads` (section 5.1).
+Converting off a network share, or writing the output to one, also slows it down (section 5.4).
+Use `encode_videos=false` for a quick first pass (section 5.3).
+
+**Output has no video.**
+`encode_videos=false` is set.
+
+---
+
 ## Related documentation
 
+- [v3 conversion guide](../../docs/convert_v3.rst): usage, configuration, output layout and troubleshooting
 - [Conversion guide](../../docs/convert.rst): the LeRobot v2.1 converter, its output layout and troubleshooting
 - [v2 Converter Reference](../trossen_mcap_to_lerobot_v2/README.md): the v2 layout, plus the TrossenMCAP channel/schema reference
