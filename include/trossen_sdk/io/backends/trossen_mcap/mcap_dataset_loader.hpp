@@ -45,6 +45,15 @@ struct AlignmentOptions {
   double fps{DEFAULT_DATASET_FPS};
   /// @brief Largest gap, in nanoseconds, allowed between a row and the sample it matches.
   uint64_t tolerance_ns{50000000};
+  /// @brief Longest single gap, in milliseconds, allowed between two kept rows. The rows
+  ///        either side of a gap are stamped one period apart but were recorded further
+  ///        apart, so a long gap is a jump in the trajectory; an episode holding one is
+  ///        rejected. Measured in time so the limit holds at any fps.
+  double max_single_gap_ms{200.0};
+  /// @brief Largest share of the grid's rows, from 0 to 1, that may be dropped between the
+  ///        first and last kept row. Scales with episode length: 0.02 allows 36 rows in a
+  ///        60 s episode at 30 fps. Past it the episode is rejected.
+  double max_gap_fraction{0.02};
 };
 
 /**
@@ -60,6 +69,10 @@ struct AlignmentOptions {
  * rather than a position. Rows where any stream or camera has no sample within tolerance
  * are dropped. Camera frames are NOT decoded here; call extract_camera_images() for that.
  *
+ * Fails when a stream's timestamps go backwards, when no stretch of time has data from
+ * every stream, or when the rows dropped between the first and last kept row exceed
+ * `alignment.max_single_gap_ms` in any one gap or `alignment.max_gap_fraction` in total.
+ *
  * Camera keys keep the name the recording gave them.
  *
  * @param mcap_file Path to the input MCAP file.
@@ -67,7 +80,7 @@ struct AlignmentOptions {
  * @param out Output episode (overwritten on success).
  * @param channels Output channel maps (reused by extract_camera_images()).
  * @param signals Selects which decoded joint and base signals enter the row vectors.
- * @param alignment Row rate and match tolerance used to build the frame sequence.
+ * @param alignment Row rate, match tolerance and allowed mid-episode gap.
  * @return true on success; false on a fatal error (message logged to stderr).
  */
 bool load_aligned_episode(

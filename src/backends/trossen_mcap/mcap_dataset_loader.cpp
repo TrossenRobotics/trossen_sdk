@@ -16,6 +16,7 @@
 #include <iostream>
 #include <limits>
 #include <regex>
+#include <set>
 #include <string_view>
 
 #include <opencv2/opencv.hpp>
@@ -467,6 +468,24 @@ bool load_aligned_episode(
   size_t rows_skipped = 0;
   size_t rows_skipped_no_frame = 0;
 
+  // A row dropped between two kept rows is a gap. Rows are stamped by position, so every
+  // row after a gap plays one period early per dropped row. Rows dropped before the first
+  // kept row or after the last one only shorten the episode and are not gaps.
+  // Each gap keeps the stream that had no sample in its first dropped row.
+  struct Gap {
+    size_t first_row;
+    size_t length;
+    std::string missing_stream;
+    bool missing_is_camera;
+  };
+  std::vector<Gap> gaps;
+  Gap pending_gap{};
+  auto note_skipped_row = [&](size_t row, const std::string& missing, bool is_camera) {
+    if (out.frames.empty()) return;
+    if (pending_gap.length == 0) pending_gap = {row, 0, missing, is_camera};
+    ++pending_gap.length;
+  };
+
   // Per-camera search cursor. Rows are visited in increasing time, so each cursor only
   // ever moves forward.
   std::map<std::string, size_t> camera_cursors;
@@ -536,6 +555,9 @@ bool load_aligned_episode(
   for (size_t ref_idx = 0; ref_idx < max_rows; ++ref_idx) {
     const uint64_t timestamp_ns = row_times[ref_idx];
 
+    // First stream without a sample within tolerance, if the row is dropped.
+    std::string missing_stream;
+
     std::vector<double> actions;
     bool have_all_leaders = true;
     for (const auto& leader_stream : out.leader_streams) {
@@ -545,6 +567,7 @@ bool load_aligned_episode(
         actions.insert(actions.end(), sample->positions.begin(), sample->positions.end());
       } else {
         have_all_leaders = false;
+        missing_stream = leader_stream;
         break;
       }
     }
@@ -559,6 +582,7 @@ bool load_aligned_episode(
                              signals.joint_effort);
       } else {
         have_all_followers = false;
+        if (missing_stream.empty()) missing_stream = follower_stream;
         break;
       }
     }
@@ -588,6 +612,7 @@ bool load_aligned_episode(
 
     if (!have_all_leaders || !have_all_followers) {
       ++rows_skipped;
+      note_skipped_row(ref_idx, missing_stream, /*is_camera=*/false);
       continue;
     }
 
@@ -599,11 +624,15 @@ bool load_aligned_episode(
     for (const auto& cam : out.cameras) {
       const size_t frame_idx = nearest_frame(camera_timestamps[cam.name], timestamp_ns,
                                              camera_cursors[cam.name]);
-      if (frame_idx == std::numeric_limits<size_t>::max()) break;
+      if (frame_idx == std::numeric_limits<size_t>::max()) {
+        missing_stream = cam.name;
+        break;
+      }
       staged_camera_frames.push_back(frame_idx);
     }
     if (staged_camera_frames.size() != out.cameras.size()) {
       ++rows_skipped_no_frame;
+      note_skipped_row(ref_idx, missing_stream, /*is_camera=*/true);
       continue;
     }
     for (size_t c = 0; c < out.cameras.size(); ++c) {
@@ -613,6 +642,11 @@ bool load_aligned_episode(
     if (channels.has_mobile_base) {
       actions.insert(actions.end(), base_values.begin(), base_values.end());
       observations.insert(observations.end(), base_values.begin(), base_values.end());
+    }
+
+    if (pending_gap.length > 0) {
+      gaps.push_back(pending_gap);
+      pending_gap = Gap{};
     }
 
     AlignedFrame frame;
@@ -630,6 +664,63 @@ bool load_aligned_episode(
     std::cout << " (skipped " << rows_skipped_no_frame << " with no camera frame in tolerance)";
   }
   std::cout << "\n";
+
+  if (!gaps.empty()) {
+    auto gap_ms = [row_period_ns](size_t rows) {
+      return static_cast<double>(rows * row_period_ns) / 1e6;
+    };
+    size_t gap_rows = 0;
+    size_t longest_gap = 0;
+    for (const auto& gap : gaps) {
+      gap_rows += gap.length;
+      longest_gap = std::max(longest_gap, gap.length);
+    }
+    const double gap_fraction =
+      static_cast<double>(gap_rows) / static_cast<double>(row_times.size());
+    const bool gap_too_long = gap_ms(longest_gap) > alignment.max_single_gap_ms;
+    const bool too_many_gaps = gap_fraction > alignment.max_gap_fraction;
+
+    const std::ios::fmtflags saved_flags = std::cerr.flags();
+    const std::streamsize saved_precision = std::cerr.precision();
+    std::cerr << (gap_too_long || too_many_gaps ? "Error: " : "Warning: ") << gap_rows
+              << " row(s) dropped mid-episode (" << std::fixed << std::setprecision(2)
+              << gap_fraction * 100.0 << "% of the grid), so every row after each gap "
+              << "plays early:\n";
+    for (const auto& gap : gaps) {
+      std::cerr << "    - " << gap.length << " row(s) (" << gap_ms(gap.length) << " ms) at "
+                << static_cast<double>(row_times[gap.first_row] - row_times.front()) /
+                     static_cast<double>(data::S_TO_NS)
+                << " s, " << gap.missing_stream << " had no sample\n";
+    }
+
+    // A camera stall is a recording fault. Dropping its rows drops them for every camera,
+    // so each stream-copied video that kept recording lags its joints from the gap on, and
+    // no conversion step can restore the frames the stalled camera never captured.
+    std::set<std::string> stalled_cameras;
+    for (const auto& gap : gaps) {
+      if (gap.missing_is_camera) stalled_cameras.insert(gap.missing_stream);
+    }
+    if (!stalled_cameras.empty()) {
+      std::cerr << "  BAD EPISODE: camera stall during recording (";
+      for (auto it = stalled_cameras.begin(); it != stalled_cameras.end(); ++it) {
+        std::cerr << (it == stalled_cameras.begin() ? "" : ", ") << *it;
+      }
+      std::cerr << "). Rows were dropped for every camera, so the video of any camera that "
+                << "kept recording lags its joints after each gap. Conversion cannot repair "
+                << "this; discard or re-record the episode.\n";
+    }
+    if (gap_too_long) {
+      std::cerr << "  The longest gap, " << gap_ms(longest_gap) << " ms, is over the "
+                << alignment.max_single_gap_ms << " ms limit; rejecting the episode.\n";
+    }
+    if (too_many_gaps) {
+      std::cerr << "  Dropped rows are over the " << alignment.max_gap_fraction * 100.0
+                << "% limit; rejecting the episode.\n";
+    }
+    std::cerr.flags(saved_flags);
+    std::cerr.precision(saved_precision);
+    if (gap_too_long || too_many_gaps) return false;
+  }
 
   // How far each camera ends up from its rows: a large or growing offset means the camera
   // clock is drifting away from the row grid and is worth investigating.
