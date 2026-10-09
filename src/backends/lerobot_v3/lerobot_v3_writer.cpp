@@ -30,6 +30,12 @@ namespace trossen::io::backends {
 namespace fs = std::filesystem;
 namespace v3 = trossen::io::backends::lerobot_v3;
 
+namespace {
+
+using v3::update_chunk_file_indices;
+
+}  // namespace
+
 LeRobotV3DatasetWriter::LeRobotV3DatasetWriter(Options opts) : opts_(std::move(opts)) {}
 
 LeRobotV3DatasetWriter::~LeRobotV3DatasetWriter() {
@@ -37,34 +43,133 @@ LeRobotV3DatasetWriter::~LeRobotV3DatasetWriter() {
 }
 
 bool LeRobotV3DatasetWriter::open() {
-  // TODO(shantanuparab-tr): create the dataset directory tree.
-  return false;
+  meta_dir_ = opts_.dataset_root / v3::META_DIR;
+  data_dir_ = opts_.dataset_root / v3::DATA_DIR;
+  videos_dir_ = opts_.dataset_root / v3::VIDEO_DIR;
+  try {
+    fs::create_directories(meta_dir_ / "episodes");
+    fs::create_directories(data_dir_);
+    fs::create_directories(videos_dir_);
+  } catch (const std::exception& e) {
+    std::cerr << "Error: Failed to create dataset directories: " << e.what() << "\n";
+    return false;
+  }
+  return true;
 }
 
 std::shared_ptr<arrow::Schema> LeRobotV3DatasetWriter::make_data_schema() const {
-  // TODO(shantanuparab-tr): build the arrow schema for a v3.0 data file.
-  return nullptr;
+  return arrow::schema({
+    arrow::field("action", arrow::fixed_size_list(arrow::float32(), action_dim_)),
+    arrow::field("observation.state", arrow::fixed_size_list(arrow::float32(), obs_dim_)),
+    arrow::field("timestamp", arrow::float32()),
+    arrow::field("frame_index", arrow::int64()),
+    arrow::field("episode_index", arrow::int64()),
+    arrow::field("index", arrow::int64()),
+    arrow::field("task_index", arrow::int64()),
+  });
 }
 
 std::shared_ptr<arrow::Table> LeRobotV3DatasetWriter::build_episode_table(
   const AlignedEpisode& ep, int episode_index, int task_index, int64_t global_from) const
 {
-  // TODO(shantanuparab-tr): build one episode's arrow table.
-  return nullptr;
+  arrow::FloatBuilder ts_b;
+  auto obs_vb = std::make_shared<arrow::FloatBuilder>();
+  arrow::FixedSizeListBuilder obs_b(arrow::default_memory_pool(), obs_vb, obs_dim_);
+  auto act_vb = std::make_shared<arrow::FloatBuilder>();
+  arrow::FixedSizeListBuilder act_b(arrow::default_memory_pool(), act_vb, action_dim_);
+  arrow::Int64Builder frame_b, epi_b, idx_b, task_b;
+  auto* obs_val = static_cast<arrow::FloatBuilder*>(obs_b.value_builder());
+  auto* act_val = static_cast<arrow::FloatBuilder*>(act_b.value_builder());
+
+  for (size_t i = 0; i < ep.frames.size(); ++i) {
+    const auto& f = ep.frames[i];
+    (void)ts_b.Append(f.timestamp_s);
+    (void)obs_b.Append();
+    for (double v : f.observation) (void)obs_val->Append(static_cast<float>(v));
+    (void)act_b.Append();
+    for (double v : f.action) (void)act_val->Append(static_cast<float>(v));
+    (void)frame_b.Append(static_cast<int64_t>(i));
+    (void)epi_b.Append(episode_index);
+    (void)idx_b.Append(global_from + static_cast<int64_t>(i));
+    (void)task_b.Append(task_index);
+  }
+
+  std::shared_ptr<arrow::Array> ts_a, obs_a, act_a, frame_a, epi_a, idx_a, task_a;
+  (void)ts_b.Finish(&ts_a);
+  (void)obs_b.Finish(&obs_a);
+  (void)act_b.Finish(&act_a);
+  (void)frame_b.Finish(&frame_a);
+  (void)epi_b.Finish(&epi_a);
+  (void)idx_b.Finish(&idx_a);
+  (void)task_b.Finish(&task_a);
+
+  return arrow::Table::Make(data_schema_,
+                            {act_a, obs_a, ts_a, frame_a, epi_a, idx_a, task_a});
 }
 
 bool LeRobotV3DatasetWriter::open_data_writer(const std::shared_ptr<arrow::Schema>& schema) {
-  // TODO(shantanuparab-tr): open a new size-rolled parquet data file.
-  return false;
+  std::ostringstream rel;
+  rel << "chunk-" << std::setfill('0') << std::setw(3) << data_.chunk_index << "/file-"
+      << std::setfill('0') << std::setw(3) << data_.file_index << ".parquet";
+  data_.path = data_dir_ / rel.str();
+  try {
+    fs::create_directories(data_.path.parent_path());
+  } catch (const std::exception& e) {
+    std::cerr << "Error: Failed to create data chunk dir: " << e.what() << "\n";
+    return false;
+  }
+
+  auto out_res = arrow::io::FileOutputStream::Open(data_.path.string());
+  if (!out_res.ok()) {
+    std::cerr << "Error: Failed to open data parquet: " << data_.path << "\n";
+    return false;
+  }
+  data_.out = *out_res;
+  auto props =
+    parquet::WriterProperties::Builder().compression(parquet::Compression::SNAPPY)->build();
+  auto arrow_props = parquet::ArrowWriterProperties::Builder().store_schema()->build();
+  auto wr_res = parquet::arrow::FileWriter::Open(*schema, arrow::default_memory_pool(), data_.out,
+                                                 props, arrow_props);
+  if (!wr_res.ok()) {
+    std::cerr << "Error: Failed to open parquet writer: " << wr_res.status().ToString() << "\n";
+    return false;
+  }
+  data_.writer = std::move(wr_res).ValueUnsafe();
+  data_.frames_in_file = 0;
+  return true;
 }
 
 void LeRobotV3DatasetWriter::close_data_writer() {
-  // TODO(shantanuparab-tr): close the open parquet data file.
+  if (data_.writer) {
+    (void)data_.writer->Close();
+    data_.writer.reset();
+  }
+  if (data_.out) {
+    (void)data_.out->Close();
+    data_.out.reset();
+  }
 }
 
 bool LeRobotV3DatasetWriter::roll_data_file_if_needed(int64_t next_ep_frames) {
-  // TODO(shantanuparab-tr): roll to the next data file when the size budget is crossed.
-  return false;
+  if (!data_.writer) {
+    return open_data_writer(data_schema_);
+  }
+  if (data_.frames_in_file == 0) return true;
+
+  // Estimate bytes/frame from the fixed schema and project whether the next episode
+  // would push the current file past the size budget. (File partitioning only; does
+  // not affect dataset correctness.)
+  const double bytes_per_frame =
+    static_cast<double>(action_dim_ + obs_dim_) * sizeof(float) + 5.0 * sizeof(int64_t);
+  const double budget_bytes = static_cast<double>(opts_.data_files_size_in_mb) * 1e6;
+  const double projected =
+    static_cast<double>(data_.frames_in_file + next_ep_frames) * bytes_per_frame;
+  if (projected >= budget_bytes) {
+    close_data_writer();
+    update_chunk_file_indices(data_.chunk_index, data_.file_index, opts_.chunks_size);
+    return open_data_writer(data_schema_);
+  }
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::encode_episode_video(
