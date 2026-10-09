@@ -6,8 +6,9 @@
  * one uncompressed frame per message; one made with `image_encoding: video` stores them as
  * `foxglove.CompressedVideo`. This converts a recording of the first kind into the second,
  * in place of re-recording it: camera topics are decoded and re-encoded (H.264 color,
- * lossless H.265 for 12-bit depth), every other topic is copied through unchanged, and the
- * file-level metadata records are not copied.
+ * lossless H.265 for 12-bit depth), and every other topic, along with the file-level
+ * metadata records, is copied through unchanged, except that the recording record's
+ * `image_encoding` becomes "video".
  */
 
 #ifndef TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__MCAP_VIDEO_TRANSCODER_HPP_

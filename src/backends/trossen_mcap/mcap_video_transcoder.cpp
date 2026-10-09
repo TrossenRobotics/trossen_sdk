@@ -185,6 +185,32 @@ size_t encode_message(Message& msg, std::vector<uint8_t>& buffer) {
   return encoded_len;
 }
 
+/// @brief Copy every file-level metadata record from the input to the output.
+///
+/// Records are found through the summary's metadata indexes. The recording record's
+/// `image_encoding` becomes "video", because the output's camera frames are compressed.
+/// @return False when a record cannot be read, parsed or written (reason logged to stderr).
+bool copy_metadata_records(mcap::McapReader& reader, foxglove::McapWriter& writer) {
+  for (const auto& [name, index] : reader.metadataIndexes()) {
+    mcap::Metadata record;
+    if (!read_metadata(reader, index, record)) return false;
+
+    if (name == trossen_mcap_defs::kRecordingMetadataName) {
+      record.metadata[trossen_mcap_defs::kImageEncodingKey] =
+        trossen::configuration::TROSSEN_MCAP_IMAGE_ENCODING_VIDEO;
+    }
+
+    // The map is unordered_map<string, string>; writeMetadata only iterates it.
+    auto write_status = writer.writeMetadata(name, record.metadata.begin(), record.metadata.end());
+    if (write_status != foxglove::FoxgloveError::Ok) {
+      std::cerr << "Error: Failed to copy metadata record '" << name
+                << "': " << foxglove::strerror(write_status) << "\n";
+      return false;
+    }
+  }
+  return true;
+}
+
 /// @brief Translate a compression name to the writer's enum; nullopt for an unknown name.
 std::optional<foxglove::McapCompression> compression_from(const std::string& name) {
   if (name == "zstd") return foxglove::McapCompression::Zstd;
@@ -379,6 +405,8 @@ bool transcode_images_to_video(
     return false;
   }
   auto writer = std::move(writer_result.value());
+
+  if (!copy_metadata_records(reader, writer)) return false;
 
   // Plan every channel before the first message. The writer records a channel with its first
   // message, so a channel the recording never logged to is not in the output.
