@@ -498,7 +498,7 @@ std::vector<cv::Mat> LeRobotV3DatasetWriter::sample_video_frames(
 
 bool LeRobotV3DatasetWriter::place_or_concat_video(
   const std::string& video_key, const fs::path& episode_mp4, double ep_duration_s,
-  std::array<double, 4>& out_slot)
+  double start_offset_s, std::array<double, 4>& out_slot)
 {
   VideoFileState& st = videos_[video_key];
 
@@ -526,8 +526,8 @@ bool LeRobotV3DatasetWriter::place_or_concat_video(
     }
     st.path = target;
     st.duration_s = ep_duration_s;
-    out_slot = {static_cast<double>(st.chunk_index), static_cast<double>(st.file_index), 0.0,
-                ep_duration_s};
+    out_slot = {static_cast<double>(st.chunk_index), static_cast<double>(st.file_index),
+                start_offset_s, ep_duration_s};
     return true;
   };
 
@@ -567,7 +567,9 @@ bool LeRobotV3DatasetWriter::place_or_concat_video(
     return false;
   }
 
-  double from_ts = st.duration_s;
+  // The episode's frames begin where the file ended; its first row reads start_offset_s
+  // further in, at the frame matched to row 0.
+  double from_ts = st.duration_s + start_offset_s;
   st.duration_s += ep_duration_s;
   out_slot = {static_cast<double>(st.chunk_index), static_cast<double>(st.file_index), from_ts,
               st.duration_s};
@@ -646,6 +648,8 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
         return out;  // ok == false
       }
       pv.duration_s = static_cast<double>(vs.frame_count) / static_cast<double>(opts_.fps);
+      pv.start_offset_s =
+        static_cast<double>(video_start_offset(cam)) / static_cast<double>(opts_.fps);
       // lerobot names these canonically and validates them; "h265" is "hevc" there.
       pv.codec = vs.format == "h265" ? "hevc" : "h264";
       pv.pix_fmt = vs.format == "h265" ? "gray12le" : "yuv420p";
@@ -663,7 +667,8 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
       fs::remove(vs.annexb_path, ec);
     }
 
-    clamp_episode_to_video_frame_counts(out.ep, video_streams);
+    report_unaligned_video_streams(out.ep, video_streams, /*start_offset_applied=*/true);
+    clamp_episode_to_video_frame_counts(out.ep, video_streams, /*start_offset_applied=*/true);
   }
 
   // ── Raw-image cameras: extract frames, encode a per-episode mp4, sample stats ──
@@ -818,7 +823,10 @@ bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
       }
 
       std::array<double, 4> slot{};
-      if (!place_or_concat_video(pv.obs_key, pv.episode_mp4, pv.duration_s, slot)) return false;
+      if (!place_or_concat_video(pv.obs_key, pv.episode_mp4, pv.duration_s, pv.start_offset_s,
+                                 slot)) {
+        return false;
+      }
       meta.videos[pv.obs_key] = slot;
 
       // Accumulate sampled frames for image stats (cap total per key).
