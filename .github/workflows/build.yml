@@ -34,6 +34,11 @@ jobs:
           libswscale-dev
 
     - name: Install Parquet dependencies
+      # The apt source always serves the newest Arrow, and a new major release
+      # can remove APIs the SDK calls. Pin the version so an Arrow release
+      # cannot break CI; bump it deliberately.
+      env:
+        ARROW_VERSION: 26.0.0-1
       run: |
         wget https://packages.apache.org/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb && \
         sudo apt-get update && \
@@ -41,8 +46,8 @@ jobs:
           ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb && \
         sudo apt-get update && \
         sudo apt-get install -yqq --no-install-recommends \
-          libarrow-dev \
-          libparquet-dev && \
+          libarrow-dev=${ARROW_VERSION} \
+          libparquet-dev=${ARROW_VERSION} && \
         rm apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 
     - name: Install libtrossen_arm
