@@ -20,14 +20,51 @@
  * exercise VideoEncoder::create() alone, ENCODE TESTS exercise encode() as well.
  */
 
+#include <cstddef>
+#include <cstdint>
+#include <vector>
+
 #include "gtest/gtest.h"
 
+#include "trossen_sdk/utils/depth_quantization.hpp"
 #include "trossen_sdk/utils/video_encoder.hpp"
 
 namespace {
 
 constexpr int kWidth = 64;
 constexpr int kHeight = 48;
+
+/// @brief A raw BGR8 frame whose content varies per index, so encoded sizes differ
+///        and a stuck/duplicated frame would be visible.
+std::vector<uint8_t> make_color_frame(int index) {
+  std::vector<uint8_t> frame(static_cast<size_t>(kWidth) * kHeight * 3, 0);
+  const int block_x = (index * 3) % (kWidth - 8);
+  for (int y = 4; y < 12; ++y) {
+    for (int x = block_x; x < block_x + 8; ++x) {
+      const size_t offset = (static_cast<size_t>(y) * kWidth + x) * 3;
+      frame[offset + 0] = static_cast<uint8_t>(20 + index);
+      frame[offset + 1] = static_cast<uint8_t>(200 - index);
+      frame[offset + 2] = 128;
+    }
+  }
+  return frame;
+}
+
+/// @brief A raw gray12le depth frame: already-quantized 12-bit codes, the way the
+///        recorder will feed them, packed 2 bytes per pixel little-endian.
+std::vector<uint8_t> make_depth_frame(int index) {
+  std::vector<uint8_t> frame(static_cast<size_t>(kWidth) * kHeight * 2);
+  for (int y = 0; y < kHeight; ++y) {
+    for (int x = 0; x < kWidth; ++x) {
+      const auto mm = static_cast<uint16_t>(500 + (x + y + index) * 10);
+      const uint16_t code = trossen::utils::quantize_depth_mm(mm);
+      const size_t offset = (static_cast<size_t>(y) * kWidth + x) * 2;
+      frame[offset + 0] = static_cast<uint8_t>(code & 0xFF);
+      frame[offset + 1] = static_cast<uint8_t>((code >> 8) & 0xFF);
+    }
+  }
+  return frame;
+}
 
 using trossen::utils::VideoCodec;
 using trossen::utils::VideoEncoder;
@@ -88,4 +125,74 @@ TEST(VideoEncoderTest, ReportsResolvedEncoderName) {
   ASSERT_NE(encoder, nullptr);
   EXPECT_EQ(encoder->encoder_name(), "libx264");
   EXPECT_EQ(encoder->codec(), VideoCodec::H264);
+}
+
+// ============================================================================
+// ENCODE TESTS: exercise VideoEncoder::encode().
+// ============================================================================
+
+TEST(VideoEncoderTest, EmitsExactlyOnePacketPerFrame) {
+  // The invariant the converter's index-based alignment rests on.
+  auto encoder = VideoEncoder::create(color_params());
+  ASSERT_NE(encoder, nullptr);
+
+  // Several GOPs at gop_size=5.
+  constexpr int kFrames = 40;
+  int packets = 0;
+  for (int i = 0; i < kFrames; ++i) {
+    const auto frame = make_color_frame(i);
+    const auto result = encoder->encode(frame.data(), frame.size());
+    EXPECT_GT(result.data.size(), 0u) << "empty packet for frame " << i;
+    ++packets;
+  }
+  EXPECT_EQ(packets, kFrames);
+}
+
+TEST(VideoEncoderTest, FirstFrameIsAKeyframe) {
+  // An episode whose first packet is a delta frame is undecodable from its start.
+  auto encoder = VideoEncoder::create(color_params());
+  ASSERT_NE(encoder, nullptr);
+  const auto frame = make_color_frame(0);
+  const auto result = encoder->encode(frame.data(), frame.size());
+  EXPECT_TRUE(result.is_keyframe);
+}
+
+// A caller that passes a buffer of the wrong size for this encoder's pixel
+// format must be rejected, not read out of bounds or encode garbage.
+TEST(VideoEncoderTest, RejectsWrongFrameSize) {
+  auto encoder = VideoEncoder::create(color_params());
+  ASSERT_NE(encoder, nullptr);
+
+  // One row short of a full BGR8 frame.
+  const std::vector<uint8_t> too_small(static_cast<size_t>(kWidth) * (kHeight - 1) * 3);
+  EXPECT_EQ(encoder->encode(too_small.data(), too_small.size()).data.size(), 0u);
+
+  // Sized as if 16-bit depth data, not BGR8 color: same pixel count, wrong byte count.
+  const std::vector<uint8_t> wrong_layout(static_cast<size_t>(kWidth) * kHeight * 2);
+  EXPECT_EQ(encoder->encode(wrong_layout.data(), wrong_layout.size()).data.size(), 0u);
+}
+
+// Depth must round-trip its already-quantized 12-bit codes exactly; any
+// encoder loss here decodes to a plausible but wrong distance downstream.
+TEST(VideoEncoderTest, LosslessDepthEncodesQuantizedCodes) {
+  VideoEncoder::Params p;
+  p.width = kWidth;
+  p.height = kHeight;
+  p.fps = 30;
+  p.gop_size = 5;
+  p.codec = VideoCodec::H265;
+  p.lossless = true;
+  p.encoder = "x265";
+
+  auto encoder = VideoEncoder::create(p);
+  if (!encoder) {
+    GTEST_SKIP() << "libx265 not available in this ffmpeg build";
+  }
+
+  // Feed already-quantized 12-bit codes, the way the recorder will.
+  for (int i = 0; i < 10; ++i) {
+    const auto frame = make_depth_frame(i);
+    const auto result = encoder->encode(frame.data(), frame.size());
+    EXPECT_GT(result.data.size(), 0u) << "no depth packet for frame " << i;
+  }
 }
