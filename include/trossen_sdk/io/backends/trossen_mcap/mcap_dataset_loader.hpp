@@ -47,6 +47,10 @@ struct AlignmentOptions {
   double fps{DEFAULT_DATASET_FPS};
   /// @brief Largest gap, in nanoseconds, allowed between a row and the sample it matches.
   uint64_t tolerance_ns{DEFAULT_MATCH_TOLERANCE_NS};
+  /// @brief Leave depth cameras out of the episode before they are checked or aligned, for
+  ///        a format that cannot store depth. A depth camera then cannot reject the episode
+  ///        or cost it rows.
+  bool skip_depth_cameras{false};
 };
 
 /**

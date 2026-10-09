@@ -326,6 +326,14 @@ bool load_aligned_episode(
       return false;
     }
   }
+  if (alignment.skip_depth_cameras) {
+    std::erase_if(channels.camera_channels, [&](const auto& entry) {
+      if (!camera_is_depth(entry.second, info)) return false;
+      std::cerr << "Warning: skipping depth camera " << entry.second
+                << "; the output format cannot store depth\n";
+      return true;
+    });
+  }
 
   // The base's two velocity columns are named by its producer (get_stream_info()).
   if (channels.has_mobile_base) {
