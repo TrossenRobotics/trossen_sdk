@@ -66,6 +66,7 @@ inline constexpr int DEFAULT_ENCODER_THREADS = 1;
 inline constexpr int DEFAULT_MAX_IMAGE_QUEUE = 0;
 inline constexpr int DEFAULT_PNG_COMPRESSION_LEVEL = 3;
 inline constexpr char DEFAULT_ROBOT_NAME[] = "trossen_ai_stationary";
+inline constexpr float DEFAULT_DATASET_FPS = 30.0f;
 
 }  // namespace trossen::io::backends
 
