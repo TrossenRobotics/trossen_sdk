@@ -168,8 +168,17 @@ Supported producer types:
 
 .. tip::
 
-    Set ``use_device_time: true`` for cameras so the timestamp attached to each image is the sensor capture time rather than the host-side poll time.
-    For arms, ``false`` is usually fine because the host-side timestamp matches the joint-state read.
+    ``use_device_time: true`` records the device's own capture time in each record's ``device`` timestamp, beside the host ``monotonic`` and ``realtime`` clocks, which record delivery.
+    For the arm and camera producers below, the host clocks are never replaced.
+
+    In the ``producers`` array, an omitted ``use_device_time`` is ``false``, so set it to ``true`` explicitly on each producer that should record device time.
+    The defaults listed below are the producers' own, used when a producer is created directly from JSON that omits the key.
+
+    - ``realsense_camera``: the mid-exposure sensor timestamp when the kernel exposes UVC metadata, otherwise the frame timestamp when the camera stamps it from its own or the global clock. A frame stamped from the host clock on arrival records no device time. Default ``true``.
+    - ``zed_camera``: the center of exposure, on GMSL models (ZED X family) with ZED SDK 5.5 or newer. Default ``true``.
+    - ``trossen_arm``: the controller's sample time. Default ``false``.
+    - ``opencv_camera`` and ``slate_base`` record no device time.
+    - ``policy_client``: ``use_device_time: true`` sets ``monotonic`` to the time the latest action chunk was received, so consecutive records can share one earlier time, and records no device time.
 
 Teleop
 ------
