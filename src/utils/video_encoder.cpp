@@ -12,6 +12,7 @@
 #include <cstring>
 #include <iostream>
 #include <memory>
+#include <span>
 #include <string>
 #include <utility>
 #include <vector>
@@ -120,6 +121,10 @@ bool try_set_opt(AVCodecContext* ctx, const char* key, const char* value) {
 
 #ifdef TROSSEN_HAVE_GST_VIDEO_ENCODE
 
+/// @brief How long encode() waits for Jetson's encoder to return a frame's packet.
+/// A 1920x1200 frame takes a few milliseconds; seconds means the encoder has stalled.
+constexpr GstClockTime kJetsonPullTimeout = 2 * GST_SECOND;
+
 /**
  * @brief Initialize GStreamer once per process.
  *
@@ -165,6 +170,31 @@ std::string pop_gst_error(GstElement* pipeline) {
   g_clear_error(&error);
   gst_message_unref(message);
   return text;
+}
+
+/**
+ * @brief True if Annex B data holds at least one coded slice (NAL type 1 or 5).
+ *
+ * The encoder may emit SPS/PPS as a buffer of their own ahead of the first IDR. Such a buffer
+ * is not a frame, so encode() keeps pulling until a slice arrives; otherwise frame N would get
+ * frame N-1's packet and the recorder's frame pairing would drift by one.
+ */
+bool contains_slice(std::span<const std::byte> data) {
+  for (size_t i = 0; i + 3 < data.size(); ++i) {
+    if (data[i] != std::byte{0} || data[i + 1] != std::byte{0}) continue;
+    size_t header = 0;
+    if (data[i + 2] == std::byte{1}) {
+      header = i + 3;
+    } else if (data[i + 2] == std::byte{0} && data[i + 3] == std::byte{1}) {
+      header = i + 4;
+    } else {
+      continue;
+    }
+    if (header >= data.size()) break;
+    const int nal_type = static_cast<int>(data[header] & std::byte{0x1F});
+    if (nal_type == 1 || nal_type == 5) return true;
+  }
+  return false;
 }
 
 /**
@@ -240,6 +270,9 @@ struct VideoEncoder::Impl {
   GstElement* appsrc = nullptr;    ///< Pipeline input; owned reference from gst_bin_get_by_name().
   GstElement* appsink = nullptr;   ///< Pipeline output; owned reference, as above.
   GstVideoInfo input_info{};       ///< I420 plane offsets/strides for buffers pushed to appsrc.
+  /// Set once a packet fails to arrive. A packet arriving late would pair with the next frame
+  /// and shift every later one, so after one miss the encoder refuses rather than drifts.
+  bool stalled = false;
 #endif
 
   /**
@@ -595,27 +628,94 @@ VideoEncoder::EncodedFrame VideoEncoder::encode(const uint8_t* data, size_t size
   // resolve_candidates(): it saves writing impl_-> repeatedly, with no extra object created.
   Impl& impl = *impl_;
 
-#ifdef TROSSEN_HAVE_GST_VIDEO_ENCODE
-  if (impl.pipeline != nullptr) {
-    std::cerr << "VideoEncoder::encode: Jetson frame encoding is not available\n";
-    return {};
-  }
-#endif
-  AVCodecContext* ctx = impl.ctx;
-
   // The expected input size depends entirely on which pixel format create() configured this
   // encoder for: BGR8 color is 3 bytes per pixel, packed 12-bit depth codes are 2 bytes per
   // pixel (stored in a 16-bit little-endian container). Rejecting a mismatched buffer here,
   // before touching any FFmpeg call, turns a caller bug into a clear error instead of a crash.
-  const bool is_depth = ctx->pix_fmt == AV_PIX_FMT_GRAY12LE;
+  const bool is_depth = impl.video_codec == VideoCodec::H265;
   const size_t bytes_per_pixel = is_depth ? 2 : 3;
   const size_t expected_size =
-      static_cast<size_t>(ctx->width) * static_cast<size_t>(ctx->height) * bytes_per_pixel;
+      static_cast<size_t>(impl.width) * static_cast<size_t>(impl.height) * bytes_per_pixel;
   if (size != expected_size) {
     std::cerr << "VideoEncoder::encode: expected " << expected_size << " bytes, got " << size
                << '\n';
     return {};
   }
+
+#ifdef TROSSEN_HAVE_GST_VIDEO_ENCODE
+  if (impl.pipeline != nullptr) {
+    if (impl.stalled) return {};
+
+    const gsize input_size = GST_VIDEO_INFO_SIZE(&impl.input_info);
+    GstBuffer* input = gst_buffer_new_allocate(nullptr, input_size, nullptr);
+    GstMapInfo input_map;
+    if (input == nullptr || gst_buffer_map(input, &input_map, GST_MAP_WRITE) == FALSE) {
+      if (input != nullptr) gst_buffer_unref(input);
+      std::cerr << "VideoEncoder::encode: failed to allocate a Jetson input buffer\n";
+      return {};
+    }
+    // Convert straight into the buffer's three I420 planes. GstVideoInfo supplies where each
+    // plane starts and its row stride, which GStreamer pads to 4 bytes, so for widths where
+    // width/2 is not a multiple of 4 the chroma rows are wider than the pixels they hold.
+    uint8_t* dst_planes[3];
+    int dst_strides[3];
+    for (int plane = 0; plane < 3; ++plane) {
+      dst_planes[plane] = input_map.data + GST_VIDEO_INFO_PLANE_OFFSET(&impl.input_info, plane);
+      dst_strides[plane] = GST_VIDEO_INFO_PLANE_STRIDE(&impl.input_info, plane);
+    }
+    const uint8_t* src_planes[1] = {data};
+    const int src_strides[1] = {impl.width * 3};
+    sws_scale(impl.sws, src_planes, src_strides, 0, impl.height, dst_planes, dst_strides);
+    gst_buffer_unmap(input, &input_map);
+
+    // Timestamps in nanoseconds on the nominal-rate grid, like the libavcodec path's pts.
+    // gst_util_uint64_scale() computes a*b/c without overflowing the intermediate product.
+    GST_BUFFER_PTS(input) = gst_util_uint64_scale(static_cast<guint64>(impl.pts), GST_SECOND,
+                                                  static_cast<guint64>(impl.fps));
+    GST_BUFFER_DURATION(input) = gst_util_uint64_scale(1, GST_SECOND,
+                                                       static_cast<guint64>(impl.fps));
+    ++impl.pts;
+
+    // push_buffer takes ownership of `input`, whatever it returns.
+    if (gst_app_src_push_buffer(GST_APP_SRC(impl.appsrc), input) != GST_FLOW_OK) {
+      std::cerr << "VideoEncoder::encode: Jetson pipeline refused a frame: "
+                << pop_gst_error(impl.pipeline) << '\n';
+      impl.stalled = true;
+      return {};
+    }
+
+    // Collect buffers until one carries this frame's slice. Normally the first one does; a
+    // parameter-set-only buffer ahead of the first IDR is folded into the same packet.
+    EncodedFrame result;
+    while (true) {
+      GstSample* sample =
+          gst_app_sink_try_pull_sample(GST_APP_SINK(impl.appsink), kJetsonPullTimeout);
+      if (sample == nullptr) {
+        std::cerr << "VideoEncoder::encode: Jetson encoder returned no packet within "
+                  << GST_TIME_AS_MSECONDS(kJetsonPullTimeout) << " ms: "
+                  << pop_gst_error(impl.pipeline) << '\n';
+        impl.stalled = true;
+        return {};
+      }
+      GstBuffer* output = gst_sample_get_buffer(sample);  // Borrowed from `sample`.
+      GstMapInfo output_map;
+      if (output != nullptr && gst_buffer_map(output, &output_map, GST_MAP_READ) != FALSE) {
+        const auto* bytes = reinterpret_cast<const std::byte*>(output_map.data);
+        result.data.insert(result.data.end(), bytes, bytes + output_map.size);
+        // DELTA_UNIT marks a frame that depends on earlier ones; its absence is a keyframe.
+        if (!GST_BUFFER_FLAG_IS_SET(output, GST_BUFFER_FLAG_DELTA_UNIT) &&
+            contains_slice({bytes, output_map.size})) {
+          result.is_keyframe = true;
+        }
+        gst_buffer_unmap(output, &output_map);
+      }
+      gst_sample_unref(sample);
+      if (contains_slice(result.data)) return result;
+    }
+  }
+#endif
+
+  AVCodecContext* ctx = impl.ctx;
 
   // FFmpeg's AVFrame buffers are reference-counted internally: the encoder may still be holding
   // a reference to the data from a previous encode() call until it's fully done with it.
