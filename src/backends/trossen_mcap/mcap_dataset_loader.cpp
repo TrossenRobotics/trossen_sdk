@@ -10,11 +10,13 @@
 #include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
+#include <optional>
 #include <regex>
 #include <set>
 #include <sstream>
@@ -28,6 +30,7 @@
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
 #include "CompressedVideo.pb.h"
+#include "FrameMeta.pb.h"
 #include "RawImage.pb.h"
 
 namespace trossen::io::backends {
@@ -159,9 +162,16 @@ bool load_aligned_episode(
       static const std::regex camera_topic_re(
         std::string("^") + trossen_mcap_defs::kCameraTopicPrefix + "(.+)" +
         trossen_mcap_defs::kImageTopicSuffix + "$");
+      static const std::regex camera_meta_topic_re(
+        std::string("^") + trossen_mcap_defs::kCameraTopicPrefix + "(.+)" +
+        trossen_mcap_defs::kCameraMetaTopicSuffix + "$");
       std::smatch m;
       if (std::regex_match(topic, m, camera_topic_re)) {
         channels.camera_channels[channel_id] = m[1].str();
+      } else if (std::regex_match(topic, m, camera_meta_topic_re) && channel_ptr->schemaId != 0 &&
+                 reader.schema(channel_ptr->schemaId) &&
+                 reader.schema(channel_ptr->schemaId)->name == "trossen_sdk.msg.FrameMeta") {
+        channels.camera_meta_channels[channel_id] = m[1].str();
       }
     }
   }
@@ -237,6 +247,14 @@ bool load_aligned_episode(
   // Per camera, the log time of every frame in arrival order. The index into this vector is
   // the same source index extract_camera_images() counts up as it re-reads the file.
   std::map<std::string, std::vector<uint64_t>> camera_timestamps;
+  // Per camera, what the camera itself recorded for each frame, indexed by the frame's
+  // position in the stream (FrameMeta.frame_index, the same index as camera_timestamps).
+  struct CaptureRecord {
+    bool has_device{false};
+    uint64_t device_ns{0};
+    std::optional<uint64_t> frame_number;
+  };
+  std::map<std::string, std::vector<CaptureRecord>> camera_capture;
 
   size_t total_messages = 0;
   size_t total_images = 0;
@@ -289,6 +307,26 @@ bool load_aligned_episode(
     if (camera_it != channels.camera_channels.end()) {
       camera_timestamps[camera_it->second].push_back(messageView.message.logTime);
       ++total_images;
+      continue;
+    }
+
+    auto meta_it = channels.camera_meta_channels.find(messageView.channel->id);
+    if (meta_it != channels.camera_meta_channels.end()) {
+      trossen_sdk::msg::FrameMeta meta;
+      if (!meta.ParseFromArray(reinterpret_cast<const char*>(messageView.message.data),
+                               static_cast<int>(messageView.message.dataSize))) {
+        continue;
+      }
+      auto& records = camera_capture[meta_it->second];
+      const size_t index = meta.frame_index();
+      if (index >= records.size()) records.resize(index + 1);
+      CaptureRecord& record = records[index];
+      record.has_device = meta.ts().device_clock() != trossen_sdk::DEVICE_CLOCK_NONE;
+      if (record.has_device) {
+        record.device_ns = static_cast<uint64_t>(meta.ts().device().seconds()) * data::S_TO_NS +
+                           static_cast<uint64_t>(meta.ts().device().nanos());
+      }
+      if (meta.has_device_frame_number()) record.frame_number = meta.device_frame_number();
     }
   }
 
@@ -472,18 +510,27 @@ bool load_aligned_episode(
   // A row dropped between two kept rows is a gap. Rows are stamped by position, so every
   // row after a gap plays one period early per dropped row. Rows dropped before the first
   // kept row or after the last one only shorten the episode and are not gaps.
-  // Each gap keeps the stream that had no sample in its first dropped row.
+  // Each gap keeps the stream that had no sample in its first dropped row and, when that
+  // stream is a camera, the camera's frames either side of the gap.
   struct Gap {
-    size_t first_row;
-    size_t length;
+    size_t first_row{0};
+    size_t length{0};
     std::string missing_stream;
-    bool missing_is_camera;
+    std::optional<size_t> camera_index;
+    size_t frame_before{0};
+    size_t frame_after{0};
   };
   std::vector<Gap> gaps;
   Gap pending_gap{};
-  auto note_skipped_row = [&](size_t row, const std::string& missing, bool is_camera) {
+  auto note_skipped_row = [&](size_t row, const std::string& missing,
+                              std::optional<size_t> camera_index) {
     if (out.frames.empty()) return;
-    if (pending_gap.length == 0) pending_gap = {row, 0, missing, is_camera};
+    if (pending_gap.length == 0) {
+      pending_gap = Gap{row, 0, missing, camera_index, 0, 0};
+      if (camera_index) {
+        pending_gap.frame_before = out.cameras[*camera_index].row_source_index.back();
+      }
+    }
     ++pending_gap.length;
   };
 
@@ -613,7 +660,7 @@ bool load_aligned_episode(
 
     if (!have_all_leaders || !have_all_followers) {
       ++rows_skipped;
-      note_skipped_row(ref_idx, missing_stream, /*is_camera=*/false);
+      note_skipped_row(ref_idx, missing_stream, std::nullopt);
       continue;
     }
 
@@ -633,7 +680,8 @@ bool load_aligned_episode(
     }
     if (staged_camera_frames.size() != out.cameras.size()) {
       ++rows_skipped_no_frame;
-      note_skipped_row(ref_idx, missing_stream, /*is_camera=*/true);
+      // The first camera without a frame is the one the staging loop stopped at.
+      note_skipped_row(ref_idx, missing_stream, staged_camera_frames.size());
       continue;
     }
     for (size_t c = 0; c < out.cameras.size(); ++c) {
@@ -646,6 +694,9 @@ bool load_aligned_episode(
     }
 
     if (pending_gap.length > 0) {
+      if (pending_gap.camera_index) {
+        pending_gap.frame_after = staged_camera_frames[*pending_gap.camera_index];
+      }
       gaps.push_back(pending_gap);
       pending_gap = Gap{};
     }
@@ -687,20 +738,100 @@ bool load_aligned_episode(
               << " row(s) dropped mid-episode (" << std::fixed << std::setprecision(2)
               << gap_fraction * 100.0 << "% of the grid), so every row after each gap "
               << "plays early:\n";
+    // Host arrival alone cannot tell a camera that stopped capturing from one whose frames
+    // were held up in USB or driver buffers and delivered together. The camera's own frame
+    // counter, or failing that its device clock, can: a delayed camera still shows one
+    // frame per period across the gap.
+    std::map<std::string, double> device_period_ns;
+    auto period_of = [&](const std::string& camera) -> double {
+      auto cached = device_period_ns.find(camera);
+      if (cached != device_period_ns.end()) return cached->second;
+      std::vector<double> intervals;
+      const auto& records = camera_capture[camera];
+      for (size_t i = 1; i < records.size(); ++i) {
+        if (records[i].has_device && records[i - 1].has_device &&
+            records[i].device_ns > records[i - 1].device_ns) {
+          intervals.push_back(static_cast<double>(records[i].device_ns - records[i - 1].device_ns));
+        }
+      }
+      double period = 0.0;
+      if (!intervals.empty()) {
+        std::nth_element(intervals.begin(), intervals.begin() + intervals.size() / 2,
+                         intervals.end());
+        period = intervals[intervals.size() / 2];
+      }
+      device_period_ns[camera] = period;
+      return period;
+    };
+    // Frames the camera lost across a gap, or nullopt when it recorded nothing to tell.
+    auto frames_lost_across = [&](const Gap& gap) -> std::optional<uint64_t> {
+      const auto& records = camera_capture[gap.missing_stream];
+      if (gap.frame_after >= records.size() || gap.frame_after <= gap.frame_before) {
+        return std::nullopt;
+      }
+      bool counters = true;
+      bool clocks = true;
+      for (size_t i = gap.frame_before; i <= gap.frame_after; ++i) {
+        counters = counters && records[i].frame_number.has_value();
+        clocks = clocks && records[i].has_device;
+      }
+      uint64_t lost = 0;
+      if (counters) {
+        for (size_t i = gap.frame_before + 1; i <= gap.frame_after; ++i) {
+          const uint64_t step = *records[i].frame_number - *records[i - 1].frame_number;
+          if (step > 1) lost += step - 1;
+        }
+        return lost;
+      }
+      const double period = period_of(gap.missing_stream);
+      if (!clocks || period <= 0.0) return std::nullopt;
+      for (size_t i = gap.frame_before + 1; i <= gap.frame_after; ++i) {
+        if (records[i].device_ns <= records[i - 1].device_ns) return std::nullopt;
+        const double steps =
+          std::round(static_cast<double>(records[i].device_ns - records[i - 1].device_ns) / period);
+        if (steps > 1.0) lost += static_cast<uint64_t>(steps) - 1;
+      }
+      return lost;
+    };
+
+    std::set<std::string> stalled_cameras;
+    std::set<std::string> delayed_cameras;
     for (const auto& gap : gaps) {
       std::cerr << "    - " << gap.length << " row(s) (" << gap_ms(gap.length) << " ms) at "
                 << static_cast<double>(row_times[gap.first_row] - row_times.front()) /
                      static_cast<double>(data::S_TO_NS)
-                << " s, " << gap.missing_stream << " had no sample\n";
+                << " s, " << gap.missing_stream << " had no sample";
+      if (gap.camera_index) {
+        const std::optional<uint64_t> lost = frames_lost_across(gap);
+        if (!lost) {
+          std::cerr << "; no capture record to tell a stall from a delivery delay";
+          stalled_cameras.insert(gap.missing_stream);
+        } else if (*lost > 0) {
+          std::cerr << "; the camera lost " << *lost << " frame(s)";
+          stalled_cameras.insert(gap.missing_stream);
+        } else {
+          std::cerr << "; the camera captured every frame, delivery was delayed";
+          delayed_cameras.insert(gap.missing_stream);
+        }
+      }
+      std::cerr << "\n";
+    }
+    for (const auto& camera : stalled_cameras) delayed_cameras.erase(camera);
+
+    // A delivery delay is not a camera fault: the frames exist, and only matching rows on
+    // host arrival time drops them.
+    if (!delayed_cameras.empty()) {
+      std::cerr << "  Delivery delay, not a stall (";
+      for (auto it = delayed_cameras.begin(); it != delayed_cameras.end(); ++it) {
+        std::cerr << (it == delayed_cameras.begin() ? "" : ", ") << *it;
+      }
+      std::cerr << "): the camera captured every frame, but they reached the host late, so "
+                << "rows matched on arrival time were dropped.\n";
     }
 
     // A camera stall is a recording fault. Dropping its rows drops them for every camera,
     // so each stream-copied video that kept recording lags its joints from the gap on, and
     // no conversion step can restore the frames the stalled camera never captured.
-    std::set<std::string> stalled_cameras;
-    for (const auto& gap : gaps) {
-      if (gap.missing_is_camera) stalled_cameras.insert(gap.missing_stream);
-    }
     if (!stalled_cameras.empty()) {
       std::cerr << "  BAD EPISODE: camera stall during recording (";
       for (auto it = stalled_cameras.begin(); it != stalled_cameras.end(); ++it) {
