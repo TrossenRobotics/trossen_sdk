@@ -9,7 +9,7 @@ For the LeRobot v2.1 converter and the recording format, read the [conversion gu
 The settings named here are config keys under `lerobot_v3_backend`; `jobs` can also be set with the `--jobs` flag.
 Two settings set the speed: `jobs` (throughput) and `encode_videos` (turn it off and conversion takes minutes instead of hours).
 `video_files_size_in_mb` sets how many episodes share one video file; each shared file is written once, when it rolls over or when the run ends.
-Leave `fps` at 30.
+Leave `fps` at 30 (section 6.1).
 
 ---
 
@@ -20,6 +20,11 @@ Leave `fps` at 30.
 3. [The parallelism model](#3-the-parallelism-model)
 4. [Configuration reference](#4-configuration-reference)
 5. [Tuning for speed](#5-tuning-for-speed)
+6. [Settings that affect correctness](#6-settings-that-affect-correctness)
+7. [Video encoding details](#7-video-encoding-details)
+8. [Memory and disk footprint](#8-memory-and-disk-footprint)
+9. [Output layout](#9-output-layout)
+10. [Troubleshooting](#10-troubleshooting)
 
 ---
 
@@ -221,6 +226,155 @@ A megabyte here is 1,000,000 bytes, so the 100 MB default holds about 676k frame
 Files roll only between episodes, so a single episode longer than the budget still goes into one file.
 Parquet compresses the rows, so files usually come out well under the projected size: an 83-episode, 4-camera dataset produced a single 6.4 MB data file.
 It only becomes relevant on very large datasets.
+
+---
+
+## 6. Settings that affect correctness
+
+### 6.1 `fps` is not a working knob: leave it at 30
+
+The converter does not pass `fps` to the loader, so rows are generated at the `AlignmentOptions` default of 30 Hz, and the match tolerance stays at 50 ms.
+The config's `fps` value reaches:
+
+1. the encode and remux frame rates (`-framerate` and `-r`),
+2. each episode's video duration in the seek metadata,
+3. the `fps` field in `info.json`.
+
+So `fps=60` keeps 30 Hz rows but writes the videos and `info.json` at 60, which is an internally inconsistent dataset.
+
+### 6.2 `task_name` is a fallback, not an override
+
+The task is stored **per episode inside the MCAP** at recording time.
+The writer de-duplicates tasks into `meta/tasks.parquet` and stamps a `task_index` on every frame, which is what makes a multi-task dataset.
+`task_name` fills in only for episodes that carry none; setting it does not relabel episodes that already have one.
+
+### 6.3 `overwrite_existing` and the no-append rule
+
+v3 aggregates episodes into shared files whose offsets are computed as the conversion proceeds, so a second run into an existing dataset cannot append to it.
+Without `overwrite_existing=true`, the converter stops before writing anything when the dataset already exists.
+With it, the dataset directory is deleted first.
+
+To add episodes to a dataset, add the MCAP files to the input folder and convert the whole set again.
+
+---
+
+## 7. Video encoding details
+
+Requires **ffmpeg and ffprobe on `PATH`**.
+What else each camera needs depends on how the recording stored its images.
+
+### 7.1 Raw-image recordings
+
+Color frames are extracted as JPEG (quality 95) and encoded to AV1 with `libsvtav1`.
+Depth frames are extracted as 16-bit PNG and encoded to lossless HEVC with `libx265`.
+There is no fallback: if an encoder is missing, encoding fails and the episode is skipped.
+
+Color:
+
+```
+ffmpeg -framerate <fps> -start_number 0 -i image_%06d.jpg -frames:v <n> \
+       -c:v libsvtav1 -crf 30 -g 30 -preset 6 [-svtav1-params lp=<encoder-threads>] \
+       -pix_fmt yuv420p -r <fps> out.mp4
+```
+
+The color path is lossy twice: once to JPEG, once to AV1.
+`crf 30` and `preset 6` are compiled in, not configurable.
+Preset 6 is SVT-AV1's mid-range speed and quality point; a lower preset is slower and smaller.
+
+Depth:
+
+```
+ffmpeg -f rawvideo -pix_fmt gray12le -s <W>x<H> -framerate <fps> -i <temp>.gray12.raw -frames:v <n> \
+       -c:v libx265 -x265-params lossless=1[:pools=<encoder-threads>] -pix_fmt gray12le -r <fps> out.mp4
+```
+
+16-bit depth is log-quantized to 12-bit codes through a precomputed 65536-entry lookup table, then encoded **losslessly**.
+The quantization uses lerobot 0.6.0's `DepthEncoderConfig` values: shift 3.5 m, range 0.01 to 10 m, 4095 codes.
+Raw depth is in millimeters, so the parameters are scaled by 1000.
+Lossless HEVC makes depth video much larger than color, so budget disk for it.
+
+### 7.2 Compressed-video recordings
+
+Recordings made with `image_encoding="video"` already hold H.264 (color) or H.265 (depth) streams.
+Each camera's stream is copied into an mp4 without a decode or re-encode, so no encoder library is needed and the video keeps the quality it was recorded with:
+
+```
+ffmpeg -fflags +genpts -r <fps> -i <stream> -c copy -movflags +faststart out.mp4
+```
+
+`ffprobe -count_packets` then counts the mp4's frames, and the episode fails unless the count equals the number of video messages in the recording.
+
+---
+
+## 8. Memory and disk footprint
+
+**Peak memory** is about `jobs + 2` prepared episodes held at once.
+One prepared episode holds its aligned frames plus sampled frames for image statistics, per color camera: about `N^0.75` of its `N` frames (at least 100, at most 10000) for raw-image recordings, and about 30 for compressed-video recordings.
+Across the whole dataset the writer keeps at most 1000 samples per camera.
+`--jobs 8` on a 4-camera rig is the practical ceiling on a 32 GB machine; halve `--jobs` if the machine starts swapping.
+
+**At `finalize()`**, quantiles are computed by fully sorting a per-dimension array containing every value in the dataset.
+For 28 dimensions and 100k frames that is fine; it grows linearly with dataset size and is held in memory all at once.
+
+**Temp disk** lives at `<dataset_root>/.tmp_convert/<episode>/`.
+For raw-image recordings, each in-flight episode holds all its extracted frames until its video is encoded, so transient usage is roughly `jobs + 2` episodes of raw frames: tens of GB with 8 workers and 8 streams.
+It is removed after each episode is consumed, and the root is removed at the end, including after a failure.
+
+---
+
+## 9. Output layout
+
+```
+<root>/<repository_id>/<dataset_id>/
+|-- data/chunk-000/file-000.parquet                         # many episodes per file, rolled by size
+|-- videos/observation.images.<cam>/chunk-000/file-000.mp4  # episodes concatenated
+|-- meta/
+|   |-- info.json                             # codebase_version "v3.0", features, fps
+|   |-- episodes/chunk-000/file-000.parquet   # per-episode seek metadata
+|   |-- tasks.parquet
+|   `-- stats.json                            # global per-feature stats and quantiles
+`-- README.md                                 # dataset card
+```
+
+Every episode's row in `meta/episodes/` records which data file holds it, its `from`/`to` row indices, and per camera the file plus start and end timestamps inside the shared video.
+That is what lets a loader seek to one episode inside an aggregated file.
+
+---
+
+## 10. Troubleshooting
+
+**SIGSEGV partway through a large dataset.**
+Check `--jobs`.
+On a 24-core machine, `--jobs 12` crashed once concatenation started; use 8 or fewer (section 5.1).
+
+**`ffmpeg encode failed`.**
+ffmpeg is missing, or lacks `libsvtav1` (color) or `libx265` (depth).
+Verify with `ffmpeg -encoders | grep -E 'svtav1|x265'`.
+
+**Conversion is far slower than expected.**
+For raw-image recordings, video encoding takes most of the time; check `--jobs` and `--encoder-threads` (section 5.1).
+Converting off a network share, or writing the output to one, also slows it down (section 5.4).
+Use `encode_videos=false` for a quick first pass (section 5.3).
+
+**One episode fails, the rest succeed.**
+An episode that fails while being prepared (loading, aligning or encoding) is logged as `[FAILED]` and skipped, and the run exits non-zero at the end.
+A truncated final episode from an interrupted recording is the usual cause; delete it and run again.
+
+**Conversion stops with "Could not add ... to the dataset; stopping".**
+The writer failed while appending an episode, after some of its rows or videos may already be in the shared files.
+The converter stops without finalizing and reports the dataset as incomplete.
+Delete the dataset (or set `overwrite_existing=true`) and convert again.
+
+**Output has no video.**
+`encode_videos=false` is set.
+
+**"dataset already exists" error.**
+Set `overwrite_existing=true` to replace it, or choose another `dataset_id` (section 6.3).
+
+**Task prompts are empty.**
+The recordings carry no embedded task.
+Set `task_name` and convert again; no re-recording needed (section 6.2).
+A wrong task embedded in a recording is not replaced by `task_name`; correct it in the recording's metadata and convert again.
 
 ---
 

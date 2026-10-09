@@ -322,6 +322,51 @@ One JSON object for the whole dataset, written after the last episode:
 
 Image statistics are computed from at most 1000 sampled frames per camera; depth cameras have none.
 
+Troubleshooting
+===============
+
+Missing Arrow/Parquet libraries
+-------------------------------
+
+Install the Apache Arrow APT repo and development packages.
+See the Parquet section in :doc:`/installation`.
+
+FFmpeg not found or codec error
+-------------------------------
+
+Install FFmpeg with ``sudo apt-get install ffmpeg``.
+The tool shells out to FFmpeg for AV1 encoding of color cameras (``libsvtav1``) and lossless HEVC encoding of depth cameras (``libx265``).
+Check that both encoders are available with ``ffmpeg -encoders | grep -E 'svtav1|x265'``.
+
+One episode fails, the rest succeed
+-----------------------------------
+
+An episode that fails while it is loaded, aligned or encoded is logged as ``[FAILED]`` and skipped, and the tool exits non-zero at the end.
+A truncated final episode from an interrupted recording is the usual cause; delete it and run again.
+
+Conversion stops with "Could not add ... to the dataset"
+---------------------------------------------------------
+
+The tool failed while appending an episode to the shared files, so it stops without finishing the dataset.
+Delete the dataset, or set ``overwrite_existing`` to ``true``, and convert again.
+
+Crash partway through a large dataset
+-------------------------------------
+
+Check ``jobs``.
+On a 24-core machine, 12 jobs crashed once the tool started joining video files, and 8 jobs did not; use 8 or fewer.
+
+"dataset already exists"
+------------------------
+
+Set ``overwrite_existing`` to ``true`` to replace the dataset, or choose another ``dataset_id``.
+
+Task prompts are empty
+----------------------
+
+The recordings carry no embedded task.
+Set ``task_name`` and convert again; there is no need to record again.
+
 What's Next
 ===========
 
