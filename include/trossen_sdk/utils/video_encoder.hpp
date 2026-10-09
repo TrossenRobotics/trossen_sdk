@@ -48,6 +48,15 @@ class VideoEncoder {
     bool lossless{false};
   };
 
+  /**
+   * @brief Build an encoder, resolving and opening the underlying codec.
+   *
+   * @param params Encoder parameters; width/height must be non-zero.
+   * @return An open encoder, or nullptr when no usable encoder was found or the parameters were
+   * rejected (reason logged to stderr).
+   */
+  static std::unique_ptr<VideoEncoder> create(const Params& params);
+
   /// @brief Name of the libavcodec encoder actually opened (e.g. "libx264", "h264_nvenc").
   const std::string& encoder_name() const;
 
