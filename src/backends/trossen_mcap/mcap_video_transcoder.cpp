@@ -128,6 +128,23 @@ bool read_described_cameras(const std::string& dataset_info,
   return true;
 }
 
+/**
+ * @brief dataset_info with every camera's storage set to the video codec it is encoded with.
+ *
+ * @param dataset_info The input recording's dataset_info JSON, already checked to parse.
+ * @return The dataset_info JSON with `h264` storage for color cameras and `h265` for depth.
+ */
+std::string video_dataset_info(const std::string& dataset_info) {
+  auto info = nlohmann::ordered_json::parse(dataset_info);
+  if (info.contains("cameras")) {
+    for (auto& [name, camera] : info["cameras"].items()) {
+      camera["storage"] = camera.value("is_depth_map", false) ? trossen_mcap_defs::kH265Storage
+                                                              : trossen_mcap_defs::kH264Storage;
+    }
+  }
+  return info.dump();
+}
+
 /// @brief Map a RawImage `encoding` string to the OpenCV type of its pixel buffer.
 /// @return The CV type, or -1 when the encoding is not one this tool can re-encode.
 int cv_type_for_encoding(const std::string& encoding) {
@@ -220,6 +237,38 @@ size_t encode_message(Message& msg, std::vector<uint8_t>& buffer) {
     return 0;
   }
   return encoded_len;
+}
+
+/**
+ * @brief Copy every file-level metadata record from the input to the output.
+ *
+ * Records are found through the summary's metadata indexes. The recording record's
+ * dataset_info is replaced by @p dataset_info, which names each camera's video storage.
+ *
+ * @param reader Reader of the input recording, with its summary read.
+ * @param writer Writer of the output recording.
+ * @param dataset_info The dataset_info JSON to write in place of the input's.
+ * @return False when a record cannot be read, parsed or written (reason logged to stderr).
+ */
+bool copy_metadata_records(mcap::McapReader& reader, foxglove::McapWriter& writer,
+                           const std::string& dataset_info) {
+  for (const auto& [name, index] : reader.metadataIndexes()) {
+    mcap::Metadata record;
+    if (!read_metadata(reader, index, record)) return false;
+
+    if (name == trossen_mcap_defs::kRecordingMetadataName) {
+      record.metadata[trossen_mcap_defs::kDatasetInfoKey] = dataset_info;
+    }
+
+    // The map is unordered_map<string, string>; writeMetadata only iterates it.
+    auto write_status = writer.writeMetadata(name, record.metadata.begin(), record.metadata.end());
+    if (write_status != foxglove::FoxgloveError::Ok) {
+      std::cerr << "Error: Failed to copy metadata record '" << name
+                << "': " << foxglove::strerror(write_status) << "\n";
+      return false;
+    }
+  }
+  return true;
 }
 
 /// @brief Translate a compression name to the writer's enum; nullopt for an unknown name.
@@ -395,6 +444,8 @@ bool transcode_images_to_video(
     return false;
   }
   auto writer = std::move(writer_result.value());
+
+  if (!copy_metadata_records(reader, writer, video_dataset_info(dataset_info))) return false;
 
   // Plan every channel before the first message. The writer records a channel with its first
   // message, so a channel the recording never logged to is not in the output.
