@@ -271,7 +271,7 @@ private:
                                uint64_t* counter);
 
   /**
-   * @brief Write one frame as foxglove.RawImage
+   * @brief Write one frame as video or raw image, depending on `records_video()`
    *
    * @param img Image record to write
    * @param depth True for a depth frame, false for color

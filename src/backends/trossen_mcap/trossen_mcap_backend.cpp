@@ -67,6 +67,25 @@ bool TrossenMCAPBackend::open() {
     return true;
   }
 
+  // Validate the requested camera format before creating anything. A typo, or a
+  // video request against a build without the encoder, fails the episode here
+  // rather than silently writing raw frames, which would only surface much
+  // later, at conversion time, as a dataset nobody asked for.
+  if (!cfg_->image_encoding_is_valid()) {
+    std::cerr << "Unknown image_encoding \"" << cfg_->image_encoding << "\" (expected \""
+              << trossen::configuration::TROSSEN_MCAP_IMAGE_ENCODING_RAW << "\" or \""
+              << trossen::configuration::TROSSEN_MCAP_IMAGE_ENCODING_VIDEO << "\")\n";
+    return false;
+  }
+#ifndef TROSSEN_ENABLE_VIDEO_ENCODE
+  if (cfg_->records_video()) {
+    std::cerr << "image_encoding is \"video\" but this SDK was built without "
+                 "TROSSEN_ENABLE_VIDEO_ENCODE; rebuild with "
+                 "-DTROSSEN_ENABLE_VIDEO_ENCODE=ON or set image_encoding to \"raw\"\n";
+    return false;
+  }
+#endif
+
   const std::filesystem::path dataset_dir = std::filesystem::path(cfg_->root) / cfg_->dataset_id;
   do {
     path_ = dataset_dir / (trossen::io::backends::generate_episode_id() + ".mcap");
@@ -328,11 +347,23 @@ foxglove::RawChannel* TrossenMCAPBackend::ensure_image_channel_with_metadata(
     return &it->second;
   }
 
-  // Use Foxglove SDK's built-in RawImage schema
-  foxglove::Schema schema = foxglove::schemas::RawImage::schema();
+  // The schema has to match what will actually be logged on this channel, so it
+  // follows the configured storage format rather than being fixed to RawImage.
+  const bool video = cfg_ && cfg_->records_video();
+  foxglove::Schema schema =
+      video ? foxglove::schemas::CompressedVideo::schema() : foxglove::schemas::RawImage::schema();
 
   // Convert metadata to std::map
   std::map<std::string, std::string> channel_metadata(metadata.begin(), metadata.end());
+  if (video) {
+    // Recorded in the channel metadata so a reader can tell which codec a
+    // stream carries without decoding a packet to find out. Depth is HEVC
+    // because it needs 12-bit; color is H.264.
+    const auto stream_type = channel_metadata.find("stream_type");
+    const bool depth_stream =
+        stream_type != channel_metadata.end() && stream_type->second == "depth";
+    channel_metadata["video_format"] = depth_stream ? "h265" : "h264";
+  }
 
   // Create channel
   auto channel_result = foxglove::RawChannel::create(
@@ -656,6 +687,10 @@ void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
 
 void TrossenMCAPBackend::write_image_frame(const data::ImageRecord& img, bool depth,
                                            foxglove::RawChannel* channel) {
+  if (cfg_ && cfg_->records_video()) {
+    write_video_frame(img, depth, channel);
+    return;
+  }
   write_raw_image_message(img.image, img.id, img.width, img.height, img.encoding, img.ts.realtime,
                           channel, depth ? &stats_.depth_images_written : &stats_.images_written);
 }
