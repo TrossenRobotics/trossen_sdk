@@ -462,17 +462,116 @@ bool LeRobotV3DatasetWriter::remux_episode_video(
 std::vector<cv::Mat> LeRobotV3DatasetWriter::sample_video_frames(
   const fs::path& mp4, size_t frame_count, const fs::path& tmp_dir) const
 {
-  // TODO(shantanuparab-tr): sample frames back out of a written video for pixel statistics.
-  return {};
+  if (frame_count == 0) return {};
+
+  const fs::path sample_dir = tmp_dir / "samples";
+  std::error_code ec;
+  fs::create_directories(sample_dir, ec);
+
+  // Decode roughly this many stills, evenly spread. Enough for stable global
+  // image statistics without decoding the whole stream.
+  constexpr size_t kTargetSamples = 30;
+  const size_t stride = std::max<size_t>(1, frame_count / kTargetSamples);
+
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -i " << mp4.string()
+      << " -vf \"select='not(mod(n\\," << stride << "))'\" -vsync 0 -q:v 2 "
+      << (sample_dir / "sample_%04d.jpg").string();
+  if (std::system(cmd.str().c_str()) != 0) {
+    std::cerr << "Warning: could not sample frames from " << mp4.string()
+              << "; image stats for this camera will be based on fewer frames\n";
+  }
+
+  std::vector<fs::path> paths;
+  if (fs::exists(sample_dir)) {
+    for (const auto& entry : fs::directory_iterator(sample_dir)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+        paths.push_back(entry.path());
+      }
+    }
+  }
+  std::sort(paths.begin(), paths.end());
+  std::vector<cv::Mat> samples = trossen::io::backends::sample_images(paths);
+  fs::remove_all(sample_dir, ec);
+  return samples;
 }
 
 bool LeRobotV3DatasetWriter::place_or_concat_video(
   const std::string& video_key, const fs::path& episode_mp4, double ep_duration_s,
   std::array<double, 4>& out_slot)
 {
-  // TODO(shantanuparab-tr): place the episode video, concatenating into the current file when it
-  // fits.
-  return false;
+  VideoFileState& st = videos_[video_key];
+
+  auto target_path = [&]() {
+    std::ostringstream rel;
+    rel << video_key << "/chunk-" << std::setfill('0') << std::setw(3) << st.chunk_index
+        << "/file-" << std::setfill('0') << std::setw(3) << st.file_index << ".mp4";
+    return videos_dir_ / rel.str();
+  };
+
+  auto start_new_file = [&]() -> bool {
+    fs::path target = target_path();
+    try {
+      fs::create_directories(target.parent_path());
+      fs::rename(episode_mp4, target);
+    } catch (const std::exception& e) {
+      // rename across filesystems can fail; fall back to copy.
+      try {
+        fs::copy_file(episode_mp4, target, fs::copy_options::overwrite_existing);
+        fs::remove(episode_mp4);
+      } catch (const std::exception& e2) {
+        std::cerr << "Error: Failed to place video: " << e2.what() << "\n";
+        return false;
+      }
+    }
+    st.path = target;
+    st.duration_s = ep_duration_s;
+    out_slot = {static_cast<double>(st.chunk_index), static_cast<double>(st.file_index), 0.0,
+                ep_duration_s};
+    return true;
+  };
+
+  if (st.path.empty()) {
+    return start_new_file();
+  }
+
+  double cur_mb = static_cast<double>(fs::file_size(st.path)) / 1e6;
+  double ep_mb = static_cast<double>(fs::file_size(episode_mp4)) / 1e6;
+  if (cur_mb + ep_mb >= static_cast<double>(opts_.video_files_size_in_mb)) {
+    update_chunk_file_indices(st.chunk_index, st.file_index, opts_.chunks_size);
+    return start_new_file();
+  }
+
+  // Concatenate episode_mp4 onto the current shared file (stream copy, no re-encode).
+  fs::path list_file = episode_mp4.parent_path() / "concat_list.txt";
+  {
+    std::ofstream lf(list_file);
+    lf << "file '" << st.path.string() << "'\n";
+    lf << "file '" << episode_mp4.string() << "'\n";
+  }
+  fs::path tmp_out = episode_mp4.parent_path() / "concat_out.mp4";
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -f concat -safe 0 -i " << list_file.string() << " -c copy "
+      << tmp_out.string();
+  int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg concat failed (exit " << ret << ")\n";
+    return false;
+  }
+  try {
+    fs::rename(tmp_out, st.path);
+    fs::remove(episode_mp4);
+    fs::remove(list_file);
+  } catch (const std::exception& e) {
+    std::cerr << "Error: Failed to replace shared video: " << e.what() << "\n";
+    return false;
+  }
+
+  double from_ts = st.duration_s;
+  st.duration_s += ep_duration_s;
+  out_slot = {static_cast<double>(st.chunk_index), static_cast<double>(st.file_index), from_ts,
+              st.duration_s};
+  return true;
 }
 
 int LeRobotV3DatasetWriter::task_index_for(const std::string& task_name) {
