@@ -326,22 +326,137 @@ bool LeRobotV3DatasetWriter::roll_data_file_if_needed(int64_t next_ep_frames) {
 bool LeRobotV3DatasetWriter::encode_episode_video(
   const fs::path& image_dir, size_t frame_count, const fs::path& out_mp4) const
 {
-  // TODO(shantanuparab-tr): encode an episode's color frames to video.
-  return false;
+  fs::path input_pattern = image_dir / "image_%06d.jpg";
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -framerate " << opts_.fps << " -start_number 0"
+      << " -i " << input_pattern.string() << " -frames:v " << frame_count
+      << " -c:v libsvtav1 -crf 30 -g 30 -preset 6";
+  // SVT-AV1's level-of-parallelism. ffmpeg's -threads is silently ignored by this
+  // encoder, so lp= is the only way to stop each concurrent worker's encoder from
+  // sizing itself to the whole machine.
+  if (opts_.encoder_threads > 0) {
+    cmd << " -svtav1-params lp=" << opts_.encoder_threads;
+  }
+  // The output rate matches the row grid; -frames:v counts output frames, so any other
+  // rate would cut the video short or drop frames.
+  cmd << " -pix_fmt yuv420p -r " << opts_.fps << " " << out_mp4.string();
+  int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg encode failed (exit " << ret << "): " << cmd.str() << "\n";
+    return false;
+  }
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::encode_depth_video(
   const fs::path& image_dir, size_t frame_count, const fs::path& out_mp4) const
 {
-  // TODO(shantanuparab-tr): encode an episode's depth frames to video.
-  return false;
+  // 16-bit depth (mm) → 12-bit log-quantized codes → lossless HEVC gray12le. The
+  // mapping lives in trossen_sdk/utils/depth_quantization.hpp so this converter and
+  // the MCAP recorder (which can encode depth video at capture time) cannot drift
+  // apart, and a mismatch would decode to wrong distances without erroring.
+  const std::vector<uint16_t> lut = trossen::utils::build_depth_quantization_lut();
+
+  int width = 0, height = 0;
+  const fs::path raw_path = fs::path(out_mp4.string() + ".gray12.raw");
+  {
+    std::ofstream raw(raw_path, std::ios::binary);
+    if (!raw) {
+      std::cerr << "Error: cannot open depth raw temp: " << raw_path.string() << "\n";
+      return false;
+    }
+    std::vector<uint16_t> codes;
+    for (size_t f = 0; f < frame_count; ++f) {
+      char namebuf[32];
+      std::snprintf(namebuf, sizeof(namebuf), "image_%06zu.png", f);
+      cv::Mat img = cv::imread((image_dir / namebuf).string(), cv::IMREAD_UNCHANGED);
+      if (img.empty() || img.type() != CV_16UC1) {
+        std::cerr << "Error: depth frame missing or not 16-bit mono: " << namebuf << "\n";
+        return false;
+      }
+      if (width == 0) {
+        width = img.cols;
+        height = img.rows;
+      }
+      codes.resize(static_cast<size_t>(img.rows) * static_cast<size_t>(img.cols));
+      size_t k = 0;
+      for (int y = 0; y < img.rows; ++y) {
+        const uint16_t* row = img.ptr<uint16_t>(y);
+        for (int x = 0; x < img.cols; ++x) codes[k++] = lut[row[x]];
+      }
+      raw.write(reinterpret_cast<const char*>(codes.data()), codes.size() * sizeof(uint16_t));
+    }
+  }
+  if (width == 0 || height == 0) {
+    std::cerr << "Error: no depth frames read from " << image_dir.string() << "\n";
+    std::error_code ec;
+    fs::remove(raw_path, ec);
+    return false;
+  }
+
+  // x265 pools= caps its worker pool. ffmpeg's -threads only reaches x265's
+  // frame-threads, which leaves most of the pool uncapped, so use pools=.
+  std::ostringstream x265_params;
+  x265_params << "lossless=1:log-level=error";
+  if (opts_.encoder_threads > 0) {
+    x265_params << ":pools=" << opts_.encoder_threads;
+  }
+
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -f rawvideo -pix_fmt gray12le -s " << width << "x" << height
+      << " -framerate " << opts_.fps << " -i " << raw_path.string() << " -frames:v " << frame_count
+      << " -c:v libx265 -x265-params " << x265_params.str() << " -pix_fmt gray12le -r "
+      << opts_.fps << " " << out_mp4.string();
+  int ret = std::system(cmd.str().c_str());
+  std::error_code ec;
+  fs::remove(raw_path, ec);
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg depth encode failed (exit " << ret << "): " << cmd.str() << "\n";
+    return false;
+  }
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::remux_episode_video(
   const fs::path& annexb, size_t frame_count, const fs::path& out_mp4) const
 {
-  // TODO(shantanuparab-tr): remux an already-compressed stream without re-encoding.
-  return false;
+  // -c copy: the bitstream goes through untouched. An elementary stream has no
+  // container timestamps, so -r stamps them at the dataset rate and +genpts
+  // fills in the presentation timestamps the mp4 muxer needs.
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << opts_.fps
+      << " -i " << annexb.string()
+      << " -c copy -movflags +faststart " << out_mp4.string();
+  const int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg remux failed (exit " << ret << "): " << cmd.str() << "\n";
+    return false;
+  }
+
+  // A frame count that disagrees with the message count silently shifts image/state
+  // alignment for every later frame.
+  std::ostringstream probe;
+  probe << "ffprobe -v error -count_frames -select_streams v:0 "
+        << "-show_entries stream=nb_read_frames -of default=nw=1:nk=1 "
+        << out_mp4.string();
+  FILE* pipe = popen(probe.str().c_str(), "r");
+  if (!pipe) {
+    std::cerr << "Warning: could not probe remuxed video " << out_mp4.string() << "\n";
+    return true;
+  }
+  char buf[64] = {0};
+  const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
+  pclose(pipe);
+  if (read_ok) {
+    const int64_t muxed = std::strtoll(buf, nullptr, 10);
+    if (muxed > 0 && static_cast<size_t>(muxed) != frame_count) {
+      std::cerr << "Error: remuxed " << out_mp4.filename().string() << " has " << muxed
+                << " frames but the recording had " << frame_count
+                << " video messages; refusing to misalign frames against joint states\n";
+      return false;
+    }
+  }
+  return true;
 }
 
 std::vector<cv::Mat> LeRobotV3DatasetWriter::sample_video_frames(
