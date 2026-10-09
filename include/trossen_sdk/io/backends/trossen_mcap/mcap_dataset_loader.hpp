@@ -20,6 +20,7 @@
 #include <functional>
 #include <limits>
 #include <map>
+#include <optional>
 #include <string>
 
 #include "trossen_sdk/io/backend_utils.hpp"
@@ -83,6 +84,27 @@ size_t nearest_sample_index(
     best = cursor + 1;
   }
   return distance(stamp_at(best)) > tolerance_ns ? NO_SAMPLE : best;
+}
+
+/**
+ * @brief First entry whose time is earlier than the entry before it.
+ *
+ * nearest_sample_index() moves its cursor forward only, so a stream must be in time order
+ * for its rows to match correctly. Equal consecutive times are in order.
+ *
+ * @tparam StampAt Callable taking an index and returning that entry's time in nanoseconds.
+ * @param count Number of entries.
+ * @param stamp_at Returns entry i's time.
+ * @return Index of the first entry that steps backwards, or no value when the sequence is in
+ *   order.
+ */
+template <typename StampAt>
+std::optional<size_t> first_backward_step(size_t count, const StampAt& stamp_at)
+{
+  for (size_t i = 1; i < count; ++i) {
+    if (stamp_at(i) < stamp_at(i - 1)) return i;
+  }
+  return std::nullopt;
 }
 
 /**

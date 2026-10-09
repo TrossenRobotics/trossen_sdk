@@ -401,6 +401,36 @@ bool load_aligned_episode(
   // realtime half, so that is the key every comparison below uses.
   auto log_ns_of = [](const data::RecordBase& rec) { return rec.ts.realtime.to_ns(); };
 
+  // Every stream must be in log-time order: rows are matched with cursors that only move
+  // forward. The realtime clock can step backwards (an NTP correction), which would break
+  // that without any error, so an out-of-order stream rejects the episode.
+  auto check_time_order = [](const std::string& name, size_t count,
+                             const auto& stamp_at) -> bool {
+    const auto step = first_backward_step(count, stamp_at);
+    if (!step) return true;
+    const size_t i = *step;
+    std::cerr << "Error: " << name << " timestamps go backwards at message " << i << " ("
+              << (stamp_at(i - 1) - stamp_at(i)) << " ns earlier than message " << (i - 1)
+              << "). The recording clock stepped, so rows cannot be matched.\n";
+    return false;
+  };
+  for (const auto& [stream_id, messages] : messages_by_stream) {
+    if (!check_time_order(stream_id, messages.size(),
+                          [&](size_t i) { return log_ns_of(messages[i]); })) {
+      return false;
+    }
+  }
+  if (!check_time_order("mobile base", mobile_base_messages.size(),
+                        [&](size_t i) { return log_ns_of(mobile_base_messages[i]); })) {
+    return false;
+  }
+  for (const auto& [camera_name, stamps] : camera_timestamps) {
+    const auto stamp_at = [&stamps](size_t i) { return stamps[i]; };
+    if (!check_time_order(camera_name, stamps.size(), stamp_at)) {
+      return false;
+    }
+  }
+
   // ── Detect the joint count and mobile base; episode_action_dim() and episode_obs_dim()
   //    derive the row widths from them ──
   out.joints_per_stream = 0;
