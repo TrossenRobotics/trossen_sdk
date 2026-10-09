@@ -455,7 +455,7 @@ bool SessionManager::start_episode() {
   std::cout << "Episode " << next_episode_index_ << " started." << std::endl;
 
   trossen::utils::announce(
-    "Episode " + std::to_string(next_episode_index_) + " started", false);
+    "Episode " + std::to_string(next_episode_index_) + " started");
 
   // SDK-driven episode start: bring teleop mirrors up now that recording is live, and
   // notify components that the episode has started.
