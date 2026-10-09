@@ -13,6 +13,7 @@
 #ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_V3__LEROBOT_V3_WRITER_HPP_
 #define TROSSEN_SDK__IO__BACKENDS__LEROBOT_V3__LEROBOT_V3_WRITER_HPP_
 
+#include <array>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -148,6 +149,25 @@ public:
 private:
   /// @brief Close the open data file, if any. @return false when closing it fails.
   bool close_data_writer();
+
+  // Video helpers. They run ffmpeg/ffprobe. The color encode, the remux and the frame
+  // sampling are shared with the v2 converter (lerobot_common/lerobot_video.hpp).
+  /// @brief Encode 16-bit depth PNGs as HEVC gray12le video with 12-bit log quantization.
+  bool encode_depth_video(
+    const std::filesystem::path& image_dir, size_t frame_count,
+    const std::filesystem::path& out_mp4) const;
+  // Not up for review, changes in #360.
+  bool place_or_concat_video(
+    const std::string& video_key, const std::filesystem::path& episode_mp4,
+    double ep_duration_s, std::array<double, 4>& out_slot);
+
+  int task_index_for(const std::string& task_name);
+
+  bool write_episodes_parquet();
+  bool write_tasks_parquet();
+  bool write_stats_json();
+  bool write_info_json();
+  bool write_readme();
 
   Options opts_;
 };
