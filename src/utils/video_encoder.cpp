@@ -273,11 +273,16 @@ std::unique_ptr<VideoEncoder> VideoEncoder::create(const Params& params) {
       }
     } else if (name.find("nvenc") != std::string::npos) {
       // nvenc (NVIDIA's hardware encoder) uses its own preset/tune vocabulary, not libx264/265's:
-      // "p1" = fastest hardware preset, "ll" = low-latency tuning, "zerolatency" = an explicit
-      // nvenc-specific boolean option for the same "don't buffer frames" behavior as above.
+      // "p1" = fastest hardware preset, "ll" = low-latency tuning, "zerolatency" = no frame
+      // reordering.
       try_set_opt(candidate_ctx, "preset", "p1");
       try_set_opt(candidate_ctx, "tune", "ll");
       try_set_opt(candidate_ctx, "zerolatency", "1");
+      // "delay" is how many frames nvenc holds before it returns the first packet, and it
+      // defaults to INT_MAX: without this, encode() gets nothing back for the opening frames
+      // and the caller sees an encoder that produces no output. "zerolatency" does not cover
+      // it; that one only disables reordering.
+      try_set_opt(candidate_ctx, "delay", "0");
     }
     // vaapi candidates are left unconfigured here: real hardware use needs an AVHWDeviceContext /
     // AVHWFramesContext wired up first, which is out of scope for now. Left as-is,
