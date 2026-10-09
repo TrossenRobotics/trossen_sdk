@@ -593,7 +593,11 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
   out.ep.episode_index = episode_index;
 
   // ── Decode + align (independent per file: safe to run on a worker thread) ──
-  if (!load_aligned_episode(mcap_path.string(), episode_index, out.ep, out.channels)) {
+  // Rows are gridded at the configured rate, the same rate the remux stamps frames at.
+  AlignmentOptions alignment;
+  alignment.fps = opts_.fps;
+  if (!load_aligned_episode(mcap_path.string(), episode_index, out.ep, out.channels, {},
+                            alignment)) {
     std::cerr << "[FAILED] Could not load " << mcap_path.string() << "\n";
     return out;  // ok == false
   }
