@@ -7,10 +7,15 @@
 
 #include <sys/wait.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <sstream>
+#include <string>
+#include <system_error>
+
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_stats_utils.hpp"
 
 namespace trossen::io::backends {
 
@@ -24,6 +29,10 @@ constexpr int kAv1Crf = 30;
 constexpr int kAv1KeyframeInterval = 30;
 /// @brief SVT-AV1 speed preset for color video.
 constexpr int kAv1Preset = 6;
+/// @brief ffmpeg JPEG quality of the stills sampled from a video (2 is near lossless).
+constexpr int kSampleJpegQuality = 2;
+/// @brief Stills sampled from each video for image statistics, roughly.
+constexpr size_t kTargetSamples = 30;
 
 }  // namespace
 
@@ -82,6 +91,90 @@ bool encode_episode_video(
     return false;
   }
   return true;
+}
+
+bool remux_episode_video(
+  const fs::path& annexb, size_t frame_count, double fps, const fs::path& out_mp4)
+{
+  // -c copy: the bitstream goes through untouched. An elementary stream has no container
+  // timestamps, so -r stamps them at `fps` and +genpts fills in the presentation timestamps
+  // the mp4 muxer needs.
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << fps << " -i " << annexb.string()
+      << " -c copy -movflags +faststart " << out_mp4.string();
+  const int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg remux failed (exit " << exit_code(ret) << "): " << cmd.str()
+              << "\n";
+    return false;
+  }
+
+  // A frame count that disagrees with the message count silently shifts image/state
+  // alignment for every later frame. A stream copy writes one packet per frame, so the
+  // packet count is the frame count. A count that cannot be read fails the remux.
+  const int64_t muxed = count_video_packets(out_mp4);
+  if (muxed < 0) {
+    std::cerr << "Error: could not count the frames of remuxed video " << out_mp4.string()
+              << "\n";
+    return false;
+  }
+  if (static_cast<size_t>(muxed) != frame_count) {
+    std::cerr << "Error: remuxed " << out_mp4.filename().string() << " has " << muxed
+              << " frames but the recording had " << frame_count
+              << " video messages; refusing to misalign frames against joint states\n";
+    return false;
+  }
+  return true;
+}
+
+std::vector<cv::Mat> sample_video_frames(
+  const fs::path& mp4, size_t first_frame, size_t frame_count, const fs::path& tmp_dir)
+{
+  if (frame_count == 0) return {};
+
+  // The folder is emptied first so stills left by an earlier run are not counted.
+  const fs::path sample_dir = tmp_dir / "samples";
+  std::error_code ec;
+  fs::remove_all(sample_dir, ec);
+  if (!ec) fs::create_directories(sample_dir, ec);
+  if (ec) {
+    std::cerr << "Warning: could not prepare " << sample_dir.string() << ": " << ec.message()
+              << "; no image stats are sampled from " << mp4.string() << "\n";
+    return {};
+  }
+
+  // The select filter decodes every frame and keeps every stride-th one from
+  // `first_frame` through the last of the `frame_count` frames. Passthrough
+  // writes each kept frame once instead of duplicating frames to fill the gaps;
+  // -vsync is used because FFmpeg 4.4 (Ubuntu 22.04) has no -fps_mode.
+  const size_t stride = std::max<size_t>(1, frame_count / kTargetSamples);
+  const size_t last_frame = first_frame + frame_count - 1;
+
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -i " << mp4.string()
+      << " -vf \"select='between(n\\," << first_frame << "\\," << last_frame
+      << ")*not(mod(n-" << first_frame << "\\," << stride << "))'\" -vsync passthrough -q:v "
+      << kSampleJpegQuality << " " << (sample_dir / "sample_%04d.jpg").string();
+  const int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Warning: could not sample frames from " << mp4.string() << " (exit "
+              << exit_code(ret) << "); image stats for this camera will be based on fewer "
+              << "frames\n";
+  }
+
+  std::vector<fs::path> paths;
+  if (fs::exists(sample_dir)) {
+    for (const auto& entry : fs::directory_iterator(sample_dir)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+        paths.push_back(entry.path());
+      }
+    }
+  }
+  std::sort(paths.begin(), paths.end());
+  std::vector<cv::Mat> samples = sample_images(paths);
+
+  fs::remove_all(sample_dir, ec);
+  return samples;
 }
 
 }  // namespace trossen::io::backends

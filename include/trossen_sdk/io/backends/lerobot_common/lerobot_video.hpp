@@ -12,6 +12,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <vector>
+
+#include <opencv2/core.hpp>
 
 namespace trossen::io::backends {
 
@@ -49,6 +52,39 @@ int64_t count_video_packets(const std::filesystem::path& video);
 bool encode_episode_video(
   const std::filesystem::path& image_dir, size_t frame_count, double fps, int encoder_threads,
   const std::filesystem::path& out_mp4);
+
+/**
+ * @brief Wrap an already-compressed Annex B stream in mp4 without re-encoding.
+ *
+ * The bitstream is copied through verbatim (`-c copy`), so the recorded frames reach
+ * LeRobot exactly as captured. Timestamps are generated at `fps` because an elementary
+ * stream carries none.
+ *
+ * @param annexb Input elementary stream (`.h264` / `.hevc`).
+ * @param frame_count Expected frame count, checked against the muxed result.
+ * @param fps Frame rate stamped on the frames.
+ * @param out_mp4 Output mp4.
+ * @return true when the video holds exactly frame_count frames.
+ */
+bool remux_episode_video(
+  const std::filesystem::path& annexb, size_t frame_count, double fps,
+  const std::filesystem::path& out_mp4);
+
+/**
+ * @brief Decode evenly spaced frames from an mp4 for image statistics.
+ *
+ * Every frame is decoded and an evenly spaced sample of the frames from `first_frame`
+ * is kept, as sample_images() loads them: CV_32FC3, BGR, scaled to [0, 1].
+ *
+ * @param mp4 Video to sample.
+ * @param first_frame Index of the first frame to sample, the one row 0 plays.
+ * @param frame_count Number of frames to sample from, starting at `first_frame`.
+ * @param tmp_dir Scratch directory for the extracted stills.
+ * @return Sampled frames (empty on failure; stats degrade rather than fail).
+ */
+std::vector<cv::Mat> sample_video_frames(
+  const std::filesystem::path& mp4, size_t first_frame, size_t frame_count,
+  const std::filesystem::path& tmp_dir);
 
 }  // namespace trossen::io::backends
 

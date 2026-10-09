@@ -177,6 +177,36 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
       if (feature_name.find("observation.images.") == 0) {
         std::string camera_name = feature_name.substr(19);
 
+        // A camera with an episode video, encoded or remuxed, is sampled from that video.
+        fs::path videos_root = dataset_root / trossen::io::backends::VIDEO_DIR;
+        bool is_video_camera = false;
+        if (fs::exists(videos_root)) {
+          for (const auto& chunk_entry : fs::directory_iterator(videos_root)) {
+            if (!chunk_entry.is_directory()) continue;
+            fs::path candidate = chunk_entry.path() / feature_name /
+                trossen::io::backends::format_video_filename(episode_index);
+            if (!fs::exists(candidate)) continue;
+
+            is_video_camera = true;
+            // Every frame of a v2 episode video is one of its rows, so all are sampled.
+            const int64_t frames = trossen::io::backends::count_video_packets(candidate);
+            const fs::path scratch = dataset_root / ".tmp_stats";
+            auto images = frames > 0 ? trossen::io::backends::sample_video_frames(
+                                         candidate, 0, static_cast<size_t>(frames), scratch)
+                                     : std::vector<cv::Mat>{};
+            std::error_code scratch_ec;
+            fs::remove_all(scratch, scratch_ec);
+            if (!images.empty()) {
+              stats[feature_name] = trossen::io::backends::compute_image_stats(images);
+            } else {
+              std::cerr << "  Warning: No valid frames sampled from video for camera: "
+                        << camera_name << "\n";
+            }
+            break;
+          }
+        }
+        if (is_video_camera) continue;
+
         // Construct the expected image directory path for this episode and camera
         std::string episode_folder_name =
             trossen::io::backends::format_episode_folder(episode_index);
@@ -256,6 +286,8 @@ struct PreparedEpisode {
   std::map<std::string, std::filesystem::path> image_dirs;
   /// Episode video of each camera, under the scratch folder.
   std::map<std::string, std::filesystem::path> videos;
+  /// Codec and pixel format of each remuxed camera, which keeps the recorder's codec.
+  std::map<std::string, trossen::io::backends::VideoCodecInfo> remuxed_codecs;
 };
 
 /// @brief Decode one recording and build its images and videos under tmp_dir.
@@ -322,7 +354,10 @@ static void print_usage(const char* program) {
   std::cerr << "  5. Compute and update dataset statistics\n";
   std::cerr << "\nFolder structure: "
             << "root/repository_id/dataset_id/[data,images,videos,meta]\n";
-  std::cerr << "\nNote: Video encoding requires FFmpeg with libsvtav1 codec.\n";
+  std::cerr << "\nNote: Cameras recorded raw (image_encoding=\"raw\") are encoded to AV1 and\n"
+            << "  require FFmpeg with libsvtav1. Cameras recorded as compressed video\n"
+            << "  (image_encoding=\"video\") are remuxed as-is (h264) and need only ffmpeg\n"
+            << "  and ffprobe on PATH.\n";
 }
 
 int main(int argc, char** argv) {
@@ -630,6 +665,7 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
   namespace fs = std::filesystem;
   using trossen::io::backends::AlignedEpisode;
   using trossen::io::backends::McapChannelMap;
+  using trossen::io::backends::CameraVideoStream;
 
   out.mcap_file = mcap_file;
   if (!fs::exists(mcap_file)) {
@@ -680,10 +716,11 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
 
 
   // ──────────────────────────────────────────────────────────
-  // Extract camera images
+  // Extract camera video (compressed streams, remuxed) + images (raw streams)
   // ──────────────────────────────────────────────────────────
 
   std::map<std::string, fs::path>& camera_dirs = out.image_dirs;
+  std::map<std::string, CameraVideoStream> video_streams;
   std::map<std::string, size_t> image_counts;
 
   if (!channels.camera_channels.empty()) {
@@ -691,16 +728,30 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
       camera_dirs[camera_name] = tmp_dir / "images" / ("observation.images." + camera_name);
     }
 
-    std::cout << "\nExtracting camera images...\n";
-    if (!trossen::io::backends::extract_camera_images(
-            mcap_file.string(), channels, ep,
-            [&](const std::string& camera_name) -> fs::path {
-              fs::path dir = camera_dirs[camera_name];
-              fs::create_directories(dir);
-              return dir;
-            },
-            image_counts)) {
+    const auto camera_dir_for = [&](const std::string& camera_name) -> fs::path {
+      fs::path dir = camera_dirs[camera_name];
+      fs::create_directories(dir);
+      return dir;
+    };
+
+    std::cout << "\nExtracting camera video (compressed streams)...\n";
+    if (!trossen::io::backends::extract_camera_video(
+            mcap_file.string(), channels, camera_dir_for, video_streams)) {
       return false;
+    }
+
+    // A camera that free-ran short would otherwise leave more parquet rows than its
+    // remuxed video has frames; trim the whole episode to whatever every video-mode
+    // camera actually covers (shared with the v3 converter).
+    trossen::io::backends::clamp_episode_to_video_frame_counts(ep, video_streams);
+
+    // A recording stores every camera the same way: as compressed video or as raw images.
+    if (video_streams.empty()) {
+      std::cout << "\nExtracting camera images (raw streams)...\n";
+      if (!trossen::io::backends::extract_camera_images(
+              mcap_file.string(), channels, ep, camera_dir_for, image_counts)) {
+        return false;
+      }
     }
   }
 
@@ -718,6 +769,37 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
       const std::string video_key = "observation.images." + camera_name;
       const fs::path video_output = tmp_dir / "videos" / (video_key + ".mp4");
       fs::create_directories(video_output.parent_path());
+
+      auto vs_it = video_streams.find(camera_name);
+      if (vs_it != video_streams.end() && vs_it->second.frame_count > 0) {
+        // Already-compressed: remux with `-c copy` instead of re-encoding.
+        const CameraVideoStream& vs = vs_it->second;
+
+        std::cout << "  Remuxing " << camera_name << " (" << vs.format << ")...";
+        std::cout.flush();
+
+        auto remux_start = std::chrono::steady_clock::now();
+        if (!trossen::io::backends::remux_episode_video(vs.annexb_path, vs.frame_count, ep.fps,
+                                                        video_output)) {
+          std::cout << " [FAILED]\n";
+          return false;
+        }
+        auto remux_end = std::chrono::steady_clock::now();
+        // The MP4 now holds every frame, so the extracted stream is no longer needed. The
+        // second remove takes the camera's episode folder too, once it is left empty.
+        std::error_code rm_ec;
+        fs::remove(vs.annexb_path, rm_ec);
+        fs::remove(vs.annexb_path.parent_path(), rm_ec);
+
+        out.remuxed_codecs[camera_name] = trossen::io::backends::copied_stream_codec(vs.format);
+
+        auto duration =
+            std::chrono::duration_cast<std::chrono::milliseconds>(remux_end - remux_start).count();
+        std::cout << " [ok] (" << (duration / 1000.0) << "s)\n";
+        out.videos[camera_name] = video_output;
+        videos_created++;
+        continue;
+      }
 
       auto cnt_it = image_counts.find(camera_name);
       if (cnt_it == image_counts.end() || cnt_it->second == 0) {
@@ -903,6 +985,11 @@ bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
 
     nlohmann::ordered_json features =
         trossen::io::backends::build_features(ep);
+
+    // A remuxed camera keeps the recorder's codec, not the one build_features() names.
+    for (const auto& [camera_name, codec] : pe.remuxed_codecs) {
+      trossen::io::backends::set_video_codec(features, "observation.images." + camera_name, codec);
+    }
 
     // Add standard metadata features (timestamp, frame_index, episode_index, index, task_index)
     trossen::io::backends::add_standard_metadata_features(features);
