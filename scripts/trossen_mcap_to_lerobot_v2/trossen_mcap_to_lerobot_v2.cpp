@@ -111,7 +111,10 @@ static void print_usage(const char* program) {
   std::cerr << "  5. Compute and update dataset statistics\n";
   std::cerr << "\nFolder structure: "
             << "root/repository_id/dataset_id/[data,images,videos,meta]\n";
-  std::cerr << "\nNote: Video encoding requires FFmpeg with libsvtav1 codec.\n";
+  std::cerr << "\nNote: Cameras recorded raw (image_encoding=\"raw\") are encoded to AV1 and\n"
+            << "  require FFmpeg with libsvtav1. Cameras recorded as compressed video\n"
+            << "  (image_encoding=\"video\") are remuxed as-is (h264) and need only ffmpeg\n"
+            << "  and ffprobe on PATH.\n";
 }
 
 int main(int argc, char** argv) {
