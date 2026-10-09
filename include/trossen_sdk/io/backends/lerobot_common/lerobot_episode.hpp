@@ -89,15 +89,11 @@ struct CameraInfo {
   /// Cameras free-run on their own clock, so their frames neither start with nor keep pace
   /// with the joint streams; pairing the two by position drifts. Each row therefore records
   /// which source frame actually belongs to it, and extract_camera_images() writes exactly
-  /// those frames, in row order. Consecutive rows may name the same source frame when the
-  /// camera runs slower than the row rate.
+  /// those frames, in row order. Consecutive rows name the same source frame when the camera
+  /// runs slower than the row rate, as LeRobot's recorder repeats a slow camera's latest frame.
   ///
   /// Its size must equal AlignedEpisode::frames.size(); extract_camera_images() rejects a
   /// camera whose size differs.
-  ///
-  /// TODO(shantanuparab-tr): improve this synchronization logic. Nearest-timestamp matching
-  /// repeats a source frame whenever a camera runs slower than the row rate, so a row's image
-  /// can be up to the tolerance old.
   std::vector<size_t> row_source_index;
 };
 
