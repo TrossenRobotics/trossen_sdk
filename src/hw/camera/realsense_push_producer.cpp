@@ -113,6 +113,53 @@ void RealsensePushProducer::stop() {
             << " dropped=" << stats_.dropped << std::endl;
 }
 
+RealsensePushProducer::DeviceStampSource RealsensePushProducer::stamp_device_time(
+  const rs2::frame& frame, data::Timestamp& ts) {
+  // The sensor timestamp is the middle of the exposure, in microseconds of the camera's
+  // own clock. It needs UVC metadata support in the kernel, so it is not always there.
+  if (frame.supports_frame_metadata(RS2_FRAME_METADATA_SENSOR_TIMESTAMP)) {
+    const auto sensor_us =
+      static_cast<uint64_t>(frame.get_frame_metadata(RS2_FRAME_METADATA_SENSOR_TIMESTAMP));
+    ts.device = data::Timespec::from_ns(sensor_us * data::US_TO_NS);
+    ts.device_clock = data::DeviceClock::Uptime;
+    return DeviceStampSource::SensorTimestamp;
+  }
+
+  // Otherwise get_timestamp(), in milliseconds. It is not the middle of the exposure, and
+  // which clock it counts from depends on the camera firmware and the kernel, so the
+  // domain is read from each frame.
+  const double device_ts_ms = frame.get_timestamp();
+  switch (frame.get_frame_timestamp_domain()) {
+    case RS2_TIMESTAMP_DOMAIN_HARDWARE_CLOCK:
+      ts.device = data::Timespec::from_ns(
+        static_cast<uint64_t>(device_ts_ms * static_cast<double>(data::MS_TO_NS)));
+      ts.device_clock = data::DeviceClock::Uptime;
+      return DeviceStampSource::HardwareClock;
+    case RS2_TIMESTAMP_DOMAIN_GLOBAL_TIME:
+      ts.device = data::Timespec::from_ns(
+        static_cast<uint64_t>(device_ts_ms * static_cast<double>(data::MS_TO_NS)));
+      ts.device_clock = data::DeviceClock::HostMapped;
+      return DeviceStampSource::GlobalTime;
+    case RS2_TIMESTAMP_DOMAIN_SYSTEM_TIME:
+    default:
+      // Librealsense stamped it on arrival from the host clock, so it carries no more
+      // information about the exposure than ts.realtime already does.
+      ts.device_clock = data::DeviceClock::None;
+      return DeviceStampSource::SystemTime;
+  }
+}
+
+const char* RealsensePushProducer::to_string(DeviceStampSource source) {
+  switch (source) {
+    case DeviceStampSource::SensorTimestamp: return "sensor timestamp, mid-exposure";
+    case DeviceStampSource::HardwareClock: return "frame timestamp, camera clock";
+    case DeviceStampSource::GlobalTime: return "frame timestamp, host-mapped";
+    case DeviceStampSource::SystemTime: return "host arrival only, no capture time";
+    case DeviceStampSource::Unset:
+    default: return "unset";
+  }
+}
+
 void RealsensePushProducer::push_loop(
   const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
 {
@@ -180,17 +227,22 @@ void RealsensePushProducer::push_loop(
       // If depth frame is null for this frameset, emit color-only record
     }
 
-    // Timestamp
+    // Timestamp. The host clocks record when the frame reached this callback, which on
+    // a stalled pipeline can be many frame periods after the exposure. The device
+    // timestamp is the exposure itself and is kept beside them, never over them.
     uint64_t mono_now = data::now_mono().to_ns();
     data::Timestamp ts;
-    if (cfg_.use_device_time) {
-      double device_ts_ms = color_frame.get_timestamp();
-      uint64_t device_ts_ns = static_cast<uint64_t>(device_ts_ms * 1'000'000.0);
-      ts.monotonic = data::Timespec::from_ns(device_ts_ns);
-    } else {
-      ts.monotonic = data::now_mono();
-    }
+    ts.monotonic = data::Timespec::from_ns(mono_now);
     ts.realtime = data::now_real();
+    if (cfg_.use_device_time) {
+      const DeviceStampSource source = stamp_device_time(color_frame, ts);
+      if (source != last_device_source_) {
+        std::cout << "[realsense:" << cfg_.stream_id << "] device timestamp: "
+                  << to_string(source) << " (" << data::to_string(ts.device_clock) << ")"
+                  << std::endl;
+        last_device_source_ = source;
+      }
+    }
 
     // Inter-frame timing
     if (last_capture_mono_ != 0) {
@@ -200,6 +252,19 @@ void RealsensePushProducer::push_loop(
       ++if_samples_;
     }
     last_capture_mono_ = mono_now;
+
+    // The camera's frame counter tells a frame lost on the camera from one that only
+    // arrived late, which the host clocks cannot. Needs UVC metadata, like the sensor
+    // timestamp.
+    if (color_frame.supports_frame_metadata(RS2_FRAME_METADATA_FRAME_COUNTER)) {
+      const auto counter =
+        static_cast<uint64_t>(color_frame.get_frame_metadata(RS2_FRAME_METADATA_FRAME_COUNTER));
+      if (last_device_frame_number_ && counter > *last_device_frame_number_ + 1) {
+        device_frames_lost_ += counter - *last_device_frame_number_ - 1;
+      }
+      last_device_frame_number_ = counter;
+      rec->device_frame_number = counter;
+    }
 
     rec->ts = ts;
     rec->seq = seq_++;
@@ -232,11 +297,13 @@ void RealsensePushProducer::push_loop(
       if (produced_fps > 0 && (produced_fps + 0.5) < cfg_.fps) {
         std::cerr << "[RealsensePushProducer] FPS health: produced=" << produced_fps
                   << " requested=" << cfg_.fps
-                  << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
+                  << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms
+                  << " camera_frames_lost=" << device_frames_lost_ << std::endl;
       } else {
         std::cout << "[RealsensePushProducer] FPS health: produced=" << produced_fps
                   << " requested=" << cfg_.fps
-                  << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
+                  << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms
+                  << " camera_frames_lost=" << device_frames_lost_ << std::endl;
       }
       uint64_t interval = static_cast<uint64_t>(cfg_.fps) * 10;
       if (interval == 0) interval = 300;
