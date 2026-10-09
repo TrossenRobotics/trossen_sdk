@@ -38,16 +38,8 @@ std::string stream_side(const std::string& stream_id) {
   return stream_id;
 }
 
-/**
- * @brief Check whether a camera is a depth map.
- *
- * The camera's boolean `is_depth_map` flag in dataset_info decides when present. A `_depth`
- * name suffix is used only for a camera that has no such flag.
- *
- * @param camera_name Camera id as recorded, e.g. `cam_high_depth`.
- * @param dataset_info The recording's dataset_info metadata; may be empty.
- * @return True if the camera records depth, false if it records color.
- */
+}  // namespace
+
 bool camera_is_depth(const std::string& camera_name, const nlohmann::json& dataset_info) {
   if (dataset_info.contains("cameras") && dataset_info["cameras"].contains(camera_name)) {
     const auto& camera = dataset_info["cameras"][camera_name];
@@ -58,8 +50,6 @@ bool camera_is_depth(const std::string& camera_name, const nlohmann::json& datas
   constexpr std::string_view kSuffix = "_depth";
   return camera_name.ends_with(kSuffix);
 }
-
-}  // namespace
 
 int base_block_width(const DatasetSignalOptions& signals) {
   return 2 + (signals.base_lateral_velocity ? 1 : 0) + (signals.base_pose ? 3 : 0);
