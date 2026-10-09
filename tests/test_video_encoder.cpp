@@ -186,6 +186,27 @@ TEST(VideoEncoderTest, EmitsExactlyOnePacketPerFrame) {
   EXPECT_EQ(packets, kFrames);
 }
 
+TEST(VideoEncoderTest, NvencReturnsAPacketForEveryFrameFromTheFirst) {
+  // NVENC holds frames back unless its `delay` option is 0, and a frame with no packet
+  // breaks the one-packet-per-frame invariant from the very first frame.
+  VideoEncoder::Params p = color_params();
+  // Above the smallest frame NVENC accepts.
+  p.width = 320;
+  p.height = 240;
+  p.encoder = "nvenc";
+  auto encoder = VideoEncoder::create(p);
+  if (!encoder) {
+    GTEST_SKIP() << "NVENC not available on this machine";
+  }
+
+  std::vector<uint8_t> frame(static_cast<size_t>(p.width) * p.height * 3);
+  for (int i = 0; i < 12; ++i) {
+    std::fill(frame.begin(), frame.end(), static_cast<uint8_t>(16 * i));
+    const auto result = encoder->encode(frame.data(), frame.size());
+    EXPECT_GT(result.data.size(), 0u) << "empty packet for frame " << i;
+  }
+}
+
 TEST(VideoEncoderTest, FirstFrameIsAKeyframe) {
   // An episode whose first packet is a delta frame is undecodable from its start.
   auto encoder = VideoEncoder::create(color_params());
