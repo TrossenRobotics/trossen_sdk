@@ -14,9 +14,11 @@
 #ifndef TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__MCAP_DATASET_LOADER_HPP_
 #define TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__MCAP_DATASET_LOADER_HPP_
 
+#include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <functional>
+#include <limits>
 #include <map>
 #include <string>
 
@@ -48,6 +50,40 @@ struct AlignmentOptions {
   /// @brief Largest gap, in nanoseconds, allowed between a row and the sample it matches.
   uint64_t tolerance_ns{DEFAULT_MATCH_TOLERANCE_NS};
 };
+
+/// @brief Returned by nearest_sample_index() when no entry is within the tolerance.
+inline constexpr size_t NO_SAMPLE = std::numeric_limits<size_t>::max();
+
+/**
+ * @brief Index of the entry nearest a target time in a time-ordered sequence.
+ *
+ * Both neighbors of the target are compared, so a row pairs with a later sample when that
+ * one is closer; on an equal distance the earlier entry wins. `cursor` is the search start
+ * and is left on the last entry at or before the target, so successive calls with
+ * increasing targets each scan forward from where the previous one stopped.
+ *
+ * @tparam StampAt Callable taking an index and returning that entry's time in nanoseconds.
+ * @param count Number of entries.
+ * @param stamp_at Returns entry i's time, in the same clock as `target`.
+ * @param target Time to match, in nanoseconds.
+ * @param tolerance_ns Largest distance, in nanoseconds, at which the nearest entry is accepted.
+ * @param cursor Search cursor; only moves forward.
+ * @return Index of the nearest entry, or NO_SAMPLE when there are no entries or the nearest
+ *   is further than `tolerance_ns` from `target`.
+ */
+template <typename StampAt>
+size_t nearest_sample_index(
+  size_t count, const StampAt& stamp_at, uint64_t target, uint64_t tolerance_ns, size_t& cursor)
+{
+  if (cursor >= count) return NO_SAMPLE;
+  while (cursor + 1 < count && stamp_at(cursor + 1) <= target) ++cursor;
+  auto distance = [target](uint64_t ts) { return target > ts ? target - ts : ts - target; };
+  size_t best = cursor;
+  if (cursor + 1 < count && distance(stamp_at(cursor + 1)) < distance(stamp_at(cursor))) {
+    best = cursor + 1;
+  }
+  return distance(stamp_at(best)) > tolerance_ns ? NO_SAMPLE : best;
+}
 
 /**
  * @brief Read an MCAP file and align its joint/camera streams into a frame sequence.
