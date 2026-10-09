@@ -29,6 +29,7 @@
 
 #include "RawImage.pb.h"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
+#include "trossen_sdk/utils/depth_quantization.hpp"
 #include "trossen_sdk/utils/video_encoder.hpp"
 
 namespace fs = std::filesystem;
@@ -73,6 +74,7 @@ int cv_type_for_encoding(const std::string& encoding) {
   if (encoding == "bgr8" || encoding == "rgb8" || encoding == "8UC3") return CV_8UC3;
   if (encoding == "rgba8" || encoding == "bgra8") return CV_8UC4;
   if (encoding == "mono8" || encoding == "8UC1") return CV_8UC1;
+  if (encoding == "mono16" || encoding == "16UC1" || encoding == "depth16") return CV_16UC1;
   return -1;
 }
 
@@ -82,6 +84,8 @@ struct ChannelPlan {
   bool copy{false};
   /// @brief Camera name, for the channels being re-encoded.
   std::string camera;
+  /// @brief Whether this camera holds depth, which encodes losslessly as 12-bit H.265.
+  bool depth{false};
   /// @brief Channel metadata carried over from the input, plus `video_format`.
   std::map<std::string, std::string> metadata;
   /// @brief Output channel; created on the first message for a re-encoded camera, because
@@ -92,7 +96,7 @@ struct ChannelPlan {
 };
 
 /// @brief Build the encoder parameters for one camera stream.
-utils::VideoEncoder::Params encoder_params_for(int width, int height,
+utils::VideoEncoder::Params encoder_params_for(int width, int height, bool depth,
                                                const std::string& encoder_name,
                                                const VideoTranscodeOptions& options) {
   utils::VideoEncoder::Params params;
@@ -103,9 +107,29 @@ utils::VideoEncoder::Params encoder_params_for(int width, int height,
   params.fps = trossen::configuration::TROSSEN_MCAP_VIDEO_NOMINAL_FPS;
   params.gop_size = options.keyframe_interval;
   params.encoder = encoder_name;
-  params.codec = utils::VideoCodec::H264;
-  params.bitrate_kbps = options.bitrate_kbps;
+  if (depth) {
+    // 12-bit depth codes cannot survive an 8-bit codec, and quantization has already
+    // discarded everything that can be spared, so encode losslessly.
+    params.codec = utils::VideoCodec::H265;
+    params.lossless = true;
+  } else {
+    params.codec = utils::VideoCodec::H264;
+    params.bitrate_kbps = options.bitrate_kbps;
+  }
   return params;
+}
+
+/// @brief Decide whether a camera channel carries depth.
+///
+/// The recorder tags depth channels in their metadata, so that is authoritative; a
+/// recording made before the tag existed is classified by topic and pixel encoding.
+bool channel_is_depth(const mcap::Channel& channel, const std::string& encoding) {
+  auto it = channel.metadata.find("stream_type");
+  if (it != channel.metadata.end()) {
+    return it->second == "depth";
+  }
+  return channel.topic.find("depth") != std::string::npos || encoding == "16UC1" ||
+         encoding == "mono16" || encoding == "depth16";
 }
 
 /// @brief Copy an MCAP schema into the Foxglove writer's schema type.
@@ -147,8 +171,27 @@ foxglove::McapCompression compression_from(const std::string& name) {
   return foxglove::McapCompression::None;
 }
 
-/// @brief Convert a decoded frame to what the encoder expects: BGR8.
-cv::Mat prepare_frame(const cv::Mat& image, const std::string& encoding) {
+/// @brief Convert a decoded frame to what the encoder expects: BGR8 for color, 12-bit
+///        quantized codes for depth.
+/// @return The converted frame, or an empty Mat when the input cannot be converted.
+cv::Mat prepare_frame(const cv::Mat& image, const std::string& encoding, bool depth,
+                      const std::vector<uint16_t>& depth_lut) {
+  if (depth) {
+    if (image.type() != CV_16UC1) {
+      std::cerr << "Error: Depth video needs CV_16UC1, got type " << image.type() << "\n";
+      return {};
+    }
+    // The same log-quantization the recorder applies, so a transcoded file and a freshly
+    // recorded one decode to the same metric depth.
+    cv::Mat quantized(image.rows, image.cols, CV_16UC1);
+    for (int y = 0; y < image.rows; ++y) {
+      const uint16_t* src = image.ptr<uint16_t>(y);
+      uint16_t* dst = quantized.ptr<uint16_t>(y);
+      for (int x = 0; x < image.cols; ++x) dst[x] = depth_lut[src[x]];
+    }
+    return quantized;
+  }
+
   // The encoder converts BGR to YUV itself, so anything else is normalized here,
   // otherwise the red and blue channels swap silently.
   cv::Mat bgr;
@@ -274,6 +317,7 @@ bool transcode_images_to_video(
     plans.emplace(channel_id, std::move(plan));
   }
 
+  std::vector<uint16_t> depth_lut;
   std::vector<uint8_t> buffer(kInitialEncodedBufferSize);
 
   for (const auto& message_view : reader.readMessages(on_problem)) {
@@ -309,9 +353,12 @@ bool transcode_images_to_video(
     }
 
     if (!plan.encoder) {
+      plan.depth = channel_is_depth(*message_view.channel, raw_image.encoding());
+
       plan.encoder = utils::VideoEncoder::create(
         encoder_params_for(static_cast<int>(raw_image.width()),
-                           static_cast<int>(raw_image.height()), options.encoder, options));
+                           static_cast<int>(raw_image.height()), plan.depth, options.encoder,
+                           options));
       if (!plan.encoder) {
         std::cerr << "Error: Failed to create a video encoder for " << plan.camera << "\n";
         return false;
@@ -319,7 +366,7 @@ bool transcode_images_to_video(
 
       // Recorded in the channel metadata so a reader can tell which codec a stream carries
       // without decoding a packet to find out.
-      plan.metadata["stream_type"] = "color";
+      plan.metadata["stream_type"] = plan.depth ? "depth" : "color";
       plan.metadata["video_format"] = utils::video_codec_format(plan.encoder->codec());
 
       auto created = foxglove::RawChannel::create(
@@ -338,9 +385,13 @@ bool transcode_images_to_video(
                 << plan.encoder->encoder_name() << "\n";
     }
 
+    if (plan.depth && depth_lut.empty()) {
+      depth_lut = utils::build_depth_quantization_lut();
+    }
+
     const cv::Mat image(static_cast<int>(raw_image.height()), static_cast<int>(raw_image.width()),
                         cv_type, const_cast<char*>(raw_image.data().data()), raw_image.step());
-    const cv::Mat frame = prepare_frame(image, raw_image.encoding());
+    const cv::Mat frame = prepare_frame(image, raw_image.encoding(), plan.depth, depth_lut);
     if (frame.empty()) {
       std::cerr << "Error: Could not prepare a frame for " << plan.camera << "\n";
       return false;
@@ -354,7 +405,7 @@ bool transcode_images_to_video(
       // video with the nth frame-meta message, so a dropped packet shifts every later
       // frame. Fail rather than write a file whose misalignment nothing can detect.
       std::cerr << "Error: Encoder produced no packet for " << plan.camera << " frame "
-                << stats.color_frames_encoded << "\n";
+                << (plan.depth ? stats.depth_frames_encoded : stats.color_frames_encoded) << "\n";
       return false;
     }
 
@@ -376,7 +427,11 @@ bool transcode_images_to_video(
                 << foxglove::strerror(st) << "\n";
       return false;
     }
-    ++stats.color_frames_encoded;
+    if (plan.depth) {
+      ++stats.depth_frames_encoded;
+    } else {
+      ++stats.color_frames_encoded;
+    }
   }
 
   // Channels hold a reference to the writer's context, so they have to go first.
