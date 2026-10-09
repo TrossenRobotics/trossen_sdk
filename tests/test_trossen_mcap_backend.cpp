@@ -4,6 +4,7 @@
  */
 
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -12,8 +13,11 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <utility>
+#include <vector>
 
 #include "gtest/gtest.h"
+#include "mcap/reader.hpp"
 #include "opencv2/core.hpp"
 
 #include "trossen_sdk/configuration/global_config.hpp"
@@ -22,6 +26,9 @@
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/utils/video_encoder.hpp"
+
+#include "JointState.pb.h"
+#include "Odometry2D.pb.h"
 
 using trossen::io::BackendRegistry;
 
@@ -308,6 +315,149 @@ TEST_F(TrossenMCAPBackendTest, RawFrameWriteReportsTheFrameLogged) {
   EXPECT_TRUE(TrossenMCAPBackendTestPeer::write_frame(*backend, img, /*depth=*/false));
   backend->close();
   EXPECT_EQ(backend->stats().images_written, 1u);
+}
+
+namespace {
+
+/// @brief Serialized payloads of every message in `mcap_path` whose schema is `schema_name`,
+///        in log order.
+std::vector<std::string> messages_with_schema(
+  const std::filesystem::path& mcap_path, const std::string& schema_name)
+{
+  std::vector<std::string> payloads;
+  mcap::McapReader reader;
+  if (!reader.open(mcap_path.string()).ok()) return payloads;
+  for (const auto& view : reader.readMessages()) {
+    if (view.schema && view.schema->name == schema_name) {
+      payloads.emplace_back(reinterpret_cast<const char*>(view.message.data),
+                            view.message.dataSize);
+    }
+  }
+  reader.close();
+  return payloads;
+}
+
+/// @brief The single .mcap file in `dir`, or an empty path.
+std::filesystem::path only_mcap_in(const std::filesystem::path& dir) {
+  for (const auto& entry : std::filesystem::directory_iterator(dir)) {
+    if (entry.path().extension() == ".mcap") return entry.path();
+  }
+  return {};
+}
+
+/// @brief A timestamp with distinct host clocks and the given device clock.
+trossen::data::Timestamp stamp(uint64_t host_ns, trossen::data::DeviceClock clock,
+                               uint64_t device_ns) {
+  trossen::data::Timestamp ts;
+  ts.monotonic = trossen::data::Timespec::from_ns(host_ns);
+  ts.realtime = trossen::data::Timespec::from_ns(host_ns + 1'700'000'000'000'000'000ull);
+  ts.device = trossen::data::Timespec::from_ns(device_ns);
+  ts.device_clock = clock;
+  return ts;
+}
+
+/// @brief Nanoseconds in a protobuf timestamp.
+uint64_t ns_of(const google::protobuf::Timestamp& t) {
+  return static_cast<uint64_t>(t.seconds()) * trossen::data::S_TO_NS +
+         static_cast<uint64_t>(t.nanos());
+}
+
+}  // namespace
+
+// Every device clock tag, and the host clocks beside it, survive the write. No device
+// clock writes no device field, which a device time of zero still does.
+TEST_F(TrossenMCAPBackendTest, JointStateKeepsEveryClock) {
+  using trossen::data::DeviceClock;
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  RootDatasetRestorer restorer{cfg.get(), cfg->root, cfg->dataset_id};
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "joint_clock_test";
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  ASSERT_TRUE(backend->open());
+  const std::vector<std::pair<DeviceClock, uint64_t>> cases = {
+    {DeviceClock::None, 5}, {DeviceClock::Uptime, 0}, {DeviceClock::Uptime, 2'500'000'001},
+    {DeviceClock::Epoch, 1'700'000'000'123'456'789}, {DeviceClock::HostMapped, 42}};
+  for (size_t i = 0; i < cases.size(); ++i) {
+    trossen::data::JointStateRecord js;
+    js.id = "follower";
+    js.seq = i;
+    js.ts = stamp(1'000'000'000ull * (i + 1) + 7, cases[i].first, cases[i].second);
+    js.positions = {0.1f};
+    backend->write(js);
+  }
+  backend->close();
+
+  const auto payloads =
+    messages_with_schema(only_mcap_in(episode_dir), "trossen_sdk.msg.JointState");
+  ASSERT_EQ(payloads.size(), cases.size());
+  const trossen_sdk::DeviceClock expected_tag[] = {
+    trossen_sdk::DEVICE_CLOCK_NONE, trossen_sdk::DEVICE_CLOCK_UPTIME,
+    trossen_sdk::DEVICE_CLOCK_UPTIME, trossen_sdk::DEVICE_CLOCK_EPOCH,
+    trossen_sdk::DEVICE_CLOCK_HOST_MAPPED};
+  for (size_t i = 0; i < cases.size(); ++i) {
+    trossen_sdk::msg::JointState msg;
+    ASSERT_TRUE(msg.ParseFromString(payloads[i])) << "message " << i;
+    const uint64_t host_ns = 1'000'000'000ull * (i + 1) + 7;
+    EXPECT_EQ(ns_of(msg.ts().monotonic()), host_ns) << "message " << i;
+    EXPECT_EQ(ns_of(msg.ts().realtime()), host_ns + 1'700'000'000'000'000'000ull)
+      << "message " << i;
+    EXPECT_EQ(msg.ts().device_clock(), expected_tag[i]) << "message " << i;
+    if (cases[i].first == DeviceClock::None) {
+      EXPECT_FALSE(msg.ts().has_device()) << "message " << i;
+    } else {
+      ASSERT_TRUE(msg.ts().has_device()) << "message " << i;
+      EXPECT_EQ(ns_of(msg.ts().device()), cases[i].second) << "message " << i;
+    }
+  }
+}
+
+// Odometry carries the same clocks as joint states.
+TEST_F(TrossenMCAPBackendTest, OdometryKeepsEveryClock) {
+  using trossen::data::DeviceClock;
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  RootDatasetRestorer restorer{cfg.get(), cfg->root, cfg->dataset_id};
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "odometry_clock_test";
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  ASSERT_TRUE(backend->open());
+  trossen::data::Odometry2DRecord without_device;
+  without_device.id = "base";
+  without_device.ts = stamp(3'000'000'011, DeviceClock::None, 9);
+  backend->write(without_device);
+  trossen::data::Odometry2DRecord at_zero = without_device;
+  at_zero.seq = 1;
+  at_zero.ts = stamp(4'000'000'011, DeviceClock::Uptime, 0);
+  backend->write(at_zero);
+  backend->close();
+
+  const auto payloads =
+    messages_with_schema(only_mcap_in(episode_dir), "trossen_sdk.msg.Odometry2D");
+  ASSERT_EQ(payloads.size(), 2u);
+  trossen_sdk::msg::Odometry2D first;
+  ASSERT_TRUE(first.ParseFromString(payloads[0]));
+  EXPECT_EQ(ns_of(first.ts().monotonic()), 3'000'000'011u);
+  EXPECT_EQ(first.ts().device_clock(), trossen_sdk::DEVICE_CLOCK_NONE);
+  EXPECT_FALSE(first.ts().has_device());
+  trossen_sdk::msg::Odometry2D second;
+  ASSERT_TRUE(second.ParseFromString(payloads[1]));
+  EXPECT_EQ(ns_of(second.ts().realtime()), 4'000'000'011ull + 1'700'000'000'000'000'000ull);
+  EXPECT_EQ(second.ts().device_clock(), trossen_sdk::DEVICE_CLOCK_UPTIME);
+  ASSERT_TRUE(second.ts().has_device());
+  EXPECT_EQ(ns_of(second.ts().device()), 0u);
 }
 
 #ifdef TROSSEN_ENABLE_VIDEO_ENCODE

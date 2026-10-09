@@ -75,12 +75,19 @@ void TrossenArmProducer::poll(const std::function<void(std::shared_ptr<data::Rec
   vel_d_ = robot_output_.joint.all.velocities;
   eff_d_ = robot_output_.joint.all.efforts;
 
-  // Create record with appropriate timestamp
+  // Create record with appropriate timestamp. The host clocks always record delivery;
+  // the controller's own sample time goes in the device field beside them, never over
+  // them, so a stalled read is still detectable by comparing the two.
   data::Timestamp ts;
   uint64_t mono_now = data::now_mono().to_ns();
-  ts.monotonic = (cfg_.use_device_time && device_ts != 0) ?
-    data::Timespec::from_ns(device_ts) : data::now_mono();
+  ts.monotonic = data::now_mono();
   ts.realtime = data::now_real();
+  if (cfg_.use_device_time && device_ts != 0) {
+    // Controller reports microseconds since configuration, so it is an uptime counter
+    // and needs an offset against a host clock before it compares across devices.
+    ts.device = data::Timespec::from_ns(device_ts * data::US_TO_NS);
+    ts.device_clock = data::DeviceClock::Uptime;
+  }
 
   // Create and populate JointStateRecord
   auto rec = std::make_shared<data::JointStateRecord>();
