@@ -164,6 +164,11 @@ struct ImageRecord : public RecordBase {
   ///        Only meaningful when depth_image.has_value().
   std::optional<float> depth_scale;
 
+  /// @brief The camera's own frame counter, which increments once per captured frame.
+  ///        A jump of more than one between records means frames were lost on the
+  ///        camera side. std::nullopt when the camera does not report one.
+  std::optional<uint64_t> device_frame_number;
+
   // ── Convenience accessors ──
 
   /// @brief Check if this record contains depth data
