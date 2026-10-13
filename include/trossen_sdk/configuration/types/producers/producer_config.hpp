@@ -12,6 +12,9 @@
 
 namespace trossen::configuration {
 
+/// @brief Producer type of a Trossen arm joint-state producer.
+inline constexpr char kTrossenArmProducerType[] = "trossen_arm";
+
 /**
  * @brief Configuration for an individual producer instance
  *
@@ -32,7 +35,8 @@ namespace trossen::configuration {
  * @endcode
  *
  * Known types:
- *  - "trossen_arm"      - arm joint-state producer
+ *  - "trossen_arm"      - arm joint-state producer; its stream_id must be `leader`,
+ *                         `follower`, `leader_<side>` or `follower_<side>`
  *  - "zed_camera"       - StereoLabs ZED stereo camera producer
  *  - "realsense_camera" - RealSense image producer
  *  - "opencv_camera"    - OpenCV/V4L2 image producer
