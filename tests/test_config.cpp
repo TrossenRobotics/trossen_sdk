@@ -7,6 +7,7 @@
  */
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "gtest/gtest.h"
@@ -240,4 +241,41 @@ TEST(ArmConfigTest, ToJson_OmitsEmptyStagedPosition) {
   EXPECT_FALSE(j.contains("staged_position"));
   EXPECT_TRUE(j.contains("staging_time_s"));
   EXPECT_FLOAT_EQ(j.at("staging_time_s").get<float>(), 2.0f);
+}
+
+// ============================================================================
+// CFG-11: arm producers must name their stream for its leader/follower role
+// ============================================================================
+
+TEST(SdkConfigTest, FromJson_AcceptsLeaderAndFollowerArmStreams) {
+  const auto j = nlohmann::json::parse(R"({
+    "producers": [
+      {"type": "trossen_arm", "hardware_id": "a", "stream_id": "leader_left"},
+      {"type": "trossen_arm", "hardware_id": "b", "stream_id": "follower_left"},
+      {"type": "trossen_arm", "hardware_id": "c", "stream_id": "follower"}
+    ]
+  })");
+
+  EXPECT_NO_THROW(trossen::configuration::SdkConfig::from_json(j));
+}
+
+TEST(SdkConfigTest, FromJson_RejectsArmStreamWithoutRole) {
+  const auto j = nlohmann::json::parse(R"({
+    "producers": [
+      {"type": "trossen_arm", "hardware_id": "a", "stream_id": "glide_left"}
+    ]
+  })");
+
+  EXPECT_THROW(trossen::configuration::SdkConfig::from_json(j), std::runtime_error);
+}
+
+// Only arm producers carry a role; a camera's stream id is free-form.
+TEST(SdkConfigTest, FromJson_IgnoresNonArmStreamNames) {
+  const auto j = nlohmann::json::parse(R"({
+    "producers": [
+      {"type": "realsense_camera", "hardware_id": "c", "stream_id": "camera_high"}
+    ]
+  })");
+
+  EXPECT_NO_THROW(trossen::configuration::SdkConfig::from_json(j));
 }
