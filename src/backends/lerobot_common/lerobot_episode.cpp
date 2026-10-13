@@ -105,7 +105,13 @@ nlohmann::ordered_json build_features(
     if (!ep.dataset_info.empty() && ep.dataset_info.contains("streams") &&
         ep.dataset_info["streams"].contains(stream_id) &&
         ep.dataset_info["streams"][stream_id].contains("joint_names")) {
-      return ep.dataset_info["streams"][stream_id]["joint_names"];
+      // The recorded names repeat across arms (joint_0 on every arm), so each is
+      // prefixed with its stream id to keep the columns unique.
+      nlohmann::json names = nlohmann::json::array();
+      for (const auto& n : ep.dataset_info["streams"][stream_id]["joint_names"]) {
+        names.push_back(stream_id + "." + n.get<std::string>());
+      }
+      return names;
     }
     nlohmann::json names = nlohmann::json::array();
     std::string arm_name = stream_id;
