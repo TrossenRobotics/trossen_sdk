@@ -11,6 +11,7 @@
 #include <unordered_set>
 
 #include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 
 namespace trossen::configuration {
 
@@ -77,6 +78,21 @@ SdkConfig SdkConfig::from_json(const nlohmann::json& j) {
   if (j.contains("producers") && j.at("producers").is_array()) {
     for (const auto& p : j.at("producers")) {
       c.producers.push_back(ProducerConfig::from_json(p));
+    }
+  }
+
+  // Conversion reads each arm's role from its stream id alone (leaders become the dataset
+  // action, followers the observation), so an arm stream named for neither is rejected
+  // here rather than recorded.
+  for (size_t i = 0; i < c.producers.size(); ++i) {
+    const auto& p = c.producers[i];
+    if (p.type != kTrossenArmProducerType) continue;
+    if (!trossen_mcap_defs::is_leader_stream_id(p.stream_id) &&
+        !trossen_mcap_defs::is_follower_stream_id(p.stream_id)) {
+      throw std::runtime_error(
+        "SdkConfig: producers[" + std::to_string(i) + "] is an arm, so its stream_id must "
+        "be 'leader', 'follower', 'leader_<side>' or 'follower_<side>' (got '" +
+        p.stream_id + "')");
     }
   }
 
