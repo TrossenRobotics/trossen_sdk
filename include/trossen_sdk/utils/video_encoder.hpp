@@ -1,8 +1,11 @@
 #ifndef TROSSEN_SDK__UTILS__VIDEO_ENCODER_HPP_
 #define TROSSEN_SDK__UTILS__VIDEO_ENCODER_HPP_
 
+#include <cstddef>
+#include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 namespace trossen::utils {
 
@@ -56,6 +59,21 @@ class VideoEncoder {
    * rejected (reason logged to stderr).
    */
   static std::unique_ptr<VideoEncoder> create(const Params& params);
+
+  /// @brief One encoded frame's output: the Annex B bytes, and whether they form a keyframe.
+  struct EncodedFrame {
+    std::vector<std::byte> data;
+    bool is_keyframe{false};
+  };
+
+  /**
+   * @brief Encode one raw frame.
+   *
+   * @param data Raw pixel bytes: BGR8 for H264, packed 12-bit depth codes for H265.
+   * @param size Byte length of `data`; must match width*height*bytes-per-pixel for this encoder.
+   * @return The encoded bytes for this frame (empty on failure, reason logged to stderr).
+   */
+  EncodedFrame encode(const uint8_t* data, size_t size);
 
   /// @brief Name of the libavcodec encoder actually opened (e.g. "libx264", "h264_nvenc").
   const std::string& encoder_name() const;
