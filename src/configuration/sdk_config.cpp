@@ -184,6 +184,11 @@ void SdkConfig::populate_global_config() const {
     bj["chunk_size_bytes"] = b.chunk_size_bytes;
     bj["compression"] = b.compression;
     bj["dataset_id"] = b.dataset_id;
+    bj["task_description"] = b.task_description;
+    bj["image_encoding"] = b.image_encoding;
+    bj["video_bitrate_kbps"] = b.video_bitrate_kbps;
+    bj["video_keyframe_interval"] = b.video_keyframe_interval;
+    bj["video_encoder"] = b.video_encoder;
     gc_json["trossen_mcap_backend"] = bj;
   }
 
