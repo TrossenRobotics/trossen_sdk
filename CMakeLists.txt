@@ -84,6 +84,10 @@ if(TROSSEN_ENABLE_VIDEO_ENCODE)
   # PRIVATE: the ffmpeg headers stay confined to video_encoder.cpp, so consumers
   # of trossen_sdk do not need libavcodec headers on their include path.
   target_link_libraries(trossen_sdk PRIVATE PkgConfig::FFMPEG_ENC)
+else()
+  # The backend holds std::unique_ptr<VideoEncoder> in every build, so the
+  # destructor must still be defined without FFmpeg.
+  target_sources(trossen_sdk PRIVATE src/utils/video_encoder_stub.cpp)
 endif()
 
 if(TROSSEN_ENABLE_ZED)
