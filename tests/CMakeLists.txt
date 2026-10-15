@@ -50,6 +50,9 @@ target_link_libraries(test_lerobot_depth_utils PRIVATE trossen_sdk GTest::gtest_
 add_executable(test_depth_quantization test_depth_quantization.cpp)
 target_link_libraries(test_depth_quantization PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_mcap_dataset_loader test_mcap_dataset_loader.cpp)
+target_link_libraries(test_mcap_dataset_loader PRIVATE trossen_sdk GTest::gtest_main)
+
 # Guarded as a whole rather than compiled to an empty binary: every test in this
 # file drives VideoEncoder, which does not exist without the ffmpeg-backed build.
 if(TROSSEN_ENABLE_VIDEO_ENCODE)
@@ -174,6 +177,7 @@ if(TROSSEN_ENABLE_REALSENSE)
 endif()
 gtest_discover_tests(test_lerobot_depth_utils)
 gtest_discover_tests(test_depth_quantization)
+gtest_discover_tests(test_mcap_dataset_loader)
 if(TROSSEN_ENABLE_VIDEO_ENCODE)
   gtest_discover_tests(test_video_encoder)
 endif()
