@@ -50,10 +50,13 @@ struct AlignmentOptions {
 };
 
 /**
- * @brief Read an MCAP file and align its joint/camera streams into a frame sequence.
+ * @brief Read an MCAP file and align its streams into one row per tick of `alignment.fps`.
  *
- * Row alignment is not implemented yet: on success it maps each channel to the stream its
- * dataset_info describes and returns true with no frames.
+ * Each row holds the sample nearest its time from every joint, odometry and camera
+ * stream; a camera's match is stored in CameraInfo::row_source_index, not decoded (call
+ * extract_camera_images() for images). Leader and follower streams are found by their
+ * `role`. A row with no sample within `alignment.tolerance_ns` for any stream or camera
+ * is dropped. Camera keys keep the names the recording gave them.
  *
  * @param mcap_file Path to the input MCAP file.
  * @param episode_index Zero-based episode index to stamp on the episode.
