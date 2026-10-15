@@ -42,7 +42,8 @@ struct McapChannelMap {
 
 /// @brief Timing parameters for nearest-timestamp alignment.
 struct AlignmentOptions {
-  /// @brief Rate the output rows are generated at, in frames per second.
+  /// @brief Rate the output rows are generated at, in frames per second. Must be a whole
+  /// number from 1 to 1000000000; otherwise load_aligned_episode() returns false.
   double fps{DEFAULT_DATASET_FPS};
   /// @brief Largest gap, in nanoseconds, allowed between a row and the sample it matches.
   uint64_t tolerance_ns{DEFAULT_MATCH_TOLERANCE_NS};

@@ -7,6 +7,7 @@
  */
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <fstream>
 #include <iostream>
@@ -212,6 +213,18 @@ bool load_aligned_episode(
   McapChannelMap& channels,
   const AlignmentOptions& alignment)
 {
+  // LeRobot stores fps as an integer, and rows sit at k / fps seconds, so a fractional rate
+  // would leave info.json describing a different clock than the rows and videos use. Rows
+  // are spaced in whole nanoseconds, so a rate above one row per nanosecond has no period.
+  if (!std::isfinite(alignment.fps) || alignment.fps <= 0.0 ||
+      alignment.fps != std::floor(alignment.fps) ||
+      alignment.fps > static_cast<double>(data::S_TO_NS)) {
+    std::cerr << "Error: alignment.fps must be a whole number from 1 to " << data::S_TO_NS
+              << " (LeRobot stores fps as an integer; 30 is recommended), got " << alignment.fps
+              << "\n";
+    return false;
+  }
+
   out = AlignedEpisode{};
   channels = McapChannelMap{};
   out.episode_index = episode_index;
