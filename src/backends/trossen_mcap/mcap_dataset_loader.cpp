@@ -484,10 +484,64 @@ bool load_aligned_episode(
     out.cameras.push_back(std::move(cam));
   }
 
-  // Times at which rows are sampled, in MCAP log time.
-  // TODO(shantanuparab-tr): fill with a uniform grid at alignment.fps over the window where
-  // every stream has data. Until then no rows are produced.
+  // Rows sit on a uniform grid at the dataset rate, spanning the window where every
+  // stream has data. A LeRobot episode plays row k back at k/fps, so uniform spacing is
+  // what makes that stored timestamp describe the row.
+  const uint64_t row_period_ns =
+    static_cast<uint64_t>(static_cast<double>(data::S_TO_NS) / alignment.fps);
+
+  // The streams that set each edge are kept so a window that closes can be reported.
+  uint64_t window_start = 0;
+  uint64_t window_end = std::numeric_limits<uint64_t>::max();
+  std::string last_to_start;
+  std::string first_to_end;
+  auto narrow_window = [&](const std::string& name, uint64_t first, uint64_t last) {
+    if (first >= window_start) {
+      window_start = first;
+      last_to_start = name;
+    }
+    if (last <= window_end) {
+      window_end = last;
+      first_to_end = name;
+    }
+  };
+
+  for (const auto& stream_id : out.leader_streams) {
+    const auto it = messages_by_stream.find(stream_id);
+    if (it == messages_by_stream.end() || it->second.empty()) continue;
+    narrow_window(stream_id, log_ns_of(it->second.front()), log_ns_of(it->second.back()));
+  }
+  for (const auto& stream_id : out.follower_streams) {
+    const auto it = messages_by_stream.find(stream_id);
+    if (it == messages_by_stream.end() || it->second.empty()) continue;
+    narrow_window(stream_id, log_ns_of(it->second.front()), log_ns_of(it->second.back()));
+  }
+  for (const auto& cam : out.cameras) {
+    const auto& stamps = camera_timestamps[cam.name];
+    if (stamps.empty()) continue;
+    narrow_window(cam.name, stamps.front(), stamps.back());
+  }
+
+  // At least one joint stream has data, so the window always has a finite end. A window
+  // that closed means one stream stopped before another started, and no row can hold a
+  // sample from both.
+  if (window_end <= window_start) {
+    std::cerr << "Error: no stretch of time has data from every stream. " << first_to_end
+              << " ends " << static_cast<double>(window_start - window_end) / 1e6
+              << " ms before " << last_to_start << " starts.\n";
+    return false;
+  }
+
+  const uint64_t span_ns = window_end - window_start;
+  const size_t row_count = static_cast<size_t>(span_ns / row_period_ns) + 1;
   std::vector<uint64_t> row_times;
+  row_times.reserve(row_count);
+  for (size_t k = 0; k < row_count; ++k) {
+    row_times.push_back(window_start + k * row_period_ns);
+  }
+  std::cout << "  Rows run on a " << alignment.fps << " Hz grid over "
+            << static_cast<double>(span_ns) / static_cast<double>(data::S_TO_NS) << " s ("
+            << row_times.size() << " rows)\n";
 
   const size_t max_rows = row_times.size();
   for (auto& cam : out.cameras) cam.row_source_index.reserve(max_rows);
