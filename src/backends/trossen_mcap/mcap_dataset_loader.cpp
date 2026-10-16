@@ -31,4 +31,34 @@ bool load_aligned_episode(
   return false;
 }
 
+bool extract_camera_images(
+  [[maybe_unused]] const std::string& mcap_file,
+  [[maybe_unused]] const McapChannelMap& channels,
+  [[maybe_unused]] const AlignedEpisode& episode,
+  [[maybe_unused]] const std::function<std::filesystem::path(const std::string& camera_name)>&
+    dir_for,
+  [[maybe_unused]] std::map<std::string, size_t>& out_counts)
+{
+  // TODO(shantanuparab-tr): implement the per-row camera frame decode and write.
+  return false;
+}
+
+bool extract_camera_video(
+  [[maybe_unused]] const std::string& mcap_file,
+  [[maybe_unused]] const McapChannelMap& channels,
+  [[maybe_unused]] const std::function<std::filesystem::path(const std::string& camera_name)>&
+    dir_for,
+  [[maybe_unused]] std::map<std::string, CameraVideoStream>& out_streams)
+{
+  // TODO(shantanuparab-tr): implement the Annex B elementary stream extraction.
+  return false;
+}
+
+void clamp_episode_to_video_frame_counts(
+  [[maybe_unused]] AlignedEpisode& ep,
+  [[maybe_unused]] const std::map<std::string, CameraVideoStream>& video_streams,
+  [[maybe_unused]] bool start_offset_applied) {
+  // TODO(shantanuparab-tr): implement the trim to the shortest video-mode camera.
+}
+
 }  // namespace trossen::io::backends
