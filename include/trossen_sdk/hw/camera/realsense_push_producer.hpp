@@ -9,6 +9,7 @@
 #include <atomic>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 
@@ -213,6 +214,36 @@ private:
 
   /// @brief Depth aligner (created once if use_depth_; reused per frame)
   std::unique_ptr<rs2::align> aligner_;
+
+  /// @brief Where a frame's device timestamp came from, best first
+  enum class DeviceStampSource : uint8_t {
+    Unset,            ///< No frame stamped yet
+    SensorTimestamp,  ///< RS2_FRAME_METADATA_SENSOR_TIMESTAMP: mid-exposure, camera clock
+    HardwareClock,    ///< get_timestamp() in the camera clock
+    GlobalTime,       ///< get_timestamp() mapped onto host time by librealsense
+    SystemTime,       ///< get_timestamp() is the host arrival time; no capture time
+  };
+
+  /**
+   * @brief Fill a frame's device timestamp from the best source the camera offers
+   *
+   * @param frame Frame to read the timestamp and metadata from
+   * @param ts Timestamp whose device fields are set
+   * @return The source used
+   */
+  static DeviceStampSource stamp_device_time(const rs2::frame& frame, data::Timestamp& ts);
+
+  /// @brief Human-readable name of a device timestamp source, for logging
+  static const char* to_string(DeviceStampSource source);
+
+  /// @brief Source used on the previous frame; a change of source is logged once
+  DeviceStampSource last_device_source_{DeviceStampSource::Unset};
+
+  /// @brief Camera frame counter of the previous frame, when the camera reports one
+  std::optional<uint64_t> last_device_frame_number_;
+
+  /// @brief Frames the camera's counter shows were lost before reaching the host
+  uint64_t device_frames_lost_{0};
 };
 
 }  // namespace trossen::hw::camera
