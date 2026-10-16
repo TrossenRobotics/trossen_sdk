@@ -95,10 +95,79 @@ public:
   LeRobotV3DatasetWriter& operator=(const LeRobotV3DatasetWriter&) = delete;
 
   /**
+   * @brief Result of the parallelizable per-episode preparation stage.
+   *
+   * Carries everything consume_episode() needs to fold the episode into the
+   * dataset: the aligned episode, its channel maps, the resolved task, and one
+   * already-encoded per-episode video (plus sampled stat frames) per camera.
+   * Holds no writer state, so instances are independent and safe to build on
+   * separate threads. `ok` is false when preparation failed (episode skipped).
+   */
+  struct PreparedEpisode {
+    /// @brief One camera's encoded per-episode video + sampled stat frames.
+    struct PreparedVideo {
+      std::string obs_key;                  ///< LeRobot video key (observation.images.<cam>)
+      std::filesystem::path episode_mp4;    ///< encoded per-episode mp4 (consumed by concat)
+      double duration_s{0.0};               ///< episode video duration (frame_count / fps)
+      std::vector<cv::Mat> samples;         ///< frames sampled for global image stats
+      /**
+       * @brief Codec of `episode_mp4`, as LeRobot names it in info.json.
+       *
+       * One of "av1", "h264", "hevc". lerobot derives it from the stream itself, so
+       * it must be the canonical codec name and must agree with the actual bitstream.
+       * Both the remux and the encode path set it.
+       */
+      std::string codec{"av1"};
+      /// @brief Pixel format of `episode_mp4`: "yuv420p" (color) or "gray12le" (depth).
+      std::string pix_fmt{"yuv420p"};
+    };
+    AlignedEpisode ep;
+    McapChannelMap channels;
+    std::string task_name;
+    std::filesystem::path tmp_dir;          ///< per-episode temp dir; caller removes after consume
+    std::vector<PreparedVideo> videos;      ///< first-seen camera order preserved
+    bool ok{false};
+  };
+
+  /**
    * @brief Create the dataset directory skeleton. Must be called before consume_episode().
    * @return true on success.
    */
   bool open();
+
+  /**
+   * @brief Decode + align + encode one episode's video (the parallelizable stage).
+   *
+   * Loads and aligns the MCAP, extracts camera frames into a per-episode temp
+   * dir, encodes each camera's per-episode mp4, samples frames for image stats,
+   * and drops the raw JPEGs (keeping only the encoded mp4). Touches no writer
+   * state, only Options, so it is safe to call concurrently for different
+   * episodes. On any failure it returns a PreparedEpisode with `ok == false`.
+   *
+   * @param mcap_path Input MCAP file.
+   * @param episode_index Zero-based output episode index to stamp.
+   * @param fallback_task Task used when the MCAP embeds none.
+   * @param tmp_root Root under which the per-episode temp dir is created.
+   * @return A PreparedEpisode (check `.ok`).
+   */
+  PreparedEpisode prepare_episode(
+    const std::filesystem::path& mcap_path,
+    int episode_index,
+    const std::string& fallback_task,
+    const std::filesystem::path& tmp_root) const;
+
+  /**
+   * @brief Fold one prepared episode into the dataset (the sequential stage).
+   *
+   * Writes the episode's rows into the current (or freshly rolled) data parquet,
+   * concatenates each camera's already-encoded video, accumulates stats,
+   * registers the task, and buffers the episode's seek-metadata row. Mutates
+   * writer state; call single-threaded, once per episode, in ascending order.
+   *
+   * @param pe Prepared episode from prepare_episode() (moved-from on success).
+   * @return true on success.
+   */
+  bool consume_episode(PreparedEpisode& pe);
 
   /**
    * @brief Flush episodes/tasks parquet, global stats.json, info.json, and README.
@@ -107,12 +176,35 @@ public:
   bool finalize();
 
 private:
+  /// @brief Running state for the shared data parquet stream.
+  struct DataFileState {
+    int chunk_index{0};
+    int file_index{0};
+    std::shared_ptr<parquet::arrow::FileWriter> writer;
+    std::shared_ptr<arrow::io::FileOutputStream> out;
+    std::filesystem::path path;
+    int64_t frames_in_file{0};
+  };
+
+  bool roll_data_file_if_needed(int64_t next_ep_frames);
+  bool open_data_writer(const std::shared_ptr<arrow::Schema>& schema);
   void close_data_writer();
+  std::shared_ptr<arrow::Schema> make_data_schema() const;
+  std::shared_ptr<arrow::Table> build_episode_table(
+    const AlignedEpisode& ep, int episode_index, int task_index, int64_t global_from) const;
 
   Options opts_;
   std::filesystem::path meta_dir_;
   std::filesystem::path data_dir_;
   std::filesystem::path videos_dir_;
+
+  bool schema_fixed_{false};
+  int action_dim_{0};
+  int obs_dim_{0};
+  std::shared_ptr<arrow::Schema> data_schema_;
+  nlohmann::ordered_json features_;  // LeRobot features (built from first episode)
+
+  DataFileState data_;
 };
 
 }  // namespace trossen::io::backends
