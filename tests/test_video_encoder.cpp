@@ -340,6 +340,55 @@ VideoEncoder::Params jetson_params() {
   return p;
 }
 
+/**
+ * @brief Count coded pictures in Annex B H.264 data: slices (NAL 1 or 5) that begin a picture.
+ *
+ * An encoder may split one picture into several slices, so counting slices over-counts frames.
+ * A slice starts a new picture when its first_mb_in_slice is 0. That field is the first thing in
+ * the slice header, Exp-Golomb coded, and 0 encodes as the single bit "1", so the test is whether
+ * the top bit of the byte after the NAL header is set.
+ */
+int h264_picture_count(std::span<const std::byte> data) {
+  int pictures = 0;
+  for (size_t i = 0; i + 4 < data.size(); ++i) {
+    const auto b0 = static_cast<uint8_t>(data[i]);
+    const auto b1 = static_cast<uint8_t>(data[i + 1]);
+    const auto b2 = static_cast<uint8_t>(data[i + 2]);
+    size_t header = 0;
+    if (b0 == 0 && b1 == 0 && b2 == 1) {
+      header = i + 3;
+    } else if (b0 == 0 && b1 == 0 && b2 == 0 && static_cast<uint8_t>(data[i + 3]) == 1) {
+      header = i + 4;
+    } else {
+      continue;
+    }
+    if (header + 1 >= data.size()) break;
+    const int type = static_cast<uint8_t>(data[header]) & 0x1F;
+    if ((type == 1 || type == 5) && (static_cast<uint8_t>(data[header + 1]) & 0x80) != 0) {
+      ++pictures;
+    }
+    // Resume after the header: a 4-byte start code 00 00 00 01 also contains the 3-byte form
+    // 00 00 01 one byte in, which would count this NAL a second time.
+    i = header;
+  }
+  return pictures;
+}
+
+/// @brief A kJetsonWidth x kJetsonHeight BGR8 frame with a block that moves per index.
+std::vector<uint8_t> make_jetson_frame(int index) {
+  std::vector<uint8_t> frame(static_cast<size_t>(kJetsonWidth) * kJetsonHeight * 3, 40);
+  const int block_x = (index * 7) % (kJetsonWidth - 32);
+  for (int y = 16; y < 48; ++y) {
+    for (int x = block_x; x < block_x + 32; ++x) {
+      const size_t offset = (static_cast<size_t>(y) * kJetsonWidth + x) * 3;
+      frame[offset + 0] = static_cast<uint8_t>(20 + index);
+      frame[offset + 1] = static_cast<uint8_t>(200 - index);
+      frame[offset + 2] = 128;
+    }
+  }
+  return frame;
+}
+
 }  // namespace
 
 TEST(VideoEncoderJetsonTest, ReportsResolvedEncoderName) {
@@ -356,4 +405,51 @@ TEST(VideoEncoderJetsonTest, RejectsDepth) {
   p.codec = VideoCodec::H265;
   p.lossless = true;
   EXPECT_EQ(VideoEncoder::create(p), nullptr);
+}
+
+// One packet per frame, Annex B, keyframe first, SPS/PPS on every keyframe, and
+// keyframes recurring at gop_size: the software tests' invariants, in one pass.
+TEST(VideoEncoderJetsonTest, BitstreamMatchesRecorderInvariants) {
+  auto params = jetson_params();
+  params.gop_size = 5;
+  auto encoder = VideoEncoder::create(params);
+  if (!encoder) GTEST_SKIP() << "Jetson hardware encoder not available";
+
+  constexpr int kFrames = 40;
+  std::vector<int> keyframe_indices;
+  for (int i = 0; i < kFrames; ++i) {
+    const auto frame = make_jetson_frame(i);
+    const auto result = encoder->encode(frame.data(), frame.size());
+    ASSERT_GT(result.data.size(), 0u) << "empty packet for frame " << i;
+    EXPECT_EQ(find_start_code(result.data), 0u) << "frame " << i << " is not Annex B";
+
+    const std::vector<int> nals = h264_nal_types(result.data);
+    // Jetson's encoder splits each picture into several slices, so count pictures, not slices.
+    EXPECT_EQ(h264_picture_count(result.data), 1)
+        << "frame " << i << " packet should hold exactly one picture";
+
+    if (result.is_keyframe) {
+      keyframe_indices.push_back(i);
+      // 7 = SPS, 8 = PPS, 5 = IDR slice.
+      EXPECT_NE(std::find(nals.begin(), nals.end(), 7), nals.end())
+          << "keyframe " << i << " has no SPS";
+      EXPECT_NE(std::find(nals.begin(), nals.end(), 8), nals.end())
+          << "keyframe " << i << " has no PPS";
+      EXPECT_NE(std::find(nals.begin(), nals.end(), 5), nals.end())
+          << "keyframe " << i << " is not an IDR";
+    }
+  }
+  ASSERT_GE(keyframe_indices.size(), 3u);
+  EXPECT_EQ(keyframe_indices.front(), 0);
+  EXPECT_LE(keyframe_indices[1], params.gop_size + 1);
+}
+
+TEST(VideoEncoderJetsonTest, RejectsWrongFrameSize) {
+  auto encoder = VideoEncoder::create(jetson_params());
+  if (!encoder) GTEST_SKIP() << "Jetson hardware encoder not available";
+  const std::vector<uint8_t> too_small(static_cast<size_t>(kJetsonWidth) * (kJetsonHeight - 1) * 3);
+  EXPECT_EQ(encoder->encode(too_small.data(), too_small.size()).data.size(), 0u);
+  // A rejected size must not consume a frame slot: the next valid frame still encodes.
+  const auto frame = make_jetson_frame(0);
+  EXPECT_GT(encoder->encode(frame.data(), frame.size()).data.size(), 0u);
 }
