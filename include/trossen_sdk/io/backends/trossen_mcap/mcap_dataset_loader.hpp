@@ -43,7 +43,8 @@ struct McapChannelMap {
 
 /// @brief Timing parameters for nearest-timestamp alignment.
 struct AlignmentOptions {
-  /// @brief Rate the output rows are generated at, in frames per second.
+  /// @brief Rate the output rows are generated at, in frames per second. Must be finite and
+  ///        above zero; load_aligned_episode() fails otherwise.
   double fps{DEFAULT_DATASET_FPS};
   /// @brief Largest gap, in nanoseconds, allowed between a row and the sample it matches.
   uint64_t tolerance_ns{DEFAULT_MATCH_TOLERANCE_NS};
@@ -51,8 +52,6 @@ struct AlignmentOptions {
 
 /**
  * @brief Read an MCAP file and align its joint/camera streams into a frame sequence.
- *
- * Declared here and implemented across #334, #335 and #319; until then it returns false.
  *
  * Decodes the embedded dataset_info metadata, auto-detects leader/follower joint
  * streams by topic name (falling back to single-robot mode), parses all joint and
