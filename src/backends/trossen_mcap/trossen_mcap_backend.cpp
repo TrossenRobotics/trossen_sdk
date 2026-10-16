@@ -224,6 +224,8 @@ void TrossenMCAPBackend::close_resources() {
   // independently decodable, which is exactly what a per-episode file has to be.
   video_encoders_.clear();
   video_encode_failed_.clear();
+  // Each table is built from the stream's depth_scale, which the next episode may change.
+  depth_quant_luts_.clear();
   opened_ = false;
 }
 
@@ -612,14 +614,16 @@ void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
       }
       return;
     }
-    if (depth_quant_lut_.empty()) {
-      depth_quant_lut_ = utils::build_depth_quantization_lut();
+    // Codes are metric, so each stream's table is built for its own raw unit.
+    std::vector<uint16_t>& lut = depth_quant_luts_[img.id];
+    if (lut.empty()) {
+      lut = utils::build_depth_quantization_lut(*img.depth_scale);
     }
     source.create(img.image.rows, img.image.cols, CV_16UC1);
     for (int y = 0; y < img.image.rows; ++y) {
       const uint16_t* src = img.image.ptr<uint16_t>(y);
       uint16_t* dst = source.ptr<uint16_t>(y);
-      for (int x = 0; x < img.image.cols; ++x) dst[x] = depth_quant_lut_[src[x]];
+      for (int x = 0; x < img.image.cols; ++x) dst[x] = lut[src[x]];
     }
   } else {
     // The encoder converts BGR to YUV itself, so anything else is normalized
@@ -700,6 +704,15 @@ void TrossenMCAPBackend::write_image_frame(const data::ImageRecord& img, bool de
                           channel, depth ? &stats_.depth_images_written : &stats_.images_written);
 }
 
+void TrossenMCAPBackend::add_depth_scale_metadata(
+  const data::ImageRecord& img, std::unordered_map<std::string, std::string>& md) const {
+  // Raw integer depth is stored in the sensor's unit, so readers need its size. Video depth
+  // is quantized to metric codes on the way in, and float depth is already in meters, so
+  // neither records a unit.
+  if ((cfg_ && cfg_->records_video()) || img.encoding == "32FC1") return;
+  md["depth_scale_m"] = std::to_string(*img.depth_scale);
+}
+
 bool TrossenMCAPBackend::depth_unit_known(
   const data::ImageRecord& img, const std::string& id, const std::string& encoding) {
   if (encoding == "32FC1" || img.depth_scale) return true;
@@ -717,17 +730,14 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
   if (depth && !depth_unit_known(img, img.id, img.encoding)) return;
   foxglove::RawChannel* channel = nullptr;
   if (depth) {
-    // Minimal metadata: stream_type + semantics if derivable from encoding. Integer depth
-    // always records its unit, so readers never have to guess it.
+    // Minimal metadata: stream_type, semantics if derivable from encoding, and the raw unit.
     std::unordered_map<std::string, std::string> md;
     md["stream_type"] = "depth";
+    add_depth_scale_metadata(img, md);
     if (img.encoding == "depth16") {
       md["depth_encoding_semantics"] = "uint16_scaled";
     } else if (img.encoding == "32FC1") {
       md["depth_encoding_semantics"] = "float_m";
-    }
-    if (img.encoding != "32FC1") {
-      md["depth_scale_m"] = std::to_string(*img.depth_scale);
     }
     channel = ensure_image_channel_with_metadata(img.id, md);
   } else {
@@ -746,7 +756,7 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
     std::unordered_map<std::string, std::string> md;
     md["stream_type"] = "depth";
     md["depth_encoding"] = "16UC1";
-    md["depth_scale_m"] = std::to_string(*img.depth_scale);
+    add_depth_scale_metadata(img, md);
 
     foxglove::RawChannel* depth_channel = ensure_image_channel_with_metadata(depth_topic_id, md);
     if (depth_channel) {

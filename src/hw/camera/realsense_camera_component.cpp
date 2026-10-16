@@ -9,6 +9,7 @@
 
 #include "trossen_sdk/hw/camera/realsense_camera_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/utils/depth_quantization.hpp"
 
 namespace trossen::hw::camera {
 
@@ -80,6 +81,23 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
   // Enable depth stream if requested
   if (use_depth_) {
     cam_cfg.enable_stream(RS2_STREAM_DEPTH, width_, height_, RS2_FORMAT_Z16, fps_);
+  }
+
+  // Record depth in 1 mm units, the unit LeRobot reads integer depth in. Most models
+  // default to it; the D405 defaults to 0.1 mm. The unit is set before the stream starts:
+  // on a running stream the reported scale changes but the frames keep the old unit.
+  if (use_depth_) {
+    try {
+      auto depth_sensor = cam_cfg.resolve(*camera_).get_device().first<rs2::depth_sensor>();
+      if (depth_sensor.supports(RS2_OPTION_DEPTH_UNITS) &&
+          !depth_sensor.is_option_read_only(RS2_OPTION_DEPTH_UNITS)) {
+        depth_sensor.set_option(RS2_OPTION_DEPTH_UNITS,
+                                static_cast<float>(trossen::utils::DEFAULT_DEPTH_SCALE_M));
+      }
+    } catch (const rs2::error& e) {
+      std::cerr << "RealsenseCameraComponent: Could not set 1 mm depth units: "
+                << e.what() << std::endl;
+    }
   }
 
   // Start the camera pipeline

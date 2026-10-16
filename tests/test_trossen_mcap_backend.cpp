@@ -12,6 +12,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <vector>
 
 #include "gtest/gtest.h"
 #include "opencv2/core.hpp"
@@ -21,8 +22,26 @@
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
+#include "trossen_sdk/utils/depth_quantization.hpp"
 
 using trossen::io::BackendRegistry;
+
+namespace trossen::io::backends {
+
+/// @brief Reads TrossenMCAPBackend's private state for the unit tests.
+class TrossenMCAPBackendTestPeer {
+public:
+  /// @brief The depth quantization table the backend built for a stream, or nullptr.
+  static const std::vector<uint16_t>* depth_lut(const TrossenMCAPBackend& backend,
+                                                const std::string& id) {
+    const auto it = backend.depth_quant_luts_.find(id);
+    return it == backend.depth_quant_luts_.end() ? nullptr : &it->second;
+  }
+};
+
+}  // namespace trossen::io::backends
+
+using trossen::io::backends::TrossenMCAPBackendTestPeer;
 
 // Test fixture to load configuration before running tests
 class TrossenMCAPBackendTest : public ::testing::Test {
@@ -463,5 +482,154 @@ TEST_F(TrossenMCAPBackendTest, RecordsDepthPlaneAsLosslessVideoChannel) {
     (std::istreambuf_iterator<char>(mcap_file)), std::istreambuf_iterator<char>());
   EXPECT_NE(contents.find("h264"), std::string::npos) << "color channel should be h264";
   EXPECT_NE(contents.find("h265"), std::string::npos) << "depth channel should be h265";
+  // Video depth holds metric codes, so the sensor's raw unit is not recorded with it.
+  EXPECT_EQ(contents.find("depth_scale_m"), std::string::npos)
+    << "video depth channel should not carry depth_scale_m";
+}
+
+// Raw depth is stored in the sensor's own unit, so its channel must record that unit's
+// size for a reader to convert it to millimeters.
+TEST_F(TrossenMCAPBackendTest, RecordsDepthScaleForRawDepth) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "raw_depth_scale_test";
+  cfg->image_encoding = "raw";
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  trossen::data::ImageRecord img;
+  img.id = "cam_rgbd";
+  img.width = 64;
+  img.height = 48;
+  img.channels = 3;
+  img.encoding = "bgr8";
+  img.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+  img.depth_image = cv::Mat(48, 64, CV_16UC1, cv::Scalar(6000));
+  img.depth_scale = 0.0001f;  // D405: 0.1 mm per unit
+
+  backend->write(img);
+  backend->close();
+
+  std::filesystem::path mcap_path;
+  for (const auto& entry : std::filesystem::directory_iterator(episode_dir)) {
+    if (entry.path().extension() == ".mcap") {
+      mcap_path = entry.path();
+      break;
+    }
+  }
+  ASSERT_FALSE(mcap_path.empty());
+  std::ifstream mcap_file(mcap_path, std::ios::binary);
+  const std::string contents(
+    (std::istreambuf_iterator<char>(mcap_file)), std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("depth_scale_m"), std::string::npos);
+  EXPECT_NE(contents.find("0.000100"), std::string::npos);
+}
+
+// Video depth is quantized in metric units, so two cameras with different raw units must
+// give the same code for the same distance: 600 mm is 6000 units at 0.1 mm and 600 at 1 mm.
+TEST_F(TrossenMCAPBackendTest, DepthCodesFollowEachStreamsScale) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "video_depth_scale_test";
+  cfg->image_encoding = "video";
+  cfg->video_encoder = "x264";
+  std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  auto mcap_backend =
+    std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
+  ASSERT_NE(mcap_backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  auto depth_record = [](const std::string& id, uint16_t raw, float scale) {
+    trossen::data::ImageRecord img;
+    img.id = id;
+    img.width = 64;
+    img.height = 48;
+    img.channels = 1;
+    img.encoding = "depth16";
+    img.image = cv::Mat(48, 64, CV_16UC1, cv::Scalar(raw));
+    img.depth_scale = scale;
+    return img;
+  };
+  backend->write(depth_record("cam_fine", 6000, 0.0001f));
+  backend->write(depth_record("cam_coarse", 600, 0.001f));
+  if (mcap_backend->stats().depth_images_written < 2) {
+    backend->close();
+    GTEST_SKIP() << "libx265 not available in this ffmpeg build";
+  }
+
+  // Read before close(), which clears the tables.
+  const auto* fine = TrossenMCAPBackendTestPeer::depth_lut(*mcap_backend, "cam_fine");
+  const auto* coarse = TrossenMCAPBackendTestPeer::depth_lut(*mcap_backend, "cam_coarse");
+  ASSERT_NE(fine, nullptr);
+  ASSERT_NE(coarse, nullptr);
+  const uint16_t expected = trossen::utils::build_depth_quantization_lut()[600];
+  EXPECT_EQ((*fine)[6000], expected);
+  EXPECT_EQ((*coarse)[600], expected);
+  backend->close();
+}
+
+// A standalone depth stream (no color frame) records its raw unit on its own channel.
+TEST_F(TrossenMCAPBackendTest, RecordsDepthScaleForStandaloneRawDepth) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "raw_standalone_depth_scale_test";
+  cfg->image_encoding = "raw";
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  trossen::data::ImageRecord img;
+  img.id = "cam_depth";
+  img.width = 64;
+  img.height = 48;
+  img.channels = 1;
+  img.encoding = "depth16";
+  img.image = cv::Mat(48, 64, CV_16UC1, cv::Scalar(6000));
+  img.depth_scale = 0.0001f;
+
+  backend->write(img);
+  backend->close();
+
+  std::filesystem::path mcap_path;
+  for (const auto& entry : std::filesystem::directory_iterator(episode_dir)) {
+    if (entry.path().extension() == ".mcap") {
+      mcap_path = entry.path();
+      break;
+    }
+  }
+  ASSERT_FALSE(mcap_path.empty());
+  std::ifstream mcap_file(mcap_path, std::ios::binary);
+  const std::string contents(
+    (std::istreambuf_iterator<char>(mcap_file)), std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("depth_scale_m"), std::string::npos);
+  EXPECT_NE(contents.find("0.000100"), std::string::npos);
 }
 #endif  // TROSSEN_ENABLE_VIDEO_ENCODE
