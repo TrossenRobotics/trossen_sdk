@@ -317,3 +317,43 @@ TEST(VideoEncoderTest, CompressesFarBelowRaw) {
   EXPECT_LT(encoded_total, raw_total / 10)
       << "encoded " << encoded_total << " vs raw " << raw_total;
 }
+
+// ============================================================================
+// JETSON TESTS: NVIDIA Jetson's hardware H.264 encoder (nvv4l2h264enc).
+// Each skips on a machine without it, so they run for real only on a Jetson.
+// They pin the same bitstream properties as the software tests above, because
+// the recorder treats every encoder alike.
+// ============================================================================
+
+namespace {
+
+// Larger than kWidth x kHeight: hardware encoders have minimum sizes, and 1/4
+// of 1920 x 1200 keeps the plane-stride arithmetic non-trivial (width/2 = 240).
+constexpr int kJetsonWidth = 480;
+constexpr int kJetsonHeight = 300;
+
+VideoEncoder::Params jetson_params() {
+  VideoEncoder::Params p = color_params();
+  p.width = kJetsonWidth;
+  p.height = kJetsonHeight;
+  p.encoder = "jetson";
+  return p;
+}
+
+}  // namespace
+
+TEST(VideoEncoderJetsonTest, ReportsResolvedEncoderName) {
+  auto encoder = VideoEncoder::create(jetson_params());
+  if (!encoder) GTEST_SKIP() << "Jetson hardware encoder not available";
+  EXPECT_EQ(encoder->encoder_name(), "nvv4l2h264enc");
+  EXPECT_EQ(encoder->codec(), VideoCodec::H264);
+}
+
+TEST(VideoEncoderJetsonTest, RejectsDepth) {
+  // No lossless 12-bit mode on Jetson's encoder, so asking for it must fail
+  // cleanly rather than produce a lossy depth stream.
+  VideoEncoder::Params p = jetson_params();
+  p.codec = VideoCodec::H265;
+  p.lossless = true;
+  EXPECT_EQ(VideoEncoder::create(p), nullptr);
+}
