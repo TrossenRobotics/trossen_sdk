@@ -42,11 +42,17 @@ constexpr char kJetsonH264[] = "nvv4l2h264enc";
  * @brief Hardware-first candidate encoder names to try for a codec, in order.
  *
  * @param codec Which bitstream is being produced.
- * @return An ordered list of libavcodec encoder names: hardware options first, `libx264`/`libx265`
- * last as the software fallback.
+ * @return An ordered list of encoder names: hardware options first, `libx264`/`libx265` last as
+ * the software fallback. Jetson's encoder leads the H264 list when it is compiled in: on a Jetson
+ * it is the only hardware path that works (h264_nvenc needs the desktop driver), and elsewhere
+ * its plugin is absent, so it is skipped without opening anything.
  */
 const std::vector<std::string>& probe_order(VideoCodec codec) {
-  static const std::vector<std::string> h264_candidates{"h264_nvenc", "h264_vaapi", "libx264"};
+  static const std::vector<std::string> h264_candidates{
+#ifdef TROSSEN_HAVE_GST_VIDEO_ENCODE
+      kJetsonH264,
+#endif
+      "h264_nvenc", "h264_vaapi", "libx264"};
   static const std::vector<std::string> h265_candidates{"hevc_nvenc", "hevc_vaapi", "libx265"};
 
   switch (codec) {
