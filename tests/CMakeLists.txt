@@ -70,6 +70,9 @@ target_link_libraries(test_config PRIVATE trossen_sdk GTest::gtest_main)
 add_executable(test_lerobot_utils test_lerobot_utils.cpp)
 target_link_libraries(test_lerobot_utils PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_lerobot_stats_utils test_lerobot_stats_utils.cpp)
+target_link_libraries(test_lerobot_stats_utils PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_lerobot_episode test_lerobot_episode.cpp)
 target_link_libraries(test_lerobot_episode PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -187,6 +190,7 @@ endif()
 gtest_discover_tests(test_record_types)
 gtest_discover_tests(test_config)
 gtest_discover_tests(test_lerobot_utils)
+gtest_discover_tests(test_lerobot_stats_utils)
 gtest_discover_tests(test_lerobot_episode)
 gtest_discover_tests(test_queue_adapter)
 gtest_discover_tests(test_producer_registry)
