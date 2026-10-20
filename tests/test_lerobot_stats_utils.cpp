@@ -21,6 +21,7 @@
 using trossen::io::backends::auto_downsample;
 using trossen::io::backends::compute_fixed_size_list_stats;
 using trossen::io::backends::compute_flat_stats;
+using trossen::io::backends::compute_image_stats;
 using trossen::io::backends::compute_list_stats;
 using trossen::io::backends::sample_indices;
 
@@ -50,6 +51,7 @@ std::shared_ptr<arrow::ListArray> list_array(const std::vector<std::vector<doubl
 }
 
 }  // namespace
+
 TEST(SampleIndicesTest, ShortDatasetSamplesEveryFrameOnce) {
   const std::vector<int> expected = {0, 1, 2, 3, 4, 5, 6, 7, 8, 9};
   EXPECT_EQ(sample_indices(10), expected);
@@ -183,4 +185,14 @@ TEST(FixedSizeListStatsTest, NoRowsKeepTheDeclaredWidth) {
   const auto stats = compute_fixed_size_list_stats(all_null);
   EXPECT_EQ(stats["mean"].size(), 3u);
   EXPECT_EQ(stats["count"][0].get<int64_t>(), 0);
+}
+
+TEST(ImageStatsTest, ChannelsAreReportedInRgbOrder) {
+  // OpenCV stores BGR: blue 0.1, green 0.2, red 0.3.
+  const std::vector<cv::Mat> images = {cv::Mat(2, 2, CV_32FC3, cv::Scalar(0.1, 0.2, 0.3))};
+  const auto stats = compute_image_stats(images);
+  EXPECT_NEAR(stats["mean"][0][0][0].get<double>(), 0.3, 1e-6);
+  EXPECT_NEAR(stats["mean"][1][0][0].get<double>(), 0.2, 1e-6);
+  EXPECT_NEAR(stats["mean"][2][0][0].get<double>(), 0.1, 1e-6);
+  EXPECT_EQ(stats["count"][0].get<int64_t>(), 1);
 }
