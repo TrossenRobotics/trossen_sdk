@@ -568,8 +568,9 @@ nlohmann::ordered_json LeRobotV2DatasetWriter::compute_episode_stats(
     const auto& feature_info = it.value();
     // Check if this feature is a video stream (camera)
     if (feature_info.contains("dtype") && feature_info["dtype"] == "video") {
-      if (feature_name.find("observation.images.") == 0) {
-        std::string camera_name = feature_name.substr(19);
+      constexpr std::string_view kImagesPrefix = "observation.images.";
+      if (feature_name.starts_with(kImagesPrefix)) {
+        std::string camera_name = feature_name.substr(kImagesPrefix.size());
 
         // A camera with an episode video, encoded or remuxed, is sampled from that video.
         fs::path videos_root = dataset_path() / trossen::io::backends::VIDEO_DIR;
@@ -611,7 +612,7 @@ nlohmann::ordered_json LeRobotV2DatasetWriter::compute_episode_stats(
         // First check the expected path: images/camera_name/episode_folder
         for (const auto& chunk_entry : fs::directory_iterator(images_root)) {
           if (chunk_entry.is_directory() &&
-              chunk_entry.path().filename().string().find("chunk-") == 0) {
+              chunk_entry.path().filename().string().starts_with("chunk-")) {
             fs::path potential_dir = chunk_entry.path() / camera_name / episode_folder_name;
             if (fs::exists(potential_dir)) {
               episode_image_dir = potential_dir;
