@@ -3,7 +3,9 @@
  * @brief Statistics and image-sampling utilities shared by every LeRobot output version.
  *
  * These operate on Arrow arrays and OpenCV images and are independent of the
- * dataset layout (v2.1 vs v3.0).
+ * dataset layout (v2.1 vs v3.0). They follow LeRobot 0.6.0's
+ * `lerobot/datasets/compute_stats.py`: the same sample count, the same strided
+ * downsampling, and population standard deviation.
  */
 
 #ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_COMMON__LEROBOT_STATS_UTILS_HPP_
@@ -75,12 +77,16 @@ std::vector<cv::Mat> sample_images(
   const std::vector<std::filesystem::path> &image_paths);
 
 /**
- * @brief Automatically downsample an image to a target size
+ * @brief Downsample an image by keeping every n-th pixel
  *
- * @param img OpenCV Mat object representing the image
- * @param target_size Target size for the downsampled image (default is 150)
- * @param max_threshold Maximum threshold for downsampling (default is 300)
- * @return Downsampled OpenCV Mat object
+ * Matches LeRobot's `auto_downsample_height_width()`: an image whose larger side is
+ * below max_threshold is returned as is; otherwise n is the larger side divided by
+ * target_size, rounded down, and every n-th row and column is kept.
+ *
+ * @param img Image to downsample
+ * @param target_size Larger side to aim for (default 150)
+ * @param max_threshold Larger side from which downsampling starts (default 300)
+ * @return The downsampled image, or img itself when no downsampling is needed
  */
 cv::Mat auto_downsample(
   const cv::Mat &img,
@@ -88,13 +94,17 @@ cv::Mat auto_downsample(
   int max_threshold = 300);
 
 /**
- * @brief Sample indices for selecting images from a dataset
+ * @brief Pick evenly spaced frame indices to sample
  *
- * @param dataset_len Length of the dataset
- * @param min_samples Minimum number of samples to select (default is 100)
- * @param max_samples Maximum number of samples to select (default is 10000)
- * @param power Power factor for sampling distribution (default is 0.75)
- * @return Vector of sampled indices
+ * Matches LeRobot's `sample_indices()`: the count is dataset_len^power clamped to
+ * [min(min_samples, dataset_len), max_samples], and the indices are spread evenly from 0
+ * to dataset_len - 1. With a power below 1, as by default, no frame is sampled twice.
+ *
+ * @param dataset_len Number of frames
+ * @param min_samples Minimum number of samples (default 100)
+ * @param max_samples Maximum number of samples (default 10000)
+ * @param power Growth of the sample count with dataset size (default 0.75)
+ * @return The sampled indices, in increasing order; empty when dataset_len is 0
  */
 std::vector<int> sample_indices(
   int dataset_len,
