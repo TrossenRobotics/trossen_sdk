@@ -18,7 +18,7 @@ CliParser::CliParser(int argc, char** argv) {
     std::string arg(argv[i]);
 
     // Check for flag (starts with --)
-    if (arg.rfind("--", 0) == 0) {
+    if (arg.starts_with("--")) {
       std::string flag_name = arg.substr(2);
 
       // Check for --flag=value format
