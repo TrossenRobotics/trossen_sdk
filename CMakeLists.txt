@@ -30,6 +30,7 @@ add_library(trossen_sdk SHARED
   src/backends/backend_registry.cpp
   src/backends/lerobot_common/lerobot_episode.cpp
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
+  src/backends/trossen_mcap/mcap_dataset_loader.cpp
   src/backends/trossen_mcap/trossen_mcap_backend.cpp
   src/backends/null/null_backend.cpp
   src/configuration/global_config.cpp
@@ -247,6 +248,13 @@ FetchContent_Declare(
   SOURCE_SUBDIR cpp
 )
 FetchContent_MakeAvailable(mcap)
+
+# The MCAP reader is compiled into trossen_sdk (src/backends/trossen_mcap/
+# mcap_dataset_loader.cpp owns the single MCAP_IMPLEMENTATION translation unit), so a
+# target linking trossen_sdk must not define the macro. zstd and lz4 are the reader's
+# chunk-decompression codecs.
+target_include_directories(trossen_sdk PUBLIC ${mcap_SOURCE_DIR}/cpp/mcap/include)
+target_link_libraries(trossen_sdk PUBLIC zstd lz4)
 
 # Find all Foxglove SDK source files
 file(GLOB FOXGLOVE_SOURCES CONFIGURE_DEPENDS
