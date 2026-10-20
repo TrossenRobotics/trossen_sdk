@@ -5,7 +5,7 @@
  * These operate on Arrow arrays and OpenCV images and are independent of the
  * dataset layout (v2.1 vs v3.0). They follow LeRobot 0.6.0's
  * `lerobot/datasets/compute_stats.py`: the same sample count, the same strided
- * downsampling, and population standard deviation.
+ * downsampling, population standard deviation, and image statistics per RGB channel.
  */
 
 #ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_COMMON__LEROBOT_STATS_UTILS_HPP_
@@ -60,18 +60,22 @@ nlohmann::ordered_json compute_fixed_size_list_stats(
   const std::shared_ptr<arrow::FixedSizeListArray> &fixed_list_array);
 
 /**
- * @brief Compute statistics for a set of images
+ * @brief Compute per-channel statistics for a set of images
  *
- * @param images Vector of OpenCV Mat objects representing the images
- * @return JSON object containing the computed statistics
+ * Statistics are reported in RGB order with shape [3, 1, 1], matching LeRobot. Images
+ * that are not CV_32FC3 are skipped with a warning.
+ *
+ * @param images Samples from sample_images(): CV_32FC3, BGR, scaled to [0, 1]
+ * @return JSON object with min, max, mean, std and count (images used)
  */
 nlohmann::ordered_json compute_image_stats(const std::vector<cv::Mat> &images);
 
 /**
- * @brief Sample a set of images from a list of image paths
+ * @brief Load the images at sample_indices() and downsample them
  *
- * @param image_paths Vector of filesystem paths to the images
- * @return Vector of OpenCV Mat objects representing the sampled images
+ * @param image_paths Paths to every frame of one camera, in frame order
+ * @return The sampled images as CV_32FC3 in OpenCV's BGR order, scaled to [0, 1];
+ *   unreadable files are skipped
  */
 std::vector<cv::Mat> sample_images(
   const std::vector<std::filesystem::path> &image_paths);
