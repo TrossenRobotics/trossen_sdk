@@ -9,11 +9,69 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <stdexcept>
+#include <string>
+#include <vector>
 
+#include <arrow/api.h>
 #include <opencv2/imgcodecs.hpp>
 #include <opencv2/imgproc.hpp>
 
 namespace trossen::io::backends {
+
+namespace {
+
+/**
+ * @brief Running min, max, mean and population standard deviation of a stream of values.
+ *
+ * Uses Welford's update in double. Its squared-deviation sum cannot go negative, so a
+ * constant column (such as episode_index within one episode) gets a std of exactly 0,
+ * where the textbook `sum_sq / n - mean^2` form can come out slightly negative and make
+ * sqrt() NaN. LeRobot 0.6.0 clamps that form at 0 instead.
+ */
+struct RunningStats {
+  int64_t count{0};
+  double running_mean{0.0};
+  double m2{0.0};
+  double lo{std::numeric_limits<double>::max()};
+  double hi{std::numeric_limits<double>::lowest()};
+
+  void add(double v) {
+    ++count;
+    const double delta = v - running_mean;
+    running_mean += delta / static_cast<double>(count);
+    m2 += delta * (v - running_mean);
+    lo = std::min(lo, v);
+    hi = std::max(hi, v);
+  }
+
+  double mean() const { return count > 0 ? running_mean : 0.0; }
+  double min() const { return count > 0 ? lo : 0.0; }
+  double max() const { return count > 0 ? hi : 0.0; }
+  double stddev() const {
+    return count > 0 ? std::sqrt(m2 / static_cast<double>(count)) : 0.0;
+  }
+};
+
+/**
+ * @brief Element i of a float, double or int64 array as a double.
+ * @throws std::invalid_argument For any other value type.
+ */
+double numeric_at(const arrow::Array &array, int64_t i) {
+  switch (array.type_id()) {
+    case arrow::Type::FLOAT:
+      return static_cast<const arrow::FloatArray &>(array).Value(i);
+    case arrow::Type::DOUBLE:
+      return static_cast<const arrow::DoubleArray &>(array).Value(i);
+    case arrow::Type::INT64:
+      return static_cast<double>(static_cast<const arrow::Int64Array &>(array).Value(i));
+    default:
+      throw std::invalid_argument("stats: values must be float, double or int64, got " +
+                                  array.type()->ToString());
+  }
+}
+
+}  // namespace
 
 std::vector<int> sample_indices(
   int dataset_len,
@@ -152,53 +210,16 @@ nlohmann::ordered_json compute_image_stats(
 nlohmann::ordered_json compute_flat_stats(
   const std::shared_ptr<arrow::Array> &array)
 {
-  double sum = 0.0, sum_sq = 0.0;
-  double min_val = std::numeric_limits<double>::max();
-  double max_val = std::numeric_limits<double>::lowest();
-  int64_t count = 0;
-
-  // Iterate over the array and compute statistics
+  RunningStats stats;
   for (int64_t i = 0; i < array->length(); ++i) {
     if (array->IsNull(i)) continue;
-
-    double val = 0;
-    // Handle different data types
-    if (array->type_id() == arrow::Type::DOUBLE) {
-      val = std::static_pointer_cast<arrow::DoubleArray>(array)->Value(i);
-    } else if (array->type_id() == arrow::Type::FLOAT) {
-      val = std::static_pointer_cast<arrow::FloatArray>(array)->Value(i);
-    } else if (array->type_id() == arrow::Type::INT64) {
-      val = static_cast<double>(
-          std::static_pointer_cast<arrow::Int64Array>(array)->Value(i));
-    } else {
-      continue;
-    }
-
-    // Update statistics
-    min_val = std::min(min_val, val);
-    max_val = std::max(max_val, val);
-    sum += val;
-    sum_sq += val * val;
-    ++count;
+    stats.add(numeric_at(*array, i));
   }
-  // Compute mean and standard deviation
-  double mean = count > 0 ? sum / count : 0;
-  double stddev = 0;
-
-  // Handle edge case where all values are zero and standard deviation can be NaN
-  if (count > 0) {
-    if (min_val == 0.0 && max_val == 0.0) {
-      stddev = 0.0;
-    } else {
-      stddev = std::sqrt((sum_sq / count) - (mean * mean));
-    }
-  }
-
-  return {{"min", {min_val}},
-          {"max", {max_val}},
-          {"mean", {mean}},
-          {"std", {stddev}},
-          {"count", {count}}};
+  return {{"min", {stats.min()}},
+          {"max", {stats.max()}},
+          {"mean", {stats.mean()}},
+          {"std", {stats.stddev()}},
+          {"count", {stats.count}}};
 }
 
 nlohmann::ordered_json compute_list_stats(
