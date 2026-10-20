@@ -22,6 +22,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -36,8 +37,8 @@ namespace trossen::hw::policy {
 
 namespace {
 
-constexpr const char* kObsPrefixState = "state.";
-constexpr const char* kObsPrefixImages = "images.";
+constexpr std::string_view kObsPrefixState = "state.";
+constexpr std::string_view kObsPrefixImages = "images.";
 
 // EXPECTED_CAMERAS from openpi/src/openpi/policies/aloha_policy.py:40 — the
 // server rejects any image key outside this set.
@@ -172,12 +173,12 @@ void PolicyClient::init_(configuration::PolicyClientConfig cfg,
 
   // Partition subscriptions by obs_key prefix and validate openpi conventions.
   for (const auto& sub : cfg_.subscriptions) {
-    if (sub.obs_key.rfind(kObsPrefixState, 0) == 0) {
+    if (sub.obs_key.starts_with(kObsPrefixState)) {
       state_subs_.push_back(&sub);
       continue;
     }
-    if (sub.obs_key.rfind(kObsPrefixImages, 0) == 0) {
-      const std::string cam_key = sub.obs_key.substr(std::strlen(kObsPrefixImages));
+    if (sub.obs_key.starts_with(kObsPrefixImages)) {
+      const std::string cam_key = sub.obs_key.substr(kObsPrefixImages.size());
       if (!is_expected_camera(cam_key)) {
         throw std::runtime_error(
           "PolicyClient: obs_key '" + sub.obs_key +
