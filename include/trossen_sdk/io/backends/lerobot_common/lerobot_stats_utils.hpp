@@ -29,10 +29,13 @@ nlohmann::ordered_json compute_list_stats(
   const std::shared_ptr<arrow::ListArray> &list_array);
 
 /**
- * @brief Compute statistics for a flat array
+ * @brief Compute statistics for a flat numeric array
  *
- * @param array Shared pointer to the flat array
- * @return JSON object containing the computed statistics
+ * Null values are left out. An array with no values gives zeros and a count of 0.
+ *
+ * @param array Shared pointer to the flat array; float, double or int64
+ * @return JSON object with min, max, mean, std and count, each a one-element list
+ * @throws std::invalid_argument For any other value type
  */
 nlohmann::ordered_json compute_flat_stats(const std::shared_ptr<arrow::Array> &array);
 
