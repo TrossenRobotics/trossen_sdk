@@ -92,7 +92,7 @@ struct CameraInfo {
   /// with the joint streams; pairing the two by position drifts. Each row therefore records
   /// which source frame actually belongs to it, and extract_camera_images() writes exactly
   /// those frames, in row order. Consecutive rows may name the same source frame when the
-  /// camera runs slower than the reference stream.
+  /// camera runs slower than the row rate.
   ///
   /// Its size must equal AlignedEpisode::frames.size(); extract_camera_images() rejects a
   /// camera whose size differs.
