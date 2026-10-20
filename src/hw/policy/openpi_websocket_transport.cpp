@@ -720,8 +720,8 @@ const bool kOpenpiWsRegistered = [] {
         -> std::unique_ptr<PolicyTransport> {
       // URL scheme validation is the factory's job (transport-specific; a
       // grpc transport takes host:port, so the shared config can't check).
-      const bool ws = server_url.rfind("ws://", 0) == 0;
-      const bool wss = server_url.rfind("wss://", 0) == 0;
+      const bool ws = server_url.starts_with("ws://");
+      const bool wss = server_url.starts_with("wss://");
       if (!ws && !wss) {
         throw std::runtime_error(
           "openpi_ws: 'server_url' must start with 'ws://' or 'wss://' for "
