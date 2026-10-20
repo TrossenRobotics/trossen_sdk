@@ -9,7 +9,9 @@
 #ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_COMMON__LEROBOT_STATS_UTILS_HPP_
 #define TROSSEN_SDK__IO__BACKENDS__LEROBOT_COMMON__LEROBOT_STATS_UTILS_HPP_
 
+#include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -18,6 +20,39 @@
 #include <opencv2/core.hpp>
 
 namespace trossen::io::backends {
+
+/**
+ * @brief Running min, max, mean and population standard deviation of a stream of values.
+ *
+ * A constant stream gets a std of exactly 0.
+ */
+struct RunningStats {
+  /// @brief Number of values added.
+  int64_t count{0};
+  /// @brief Mean of the values added so far.
+  double running_mean{0.0};
+  /// @brief Sum of squared deviations from the running mean.
+  double m2{0.0};
+  /// @brief Smallest value added.
+  double lo{std::numeric_limits<double>::max()};
+  /// @brief Largest value added.
+  double hi{std::numeric_limits<double>::lowest()};
+
+  /**
+   * @brief Add one value.
+   * @param v Value to add.
+   */
+  void add(double v);
+
+  /// @brief Mean of the values. @return The mean, or 0 when no value was added.
+  double mean() const;
+  /// @brief Smallest value. @return The minimum, or 0 when no value was added.
+  double min() const;
+  /// @brief Largest value. @return The maximum, or 0 when no value was added.
+  double max() const;
+  /// @brief Population standard deviation. @return The std, or 0 when no value was added.
+  double stddev() const;
+};
 
 /**
  * @brief Compute statistics for a ListArray
@@ -29,10 +64,13 @@ nlohmann::ordered_json compute_list_stats(
   const std::shared_ptr<arrow::ListArray> &list_array);
 
 /**
- * @brief Compute statistics for a flat array
+ * @brief Compute statistics for a flat numeric array
  *
- * @param array Shared pointer to the flat array
- * @return JSON object containing the computed statistics
+ * Null values are left out. An array with no values gives zeros and a count of 0.
+ *
+ * @param array Shared pointer to the flat array; float, double or int64
+ * @return JSON object with min, max, mean, std and count, each a one-element list
+ * @throws std::invalid_argument For any other value type
  */
 nlohmann::ordered_json compute_flat_stats(const std::shared_ptr<arrow::Array> &array);
 
