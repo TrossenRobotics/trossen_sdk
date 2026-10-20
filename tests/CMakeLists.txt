@@ -53,6 +53,9 @@ target_link_libraries(test_depth_quantization PRIVATE trossen_sdk GTest::gtest_m
 add_executable(test_mcap_dataset_loader test_mcap_dataset_loader.cpp)
 target_link_libraries(test_mcap_dataset_loader PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_mcap_camera_extraction test_mcap_camera_extraction.cpp)
+target_link_libraries(test_mcap_camera_extraction PRIVATE trossen_sdk GTest::gtest_main)
+
 # Guarded as a whole rather than compiled to an empty binary: every test in this
 # file drives VideoEncoder, which does not exist without the ffmpeg-backed build.
 if(TROSSEN_ENABLE_VIDEO_ENCODE)
@@ -187,6 +190,7 @@ endif()
 gtest_discover_tests(test_lerobot_depth_utils)
 gtest_discover_tests(test_depth_quantization)
 gtest_discover_tests(test_mcap_dataset_loader)
+gtest_discover_tests(test_mcap_camera_extraction)
 if(TROSSEN_ENABLE_VIDEO_ENCODE)
   gtest_discover_tests(test_video_encoder)
 endif()
