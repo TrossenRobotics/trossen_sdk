@@ -1,13 +1,14 @@
 /**
  * @file test_mcap_camera_extraction.cpp
- * @brief Unit tests for extract_camera_images() on small recordings written through the
- *        Foxglove SDK, as the recorder writes them.
+ * @brief Unit tests for extract_camera_images() and extract_camera_video() on small
+ *        recordings written through the Foxglove SDK, as the recorder writes them.
  */
 
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <string>
@@ -29,7 +30,9 @@ namespace fs = std::filesystem;
 
 using trossen::io::backends::AlignedEpisode;
 using trossen::io::backends::CameraInfo;
+using trossen::io::backends::CameraVideoStream;
 using trossen::io::backends::extract_camera_images;
+using trossen::io::backends::extract_camera_video;
 using trossen::io::backends::McapChannelMap;
 
 namespace {
@@ -69,6 +72,11 @@ class RecordingWriter {
     add_channel(name, foxglove::schemas::RawImage::schema(), std::move(metadata));
   }
 
+  /// Add a `foxglove.CompressedVideo` camera.
+  void add_video_camera(const std::string& name) {
+    add_channel(name, foxglove::schemas::CompressedVideo::schema(), {});
+  }
+
   /// Log one RawImage frame; @p data may be shorter than the header describes.
   void log_raw(const std::string& name, uint32_t width, uint32_t height,
                const std::string& encoding, uint32_t step, std::vector<std::byte> data) {
@@ -77,6 +85,15 @@ class RecordingWriter {
     msg.height = height;
     msg.encoding = encoding;
     msg.step = step;
+    msg.data = std::move(data);
+    log(name, encode(msg));
+  }
+
+  /// Log one CompressedVideo frame.
+  void log_video(const std::string& name, const std::string& format,
+                 std::vector<std::byte> data) {
+    foxglove::schemas::CompressedVideo msg;
+    msg.format = format;
     msg.data = std::move(data);
     log(name, encode(msg));
   }
@@ -223,6 +240,40 @@ TEST_F(CameraExtractionTest, DepthIsWrittenInMillimeters) {
   EXPECT_EQ(depth.at<uint16_t>(0, 0), 1235);
 }
 
+TEST_F(CameraExtractionTest, VideoPayloadsAreConcatenatedInFileOrder) {
+  RecordingWriter rec(mcap());
+  rec.add_video_camera("cam_high");
+  rec.log_video("cam_high", "h264", {std::byte{0}, std::byte{0}, std::byte{1}, std::byte{0x65}});
+  rec.log_video("cam_high", "h264", {std::byte{0}, std::byte{0}, std::byte{1}, std::byte{0x41}});
+  rec.close();
+
+  std::map<std::string, CameraVideoStream> streams;
+  ASSERT_TRUE(extract_camera_video(mcap().string(), camera_channels(mcap()),
+                                   [&](const std::string& c) { return out_dir(c); }, streams));
+  ASSERT_EQ(streams.size(), 1u);
+  const CameraVideoStream& stream = streams.at("cam_high");
+  EXPECT_EQ(stream.format, "h264");
+  EXPECT_EQ(stream.frame_count, 2u);
+  EXPECT_EQ(stream.annexb_path.extension(), ".h264");
+
+  std::ifstream in(stream.annexb_path, std::ios::binary);
+  const std::vector<char> bytes((std::istreambuf_iterator<char>(in)),
+                                std::istreambuf_iterator<char>());
+  EXPECT_EQ(bytes, std::vector<char>({0, 0, 1, 0x65, 0, 0, 1, 0x41}));
+}
+
+TEST_F(CameraExtractionTest, RawRecordingHasNoVideoStreams) {
+  RecordingWriter rec(mcap());
+  rec.add_raw_camera("cam_depth");
+  rec.log_raw("cam_depth", 2, 2, "16UC1", 4, solid_depth(500));
+  rec.close();
+
+  std::map<std::string, CameraVideoStream> streams;
+  ASSERT_TRUE(extract_camera_video(mcap().string(), camera_channels(mcap()),
+                                   [&](const std::string& c) { return out_dir(c); }, streams));
+  EXPECT_TRUE(streams.empty());
+}
+
 TEST_F(CameraExtractionTest, TruncatedImageIsRejected) {
   RecordingWriter rec(mcap());
   rec.add_raw_camera("cam_high");
@@ -236,4 +287,34 @@ TEST_F(CameraExtractionTest, TruncatedImageIsRejected) {
   EXPECT_FALSE(extract_camera_images(mcap().string(), camera_channels(mcap()), ep,
                                      [&](const std::string& c) { return out_dir(c); }, counts));
   EXPECT_NE(testing::internal::GetCapturedStderr().find("holds 7 bytes"), std::string::npos);
+}
+
+TEST_F(CameraExtractionTest, FailedVideoExtractionLeavesNoStreamFiles) {
+  RecordingWriter rec(mcap());
+  rec.add_video_camera("cam_high");
+  rec.log_video("cam_high", "h264", {std::byte{0}, std::byte{0}, std::byte{1}, std::byte{0x65}});
+  rec.log_video("cam_high", "h265", {std::byte{0}, std::byte{0}, std::byte{1}, std::byte{0x26}});
+  rec.close();
+
+  std::map<std::string, CameraVideoStream> streams;
+  testing::internal::CaptureStderr();
+  EXPECT_FALSE(extract_camera_video(mcap().string(), camera_channels(mcap()),
+                                    [&](const std::string& c) { return out_dir(c); }, streams));
+  EXPECT_NE(testing::internal::GetCapturedStderr().find("changed format"), std::string::npos);
+  EXPECT_TRUE(streams.empty());
+  EXPECT_FALSE(fs::exists(out_dir("cam_high") / "cam_high.h264"));
+}
+
+TEST_F(CameraExtractionTest, UnsupportedVideoFormatIsRejected) {
+  RecordingWriter rec(mcap());
+  rec.add_video_camera("cam_high");
+  rec.log_video("cam_high", "vp9", {std::byte{1}, std::byte{2}});
+  rec.close();
+
+  std::map<std::string, CameraVideoStream> streams;
+  testing::internal::CaptureStderr();
+  EXPECT_FALSE(extract_camera_video(mcap().string(), camera_channels(mcap()),
+                                    [&](const std::string& c) { return out_dir(c); }, streams));
+  EXPECT_NE(testing::internal::GetCapturedStderr().find("only h264 and h265"), std::string::npos);
+  EXPECT_TRUE(fs::is_empty(out_dir("cam_high")));
 }
