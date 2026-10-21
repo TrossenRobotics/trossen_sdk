@@ -7,6 +7,7 @@
  #define TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__TROSSEN_MCAP_SCHEMAS_HPP_
 
 #include <string>
+#include <string_view>
 
 namespace trossen::trossen_mcap_defs {
 
@@ -47,6 +48,39 @@ inline constexpr char kRecordingStartTimeKey[] = "recording_start_time";
 
 /// @brief Key inside that record holding the episode's task prompt, when one was set.
 inline constexpr char kTaskDescriptionKey[] = "task_description";
+
+/**
+ * @brief Check whether a stream id is named with a role: exactly `role`, or `role_<side>`.
+ *
+ * @param stream_id Stream id to check, e.g. `follower_left`.
+ * @param role Role name, kLeaderStreamToken or kFollowerStreamToken.
+ * @return True if @p stream_id is @p role alone or @p role followed by `_` and a side name.
+ */
+inline bool stream_id_has_role(std::string_view stream_id, std::string_view role) {
+  if (!stream_id.starts_with(role)) return false;
+  const std::string_view rest = stream_id.substr(role.size());
+  return rest.empty() || (rest.size() > 1 && rest.front() == '_');
+}
+
+/**
+ * @brief Check whether a stream id names a leader arm (`leader` or `leader_<side>`).
+ *
+ * @param stream_id Stream id to check.
+ * @return True if the stream belongs to a leader arm.
+ */
+inline bool is_leader_stream_id(std::string_view stream_id) {
+  return stream_id_has_role(stream_id, kLeaderStreamToken);
+}
+
+/**
+ * @brief Check whether a stream id names a follower arm (`follower` or `follower_<side>`).
+ *
+ * @param stream_id Stream id to check.
+ * @return True if the stream belongs to a follower arm.
+ */
+inline bool is_follower_stream_id(std::string_view stream_id) {
+  return stream_id_has_role(stream_id, kFollowerStreamToken);
+}
 
 /**
  * @brief Get topic name for a given camera's image stream
