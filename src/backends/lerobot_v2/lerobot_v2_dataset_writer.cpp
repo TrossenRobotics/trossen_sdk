@@ -266,6 +266,15 @@ bool LeRobotV2DatasetWriter::prepare_episode(const std::filesystem::path& mcap_f
     } else {
       std::cout << "  Warning: No videos were created\n";
     }
+
+    // Every camera's video now holds its frames, and the stats sample the videos, so the
+    // extracted frames are deleted and never reach the dataset.
+    if (!opts_.keep_images) {
+      std::error_code rm_ec;
+      for (const auto& [camera_name, camera_dir] : camera_dirs) {
+        fs::remove_all(camera_dir, rm_ec);
+      }
+    }
   }
 
   return true;
@@ -321,12 +330,10 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe) {
 
   try {
     fs::create_directories(data_dir);
-    fs::create_directories(images_dir);
     fs::create_directories(videos_dir);
     fs::create_directories(meta_dir);
 
     std::cout << "  [ok] Created data directory:   " << data_dir.string() << "\n";
-    std::cout << "  [ok] Created images directory: " << images_dir.string() << "\n";
     std::cout << "  [ok] Created videos directory: " << videos_dir.string() << "\n";
     std::cout << "  [ok] Created meta directory:   " << meta_dir.string() << "\n";
   } catch (const std::exception& e) {
@@ -678,8 +685,10 @@ nlohmann::ordered_json LeRobotV2DatasetWriter::compute_episode_stats(
         fs::path episode_image_dir;
         bool found = false;
 
-        // First check the expected path: images/camera_name/episode_folder
-        for (const auto& chunk_entry : fs::directory_iterator(images_root)) {
+        // First check the expected path: images/camera_name/episode_folder; images/ is gone
+        // once the videos are encoded.
+        std::error_code images_ec;
+        for (const auto& chunk_entry : fs::directory_iterator(images_root, images_ec)) {
           if (chunk_entry.is_directory() &&
               chunk_entry.path().filename().string().starts_with("chunk-")) {
             fs::path potential_dir = chunk_entry.path() / camera_name / episode_folder_name;

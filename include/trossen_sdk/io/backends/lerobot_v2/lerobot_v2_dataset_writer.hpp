@@ -42,6 +42,8 @@ public:
     std::string task_name;
     /// @brief Cores each AV1 encode may use (SVT-AV1 lp=).
     int encoder_threads{0};
+    /// @brief Keep the extracted frames, for images/, once the videos are encoded.
+    bool keep_images{false};
   };
 
   /// @brief One recording converted into a scratch folder, not yet part of the dataset.
@@ -62,7 +64,7 @@ public:
 
   /**
    * @brief Store the options; nothing is written until a write call.
-   * @param opts Dataset location, license, chunk size, default task and encoder threads.
+   * @param opts Dataset location and conversion settings.
    */
   explicit LeRobotV2DatasetWriter(Options opts);
 
