@@ -8,6 +8,7 @@
     "png_compression_level": 5,
     "overwrite_existing": false,
     "encode_videos": true,
+    "keep_images": false,
     "task_name": "perform a generic task",
     "repository_id": "TrossenRoboticsCommunity",
     "dataset_id": "mcap_converted_dataset",

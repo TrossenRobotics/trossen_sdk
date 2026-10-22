@@ -77,6 +77,9 @@ Examples per robot:
 
     Batch mode processes the ``.mcap`` files in the order they were recorded (by the ``recording_start_time`` stored in each file) and assigns LeRobot episode indices from that order, so episode 0 is the earliest recording.
 
+The frames extracted to ``images/`` are deleted once each episode's videos are encoded.
+Set ``keep_images`` to ``true`` in the config to keep them.
+
 Configuring the Conversion
 ==========================
 
@@ -96,6 +99,7 @@ Point it at a different config with ``--config <path>``.
         "task_name":             "perform a generic task",         // Default task description
         "fps":                   30.0,                             // Frame rate written to info.json
         "encode_videos":         true,                             // Set false to skip MP4 encoding
+        "keep_images":           false,                            // Keep images/ after encoding
         "encoder_threads":       2,                                // FFmpeg threads per camera
         "jobs":                  null,                             // Recordings at once; null = auto
         "max_image_queue":       10,                               // Back-pressure bound
