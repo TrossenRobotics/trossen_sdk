@@ -172,6 +172,7 @@ int main(int argc, char** argv) {
   const std::string dataset_id = lerobot_config->dataset_id;
   const int chunk_size = lerobot_config->chunk_size;
   const std::string license = lerobot_config->license;
+  const bool keep_images = lerobot_config->keep_images;
 
   // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -261,7 +262,7 @@ int main(int argc, char** argv) {
   trossen::io::backends::LeRobotV2DatasetWriter writer({dataset_root_dir, repository_id,
                                                         dataset_id, license, chunk_size,
                                                         lerobot_config->task_name,
-                                                        encoder_threads});
+                                                        encoder_threads, keep_images});
 
   // Workers prepare recordings concurrently; the main thread commits them in input order,
   // which is what gives each its episode index.
