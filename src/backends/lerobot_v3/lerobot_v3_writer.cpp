@@ -667,7 +667,11 @@ LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
       fs::remove(vs.annexb_path, ec);
     }
 
-    report_unaligned_video_streams(out.ep, video_streams, /*start_offset_applied=*/true);
+    if (!check_video_alignment(out.ep, video_streams, /*start_offset_applied=*/true)) {
+      std::error_code ec;
+      fs::remove_all(out.tmp_dir, ec);
+      return out;  // ok == false
+    }
     clamp_episode_to_video_frame_counts(out.ep, video_streams, /*start_offset_applied=*/true);
   }
 
