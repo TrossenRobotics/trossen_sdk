@@ -25,7 +25,7 @@ namespace trossen::io::backends {
 struct VideoTranscodeOptions {
   /// @brief Preferred encoder name, or "auto" to probe hardware then software.
   std::string encoder{trossen::configuration::TROSSEN_MCAP_DEFAULT_VIDEO_ENCODER};
-  /// @brief Target bitrate for color streams.
+  /// @brief Target bitrate for color streams; depth is always lossless.
   int bitrate_kbps{trossen::configuration::TROSSEN_MCAP_DEFAULT_VIDEO_BITRATE_KBPS};
   /// @brief Keyframe interval in frames. Small values keep single-frame reads cheap.
   int keyframe_interval{trossen::configuration::TROSSEN_MCAP_DEFAULT_VIDEO_KEYFRAME_INTERVAL};
@@ -41,6 +41,8 @@ struct VideoTranscodeStats {
   size_t messages_copied{0};
   /// @brief Color frames re-encoded to H.264.
   size_t color_frames_encoded{0};
+  /// @brief Depth frames quantized and re-encoded to lossless H.265.
+  size_t depth_frames_encoded{0};
   /// @brief Camera streams converted from raw images to video.
   size_t cameras_transcoded{0};
   /// @brief Camera streams copied through untouched, because they already held video.
