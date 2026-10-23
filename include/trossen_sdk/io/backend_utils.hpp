@@ -73,6 +73,7 @@ inline constexpr float DEFAULT_DATASET_FPS = 30.0f;
 inline constexpr uint64_t DEFAULT_MATCH_TOLERANCE_NS = 50'000'000;  // 50 ms
 inline constexpr double DEFAULT_MAX_SINGLE_GAP_MS = 200.0;
 inline constexpr double DEFAULT_MAX_GAP_FRACTION = 0.02;
+inline constexpr double DEFAULT_MAX_MISSING_FRAME_FRACTION = 0.02;
 
 }  // namespace trossen::io::backends
 
