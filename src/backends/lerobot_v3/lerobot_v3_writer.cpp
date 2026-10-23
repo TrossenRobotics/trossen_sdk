@@ -582,6 +582,9 @@ try {
       if (described.at(name).at("fps").get<double>() == opts_.fps) copied.emplace(name, vs);
     }
     clamp_episode_to_video_frame_counts(out.ep, copied, /*start_offset_applied=*/true);
+    if (!check_video_alignment(out.ep, copied, /*start_offset_applied=*/true)) {
+      return out;  // ok == false
+    }
 
     for (const auto& cam : out.ep.cameras) {
       auto vs_it = video_streams.find(cam.name);
