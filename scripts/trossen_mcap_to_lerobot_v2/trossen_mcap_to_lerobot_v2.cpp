@@ -80,6 +80,8 @@ struct ParquetConfig {
   int chunk_size = 1000;
   bool extract_images = true;
   bool create_videos = true;
+  // Keep the extracted JPEG/PNG frames after the episode's videos are encoded.
+  bool keep_images = false;
 };
 
 /**
@@ -312,11 +314,12 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
 /// @param global_index_offset In/out parameter tracking the next available
 ///   global row index across episodes. Advanced by the number of rows written only
 ///   when the whole episode succeeds; left unchanged on failure.
+/// @param keep_images Keep the extracted frames under images/ once the videos are encoded
 /// @return 0 on success, non-zero on failure
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
-                      int64_t& global_index_offset);
+                      int64_t& global_index_offset, bool keep_images);
 
 /// @brief The episodes an earlier run already wrote, read back from meta/episodes.jsonl.
 struct ConvertedEpisodes {
@@ -386,6 +389,9 @@ static void print_usage(const char* program) {
             << "(default: " << DEFAULT_CONFIG_PATH << ")\n";
   std::cerr << "  --set KEY=VALUE              Override a config value (repeatable)\n";
   std::cerr << "                               e.g. --set lerobot_v2_backend.dataset_id=my_ds\n";
+  std::cerr << "  --keep-images                Keep the extracted frames in images/\n";
+  std::cerr << "                               (deleted after encoding by default; give the\n";
+  std::cerr << "                               input path before this flag)\n";
   std::cerr << "  --dump-config                Print resolved config and exit\n";
   std::cerr << "  --help                       Show this help message\n";
   std::cerr << "\nExamples:\n";
@@ -462,6 +468,7 @@ int main(int argc, char** argv) {
   const std::string dataset_id = lerobot_config->dataset_id;
   const int chunk_size = lerobot_config->chunk_size;
   const std::string license = lerobot_config->license;
+  const bool keep_images = cli.has_flag("keep-images");
 
   // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -575,7 +582,7 @@ int main(int argc, char** argv) {
 
     int result = process_mcap_file(mcap_path.string(), dataset_root_dir, episode_index,
                                     repository_id, dataset_id, chunk_size,
-                                    global_index_offset);
+                                    global_index_offset, keep_images);
 
     if (result == 0) {
       successful++;
@@ -707,7 +714,7 @@ int main(int argc, char** argv) {
 int process_mcap_file(const std::string& mcap_file, const std::string& dataset_root_dir,
                       int episode_index, const std::string& repository_id,
                       const std::string& dataset_id, int chunk_size,
-                      int64_t& global_index_offset) {
+                      int64_t& global_index_offset, bool keep_images) {
   namespace fs = std::filesystem;
   using trossen::io::backends::AlignedEpisode;
   using trossen::io::backends::McapChannelMap;
@@ -719,6 +726,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   cfg.repository_id = repository_id;
   cfg.dataset_id = dataset_id;
   cfg.chunk_size = chunk_size;
+  cfg.keep_images = keep_images;
 
   fs::path mcap_path(cfg.mcap_file);
 
@@ -1136,6 +1144,18 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       std::cout << "  [ok] Created " << videos_created << " video(s)\n";
     } else {
       std::cout << "  Warning: No videos were created\n";
+    }
+
+    // Every camera's video now holds its frames, and the stats sample the videos, so the
+    // extracted frames are deleted. Each fs::remove() takes a parent folder once it is empty.
+    if (!cfg.keep_images) {
+      std::error_code rm_ec;
+      for (const auto& [camera_name, camera_dir] : camera_dirs) {
+        fs::remove_all(camera_dir, rm_ec);
+        fs::remove(camera_dir.parent_path(), rm_ec);
+      }
+      fs::remove(images_dir, rm_ec);
+      fs::remove(images_dir.parent_path(), rm_ec);
     }
   }
 
