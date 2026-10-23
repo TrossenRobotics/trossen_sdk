@@ -6,6 +6,7 @@
  * and nested namespace handling in GlobalConfig.
  */
 
+#include <chrono>
 #include <memory>
 #include <stdexcept>
 #include <string>
@@ -18,12 +19,14 @@
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/sdk_config.hpp"
 #include "trossen_sdk/configuration/types/hardware/arm_config.hpp"
+#include "trossen_sdk/configuration/types/producers/producer_config.hpp"
 #include "trossen_sdk/configuration/types/runtime/session_manager_config.hpp"
 
 using trossen::configuration::ArmConfig;
 using trossen::configuration::BaseConfig;
 using trossen::configuration::ConfigRegistry;
 using trossen::configuration::GlobalConfig;
+using trossen::configuration::ProducerConfig;
 using trossen::configuration::SdkConfig;
 using trossen::configuration::SessionManagerConfig;
 
@@ -290,4 +293,13 @@ TEST(SdkConfigTest, FromJson_CamerasNeedNoRole) {
   })");
 
   EXPECT_NO_THROW(trossen::configuration::SdkConfig::from_json(j));
+}
+
+TEST(ProducerConfigTest, PollPeriodKeepsTheFractionalMillisecond) {
+  ProducerConfig c;
+  c.poll_rate_hz = 30.0f;
+  EXPECT_EQ(c.poll_period(), std::chrono::nanoseconds(33'333'333));
+
+  c.poll_rate_hz = 200.0f;
+  EXPECT_EQ(c.poll_period(), std::chrono::milliseconds(5));
 }
