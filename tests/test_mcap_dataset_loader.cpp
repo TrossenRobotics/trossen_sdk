@@ -5,6 +5,7 @@
  *        clamp_episode_to_video_frame_counts().
  */
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -20,10 +21,13 @@ using trossen::io::backends::AlignedEpisode;
 using trossen::io::backends::AlignmentOptions;
 using trossen::io::backends::CameraInfo;
 using trossen::io::backends::CameraVideoStream;
+using trossen::io::backends::check_frame_counts;
 using trossen::io::backends::check_video_alignment;
 using trossen::io::backends::clamp_episode_to_video_frame_counts;
+using trossen::io::backends::frames_in_row_window;
 using trossen::io::backends::load_aligned_episode;
 using trossen::io::backends::McapChannelMap;
+using trossen::io::backends::MAX_FRAME_COUNT_GAP;
 using trossen::io::backends::MAX_VIDEO_DRIFT_FRAMES;
 
 namespace {
@@ -338,4 +342,57 @@ TEST(CheckVideoAlignmentTest, CamerasWithoutAVideoStreamAreSkipped) {
   auto ep = episode_with_cameras(5, {{"cam_raw", 9}});
   EXPECT_TRUE(check_video_alignment(ep, {}, false));
   EXPECT_TRUE(check_video_alignment(ep, {{"cam_raw", stream_of(0)}}, false));
+}
+
+namespace {
+
+// Frame times at `fps` for `seconds`, starting at 0.
+std::vector<uint64_t> frames_at(double fps, double seconds) {
+  std::vector<uint64_t> stamps;
+  for (int i = 0; i <= static_cast<int>(fps * seconds); ++i) {
+    stamps.push_back(static_cast<uint64_t>(std::llround(i * 1e9 / fps)));
+  }
+  return stamps;
+}
+
+constexpr uint64_t kRowPeriodNs = 1'000'000'000 / 30;
+
+}  // namespace
+
+TEST(FramesInRowWindowTest, FramesBeforeAndAfterTheRowsAreNotCounted) {
+  // 3 s at 30 fps, against 31 rows from 1 s to 2 s.
+  const std::vector<uint64_t> stamps = frames_at(30.0, 3.0);
+  EXPECT_EQ(frames_in_row_window(stamps, 1'000'000'000, 2'000'000'000, kRowPeriodNs), 31u);
+}
+
+TEST(FramesInRowWindowTest, ASlowerCameraCountsFewerFrames) {
+  // 2 s at 15 fps is 31 frames, against 61 rows on a 30 Hz grid.
+  const size_t frames =
+    frames_in_row_window(frames_at(15.0, 2.0), 0, 2'000'000'000, kRowPeriodNs);
+  EXPECT_EQ(frames, 31u);
+  EXPECT_FALSE(check_frame_counts({{"cam_slow", frames}}, 61));
+}
+
+TEST(FramesInRowWindowTest, TheSpanIncludesItsStartAndExcludesItsEnd) {
+  // One row at 1 s: frames half a period before it count, half a period after it do not.
+  constexpr uint64_t kRow = 1'000'000'000;
+  constexpr uint64_t kHalf = kRowPeriodNs / 2;
+  EXPECT_EQ(frames_in_row_window({kRow - kHalf, kRow + kHalf - 1, kRow + kHalf}, kRow, kRow,
+                                 kRowPeriodNs),
+            2u);
+}
+
+TEST(CheckFrameCountsTest, CountsWithinTheLimitPass) {
+  EXPECT_TRUE(check_frame_counts({{"cam_high", 603}, {"cam_low", 602}}, 600));
+  EXPECT_TRUE(check_frame_counts({{"cam_high", 600 + MAX_FRAME_COUNT_GAP}}, 600));
+  EXPECT_TRUE(check_frame_counts({}, 600));
+}
+
+TEST(CheckFrameCountsTest, ACameraThatMissedPartOfTheTaskFails) {
+  EXPECT_FALSE(check_frame_counts({{"cam_high", 589}}, 601));
+}
+
+TEST(CheckFrameCountsTest, CamerasAreComparedWithEachOtherToo) {
+  // Each camera is within the limit of the rows, but not of the other camera.
+  EXPECT_FALSE(check_frame_counts({{"cam_high", 594}, {"cam_low", 606}}, 600));
 }

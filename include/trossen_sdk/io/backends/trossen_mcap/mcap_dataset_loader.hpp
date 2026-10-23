@@ -207,8 +207,9 @@ double rows_to_ms(size_t rows, uint64_t row_period_ns);
  * Fails on input it cannot align: an `alignment.fps` that is not a whole number from 1 to
  * 1e9, a file it cannot read, no leader or follower stream, or a follower, camera or
  * mobile base channel with no data. Also fails when a stream's timestamps go backwards,
- * when no stretch of time has data from every stream, or when the rows dropped between
- * the first and last kept row exceed `alignment.max_single_gap_ms` in any one gap or
+ * when no stretch of time has data from every stream, when check_frame_counts() rejects
+ * the cameras' frame counts against the rows, or when the rows dropped between the first
+ * and last kept row exceed `alignment.max_single_gap_ms` in any one gap or
  * `alignment.max_gap_fraction` in total.
  *
  * Camera keys keep the name the recording gave them.
@@ -303,6 +304,38 @@ size_t video_start_offset(const CameraInfo& cam);
 /// @brief Most frames a row's image may be from the frame matched to it, about 100 ms at
 /// 30 fps. A stream-copied camera further off than this fails the episode.
 inline constexpr size_t MAX_VIDEO_DRIFT_FRAMES = 3;
+
+/// @brief Largest allowed difference between any two of an episode's camera frame counts
+/// and its row count, about 330 ms at 30 fps.
+inline constexpr size_t MAX_FRAME_COUNT_GAP = 10;
+
+/**
+ * @brief Frames whose time falls within the span the rows cover
+ *
+ * Each row stands for one row period centered on its time, so the span runs from half a
+ * period before the first row to half a period after the last. A camera at the row rate
+ * records about one frame per row in it.
+ *
+ * @param stamps The camera's frame times, in ns, in increasing order
+ * @param first_row_ns Time of the first row, in ns
+ * @param last_row_ns Time of the last row, in ns
+ * @param row_period_ns Spacing between rows, in ns
+ * @return Number of frames from half a period before the first row up to, but not
+ *   including, half a period after the last row.
+ */
+size_t frames_in_row_window(const std::vector<uint64_t>& stamps, uint64_t first_row_ns,
+                            uint64_t last_row_ns, uint64_t row_period_ns);
+
+/**
+ * @brief Check that every camera recorded about as many frames as the episode has rows
+ *
+ * @param camera_frames Frames each camera recorded within the rows' span
+ *   (frames_in_row_window()), keyed by camera name
+ * @param rows Rows on the episode's grid
+ * @return False if the largest and smallest of the camera frame counts and @p rows differ by
+ *   more than MAX_FRAME_COUNT_GAP (message logged to stderr); true otherwise.
+ */
+bool check_frame_counts(const std::map<std::string, size_t>& camera_frames, size_t rows);
 
 /**
  * @brief Check that each stream-copied camera's rows play the frames matched to them
