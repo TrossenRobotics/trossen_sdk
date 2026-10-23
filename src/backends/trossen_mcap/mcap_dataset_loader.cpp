@@ -396,6 +396,10 @@ bool load_aligned_episode(
     }
   }
 
+  // Records carry a dual (sec, nsec) Timestamp; the MCAP log time was written from the
+  // realtime half, so that is the key every comparison below uses.
+  auto log_ns_of = [](const data::RecordBase& rec) { return rec.ts.realtime.to_ns(); };
+
   // ── Detect the joint count and mobile base; episode_action_dim() and episode_obs_dim()
   //    derive the row widths from them ──
   out.joints_per_stream = 0;
@@ -472,48 +476,46 @@ bool load_aligned_episode(
   std::map<std::string, size_t> camera_cursors;
   for (const auto& [camera_name, stamps] : camera_timestamps) camera_cursors[camera_name] = 0;
 
-  // TODO(shantanuparab-tr): replace nearest_frame, find_closest_message and the mobile base
-  // search below with one shared nearest-sample matcher that compares both neighbors for
-  // every stream (#356).
-  // Frame nearest `target`, or npos when the nearest is further away than the tolerance.
-  // Unlike the joint matcher (which snaps to the last sample at or before the target),
-  // this compares both neighbors, halving the worst-case pairing error from a full
-  // frame period to half of one.
-  auto nearest_frame = [&alignment](const std::vector<uint64_t>& stamps, uint64_t target,
+  // Index of the entry nearest `target` in a time-ordered sequence of `count` entries, or
+  // npos when the nearest is further away than the tolerance. `stamp_at(i)` returns entry
+  // i's time. Both neighbors are compared: snapping only to the last entry at or before
+  // the target biases every row backwards by up to a full sample period, and a bias does
+  // not average out the way jitter does. Shared by joint, mobile base and camera streams
+  // so they all pair rows the same way.
+  auto nearest_index = [&alignment](size_t count, const auto& stamp_at, uint64_t target,
                                     size_t& cursor) -> size_t {
-    if (stamps.empty()) return std::numeric_limits<size_t>::max();
-    while (cursor + 1 < stamps.size() && stamps[cursor + 1] <= target) ++cursor;
-    size_t best = cursor;
+    if (cursor >= count) return std::numeric_limits<size_t>::max();
+    // Scan forward to the last entry whose time is at or before the target.
+    while (cursor + 1 < count && stamp_at(cursor + 1) <= target) ++cursor;
     auto distance = [target](uint64_t ts) {
       return target > ts ? target - ts : ts - target;
     };
-    if (cursor + 1 < stamps.size() && distance(stamps[cursor + 1]) < distance(stamps[cursor])) {
+    // Pick whichever is closer to the target: that entry, or the next one past it.
+    size_t best = cursor;
+    if (cursor + 1 < count && distance(stamp_at(cursor + 1)) < distance(stamp_at(cursor))) {
       best = cursor + 1;
     }
-    return distance(stamps[best]) > alignment.tolerance_ns ? std::numeric_limits<size_t>::max()
-                                                           : best;
+    // Accept the closer entry only if it is within the tolerance.
+    return distance(stamp_at(best)) > alignment.tolerance_ns ? std::numeric_limits<size_t>::max()
+                                                             : best;
   };
 
-  // Records carry a dual (sec, nsec) Timestamp; the MCAP log time was written from the
-  // realtime half, so that is the key every comparison below uses.
-  auto log_ns = [](const data::RecordBase& rec) { return rec.ts.realtime.to_ns(); };
-  // Distance between two timestamps. Subtracting the smaller from the larger keeps the
-  // unsigned result from wrapping around.
-  auto abs_diff_ns = [](uint64_t a, uint64_t b) { return a > b ? a - b : b - a; };
+  // Frame nearest `target`, or npos when the nearest is outside the tolerance.
+  auto nearest_frame = [&](const std::vector<uint64_t>& stamps, uint64_t target,
+                           size_t& cursor) -> size_t {
+    return nearest_index(
+      stamps.size(), [&](size_t i) { return stamps[i]; }, target, cursor);
+  };
 
+  // Joint sample nearest `target_ts`, or nullptr when the nearest is outside the tolerance.
   auto find_closest_message = [&](const std::string& stream_id, uint64_t target_ts,
                                   size_t& idx) -> const data::JointStateRecord* {
     auto it = messages_by_stream.find(stream_id);
-    if (it == messages_by_stream.end() || it->second.empty()) return nullptr;
+    if (it == messages_by_stream.end()) return nullptr;
     const auto& messages = it->second;
-    if (idx >= messages.size()) return nullptr;
-    while (idx + 1 < messages.size() && log_ns(messages[idx + 1]) <= target_ts) {
-      ++idx;
-    }
-    if (abs_diff_ns(log_ns(messages[idx]), target_ts) > alignment.tolerance_ns) {
-      return nullptr;
-    }
-    return &messages[idx];
+    const size_t best = nearest_index(
+      messages.size(), [&](size_t i) { return log_ns_of(messages[i]); }, target_ts, idx);
+    return best == std::numeric_limits<size_t>::max() ? nullptr : &messages[best];
   };
 
   // Appends one stream's enabled signal blocks in the order build_features() names them:
@@ -566,15 +568,13 @@ bool load_aligned_episode(
 
     std::vector<double> base_values;
     if (channels.has_mobile_base) {
-      // An empty base channel stops here, and the index check below drops the row.
-      while (mobile_base_idx + 1 < mobile_base_messages.size() &&
-             log_ns(mobile_base_messages[mobile_base_idx + 1]) <= timestamp_ns) {
-        ++mobile_base_idx;
-      }
-      if (mobile_base_idx < mobile_base_messages.size() &&
-          abs_diff_ns(log_ns(mobile_base_messages[mobile_base_idx]), timestamp_ns) <=
-            alignment.tolerance_ns) {
-        const auto& odom = mobile_base_messages[mobile_base_idx];
+      // A base channel with no messages yields npos here, so the row is dropped below.
+      const size_t base_idx = nearest_index(
+        mobile_base_messages.size(),
+        [&](size_t i) { return log_ns_of(mobile_base_messages[i]); }, timestamp_ns,
+        mobile_base_idx);
+      if (base_idx != std::numeric_limits<size_t>::max()) {
+        const auto& odom = mobile_base_messages[base_idx];
         base_values.push_back(odom.twist.linear_x);
         base_values.push_back(odom.twist.angular_z);
         if (signals.base_lateral_velocity) base_values.push_back(odom.twist.linear_y);
