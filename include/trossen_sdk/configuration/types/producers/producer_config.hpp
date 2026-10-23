@@ -6,6 +6,8 @@
 #ifndef TROSSEN_SDK__CONFIGURATION__TYPES__PRODUCERS__PRODUCER_CONFIG_HPP_
 #define TROSSEN_SDK__CONFIGURATION__TYPES__PRODUCERS__PRODUCER_CONFIG_HPP_
 
+#include <chrono>
+#include <cmath>
 #include <string>
 
 #include "nlohmann/json.hpp"
@@ -55,6 +57,12 @@ struct ProducerConfig {
 
   /// @brief Polling frequency in Hz
   float poll_rate_hz{30.0f};
+
+  /// @brief Polling period for poll_rate_hz, rounded to the nearest nanosecond: 33,333,333 ns
+  /// at 30 Hz. A period in whole milliseconds would be 33 ms, which polls at 30.30 Hz.
+  std::chrono::nanoseconds poll_period() const {
+    return std::chrono::nanoseconds(std::llround(1e9 / static_cast<double>(poll_rate_hz)));
+  }
 
   /// @brief Use hardware device timestamp when available
   bool use_device_time{false};
