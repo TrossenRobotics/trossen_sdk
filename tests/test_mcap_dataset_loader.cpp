@@ -16,10 +16,12 @@ using trossen::io::backends::AlignedEpisode;
 using trossen::io::backends::AlignmentOptions;
 using trossen::io::backends::CameraInfo;
 using trossen::io::backends::CameraVideoStream;
+using trossen::io::backends::check_frame_counts;
 using trossen::io::backends::check_video_alignment;
 using trossen::io::backends::clamp_episode_to_video_frame_counts;
 using trossen::io::backends::load_aligned_episode;
 using trossen::io::backends::McapChannelMap;
+using trossen::io::backends::MAX_FRAME_COUNT_GAP;
 using trossen::io::backends::MAX_VIDEO_DRIFT_FRAMES;
 
 namespace {
@@ -142,4 +144,20 @@ TEST(CheckVideoAlignmentTest, CamerasWithoutAVideoStreamAreSkipped) {
   auto ep = episode_with_cameras(5, {{"cam_raw", 9}});
   EXPECT_TRUE(check_video_alignment(ep, {}, false));
   EXPECT_TRUE(check_video_alignment(ep, {{"cam_raw", stream_of(0)}}, false));
+}
+
+TEST(CheckFrameCountsTest, CountsWithinTheLimitPass) {
+  EXPECT_TRUE(check_frame_counts({{"cam_high", 603}, {"cam_low", 602}}, 600));
+  EXPECT_TRUE(check_frame_counts({{"cam_high", 600 + MAX_FRAME_COUNT_GAP}}, 600));
+  EXPECT_TRUE(check_frame_counts({}, 600));
+}
+
+TEST(CheckFrameCountsTest, ACameraThatRanLongFails) {
+  // Episode 1 of the stack_blocks recordings: the cameras started about 3.5 s early.
+  EXPECT_FALSE(check_frame_counts({{"cam_high", 711}, {"cam_low", 702}}, 601));
+}
+
+TEST(CheckFrameCountsTest, CamerasAreComparedWithEachOtherToo) {
+  // Each camera is within the limit of the rows, but not of the other camera.
+  EXPECT_FALSE(check_frame_counts({{"cam_high", 594}, {"cam_low", 606}}, 600));
 }

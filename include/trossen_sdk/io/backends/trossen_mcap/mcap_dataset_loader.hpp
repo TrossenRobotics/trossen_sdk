@@ -76,7 +76,8 @@ struct AlignmentOptions {
  * that.
  *
  * Fails when a stream's timestamps go backwards, when no stretch of time has data from
- * every stream, or when the rows dropped between the first and last kept row exceed
+ * every stream, when check_frame_counts() rejects the cameras' frame counts against the
+ * rows, or when the rows dropped between the first and last kept row exceed
  * `alignment.max_single_gap_ms` in any one gap or `alignment.max_gap_fraction` in total.
  *
  * Camera keys keep the name the recording gave them.
@@ -171,6 +172,24 @@ size_t video_start_offset(const CameraInfo& cam);
 /// @brief Most frames a row's image may be from the frame matched to it, about 100 ms at
 /// 30 fps. A stream-copied camera further off than this fails the episode.
 inline constexpr size_t MAX_VIDEO_DRIFT_FRAMES = 3;
+
+/// @brief Largest allowed difference between any two of an episode's camera frame counts
+/// and its row count, about 330 ms at 30 fps.
+inline constexpr size_t MAX_FRAME_COUNT_GAP = 10;
+
+/**
+ * @brief Check that every camera recorded about as many frames as the episode has rows
+ *
+ * Cameras run at the row rate, so a good episode's counts agree within a few frames. A
+ * camera far off missed part of the task, or recorded long before or after the other
+ * streams.
+ *
+ * @param camera_frames Frames each camera recorded, keyed by camera name
+ * @param rows Rows on the episode's grid
+ * @return False if the largest and smallest of the camera frame counts and @p rows differ by
+ *   more than MAX_FRAME_COUNT_GAP (message logged to stderr); true otherwise.
+ */
+bool check_frame_counts(const std::map<std::string, size_t>& camera_frames, size_t rows);
 
 /**
  * @brief Check that each camera's video can be paired with the rows by index
