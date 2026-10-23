@@ -56,7 +56,7 @@ def main():
           f"{mgr.stats().current_episode_index})")
 
     # Register producers
-    period_ms = int(1000.0 / joint_cfg.rate_hz)
+    period_ms = 1000.0 / joint_cfg.rate_hz
     mgr.add_producer(joint_producer, period_ms)
     mgr.add_producer(cam_producer, period_ms)
 

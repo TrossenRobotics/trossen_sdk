@@ -231,23 +231,6 @@ TEST(SchedulerTest, TaskStats_PeriodStored) {
   EXPECT_EQ(stats[0].period_ns, 33'000'000ULL);
 }
 
-// Test that add_task with uint32_t overload works
-TEST(SchedulerTest, AddTask_Uint32Overload) {
-  Scheduler sched;
-  std::atomic<int> counter{0};
-
-  sched.add_task(
-    [&counter]() { counter++; },
-    50,  // period_ms as uint32_t
-    Scheduler::TaskOptions{.name = "uint32_task"});
-
-  sched.start();
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  sched.stop();
-
-  EXPECT_GT(counter.load(), 0);
-}
-
 // Test overall scheduler stats track wake cycles.
 // NOTE: Known issue -- Scheduler::running_ is a plain bool read from two threads
 // (main thread and lane threads). This is a data race and should be std::atomic<bool>.
