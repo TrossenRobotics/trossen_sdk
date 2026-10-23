@@ -21,6 +21,7 @@
 
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_constants.hpp"
 #include "trossen_sdk/utils/depth_quantization.hpp"
+#include "trossen_sdk/utils/shell_quote.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_schema_utils.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_stats_utils.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_readme_utils.hpp"
@@ -333,7 +334,7 @@ bool LeRobotV3DatasetWriter::encode_episode_video(
   fs::path input_pattern = image_dir / "image_%06d.jpg";
   std::ostringstream cmd;
   cmd << "ffmpeg -y -loglevel error -framerate " << opts_.fps << " -start_number 0"
-      << " -i " << input_pattern.string() << " -frames:v " << frame_count
+      << " -i " << trossen::utils::shell_quote(input_pattern) << " -frames:v " << frame_count
       << " -c:v libsvtav1 -crf 30 -g 30 -preset 6";
   // SVT-AV1's level-of-parallelism. ffmpeg's -threads is silently ignored by this
   // encoder, so lp= is the only way to stop each concurrent worker's encoder from
@@ -343,7 +344,7 @@ bool LeRobotV3DatasetWriter::encode_episode_video(
   }
   // The output rate matches the row grid; -frames:v counts output frames, so any other
   // rate would cut the video short or drop frames.
-  cmd << " -pix_fmt yuv420p -r " << opts_.fps << " " << out_mp4.string();
+  cmd << " -pix_fmt yuv420p -r " << opts_.fps << " " << trossen::utils::shell_quote(out_mp4);
   int ret = std::system(cmd.str().c_str());
   if (ret != 0) {
     std::cerr << "Error: ffmpeg encode failed (exit " << ret << "): " << cmd.str() << "\n";
@@ -408,9 +409,10 @@ bool LeRobotV3DatasetWriter::encode_depth_video(
 
   std::ostringstream cmd;
   cmd << "ffmpeg -y -loglevel error -f rawvideo -pix_fmt gray12le -s " << width << "x" << height
-      << " -framerate " << opts_.fps << " -i " << raw_path.string() << " -frames:v " << frame_count
+      << " -framerate " << opts_.fps << " -i " << trossen::utils::shell_quote(raw_path)
+      << " -frames:v " << frame_count
       << " -c:v libx265 -x265-params " << x265_params.str() << " -pix_fmt gray12le -r "
-      << opts_.fps << " " << out_mp4.string();
+      << opts_.fps << " " << trossen::utils::shell_quote(out_mp4);
   int ret = std::system(cmd.str().c_str());
   std::error_code ec;
   fs::remove(raw_path, ec);
@@ -429,8 +431,8 @@ bool LeRobotV3DatasetWriter::remux_episode_video(
   // fills in the presentation timestamps the mp4 muxer needs.
   std::ostringstream cmd;
   cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << opts_.fps
-      << " -i " << annexb.string()
-      << " -c copy -movflags +faststart " << out_mp4.string();
+      << " -i " << trossen::utils::shell_quote(annexb)
+      << " -c copy -movflags +faststart " << trossen::utils::shell_quote(out_mp4);
   const int ret = std::system(cmd.str().c_str());
   if (ret != 0) {
     std::cerr << "Error: ffmpeg remux failed (exit " << ret << "): " << cmd.str() << "\n";
@@ -442,7 +444,7 @@ bool LeRobotV3DatasetWriter::remux_episode_video(
   std::ostringstream probe;
   probe << "ffprobe -v error -count_frames -select_streams v:0 "
         << "-show_entries stream=nb_read_frames -of default=nw=1:nk=1 "
-        << out_mp4.string();
+        << trossen::utils::shell_quote(out_mp4);
   FILE* pipe = popen(probe.str().c_str(), "r");
   if (!pipe) {
     std::cerr << "Warning: could not probe remuxed video " << out_mp4.string() << "\n";
@@ -478,9 +480,9 @@ std::vector<cv::Mat> LeRobotV3DatasetWriter::sample_video_frames(
   const size_t stride = std::max<size_t>(1, frame_count / kTargetSamples);
 
   std::ostringstream cmd;
-  cmd << "ffmpeg -y -loglevel error -i " << mp4.string()
+  cmd << "ffmpeg -y -loglevel error -i " << trossen::utils::shell_quote(mp4)
       << " -vf \"select='not(mod(n\\," << stride << "))'\" -vsync 0 -q:v 2 "
-      << (sample_dir / "sample_%04d.jpg").string();
+      << trossen::utils::shell_quote(sample_dir / "sample_%04d.jpg");
   if (std::system(cmd.str().c_str()) != 0) {
     std::cerr << "Warning: could not sample frames from " << mp4.string()
               << "; image stats for this camera will be based on fewer frames\n";
@@ -547,13 +549,13 @@ bool LeRobotV3DatasetWriter::place_or_concat_video(
   fs::path list_file = episode_mp4.parent_path() / "concat_list.txt";
   {
     std::ofstream lf(list_file);
-    lf << "file '" << st.path.string() << "'\n";
-    lf << "file '" << episode_mp4.string() << "'\n";
+    lf << "file " << trossen::utils::shell_quote(st.path) << "\n";
+    lf << "file " << trossen::utils::shell_quote(episode_mp4) << "\n";
   }
   fs::path tmp_out = episode_mp4.parent_path() / "concat_out.mp4";
   std::ostringstream cmd;
-  cmd << "ffmpeg -y -loglevel error -f concat -safe 0 -i " << list_file.string() << " -c copy "
-      << tmp_out.string();
+  cmd << "ffmpeg -y -loglevel error -f concat -safe 0 -i " << trossen::utils::shell_quote(list_file)
+      << " -c copy " << trossen::utils::shell_quote(tmp_out);
   int ret = std::system(cmd.str().c_str());
   if (ret != 0) {
     std::cerr << "Error: ffmpeg concat failed (exit " << ret << ")\n";

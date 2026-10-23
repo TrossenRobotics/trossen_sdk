@@ -50,6 +50,9 @@ target_link_libraries(test_lerobot_depth_utils PRIVATE trossen_sdk GTest::gtest_
 add_executable(test_depth_quantization test_depth_quantization.cpp)
 target_link_libraries(test_depth_quantization PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_shell_quote test_shell_quote.cpp)
+target_link_libraries(test_shell_quote PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_mcap_dataset_loader test_mcap_dataset_loader.cpp)
 target_link_libraries(test_mcap_dataset_loader PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -189,6 +192,7 @@ if(TROSSEN_ENABLE_REALSENSE)
 endif()
 gtest_discover_tests(test_lerobot_depth_utils)
 gtest_discover_tests(test_depth_quantization)
+gtest_discover_tests(test_shell_quote)
 gtest_discover_tests(test_mcap_dataset_loader)
 gtest_discover_tests(test_mcap_camera_extraction)
 if(TROSSEN_ENABLE_VIDEO_ENCODE)

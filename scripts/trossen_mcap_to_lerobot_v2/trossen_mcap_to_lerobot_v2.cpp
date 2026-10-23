@@ -53,6 +53,7 @@
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/configuration/types/backends/lerobot_v2_backend_config.hpp"
+#include "trossen_sdk/utils/shell_quote.hpp"
 
 /// @brief Name of this converter, credited in the generated dataset README
 constexpr char TOOL_NAME[] = "trossen_mcap_to_lerobot_v2";
@@ -1049,8 +1050,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
         // -r stamps container timestamps at the dataset rate; +genpts fills in
         // presentation timestamps the elementary stream itself doesn't carry.
         remux_cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << ep.fps << " -i "
-                  << vs.annexb_path.string() << " -c copy -movflags +faststart "
-                  << video_output.string();
+                  << trossen::utils::shell_quote(vs.annexb_path) << " -c copy -movflags +faststart "
+                  << trossen::utils::shell_quote(video_output);
 
         std::cout << "  Remuxing " << camera_name << " (" << vs.format << ")...";
         std::cout.flush();
@@ -1070,7 +1071,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
         std::ostringstream probe_cmd;
         probe_cmd << "ffprobe -v error -count_packets -select_streams v:0 "
                   << "-show_entries stream=nb_read_packets -of default=nw=1:nk=1 "
-                  << video_output.string();
+                  << trossen::utils::shell_quote(video_output);
         bool frame_count_ok = true;
         if (FILE* pipe = popen(probe_cmd.str().c_str(), "r")) {
           char buf[64] = {0};
@@ -1118,9 +1119,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       std::ostringstream ffmpeg_cmd;
       // Force output to exactly 30fps for perfect timestamp alignment
       ffmpeg_cmd << "ffmpeg -y -loglevel error -framerate " << ep.fps << " -start_number 0"
-                 << " -i " << input_pattern.string() << " -frames:v " << cnt_it->second
+                 << " -i " << trossen::utils::shell_quote(input_pattern)
+                 << " -frames:v " << cnt_it->second
                  << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p -r 30 "
-                 << video_output.string();
+                 << trossen::utils::shell_quote(video_output);
 
       std::cout << "  Encoding " << camera_name << "...";
       std::cout.flush();
