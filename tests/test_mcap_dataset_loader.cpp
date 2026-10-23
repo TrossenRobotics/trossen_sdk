@@ -20,9 +20,11 @@ using trossen::io::backends::AlignedEpisode;
 using trossen::io::backends::AlignmentOptions;
 using trossen::io::backends::CameraInfo;
 using trossen::io::backends::CameraVideoStream;
+using trossen::io::backends::check_video_alignment;
 using trossen::io::backends::clamp_episode_to_video_frame_counts;
 using trossen::io::backends::load_aligned_episode;
 using trossen::io::backends::McapChannelMap;
+using trossen::io::backends::MAX_VIDEO_DRIFT_FRAMES;
 
 namespace {
 
@@ -309,4 +311,31 @@ TEST(SummarizeGapsTest, ShortGapsAddUpPastTheFractionLimit) {
 TEST(RowsToMsTest, ConvertsRowsAtTheRowPeriod) {
   EXPECT_DOUBLE_EQ(trossen::io::backends::rows_to_ms(4, kGapPeriodNs), 200.0);
   EXPECT_DOUBLE_EQ(trossen::io::backends::rows_to_ms(0, kGapPeriodNs), 0.0);
+}
+
+TEST(CheckVideoAlignmentTest, StartOffsetCountsOnlyWhenTheWriterCannotApplyIt) {
+  constexpr size_t kLimit = MAX_VIDEO_DRIFT_FRAMES;
+  auto at_limit = episode_with_cameras(10, {{"cam_high", kLimit}});
+  EXPECT_TRUE(check_video_alignment(at_limit, {{"cam_high", stream_of(10 + kLimit)}}, false));
+
+  auto past_limit = episode_with_cameras(10, {{"cam_high", kLimit + 1}});
+  EXPECT_FALSE(check_video_alignment(past_limit, {{"cam_high", stream_of(11 + kLimit)}}, false));
+  EXPECT_TRUE(check_video_alignment(past_limit, {{"cam_high", stream_of(11 + kLimit)}}, true));
+}
+
+TEST(CheckVideoAlignmentTest, DroppedFramesAddUp) {
+  // Each dropped frame puts every later row one frame further from the frame it plays.
+  auto ep = episode_with_cameras(10, {{"cam_high", 0}});
+  auto& matched = ep.cameras[0].row_source_index;
+  for (size_t row = 5; row < matched.size(); ++row) matched[row] += MAX_VIDEO_DRIFT_FRAMES;
+  EXPECT_TRUE(check_video_alignment(ep, {{"cam_high", stream_of(13)}}, true));
+
+  matched.back() += 1;
+  EXPECT_FALSE(check_video_alignment(ep, {{"cam_high", stream_of(14)}}, true));
+}
+
+TEST(CheckVideoAlignmentTest, CamerasWithoutAVideoStreamAreSkipped) {
+  auto ep = episode_with_cameras(5, {{"cam_raw", 9}});
+  EXPECT_TRUE(check_video_alignment(ep, {}, false));
+  EXPECT_TRUE(check_video_alignment(ep, {{"cam_raw", stream_of(0)}}, false));
 }
