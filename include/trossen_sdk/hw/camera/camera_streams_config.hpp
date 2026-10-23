@@ -6,7 +6,6 @@
  #ifndef TROSSEN_SDK__HW__CAMERA__CAMERA_STREAMS_CONFIG_HPP
 #define TROSSEN_SDK__HW__CAMERA__CAMERA_STREAMS_CONFIG_HPP
 
-#include <cstdint>
 #include <limits>
 #include <sstream>
 #include <string>
@@ -134,17 +133,6 @@ struct CameraStreamsConfig {
       return fail("frame_rate out of supported range (1..1000)");
     }
     return true;
-  }
-
-  /**
-   * @brief Estimated frame period in nanoseconds (ceil division to avoid drift accumulation)
-   *
-   * @return Frame period in nanoseconds
-   */
-  uint64_t frame_period_ns() const {
-    // Use integer math: ceil(1e9 / fps) = (1e9 + fps - 1) / fps
-    const uint64_t fps = static_cast<uint64_t>(frame_rate);
-    return (1'000'000'000ULL + fps - 1ULL) / fps;
   }
 };
 
