@@ -5,6 +5,7 @@
  *        clamp_episode_to_video_frame_counts().
  */
 
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -20,8 +21,10 @@ using trossen::io::backends::AlignedEpisode;
 using trossen::io::backends::AlignmentOptions;
 using trossen::io::backends::CameraInfo;
 using trossen::io::backends::CameraVideoStream;
+using trossen::io::backends::check_frame_counts;
 using trossen::io::backends::check_video_alignment;
 using trossen::io::backends::clamp_episode_to_video_frame_counts;
+using trossen::io::backends::frames_in_row_window;
 using trossen::io::backends::load_aligned_episode;
 using trossen::io::backends::McapChannelMap;
 using trossen::io::backends::MAX_VIDEO_DRIFT_FRAMES;
@@ -351,4 +354,67 @@ TEST(CheckVideoAlignmentTest, CamerasWithoutAVideoStreamAreSkipped) {
   auto ep = episode_with_cameras(5, {{"cam_raw", 9}});
   EXPECT_TRUE(check_video_alignment(ep, {}, false));
   EXPECT_TRUE(check_video_alignment(ep, {{"cam_raw", stream_of(0)}}, false));
+}
+
+namespace {
+
+// Frame times at `fps` for `seconds`, starting at 0.
+std::vector<uint64_t> frames_at(double fps, double seconds) {
+  std::vector<uint64_t> stamps;
+  for (int i = 0; i <= static_cast<int>(fps * seconds); ++i) {
+    stamps.push_back(static_cast<uint64_t>(std::llround(i * 1e9 / fps)));
+  }
+  return stamps;
+}
+
+constexpr uint64_t kRowPeriodNs = 1'000'000'000 / 30;
+
+}  // namespace
+
+TEST(FramesInRowWindowTest, FramesBeforeAndAfterTheRowsAreNotCounted) {
+  // 3 s at 30 fps, against 31 rows from 1 s to 2 s.
+  const std::vector<uint64_t> stamps = frames_at(30.0, 3.0);
+  EXPECT_EQ(frames_in_row_window(stamps, 1'000'000'000, 2'000'000'000, kRowPeriodNs), 31u);
+}
+
+TEST(FramesInRowWindowTest, ASlowerCameraCountsFewerFrames) {
+  // 2 s at 15 fps is 31 frames, against 61 rows on a 30 Hz grid.
+  const size_t frames =
+    frames_in_row_window(frames_at(15.0, 2.0), 0, 2'000'000'000, kRowPeriodNs);
+  EXPECT_EQ(frames, 31u);
+}
+
+TEST(FramesInRowWindowTest, TheSpanIncludesItsStartAndExcludesItsEnd) {
+  // One row at 1 s: frames half a period before it count, half a period after it do not.
+  constexpr uint64_t kRow = 1'000'000'000;
+  constexpr uint64_t kHalf = kRowPeriodNs / 2;
+  EXPECT_EQ(frames_in_row_window({kRow - kHalf, kRow + kHalf - 1, kRow + kHalf}, kRow, kRow,
+                                 kRowPeriodNs),
+            2u);
+}
+
+TEST(CheckFrameCountsTest, CountsWithinTheLimitPass) {
+  // 20 s at 30 fps promises 600 frames; 2% is 12.
+  EXPECT_TRUE(check_frame_counts({{"cam_high", {600, 30.0}}, {"cam_low", {589, 30.0}}}, 20.0,
+                                 0.02));
+  EXPECT_TRUE(check_frame_counts({}, 20.0, 0.02));
+}
+
+// A short episode can count one frame fewer than fps * span_s without losing any:
+// 16 rows at 30 Hz span 0.533 s, about 32 frames at 60 fps, and the window held 31.
+TEST(CheckFrameCountsTest, AShortEpisodeMayCountOneFrameLess) {
+  EXPECT_TRUE(check_frame_counts({{"cam_high", {31, 60.0}}}, 16.0 / 30.0, 0.02));
+  EXPECT_FALSE(check_frame_counts({{"cam_high", {30, 60.0}}}, 16.0 / 30.0, 0.02));
+}
+
+TEST(CheckFrameCountsTest, ACameraThatLostFramesFails) {
+  // One frame lost in ten.
+  EXPECT_FALSE(check_frame_counts({{"cam_high", {540, 30.0}}}, 20.0, 0.02));
+}
+
+// A camera recorded slower than the rows is measured against its own fps, not the row rate.
+TEST(CheckFrameCountsTest, ASlowerCameraIsMeasuredAgainstItsOwnRate) {
+  EXPECT_TRUE(check_frame_counts({{"cam_depth", {300, 15.0}}, {"cam_high", {600, 30.0}}}, 20.0,
+                                 0.02));
+  EXPECT_FALSE(check_frame_counts({{"cam_depth", {300, 30.0}}}, 20.0, 0.02));
 }
