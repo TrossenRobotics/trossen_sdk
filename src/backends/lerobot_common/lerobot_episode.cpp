@@ -81,8 +81,70 @@ int episode_obs_dim(const AlignedEpisode& ep, const DatasetSignalOptions& signal
 nlohmann::ordered_json build_features(
   const AlignedEpisode& ep,
   const DatasetSignalOptions& signals) {
-  // TODO(shantanuparab-tr): implement the LeRobot `features` schema construction.
-  return nlohmann::ordered_json::object();
+  nlohmann::ordered_json features;
+
+  // Joint names follow the lerobot_trossen robot classes: `<side>_joint_<i>`, with the
+  // gripper (last joint) named `<side>_left_carriage_joint`. Each name gets a `.pos`, `.vel`
+  // or `.eff` suffix for the value it labels.
+  auto joint_stems = [](const std::string& stream_id, int n) {
+    std::vector<std::string> stems;
+    const std::string side = stream_side(stream_id);
+    const std::string prefix = side.empty() ? "" : side + "_";
+    for (int i = 0; i < n; ++i) {
+      stems.push_back(i == n - 1 ? prefix + "left_carriage_joint"
+                                 : prefix + "joint_" + std::to_string(i));
+    }
+    return stems;
+  };
+
+  // The base block, in the order load_aligned_episode() appends it.
+  std::vector<std::string> base_names = {"linear_vel", "angular_vel"};
+  if (ep.dataset_info.contains("base_velocity_names")) {
+    base_names = ep.dataset_info["base_velocity_names"].get<std::vector<std::string>>();
+  }
+  if (signals.base_lateral_velocity) base_names.push_back("lateral_vel");
+  if (signals.base_pose) {
+    base_names.push_back("pose_x");
+    base_names.push_back("pose_y");
+    base_names.push_back("pose_theta");
+  }
+
+  // observation.state (followers)
+  nlohmann::json obs_names = nlohmann::json::array();
+  for (const auto& follower_stream : ep.follower_streams) {
+    const auto stems = joint_stems(follower_stream, ep.joints_per_stream);
+    for (const auto& s : stems) obs_names.push_back(s + ".pos");
+    if (signals.joint_velocity) {
+      for (const auto& s : stems) obs_names.push_back(s + ".vel");
+    }
+    if (signals.joint_effort) {
+      for (const auto& s : stems) obs_names.push_back(s + ".eff");
+    }
+  }
+  if (ep.has_mobile_base) {
+    for (const auto& n : base_names) obs_names.push_back(n);
+  }
+  features["observation.state"]["dtype"] = "float32";
+  features["observation.state"]["shape"] = nlohmann::json::array({episode_obs_dim(ep, signals)});
+  features["observation.state"]["names"] = obs_names;
+
+  // action (leaders)
+  nlohmann::json action_names = nlohmann::json::array();
+  for (const auto& leader_stream : ep.leader_streams) {
+    for (const auto& s : joint_stems(leader_stream, ep.joints_per_stream)) {
+      action_names.push_back(s + ".pos");
+    }
+  }
+  if (ep.has_mobile_base) {
+    for (const auto& n : base_names) action_names.push_back(n);
+  }
+  features["action"]["dtype"] = "float32";
+  features["action"]["shape"] = nlohmann::json::array({episode_action_dim(ep, signals)});
+  features["action"]["names"] = action_names;
+
+  // TODO(shantanuparab-tr): add the observation.images.<camera> video features.
+
+  return features;
 }
 
 }  // namespace trossen::io::backends
