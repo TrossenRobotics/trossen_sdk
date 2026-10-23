@@ -359,9 +359,13 @@ set(TROSSEN_PROTO_FILES
   ${TROSSEN_PROTO_PATH}/RobotDescription.proto
   ${TROSSEN_PROTO_PATH}/Timestamp.proto
   ${TROSSEN_PROTO_PATH}/CompressedVideo.proto
+  ${TROSSEN_PROTO_PATH}/FrameMeta.proto
 )
 
-# Generate protobuf files with proper import paths
+# Generate protobuf files with proper import paths.
+# FrameMeta.proto uses proto3 `optional` fields. protoc 3.12 to 3.14, which is what
+# Ubuntu 22.04 ships, rejects them without --experimental_allow_proto3_optional;
+# 3.15 and newer accept the flag and ignore it.
 foreach(PROTO_FILE ${TROSSEN_PROTO_FILES})
   get_filename_component(PROTO_NAME ${PROTO_FILE} NAME_WE)
   set(PROTO_SRC ${CMAKE_CURRENT_BINARY_DIR}/${PROTO_NAME}.pb.cc)
@@ -371,6 +375,7 @@ foreach(PROTO_FILE ${TROSSEN_PROTO_FILES})
     COMMAND ${Protobuf_PROTOC_EXECUTABLE}
     ARGS --cpp_out=${CMAKE_CURRENT_BINARY_DIR}
          --proto_path=${TROSSEN_PROTO_PATH}
+         --experimental_allow_proto3_optional
          ${PROTO_FILE}
     DEPENDS ${PROTO_FILE}
     COMMENT "Running cpp protocol buffer compiler on ${PROTO_FILE}"

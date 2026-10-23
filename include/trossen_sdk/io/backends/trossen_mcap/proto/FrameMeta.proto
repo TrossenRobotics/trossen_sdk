@@ -1,0 +1,33 @@
+syntax = "proto3";
+package trossen_sdk.msg;
+
+import "Timestamp.proto";
+
+// Per-frame timing for one camera stream, written on <camera>/meta alongside the
+// image or video topic.
+//
+// The image topics use Foxglove schemas, which carry a single timestamp field and so
+// cannot hold a device capture time. This message carries the full clock set for the
+// same frame. It is written only for frames that reached the image topic, so readers
+// join it to the image stream on frame_index.
+message FrameMeta {
+  // Timestamps for this frame: host delivery clocks plus the device capture clock
+  trossen_sdk.Timestamp ts = 1;
+
+  // Producer sequence number. Counts every frame the producer emitted since it started,
+  // across episodes and including frames dropped before recording, so it is not a
+  // position in this episode's stream; a jump shows frames lost upstream.
+  uint64 seq = 2;
+
+  // Stream the frame belongs to, matching the camera name in the image topic
+  string stream_id = 3;
+
+  // Position of the frame in this episode's recorded stream, starting at zero. The nth
+  // frame on the image topic, and the nth frame of a video stream decoded from it.
+  uint64 frame_index = 4;
+
+  // The camera's own frame counter, present only when the camera reports one. It
+  // increments once per captured frame, so a jump of more than one between consecutive
+  // messages means frames were lost on the camera side, whatever the host clocks show.
+  optional uint64 device_frame_number = 5;
+}
