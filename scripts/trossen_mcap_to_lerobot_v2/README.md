@@ -3,6 +3,10 @@
 Converts TrossenMCAP episode files (`.mcap`) to LeRobot V2 format (Parquet + MP4) for use
 with the [LeRobot](https://github.com/huggingface/lerobot) training framework.
 
+> **Rivet recordings are not supported yet.** They convert, with a warning, but only for
+> inspection: the base keeps its linear and angular velocity and drops the lateral
+> velocity and the lift, and no LeRobot robot can train on or replay the result.
+
 ---
 
 ## Building
