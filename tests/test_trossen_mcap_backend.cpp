@@ -461,5 +461,56 @@ TEST_F(TrossenMCAPBackendTest, RecordsDepthPlaneAsLosslessVideoChannel) {
     (std::istreambuf_iterator<char>(mcap_file)), std::istreambuf_iterator<char>());
   EXPECT_NE(contents.find("h264"), std::string::npos) << "color channel should be h264";
   EXPECT_NE(contents.find("h265"), std::string::npos) << "depth channel should be h265";
+  // Video depth holds metric codes, so the sensor's raw unit is not recorded with it.
+  EXPECT_EQ(contents.find("depth_scale_m"), std::string::npos)
+    << "video depth channel should not carry depth_scale_m";
+}
+
+// Raw depth is stored in the sensor's own unit, so its channel must record that unit's
+// size for a reader to convert it to millimeters.
+TEST_F(TrossenMCAPBackendTest, RecordsDepthScaleForRawDepth) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "raw_depth_scale_test";
+  cfg->image_encoding = "raw";
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  trossen::data::ImageRecord img;
+  img.id = "cam_rgbd";
+  img.width = 64;
+  img.height = 48;
+  img.channels = 3;
+  img.encoding = "bgr8";
+  img.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+  img.depth_image = cv::Mat(48, 64, CV_16UC1, cv::Scalar(6000));
+  img.depth_scale = 0.0001f;  // D405: 0.1 mm per unit
+
+  backend->write(img);
+  backend->close();
+
+  std::filesystem::path mcap_path;
+  for (const auto& entry : std::filesystem::directory_iterator(episode_dir)) {
+    if (entry.path().extension() == ".mcap") {
+      mcap_path = entry.path();
+      break;
+    }
+  }
+  ASSERT_FALSE(mcap_path.empty());
+  std::ifstream mcap_file(mcap_path, std::ios::binary);
+  const std::string contents(
+    (std::istreambuf_iterator<char>(mcap_file)), std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("depth_scale_m"), std::string::npos);
+  EXPECT_NE(contents.find("0.000100"), std::string::npos);
 }
 #endif  // TROSSEN_ENABLE_VIDEO_ENCODE

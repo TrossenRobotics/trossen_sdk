@@ -690,14 +690,17 @@ bool TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
       }
       return false;
     }
-    if (depth_quant_lut_.empty()) {
-      depth_quant_lut_ = utils::build_depth_quantization_lut();
+    // Codes are metric, so each stream's table is built for its own raw unit.
+    std::vector<uint16_t>& lut = depth_quant_luts_[img.id];
+    if (lut.empty()) {
+      lut = utils::build_depth_quantization_lut(
+        img.depth_scale.value_or(static_cast<float>(utils::DEFAULT_DEPTH_SCALE_M)));
     }
     source.create(img.image.rows, img.image.cols, CV_16UC1);
     for (int y = 0; y < img.image.rows; ++y) {
       const uint16_t* src = img.image.ptr<uint16_t>(y);
       uint16_t* dst = source.ptr<uint16_t>(y);
-      for (int x = 0; x < img.image.cols; ++x) dst[x] = depth_quant_lut_[src[x]];
+      for (int x = 0; x < img.image.cols; ++x) dst[x] = lut[src[x]];
     }
   } else {
     // The encoder converts BGR to YUV itself, so anything else is normalized
@@ -780,24 +783,27 @@ bool TrossenMCAPBackend::write_image_frame(const data::ImageRecord& img, bool de
                                  depth ? &stats_.depth_images_written : &stats_.images_written);
 }
 
+void TrossenMCAPBackend::add_depth_scale_metadata(
+  const data::ImageRecord& img, std::unordered_map<std::string, std::string>& md) const {
+  // Raw depth is stored in the sensor's unit, so readers need its size. Video depth is
+  // quantized to metric codes on the way in, so the raw unit does not describe it.
+  if (img.depth_scale.has_value() && !(cfg_ && cfg_->records_video())) {
+    md["depth_scale_m"] = std::to_string(img.depth_scale.value());
+  }
+}
+
 void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
   // Determine if this is a depth frame based on encoding or topic
   const bool depth =
     is_depth_encoding(img.encoding) || is_depth_topic(trossen_mcap_defs::image_topic(img.id));
   foxglove::RawChannel* channel = nullptr;
   if (depth) {
-    // Depth metadata; attempt to parse scale if provided in encoding (future) - for now leave
-    // blank
-    //
-    // We cannot know depth_scale_m here without augmenting ImageRecord; future extension could
-    // pass via id pattern.
-    //
-    // Minimal metadata: stream_type + semantics if derivable from encoding.
+    // Minimal metadata: stream_type, semantics if derivable from encoding, and the raw unit.
     std::unordered_map<std::string, std::string> md;
     md["stream_type"] = "depth";
+    add_depth_scale_metadata(img, md);
     if (img.encoding == "depth16") {
       md["depth_encoding_semantics"] = "uint16_scaled";
-      // depth_scale_m left to producer-specific channel creation path later when available
     } else if (img.encoding == "32FC1") {
       md["depth_encoding_semantics"] = "float_m";
     }
@@ -821,9 +827,7 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
     std::unordered_map<std::string, std::string> md;
     md["stream_type"] = "depth";
     md["depth_encoding"] = "16UC1";
-    if (img.depth_scale.has_value()) {
-      md["depth_scale_m"] = std::to_string(img.depth_scale.value());
-    }
+    add_depth_scale_metadata(img, md);
 
     foxglove::RawChannel* depth_channel = ensure_image_channel_with_metadata(depth_topic_id, md);
     if (depth_channel) {

@@ -307,6 +307,18 @@ private:
   bool write_image_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
 
   /**
+   * @brief Add `depth_scale_m` (meters per raw depth unit) to a depth channel's metadata
+   *
+   * Only for raw images: video depth is stored as metric codes, which the raw unit does not
+   * describe.
+   *
+   * @param img Image record carrying the producer's depth scale, if any
+   * @param md Channel metadata to add the entry to
+   */
+  void add_depth_scale_metadata(
+    const data::ImageRecord& img, std::unordered_map<std::string, std::string>& md) const;
+
+  /**
    * @brief Write a joint state record
    *
    * @param js Joint state record to write
@@ -364,8 +376,9 @@ private:
   /// @brief Cameras already reported as failing to encode
   std::unordered_map<std::string, bool> video_encode_failed_;
 
-  /// @brief Lookup table for depth quantization, built lazily on first depth frame
-  std::vector<uint16_t> depth_quant_lut_;
+  /// @brief Depth quantization table per stream id, built lazily on the stream's first frame
+  ///        for that stream's own depth unit (ImageRecord::depth_scale).
+  std::unordered_map<std::string, std::vector<uint16_t>> depth_quant_luts_;
 
   /// @brief Helper to identify depth topics
   static bool is_depth_topic(const std::string& topic);
