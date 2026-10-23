@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <iostream>
 #include <limits>
 #include <stdexcept>
@@ -137,16 +138,27 @@ std::vector<int> sample_indices(
   int max_samples,
   float power)
 {
-  // Calculate the number of samples based on the power law
-  // Clamp the number of samples between min_samples and max_samples
-  int num_samples = std::clamp(
-    static_cast<int>(std::pow(dataset_len, power)),
-    min_samples,
-    max_samples);
+  if (dataset_len <= 0) return {};
+
+  // LeRobot's estimate_num_samples(): dataset_len^power clamped to
+  // [min_samples, max_samples], where min_samples drops to dataset_len for a short
+  // dataset so no frame is sampled twice.
+  const int lower = std::min(min_samples, dataset_len);
+  const int by_power = static_cast<int>(
+    std::pow(static_cast<double>(dataset_len), static_cast<double>(power)));
+  const int num_samples = std::max(lower, std::min(by_power, max_samples));
 
   std::vector<int> indices(num_samples);
-  float step = static_cast<float>(dataset_len - 1) / (num_samples - 1);
-  for (int i = 0; i < num_samples; ++i) indices[i] = std::round(i * step);
+  if (num_samples == 1) {
+    indices[0] = 0;
+    return indices;
+  }
+  // np.round(np.linspace(0, dataset_len - 1, num_samples)). np.round rounds halves to
+  // even, as std::nearbyint does under the default rounding mode.
+  const double step = static_cast<double>(dataset_len - 1) / (num_samples - 1);
+  for (int i = 0; i < num_samples; ++i) {
+    indices[i] = static_cast<int>(std::nearbyint(i * step));
+  }
   return indices;
 }
 
@@ -155,16 +167,25 @@ cv::Mat auto_downsample(
   int target_size,
   int max_threshold)
 {
-  int h = img.rows;
-  int w = img.cols;
+  const int h = img.rows;
+  const int w = img.cols;
   // If the larger dimension is already below the max threshold, return the original image
-  if (std::max(w, h) < max_threshold) return img;
-  // Calculate the downsampling factor to make the larger dimension equal to target_size
-  float factor = (w > h) ? (w / static_cast<float>(target_size))
-                        : (h / static_cast<float>(target_size));
-  // Downsample the image using area interpolation for better quality
-  cv::Mat downsampled;
-  cv::resize(img, downsampled, {}, 1.0 / factor, 1.0 / factor, cv::INTER_AREA);
+  if (std::max(w, h) < max_threshold || target_size <= 0) return img;
+
+  // LeRobot keeps every factor-th row and column (img[:, ::factor, ::factor]) rather than
+  // interpolating, with factor = larger side // target_size.
+  const int factor = std::max(w, h) / target_size;
+  if (factor <= 1) return img;
+  cv::Mat downsampled((h + factor - 1) / factor, (w + factor - 1) / factor, img.type());
+  const size_t pixel_bytes = img.elemSize();
+  for (int y = 0; y < downsampled.rows; ++y) {
+    const uchar *src = img.ptr(y * factor);
+    uchar *dst = downsampled.ptr(y);
+    for (int x = 0; x < downsampled.cols; ++x) {
+      std::memcpy(dst + x * pixel_bytes, src + static_cast<size_t>(x) * factor * pixel_bytes,
+                  pixel_bytes);
+    }
+  }
   return downsampled;
 }
 
