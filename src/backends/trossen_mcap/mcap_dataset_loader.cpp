@@ -605,6 +605,19 @@ bool load_aligned_episode(
             << static_cast<double>(span_ns) / static_cast<double>(data::S_TO_NS) << " s ("
             << row_times.size() << " rows)\n";
 
+  std::map<std::string, CameraFrameCount> camera_frames;
+  for (const auto& cam : out.cameras) {
+    camera_frames[cam.name] = {
+      frames_in_row_window(camera_timestamps[cam.name], row_times.front(), row_times.back(),
+                           row_period_ns),
+      info.at("cameras").at(cam.name).at("fps").get<double>()};
+  }
+  const double span_s = static_cast<double>(row_times.size() * row_period_ns) /
+                        static_cast<double>(data::S_TO_NS);
+  if (!check_frame_counts(camera_frames, span_s, alignment.max_missing_frame_fraction)) {
+    return false;
+  }
+
   const size_t max_rows = row_times.size();
   for (auto& cam : out.cameras) cam.row_source_index.reserve(max_rows);
 
@@ -1206,6 +1219,37 @@ bool extract_camera_video(
     std::cout << "\n";
   }
   return true;
+}
+
+size_t frames_in_row_window(const std::vector<uint64_t>& stamps, uint64_t first_row_ns,
+                            uint64_t last_row_ns, uint64_t row_period_ns) {
+  const uint64_t half = row_period_ns / 2;
+  const uint64_t from = first_row_ns > half ? first_row_ns - half : 0;
+  const uint64_t to = last_row_ns + half;
+  return static_cast<size_t>(std::lower_bound(stamps.begin(), stamps.end(), to) -
+                             std::lower_bound(stamps.begin(), stamps.end(), from));
+}
+
+// A camera that loses frames still has one near most rows, so the row gap limits pass it,
+// and the rows around each lost frame repeat an image. This check catches it.
+bool check_frame_counts(const std::map<std::string, CameraFrameCount>& cameras, double span_s,
+                        double max_missing_fraction) {
+  std::ostringstream report;
+  for (const auto& [camera, count] : cameras) {
+    const double expected = count.fps * span_s;
+    const double missing = expected - static_cast<double>(count.frames);
+    // Frames are counted over whole row periods, so where the first frame falls relative to
+    // the grid can leave one frame out of the window without any being lost
+    if (expected <= 0.0 || missing <= std::max(expected * max_missing_fraction, 1.0)) continue;
+    report << "Error: " << camera << " recorded " << count.frames << " frames over " << span_s
+           << " s at " << count.fps << " fps, " << (missing / expected * 100.0)
+           << "% short of the " << expected << " expected (limit "
+           << max_missing_fraction * 100.0 << "%); the camera dropped frames or ran slower "
+           << "than its fps, so rows would repeat images\n";
+  }
+  // One write, so concurrently loaded episodes do not interleave their lines.
+  std::cerr << report.str();
+  return report.str().empty();
 }
 
 size_t video_start_offset(const CameraInfo& cam) {
