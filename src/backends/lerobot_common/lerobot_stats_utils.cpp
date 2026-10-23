@@ -12,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
+#include <type_traits>
 
 #include <arrow/api.h>
 #include <opencv2/imgcodecs.hpp>
@@ -69,6 +70,63 @@ double numeric_at(const arrow::Array &array, int64_t i) {
       throw std::invalid_argument("stats: values must be float, double or int64, got " +
                                   array.type()->ToString());
   }
+}
+
+/**
+ * @brief Per-dimension statistics over the rows of a list column.
+ *
+ * Rows are read through their own offsets, so a sliced array is handled. Every non-null
+ * row must hold the same number of values, none of them null.
+ *
+ * @tparam ListArrayT arrow::ListArray or arrow::FixedSizeListArray.
+ */
+template <typename ListArrayT>
+nlohmann::ordered_json list_stats(const ListArrayT &lists, const char *caller) {
+  const std::shared_ptr<arrow::Array> values = lists.values();
+
+  int64_t dim = -1;
+  int64_t rows = 0;
+  std::vector<RunningStats> per_dim;
+  // A fixed-size list declares its width, so the stats keep that shape with no rows.
+  if constexpr (std::is_same_v<ListArrayT, arrow::FixedSizeListArray>) {
+    dim = lists.list_type()->list_size();
+    per_dim.resize(static_cast<size_t>(dim));
+  }
+  for (int64_t r = 0; r < lists.length(); ++r) {
+    if (lists.IsNull(r)) continue;
+    const int64_t len = lists.value_length(r);
+    if (dim < 0) {
+      dim = len;
+      per_dim.resize(static_cast<size_t>(dim));
+    } else if (len != dim) {
+      throw std::invalid_argument(std::string(caller) + ": row " + std::to_string(r) + " holds " +
+                                  std::to_string(len) + " values but earlier rows hold " +
+                                  std::to_string(dim));
+    }
+    const int64_t start = lists.value_offset(r);
+    for (int64_t k = 0; k < len; ++k) {
+      // Every dimension shares the row count, so a row missing a value cannot be counted.
+      if (values->IsNull(start + k)) {
+        throw std::invalid_argument(std::string(caller) + ": row " + std::to_string(r) +
+                                    " holds a null value");
+      }
+      per_dim[static_cast<size_t>(k)].add(numeric_at(*values, start + k));
+    }
+    ++rows;
+  }
+
+  std::vector<double> min_val, max_val, mean, stddev;
+  for (const auto &s : per_dim) {
+    min_val.push_back(s.min());
+    max_val.push_back(s.max());
+    mean.push_back(s.mean());
+    stddev.push_back(s.stddev());
+  }
+  return {{"min", min_val},
+          {"max", max_val},
+          {"mean", mean},
+          {"std", stddev},
+          {"count", {rows}}};
 }
 
 }  // namespace
@@ -225,101 +283,13 @@ nlohmann::ordered_json compute_flat_stats(
 nlohmann::ordered_json compute_list_stats(
   const std::shared_ptr<arrow::ListArray> &list_array)
 {
-  // Get the values array from the ListArray
-  // Handle both Float and Double arrays
-  auto values_array = list_array->values();
-
-  // Calculate the number of lists and the dimension of each list
-  int64_t list_count = list_array->length();
-  int64_t value_count = values_array->length();
-  int64_t dim = list_count > 0 ? value_count / list_count : 0;
-
-  // Initialize statistics vectors
-  std::vector<double> sum(dim, 0.0), sum_sq(dim, 0.0),
-      min_val(dim, std::numeric_limits<double>::max()),
-      max_val(dim, std::numeric_limits<double>::lowest());
-
-  // Iterate over the values and compute statistics for each dimension
-  for (int64_t i = 0; i < value_count; ++i) {
-    double val = 0.0;
-
-    // Handle both Float32 and Float64 types
-    if (values_array->type_id() == arrow::Type::FLOAT) {
-      val = static_cast<double>(
-          std::static_pointer_cast<arrow::FloatArray>(values_array)->Value(i));
-    } else if (values_array->type_id() == arrow::Type::DOUBLE) {
-      val = std::static_pointer_cast<arrow::DoubleArray>(values_array)->Value(i);
-    } else {
-      // Unsupported type, skip
-      continue;
-    }
-
-    int d = i % dim;
-    min_val[d] = std::min(min_val[d], val);
-    max_val[d] = std::max(max_val[d], val);
-    sum[d] += val;
-    sum_sq[d] += val * val;
-  }
-
-  std::vector<double> mean(dim), stddev(dim);
-  // Compute mean and standard deviation for each dimension
-  for (int d = 0; d < dim; ++d) {
-    mean[d] = sum[d] / list_count;
-    // Handle edge case where all values are zero and standard deviation can be NaN
-    double variance = (sum_sq[d] / list_count) - (mean[d] * mean[d]);
-    stddev[d] = (list_count > 0 && variance >= 0.0) ? std::sqrt(variance) : 0.0;
-  }
-
-  return {{"min", min_val},
-          {"max", max_val},
-          {"mean", mean},
-          {"std", stddev},
-          {"count", {list_count}}};
+  return list_stats(*list_array, "compute_list_stats");
 }
 
 nlohmann::ordered_json compute_fixed_size_list_stats(
   const std::shared_ptr<arrow::FixedSizeListArray> &fixed_list_array)
 {
-  auto values_array = fixed_list_array->values();
-
-  int64_t list_count = fixed_list_array->length();
-  int64_t value_count = values_array->length();
-  int64_t dim = list_count > 0 ? value_count / list_count : 0;
-
-  std::vector<double> sum(dim, 0.0), sum_sq(dim, 0.0),
-      min_val(dim, std::numeric_limits<double>::max()),
-      max_val(dim, std::numeric_limits<double>::lowest());
-
-  // Iterate and compute stats
-  for (int64_t i = 0; i < value_count; ++i) {
-    double val = 0.0;
-    // Handle different numeric types (float and double)
-    if (values_array->type_id() == arrow::Type::FLOAT) {
-      val = static_cast<double>(
-          std::static_pointer_cast<arrow::FloatArray>(values_array)->Value(i));
-    } else if (values_array->type_id() == arrow::Type::DOUBLE) {
-      val = std::static_pointer_cast<arrow::DoubleArray>(values_array)->Value(i);
-    }
-
-    int d = i % dim;
-    min_val[d] = std::min(min_val[d], val);
-    max_val[d] = std::max(max_val[d], val);
-    sum[d] += val;
-    sum_sq[d] += val * val;
-  }
-  // Compute mean and standard deviation for each dimension
-  std::vector<double> mean(dim), stddev(dim);
-  for (int d = 0; d < dim; ++d) {
-    mean[d] = sum[d] / list_count;
-    double variance = (sum_sq[d] / list_count) - (mean[d] * mean[d]);
-    stddev[d] = (list_count > 0 && variance >= 0.0) ? std::sqrt(variance) : 0.0;
-  }
-  // Store stats in JSON
-  return {{"min", min_val},
-          {"max", max_val},
-          {"mean", mean},
-          {"std", stddev},
-          {"count", {list_count}}};
+  return list_stats(*fixed_list_array, "compute_fixed_size_list_stats");
 }
 
 }  // namespace trossen::io::backends
