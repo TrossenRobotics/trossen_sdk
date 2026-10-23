@@ -933,7 +933,10 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
     // camera actually covers (shared with the v3 converter).
     trossen::io::backends::clamp_episode_to_video_frame_counts(ep, copied_streams,
                                                                 /*start_offset_applied=*/false);
-    trossen::io::backends::warn_video_start_offset(ep, copied_streams);
+    if (!trossen::io::backends::check_video_alignment(ep, copied_streams,
+                                                      /*start_offset_applied=*/false)) {
+      return false;
+    }
 
     for (const auto& cam : ep.cameras) {
       const auto vs_it = video_streams.find(cam.name);
