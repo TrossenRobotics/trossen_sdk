@@ -100,7 +100,7 @@ def main():
           f"{mgr.stats().current_episode_index})")
 
     for prod_cfg in cfg.producers:
-        period_ms = int(1000.0 / prod_cfg.poll_rate_hz)
+        period_ms = 1000.0 / prod_cfg.poll_rate_hz
 
         if prod_cfg.type == "trossen_arm":
             prod = ts.ProducerRegistry.create(
