@@ -92,7 +92,7 @@ public:
    */
   void add_producer(
     std::shared_ptr<hw::PolledProducer> producer,
-    std::chrono::milliseconds poll_period,
+    std::chrono::nanoseconds poll_period,
     const Scheduler::TaskOptions& opts = {});
 
   /**
@@ -559,7 +559,7 @@ private:
   /// @brief Producer registration info
   struct ProducerTask {
     std::shared_ptr<hw::PolledProducer> producer;
-    std::chrono::milliseconds period;
+    std::chrono::nanoseconds period;
     Scheduler::TaskOptions opts;
   };
 
