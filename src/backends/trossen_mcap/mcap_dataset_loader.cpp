@@ -1439,7 +1439,7 @@ size_t video_start_offset(const CameraInfo& cam) {
   return cam.row_source_index.empty() ? 0 : cam.row_source_index.front();
 }
 
-void report_unaligned_video_streams(
+bool check_video_alignment(
   const AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams,
   bool start_offset_applied) {
   // A video stream is copied out packet by packet in recording order, starting at the
@@ -1451,6 +1451,7 @@ void report_unaligned_video_streams(
   // downstream can tell.
   // Episodes are prepared concurrently, so each message is built locally and written in
   // one call.
+  bool aligned = true;
   for (const auto& cam : ep.cameras) {
     auto it = video_streams.find(cam.name);
     if (it == video_streams.end() || it->second.frame_count == 0) continue;
@@ -1476,8 +1477,22 @@ void report_unaligned_video_streams(
         break;
       }
     }
-    // Row n plays frame played_start + n.
+    // Row n plays frame played_start + n; how far that lands from the frame it matched.
     const size_t played_start = start_offset_applied ? offset : 0;
+    size_t drift = 0;
+    for (size_t row = 0; row < cam.row_source_index.size(); ++row) {
+      const size_t matched = cam.row_source_index[row];
+      const size_t played = played_start + row;
+      drift = std::max(drift, matched > played ? matched - played : played - matched);
+    }
+    if (drift > MAX_VIDEO_DRIFT_FRAMES) {
+      std::ostringstream msg;
+      msg << "Error: episode " << ep.episode_index << " " << cam.name
+          << " video plays frames up to " << drift << " away from the ones matched to its rows"
+          << " (limit " << MAX_VIDEO_DRIFT_FRAMES << "); failing the episode\n";
+      std::cerr << msg.str();
+      aligned = false;
+    }
 
     // Frames after the last row's are never played, so they do not move any row's image.
     const size_t covered = ep.frames.size() + played_start;
@@ -1499,6 +1514,7 @@ void report_unaligned_video_streams(
         << " there, so the images drift from the joint data.\n";
     std::cerr << msg.str();
   }
+  return aligned;
 }
 
 void clamp_episode_to_video_frame_counts(

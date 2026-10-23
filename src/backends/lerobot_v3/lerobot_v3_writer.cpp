@@ -862,7 +862,11 @@ try {
     }
 
     clamp_episode_to_video_frame_counts(out.ep, video_streams, /*start_offset_applied=*/true);
-    report_unaligned_video_streams(out.ep, video_streams, /*start_offset_applied=*/true);
+    if (!check_video_alignment(out.ep, video_streams, /*start_offset_applied=*/true)) {
+      std::error_code ec;
+      fs::remove_all(out.tmp_dir, ec);
+      return out;  // ok == false
+    }
 
     for (const auto& cam : out.ep.cameras) {
       auto vs_it = video_streams.find(cam.name);

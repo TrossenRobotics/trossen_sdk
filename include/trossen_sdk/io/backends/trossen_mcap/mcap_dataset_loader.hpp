@@ -300,8 +300,12 @@ bool extract_camera_video(
  */
 size_t video_start_offset(const CameraInfo& cam);
 
+/// @brief Most frames a row's image may be from the frame matched to it, about 100 ms at
+/// 30 fps. A stream-copied camera further off than this fails the episode.
+inline constexpr size_t MAX_VIDEO_DRIFT_FRAMES = 3;
+
 /**
- * @brief Warn when a camera's video cannot be paired with the rows by index
+ * @brief Check that each camera's video can be paired with the rows by index
  *
  * Stream-copied video is written in recording order starting at the camera's first frame.
  * When the writer moves each video's start to the frame matched to row 0 (LeRobot v3 does
@@ -314,8 +318,10 @@ size_t video_start_offset(const CameraInfo& cam);
  * @param video_streams Extracted video streams keyed by camera name
  * @param start_offset_applied Whether the writer starts each video at the frame matched
  *   to row 0
+ * @return False if some row plays a frame more than MAX_VIDEO_DRIFT_FRAMES from the frame
+ *   matched to it (message logged to stderr); true otherwise.
  */
-void report_unaligned_video_streams(
+bool check_video_alignment(
   const AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams,
   bool start_offset_applied);
 
