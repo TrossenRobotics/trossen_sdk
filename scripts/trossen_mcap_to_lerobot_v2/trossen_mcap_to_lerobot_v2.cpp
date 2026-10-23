@@ -742,6 +742,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   std::erase_if(channels.camera_channels, [&](const auto& entry) {
     return trossen::io::backends::camera_is_depth(entry.second, ep.dataset_info);
   });
+  // Prefer the task embedded in this episode's MCAP; fall back to the config's.
+  const std::string task_name = ep.task_name.empty() ? cfg.task_name : ep.task_name;
+  // A new task is appended to tasks.jsonl at this index once the episode is written.
+  const int task_index = trossen::io::backends::find_task_index(meta_dir, task_name);
 
   // Width of every action and observation.state row.
   const int action_dim = trossen::io::backends::episode_action_dim(ep);
@@ -880,7 +884,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
     if (!epi_idx_builder.Append(cfg.episode_index).ok() ||
         !frame_idx_builder.Append(static_cast<int64_t>(rows_written)).ok() ||
-        !index_builder.Append(global_index).ok() || !task_idx_builder.Append(0).ok()) {
+        !index_builder.Append(global_index).ok() || !task_idx_builder.Append(task_index).ok()) {
       std::cerr << "Error: Failed to append scalar values\n";
       return 1;
     }
@@ -1114,7 +1118,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   int num_cameras = static_cast<int>(channels.camera_channels.size());
 
   if (trossen::io::backends::write_episode_metadata(
-          meta_dir, cfg.episode_index, cfg.task_name, 0, static_cast<int>(rows_written),
+          meta_dir, cfg.episode_index, task_name, static_cast<int>(rows_written),
           num_cameras)) {
     std::cout << "  [ok] Updated " << info_path.string() << "\n";
     std::cout << "  [ok] Created/Updated "

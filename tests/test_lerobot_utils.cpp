@@ -6,7 +6,9 @@
  * for episodes, chunks, videos, and standard metadata features.
  */
 
+#include <filesystem>
 #include <string>
+#include <vector>
 
 #include "gtest/gtest.h"
 #include "nlohmann/json.hpp"
@@ -20,6 +22,9 @@ using trossen::io::backends::format_image_filename;
 using trossen::io::backends::format_video_filename;
 using trossen::io::backends::create_scalar_feature;
 using trossen::io::backends::add_standard_metadata_features;
+using trossen::io::backends::find_task_index;
+using trossen::io::backends::read_tasks;
+using trossen::io::backends::write_task_entry;
 
 // ============================================================================
 // LR-01: format_episode_folder zero-padded
@@ -148,4 +153,26 @@ TEST(LeRobotUtilsTest, AddStandardMetadataFeatures_PreservesCustomFields) {
 
   // Standard features should also be present
   EXPECT_TRUE(features.contains("timestamp"));
+}
+
+// ============================================================================
+// LR-07: tasks.jsonl gives each distinct task its own index
+// ============================================================================
+
+TEST(LeRobotUtilsTest, WriteTaskEntry_IndexesEachDistinctTask) {
+  const auto meta_dir = std::filesystem::temp_directory_path() / "lerobot_utils_tasks_test";
+  std::filesystem::remove_all(meta_dir);
+  std::filesystem::create_directories(meta_dir);
+
+  EXPECT_EQ(find_task_index(meta_dir, "pick"), 0);
+  ASSERT_TRUE(write_task_entry(meta_dir, "pick"));
+  EXPECT_EQ(find_task_index(meta_dir, "place"), 1);
+  ASSERT_TRUE(write_task_entry(meta_dir, "place"));
+  ASSERT_TRUE(write_task_entry(meta_dir, "pick"));
+
+  EXPECT_EQ(read_tasks(meta_dir), (std::vector<std::string>{"pick", "place"}));
+  EXPECT_EQ(find_task_index(meta_dir, "pick"), 0);
+  EXPECT_EQ(find_task_index(meta_dir, "place"), 1);
+
+  std::filesystem::remove_all(meta_dir);
 }
