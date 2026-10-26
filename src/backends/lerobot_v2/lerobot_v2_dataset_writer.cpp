@@ -33,6 +33,8 @@
 
 namespace trossen::io::backends {
 
+namespace v2 = lerobot_v2;
+
 namespace {
 
 /**
@@ -326,10 +328,10 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe) {
 
   std::cout << "\nCreating LeRobotV2 dataset structure...\n";
 
-  fs::path data_dir = full_dataset_path / trossen::io::backends::DATA_PATH_DIR / chunk_dir_name;
-  fs::path images_dir = full_dataset_path / trossen::io::backends::IMAGES_DIR / chunk_dir_name;
-  fs::path videos_dir = full_dataset_path / trossen::io::backends::VIDEO_DIR / chunk_dir_name;
-  fs::path meta_dir = full_dataset_path / trossen::io::backends::METADATA_DIR;
+  fs::path data_dir = full_dataset_path / v2::DATA_PATH_DIR / chunk_dir_name;
+  fs::path images_dir = full_dataset_path / v2::IMAGES_DIR / chunk_dir_name;
+  fs::path videos_dir = full_dataset_path / v2::VIDEO_DIR / chunk_dir_name;
+  fs::path meta_dir = full_dataset_path / v2::METADATA_DIR;
 
   try {
     fs::create_directories(data_dir);
@@ -435,7 +437,7 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe) {
   std::cout << "\nGenerating metadata files...\n";
 
   // Check if info.json exists, create if needed
-  fs::path info_path = meta_dir / trossen::io::backends::JSON_INFO;
+  fs::path info_path = meta_dir / v2::JSON_INFO;
   if (!fs::exists(info_path)) {
     std::cout << "  Creating initial info.json...\n";
 
@@ -453,7 +455,7 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe) {
     // Use helper function to create initial info.json with custom features
     if (!trossen::io::backends::create_initial_info_json(
             meta_dir, cfg.robot_name, features, static_cast<int>(ep.fps),
-            trossen::io::backends::CODEBASE_VERSION, cfg.chunk_size)) {
+            v2::CODEBASE_VERSION, cfg.chunk_size)) {
       std::cerr << "  Error: Failed to create " << info_path.string() << "\n";
       return fail();
     }
@@ -467,11 +469,11 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe) {
           static_cast<int>(pe.videos.size()))) {
     std::cout << "  [ok] Updated " << info_path.string() << "\n";
     std::cout << "  [ok] Created/Updated "
-              << (meta_dir / trossen::io::backends::JSONL_TASKS).string() << "\n";
+              << (meta_dir / v2::JSONL_TASKS).string() << "\n";
     std::cout << "  [ok] Appended to "
-              << (meta_dir / trossen::io::backends::JSONL_EPISODES).string() << "\n";
+              << (meta_dir / v2::JSONL_EPISODES).string() << "\n";
     std::cout << "  [ok] Appended to "
-              << (meta_dir / trossen::io::backends::JSONL_EPISODE_STATS).string()
+              << (meta_dir / v2::JSONL_EPISODE_STATS).string()
               << "\n";
   } else {
     std::cerr << "  Error: Failed to write metadata files\n";
@@ -497,14 +499,14 @@ void LeRobotV2DatasetWriter::finalize() const {
   std::cout << std::string(70, '=') << "\n";
 
   const fs::path full_dataset_path = dataset_path();
-  fs::path meta_dir = full_dataset_path / trossen::io::backends::METADATA_DIR;
-  fs::path data_dir = full_dataset_path / trossen::io::backends::DATA_PATH_DIR;
+  fs::path meta_dir = full_dataset_path / v2::METADATA_DIR;
+  fs::path data_dir = full_dataset_path / v2::DATA_PATH_DIR;
 
   if (fs::exists(meta_dir) && fs::exists(data_dir)) {
     try {
-      fs::path info_path = meta_dir / trossen::io::backends::JSON_INFO;
+      fs::path info_path = meta_dir / v2::JSON_INFO;
       if (!fs::exists(info_path)) {
-        std::cerr << "Warning: " << trossen::io::backends::JSON_INFO
+        std::cerr << "Warning: " << v2::JSON_INFO
                   << " not found, skipping stats computation\n";
       } else {
         std::ifstream info_file(info_path);
@@ -561,7 +563,7 @@ void LeRobotV2DatasetWriter::finalize() const {
             }
           }
 
-          fs::path stats_path = meta_dir / trossen::io::backends::JSONL_EPISODE_STATS;
+          fs::path stats_path = meta_dir / v2::JSONL_EPISODE_STATS;
           std::ofstream stats_file(stats_path);
 
           if (stats_file.is_open()) {
@@ -583,10 +585,10 @@ void LeRobotV2DatasetWriter::finalize() const {
 
   // Generate HuggingFace Hub compatibility files
   const std::filesystem::path info_json_path =
-      std::filesystem::path(trossen::io::backends::METADATA_DIR) /
-      trossen::io::backends::JSON_INFO;
+      std::filesystem::path(v2::METADATA_DIR) /
+      v2::JSON_INFO;
   if (trossen::io::backends::generate_dataset_readme(
-          full_dataset_path, info_json_path, TOOL_NAME, opts_.license)) {
+          full_dataset_path, info_json_path, v2::TOOL_NAME, opts_.license)) {
     std::cout << "  [ok] Generated README.md\n";
   } else {
     std::cerr << "  Warning: Failed to generate README.md\n";
@@ -639,7 +641,7 @@ nlohmann::ordered_json LeRobotV2DatasetWriter::compute_episode_stats(
   }
   // Compute image statistics for each camera
   namespace fs = std::filesystem;
-  fs::path images_root = dataset_path() / trossen::io::backends::IMAGES_DIR;
+  fs::path images_root = dataset_path() / v2::IMAGES_DIR;
   auto features = info["features"];
 
   for (auto it = features.begin(); it != features.end(); ++it) {
@@ -652,7 +654,7 @@ nlohmann::ordered_json LeRobotV2DatasetWriter::compute_episode_stats(
         std::string camera_name = feature_name.substr(kImagesPrefix.size());
 
         // A camera with an episode video, encoded or remuxed, is sampled from that video.
-        fs::path videos_root = dataset_path() / trossen::io::backends::VIDEO_DIR;
+        fs::path videos_root = dataset_path() / v2::VIDEO_DIR;
         bool is_video_camera = false;
         if (fs::exists(videos_root)) {
           for (const auto& chunk_entry : fs::directory_iterator(videos_root)) {
