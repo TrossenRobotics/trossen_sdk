@@ -21,8 +21,12 @@
 using trossen::io::backends::auto_downsample;
 using trossen::io::backends::compute_fixed_size_list_stats;
 using trossen::io::backends::compute_flat_stats;
+using trossen::io::backends::compute_image_quantile_stats;
 using trossen::io::backends::compute_image_stats;
 using trossen::io::backends::compute_list_stats;
+using trossen::io::backends::compute_vector_quantile_stats;
+using trossen::io::backends::interpolated_quantile;
+using trossen::io::backends::RunningStats;
 using trossen::io::backends::sample_indices;
 
 namespace {
@@ -201,4 +205,90 @@ TEST(ImageStatsTest, NonFloatImagesAreSkipped) {
   const std::vector<cv::Mat> images = {cv::Mat(2, 2, CV_8UC3, cv::Scalar(10, 20, 30))};
   const auto stats = compute_image_stats(images);
   EXPECT_EQ(stats["count"][0].get<int64_t>(), 0);
+}
+
+TEST(RunningStatsTest, KeepsTheVarianceOfValuesWithALargeOffset) {
+  // float32 neighbors 2^-10 apart around 10000: sum_sq / n - mean^2 comes out negative here.
+  RunningStats stats;
+  for (int i = 0; i < 1000; ++i) stats.add(i % 2 == 0 ? 10000.0 : 10000.0009765625);
+  EXPECT_DOUBLE_EQ(stats.stddev(), 0.00048828125);
+  EXPECT_DOUBLE_EQ(stats.mean(), 10000.00048828125);
+  EXPECT_DOUBLE_EQ(stats.min(), 10000.0);
+  EXPECT_DOUBLE_EQ(stats.max(), 10000.0009765625);
+}
+
+TEST(RunningStatsTest, EmptyStreamReportsZeros) {
+  const RunningStats stats;
+  EXPECT_EQ(stats.count, 0);
+  EXPECT_EQ(stats.mean(), 0.0);
+  EXPECT_EQ(stats.min(), 0.0);
+  EXPECT_EQ(stats.max(), 0.0);
+  EXPECT_EQ(stats.stddev(), 0.0);
+}
+
+TEST(InterpolatedQuantileTest, InterpolatesBetweenRanks) {
+  const std::vector<float> sorted = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f};
+  EXPECT_FLOAT_EQ(interpolated_quantile(sorted, 0.0), 0.0f);
+  EXPECT_FLOAT_EQ(interpolated_quantile(sorted, 0.1), 0.4f);
+  EXPECT_FLOAT_EQ(interpolated_quantile(sorted, 0.5), 2.0f);
+  EXPECT_FLOAT_EQ(interpolated_quantile(sorted, 0.99), 3.96f);
+  EXPECT_FLOAT_EQ(interpolated_quantile(sorted, 1.0), 4.0f);
+}
+
+TEST(InterpolatedQuantileTest, ClampsAQuantileOutsideZeroToOne) {
+  const std::vector<float> sorted = {0.0f, 1.0f, 2.0f, 3.0f, 4.0f};
+  EXPECT_EQ(interpolated_quantile(sorted, 1.5), 4.0f);
+  EXPECT_EQ(interpolated_quantile(sorted, -0.5), 0.0f);
+  EXPECT_EQ(interpolated_quantile(sorted, std::nan("")), 0.0f);
+}
+
+TEST(InterpolatedQuantileTest, EmptyAndSingleValueSamples) {
+  EXPECT_EQ(interpolated_quantile({}, 0.5), 0.0f);
+  EXPECT_EQ(interpolated_quantile({7.0f}, 0.01), 7.0f);
+  EXPECT_EQ(interpolated_quantile({7.0f}, 0.99), 7.0f);
+}
+
+TEST(VectorQuantileStatsTest, ReportsEveryStatisticPerDimension) {
+  const std::vector<std::vector<float>> per_dim = {{4.0f, 0.0f, 2.0f, 1.0f, 3.0f},
+                                                   {-1.0f, -1.0f, -1.0f, -1.0f, -1.0f}};
+  const auto stats = compute_vector_quantile_stats(per_dim, 5);
+  for (const char* key : {"min", "max", "mean", "std", "q01", "q10", "q50", "q90", "q99"}) {
+    ASSERT_TRUE(stats.contains(key)) << key;
+    EXPECT_EQ(stats[key].size(), 2u) << key;
+  }
+  EXPECT_FLOAT_EQ(stats["min"][0].get<float>(), 0.0f);
+  EXPECT_FLOAT_EQ(stats["max"][0].get<float>(), 4.0f);
+  EXPECT_FLOAT_EQ(stats["mean"][0].get<float>(), 2.0f);
+  EXPECT_FLOAT_EQ(stats["std"][0].get<float>(), std::sqrt(2.0f));
+  EXPECT_FLOAT_EQ(stats["q10"][0].get<float>(), 0.4f);
+  EXPECT_FLOAT_EQ(stats["q50"][0].get<float>(), 2.0f);
+  EXPECT_FLOAT_EQ(stats["std"][1].get<float>(), 0.0f);
+  EXPECT_FLOAT_EQ(stats["q99"][1].get<float>(), -1.0f);
+  EXPECT_EQ(stats["count"], nlohmann::json::array({5}));
+}
+
+TEST(VectorQuantileStatsTest, EmptyColumnReportsZeros) {
+  const auto stats = compute_vector_quantile_stats({{}}, 0);
+  EXPECT_FLOAT_EQ(stats["min"][0].get<float>(), 0.0f);
+  EXPECT_FLOAT_EQ(stats["max"][0].get<float>(), 0.0f);
+  EXPECT_FLOAT_EQ(stats["q50"][0].get<float>(), 0.0f);
+}
+
+TEST(ImageQuantileStatsTest, ReportsRgbChannelsAsThreeByOneByOne) {
+  // OpenCV stores BGR: blue 0.1, green 0.2, red 0.3.
+  const std::vector<cv::Mat> images = {cv::Mat(2, 2, CV_32FC3, cv::Scalar(0.1, 0.2, 0.3)),
+                                       cv::Mat(2, 2, CV_8UC3, cv::Scalar(1, 2, 3))};
+  const auto stats = compute_image_quantile_stats(images, 7);
+  for (const char* key : {"min", "max", "mean", "std", "q01", "q10", "q50", "q90", "q99"}) {
+    ASSERT_EQ(stats[key].size(), 3u) << key;
+    for (const auto& channel : stats[key]) {
+      ASSERT_EQ(channel.size(), 1u) << key;
+      ASSERT_EQ(channel[0].size(), 1u) << key;
+    }
+  }
+  EXPECT_NEAR(stats["mean"][0][0][0].get<double>(), 0.3, 1e-6);
+  EXPECT_NEAR(stats["q50"][1][0][0].get<double>(), 0.2, 1e-6);
+  EXPECT_NEAR(stats["max"][2][0][0].get<double>(), 0.1, 1e-6);
+  EXPECT_FLOAT_EQ(stats["std"][0][0][0].get<float>(), 0.0f);
+  EXPECT_EQ(stats["count"], nlohmann::json::array({7}));
 }
