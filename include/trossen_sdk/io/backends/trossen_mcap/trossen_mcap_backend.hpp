@@ -29,6 +29,7 @@
 #include "foxglove/foxglove.hpp"
 #include "foxglove/mcap.hpp"
 #include "foxglove/schemas.hpp"
+#include "nlohmann/json.hpp"
 #include "trossen_sdk/configuration/types/backends/trossen_mcap_backend_config.hpp"
 #include "trossen_sdk/io/backend.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
@@ -175,6 +176,17 @@ public:
   uint32_t scan_existing_episodes() override;
 
   /**
+   * @brief Refuse a session whose setup differs from the dataset's existing episodes
+   *
+   * A dataset holds one setup. Compares the robot, each joint stream's role and joint names,
+   * each camera's size, depth flag, frame rate and storage, and the mobile base's velocity
+   * names with the first readable episode.
+   *
+   * @throws std::runtime_error listing each difference
+   */
+  void check_dataset_setup() const override;
+
+  /**
    * @brief Path of the .mcap file for the current episode
    *
    * @return The output path as a string (empty if open() has not run)
@@ -202,6 +214,12 @@ private:
    * @return Path to the newest matching episode file, or an empty path if none found
    */
   std::filesystem::path find_latest_episode_file() const;
+
+  /**
+   * @brief The dataset_info this session records: producer stream info plus the backend's
+   *        topics and storage
+   */
+  nlohmann::ordered_json build_dataset_info() const;
 
   /**
    * @brief Ensure an image channel exists for the given camera name
