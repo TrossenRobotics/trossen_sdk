@@ -1071,3 +1071,75 @@ TEST(LeRobotV3Writer, TasksParquetHoldsEachTaskOnceWithPandasIndex) {
   EXPECT_EQ(pandas["index_columns"], nlohmann::json::array({"task"}));
   fs::remove_all(dir);
 }
+
+TEST(LeRobotV3Writer, FinalizeWritesEveryMetadataFile) {
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_finalize_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  opts.encode_videos = false;
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  for (const char* task : {"pick", "place"}) {
+    auto pe = joint_episode(4, task);
+    for (size_t i = 0; i < pe.ep.frames.size(); ++i) {
+      pe.ep.frames[i].timestamp_s = static_cast<float>(i) / 30.0f;
+    }
+    ASSERT_TRUE(writer.consume_episode(pe));
+  }
+  ASSERT_TRUE(writer.finalize());
+
+  const fs::path root = opts.dataset_root;
+  EXPECT_TRUE(fs::exists(root / v3::META_DIR / "episodes" / "chunk-000" / "file-000.parquet"));
+  EXPECT_TRUE(fs::exists(root / v3::TASKS_PATH));
+  EXPECT_TRUE(fs::exists(root / "README.md"));
+
+  std::ifstream info_file(root / v3::INFO_PATH);
+  const auto info = nlohmann::json::parse(info_file);
+  EXPECT_EQ(info["total_episodes"], 2);
+  EXPECT_EQ(info["total_frames"], 8);
+  EXPECT_EQ(info["total_tasks"], 2);
+  EXPECT_TRUE(info["video_path"].is_null());
+
+  std::ifstream stats_file(root / v3::STATS_PATH);
+  const auto stats = nlohmann::json::parse(stats_file);
+  EXPECT_EQ(stats["timestamp"]["count"], nlohmann::json::array({8}));
+  EXPECT_FLOAT_EQ(stats["timestamp"]["max"][0].get<float>(), 0.1f);
+  EXPECT_EQ(stats["action"]["q99"].size(), 1u);
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, FinalizeWritesTheStagedVideos) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_finalize_video_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  for (int i = 0; i < 2; ++i) {
+    auto pe = joint_episode(3, "task");
+    LeRobotV3DatasetWriter::PreparedEpisode::PreparedVideo pv;
+    pv.obs_key = "observation.images.cam";
+    pv.episode_mp4 = dir / ("ep" + std::to_string(i) + ".mp4");
+    pv.duration_s = 3.0 / 30.0;
+    ASSERT_TRUE(make_test_video(pv.episode_mp4, 3));
+    pe.videos = {pv};
+    ASSERT_TRUE(writer.consume_episode(pe));
+  }
+  ASSERT_TRUE(writer.finalize());
+
+  const fs::path chunk = opts.dataset_root / v3::VIDEO_DIR / "observation.images.cam" / "chunk-000";
+  EXPECT_EQ(probe_packet_count(chunk / "file-000.mp4"), 6);
+  EXPECT_FALSE(fs::exists(chunk / "file-000.parts"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, FinalizeFailsWithNoEpisodes) {
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_finalize_empty_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  EXPECT_FALSE(writer.finalize());
+  EXPECT_FALSE(fs::exists(opts.dataset_root / v3::INFO_PATH));
+  fs::remove_all(dir);
+}
