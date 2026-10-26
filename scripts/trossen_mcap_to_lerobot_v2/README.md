@@ -31,6 +31,9 @@ The tool is always built as part of the standard SDK build.
 
 If `output_dir` is omitted, output is written to `~/.cache/trossen_sdk/`.
 
+The frames extracted to `images/` are deleted once the episode's videos are encoded. Pass
+`--keep-images` to keep them.
+
 Examples:
 
 ```bash
