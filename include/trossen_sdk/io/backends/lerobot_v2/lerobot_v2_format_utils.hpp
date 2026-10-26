@@ -170,7 +170,7 @@ inline bool create_initial_info_json(
     int chunk_size = 1000) {
   namespace fs = std::filesystem;
 
-  fs::path info_path = meta_dir / JSON_INFO;
+  fs::path info_path = meta_dir / lerobot_v2::JSON_INFO;
 
   // Don't overwrite if it already exists
   if (fs::exists(info_path)) {
@@ -181,7 +181,7 @@ inline bool create_initial_info_json(
 
   // Basic metadata
   info_json["codebase_version"] = codebase_version;
-  info_json["trossen_subversion"] = TROSSEN_SUBVERSION;
+  info_json["trossen_subversion"] = lerobot_v2::TROSSEN_SUBVERSION;
   info_json["robot_type"] = robot_name;
   info_json["fps"] = fps;
 
@@ -200,8 +200,8 @@ inline bool create_initial_info_json(
   info_json["features"] = features;
 
   // Path templates
-  info_json["data_path"] = DATA_PATH_META;
-  info_json["video_path"] = VIDEO_PATH_META;
+  info_json["data_path"] = lerobot_v2::DATA_PATH_META;
+  info_json["video_path"] = lerobot_v2::VIDEO_PATH_META;
 
   // Write to file
   std::ofstream info_file(info_path);
@@ -228,7 +228,7 @@ inline bool create_initial_info_json(
  * @throws std::runtime_error when tasks.jsonl cannot be opened or a line is not a task entry
  */
 inline std::vector<std::string> read_tasks(const std::filesystem::path& meta_dir) {
-  const std::filesystem::path tasks_path = meta_dir / JSONL_TASKS;
+  const std::filesystem::path tasks_path = meta_dir / lerobot_v2::JSONL_TASKS;
   std::vector<std::string> tasks;
   if (!std::filesystem::exists(tasks_path)) {
     return tasks;
@@ -278,7 +278,7 @@ inline bool update_info_json(
     int num_videos) {
   namespace fs = std::filesystem;
 
-  fs::path info_path = meta_dir / JSON_INFO;
+  fs::path info_path = meta_dir / lerobot_v2::JSON_INFO;
   nlohmann::ordered_json info_json;
 
   // Load existing info.json if it exists
@@ -358,7 +358,7 @@ inline bool write_episode_entry(
   namespace fs = std::filesystem;
 
   // Append mode: episodes.jsonl holds one JSON object per line, one line per episode.
-  fs::path episodes_path = meta_dir / JSONL_EPISODES;
+  fs::path episodes_path = meta_dir / lerobot_v2::JSONL_EPISODES;
   std::ofstream episodes_file(episodes_path, std::ios::app);
 
   if (!episodes_file.is_open()) {
@@ -394,7 +394,7 @@ inline bool write_task_entry(
     const std::string& task_name) {
   namespace fs = std::filesystem;
 
-  fs::path tasks_path = meta_dir / JSONL_TASKS;
+  fs::path tasks_path = meta_dir / lerobot_v2::JSONL_TASKS;
 
   const auto tasks = read_tasks(meta_dir);
   if (std::find(tasks.begin(), tasks.end(), task_name) != tasks.end()) {
@@ -489,7 +489,7 @@ inline bool revert_info_json(
     int num_videos) {
   namespace fs = std::filesystem;
 
-  fs::path info_path = meta_dir / JSON_INFO;
+  fs::path info_path = meta_dir / lerobot_v2::JSON_INFO;
   if (!fs::exists(info_path)) return true;
 
   nlohmann::ordered_json info_json;
@@ -547,7 +547,7 @@ inline bool write_episode_stats(
     const nlohmann::json& stats = nlohmann::json()) {
   namespace fs = std::filesystem;
 
-  fs::path stats_path = meta_dir / JSONL_EPISODE_STATS;
+  fs::path stats_path = meta_dir / lerobot_v2::JSONL_EPISODE_STATS;
   std::ofstream stats_file(stats_path, std::ios::app);
 
   if (!stats_file.is_open()) {
@@ -590,7 +590,7 @@ inline bool write_episode_stats_with_data(
     const nlohmann::json& stats) {
   namespace fs = std::filesystem;
 
-  fs::path stats_path = meta_dir / JSONL_EPISODE_STATS;
+  fs::path stats_path = meta_dir / lerobot_v2::JSONL_EPISODE_STATS;
   std::ofstream stats_file(stats_path, std::ios::app);
 
   if (!stats_file.is_open()) {
