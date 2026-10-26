@@ -116,7 +116,7 @@ Key fields to update for each new dataset:
     * - ``robot_name``
       - Written into ``meta/info.json`` so consumers can distinguish robot types
     * - ``task_name``
-      - Default task description written to ``meta/tasks.jsonl``
+      - Task for episodes whose recording carries none. Each distinct task gets its own line in ``meta/tasks.jsonl``.
     * - ``fps``
       - Frame rate stored in ``info.json``.
         Should match the camera poll rate used at recording time.
