@@ -23,6 +23,7 @@
 #include <sys/wait.h>
 
 #include "nlohmann/json.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_readme_utils.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_schema_utils.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_stats_utils.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
@@ -142,6 +143,28 @@ bool write_parquet_file(const arrow::Table& table, const fs::path& path, bool st
   const arrow::Status close_st = (*out_res)->Close();
   if (!write_st.ok()) return fail("write", write_st);
   if (!close_st.ok()) return fail("close", close_st);
+  return true;
+}
+
+/**
+ * @brief Write a JSON document, indented by 2 spaces.
+ *
+ * @param json Document to write.
+ * @param path Output file; removed again when writing it fails.
+ * @return true on success.
+ */
+bool write_json_file(const nlohmann::ordered_json& json, const fs::path& path) {
+  std::ofstream f(path);
+  if (f.is_open()) {
+    f << json.dump(2) << "\n";
+    f.close();
+  }
+  if (!f) {
+    std::cerr << "Error: Failed to write " << path << "\n";
+    std::error_code ec;
+    fs::remove(path, ec);
+    return false;
+  }
   return true;
 }
 
@@ -1193,23 +1216,71 @@ bool LeRobotV3DatasetWriter::write_tasks_parquet() {
 }
 
 bool LeRobotV3DatasetWriter::write_stats_json() {
-  // TODO(shantanuparab-tr): write the aggregated dataset statistics (#375).
-  return false;
+  nlohmann::ordered_json stats;
+  stats["action"] = compute_vector_quantile_stats(action_values_, global_frame_index_);
+  stats["observation.state"] = compute_vector_quantile_stats(obs_values_, global_frame_index_);
+  // finalize() runs once, so the timestamps are moved into the one-column input.
+  stats["timestamp"] =
+    compute_vector_quantile_stats({std::move(ts_values_)}, global_frame_index_);
+  for (const auto& key : video_keys_) {
+    auto it = image_samples_.find(key);
+    if (it != image_samples_.end() && !it->second.empty()) {
+      stats[key] =
+        compute_image_quantile_stats(it->second, static_cast<int64_t>(it->second.size()));
+    }
+  }
+
+  return write_json_file(stats, opts_.dataset_root / v3::STATS_PATH);
 }
 
 bool LeRobotV3DatasetWriter::write_info_json() {
-  // TODO(shantanuparab-tr): write the v3.0 info.json (#375).
-  return false;
+  nlohmann::ordered_json info;
+  info["codebase_version"] = v3::CODEBASE_VERSION;
+  info["robot_type"] = opts_.robot_name;
+  info["total_episodes"] = static_cast<int>(episodes_.size());
+  info["total_frames"] = global_frame_index_;
+  info["total_tasks"] = static_cast<int>(task_list_.size());
+  info["fps"] = static_cast<int>(opts_.fps);
+  info["chunks_size"] = opts_.chunks_size;
+  info["data_files_size_in_mb"] = opts_.data_files_size_in_mb;
+  info["video_files_size_in_mb"] = opts_.video_files_size_in_mb;
+  info["data_path"] = v3::INFO_DATA_PATH;
+  if (!video_keys_.empty()) {
+    info["video_path"] = v3::INFO_VIDEO_PATH;
+  } else {
+    info["video_path"] = nullptr;
+  }
+  info["splits"] = {{"train", "0:" + std::to_string(episodes_.size())}};
+  info["features"] = features_;
+
+  return write_json_file(info, opts_.dataset_root / v3::INFO_PATH);
 }
 
 bool LeRobotV3DatasetWriter::write_readme() {
-  // TODO(shantanuparab-tr): write the dataset README (#375).
-  return false;
+  return trossen::io::backends::generate_dataset_readme(
+      opts_.dataset_root, v3::INFO_PATH, "trossen_mcap_to_lerobot_v3", opts_.license);
 }
 
 bool LeRobotV3DatasetWriter::finalize() {
-  // TODO(shantanuparab-tr): write every metadata file once all episodes are in (#375).
-  return false;
+  if (!close_data_writer()) return false;
+  // Each camera's last shared mp4 is still staged until it is written here.
+  if (!flush_videos()) return false;
+
+  if (episodes_.empty()) {
+    std::cerr << "Error: no episodes were written; nothing to finalize.\n";
+    return false;
+  }
+
+  bool ok = true;
+  ok = write_episodes_parquet() && ok;
+  ok = write_tasks_parquet() && ok;
+  ok = write_stats_json() && ok;
+  ok = write_info_json() && ok;
+  // README is best-effort and must run after info.json exists.
+  if (!write_readme()) {
+    std::cerr << "  Warning: Failed to generate README.md\n";
+  }
+  return ok;
 }
 
 }  // namespace trossen::io::backends
