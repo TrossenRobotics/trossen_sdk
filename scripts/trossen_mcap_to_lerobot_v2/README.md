@@ -143,6 +143,10 @@ offset to skip them.
 - Each offset camera is reported with a
   `WARNING: episode <index> <camera> video is offset by N frame(s)` line; the image lag is
   N source frames.
+- An episode in which some row's image is more than 3 frames (about 100 ms at 30 fps) from
+  the frame matched to it fails, whether from the start offset or from dropped frames.
+  When the start offset causes it, `trossen_mcap_to_lerobot_v3` converts the episode, since it
+  removes the offset; drift from dropped frames fails there too.
 - `trossen_mcap_to_lerobot_v3` applies the offset through `from_timestamp` and is
   offset-correct.
 
