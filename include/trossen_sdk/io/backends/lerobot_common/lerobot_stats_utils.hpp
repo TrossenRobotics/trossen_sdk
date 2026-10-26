@@ -11,7 +11,9 @@
 #ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_COMMON__LEROBOT_STATS_UTILS_HPP_
 #define TROSSEN_SDK__IO__BACKENDS__LEROBOT_COMMON__LEROBOT_STATS_UTILS_HPP_
 
+#include <cstdint>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <vector>
 
@@ -20,6 +22,79 @@
 #include <opencv2/core.hpp>
 
 namespace trossen::io::backends {
+
+/**
+ * @brief Running min, max, mean and population standard deviation of a stream of values.
+ *
+ * Uses Welford's update in double. The squared-deviation sum cannot go negative, so a
+ * constant stream gets a std of exactly 0, and values with a large offset and a small
+ * spread keep their variance.
+ */
+struct RunningStats {
+  /// @brief Number of values added.
+  int64_t count{0};
+  /// @brief Mean of the values added so far.
+  double running_mean{0.0};
+  /// @brief Sum of squared deviations from the running mean.
+  double m2{0.0};
+  /// @brief Smallest value added.
+  double lo{std::numeric_limits<double>::max()};
+  /// @brief Largest value added.
+  double hi{std::numeric_limits<double>::lowest()};
+
+  /**
+   * @brief Add one value.
+   * @param v Value to add.
+   */
+  void add(double v);
+
+  /// @brief Mean of the values. @return The mean, or 0 when no value was added.
+  double mean() const;
+  /// @brief Smallest value. @return The minimum, or 0 when no value was added.
+  double min() const;
+  /// @brief Largest value. @return The maximum, or 0 when no value was added.
+  double max() const;
+  /// @brief Population standard deviation. @return The std, or 0 when no value was added.
+  double stddev() const;
+};
+
+/**
+ * @brief Quantile of a sorted sample, interpolated linearly between the two nearest ranks
+ *
+ * @param sorted Sample values in ascending order
+ * @param q Quantile to take, in [0, 1]; a value outside it is clamped and NaN counts as 0
+ * @return The interpolated value, or 0 for an empty sample
+ */
+float interpolated_quantile(const std::vector<float> &sorted, double q);
+
+/**
+ * @brief Per-dimension statistics with quantiles for a vector feature
+ *
+ * An empty column reports 0 for every statistic.
+ *
+ * @param per_dim One value column per feature dimension
+ * @param count Row count to report as `count`
+ * @return JSON object with min, max, mean, std, q01, q10, q50, q90 and q99, each a list
+ *   with one entry per dimension, and count as a one-element list
+ */
+nlohmann::ordered_json compute_vector_quantile_stats(
+  const std::vector<std::vector<float>> &per_dim,
+  int64_t count);
+
+/**
+ * @brief Per-channel statistics with quantiles for a set of images
+ *
+ * Statistics are reported in RGB order with shape [3, 1, 1]. Images that are not
+ * CV_32FC3 are skipped with a warning; a channel with no pixels reports 0.
+ *
+ * @param images Samples from sample_images(): CV_32FC3, BGR, scaled to [0, 1]
+ * @param count Number of images to report as `count`
+ * @return JSON object with min, max, mean, std, q01, q10, q50, q90 and q99, each a
+ *   [3, 1, 1] list, and count as a one-element list
+ */
+nlohmann::ordered_json compute_image_quantile_stats(
+  const std::vector<cv::Mat> &images,
+  int64_t count);
 
 /**
  * @brief Compute per-dimension statistics for a ListArray column
