@@ -1,8 +1,10 @@
 /**
  * @file test_lerobot_episode.cpp
- * @brief Unit tests for build_features(): joint naming, signal blocks and camera specs.
+ * @brief Unit tests for build_features() and its helpers: joint naming, signal blocks,
+ *        camera specs and feature comparison.
  */
 
+#include <algorithm>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -19,6 +21,7 @@ using trossen::io::backends::copied_stream_codec;
 using trossen::io::backends::DatasetSignalOptions;
 using trossen::io::backends::episode_action_dim;
 using trossen::io::backends::episode_obs_dim;
+using trossen::io::backends::feature_mismatches;
 using trossen::io::backends::set_video_codec;
 
 namespace {
@@ -254,4 +257,29 @@ TEST(CopiedStreamCodecTest, RemuxedCamerasReplaceTheEncoderDefaults) {
   EXPECT_EQ(features["observation.images.cam_high_depth"]["info"]["video.codec"], "hevc");
   EXPECT_EQ(features["observation.images.cam_high_depth"]["info"]["video.pix_fmt"], "gray12le");
   EXPECT_FALSE(features.contains("observation.images.not_a_camera"));
+}
+
+TEST(FeatureMismatchesTest, SameCamerasAndArmsMatch) {
+  auto ep = make_episode({"leader"}, {"follower"});
+  ep.cameras.push_back(make_camera("cam_high"));
+  auto remuxed = build_features(ep);
+  set_video_codec(remuxed, "observation.images.cam_high", copied_stream_codec("h264"));
+  EXPECT_TRUE(feature_mismatches(build_features(ep), remuxed).empty());
+}
+
+TEST(FeatureMismatchesTest, AMissingCameraIsReported) {
+  auto dataset_ep = make_episode({"leader"}, {"follower"});
+  dataset_ep.cameras.push_back(make_camera("cam_high"));
+  const auto episode = build_features(make_episode({"leader"}, {"follower"}));
+  EXPECT_EQ(feature_mismatches(build_features(dataset_ep), episode),
+            std::vector<std::string>{"observation.images.cam_high: missing from the episode"});
+}
+
+TEST(FeatureMismatchesTest, AnExtraArmChangesTheShapes) {
+  const auto dataset = build_features(make_episode({"leader"}, {"follower"}));
+  const auto episode = build_features(
+    make_episode({"leader_left", "leader_right"}, {"follower_left", "follower_right"}));
+  const auto mismatches = feature_mismatches(dataset, episode);
+  EXPECT_NE(std::find(mismatches.begin(), mismatches.end(), "action: dtype or shape differs"),
+            mismatches.end());
 }

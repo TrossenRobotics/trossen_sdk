@@ -204,4 +204,24 @@ void set_video_codec(
   features[obs_key]["info"]["video.pix_fmt"] = codec.pix_fmt;
 }
 
+std::vector<std::string> feature_mismatches(
+  const nlohmann::ordered_json& dataset, const nlohmann::ordered_json& episode) {
+  const auto field = [](const nlohmann::ordered_json& feature, const char* name) {
+    return feature.contains(name) ? feature.at(name) : nlohmann::ordered_json();
+  };
+  std::vector<std::string> mismatches;
+  for (const auto& [key, feature] : dataset.items()) {
+    if (!episode.contains(key)) {
+      mismatches.push_back(key + ": missing from the episode");
+    } else if (field(feature, "dtype") != field(episode.at(key), "dtype") ||
+               field(feature, "shape") != field(episode.at(key), "shape")) {
+      mismatches.push_back(key + ": dtype or shape differs");
+    }
+  }
+  for (const auto& [key, feature] : episode.items()) {
+    if (!dataset.contains(key)) mismatches.push_back(key + ": not in the dataset");
+  }
+  return mismatches;
+}
+
 }  // namespace trossen::io::backends

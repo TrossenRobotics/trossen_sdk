@@ -979,6 +979,15 @@ try {
   return {};  // ok == false
 }
 
+std::vector<std::string> LeRobotV3DatasetWriter::feature_mismatches(
+  const PreparedEpisode& pe) const
+{
+  if (!schema_fixed_) return {};
+  nlohmann::ordered_json features = build_features(pe.ep);
+  trossen::io::backends::add_standard_metadata_features(features);
+  return trossen::io::backends::feature_mismatches(features_, features);
+}
+
 bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
 {
   if (std::this_thread::get_id() != owner_thread_) {

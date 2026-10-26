@@ -295,6 +295,10 @@ int main(int argc, char** argv) {
     bool ok = false;
     if (!pe.ok) {
       std::cerr << "[FAILED] Could not prepare " << mcap_files[i].string() << "\n";
+    } else if (const auto mismatches = writer.feature_mismatches(pe); !mismatches.empty()) {
+      std::cerr << "[FAILED] " << mcap_files[i].string() << " has other features than the "
+                << "dataset:\n";
+      for (const auto& m : mismatches) std::cerr << "  " << m << "\n";
     } else {
       // The per-episode task (embedded in the MCAP, else the config default) is
       // what makes the output a multi-task dataset; the writer de-dupes tasks
