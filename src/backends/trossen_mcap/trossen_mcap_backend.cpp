@@ -6,13 +6,16 @@
 #include <chrono>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 #include <vector>
 
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
+#include "mcap/reader.hpp"
 #include "opencv2/imgcodecs.hpp"
 #include "opencv2/imgproc.hpp"
 
@@ -82,6 +85,70 @@ void warn_on_mixed_camera_rates(const nlohmann::ordered_json& dataset_info) {
   msg << ". Conversion gives every camera one frame per row, as LeRobot's recorder does: a "
       << "slower camera's frames repeat and a faster camera's are skipped.\n";
   std::cerr << msg.str();
+}
+
+/**
+ * @brief The parts of a dataset_info that every episode of one dataset must share
+ *
+ * They decide a converted dataset's features and each camera's video codec, which LeRobot
+ * holds once per dataset: the robot, each joint stream's role and joint names, each
+ * camera's size, depth flag, frame rate and storage, and the mobile base's velocity names.
+ *
+ * @param dataset_info A recording's dataset_info
+ * @return Those parts, in a json whose object keys are sorted, so producer order is ignored
+ */
+nlohmann::json dataset_layout(const nlohmann::json& dataset_info) {
+  // Held in locals: a range-for over items() of a temporary reads it after it is destroyed.
+  const nlohmann::json streams = dataset_info.value("streams", nlohmann::json::object());
+  const nlohmann::json cameras = dataset_info.value("cameras", nlohmann::json::object());
+  nlohmann::json layout;
+  layout["robot_name"] = dataset_info.value("robot_name", "");
+  for (const auto& [id, stream] : streams.items()) {
+    layout["streams"][id] = {
+      {"role", stream.value("role", "")},
+      {"joint_names", stream.value("joint_names", nlohmann::json::array())}};
+  }
+  for (const auto& [id, camera] : cameras.items()) {
+    layout["cameras"][id] = {
+      {"width", camera.value("width", 0)},
+      {"height", camera.value("height", 0)},
+      {"is_depth_map", camera.value("is_depth_map", false)},
+      {"fps", camera.value("fps", 0.0)},
+      {"storage", camera.value("storage", "")}};
+  }
+  if (dataset_info.contains("mobile_base")) {
+    layout["mobile_base"]["velocity_names"] =
+      dataset_info["mobile_base"].value("velocity_names", nlohmann::json::array());
+  }
+  return layout;
+}
+
+/**
+ * @brief A recording's dataset_info
+ *
+ * @param file An episode file
+ * @return Its dataset_info, or nothing when the file has no readable summary (a recording
+ *   cut short by a crash)
+ */
+std::optional<nlohmann::json> recorded_dataset_info(const std::filesystem::path& file) {
+  mcap::McapReader reader;
+  if (!reader.open(file.string()).ok() ||
+      !reader.readSummary(mcap::ReadSummaryMethod::NoFallbackScan).ok()) {
+    return std::nullopt;
+  }
+  const auto range = reader.metadataIndexes().equal_range(
+    trossen_mcap_defs::kRecordingMetadataName);
+  for (auto it = range.first; it != range.second; ++it) {
+    mcap::Record raw;
+    mcap::Metadata meta;
+    if (!mcap::McapReader::ReadRecord(*reader.dataSource(), it->second.offset, &raw).ok() ||
+        !mcap::McapReader::ParseMetadata(raw, &meta).ok()) {
+      continue;
+    }
+    const auto info = meta.metadata.find(trossen_mcap_defs::kDatasetInfoKey);
+    if (info != meta.metadata.end()) return nlohmann::json::parse(info->second);
+  }
+  return std::nullopt;
 }
 
 }  // namespace
@@ -216,7 +283,23 @@ bool TrossenMCAPBackend::open() {
     metadata[trossen_mcap_defs::kTaskDescriptionKey] = cfg_->task_description;
   }
 
-  // Build dataset_info JSON from producer metadata (joint names, camera specs, etc.)
+  const nlohmann::ordered_json dataset_info = build_dataset_info();
+  warn_on_mixed_camera_rates(dataset_info);
+
+  metadata[trossen_mcap_defs::kDatasetInfoKey] = dataset_info.dump();
+
+  unrecordable_streams_.clear();
+
+  auto st = writer_->writeMetadata(
+    trossen_mcap_defs::kRecordingMetadataName, metadata.begin(), metadata.end());
+  if (st != foxglove::FoxgloveError::Ok) {
+    std::cerr << "Failed to write metadata: " << foxglove::strerror(st) << "\n";
+  }
+
+  return true;
+}
+
+nlohmann::ordered_json TrossenMCAPBackend::build_dataset_info() const {
   nlohmann::ordered_json dataset_info;
   dataset_info["robot_name"] = cfg_->robot_name;
 
@@ -234,19 +317,7 @@ bool TrossenMCAPBackend::open() {
     }
   }
   add_recording_layout(dataset_info, cfg_->records_video());
-  warn_on_mixed_camera_rates(dataset_info);
-
-  metadata[trossen_mcap_defs::kDatasetInfoKey] = dataset_info.dump();
-
-  unrecordable_streams_.clear();
-
-  auto st = writer_->writeMetadata(
-    trossen_mcap_defs::kRecordingMetadataName, metadata.begin(), metadata.end());
-  if (st != foxglove::FoxgloveError::Ok) {
-    std::cerr << "Failed to write metadata: " << foxglove::strerror(st) << "\n";
-  }
-
-  return true;
+  return dataset_info;
 }
 
 void TrossenMCAPBackend::close_resources() {
@@ -985,6 +1056,32 @@ uint32_t TrossenMCAPBackend::scan_existing_episodes() {
   }
 
   return count;
+}
+
+void TrossenMCAPBackend::check_dataset_setup() const {
+  const nlohmann::json session = dataset_layout(nlohmann::json::parse(build_dataset_info().dump()));
+  const std::filesystem::path base_path = std::filesystem::path(cfg_->root) / cfg_->dataset_id;
+  // Every episode of the dataset shares its setup; a crash leaves one unreadable, so the
+  // first readable episode is compared.
+  for (const auto& entry : std::filesystem::directory_iterator(base_path)) {
+    if (!std::regex_match(entry.path().filename().string(), episode_filename_pattern())) {
+      continue;
+    }
+    const auto recorded = recorded_dataset_info(entry.path());
+    if (!recorded) continue;
+    std::ostringstream differences;
+    for (const auto& change : nlohmann::json::diff(dataset_layout(*recorded), session)) {
+      differences << "  " << change.at("path").get<std::string>() << ": "
+                  << (change.at("op") == "remove" ? "missing now"
+                                                  : "now " + change.at("value").dump())
+                  << "\n";
+    }
+    if (differences.str().empty()) return;
+    throw std::runtime_error(
+      "Dataset '" + cfg_->dataset_id + "' holds episodes recorded with another setup (" +
+      entry.path().filename().string() + "):\n" + differences.str() +
+      "Record into a new dataset_id, or restore the setup.");
+  }
 }
 
 }  // namespace trossen::io::backends
