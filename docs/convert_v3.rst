@@ -341,6 +341,7 @@ One episode fails, the rest succeed
 
 An episode that fails while it is loaded, aligned or encoded is logged as ``[FAILED]`` and skipped, and the tool exits non-zero at the end.
 The ``[FAILED]`` line names the recording, and the error logged above it names the check that failed.
+The checks an episode can fail are listed in :ref:`convert:Episode fails`.
 
 Conversion stops with "Could not add ... to the dataset"
 --------------------------------------------------------
