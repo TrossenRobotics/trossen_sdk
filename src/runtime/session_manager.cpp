@@ -255,6 +255,17 @@ bool SessionManager::start_episode() {
 
   next_episode_index_ = current_backend_->scan_existing_episodes();
 
+  // The config does not change within a session, so a resumed dataset is checked once.
+  if (!dataset_setup_checked_ && next_episode_index_ > 0) {
+    try {
+      current_backend_->check_dataset_setup();
+    } catch (const std::exception& e) {
+      std::cerr << "Error: " << e.what() << std::endl;
+      return false;
+    }
+  }
+  dataset_setup_checked_ = true;
+
   if (next_episode_index_ > 0) {
     std::cout << "Found " << next_episode_index_ << " existing episode(s). "
               << "Next episode index: " << next_episode_index_ << std::endl;
