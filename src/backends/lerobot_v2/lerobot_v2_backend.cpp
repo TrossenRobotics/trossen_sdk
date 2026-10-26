@@ -449,7 +449,7 @@ void LeRobotV2Backend::compute_statistics() const {
   }
 
   // // Write to info.json
-  std::ofstream episode_stats_file(meta_root_ / JSONL_EPISODE_STATS, std::ios::app);
+  std::ofstream episode_stats_file(meta_root_ / lerobot_v2::JSONL_EPISODE_STATS, std::ios::app);
 
   nlohmann::ordered_json episode_stats;
   episode_stats["episode_index"] = episode_index_;
@@ -578,7 +578,7 @@ void LeRobotV2Backend::close() {
   // episode's images are deleted unless keep_images is set. A camera without a video keeps
   // its images.
   if (!cfg_->keep_images) {
-    remove_encoded_episode_images(images_root_, root_ / VIDEO_DIR / format_chunk_dir(0),
+    remove_encoded_episode_images(images_root_, root_ / lerobot_v2::VIDEO_DIR / format_chunk_dir(0),
                                   episode_index_);
   }
 }
@@ -643,7 +643,7 @@ void LeRobotV2Backend::discard_episode() {
   // so we can decrement info.json counters accurately.
   int discarded_frame_count = 0;
   try {
-    fs::path episodes_path = discard_meta / JSONL_EPISODES;
+    fs::path episodes_path = discard_meta / lerobot_v2::JSONL_EPISODES;
     if (fs::exists(episodes_path)) {
       std::ifstream in(episodes_path);
       std::string last_line, line;
@@ -673,10 +673,10 @@ void LeRobotV2Backend::discard_episode() {
 
   // Remove JSONL entries only if they match this episode's index
   int ep_idx = static_cast<int>(episode_index_);
-  if (!remove_last_jsonl_line(discard_meta / JSONL_EPISODES, ep_idx)) {
+  if (!remove_last_jsonl_line(discard_meta / lerobot_v2::JSONL_EPISODES, ep_idx)) {
     std::cerr << "[LeRobotV2] Warning: Failed to revert episodes.jsonl" << std::endl;
   }
-  if (!remove_last_jsonl_line(discard_meta / JSONL_EPISODE_STATS, ep_idx)) {
+  if (!remove_last_jsonl_line(discard_meta / lerobot_v2::JSONL_EPISODE_STATS, ep_idx)) {
     std::cerr << "[LeRobotV2] Warning: Failed to revert episodes_stats.jsonl" << std::endl;
   }
 
@@ -880,7 +880,7 @@ void LeRobotV2Backend::write_metadata() {
   // configuration file or constant definitions
 
   // Check if info.json already exists
-  fs::path info_path = meta_root_ / JSON_INFO;
+  fs::path info_path = meta_root_ / lerobot_v2::JSON_INFO;
   if (fs::exists(info_path)) {
     return;
   }
