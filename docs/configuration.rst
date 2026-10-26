@@ -135,6 +135,11 @@ Producers
 Each entry describes one data stream that the SDK will poll and record.
 Add one producer per arm, one per camera, and one per mobile base.
 
+An arm producer's ``stream_id`` names its role: ``leader``, ``follower``,
+``leader_<side>`` or ``follower_<side>`` (for example ``follower_left``).
+Conversion reads each arm's role from this name, so a config with any other
+arm ``stream_id`` fails to load.
+
 .. code-block:: javascript
 
     {
