@@ -15,6 +15,7 @@
 #include <string>
 #include <vector>
 #include <type_traits>
+#include <utility>
 
 #include <arrow/api.h>
 #include <opencv2/imgcodecs.hpp>
@@ -24,37 +25,11 @@ namespace trossen::io::backends {
 
 namespace {
 
-/**
- * @brief Running min, max, mean and population standard deviation of a stream of values.
- *
- * Uses Welford's update in double. Its squared-deviation sum cannot go negative, so a
- * constant column (such as episode_index within one episode) gets a std of exactly 0,
- * where the textbook `sum_sq / n - mean^2` form can come out slightly negative and make
- * sqrt() NaN. LeRobot 0.6.0 clamps that form at 0 instead.
- */
-struct RunningStats {
-  int64_t count{0};
-  double running_mean{0.0};
-  double m2{0.0};
-  double lo{std::numeric_limits<double>::max()};
-  double hi{std::numeric_limits<double>::lowest()};
-
-  void add(double v) {
-    ++count;
-    const double delta = v - running_mean;
-    running_mean += delta / static_cast<double>(count);
-    m2 += delta * (v - running_mean);
-    lo = std::min(lo, v);
-    hi = std::max(hi, v);
-  }
-
-  double mean() const { return count > 0 ? running_mean : 0.0; }
-  double min() const { return count > 0 ? lo : 0.0; }
-  double max() const { return count > 0 ? hi : 0.0; }
-  double stddev() const {
-    return count > 0 ? std::sqrt(m2 / static_cast<double>(count)) : 0.0;
-  }
-};
+/// @brief Quantile levels reported, each with its stats.json key.
+constexpr auto kQuantiles = std::to_array<std::pair<double, const char *>>(
+  {{0.01, "q01"}, {0.10, "q10"}, {0.50, "q50"}, {0.90, "q90"}, {0.99, "q99"}});
+/// @brief Color channels in an image statistic.
+constexpr size_t kNumChannels = 3;
 
 /**
  * @brief Element i of a float, double or int64 array as a double.
@@ -132,6 +107,25 @@ nlohmann::ordered_json list_stats(const ListArrayT &lists, const char *caller) {
 }
 
 }  // namespace
+
+void RunningStats::add(double v) {
+  ++count;
+  const double delta = v - running_mean;
+  running_mean += delta / static_cast<double>(count);
+  m2 += delta * (v - running_mean);
+  lo = std::min(lo, v);
+  hi = std::max(hi, v);
+}
+
+double RunningStats::mean() const { return count > 0 ? running_mean : 0.0; }
+
+double RunningStats::min() const { return count > 0 ? lo : 0.0; }
+
+double RunningStats::max() const { return count > 0 ? hi : 0.0; }
+
+double RunningStats::stddev() const {
+  return count > 0 ? std::sqrt(m2 / static_cast<double>(count)) : 0.0;
+}
 
 std::vector<int> sample_indices(
   int dataset_len,
@@ -296,6 +290,118 @@ nlohmann::ordered_json compute_fixed_size_list_stats(
   const std::shared_ptr<arrow::FixedSizeListArray> &fixed_list_array)
 {
   return list_stats(*fixed_list_array, "compute_fixed_size_list_stats");
+}
+
+float interpolated_quantile(const std::vector<float> &sorted, double q)
+{
+  if (sorted.empty()) return 0.0f;
+  if (sorted.size() == 1) return sorted[0];
+  // A q outside [0, 1] would index past the sample, so it is clamped. NaN counts as 0.
+  q = std::isnan(q) ? 0.0 : std::clamp(q, 0.0, 1.0);
+  const double pos = q * (static_cast<double>(sorted.size()) - 1.0);
+  const size_t lo = static_cast<size_t>(std::floor(pos));
+  const size_t hi = static_cast<size_t>(std::ceil(pos));
+  const double frac = pos - static_cast<double>(lo);
+  return static_cast<float>(sorted[lo] * (1.0 - frac) + sorted[hi] * frac);
+}
+
+nlohmann::ordered_json compute_vector_quantile_stats(
+  const std::vector<std::vector<float>> &per_dim,
+  int64_t count)
+{
+  nlohmann::json mn = nlohmann::json::array(), mx = nlohmann::json::array(),
+                 me = nlohmann::json::array(), sd = nlohmann::json::array();
+  std::array<nlohmann::json, kQuantiles.size()> q;
+  for (auto &qa : q) qa = nlohmann::json::array();
+
+  for (const auto &col : per_dim) {
+    RunningStats stats;
+    for (float v : col) stats.add(v);
+    mn.push_back(static_cast<float>(stats.min()));
+    mx.push_back(static_cast<float>(stats.max()));
+    me.push_back(static_cast<float>(stats.mean()));
+    sd.push_back(static_cast<float>(stats.stddev()));
+
+    std::vector<float> sorted = col;
+    std::sort(sorted.begin(), sorted.end());
+    for (size_t k = 0; k < kQuantiles.size(); ++k) {
+      q[k].push_back(interpolated_quantile(sorted, kQuantiles[k].first));
+    }
+  }
+
+  nlohmann::ordered_json out;
+  out["min"] = mn;
+  out["max"] = mx;
+  out["mean"] = me;
+  out["std"] = sd;
+  out["count"] = nlohmann::json::array({count});
+  for (size_t k = 0; k < kQuantiles.size(); ++k) out[kQuantiles[k].second] = q[k];
+  return out;
+}
+
+nlohmann::ordered_json compute_image_quantile_stats(
+  const std::vector<cv::Mat> &images,
+  int64_t count)
+{
+  // Pixel values per channel in RGB order; OpenCV images are BGR.
+  std::array<std::vector<float>, kNumChannels> channels;
+  size_t pixels = 0;
+  for (const auto &img : images) {
+    if (img.type() == CV_32FC3) pixels += img.total();
+  }
+  for (auto &values : channels) values.reserve(pixels);
+  for (const auto &img : images) {
+    if (img.empty()) continue;
+    // Reading anything but float32 pixels as floats would turn the bytes into noise.
+    if (img.type() != CV_32FC3) {
+      std::cerr << "Warning: skipping image sample with unexpected type " << img.type()
+                << " (expected CV_32FC3)\n";
+      continue;
+    }
+    for (int y = 0; y < img.rows; ++y) {
+      const cv::Vec3f *row = img.ptr<cv::Vec3f>(y);
+      for (int x = 0; x < img.cols; ++x) {
+        channels[0].push_back(row[x][2]);
+        channels[1].push_back(row[x][1]);
+        channels[2].push_back(row[x][0]);
+      }
+    }
+  }
+
+  using ChannelValues = std::array<float, kNumChannels>;
+  ChannelValues mn{}, mx{}, me{}, sd{};
+  std::array<ChannelValues, kQuantiles.size()> q{};
+  for (size_t c = 0; c < kNumChannels; ++c) {
+    auto &values = channels[c];
+    if (values.empty()) continue;
+    RunningStats stats;
+    for (float v : values) stats.add(v);
+    mn[c] = static_cast<float>(stats.min());
+    mx[c] = static_cast<float>(stats.max());
+    me[c] = static_cast<float>(stats.mean());
+    sd[c] = static_cast<float>(stats.stddev());
+    std::sort(values.begin(), values.end());
+    for (size_t k = 0; k < kQuantiles.size(); ++k) {
+      q[k][c] = interpolated_quantile(values, kQuantiles[k].first);
+    }
+  }
+
+  // Shape [3, 1, 1]: one [[value]] per channel.
+  auto per_channel = [](const ChannelValues &values) {
+    nlohmann::json result = nlohmann::json::array();
+    for (float v : values) result.push_back({{v}});
+    return result;
+  };
+  nlohmann::ordered_json out;
+  out["min"] = per_channel(mn);
+  out["max"] = per_channel(mx);
+  out["mean"] = per_channel(me);
+  out["std"] = per_channel(sd);
+  out["count"] = nlohmann::json::array({count});
+  for (size_t k = 0; k < kQuantiles.size(); ++k) {
+    out[kQuantiles[k].second] = per_channel(q[k]);
+  }
+  return out;
 }
 
 }  // namespace trossen::io::backends
