@@ -7,12 +7,19 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include <arrow/io/api.h>
+#include <sys/wait.h>
+
+#include "trossen_sdk/utils/depth_quantization.hpp"
 
 namespace trossen::io::backends {
 
@@ -27,6 +34,12 @@ using v3::update_chunk_file_indices;
 constexpr char kEpisodesDir[] = "episodes";
 /// @brief Bytes in one megabyte of the `*_size_in_mb` budgets.
 constexpr double kBytesPerMegabyte = 1e6;
+/// @brief SVT-AV1 constant rate factor for color video.
+constexpr int kAv1Crf = 30;
+/// @brief Frames between keyframes in color video.
+constexpr int kAv1KeyframeInterval = 30;
+/// @brief SVT-AV1 speed preset for color video.
+constexpr int kAv1Preset = 6;
 
 /// @brief "chunk-NNN/file-NNN": the zero-padded chunk/file pair in LeRobot v3.0 paths.
 std::string chunk_file_stem(int chunk_index, int file_index) {
@@ -57,6 +70,40 @@ double row_bytes(const arrow::Schema& schema) {
     bytes += static_cast<double>(count) * width;
   }
   return bytes;
+}
+
+/// @brief Removes a file when it goes out of scope, on success and error paths alike.
+struct RemoveOnExit {
+  /// @brief File to remove.
+  fs::path path;
+
+  ~RemoveOnExit() {
+    std::error_code ec;
+    fs::remove(path, ec);
+  }
+};
+
+/// @brief Exit code of a process from its std::system or pclose status.
+/// @return -1 when the process did not exit normally, such as when a signal killed it.
+int exit_code(int status) {
+  return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+/// @brief Packets in the first video stream of a file, one per frame in an mp4.
+/// @return -1 when ffprobe fails or prints no count.
+int64_t count_video_packets(const fs::path& video) {
+  std::ostringstream probe;
+  probe << "ffprobe -v error -count_packets -select_streams v:0 "
+        << "-show_entries stream=nb_read_packets -of default=nw=1:nk=1 " << video.string();
+  FILE* pipe = popen(probe.str().c_str(), "r");
+  if (!pipe) return -1;
+  char buf[64] = {0};
+  const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
+  const int status = pclose(pipe);
+  char* end = nullptr;
+  const int64_t count = read_ok ? std::strtoll(buf, &end, 10) : -1;
+  if (status != 0 || !read_ok || end == buf || count < 0) return -1;
+  return count;
 }
 
 }  // namespace
@@ -255,22 +302,155 @@ bool LeRobotV3DatasetWriter::roll_data_file_if_needed(int64_t next_ep_frames) {
 bool LeRobotV3DatasetWriter::encode_episode_video(
   const fs::path& image_dir, size_t frame_count, const fs::path& out_mp4) const
 {
-  // TODO(shantanuparab-tr): encode an episode's color frames to video (#354).
-  return false;
+  fs::path input_pattern = image_dir / kColorFramePattern;
+  // SVT_LOG=1 limits SVT-AV1's own log, which -loglevel does not reach, to errors.
+  std::ostringstream cmd;
+  cmd << "SVT_LOG=1 ffmpeg -y -loglevel error -framerate " << opts_.fps << " -start_number 0"
+      << " -i " << input_pattern.string() << " -frames:v " << frame_count
+      << " -c:v libsvtav1 -crf " << kAv1Crf << " -g " << kAv1KeyframeInterval << " -preset "
+      << kAv1Preset;
+  // SVT-AV1's level-of-parallelism. ffmpeg's -threads is silently ignored by this
+  // encoder, so lp= is the only way to stop each concurrent worker's encoder from
+  // sizing itself to the whole machine.
+  if (opts_.encoder_threads > 0) {
+    cmd << " -svtav1-params lp=" << opts_.encoder_threads;
+  }
+  // The output rate matches the row grid; -frames:v counts output frames, so any other
+  // rate would cut the video short or drop frames.
+  cmd << " -pix_fmt yuv420p -r " << opts_.fps << " " << out_mp4.string();
+  const int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg encode failed (exit " << exit_code(ret) << "): " << cmd.str()
+              << "\n";
+    return false;
+  }
+
+  // ffmpeg stops at the first missing image and still exits 0, so a short image
+  // sequence gives a short video. Each encoded frame is one packet.
+  const int64_t encoded = count_video_packets(out_mp4);
+  if (encoded < 0 || static_cast<size_t>(encoded) != frame_count) {
+    std::cerr << "Error: encoded " << out_mp4.filename().string() << " has " << encoded
+              << " frames but the episode has " << frame_count << "\n";
+    return false;
+  }
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::encode_depth_video(
   const fs::path& image_dir, size_t frame_count, const fs::path& out_mp4) const
 {
-  // TODO(shantanuparab-tr): encode an episode's depth frames to video (#354).
-  return false;
+  // 16-bit depth (mm) to 12-bit log-quantized codes to lossless HEVC gray12le. Decoding
+  // with any other mapping gives wrong distances without an error, so the codes come
+  // from the shared table in trossen_sdk/utils/depth_quantization.hpp.
+  const std::vector<uint16_t> lut = trossen::utils::build_depth_quantization_lut();
+
+  int width = 0;
+  int height = 0;
+  const RemoveOnExit raw_file{fs::path(out_mp4.string() + ".gray12.raw")};
+  const fs::path& raw_path = raw_file.path;
+  {
+    std::ofstream raw(raw_path, std::ios::binary);
+    if (!raw) {
+      std::cerr << "Error: cannot open depth raw temp: " << raw_path.string() << "\n";
+      return false;
+    }
+    std::vector<uint16_t> codes;
+    for (size_t f = 0; f < frame_count; ++f) {
+      char namebuf[32];
+      std::snprintf(namebuf, sizeof(namebuf), kDepthFramePattern, f);
+      cv::Mat img = cv::imread((image_dir / namebuf).string(), cv::IMREAD_UNCHANGED);
+      if (img.empty() || img.type() != CV_16UC1) {
+        std::cerr << "Error: depth frame missing or not 16-bit mono: " << namebuf << "\n";
+        return false;
+      }
+      if (width == 0) {
+        width = img.cols;
+        height = img.rows;
+      } else if (img.cols != width || img.rows != height) {
+        // The raw stream has one frame size, taken from the first frame.
+        std::cerr << "Error: depth frame " << namebuf << " is " << img.cols << "x" << img.rows
+                  << " but the first frame is " << width << "x" << height << "\n";
+        return false;
+      }
+      codes.resize(static_cast<size_t>(img.rows) * static_cast<size_t>(img.cols));
+      size_t k = 0;
+      for (int y = 0; y < img.rows; ++y) {
+        const uint16_t* row = img.ptr<uint16_t>(y);
+        for (int x = 0; x < img.cols; ++x) codes[k++] = lut[row[x]];
+      }
+      raw.write(reinterpret_cast<const char*>(codes.data()),
+                static_cast<std::streamsize>(codes.size() * sizeof(uint16_t)));
+      if (!raw) {
+        std::cerr << "Error: failed to write depth raw temp: " << raw_path.string() << "\n";
+        return false;
+      }
+    }
+    raw.close();
+    if (!raw) {
+      std::cerr << "Error: failed to close depth raw temp: " << raw_path.string() << "\n";
+      return false;
+    }
+  }
+  if (width == 0 || height == 0) {
+    std::cerr << "Error: no depth frames read from " << image_dir.string() << "\n";
+    return false;
+  }
+
+  // x265 pools= caps its worker pool. ffmpeg's -threads only reaches x265's
+  // frame-threads, which leaves most of the pool uncapped, so use pools=.
+  std::ostringstream x265_params;
+  x265_params << "lossless=1:log-level=error";
+  if (opts_.encoder_threads > 0) {
+    x265_params << ":pools=" << opts_.encoder_threads;
+  }
+
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -f rawvideo -pix_fmt gray12le -s " << width << "x" << height
+      << " -framerate " << opts_.fps << " -i " << raw_path.string() << " -frames:v " << frame_count
+      << " -c:v libx265 -x265-params " << x265_params.str() << " -pix_fmt gray12le -r "
+      << opts_.fps << " " << out_mp4.string();
+  const int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg depth encode failed (exit " << exit_code(ret) << "): " << cmd.str()
+              << "\n";
+    return false;
+  }
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::remux_episode_video(
   const fs::path& annexb, size_t frame_count, const fs::path& out_mp4) const
 {
-  // TODO(shantanuparab-tr): remux an already-compressed stream without re-encoding (#354).
-  return false;
+  // -c copy: the bitstream goes through untouched. An elementary stream has no
+  // container timestamps, so -r stamps them at the dataset rate and +genpts
+  // fills in the presentation timestamps the mp4 muxer needs.
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << opts_.fps
+      << " -i " << annexb.string()
+      << " -c copy -movflags +faststart " << out_mp4.string();
+  const int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg remux failed (exit " << exit_code(ret) << "): " << cmd.str()
+              << "\n";
+    return false;
+  }
+
+  // A frame count that disagrees with the message count silently shifts image/state
+  // alignment for every later frame. A stream copy writes one packet per frame, so the
+  // packet count is the frame count. A count that cannot be read fails the remux.
+  const int64_t muxed = count_video_packets(out_mp4);
+  if (muxed < 0) {
+    std::cerr << "Error: could not count the frames of remuxed video " << out_mp4.string()
+              << "\n";
+    return false;
+  }
+  if (static_cast<size_t>(muxed) != frame_count) {
+    std::cerr << "Error: remuxed " << out_mp4.filename().string() << " has " << muxed
+              << " frames but the recording had " << frame_count
+              << " video messages; refusing to misalign frames against joint states\n";
+    return false;
+  }
+  return true;
 }
 
 std::vector<cv::Mat> LeRobotV3DatasetWriter::sample_video_frames(

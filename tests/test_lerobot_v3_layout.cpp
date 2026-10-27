@@ -7,12 +7,15 @@
 #include <gtest/gtest.h>
 
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <filesystem>
 #include <fstream>
 #include <memory>
 #include <string>
 
 #include <arrow/api.h>
+#include <opencv2/imgcodecs.hpp>
 
 #include "nlohmann/json.hpp"
 #include "trossen_sdk/configuration/types/backends/lerobot_v3_backend_config.hpp"
@@ -50,6 +53,20 @@ public:
     writer.data_.frames_in_file = frames;
   }
   static fs::path data_path(const LeRobotV3DatasetWriter& writer) { return writer.data_.path; }
+  static bool encode_color(const LeRobotV3DatasetWriter& writer, const fs::path& image_dir,
+                           size_t frame_count, const fs::path& out_mp4) {
+    return writer.encode_episode_video(image_dir, frame_count, out_mp4);
+  }
+  static bool encode_depth(const LeRobotV3DatasetWriter& writer, const fs::path& image_dir,
+                           size_t frame_count, const fs::path& out_mp4) {
+    return writer.encode_depth_video(image_dir, frame_count, out_mp4);
+  }
+  static bool remux(const LeRobotV3DatasetWriter& writer, const fs::path& annexb,
+                    size_t frame_count, const fs::path& out_mp4) {
+    return writer.remux_episode_video(annexb, frame_count, out_mp4);
+  }
+  static constexpr const char* kColorFramePattern = LeRobotV3DatasetWriter::kColorFramePattern;
+  static constexpr const char* kDepthFramePattern = LeRobotV3DatasetWriter::kDepthFramePattern;
 };
 
 }  // namespace trossen::io::backends
@@ -87,6 +104,49 @@ bool is_complete_parquet(const fs::path& path) {
   in.seekg(-4, std::ios::end);
   in.read(tail, 4);
   return in && std::string(head, 4) == "PAR1" && std::string(tail, 4) == "PAR1";
+}
+
+/// @brief True when ffmpeg and ffprobe are both on PATH.
+bool have_ffmpeg() {
+  return std::system("command -v ffmpeg >/dev/null 2>&1 && command -v ffprobe >/dev/null 2>&1") ==
+         0;
+}
+
+/// @brief Packets in the first video stream of a file, or -1 when ffprobe fails.
+int64_t probe_packet_count(const fs::path& video) {
+  const std::string cmd = "ffprobe -v error -count_packets -select_streams v:0 "
+                          "-show_entries stream=nb_read_packets -of default=nw=1:nk=1 '" +
+                          video.string() + "'";
+  FILE* pipe = popen(cmd.c_str(), "r");
+  if (!pipe) return -1;
+  char buf[64] = {0};
+  const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
+  if (pclose(pipe) != 0 || !read_ok) return -1;
+  return std::strtoll(buf, nullptr, 10);
+}
+
+/// @brief A fresh, empty scratch directory under the system temp directory.
+fs::path fresh_dir(const std::string& name) {
+  const fs::path dir = fs::temp_directory_path() / name;
+  fs::remove_all(dir);
+  fs::create_directories(dir);
+  return dir;
+}
+
+/// @brief Write a constant 16-bit depth frame named as the writer reads it.
+void write_depth_frame(const fs::path& dir, size_t index, int width, int height) {
+  char name[32];
+  std::snprintf(name, sizeof(name), LeRobotV3WriterTestPeer::kDepthFramePattern, index);
+  ASSERT_TRUE(cv::imwrite((dir / name).string(),
+                          cv::Mat(height, width, CV_16UC1, cv::Scalar(1000.0 + index))));
+}
+
+/// @brief Write a 64x64 color frame named as the writer reads it.
+void write_color_frame(const fs::path& dir, int index) {
+  char name[32];
+  std::snprintf(name, sizeof(name), LeRobotV3WriterTestPeer::kColorFramePattern, index);
+  ASSERT_TRUE(cv::imwrite((dir / name).string(),
+                          cv::Mat(64, 64, CV_8UC3, cv::Scalar(10 * index, 100, 200))));
 }
 
 }  // namespace
@@ -290,4 +350,102 @@ TEST(LeRobotV3Writer, CloseWritesTheFooterAndCanRunTwice) {
   EXPECT_TRUE(is_complete_parquet(path));
   EXPECT_TRUE(LeRobotV3WriterTestPeer::close(writer));
   fs::remove_all(opts.dataset_root);
+}
+
+TEST(LeRobotV3Writer, DepthEncodeRejectsAFrameOfAnotherSize) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_depth_size_test");
+  write_depth_frame(dir, 0, 16, 16);
+  write_depth_frame(dir, 1, 32, 16);
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+  const fs::path mp4 = dir / "depth.mp4";
+
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::encode_depth(writer, dir, 1, dir / "first.mp4"));
+  EXPECT_FALSE(LeRobotV3WriterTestPeer::encode_depth(writer, dir, 2, mp4));
+  EXPECT_FALSE(fs::exists(mp4.string() + ".gray12.raw"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, DepthEncodeRemovesTheRawFileWhenAFrameIsMissing) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_depth_missing_test");
+  write_depth_frame(dir, 0, 16, 16);
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+  const fs::path mp4 = dir / "depth.mp4";
+
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::encode_depth(writer, dir, 1, dir / "first.mp4"));
+  EXPECT_FALSE(LeRobotV3WriterTestPeer::encode_depth(writer, dir, 2, mp4));
+  EXPECT_FALSE(fs::exists(mp4.string() + ".gray12.raw"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, DepthEncodeWritesEveryFrame) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_depth_encode_test");
+  for (size_t i = 0; i < 3; ++i) write_depth_frame(dir, i, 16, 16);
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+  const fs::path mp4 = dir / "depth.mp4";
+
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::encode_depth(writer, dir, 3, mp4));
+  EXPECT_EQ(probe_packet_count(mp4), 3);
+  EXPECT_FALSE(fs::exists(mp4.string() + ".gray12.raw"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, ColorEncodeWritesEveryFrame) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_color_encode_test");
+  for (int i = 0; i < 3; ++i) write_color_frame(dir, i);
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+  const fs::path mp4 = dir / "color.mp4";
+
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::encode_color(writer, dir, 3, mp4));
+  EXPECT_EQ(probe_packet_count(mp4), 3);
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, ColorEncodeRejectsAShortImageSequence) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_color_short_test");
+  for (int i = 0; i < 2; ++i) write_color_frame(dir, i);
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::encode_color(writer, dir, 2, dir / "two.mp4"));
+  EXPECT_FALSE(LeRobotV3WriterTestPeer::encode_color(writer, dir, 3, dir / "color.mp4"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, ColorEncodeReportsTheExitCode) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_color_exit_test");
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+
+  testing::internal::CaptureStderr();
+  const bool ok = LeRobotV3WriterTestPeer::encode_color(writer, dir, 1, dir / "color.mp4");
+  const std::string err = testing::internal::GetCapturedStderr();
+
+  // No images, so ffmpeg exits with an error. A raw wait status would read 256 or more.
+  EXPECT_FALSE(ok);
+  const size_t at = err.find("(exit ");
+  ASSERT_NE(at, std::string::npos) << err;
+  const int code = std::atoi(err.c_str() + at + 6);
+  EXPECT_GT(code, 0);
+  EXPECT_LT(code, 256);
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, RemuxRequiresTheExactFrameCount) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_remux_test");
+  const fs::path annexb = dir / "camera.h264";
+  const std::string make_stream =
+    "ffmpeg -y -loglevel error -f lavfi -i testsrc=size=64x64:rate=30 -frames:v 5 "
+    "-c:v libx264 -f h264 '" + annexb.string() + "'";
+  ASSERT_EQ(std::system(make_stream.c_str()), 0);
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+
+  EXPECT_TRUE(LeRobotV3WriterTestPeer::remux(writer, annexb, 5, dir / "match.mp4"));
+  EXPECT_FALSE(LeRobotV3WriterTestPeer::remux(writer, annexb, 6, dir / "more.mp4"));
+  EXPECT_FALSE(LeRobotV3WriterTestPeer::remux(writer, annexb, 4, dir / "fewer.mp4"));
+  fs::remove_all(dir);
 }
