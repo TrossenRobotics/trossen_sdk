@@ -187,6 +187,12 @@ private:
 
   /// @brief Options given at construction.
   Options opts_;
+  /// @brief Metadata directory, `<dataset_root>/meta`; set by open().
+  std::filesystem::path meta_dir_;
+  /// @brief Data parquet directory, `<dataset_root>/data`; set by open().
+  std::filesystem::path data_dir_;
+  /// @brief Video directory, `<dataset_root>/videos`; set by open().
+  std::filesystem::path videos_dir_;
 };
 
 }  // namespace trossen::io::backends
