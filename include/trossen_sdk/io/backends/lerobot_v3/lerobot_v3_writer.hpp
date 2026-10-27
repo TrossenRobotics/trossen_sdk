@@ -14,10 +14,13 @@
 #define TROSSEN_SDK__IO__BACKENDS__LEROBOT_V3__LEROBOT_V3_WRITER_HPP_
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include <arrow/api.h>
 #include <opencv2/opencv.hpp>
 
 #include "trossen_sdk/configuration/types/backends/lerobot_v3_backend_config.hpp"
@@ -148,8 +151,16 @@ public:
   bool finalize();
 
 private:
+  /// @brief Gives the unit tests access to the private helpers.
+  friend class LeRobotV3WriterTestPeer;
+
   /// @brief Close the open data file, if any. @return false when closing it fails.
   bool close_data_writer();
+  /// @brief The data parquet columns, with list widths from action_dim_ and obs_dim_.
+  std::shared_ptr<arrow::Schema> make_data_schema() const;
+  /// @brief One episode's rows. @return nullptr when a column fails to build.
+  std::shared_ptr<arrow::Table> build_episode_table(
+    const AlignedEpisode& ep, int episode_index, int task_index, int64_t global_from) const;
 
   // Video helpers. They run ffmpeg/ffprobe.
   bool encode_episode_video(
@@ -207,6 +218,10 @@ private:
   std::filesystem::path meta_dir_;
   std::filesystem::path data_dir_;
   std::filesystem::path videos_dir_;
+
+  int action_dim_{0};
+  int obs_dim_{0};
+  std::shared_ptr<arrow::Schema> data_schema_;
 };
 
 }  // namespace trossen::io::backends
