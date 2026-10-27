@@ -204,6 +204,9 @@ private:
   bool write_readme();
 
   Options opts_;
+  std::filesystem::path meta_dir_;
+  std::filesystem::path data_dir_;
+  std::filesystem::path videos_dir_;
 };
 
 }  // namespace trossen::io::backends
