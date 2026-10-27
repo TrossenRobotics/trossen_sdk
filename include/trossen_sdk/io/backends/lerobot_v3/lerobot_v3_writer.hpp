@@ -18,12 +18,16 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <random>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <arrow/api.h>
 #include <parquet/arrow/writer.h>
 #include <opencv2/opencv.hpp>
+
+#include "nlohmann/json.hpp"
 
 #include "trossen_sdk/configuration/types/backends/lerobot_v3_backend_config.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
@@ -142,7 +146,7 @@ public:
    * constructed the writer.
    *
    * @param pe Prepared episode from prepare_episode(); its sampled frames are moved out.
-   * @return true on success.
+   * @return true on success; false when called from another thread or on a write failure.
    */
   bool consume_episode(PreparedEpisode& pe);
 
@@ -187,6 +191,27 @@ private:
     /// @brief Measured duration of the staged episode videos in seconds, where the next
     ///        episode starts.
     double duration_s{0.0};
+  };
+
+  /// @brief One episode's seek metadata, buffered until finalize().
+  struct EpisodeMeta {
+    /// @brief Output episode index, the episode's position in the episodes table.
+    int episode_index{0};
+    /// @brief Tasks performed in the episode.
+    std::vector<std::string> tasks;
+    /// @brief Number of rows in the episode.
+    int64_t length{0};
+    /// @brief Chunk index of the data parquet holding the episode's rows.
+    int data_chunk_index{0};
+    /// @brief File index of the data parquet holding the episode's rows.
+    int data_file_index{0};
+    /// @brief Dataset-wide index of the episode's first row.
+    int64_t dataset_from_index{0};
+    /// @brief Dataset-wide index one past the episode's last row.
+    int64_t dataset_to_index{0};
+    /// @brief Per video key: {chunk_index, file_index, from_timestamp, to_timestamp}, with
+    /// the timestamps in seconds from the start of the shared mp4.
+    std::map<std::string, std::array<double, 4>> videos;
   };
 
   /// @brief Make sure an open data file has room for the next episode, opening the next
@@ -282,17 +307,48 @@ private:
   bool write_readme();
 
   Options opts_;
+  /// @brief Thread that constructed the writer; the only one allowed to consume episodes.
+  std::thread::id owner_thread_{std::this_thread::get_id()};
   std::filesystem::path meta_dir_;
   std::filesystem::path data_dir_;
   std::filesystem::path videos_dir_;
 
+  /// @brief True once the first episode has fixed the schema and features.
+  bool schema_fixed_{false};
   int action_dim_{0};
   int obs_dim_{0};
   std::shared_ptr<arrow::Schema> data_schema_;
+  /// @brief info.json `features`, built from the first episode.
+  nlohmann::ordered_json features_;
 
   DataFileState data_;
   /// @brief Each camera's shared video stream, keyed by video_key.
   std::map<std::string, VideoFileState> videos_;
+  /// @brief Video keys in the order they were first seen.
+  std::vector<std::string> video_keys_;
+
+  /// @brief Seek metadata of every written episode, in episode order.
+  std::vector<EpisodeMeta> episodes_;
+  /// @brief Task strings indexed by task_index.
+  std::vector<std::string> task_list_;
+  /// @brief task_index of each task string.
+  std::map<std::string, int> task_to_index_;
+
+  /// @brief Rows written so far; the dataset-wide index of the next row.
+  int64_t global_frame_index_{0};
+
+  /// @brief Every action value written, one column per dimension, for stats.json.
+  std::vector<std::vector<float>> action_values_;
+  /// @brief Every observation.state value written, one column per dimension, for stats.json.
+  std::vector<std::vector<float>> obs_values_;
+  /// @brief Every row timestamp written, in seconds, for stats.json.
+  std::vector<float> ts_values_;
+  /// @brief Sampled images per video key for image stats, a uniform reservoir capped per key.
+  std::map<std::string, std::vector<cv::Mat>> image_samples_;
+  /// @brief Sampled images offered per video key so far, kept or not.
+  std::map<std::string, size_t> image_samples_seen_;
+  /// @brief Fixed-seed generator for the reservoir, so a dataset's stats are reproducible.
+  std::mt19937_64 sample_rng_{0};
 };
 
 }  // namespace trossen::io::backends
