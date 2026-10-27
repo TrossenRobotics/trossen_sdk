@@ -301,6 +301,8 @@ An episode fails when:
 - no stretch of time has data from every leader, follower and camera stream, and from the mobile base on a mobile robot.
   The log names the stream that ends first, the stream that starts last, and the gap between them.
 - a mobile robot's base channel has no messages.
+- rows are missing for more than 200 ms in one gap, or for more than 2% of the episode in total.
+  Shorter gaps are listed in the log with their length and the stream that had no sample.
 
 What's Next
 ===========
