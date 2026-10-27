@@ -65,7 +65,8 @@ Options
 
 The loader decodes every field a recording carries, including joint velocities and efforts and the full odometry pose and twist.
 ``DatasetSignalOptions`` selects which fields go into the row vectors; by default, joint positions and the planar base velocity pair.
-``AlignmentOptions`` sets the row rate and the match tolerance, 30 fps and 50 ms by default.
+``AlignmentOptions`` sets the row rate (``fps``, 30), the match tolerance (``tolerance_ns``, 50 ms) and the gap limits (``max_single_gap_ms``, 200 ms in one gap; ``max_gap_fraction``, 0.02 of the episode in total); the values shown are the defaults.
+An episode past either gap limit fails to load.
 
 .. note::
 
