@@ -24,6 +24,7 @@
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
+#include "trossen_sdk/utils/shell_quote.hpp"
 
 namespace trossen::io::backends {
 
@@ -333,9 +334,9 @@ void LeRobotV2Backend::convert_to_videos() const {
         std::ostringstream ffmpeg_cmd;
         ffmpeg_cmd
             << "ffmpeg -y -loglevel error -framerate " << fps
-            << " -i " << input_pattern.string()
+            << " -i " << trossen::utils::shell_quote(input_pattern)
             << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p "
-            << task.output_path.string();
+            << trossen::utils::shell_quote(task.output_path);
 
         auto t0 = std::chrono::steady_clock::now();
         // TODO(shantanuparab-tr): Make this into debug log
