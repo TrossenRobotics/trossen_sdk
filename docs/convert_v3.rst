@@ -120,8 +120,8 @@ Key fields to update for each new dataset:
     * - ``task_name``
       - Task for episodes whose recording carries none. Each distinct task gets its own row in ``meta/tasks.parquet``.
     * - ``fps``
-      - Frame rate stored in ``info.json`` and used for the videos.
-        Leave it at 30: rows are generated at 30 Hz whatever this is set to, so any other value puts the videos out of step with the rows.
+      - Rate of the rows and videos in frames per second, stored in ``info.json``.
+        Must be a whole number, and should match the camera poll rate used at recording time.
     * - ``encode_videos``
       - Disable to produce Parquet only (useful for joint-state-only pipelines)
     * - ``overwrite_existing``

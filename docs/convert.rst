@@ -298,6 +298,7 @@ An episode fails when:
 
 - a stream's timestamps go backwards, such as after an NTP clock correction.
   The log names the stream and the message index.
+- no stretch of time has data from every leader, follower and camera stream, and from the mobile base on a mobile robot.
 
 What's Next
 ===========
