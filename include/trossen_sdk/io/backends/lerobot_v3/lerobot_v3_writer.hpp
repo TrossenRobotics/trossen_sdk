@@ -14,10 +14,14 @@
 #define TROSSEN_SDK__IO__BACKENDS__LEROBOT_V3__LEROBOT_V3_WRITER_HPP_
 
 #include <array>
+#include <cstdint>
 #include <filesystem>
+#include <memory>
 #include <string>
 #include <vector>
 
+#include <arrow/api.h>
+#include <parquet/arrow/writer.h>
 #include <opencv2/opencv.hpp>
 
 #include "trossen_sdk/configuration/types/backends/lerobot_v3_backend_config.hpp"
@@ -162,6 +166,33 @@ public:
   bool finalize();
 
 private:
+  /// @brief Gives the unit tests access to the private helpers.
+  friend class LeRobotV3WriterTestPeer;
+
+  /// @brief Running state for the shared data parquet stream.
+  struct DataFileState {
+    /// @brief Chunk index of the open data file.
+    int chunk_index{0};
+    /// @brief File index of the open data file within its chunk.
+    int file_index{0};
+    /// @brief Parquet writer of the open data file; null when no file is open.
+    std::shared_ptr<parquet::arrow::FileWriter> writer;
+    /// @brief Output stream under `writer`; null when no file is open.
+    std::shared_ptr<arrow::io::FileOutputStream> out;
+    /// @brief Path of the open data file.
+    std::filesystem::path path;
+    /// @brief Rows written to the open data file.
+    int64_t frames_in_file{0};
+  };
+
+  /// @brief Make sure an open data file has room for the next episode, opening the next
+  ///        chunk/file when the projected uncompressed size reaches the budget.
+  /// @param next_ep_frames Rows in the episode about to be written.
+  /// @return false when no schema is set or a file fails to close or open.
+  bool roll_data_file_if_needed(int64_t next_ep_frames);
+  /// @brief Open the data file at the current chunk/file index with data_schema_.
+  /// @return false when the file or the parquet writer fails to open.
+  bool open_data_writer();
   /// @brief Close the open data file, if any. @return false when closing it fails.
   bool close_data_writer();
 
@@ -207,6 +238,16 @@ private:
   std::filesystem::path data_dir_;
   /// @brief Video directory, `<dataset_root>/videos`; set by open().
   std::filesystem::path videos_dir_;
+
+  /// @brief Width of every action row, fixed by the first episode.
+  int action_dim_{0};
+  /// @brief Width of every observation.state row, fixed by the first episode.
+  int obs_dim_{0};
+  /// @brief Schema of every data parquet file, fixed by the first episode.
+  std::shared_ptr<arrow::Schema> data_schema_;
+
+  /// @brief The data parquet file that receives the next episode's rows.
+  DataFileState data_;
 };
 
 }  // namespace trossen::io::backends
