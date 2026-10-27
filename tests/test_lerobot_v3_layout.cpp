@@ -6,9 +6,13 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
+#include <memory>
 #include <string>
+
+#include <arrow/api.h>
 
 #include "nlohmann/json.hpp"
 #include "trossen_sdk/configuration/types/backends/lerobot_v3_backend_config.hpp"
@@ -18,9 +22,46 @@
 namespace v3 = trossen::io::backends::lerobot_v3;
 namespace fs = std::filesystem;
 using trossen::configuration::LeRobotV3BackendConfig;
+using trossen::io::backends::AlignedEpisode;
+using trossen::io::backends::AlignedFrame;
 using trossen::io::backends::LeRobotV3DatasetWriter;
 
+namespace trossen::io::backends {
+
+/// @brief Calls the writer's private helpers.
+class LeRobotV3WriterTestPeer {
+public:
+  /// @brief Set the joint widths and the data schema, as the first episode does.
+  static void set_dims(LeRobotV3DatasetWriter& writer, int action_dim, int obs_dim) {
+    writer.action_dim_ = action_dim;
+    writer.obs_dim_ = obs_dim;
+    writer.data_schema_ = writer.make_data_schema();
+  }
+  static std::shared_ptr<arrow::Table> table(
+    const LeRobotV3DatasetWriter& writer, const AlignedEpisode& ep, int episode_index,
+    int task_index, int64_t global_from) {
+    return writer.build_episode_table(ep, episode_index, task_index, global_from);
+  }
+};
+
+}  // namespace trossen::io::backends
+
+using trossen::io::backends::LeRobotV3WriterTestPeer;
+
 namespace {
+
+/// @brief An episode of `rows` rows with `action_dim` action and `obs_dim` observation values.
+AlignedEpisode make_episode(size_t rows, size_t action_dim, size_t obs_dim) {
+  AlignedEpisode ep;
+  for (size_t i = 0; i < rows; ++i) {
+    AlignedFrame f;
+    f.timestamp_s = static_cast<float>(i) / 30.0f;
+    f.action.assign(action_dim, 0.5);
+    f.observation.assign(obs_dim, 0.25);
+    ep.frames.push_back(f);
+  }
+  return ep;
+}
 
 /// @brief Writer options rooted at an emptied temp folder.
 LeRobotV3DatasetWriter::Options temp_options(const std::string& name) {
@@ -150,4 +191,31 @@ TEST(LeRobotV3Writer, OpenFailsWhenADatasetFolderIsAFile) {
   std::ofstream(opts.dataset_root / v3::DATA_DIR) << "x";
   EXPECT_FALSE(LeRobotV3DatasetWriter(opts).open());
   fs::remove_all(opts.dataset_root);
+}
+
+TEST(LeRobotV3Writer, EpisodeTableNumbersRowsWithinTheEpisodeAndTheDataset) {
+  LeRobotV3DatasetWriter writer(temp_options("trossen_lerobot_v3_table_test"));
+  LeRobotV3WriterTestPeer::set_dims(writer, 2, 3);
+  const auto table = LeRobotV3WriterTestPeer::table(writer, make_episode(3, 2, 3), 5, 1, 3600);
+
+  ASSERT_NE(table, nullptr);
+  EXPECT_EQ(table->num_rows(), 3);
+  ASSERT_TRUE(table->ValidateFull().ok());
+  const auto column = [&](const char* name) {
+    return std::static_pointer_cast<arrow::Int64Array>(table->GetColumnByName(name)->chunk(0));
+  };
+  for (int64_t i = 0; i < 3; ++i) {
+    EXPECT_EQ(column("frame_index")->Value(i), i);
+    EXPECT_EQ(column("index")->Value(i), 3600 + i);
+    EXPECT_EQ(column("episode_index")->Value(i), 5);
+    EXPECT_EQ(column("task_index")->Value(i), 1);
+  }
+}
+
+TEST(LeRobotV3Writer, EpisodeTableRejectsARowOfTheWrongWidth) {
+  LeRobotV3DatasetWriter writer(temp_options("trossen_lerobot_v3_width_test"));
+  LeRobotV3WriterTestPeer::set_dims(writer, 2, 3);
+  AlignedEpisode ep = make_episode(3, 2, 3);
+  ep.frames[1].observation.pop_back();
+  EXPECT_EQ(LeRobotV3WriterTestPeer::table(writer, ep, 0, 0, 0), nullptr);
 }
