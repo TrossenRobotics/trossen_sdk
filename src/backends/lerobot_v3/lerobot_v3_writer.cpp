@@ -63,6 +63,10 @@ constexpr char kDepthCodec[] = "hevc";
 constexpr char kDepthPixFmt[] = "gray12le";
 /// @brief Most sampled images kept per camera for its image statistics.
 constexpr size_t kMaxImageSamplesPerKey = 1000;
+/// @brief Schema metadata key that pandas reads its index layout from.
+constexpr char kPandasMetadataKey[] = "pandas";
+/// @brief pandas version recorded in the tasks table's pandas metadata.
+constexpr char kPandasMetadataVersion[] = "2.0.0";
 
 /// @brief "chunk-NNN/file-NNN": the zero-padded chunk/file pair in LeRobot v3.0 paths.
 std::string chunk_file_stem(int chunk_index, int file_index) {
@@ -104,6 +108,41 @@ bool dir_has_png(const fs::path& dir) {
     if (entry.is_regular_file() && entry.path().extension() == ".png") return true;
   }
   return false;
+}
+
+/**
+ * @brief Write a table to one Snappy-compressed parquet file.
+ *
+ * @param table Table to write.
+ * @param path Output file; removed again when writing or closing it fails. A file that
+ *   could not be opened is left untouched.
+ * @param store_schema Embed the Arrow schema and its metadata in the file.
+ * @return true on success.
+ */
+bool write_parquet_file(const arrow::Table& table, const fs::path& path, bool store_schema) {
+  auto report = [&path](const char* step, const arrow::Status& status) {
+    std::cerr << "Error: Failed to " << step << " " << path << ": " << status.ToString() << "\n";
+    return false;
+  };
+  auto fail = [&path, &report](const char* step, const arrow::Status& status) {
+    std::error_code ec;
+    fs::remove(path, ec);
+    return report(step, status);
+  };
+  auto out_res = arrow::io::FileOutputStream::Open(path.string());
+  if (!out_res.ok()) return report("open", out_res.status());
+  auto props =
+    parquet::WriterProperties::Builder().compression(parquet::Compression::SNAPPY)->build();
+  parquet::ArrowWriterProperties::Builder arrow_builder;
+  if (store_schema) arrow_builder.store_schema();
+  const arrow::Status write_st =
+    parquet::arrow::WriteTable(table, arrow::default_memory_pool(), *out_res,
+                               std::max<int64_t>(1, table.num_rows()), props,
+                               arrow_builder.build());
+  const arrow::Status close_st = (*out_res)->Close();
+  if (!write_st.ok()) return fail("write", write_st);
+  if (!close_st.ok()) return fail("close", close_st);
+  return true;
 }
 
 /// @brief Removes a file when it goes out of scope, on success and error paths alike.
@@ -1015,13 +1054,142 @@ bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
 }
 
 bool LeRobotV3DatasetWriter::write_episodes_parquet() {
-  // TODO(shantanuparab-tr): write the per-episode metadata table (#374).
-  return false;
+  // Builders for the required and recommended seek columns.
+  arrow::Int64Builder epi_b, len_b, dchunk_b, dfile_b, from_b, to_b;
+  auto task_item_b = std::make_shared<arrow::StringBuilder>();
+  arrow::ListBuilder tasks_b(arrow::default_memory_pool(), task_item_b);
+  auto* task_item = static_cast<arrow::StringBuilder*>(tasks_b.value_builder());
+
+  // Per video key index/timestamp builders.
+  std::map<std::string, arrow::Int64Builder> vchunk_b, vfile_b;
+  std::map<std::string, arrow::DoubleBuilder> vfrom_b, vto_b;
+  for (const auto& key : video_keys_) {
+    vchunk_b[key];
+    vfile_b[key];
+    vfrom_b[key];
+    vto_b[key];
+  }
+
+  arrow::Status st;
+  for (const auto& e : episodes_) {
+    st &= epi_b.Append(e.episode_index);
+    st &= len_b.Append(e.length);
+    st &= dchunk_b.Append(e.data_chunk_index);
+    st &= dfile_b.Append(e.data_file_index);
+    st &= from_b.Append(e.dataset_from_index);
+    st &= to_b.Append(e.dataset_to_index);
+    st &= tasks_b.Append();
+    for (const auto& t : e.tasks) st &= task_item->Append(t);
+
+    for (const auto& key : video_keys_) {
+      auto it = e.videos.find(key);
+      if (it == e.videos.end()) {
+        st &= vchunk_b[key].AppendNull();
+        st &= vfile_b[key].AppendNull();
+        st &= vfrom_b[key].AppendNull();
+        st &= vto_b[key].AppendNull();
+      } else {
+        st &= vchunk_b[key].Append(static_cast<int64_t>(it->second[0]));
+        st &= vfile_b[key].Append(static_cast<int64_t>(it->second[1]));
+        st &= vfrom_b[key].Append(it->second[2]);
+        st &= vto_b[key].Append(it->second[3]);
+      }
+    }
+  }
+
+  std::vector<std::shared_ptr<arrow::Field>> fields;
+  std::vector<std::shared_ptr<arrow::Array>> arrays;
+  auto add = [&](const std::string& name, std::shared_ptr<arrow::DataType> type,
+                 std::shared_ptr<arrow::Array> arr) {
+    fields.push_back(arrow::field(name, std::move(type)));
+    arrays.push_back(std::move(arr));
+  };
+
+  std::shared_ptr<arrow::Array> epi_a, tasks_a, len_a, dchunk_a, dfile_a, from_a, to_a;
+  st &= epi_b.Finish(&epi_a);
+  st &= tasks_b.Finish(&tasks_a);
+  st &= len_b.Finish(&len_a);
+  st &= dchunk_b.Finish(&dchunk_a);
+  st &= dfile_b.Finish(&dfile_a);
+  st &= from_b.Finish(&from_a);
+  st &= to_b.Finish(&to_a);
+
+  add("episode_index", arrow::int64(), epi_a);
+  add("tasks", arrow::list(arrow::utf8()), tasks_a);
+  add("length", arrow::int64(), len_a);
+  add("data/chunk_index", arrow::int64(), dchunk_a);
+  add("data/file_index", arrow::int64(), dfile_a);
+  add("dataset_from_index", arrow::int64(), from_a);
+  add("dataset_to_index", arrow::int64(), to_a);
+
+  for (const auto& key : video_keys_) {
+    std::shared_ptr<arrow::Array> ca, fa, fra, ta;
+    st &= vchunk_b[key].Finish(&ca);
+    st &= vfile_b[key].Finish(&fa);
+    st &= vfrom_b[key].Finish(&fra);
+    st &= vto_b[key].Finish(&ta);
+    add("videos/" + key + "/chunk_index", arrow::int64(), ca);
+    add("videos/" + key + "/file_index", arrow::int64(), fa);
+    add("videos/" + key + "/from_timestamp", arrow::float64(), fra);
+    add("videos/" + key + "/to_timestamp", arrow::float64(), ta);
+  }
+  if (!st.ok()) {
+    std::cerr << "Error: Failed to build the episodes table: " << st.ToString() << "\n";
+    return false;
+  }
+
+  auto table = arrow::Table::Make(arrow::schema(fields), arrays);
+  // Every episode's metadata fits one file.
+  fs::path out_path = meta_dir_ / kEpisodesDir / (chunk_file_stem(0, 0) + ".parquet");
+  std::error_code ec;
+  fs::create_directories(out_path.parent_path(), ec);
+  if (ec) {
+    std::cerr << "Error: Failed to create episodes meta dir: " << ec.message() << "\n";
+    return false;
+  }
+  return write_parquet_file(*table, out_path, /*store_schema=*/false);
 }
 
 bool LeRobotV3DatasetWriter::write_tasks_parquet() {
-  // TODO(shantanuparab-tr): write the tasks table (#374).
-  return false;
+  arrow::StringBuilder task_b;
+  arrow::Int64Builder idx_b;
+  arrow::Status st;
+  for (size_t i = 0; i < task_list_.size(); ++i) {
+    st &= task_b.Append(task_list_[i]);
+    st &= idx_b.Append(static_cast<int64_t>(i));
+  }
+  std::shared_ptr<arrow::Array> task_a, idx_a;
+  st &= task_b.Finish(&task_a);
+  st &= idx_b.Finish(&idx_a);
+  if (!st.ok()) {
+    std::cerr << "Error: Failed to build the tasks table: " << st.ToString() << "\n";
+    return false;
+  }
+
+  // pandas index metadata: pd.read_parquet restores `task` as the index, so a task string
+  // looks up its row and each row's index is its task.
+  nlohmann::json pandas_meta = {
+    {"index_columns", {"task"}},
+    {"column_indexes", nlohmann::json::array()},
+    {"columns",
+     {{{"name", "task_index"},
+       {"field_name", "task_index"},
+       {"pandas_type", "int64"},
+       {"numpy_type", "int64"},
+       {"metadata", nullptr}},
+      {{"name", "task"},
+       {"field_name", "task"},
+       {"pandas_type", "unicode"},
+       {"numpy_type", "object"},
+       {"metadata", nullptr}}}},
+    {"pandas_version", kPandasMetadataVersion}};
+  auto kv = std::make_shared<arrow::KeyValueMetadata>();
+  kv->Append(kPandasMetadataKey, pandas_meta.dump());
+
+  auto schema = arrow::schema(
+    {arrow::field("task_index", arrow::int64()), arrow::field("task", arrow::utf8())}, kv);
+  auto table = arrow::Table::Make(schema, {idx_a, task_a});
+  return write_parquet_file(*table, opts_.dataset_root / v3::TASKS_PATH, /*store_schema=*/true);
 }
 
 bool LeRobotV3DatasetWriter::write_stats_json() {
