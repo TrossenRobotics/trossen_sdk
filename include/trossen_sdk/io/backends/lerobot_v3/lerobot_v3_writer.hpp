@@ -18,12 +18,16 @@
 #include <filesystem>
 #include <map>
 #include <memory>
+#include <random>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include <arrow/api.h>
 #include <parquet/arrow/writer.h>
 #include <opencv2/opencv.hpp>
+
+#include "nlohmann/json.hpp"
 
 #include "trossen_sdk/configuration/types/backends/lerobot_v3_backend_config.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
@@ -146,6 +150,18 @@ public:
     const std::string& fallback_task,
     const std::filesystem::path& tmp_root) const;
 
+  /// @brief Outcome of consume_episode().
+  enum class ConsumeResult {
+    /// @brief The episode was appended to the dataset.
+    kAppended,
+    /// @brief The episode does not fit the dataset and nothing of it was written, so the
+    ///        dataset can take the next episode.
+    kRefused,
+    /// @brief The writer failed, possibly after part of the episode was written, so the
+    ///        dataset cannot take another episode.
+    kFailed,
+  };
+
   /**
    * @brief Fold one prepared episode into the dataset (the sequential stage).
    *
@@ -155,10 +171,15 @@ public:
    * writer state; call once per episode, in ascending order, from the thread that
    * constructed the writer.
    *
+   * The first appended episode fixes the dataset's row widths, cameras and video codecs.
+   * An episode with no rows, or one that differs from the dataset in any of these, is
+   * refused before anything of it is stored.
+   *
    * @param pe Prepared episode from prepare_episode(); its sampled frames are moved out.
-   * @return true on success.
+   * @return kAppended on success, kRefused when the episode does not fit the dataset, and
+   *         kFailed when called from another thread or on a write failure.
    */
-  bool consume_episode(PreparedEpisode& pe);
+  ConsumeResult consume_episode(PreparedEpisode& pe);
 
   /**
    * @brief Flush episodes/tasks parquet, global stats.json, info.json, and README.
@@ -205,6 +226,27 @@ private:
     /// @brief Measured duration of the staged episode videos in seconds, where the next
     ///        episode starts.
     double duration_s{0.0};
+  };
+
+  /// @brief One episode's seek metadata, buffered until finalize().
+  struct EpisodeMeta {
+    /// @brief Output episode index, the episode's position in the episodes table.
+    int episode_index{0};
+    /// @brief Tasks performed in the episode.
+    std::vector<std::string> tasks;
+    /// @brief Number of rows in the episode.
+    int64_t length{0};
+    /// @brief Chunk index of the data parquet holding the episode's rows.
+    int data_chunk_index{0};
+    /// @brief File index of the data parquet holding the episode's rows.
+    int data_file_index{0};
+    /// @brief Dataset-wide index of the episode's first row.
+    int64_t dataset_from_index{0};
+    /// @brief Dataset-wide index one past the episode's last row.
+    int64_t dataset_to_index{0};
+    /// @brief Per video key: {chunk_index, file_index, from_timestamp, to_timestamp}, with
+    /// the timestamps in seconds from the start of the shared mp4.
+    std::map<std::string, std::array<double, 4>> videos;
   };
 
   /// @brief Make sure an open data file has room for the next episode, opening the next
@@ -264,6 +306,19 @@ private:
    */
   int task_index_for(const std::string& task_name);
 
+  /**
+   * @brief Check that an episode fits the dataset, logging what differs when it does not.
+   *
+   * @param pe Prepared episode.
+   * @param action_dim The dataset's action width.
+   * @param obs_dim The dataset's observation.state width.
+   * @param features The dataset's info.json `features`.
+   * @return true when the episode has the same row widths, a video for exactly the
+   *         dataset's cameras, and each video in its camera's codec and pixel format.
+   */
+  bool episode_fits_dataset(const PreparedEpisode& pe, int action_dim, int obs_dim,
+                            const nlohmann::ordered_json& features) const;
+
   /// @brief Write the episodes metadata parquet, one row of seek metadata per episode.
   /// @return false when the file cannot be written.
   bool write_episodes_parquet();
@@ -282,6 +337,8 @@ private:
 
   /// @brief Options given at construction.
   Options opts_;
+  /// @brief Thread that constructed the writer; the only one allowed to consume episodes.
+  std::thread::id owner_thread_{std::this_thread::get_id()};
   /// @brief Metadata directory, `<dataset_root>/meta`; set by open().
   std::filesystem::path meta_dir_;
   /// @brief Data parquet directory, `<dataset_root>/data`; set by open().
@@ -289,17 +346,48 @@ private:
   /// @brief Video directory, `<dataset_root>/videos`; set by open().
   std::filesystem::path videos_dir_;
 
+  /// @brief True once the first episode has fixed the schema and features.
+  bool schema_fixed_{false};
+  /// @brief The recorded robot_name of the first episode, written as `robot_type`.
+  std::string robot_name_;
   /// @brief Width of every action row, fixed by the first episode.
   int action_dim_{0};
   /// @brief Width of every observation.state row, fixed by the first episode.
   int obs_dim_{0};
   /// @brief Schema of every data parquet file, fixed by the first episode.
   std::shared_ptr<arrow::Schema> data_schema_;
+  /// @brief info.json `features`, built from the first episode.
+  nlohmann::ordered_json features_;
 
   /// @brief The data parquet file that receives the next episode's rows.
   DataFileState data_;
   /// @brief Each camera's shared video stream, keyed by video_key.
   std::map<std::string, VideoFileState> videos_;
+  /// @brief Video keys in the order they were first seen.
+  std::vector<std::string> video_keys_;
+
+  /// @brief Seek metadata of every written episode, in episode order.
+  std::vector<EpisodeMeta> episodes_;
+  /// @brief Task strings indexed by task_index.
+  std::vector<std::string> task_list_;
+  /// @brief task_index of each task string.
+  std::map<std::string, int> task_to_index_;
+
+  /// @brief Rows written so far; the dataset-wide index of the next row.
+  int64_t global_frame_index_{0};
+
+  /// @brief Every action value written, one column per dimension, for stats.json.
+  std::vector<std::vector<float>> action_values_;
+  /// @brief Every observation.state value written, one column per dimension, for stats.json.
+  std::vector<std::vector<float>> obs_values_;
+  /// @brief Every row timestamp written, in seconds, for stats.json.
+  std::vector<float> ts_values_;
+  /// @brief Sampled images per video key for image stats, a uniform reservoir capped per key.
+  std::map<std::string, std::vector<cv::Mat>> image_samples_;
+  /// @brief Sampled images offered per video key so far, kept or not.
+  std::map<std::string, size_t> image_samples_seen_;
+  /// @brief Fixed-seed generator for the reservoir, so a dataset's stats are reproducible.
+  std::mt19937_64 sample_rng_{0};
 };
 
 }  // namespace trossen::io::backends
