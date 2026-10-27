@@ -13,6 +13,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <set>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -21,7 +22,10 @@
 
 #include <arrow/io/api.h>
 
+#include "nlohmann/json.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_schema_utils.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_stats_utils.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_table.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_video.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
@@ -40,6 +44,8 @@ using v3::update_chunk_file_indices;
 constexpr double kBytesPerMegabyte = 1e6;
 /// @brief Largest gap between a written video's duration and its episodes' durations.
 constexpr double kDurationToleranceS = 1e-3;
+/// @brief Most sampled images kept per camera for its image statistics.
+constexpr size_t kMaxImageSamplesPerKey = 1000;
 
 /// @brief "chunk-NNN/file-NNN": the zero-padded chunk/file pair in LeRobot v3.0 paths.
 std::string chunk_file_stem(int chunk_index, int file_index) {
@@ -489,8 +495,12 @@ bool LeRobotV3DatasetWriter::flush_videos() {
 }
 
 int LeRobotV3DatasetWriter::task_index_for(const std::string& task_name) {
-  // TODO(shantanuparab-tr): map a task name to its row in the tasks table (#365).
-  return 0;
+  auto it = task_to_index_.find(task_name);
+  if (it != task_to_index_.end()) return it->second;
+  int idx = static_cast<int>(task_list_.size());
+  task_list_.push_back(task_name);
+  task_to_index_[task_name] = idx;
+  return idx;
 }
 
 LeRobotV3DatasetWriter::PreparedEpisode LeRobotV3DatasetWriter::prepare_episode(
@@ -683,10 +693,174 @@ try {
   return {};  // ok == false
 }
 
-bool LeRobotV3DatasetWriter::consume_episode(PreparedEpisode& pe)
+bool LeRobotV3DatasetWriter::episode_fits_dataset(
+  const PreparedEpisode& pe, int action_dim, int obs_dim,
+  const nlohmann::ordered_json& features) const
 {
-  // TODO(shantanuparab-tr): append a prepared episode to the aggregated files, in order (#365).
-  return false;
+  const AlignedEpisode& ep = pe.ep;
+  const int ep_action_dim = episode_action_dim(ep);
+  const int ep_obs_dim = episode_obs_dim(ep);
+  if (ep_action_dim != action_dim || ep_obs_dim != obs_dim) {
+    std::cerr << "Error: episode " << ep.episode_index << " has " << ep_action_dim
+              << " action and " << ep_obs_dim << " observation.state values per row but the"
+              << " dataset has " << action_dim << " and " << obs_dim << "\n";
+    return false;
+  }
+
+  // Every episode carries a video for each of the dataset's cameras and no other, so the
+  // episodes table holds the same video columns for every episode.
+  std::set<std::string> dataset_keys;
+  for (const auto& [key, feature] : features.items()) {
+    if (feature.value("dtype", std::string{}) == "video") dataset_keys.insert(key);
+  }
+  std::set<std::string> episode_keys;
+  for (const auto& pv : pe.videos) episode_keys.insert(pv.obs_key);
+  if (episode_keys != dataset_keys) {
+    const auto join = [](const std::set<std::string>& keys) {
+      std::string joined;
+      for (const auto& key : keys) joined += (joined.empty() ? "" : ", ") + key;
+      return joined.empty() ? std::string{"none"} : joined;
+    };
+    std::cerr << "Error: episode " << ep.episode_index << " has videos for "
+              << join(episode_keys) << " but the dataset has " << join(dataset_keys) << "\n";
+    return false;
+  }
+
+  // A shared video file holds one bitstream format, so each video must match the codec and
+  // pixel format the dataset declares for its camera.
+  for (const auto& pv : pe.videos) {
+    const auto& info = features.at(pv.obs_key).at("info");
+    const std::string codec = info.value("video.codec", std::string{});
+    const std::string pix_fmt = info.value("video.pix_fmt", std::string{});
+    if (pv.codec != codec || pv.pix_fmt != pix_fmt) {
+      std::cerr << "Error: episode " << ep.episode_index << " has " << pv.codec << "/"
+                << pv.pix_fmt << " video for " << pv.obs_key << " but the dataset holds "
+                << codec << "/" << pix_fmt << "\n";
+      return false;
+    }
+  }
+  return true;
+}
+
+LeRobotV3DatasetWriter::ConsumeResult LeRobotV3DatasetWriter::consume_episode(
+  PreparedEpisode& pe)
+{
+  if (std::this_thread::get_id() != owner_thread_) {
+    std::cerr << "Error: consume_episode() called from a thread other than the writer's\n";
+    return ConsumeResult::kFailed;
+  }
+  const AlignedEpisode& ep = pe.ep;
+  if (ep.frames.empty()) {
+    std::cerr << "Error: episode " << ep.episode_index << " has no frames\n";
+    return ConsumeResult::kRefused;
+  }
+
+  // The first episode fixes the row widths and features, and every later one must match
+  // them. They are stored only once the episode fits, so a refused first episode leaves
+  // the dataset unfixed.
+  const int action_dim = schema_fixed_ ? action_dim_ : episode_action_dim(ep);
+  const int obs_dim = schema_fixed_ ? obs_dim_ : episode_obs_dim(ep);
+  nlohmann::ordered_json first_features;
+  if (!schema_fixed_) {
+    first_features = build_features(ep);
+    // Each video's actual codec, which differs from build_features()'s for a remuxed camera.
+    for (const auto& pv : pe.videos) {
+      set_video_codec(first_features, pv.obs_key, {pv.codec, pv.pix_fmt});
+    }
+    trossen::io::backends::add_standard_metadata_features(first_features);
+  }
+  if (!episode_fits_dataset(pe, action_dim, obs_dim,
+                            schema_fixed_ ? features_ : first_features)) {
+    return ConsumeResult::kRefused;
+  }
+  if (!schema_fixed_) {
+    action_dim_ = action_dim;
+    obs_dim_ = obs_dim;
+    data_schema_ = make_data_schema(action_dim_, obs_dim_);
+    features_ = std::move(first_features);
+    robot_name_ = ep.robot_name;
+    action_values_.assign(action_dim_, {});
+    obs_values_.assign(obs_dim_, {});
+    schema_fixed_ = true;
+  }
+
+  const int task_index = task_index_for(pe.task_name);
+  const int64_t ep_frames = static_cast<int64_t>(ep.frames.size());
+
+  // The episode index is the position in the episodes table, assigned here rather than
+  // taken from the input file's position, so a skipped input leaves no hole. Episodes are
+  // looked up by position, and a gap makes every later episode read another episode's
+  // video seek metadata.
+  const int episode_index = static_cast<int>(episodes_.size());
+
+  // Data parquet: roll if needed, then write this episode as one row group.
+  if (!roll_data_file_if_needed(ep_frames)) return ConsumeResult::kFailed;
+
+  EpisodeMeta meta;
+  meta.episode_index = episode_index;
+  meta.tasks = {pe.task_name};
+  meta.length = ep_frames;
+  meta.data_chunk_index = data_.chunk_index;
+  meta.data_file_index = data_.file_index;
+  meta.dataset_from_index = global_frame_index_;
+  meta.dataset_to_index = global_frame_index_ + ep_frames;
+
+  auto table = build_episode_table(ep, action_dim_, obs_dim_, episode_index, task_index,
+                                   global_frame_index_);
+  if (!table) return ConsumeResult::kFailed;
+  auto st = data_.writer->WriteTable(*table, table->num_rows());  // one row group / episode
+  if (!st.ok()) {
+    std::cerr << "Error: Failed to write data table: " << st.ToString() << "\n";
+    return ConsumeResult::kFailed;
+  }
+  data_.frames_in_file += ep_frames;
+  global_frame_index_ += ep_frames;
+
+  // Accumulate global stats from this episode's frames. build_episode_table() checked that
+  // every row has action_dim_ action and obs_dim_ observation values.
+  for (const auto& f : ep.frames) {
+    for (size_t d = 0; d < f.action.size(); ++d) {
+      action_values_[d].push_back(static_cast<float>(f.action[d]));
+    }
+    for (size_t d = 0; d < f.observation.size(); ++d) {
+      obs_values_[d].push_back(static_cast<float>(f.observation[d]));
+    }
+    ts_values_.push_back(f.timestamp_s);
+  }
+
+  // Videos: place or concatenate each pre-encoded episode mp4 into the shared file.
+  if (opts_.encode_videos) {
+    for (auto& pv : pe.videos) {
+      if (std::find(video_keys_.begin(), video_keys_.end(), pv.obs_key) == video_keys_.end()) {
+        video_keys_.push_back(pv.obs_key);
+      }
+
+      std::array<double, 4> slot{};
+      if (!place_or_concat_video(pv.obs_key, pv.episode_mp4, pv.duration_s, slot)) {
+        return ConsumeResult::kFailed;
+      }
+      meta.videos[pv.obs_key] = slot;
+
+      // Reservoir sampling: once the bucket is full, the n-th image offered replaces a
+      // random kept one with probability cap/n, so every episode is equally represented.
+      auto& bucket = image_samples_[pv.obs_key];
+      size_t& seen = image_samples_seen_[pv.obs_key];
+      for (auto& img : pv.samples) {
+        if (img.empty()) continue;
+        ++seen;
+        if (bucket.size() < kMaxImageSamplesPerKey) {
+          bucket.push_back(std::move(img));
+          continue;
+        }
+        const size_t replace_at =
+          std::uniform_int_distribution<size_t>(0, seen - 1)(sample_rng_);
+        if (replace_at < kMaxImageSamplesPerKey) bucket[replace_at] = std::move(img);
+      }
+    }
+  }
+
+  episodes_.push_back(std::move(meta));
+  return ConsumeResult::kAppended;
 }
 
 bool LeRobotV3DatasetWriter::write_episodes_parquet() {
