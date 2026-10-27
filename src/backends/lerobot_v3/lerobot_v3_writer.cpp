@@ -5,11 +5,21 @@
 
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_writer.hpp"
 
+#include <iostream>
+#include <system_error>
 #include <utility>
 
 namespace trossen::io::backends {
 
 namespace fs = std::filesystem;
+namespace v3 = trossen::io::backends::lerobot_v3;
+
+namespace {
+
+/// @brief Per-episode metadata directory under meta/.
+constexpr char kEpisodesDir[] = "episodes";
+
+}  // namespace
 
 LeRobotV3DatasetWriter::LeRobotV3DatasetWriter(Options opts) : opts_(std::move(opts)) {}
 
@@ -18,8 +28,34 @@ LeRobotV3DatasetWriter::~LeRobotV3DatasetWriter() {
 }
 
 bool LeRobotV3DatasetWriter::open() {
-  // TODO(shantanuparab-tr): create the dataset directory tree (#345).
-  return false;
+  if (opts_.chunks_size <= 0) {
+    std::cerr << "Error: chunks_size must be positive, got " << opts_.chunks_size << "\n";
+    return false;
+  }
+  // A size budget of 0 starts a new file for every episode.
+  const std::pair<const char*, int> budgets[] = {
+    {"data_files_size_in_mb", opts_.data_files_size_in_mb},
+    {"video_files_size_in_mb", opts_.video_files_size_in_mb},
+  };
+  for (const auto& [name, value] : budgets) {
+    if (value < 0) {
+      std::cerr << "Error: " << name << " must not be negative, got " << value << "\n";
+      return false;
+    }
+  }
+
+  meta_dir_ = opts_.dataset_root / v3::META_DIR;
+  data_dir_ = opts_.dataset_root / v3::DATA_DIR;
+  videos_dir_ = opts_.dataset_root / v3::VIDEO_DIR;
+  for (const fs::path& dir : {meta_dir_ / kEpisodesDir, data_dir_, videos_dir_}) {
+    std::error_code ec;
+    fs::create_directories(dir, ec);
+    if (ec) {
+      std::cerr << "Error: Failed to create " << dir << ": " << ec.message() << "\n";
+      return false;
+    }
+  }
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::close_data_writer() {
