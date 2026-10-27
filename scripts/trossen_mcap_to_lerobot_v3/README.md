@@ -2,6 +2,10 @@
 
 Offline converter: TrossenMCAP recordings to a HuggingFace **LeRobot v3.0** dataset.
 
+> **Rivet recordings are not supported yet.** They convert, with a warning, but only for
+> inspection: the base keeps its linear and angular velocity and drops the lateral
+> velocity and the lift, and no LeRobot robot can train on or replay the result.
+
 This document explains the internals and which settings change the outcome: throughput, output size, and correctness.
 For the LeRobot v2.1 converter and the recording format, read the [conversion guide](../../docs/convert.rst) first.
 
