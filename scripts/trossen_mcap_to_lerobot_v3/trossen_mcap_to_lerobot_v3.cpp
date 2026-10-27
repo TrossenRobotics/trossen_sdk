@@ -15,10 +15,17 @@
  */
 
 #include <algorithm>
+#include <atomic>
+#include <condition_variable>
+#include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <iostream>
+#include <mutex>
+#include <semaphore>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <vector>
 
 #include "trossen_sdk/configuration/cli_parser.hpp"
@@ -28,6 +35,16 @@
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_writer.hpp"
 
 namespace fs = std::filesystem;
+
+namespace {
+
+/// @brief Largest default worker count.
+constexpr unsigned kMaxDefaultJobs = 8;
+
+/// @brief Prepared episodes the workers may hold beyond one per worker.
+constexpr std::ptrdiff_t kPrefetchSlack = 2;
+
+}  // namespace
 
 static void print_usage(const char* program) {
   std::cerr << "Usage: " << program << " <mcap_file_or_folder> [options]\n";
@@ -116,6 +133,22 @@ int main(int argc, char** argv) {
   }
   std::cout << "Found " << mcap_files.size() << " MCAP file(s) to convert\n";
 
+  // Worker-thread count for the decode/extract/encode stage: the core count, at most
+  // kMaxDefaultJobs.
+  const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+  int jobs = static_cast<int>(std::min(hw, kMaxDefaultJobs));
+  if (static_cast<size_t>(jobs) > mcap_files.size()) jobs = static_cast<int>(mcap_files.size());
+  std::cout << "Worker threads (decode/extract/encode): " << jobs
+            << " (writer stays single-threaded, ordered)\n";
+
+  // Per-encoder parallelism cap, applied by the writer as SVT-AV1 lp= and x265 pools=
+  // (ffmpeg's -threads does not reach the SVT-AV1 encoder, and only reaches x265's frame
+  // threads). It splits the machine evenly across the workers.
+  const int encoder_threads = std::max(1, static_cast<int>(hw) / jobs);
+  std::cout << "Encoder parallelism per episode: "
+            << (encoder_threads > 0 ? std::to_string(encoder_threads) : std::string("uncapped"))
+            << " (SVT-AV1 lp / x265 pools)\n";
+
   // The writer starts a fresh dataset and cannot append to an existing one, so an existing
   // dataset is either removed or left untouched.
   if (fs::exists(dataset_root)) {
@@ -159,6 +192,7 @@ int main(int argc, char** argv) {
   opts.data_files_size_in_mb = cfg->data_files_size_in_mb;
   opts.video_files_size_in_mb = cfg->video_files_size_in_mb;
   opts.encode_videos = cfg->encode_videos;
+  opts.encoder_threads = encoder_threads;
 
   trossen::io::backends::LeRobotV3DatasetWriter writer(opts);
   if (!writer.open()) {
@@ -169,18 +203,63 @@ int main(int argc, char** argv) {
   fs::path tmp_root = dataset_root / ".tmp_convert";
   const size_t num_files = mcap_files.size();
 
+  // Producer/consumer pipeline. Workers prepare episodes (decode, align, extract and
+  // per-episode video encode) concurrently; the main thread appends them to the dataset
+  // strictly in input order, which the shared files and their offsets require. A counting
+  // semaphore bounds how far the workers may run ahead of the consumer, so at most `window`
+  // prepared episodes are held at once.
   using Writer = trossen::io::backends::LeRobotV3DatasetWriter;
+  std::vector<Writer::PreparedEpisode> slots(num_files);
+  std::vector<uint8_t> ready(num_files, 0);
+  std::mutex mtx;
+  std::condition_variable ready_cv;
+  std::atomic<size_t> next_index{0};
+
+  // window >= jobs guarantees progress: indices are handed out in increasing order, so the
+  // episode the consumer waits for is always already in flight on some worker, which holds
+  // its permit until done. The extra kPrefetchSlack permits let workers start the next
+  // episodes while the consumer is appending one.
+  const std::ptrdiff_t window = static_cast<std::ptrdiff_t>(jobs) + kPrefetchSlack;
+  std::counting_semaphore<> slots_free(window);
+
+  auto worker = [&]() {
+    while (true) {
+      slots_free.acquire();
+      size_t i = next_index.fetch_add(1);
+      if (i >= num_files) {
+        slots_free.release();  // nothing to do with this permit
+        break;
+      }
+      // `i` is the input position and names the episode's temp dir. consume_episode()
+      // numbers the dataset's episodes, so a failed recording leaves no hole in the indices.
+      // prepare_episode() reports its own exceptions as a failed episode, so none reaches
+      // this thread.
+      Writer::PreparedEpisode prepared =
+        writer.prepare_episode(mcap_files[i], static_cast<int>(i), cfg->task_name, tmp_root);
+      {
+        std::lock_guard<std::mutex> lk(mtx);
+        slots[i] = std::move(prepared);
+        ready[i] = 1;
+      }
+      ready_cv.notify_all();
+    }
+  };
+
+  std::vector<std::thread> pool;
+  pool.reserve(static_cast<size_t>(jobs));
+  for (int t = 0; t < jobs; ++t) pool.emplace_back(worker);
 
   int converted = 0;
   int failed = 0;
   bool writer_failed = false;
 
   for (size_t i = 0; i < num_files; ++i) {
-    // Not up for review, changes in #381.
-    // `i` is the input position and names the episode's temp dir. consume_episode() numbers
-    // the dataset's episodes, so a failed recording leaves no hole in the episode indices.
-    Writer::PreparedEpisode pe =
-        writer.prepare_episode(mcap_files[i], static_cast<int>(i), cfg->task_name, tmp_root);
+    Writer::PreparedEpisode pe;
+    {
+      std::unique_lock<std::mutex> lk(mtx);
+      ready_cv.wait(lk, [&] { return ready[i] != 0; });
+      pe = std::move(slots[i]);
+    }
 
     std::cout << "\n" << std::string(70, '-') << "\n";
     std::cout << "[" << (i + 1) << "/" << num_files << "] " << mcap_files[i].filename().string()
@@ -207,13 +286,17 @@ int main(int argc, char** argv) {
       writer_failed = result == Writer::ConsumeResult::kFailed;
     }
 
-    // Clean up this episode's temp dir regardless of outcome.
+    // Clean up this episode's temp dir regardless of outcome, then free the slot.
     std::error_code ec;
     fs::remove_all(pe.tmp_dir, ec);
+    slots_free.release();
 
     if (writer_failed) {
       std::cerr << "[FAILED] Could not add " << mcap_files[i].string()
                 << " to the dataset; stopping\n";
+      // Hand out no more work, and give every worker a permit so none stays blocked.
+      next_index.store(num_files);
+      slots_free.release(static_cast<std::ptrdiff_t>(jobs));
       break;
     }
 
@@ -223,6 +306,8 @@ int main(int argc, char** argv) {
       ++failed;
     }
   }
+
+  for (auto& th : pool) th.join();
 
   std::error_code ec;
   fs::remove_all(tmp_root, ec);
