@@ -95,7 +95,7 @@ Point it at a different config with ``--config <path>``.
         "task_name":              "perform a generic task",         // Default task description
         "repository_id":          "TrossenRoboticsCommunity",       // Top-level folder name
         "dataset_id":             "mcap_converted_dataset_v3",      // Sub-folder for this dataset
-        "fps":                    30.0,                             // Frame rate written to info.json
+        "fps":                    30.0,                             // Row and video rate; a whole number
         "license":                "apache-2.0",                     // Written to the dataset card
         "chunks_size":            1000,                             // Files per chunk-NNN folder
         "data_files_size_in_mb":  100,                              // Size budget of each data file
@@ -122,8 +122,8 @@ Key fields to update for each new dataset:
       - Task for episodes whose recording carries none.
         Each distinct task gets its own row in ``meta/tasks.parquet``.
     * - ``fps``
-      - Frame rate stored in ``info.json`` and used for the videos.
-        Leave it at 30: rows are generated at 30 Hz whatever this is set to, so any other value puts the videos out of step with the rows.
+      - Rate of the rows and videos in frames per second, stored in ``info.json``.
+        Must be a whole number, and should match the frame rate the cameras recorded at.
     * - ``encode_videos``
       - Disable to produce Parquet only (useful for joint-state-only pipelines)
     * - ``overwrite_existing``
