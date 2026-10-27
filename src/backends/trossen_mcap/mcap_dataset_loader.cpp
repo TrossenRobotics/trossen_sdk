@@ -237,6 +237,29 @@ void drop_depth_cameras(McapChannelMap& channels, const nlohmann::json& dataset_
   });
 }
 
+void StreamWindow::narrow(const std::string& name, uint64_t first, uint64_t last) {
+  if (first >= start) {
+    start = first;
+    last_to_start = name;
+  }
+  if (last <= end) {
+    end = last;
+    first_to_end = name;
+  }
+}
+
+bool StreamWindow::is_open() const {
+  return end > start;
+}
+
+std::vector<uint64_t> row_grid(uint64_t start, uint64_t end, uint64_t period_ns) {
+  const size_t row_count = static_cast<size_t>((end - start) / period_ns) + 1;
+  std::vector<uint64_t> times;
+  times.reserve(row_count);
+  for (size_t k = 0; k < row_count; ++k) times.push_back(start + k * period_ns);
+  return times;
+}
+
 uint64_t camera_match_window_ns(double camera_fps, double row_fps, uint64_t tolerance_ns) {
   // A camera at least as fast as the rows has a frame within half a row period of every row,
   // so tolerance_ns applies as for any stream. A slower camera leaves wider spaces between its
@@ -437,9 +460,10 @@ bool load_aligned_episode(
   // realtime half, so that is the key every comparison below uses.
   auto log_ns_of = [](const data::RecordBase& rec) { return rec.ts.realtime.to_ns(); };
 
-  // Every stream must be in log-time order: rows are matched with cursors that only move
+  // Every stream must be in log-time order: the window reads each stream's first and last
+  // sample as its earliest and latest, and rows are matched with cursors that only move
   // forward. The realtime clock can step backwards (an NTP correction), which would break
-  // that without any error, so an out-of-order stream rejects the episode.
+  // both without any error, so an out-of-order stream rejects the episode.
   auto check_time_order = [](const std::string& name, size_t count,
                              const auto& stamp_at) -> bool {
     const auto step = first_backward_step(count, stamp_at);
@@ -511,10 +535,54 @@ bool load_aligned_episode(
     out.cameras.push_back(std::move(cam));
   }
 
-  // Times at which rows are sampled, in MCAP log time.
-  // TODO(shantanuparab-tr): fill with a uniform grid at alignment.fps over the window where
-  // every stream has data (#358). Until then no rows are produced.
-  std::vector<uint64_t> row_times;
+  // Rows sit on a uniform grid at the dataset rate, spanning the window where every
+  // stream has data. A LeRobot episode plays row k back at k/fps, so uniform spacing is
+  // what makes that stored timestamp describe the row.
+  const uint64_t row_period_ns =
+    static_cast<uint64_t>(static_cast<double>(data::S_TO_NS) / alignment.fps);
+
+  StreamWindow window;
+
+  for (const auto& stream_id : out.leader_streams) {
+    const auto it = messages_by_stream.find(stream_id);
+    if (it == messages_by_stream.end() || it->second.empty()) continue;
+    window.narrow(stream_id, log_ns_of(it->second.front()), log_ns_of(it->second.back()));
+  }
+  for (const auto& stream_id : out.follower_streams) {
+    const auto it = messages_by_stream.find(stream_id);
+    if (it == messages_by_stream.end() || it->second.empty()) continue;
+    window.narrow(stream_id, log_ns_of(it->second.front()), log_ns_of(it->second.back()));
+  }
+  for (const auto& cam : out.cameras) {
+    const auto& stamps = camera_timestamps[cam.name];
+    if (stamps.empty()) continue;
+    window.narrow(cam.name, stamps.front(), stamps.back());
+  }
+  // Every row needs a base sample, so the base bounds the window like any other stream.
+  if (channels.has_mobile_base) {
+    if (mobile_base_messages.empty()) {
+      std::cerr << "Error: the mobile base channel has no messages.\n";
+      return false;
+    }
+    window.narrow("mobile base", log_ns_of(mobile_base_messages.front()),
+                  log_ns_of(mobile_base_messages.back()));
+  }
+
+  // At least one joint stream has data, so the window always has a finite end. A window
+  // that closed means one stream stopped before another started, and no row can hold a
+  // sample from both.
+  if (!window.is_open()) {
+    std::cerr << "Error: no stretch of time has data from every stream. " << window.first_to_end
+              << " ends " << static_cast<double>(window.start - window.end) / 1e6
+              << " ms before " << window.last_to_start << " starts.\n";
+    return false;
+  }
+
+  const uint64_t span_ns = window.end - window.start;
+  const std::vector<uint64_t> row_times = row_grid(window.start, window.end, row_period_ns);
+  std::cout << "  Rows run on a " << alignment.fps << " Hz grid over "
+            << static_cast<double>(span_ns) / static_cast<double>(data::S_TO_NS) << " s ("
+            << row_times.size() << " rows)\n";
 
   const size_t max_rows = row_times.size();
   for (auto& cam : out.cameras) cam.row_source_index.reserve(max_rows);
