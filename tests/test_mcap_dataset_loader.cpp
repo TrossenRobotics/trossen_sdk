@@ -1,7 +1,8 @@
 /**
  * @file test_mcap_dataset_loader.cpp
  * @brief Unit tests for load_aligned_episode() option validation,
- *        nearest_sample_index() and first_backward_step().
+ *        nearest_sample_index(), first_backward_step(), StreamWindow and
+ *        row_grid().
  */
 
 #include <cstddef>
@@ -42,6 +43,10 @@ TEST(LoadAlignedEpisodeTest, RejectsFractionalFps) {
 TEST(LoadAlignedEpisodeTest, RejectsNonPositiveFps) {
   EXPECT_NE(stderr_for_fps(0.0).find("whole number"), std::string::npos);
   EXPECT_NE(stderr_for_fps(-30.0).find("whole number"), std::string::npos);
+}
+
+TEST(LoadAlignedEpisodeTest, RejectsFpsAboveOneRowPerNanosecond) {
+  EXPECT_NE(stderr_for_fps(2e9).find("one row per nanosecond"), std::string::npos);
 }
 
 TEST(LoadAlignedEpisodeTest, AcceptsWholeFpsAndFailsOnTheMissingFile) {
@@ -134,4 +139,47 @@ TEST(FirstBackwardStepTest, EmptyAndSingleEntryAreInOrder) {
 
 TEST(FirstBackwardStepTest, ReportsTheFirstEntryThatStepsBack) {
   EXPECT_EQ(backward_step({0, 33, 20, 66, 10}), std::optional<size_t>{2});
+}
+
+TEST(StreamWindowTest, TheLatestStartAndEarliestEndBoundTheWindow) {
+  trossen::io::backends::StreamWindow window;
+  window.narrow("joints", 0, 1'000'000'000);
+  window.narrow("cam_high", 320'000'000, 1'100'000'000);
+  EXPECT_EQ(window.start, 320'000'000u);
+  EXPECT_EQ(window.last_to_start, "cam_high");
+  EXPECT_EQ(window.end, 1'000'000'000u);
+  EXPECT_EQ(window.first_to_end, "joints");
+  EXPECT_TRUE(window.is_open());
+}
+
+TEST(StreamWindowTest, DisjointStreamsCloseTheWindow) {
+  trossen::io::backends::StreamWindow window;
+  window.narrow("joints", 0, 100);
+  window.narrow("cam_high", 200, 300);
+  EXPECT_FALSE(window.is_open());
+  EXPECT_EQ(window.first_to_end, "joints");
+  EXPECT_EQ(window.last_to_start, "cam_high");
+}
+
+TEST(StreamWindowTest, ASingleSharedInstantIsNotOpen) {
+  trossen::io::backends::StreamWindow window;
+  window.narrow("joints", 0, 100);
+  window.narrow("cam_high", 100, 200);
+  EXPECT_FALSE(window.is_open());
+}
+
+TEST(RowGridTest, RowsRunAtTheDatasetRateFromTheWindowStart) {
+  // A late-starting stream sets the window start, and row 0 sits on it whatever rate the
+  // streams were recorded at.
+  constexpr uint64_t kPeriod = 1'000'000'000 / 30;
+  const auto rows = trossen::io::backends::row_grid(320'000'000, 1'320'000'000, kPeriod);
+  ASSERT_EQ(rows.size(), 31u);
+  EXPECT_EQ(rows.front(), 320'000'000u);
+  for (size_t k = 1; k < rows.size(); ++k) EXPECT_EQ(rows[k] - rows[k - 1], kPeriod);
+  EXPECT_LE(rows.back(), 1'320'000'000u);
+}
+
+TEST(RowGridTest, AnEndOnTheGridGetsARow) {
+  const auto rows = trossen::io::backends::row_grid(100, 400, 100);
+  EXPECT_EQ(rows, (std::vector<uint64_t>{100, 200, 300, 400}));
 }
