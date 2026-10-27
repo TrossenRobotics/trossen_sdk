@@ -12,6 +12,7 @@
 
 #include "nlohmann/json.hpp"
 #include "trossen_sdk/configuration/types/backends/lerobot_v3_backend_config.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_table.hpp"
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_constants.hpp"
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_writer.hpp"
 
@@ -19,6 +20,31 @@ namespace v3 = trossen::io::backends::lerobot_v3;
 namespace fs = std::filesystem;
 using trossen::configuration::LeRobotV3BackendConfig;
 using trossen::io::backends::LeRobotV3DatasetWriter;
+
+namespace trossen::io::backends {
+
+/// @brief Calls the writer's private helpers.
+class LeRobotV3WriterTestPeer {
+public:
+  /// @brief Set the joint widths and the data schema, as the first episode does.
+  static void set_dims(LeRobotV3DatasetWriter& writer, int action_dim, int obs_dim) {
+    writer.action_dim_ = action_dim;
+    writer.obs_dim_ = obs_dim;
+    writer.data_schema_ = make_data_schema(action_dim, obs_dim);
+  }
+  static bool roll(LeRobotV3DatasetWriter& writer, int64_t next_ep_frames) {
+    return writer.roll_data_file_if_needed(next_ep_frames);
+  }
+  static bool close(LeRobotV3DatasetWriter& writer) { return writer.close_data_writer(); }
+  static void set_frames_in_file(LeRobotV3DatasetWriter& writer, int64_t frames) {
+    writer.data_.frames_in_file = frames;
+  }
+  static fs::path data_path(const LeRobotV3DatasetWriter& writer) { return writer.data_.path; }
+};
+
+}  // namespace trossen::io::backends
+
+using trossen::io::backends::LeRobotV3WriterTestPeer;
 
 namespace {
 
@@ -28,6 +54,16 @@ LeRobotV3DatasetWriter::Options temp_options(const std::string& name) {
   opts.dataset_root = fs::temp_directory_path() / name;
   fs::remove_all(opts.dataset_root);
   return opts;
+}
+
+/// @brief True when the file starts and ends with the parquet magic "PAR1".
+bool is_complete_parquet(const fs::path& path) {
+  std::ifstream in(path, std::ios::binary);
+  char head[4] = {}, tail[4] = {};
+  in.read(head, 4);
+  in.seekg(-4, std::ios::end);
+  in.read(tail, 4);
+  return in && std::string(head, 4) == "PAR1" && std::string(tail, 4) == "PAR1";
 }
 
 }  // namespace
@@ -149,5 +185,59 @@ TEST(LeRobotV3Writer, OpenFailsWhenADatasetFolderIsAFile) {
   fs::create_directories(opts.dataset_root);
   std::ofstream(opts.dataset_root / v3::DATA_DIR) << "x";
   EXPECT_FALSE(LeRobotV3DatasetWriter(opts).open());
+  fs::remove_all(opts.dataset_root);
+}
+
+TEST(LeRobotV3Writer, RollFailsBeforeTheSchemaIsSet) {
+  const auto opts = temp_options("trossen_lerobot_v3_noschema_test");
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  EXPECT_FALSE(LeRobotV3WriterTestPeer::roll(writer, 10));
+  fs::remove_all(opts.dataset_root);
+}
+
+TEST(LeRobotV3Writer, DataFileRollsWhenTheProjectedSizeReachesTheBudget) {
+  auto opts = temp_options("trossen_lerobot_v3_roll_test");
+  opts.data_files_size_in_mb = 1;
+  opts.chunks_size = 2;
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  // One action and one observation value: 4 + 4 + 4 (timestamp) + 4 * 8 = 44 bytes a row.
+  LeRobotV3WriterTestPeer::set_dims(writer, 1, 1);
+  const fs::path data = opts.dataset_root / v3::DATA_DIR;
+
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::roll(writer, 10));
+  EXPECT_EQ(LeRobotV3WriterTestPeer::data_path(writer), data / "chunk-000/file-000.parquet");
+
+  // 22,727 rows * 44 bytes = 999,988 bytes, under the 1,000,000-byte budget.
+  LeRobotV3WriterTestPeer::set_frames_in_file(writer, 22000);
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::roll(writer, 727));
+  EXPECT_EQ(LeRobotV3WriterTestPeer::data_path(writer), data / "chunk-000/file-000.parquet");
+
+  // 22,728 rows * 44 bytes = 1,000,032 bytes, at the budget.
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::roll(writer, 728));
+  EXPECT_EQ(LeRobotV3WriterTestPeer::data_path(writer), data / "chunk-000/file-001.parquet");
+  EXPECT_TRUE(is_complete_parquet(data / "chunk-000/file-000.parquet"));
+
+  // With two files per chunk, the next roll starts chunk-001.
+  LeRobotV3WriterTestPeer::set_frames_in_file(writer, 22000);
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::roll(writer, 728));
+  EXPECT_EQ(LeRobotV3WriterTestPeer::data_path(writer), data / "chunk-001/file-000.parquet");
+
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::close(writer));
+  fs::remove_all(opts.dataset_root);
+}
+
+TEST(LeRobotV3Writer, CloseWritesTheFooterAndCanRunTwice) {
+  const auto opts = temp_options("trossen_lerobot_v3_close_test");
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  LeRobotV3WriterTestPeer::set_dims(writer, 1, 1);
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::roll(writer, 1));
+  const fs::path path = LeRobotV3WriterTestPeer::data_path(writer);
+
+  EXPECT_TRUE(LeRobotV3WriterTestPeer::close(writer));
+  EXPECT_TRUE(is_complete_parquet(path));
+  EXPECT_TRUE(LeRobotV3WriterTestPeer::close(writer));
   fs::remove_all(opts.dataset_root);
 }
