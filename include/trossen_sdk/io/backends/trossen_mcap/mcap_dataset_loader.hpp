@@ -22,6 +22,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_episode.hpp"
@@ -107,17 +108,53 @@ std::optional<size_t> first_backward_step(size_t count, const StampAt& stamp_at)
   return std::nullopt;
 }
 
+/// @brief The span of time in which every stream added so far has data.
+struct StreamWindow {
+  /// @brief Latest first sample among the streams, in nanoseconds of log time.
+  uint64_t start{0};
+  /// @brief Earliest last sample among the streams, in nanoseconds of log time.
+  uint64_t end{std::numeric_limits<uint64_t>::max()};
+  /// @brief Stream that set `start`, for reporting a window that closed.
+  std::string last_to_start;
+  /// @brief Stream that set `end`, for reporting a window that closed.
+  std::string first_to_end;
+
+  /**
+   * @brief Narrow the window to a stream's first and last sample times.
+   *
+   * @param name Stream name, kept when it sets an edge.
+   * @param first Stream's first sample time, in nanoseconds of log time.
+   * @param last Stream's last sample time, in nanoseconds of log time.
+   */
+  void narrow(const std::string& name, uint64_t first, uint64_t last);
+
+  /// @return true when the window spans a positive length of time.
+  bool is_open() const;
+};
+
+/**
+ * @brief Row times on a uniform grid from `start`, one per `period_ns`, up to `end`.
+ *
+ * @param start First row time, in nanoseconds.
+ * @param end Last time a row may fall on, in nanoseconds; must be at least `start`.
+ * @param period_ns Spacing between rows, in nanoseconds; must be above zero.
+ * @return Row times `start + k * period_ns` for every k that stays at or before `end`.
+ */
+std::vector<uint64_t> row_grid(uint64_t start, uint64_t end, uint64_t period_ns);
+
 /**
  * @brief Read an MCAP file and align its joint/camera streams into a frame sequence.
  *
  * Decodes the embedded dataset_info metadata, auto-detects leader/follower joint
  * streams by topic name (falling back to single-robot mode), parses all joint and
- * odometry messages, and produces one AlignedFrame per dataset row via
- * nearest-timestamp matching. Camera frames are matched the same way: each row records
- * the nearest frame per camera in CameraInfo::row_source_index, so images and joint
- * states in a row share an instant rather than a position. Rows where any stream or
- * camera has no sample within tolerance are dropped. Camera frames are NOT decoded
- * here; call extract_camera_images() for that.
+ * odometry messages, and produces one AlignedFrame per dataset row. Rows sit on a
+ * uniform grid at `alignment.fps` spanning the time every joint stream, camera and
+ * mobile base has data, and each row takes every stream's nearest sample. Camera frames
+ * are matched the same way: each row records the nearest frame per camera in
+ * CameraInfo::row_source_index, so images and joint states in a row share an instant
+ * rather than a position. Rows where any stream or camera has no sample within tolerance
+ * are dropped. Camera frames are NOT decoded here; call extract_camera_images() for
+ * that.
  *
  * Camera keys keep the name the recording gave them.
  *
