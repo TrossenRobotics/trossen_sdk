@@ -93,6 +93,9 @@ public:
       std::string obs_key;                  ///< video key (observation.images.<cam>)
       std::filesystem::path episode_mp4;    ///< encoded per-episode mp4 (consumed by concat)
       double duration_s{0.0};               ///< episode video duration (frame_count / fps)
+      /// @brief Seconds of video before the frame matched to row 0, added to
+      ///        `from_timestamp`; zero for re-encoded video.
+      double start_offset_s{0.0};
       std::vector<cv::Mat> samples;         ///< frames sampled for global image stats
       /// @brief Codec of `episode_mp4` as written to info.json: "av1", "h264" or "hevc".
       /// Matches the bitstream.
@@ -265,12 +268,17 @@ private:
    * @param video_key Camera's feature key.
    * @param episode_mp4 Episode video; moved into the staging folder.
    * @param ep_duration_s Expected duration, frame count / fps.
+   * @param start_offset_s Seconds of video before the frame matched to row 0, added to the
+   *        span's start.
+   * @param played_s Seconds of video the episode's rows play, from the frame matched to
+   *        row 0; the span ends there.
    * @param out_slot Set to {chunk_index, file_index, from_timestamp, to_timestamp}.
    * @return false when the episode is not staged; the camera's state is then unchanged.
    */
   bool place_or_concat_video(
     const std::string& video_key, const std::filesystem::path& episode_mp4,
-    double ep_duration_s, std::array<double, 4>& out_slot);
+    double ep_duration_s, double start_offset_s, double played_s,
+    std::array<double, 4>& out_slot);
   /**
    * @brief Write a camera's staged episode videos into its shared mp4 with one stream copy,
    *        then move the camera to the next file.

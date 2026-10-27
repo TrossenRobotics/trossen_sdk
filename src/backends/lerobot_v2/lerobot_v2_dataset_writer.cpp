@@ -182,7 +182,9 @@ bool LeRobotV2DatasetWriter::prepare_episode(const std::filesystem::path& mcap_f
     // A camera that free-ran short would otherwise leave more parquet rows than its
     // remuxed video has frames; trim the whole episode to whatever every stream-copied
     // camera actually covers.
-    trossen::io::backends::clamp_episode_to_video_frame_counts(ep, copied_streams);
+    trossen::io::backends::clamp_episode_to_video_frame_counts(ep, copied_streams,
+                                                                /*start_offset_applied=*/false);
+    trossen::io::backends::warn_video_start_offset(ep, copied_streams);
 
     for (const auto& cam : ep.cameras) {
       const auto vs_it = video_streams.find(cam.name);

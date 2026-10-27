@@ -295,24 +295,41 @@ bool extract_camera_video(
   std::map<std::string, CameraVideoStream>& out_streams);
 
 /**
- * @brief Trim an aligned episode to whatever every video-mode camera actually covers.
+ * @brief Source frames a camera recorded before the episode's first row.
  *
- * Compressed camera streams are remuxed verbatim (extract_camera_video(), arrival order,
- * not row-aligned), so a camera that free-ran short ends up with fewer frames than the
- * joint-aligned episode has rows: lerobot then queries that video by row timestamp and
- * walks off the end. Raw-image cameras always yield exactly one frame per row, because
- * extract_camera_images() writes each row's matched source frame and writes it again when
- * two rows match the same one, so only video-mode cameras are considered here.
+ * @param cam Camera with its per-row frame selections.
+ * @return Index of the frame matched to row 0, or 0 when no row matched a frame.
+ */
+size_t video_start_offset(const CameraInfo& cam);
+
+/**
+ * @brief Warn about each stream-copied camera whose video starts before row 0's frame,
+ *        for a writer that cannot move a video's start.
  *
- * Trimming drops rows from the end and prints a warning naming the shortest camera.
+ * @param ep Aligned episode carrying the per-row frame selections.
+ * @param video_streams Extracted video streams keyed by camera name.
+ */
+void warn_video_start_offset(
+  const AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams);
+
+/**
+ * @brief Trim an aligned episode to the rows every video-mode camera covers.
+ *
+ * A compressed camera stream holds the camera's frames in arrival order, so a camera that
+ * recorded fewer frames than the episode has rows leaves the last rows without video.
+ * Trimming drops rows from the end and prints a warning naming the shortest camera and the
+ * rows dropped. Raw-image cameras are not considered.
  *
  * @param ep Aligned episode to trim in place; a no-op if no camera is shorter than the
  *   episode already is.
  * @param video_streams Per-camera compressed video streams from extract_camera_video(),
  *   keyed by camera name (AlignedEpisode::cameras[i].name).
+ * @param start_offset_applied Whether the writer starts each video at the frame matched
+ *   to row 0, in which case the frames before it are never played and do not count.
  */
 void clamp_episode_to_video_frame_counts(
-  AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams);
+  AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams,
+  bool start_offset_applied);
 
 }  // namespace trossen::io::backends
 
