@@ -94,6 +94,14 @@ public:
       std::string obs_key;                  ///< video key (observation.images.<cam>)
       std::filesystem::path episode_mp4;    ///< encoded per-episode mp4 (consumed by concat)
       double duration_s{0.0};               ///< episode video duration (frame_count / fps)
+      /**
+       * @brief Seconds of recorded video before the frame matched to row 0.
+       *
+       * A stream-copied video begins at the camera's first frame, which can precede the
+       * episode's first row. Added to `from_timestamp` so row 0 reads the matched frame.
+       * Zero for re-encoded video, which is written from the matched frames only.
+       */
+      double start_offset_s{0.0};
       std::vector<cv::Mat> samples;         ///< frames sampled for global image stats
       /// @brief Codec of `episode_mp4` as written to info.json: "av1", "h264" or "hevc".
       /// Matches the bitstream.
@@ -258,18 +266,19 @@ private:
    * @brief Decode evenly spaced frames from an mp4 for global image statistics.
    *
    * Used on the remux path, where no decoded frames pass through the converter
-   * at all. Every frame is decoded and an evenly spaced sample is kept.
+   * at all. Every frame is decoded and an evenly spaced sample of the frames the
+   * episode's rows play is kept.
    *
    * @param mp4 Video to sample.
-   * @param frame_count Total frames in the video.
+   * @param first_frame Index of the first frame to sample, the one row 0 plays.
+   * @param frame_count Number of frames to sample from, starting at `first_frame`.
    * @param tmp_dir Scratch directory for the extracted stills.
    * @return Sampled frames (empty on failure; stats degrade rather than fail).
    */
   std::vector<cv::Mat> sample_video_frames(
-    const std::filesystem::path& mp4, size_t frame_count,
+    const std::filesystem::path& mp4, size_t first_frame, size_t frame_count,
     const std::filesystem::path& tmp_dir) const;
 
-  // Not up for review, changes in #360.
   /**
    * @brief Stage one episode's video for its camera's shared mp4 and report its seek span.
    *
@@ -281,12 +290,18 @@ private:
    * @param video_key Camera's feature key.
    * @param episode_mp4 Episode video; moved into the staging folder.
    * @param ep_duration_s Expected duration, frame count / fps.
+   * @param start_offset_s Seconds of video before the frame matched to row 0, added to the
+   *        span's start.
+   * @param played_s Seconds of video the episode's rows play, from the frame matched to
+   *        row 0; the span ends there. Frames after it stay in the file but are not in the
+   *        span.
    * @param out_slot Set to {chunk_index, file_index, from_timestamp, to_timestamp}.
    * @return false when the episode is not staged; the camera's state is then unchanged.
    */
   bool place_or_concat_video(
     const std::string& video_key, const std::filesystem::path& episode_mp4,
-    double ep_duration_s, std::array<double, 4>& out_slot);
+    double ep_duration_s, double start_offset_s, double played_s,
+    std::array<double, 4>& out_slot);
   /**
    * @brief Write a camera's staged episode videos into its shared mp4 with one stream copy,
    *        then move the camera to the next file.
