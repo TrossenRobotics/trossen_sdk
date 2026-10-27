@@ -817,8 +817,11 @@ try {
   const RemoveTreeUnlessKept tmp_guard{out.tmp_dir, out.ok};
 
   // Decode and align (independent per file: safe to run on a worker thread).
-  // Not up for review, changes in #358.
-  if (!load_aligned_episode(mcap_path.string(), episode_index, out.ep, channels)) {
+  // Rows are gridded at the configured rate, the same rate the remux stamps frames at.
+  AlignmentOptions alignment;
+  alignment.fps = opts_.fps;
+  if (!load_aligned_episode(mcap_path.string(), episode_index, out.ep, channels, {},
+                            alignment)) {
     std::cerr << "[FAILED] Could not load " << mcap_path.string() << "\n";
     return out;  // ok == false
   }
