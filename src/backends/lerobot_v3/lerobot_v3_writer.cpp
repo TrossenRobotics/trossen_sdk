@@ -5,6 +5,7 @@
 
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_writer.hpp"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -19,6 +20,7 @@
 #include <arrow/io/api.h>
 #include <sys/wait.h>
 
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_stats_utils.hpp"
 #include "trossen_sdk/utils/depth_quantization.hpp"
 
 namespace trossen::io::backends {
@@ -40,6 +42,10 @@ constexpr int kAv1Crf = 30;
 constexpr int kAv1KeyframeInterval = 30;
 /// @brief SVT-AV1 speed preset for color video.
 constexpr int kAv1Preset = 6;
+/// @brief ffmpeg JPEG quality of the stills sampled from a video (2 is near lossless).
+constexpr int kSampleJpegQuality = 2;
+/// @brief Stills sampled from each video for global image statistics, roughly.
+constexpr size_t kTargetSamples = 30;
 
 /// @brief "chunk-NNN/file-NNN": the zero-padded chunk/file pair in LeRobot v3.0 paths.
 std::string chunk_file_stem(int chunk_index, int file_index) {
@@ -456,8 +462,50 @@ bool LeRobotV3DatasetWriter::remux_episode_video(
 std::vector<cv::Mat> LeRobotV3DatasetWriter::sample_video_frames(
   const fs::path& mp4, size_t frame_count, const fs::path& tmp_dir) const
 {
-  // TODO(shantanuparab-tr): sample frames back out of a written video for pixel statistics (#355).
-  return {};
+  if (frame_count == 0) return {};
+
+  // The folder is emptied first so stills left by an earlier run are not counted.
+  const fs::path sample_dir = tmp_dir / "samples";
+  std::error_code ec;
+  fs::remove_all(sample_dir, ec);
+  if (!ec) fs::create_directories(sample_dir, ec);
+  if (ec) {
+    std::cerr << "Warning: could not prepare " << sample_dir.string() << ": " << ec.message()
+              << "; no image stats are sampled from " << mp4.string() << "\n";
+    return {};
+  }
+
+  // The select filter decodes every frame and keeps every stride-th one. Passthrough
+  // writes each kept frame once instead of duplicating frames to fill the gaps;
+  // -vsync is used because FFmpeg 4.4 (Ubuntu 22.04) has no -fps_mode.
+  const size_t stride = std::max<size_t>(1, frame_count / kTargetSamples);
+
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -i " << mp4.string()
+      << " -vf \"select='not(mod(n\\," << stride << "))'\" -vsync passthrough -q:v "
+      << kSampleJpegQuality << " "
+      << (sample_dir / "sample_%04d.jpg").string();
+  const int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Warning: could not sample frames from " << mp4.string() << " (exit "
+              << exit_code(ret) << "); image stats for this camera will be based on fewer "
+              << "frames\n";
+  }
+
+  std::vector<fs::path> paths;
+  if (fs::exists(sample_dir)) {
+    for (const auto& entry : fs::directory_iterator(sample_dir)) {
+      if (entry.is_regular_file() && entry.path().extension() == ".jpg") {
+        paths.push_back(entry.path());
+      }
+    }
+  }
+  std::sort(paths.begin(), paths.end());
+  std::vector<cv::Mat> samples = sample_images(paths);
+
+
+  fs::remove_all(sample_dir, ec);
+  return samples;
 }
 
 bool LeRobotV3DatasetWriter::place_or_concat_video(
