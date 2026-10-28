@@ -179,6 +179,8 @@ private:
     int file_index{0};
     /// @brief Episode videos staged for that mp4, in order; written by flush_video_file().
     std::vector<std::filesystem::path> parts;
+    /// @brief Bytes of the staged episode videos.
+    std::uintmax_t bytes{0};
     /// @brief Duration of the staged episode videos in seconds, where the next episode
     ///        starts.
     double duration_s{0.0};
@@ -242,6 +244,9 @@ private:
   // Not up for review, changes in #360.
   /**
    * @brief Stage one episode's video for its camera's shared mp4 and report its seek span.
+   *
+   * When the staged videos plus this one reach the size budget, the staged videos are
+   * written first and the episode starts the next file.
    *
    * @param video_key Camera's feature key.
    * @param episode_mp4 Episode video; moved into the staging folder.

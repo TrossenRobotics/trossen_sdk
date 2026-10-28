@@ -561,6 +561,99 @@ TEST(LeRobotV3Writer, VideoFlushWritesTheStagedEpisodesAsOneFile) {
   fs::remove_all(dir);
 }
 
+TEST(LeRobotV3Writer, VideoRollsToANewFileOverTheBudget) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_video_roll_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  opts.video_files_size_in_mb = 0;
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  ASSERT_TRUE(make_test_video(dir / "ep0.mp4", 5));
+  ASSERT_TRUE(make_test_video(dir / "ep1.mp4", 5));
+  const double d = 5.0 / 30.0;
+  const fs::path chunk = opts.dataset_root / v3::VIDEO_DIR / "cam" / "chunk-000";
+
+  std::array<double, 4> slot{};
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep0.mp4", d, slot));
+  EXPECT_EQ(slot[1], 0.0);
+  EXPECT_FALSE(fs::exists(chunk / "file-000.mp4"));
+  // The second episode reaches the budget, so file 0 is written and it starts file 1.
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep1.mp4", d, slot));
+  EXPECT_EQ(slot[1], 1.0);
+  EXPECT_EQ(slot[2], 0.0);
+  EXPECT_EQ(probe_packet_count(chunk / "file-000.mp4"), 5);
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::flush(writer));
+  EXPECT_EQ(probe_packet_count(chunk / "file-001.mp4"), 5);
+  EXPECT_FALSE(fs::exists(dir / "ep0.mp4"));
+  fs::remove_all(dir);
+}
+
+
+TEST(LeRobotV3Writer, VideoRollCountsTheStagedBytesOfEachFile) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_video_roll_bytes_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  opts.video_files_size_in_mb = 1;
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  // Lossless noise does not compress, so 15 frames make a deterministic ~0.39 MB video:
+  // two fit under 1 MB, three do not.
+  for (int i = 0; i < 4; ++i) {
+    const fs::path mp4 = dir / ("ep" + std::to_string(i) + ".mp4");
+    const std::string cmd =
+      "ffmpeg -y -loglevel error -f lavfi "
+      "-i 'color=size=128x128:rate=30,noise=all_strength=100:all_flags=t' "
+      "-frames:v 15 -c:v libx264 -qp 0 -pix_fmt yuv420p '" + mp4.string() + "'";
+    ASSERT_EQ(std::system(cmd.c_str()), 0);
+    ASSERT_GT(fs::file_size(mp4), 340000u);
+    ASSERT_LT(fs::file_size(mp4), 490000u);
+  }
+  const double d = 15.0 / 30.0;
+
+  std::array<double, 4> slot{};
+  std::vector<double> files;
+  for (int i = 0; i < 4; ++i) {
+    const fs::path mp4 = dir / ("ep" + std::to_string(i) + ".mp4");
+    ASSERT_TRUE(LeRobotV3WriterTestPeer::place(writer, "cam", mp4, d, slot));
+    files.push_back(slot[1]);
+  }
+  // The third episode would take file 0 past the budget; the fourth fits with it in file 1.
+  EXPECT_EQ(files, (std::vector<double>{0.0, 0.0, 1.0, 1.0}));
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::flush(writer));
+  const fs::path chunk = opts.dataset_root / v3::VIDEO_DIR / "cam" / "chunk-000";
+  EXPECT_EQ(probe_packet_count(chunk / "file-000.mp4"), 30);
+  EXPECT_EQ(probe_packet_count(chunk / "file-001.mp4"), 30);
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, FailedRollKeepsTheVideoIndices) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_video_roll_fail_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  opts.video_files_size_in_mb = 0;
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  ASSERT_TRUE(make_test_video(dir / "ep0.mp4", 5));
+  ASSERT_TRUE(make_test_video(dir / "ep1.mp4", 5));
+  const double d = 5.0 / 30.0;
+  const fs::path chunk = opts.dataset_root / v3::VIDEO_DIR / "cam" / "chunk-000";
+
+  std::array<double, 4> slot{};
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep0.mp4", d, slot));
+  // A directory where file 0 goes makes writing it fail.
+  fs::create_directories(chunk / "file-000.mp4");
+  EXPECT_FALSE(LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep1.mp4", d, slot));
+  EXPECT_TRUE(fs::exists(dir / "ep1.mp4"));
+  fs::remove(chunk / "file-000.mp4");
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep1.mp4", d, slot));
+  EXPECT_EQ(slot[1], 1.0);
+  EXPECT_EQ(probe_packet_count(chunk / "file-000.mp4"), 5);
+  fs::remove_all(dir);
+}
+
 TEST(LeRobotV3Writer, FailedFlushKeepsTheStagedEpisodes) {
   if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
   if (!permissions_apply()) GTEST_SKIP() << "running as root";
