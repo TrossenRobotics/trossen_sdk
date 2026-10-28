@@ -214,7 +214,7 @@ private:
    * @brief Decode evenly spaced frames from an mp4 for global image statistics.
    *
    * Used on the remux path, where no decoded frames pass through the converter
-   * at all. Only a sample is decoded, not the whole stream.
+   * at all. Every frame is decoded and an evenly spaced sample is kept.
    *
    * @param mp4 Video to sample.
    * @param frame_count Total frames in the video.
