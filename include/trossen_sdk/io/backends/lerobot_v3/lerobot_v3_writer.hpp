@@ -16,6 +16,7 @@
 #include <array>
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -170,6 +171,19 @@ private:
     int64_t frames_in_file{0};
   };
 
+  /// @brief Running state for one camera's shared video stream.
+  struct VideoFileState {
+    /// @brief Chunk index of the shared mp4 that receives the next episode.
+    int chunk_index{0};
+    /// @brief File index of that mp4 within its chunk.
+    int file_index{0};
+    /// @brief Episode videos staged for that mp4, in order; written by flush_video_file().
+    std::vector<std::filesystem::path> parts;
+    /// @brief Duration of the staged episode videos in seconds, where the next episode
+    ///        starts.
+    double duration_s{0.0};
+  };
+
   /// @brief Make sure an open data file has room for the next episode, opening the next
   ///        chunk/file when the projected uncompressed size reaches the budget.
   /// @param next_ep_frames Rows in the episode about to be written.
@@ -226,9 +240,27 @@ private:
     const std::filesystem::path& tmp_dir) const;
 
   // Not up for review, changes in #360.
+  /**
+   * @brief Stage one episode's video for its camera's shared mp4 and report its seek span.
+   *
+   * @param video_key Camera's feature key.
+   * @param episode_mp4 Episode video; moved into the staging folder.
+   * @param ep_duration_s Episode duration in seconds, frame count / fps.
+   * @param out_slot Set to {chunk_index, file_index, from_timestamp, to_timestamp}.
+   * @return false when the episode is not staged; the camera's state is then unchanged.
+   */
   bool place_or_concat_video(
     const std::string& video_key, const std::filesystem::path& episode_mp4,
     double ep_duration_s, std::array<double, 4>& out_slot);
+  /**
+   * @brief Write a camera's staged episode videos into its shared mp4 with one stream copy,
+   *        then move the camera to the next file.
+   *
+   * @return false when writing fails; the staged videos are then kept.
+   */
+  bool flush_video_file(const std::string& video_key, VideoFileState& st);
+  /// @brief flush_video_file() for every camera. @return false when any camera fails.
+  bool flush_videos();
 
   int task_index_for(const std::string& task_name);
 
@@ -248,6 +280,8 @@ private:
   std::shared_ptr<arrow::Schema> data_schema_;
 
   DataFileState data_;
+  /// @brief Each camera's shared video stream, keyed by video_key.
+  std::map<std::string, VideoFileState> videos_;
 };
 
 }  // namespace trossen::io::backends

@@ -112,6 +112,15 @@ int64_t count_video_packets(const fs::path& video) {
   return count;
 }
 
+/// @brief Remove a file whose contents are already copied elsewhere, warning on failure.
+void remove_or_warn(const fs::path& path) {
+  std::error_code ec;
+  fs::remove(path, ec);
+  if (ec) {
+    std::cerr << "Warning: could not remove " << path.string() << ": " << ec.message() << "\n";
+  }
+}
+
 }  // namespace
 
 LeRobotV3DatasetWriter::LeRobotV3DatasetWriter(Options opts) : opts_(std::move(opts)) {}
@@ -512,9 +521,108 @@ bool LeRobotV3DatasetWriter::place_or_concat_video(
   const std::string& video_key, const fs::path& episode_mp4, double ep_duration_s,
   std::array<double, 4>& out_slot)
 {
-  // TODO(shantanuparab-tr): place the episode video, concatenating into the current file when it
-  // fits (#355).
-  return false;
+  VideoFileState& st = videos_[video_key];
+
+  std::error_code ec;
+
+  const fs::path staging = videos_dir_ / video_key /
+                           (chunk_file_stem(st.chunk_index, st.file_index) + ".parts");
+  char part_name[32];
+  std::snprintf(part_name, sizeof(part_name), "part-%06zu.mp4", st.parts.size());
+  const fs::path part = staging / part_name;
+  fs::create_directories(staging, ec);
+  if (ec) {
+    std::cerr << "Error: Failed to create " << staging.string() << ": " << ec.message() << "\n";
+    return false;
+  }
+  fs::rename(episode_mp4, part, ec);
+  if (ec) {
+    // rename across filesystems fails; fall back to copy.
+    ec.clear();
+    fs::copy_file(episode_mp4, part, fs::copy_options::overwrite_existing, ec);
+    if (ec) {
+      std::cerr << "Error: Failed to stage video " << part.string() << ": " << ec.message()
+                << "\n";
+      return false;
+    }
+    remove_or_warn(episode_mp4);
+  }
+
+  st.parts.push_back(part);
+  // Not up for review, changes in #360.
+  const double from_ts = st.duration_s;
+  st.duration_s += ep_duration_s;
+  out_slot = {static_cast<double>(st.chunk_index), static_cast<double>(st.file_index), from_ts,
+              st.duration_s};
+  return true;
+}
+
+bool LeRobotV3DatasetWriter::flush_video_file(const std::string& video_key, VideoFileState& st) {
+  if (st.parts.empty()) return true;
+
+  const fs::path target =
+    videos_dir_ / video_key / (chunk_file_stem(st.chunk_index, st.file_index) + ".mp4");
+  const fs::path staging = st.parts.front().parent_path();
+  std::error_code ec;
+  if (st.parts.size() == 1) {
+    // One episode is already the whole file.
+    fs::rename(st.parts.front(), target, ec);
+    if (ec) {
+      std::cerr << "Error: Failed to write shared video " << target.string() << ": "
+                << ec.message() << "\n";
+      return false;
+    }
+  } else {
+    // The concat demuxer resolves relative entries against the list's own directory, so
+    // the list holds absolute paths. Both temporary files are removed on every path, and
+    // the output sits next to the target, so replacing it is a rename within one directory.
+    const RemoveOnExit list_guard{staging / "concat_list.txt"};
+    const RemoveOnExit out_guard{fs::path(target.string() + ".concat.mp4")};
+    {
+      std::ofstream lf(list_guard.path);
+      for (const auto& part : st.parts) {
+        const fs::path part_abs = fs::absolute(part, ec);
+        if (ec) break;
+        lf << "file '" << part_abs.string() << "'\n";
+      }
+      lf.close();
+      if (ec || !lf) {
+        std::cerr << "Error: Failed to write concat list " << list_guard.path.string() << "\n";
+        return false;
+      }
+    }
+    std::ostringstream cmd;
+    cmd << "ffmpeg -y -loglevel error -f concat -safe 0 -i " << list_guard.path.string()
+        << " -c copy " << out_guard.path.string();
+    const int ret = std::system(cmd.str().c_str());
+    if (ret != 0) {
+      std::cerr << "Error: ffmpeg concat failed (exit " << exit_code(ret) << "): " << cmd.str()
+                << "\n";
+      return false;
+    }
+    fs::rename(out_guard.path, target, ec);
+    if (ec) {
+      std::cerr << "Error: Failed to write shared video " << target.string() << ": "
+                << ec.message() << "\n";
+      return false;
+    }
+  }
+
+  fs::remove_all(staging, ec);
+  if (ec) {
+    std::cerr << "Warning: could not remove " << staging.string() << ": " << ec.message() << "\n";
+  }
+  st.parts.clear();
+  st.duration_s = 0.0;
+  update_chunk_file_indices(st.chunk_index, st.file_index, opts_.chunks_size);
+  return true;
+}
+
+bool LeRobotV3DatasetWriter::flush_videos() {
+  for (auto& [video_key, st] : videos_) {
+    if (!flush_video_file(video_key, st)) return false;
+  }
+  return true;
 }
 
 int LeRobotV3DatasetWriter::task_index_for(const std::string& task_name) {
