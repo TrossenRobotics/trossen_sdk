@@ -13,8 +13,10 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include <arrow/api.h>
+#include <unistd.h>
 #include <opencv2/imgcodecs.hpp>
 
 #include "nlohmann/json.hpp"
@@ -67,6 +69,10 @@ public:
   }
   static constexpr const char* kColorFramePattern = LeRobotV3DatasetWriter::kColorFramePattern;
   static constexpr const char* kDepthFramePattern = LeRobotV3DatasetWriter::kDepthFramePattern;
+  static std::vector<cv::Mat> sample(const LeRobotV3DatasetWriter& writer, const fs::path& mp4,
+                                     size_t frame_count, const fs::path& tmp_dir) {
+    return writer.sample_video_frames(mp4, frame_count, tmp_dir);
+  }
 };
 
 }  // namespace trossen::io::backends
@@ -131,6 +137,17 @@ fs::path fresh_dir(const std::string& name) {
   fs::remove_all(dir);
   fs::create_directories(dir);
   return dir;
+}
+
+/// @brief True when file permissions bind this process; root ignores them.
+bool permissions_apply() { return geteuid() != 0; }
+
+/// @brief Encode `frames` frames of a 64x64 test pattern at 30 fps as H.264 mp4.
+bool make_test_video(const fs::path& mp4, int frames) {
+  const std::string cmd =
+    "ffmpeg -y -loglevel error -f lavfi -i testsrc=size=64x64:rate=30 -frames:v " +
+    std::to_string(frames) + " -c:v libx264 -pix_fmt yuv420p '" + mp4.string() + "'";
+  return std::system(cmd.c_str()) == 0;
 }
 
 /// @brief Write a constant 16-bit depth frame named as the writer reads it.
@@ -447,5 +464,61 @@ TEST(LeRobotV3Writer, RemuxRequiresTheExactFrameCount) {
   EXPECT_TRUE(LeRobotV3WriterTestPeer::remux(writer, annexb, 5, dir / "match.mp4"));
   EXPECT_FALSE(LeRobotV3WriterTestPeer::remux(writer, annexb, 6, dir / "more.mp4"));
   EXPECT_FALSE(LeRobotV3WriterTestPeer::remux(writer, annexb, 4, dir / "fewer.mp4"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, SampleVideoFramesKeepsEveryStrideThFrame) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_sample_test");
+  // Even frame n is gray level 100 + 2n and odd frames are black, so each still shows
+  // which frame it came from. Lossless encoding keeps the levels exact.
+  const std::string level = "if(mod(N\\,2)\\,0\\,100+2*N)";
+  const std::string cmd =
+    "ffmpeg -y -loglevel error -f lavfi -i \"color=black:s=64x64:r=30,format=rgb24,geq=r='" +
+    level + "':g='" + level + "':b='" + level + "'\" -frames:v 60 -c:v libx264 -qp 0 "
+    "-pix_fmt yuv444p '" + (dir / "camera.mp4").string() + "'";
+  ASSERT_EQ(std::system(cmd.c_str()), 0);
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+
+  // 60 frames at a target of 30 samples: every second frame, starting at frame 0.
+  const auto samples = LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 60, dir);
+  ASSERT_EQ(samples.size(), 30u);
+  for (size_t i = 0; i < samples.size(); ++i) {
+    const double expected = (100.0 + 4.0 * static_cast<double>(i)) / 255.0;
+    EXPECT_NEAR(cv::mean(samples[i])[0], expected, 2.0 / 255.0) << "sample " << i;
+  }
+  EXPECT_FALSE(fs::exists(dir / "samples"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, SampleVideoFramesIgnoresStillsFromAnEarlierRun) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_sample_stale_test");
+  ASSERT_TRUE(make_test_video(dir / "camera.mp4", 60));
+  fs::create_directories(dir / "samples");
+  ASSERT_TRUE(cv::imwrite((dir / "samples" / "sample_9999.jpg").string(),
+                          cv::Mat(64, 64, CV_8UC3, cv::Scalar(0, 0, 0))));
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+
+  const auto samples = LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 60, dir);
+  EXPECT_EQ(samples.size(), 30u);
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, SampleVideoFramesSkipsAFolderItCannotEmpty) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  if (!permissions_apply()) GTEST_SKIP() << "running as root";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_sample_locked_test");
+  ASSERT_TRUE(make_test_video(dir / "camera.mp4", 60));
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+  ASSERT_EQ(LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 60, dir).size(), 30u);
+
+  fs::create_directories(dir / "samples");
+  ASSERT_TRUE(cv::imwrite((dir / "samples" / "sample_0001.jpg").string(),
+                          cv::Mat(64, 64, CV_8UC3, cv::Scalar(0, 0, 0))));
+  fs::permissions(dir / "samples", fs::perms::owner_read | fs::perms::owner_exec);
+  const auto samples = LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 60, dir);
+  fs::permissions(dir / "samples", fs::perms::owner_all);
+  EXPECT_TRUE(samples.empty());
   fs::remove_all(dir);
 }
