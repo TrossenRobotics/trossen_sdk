@@ -49,6 +49,16 @@ int exit_code(int status);
 int64_t count_video_packets(const std::filesystem::path& video);
 
 /**
+ * @brief Duration of the first video stream of a file in seconds, read by ffprobe.
+ *
+ * The stream duration counts in the track's own timescale, while the container duration
+ * can be rounded to milliseconds.
+ * @param video File to probe.
+ * @return -1 when ffprobe fails or prints no duration.
+ */
+double video_duration_s(const std::filesystem::path& video);
+
+/**
  * @brief Encode an episode's color frames as AV1 video.
  *
  * @param image_dir Folder holding the frames, named by kColorFramePattern from 0.
