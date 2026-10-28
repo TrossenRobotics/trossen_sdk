@@ -530,6 +530,22 @@ TEST(LeRobotV3Writer, SampleVideoFramesSkipsAFolderItCannotEmpty) {
   fs::remove_all(dir);
 }
 
+TEST(LeRobotV3Writer, VideoPlacementRejectsAVideoOfTheWrongDuration) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_video_duration_test");
+  ASSERT_TRUE(make_test_video(dir / "ep0.mp4", 5));
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+
+  std::array<double, 4> slot{};
+  EXPECT_FALSE(LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep0.mp4", 6.0 / 30.0, slot));
+  EXPECT_TRUE(fs::exists(dir / "ep0.mp4"));
+  EXPECT_TRUE(LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep0.mp4", 5.0 / 30.0, slot));
+  fs::remove_all(dir);
+}
+
 TEST(LeRobotV3Writer, VideoFlushWritesTheStagedEpisodesAsOneFile) {
   if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
   const fs::path dir = fresh_dir("trossen_lerobot_v3_concat_test");
@@ -706,5 +722,57 @@ TEST(LeRobotV3Writer, VideoPlacementSucceedsWhenTheSourceCannotBeRemoved) {
   EXPECT_TRUE(placed);
   ASSERT_TRUE(LeRobotV3WriterTestPeer::flush(writer));
   EXPECT_TRUE(fs::exists(opts.dataset_root / v3::VIDEO_DIR / "cam" / "chunk-000" / "file-000.mp4"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, FlushRejectsAFileOfTheWrongDurationAndKeepsItsEpisode) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_flush_duration_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  ASSERT_TRUE(make_test_video(dir / "ep0.mp4", 5));
+  std::array<double, 4> slot{};
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep0.mp4", 5.0 / 30.0, slot));
+
+  // A staged video that changed after placement no longer matches its span.
+  const fs::path chunk = opts.dataset_root / v3::VIDEO_DIR / "cam" / "chunk-000";
+  const fs::path part = chunk / "file-000.parts" / "part-000000.mp4";
+  ASSERT_TRUE(make_test_video(part, 6));
+  EXPECT_FALSE(LeRobotV3WriterTestPeer::flush(writer));
+  EXPECT_FALSE(fs::exists(chunk / "file-000.mp4"));
+  EXPECT_TRUE(fs::exists(part));
+
+  // The episode is still staged, so a flush succeeds once the video matches again.
+  ASSERT_TRUE(make_test_video(part, 5));
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::flush(writer));
+  EXPECT_EQ(probe_packet_count(chunk / "file-000.mp4"), 5);
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, FlushJoinsEpisodesAtTheirVideoDurations) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_concat_offsets_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+
+  // Each container lasts 0.3 s, longer than its five video frames.
+  ASSERT_TRUE(make_test_video(dir / "video.mp4", 5));
+  std::array<double, 4> slot{};
+  for (int i = 0; i < 5; ++i) {
+    const fs::path ep = dir / ("ep" + std::to_string(i) + ".mp4");
+    const std::string cmd = "ffmpeg -y -loglevel error -i '" + (dir / "video.mp4").string() +
+                            "' -f lavfi -t 0.3 -i anullsrc=r=8000:cl=mono -c:v copy -c:a aac '" +
+                            ep.string() + "'";
+    ASSERT_EQ(std::system(cmd.c_str()), 0);
+    ASSERT_TRUE(LeRobotV3WriterTestPeer::place(writer, "cam", ep, 5.0 / 30.0, slot));
+  }
+
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::flush(writer));
+  const fs::path out = opts.dataset_root / v3::VIDEO_DIR / "cam" / "chunk-000" / "file-000.mp4";
+  EXPECT_EQ(probe_packet_count(out), 25);
   fs::remove_all(dir);
 }

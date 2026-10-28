@@ -6,10 +6,12 @@
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_writer.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
@@ -46,6 +48,8 @@ constexpr int kAv1Preset = 6;
 constexpr int kSampleJpegQuality = 2;
 /// @brief Stills sampled from each video for global image statistics, roughly.
 constexpr size_t kTargetSamples = 30;
+/// @brief Largest gap between a written video's duration and its episodes' durations.
+constexpr double kDurationToleranceS = 1e-3;
 
 /// @brief "chunk-NNN/file-NNN": the zero-padded chunk/file pair in LeRobot v3.0 paths.
 std::string chunk_file_stem(int chunk_index, int file_index) {
@@ -110,6 +114,27 @@ int64_t count_video_packets(const fs::path& video) {
   const int64_t count = read_ok ? std::strtoll(buf, &end, 10) : -1;
   if (status != 0 || !read_ok || end == buf || count < 0) return -1;
   return count;
+}
+
+/// @brief Duration of a video's first video stream in seconds, read by ffprobe.
+///
+/// The stream duration counts in the track's own timescale. The container duration can
+/// be rounded to milliseconds, and summed over the episodes of a file that rounding
+/// would exceed the 1 ms flush tolerance.
+/// @return -1 when ffprobe fails or prints no duration.
+double video_duration_s(const fs::path& video) {
+  std::ostringstream probe;
+  probe << "ffprobe -v error -select_streams v:0 -show_entries stream=duration "
+        << "-of default=nw=1:nk=1 " << video.string();
+  FILE* pipe = popen(probe.str().c_str(), "r");
+  if (!pipe) return -1.0;
+  char buf[64] = {0};
+  const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
+  const int status = pclose(pipe);
+  char* end = nullptr;
+  const double duration = read_ok ? std::strtod(buf, &end) : -1.0;
+  if (status != 0 || !read_ok || end == buf || duration < 0.0) return -1.0;
+  return duration;
 }
 
 /// @brief Remove a file whose contents are already copied elsewhere, warning on failure.
@@ -523,6 +548,15 @@ bool LeRobotV3DatasetWriter::place_or_concat_video(
 {
   VideoFileState& st = videos_[video_key];
 
+  // The span uses the measured duration. A disagreement of half a frame or more means the
+  // frame count or the timestamps are off, and every later episode's span would shift.
+  const double measured_s = video_duration_s(episode_mp4);
+  const double half_frame_s = 0.5 / static_cast<double>(opts_.fps);
+  if (measured_s < 0.0 || std::abs(measured_s - ep_duration_s) >= half_frame_s) {
+    std::cerr << "Error: " << episode_mp4.filename().string() << " lasts " << measured_s
+              << " s but " << ep_duration_s << " s was expected\n";
+    return false;
+  }
   std::error_code ec;
   const std::uintmax_t ep_bytes = fs::file_size(episode_mp4, ec);
   if (ec) {
@@ -562,10 +596,11 @@ bool LeRobotV3DatasetWriter::place_or_concat_video(
   }
 
   st.parts.push_back(part);
+  st.part_durations_s.push_back(measured_s);
   st.bytes += ep_bytes;
   // Not up for review, changes in #360.
   const double from_ts = st.duration_s;
-  st.duration_s += ep_duration_s;
+  st.duration_s += measured_s;
   out_slot = {static_cast<double>(st.chunk_index), static_cast<double>(st.file_index), from_ts,
               st.duration_s};
   return true;
@@ -577,9 +612,21 @@ bool LeRobotV3DatasetWriter::flush_video_file(const std::string& video_key, Vide
   const fs::path target =
     videos_dir_ / video_key / (chunk_file_stem(st.chunk_index, st.file_index) + ".mp4");
   const fs::path staging = st.parts.front().parent_path();
+  // The file must last as long as the spans recorded for its episodes. It is checked
+  // before it moves to the target, so a failure leaves the staged episodes in place.
+  auto lasts_as_staged = [&](const fs::path& written) {
+    const double written_s = video_duration_s(written);
+    if (written_s < 0.0 || std::abs(written_s - st.duration_s) >= kDurationToleranceS) {
+      std::cerr << "Error: " << target.string() << " would last " << written_s
+                << " s but its episodes add up to " << st.duration_s << " s\n";
+      return false;
+    }
+    return true;
+  };
   std::error_code ec;
   if (st.parts.size() == 1) {
     // One episode is already the whole file.
+    if (!lasts_as_staged(st.parts.front())) return false;
     fs::rename(st.parts.front(), target, ec);
     if (ec) {
       std::cerr << "Error: Failed to write shared video " << target.string() << ": "
@@ -588,16 +635,20 @@ bool LeRobotV3DatasetWriter::flush_video_file(const std::string& video_key, Vide
     }
   } else {
     // The concat demuxer resolves relative entries against the list's own directory, so
-    // the list holds absolute paths. Both temporary files are removed on every path, and
+    // the list holds absolute paths. Without a duration entry it starts each part where the
+    // previous part's container ends, which can be later than its video stream (a longer
+    // track, or a container duration rounded to milliseconds), so each part gets its
+    // measured video duration. Both temporary files are removed on every path, and
     // the output sits next to the target, so replacing it is a rename within one directory.
     const RemoveOnExit list_guard{staging / "concat_list.txt"};
     const RemoveOnExit out_guard{fs::path(target.string() + ".concat.mp4")};
     {
       std::ofstream lf(list_guard.path);
-      for (const auto& part : st.parts) {
-        const fs::path part_abs = fs::absolute(part, ec);
+      lf << std::fixed << std::setprecision(6);
+      for (size_t i = 0; i < st.parts.size(); ++i) {
+        const fs::path part_abs = fs::absolute(st.parts[i], ec);
         if (ec) break;
-        lf << "file '" << part_abs.string() << "'\n";
+        lf << "file '" << part_abs.string() << "'\nduration " << st.part_durations_s[i] << "\n";
       }
       lf.close();
       if (ec || !lf) {
@@ -614,6 +665,7 @@ bool LeRobotV3DatasetWriter::flush_video_file(const std::string& video_key, Vide
                 << "\n";
       return false;
     }
+    if (!lasts_as_staged(out_guard.path)) return false;
     fs::rename(out_guard.path, target, ec);
     if (ec) {
       std::cerr << "Error: Failed to write shared video " << target.string() << ": "
@@ -627,6 +679,7 @@ bool LeRobotV3DatasetWriter::flush_video_file(const std::string& video_key, Vide
     std::cerr << "Warning: could not remove " << staging.string() << ": " << ec.message() << "\n";
   }
   st.parts.clear();
+  st.part_durations_s.clear();
   st.bytes = 0;
   st.duration_s = 0.0;
   update_chunk_file_indices(st.chunk_index, st.file_index, opts_.chunks_size);

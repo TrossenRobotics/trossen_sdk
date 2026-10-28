@@ -179,10 +179,13 @@ private:
     int file_index{0};
     /// @brief Episode videos staged for that mp4, in order; written by flush_video_file().
     std::vector<std::filesystem::path> parts;
+    /// @brief Measured duration of each staged episode video in seconds, one per entry of
+    ///        `parts`.
+    std::vector<double> part_durations_s;
     /// @brief Bytes of the staged episode videos.
     std::uintmax_t bytes{0};
-    /// @brief Duration of the staged episode videos in seconds, where the next episode
-    ///        starts.
+    /// @brief Measured duration of the staged episode videos in seconds, where the next
+    ///        episode starts.
     double duration_s{0.0};
   };
 
@@ -245,12 +248,14 @@ private:
   /**
    * @brief Stage one episode's video for its camera's shared mp4 and report its seek span.
    *
-   * When the staged videos plus this one reach the size budget, the staged videos are
-   * written first and the episode starts the next file.
+   * The episode's duration is measured with ffprobe, and fails the placement when it
+   * differs from `ep_duration_s` by half a frame or more. When the staged videos plus this
+   * one reach the size budget, the staged videos are written first and the episode starts
+   * the next file.
    *
    * @param video_key Camera's feature key.
    * @param episode_mp4 Episode video; moved into the staging folder.
-   * @param ep_duration_s Episode duration in seconds, frame count / fps.
+   * @param ep_duration_s Expected duration, frame count / fps.
    * @param out_slot Set to {chunk_index, file_index, from_timestamp, to_timestamp}.
    * @return false when the episode is not staged; the camera's state is then unchanged.
    */
@@ -261,7 +266,8 @@ private:
    * @brief Write a camera's staged episode videos into its shared mp4 with one stream copy,
    *        then move the camera to the next file.
    *
-   * @return false when writing fails; the staged videos are then kept.
+   * @return false when writing fails or the written duration differs from the staged
+   *         durations by 1 ms or more; the staged videos are then kept.
    */
   bool flush_video_file(const std::string& video_key, VideoFileState& st);
   /// @brief flush_video_file() for every camera. @return false when any camera fails.
