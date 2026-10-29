@@ -21,6 +21,7 @@
 #include <vector>
 
 #include <arrow/api.h>
+#include <parquet/arrow/writer.h>
 #include <opencv2/opencv.hpp>
 
 #include "trossen_sdk/configuration/types/backends/lerobot_v3_backend_config.hpp"
@@ -154,6 +155,24 @@ private:
   /// @brief Gives the unit tests access to the private helpers.
   friend class LeRobotV3WriterTestPeer;
 
+  /// @brief Running state for the shared data parquet stream.
+  struct DataFileState {
+    int chunk_index{0};
+    int file_index{0};
+    std::shared_ptr<parquet::arrow::FileWriter> writer;
+    std::shared_ptr<arrow::io::FileOutputStream> out;
+    std::filesystem::path path;
+    int64_t frames_in_file{0};
+  };
+
+  /// @brief Make sure an open data file has room for the next episode, opening the next
+  ///        chunk/file when the projected uncompressed size reaches the budget.
+  /// @param next_ep_frames Rows in the episode about to be written.
+  /// @return false when no schema is set or a file fails to close or open.
+  bool roll_data_file_if_needed(int64_t next_ep_frames);
+  /// @brief Open the data file at the current chunk/file index with data_schema_.
+  /// @return false when the file or the parquet writer fails to open.
+  bool open_data_writer();
   /// @brief Close the open data file, if any. @return false when closing it fails.
   bool close_data_writer();
   /// @brief The data parquet columns, with list widths from action_dim_ and obs_dim_.
@@ -222,6 +241,8 @@ private:
   int action_dim_{0};
   int obs_dim_{0};
   std::shared_ptr<arrow::Schema> data_schema_;
+
+  DataFileState data_;
 };
 
 }  // namespace trossen::io::backends
