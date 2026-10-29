@@ -13,6 +13,7 @@
 #ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_V3__LEROBOT_V3_WRITER_HPP_
 #define TROSSEN_SDK__IO__BACKENDS__LEROBOT_V3__LEROBOT_V3_WRITER_HPP_
 
+#include <array>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -149,6 +150,58 @@ public:
 private:
   /// @brief Close the open data file, if any. @return false when closing it fails.
   bool close_data_writer();
+
+  // Video helpers. They run ffmpeg/ffprobe.
+  bool encode_episode_video(
+    const std::filesystem::path& image_dir, size_t frame_count,
+    const std::filesystem::path& out_mp4) const;
+  /// @brief Encode 16-bit depth PNGs as HEVC gray12le video with 12-bit log quantization.
+  bool encode_depth_video(
+    const std::filesystem::path& image_dir, size_t frame_count,
+    const std::filesystem::path& out_mp4) const;
+  /**
+   * @brief Wrap an already-compressed Annex B stream in mp4 without re-encoding.
+   *
+   * The bitstream is copied through verbatim (`-c copy`), so the recorded frames
+   * reach LeRobot exactly as captured. Timestamps are generated at the dataset
+   * fps because an elementary stream carries none.
+   *
+   * @param annexb Input elementary stream (`.h264` / `.hevc`).
+   * @param frame_count Expected frame count, checked against the muxed result.
+   * @param out_mp4 Output mp4.
+   * @return true on success.
+   */
+  bool remux_episode_video(
+    const std::filesystem::path& annexb, size_t frame_count,
+    const std::filesystem::path& out_mp4) const;
+
+  /**
+   * @brief Decode evenly spaced frames from an mp4 for global image statistics.
+   *
+   * Used on the remux path, where no decoded frames pass through the converter
+   * at all. Only a sample is decoded, not the whole stream.
+   *
+   * @param mp4 Video to sample.
+   * @param frame_count Total frames in the video.
+   * @param tmp_dir Scratch directory for the extracted stills.
+   * @return Sampled frames (empty on failure; stats degrade rather than fail).
+   */
+  std::vector<cv::Mat> sample_video_frames(
+    const std::filesystem::path& mp4, size_t frame_count,
+    const std::filesystem::path& tmp_dir) const;
+
+  // Not up for review, changes in #360.
+  bool place_or_concat_video(
+    const std::string& video_key, const std::filesystem::path& episode_mp4,
+    double ep_duration_s, std::array<double, 4>& out_slot);
+
+  int task_index_for(const std::string& task_name);
+
+  bool write_episodes_parquet();
+  bool write_tasks_parquet();
+  bool write_stats_json();
+  bool write_info_json();
+  bool write_readme();
 
   Options opts_;
 };
