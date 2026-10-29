@@ -20,6 +20,7 @@
 #include <limits>
 #include <regex>
 #include <set>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -638,8 +639,6 @@ bool load_aligned_episode(
 
   // How far each camera ends up from its rows: a large or growing offset means the camera
   // clock is drifting away from the row grid and is worth investigating.
-  const std::ios::fmtflags cout_flags = std::cout.flags();
-  const std::streamsize cout_precision = std::cout.precision();
   for (const auto& cam : out.cameras) {
     if (cam.row_source_index.empty()) continue;
     const auto& stamps = camera_timestamps[cam.name];
@@ -652,13 +651,14 @@ bool load_aligned_episode(
       sum_abs_ms += std::abs(delta_ms);
       worst_ms = std::max(worst_ms, std::abs(delta_ms));
     }
-    std::cout << "    - " << cam.name << ": " << stamps.size() << " frames, pairing offset mean "
-              << std::fixed << std::setprecision(1)
-              << (sum_abs_ms / static_cast<double>(out.frames.size())) << " ms, worst " << worst_ms
-              << " ms\n";
+    // Formatted locally: episodes are loaded concurrently and std::cout's flags are shared.
+    std::ostringstream line;
+    line << "    - " << cam.name << ": " << stamps.size() << " frames, pairing offset mean "
+         << std::fixed << std::setprecision(1)
+         << (sum_abs_ms / static_cast<double>(out.frames.size())) << " ms, worst " << worst_ms
+         << " ms\n";
+    std::cout << line.str();
   }
-  std::cout.flags(cout_flags);
-  std::cout.precision(cout_precision);
 
   return true;
 }
