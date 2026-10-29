@@ -20,10 +20,15 @@
 namespace trossen::io::backends {
 
 /**
- * @brief Compute statistics for a ListArray
+ * @brief Compute per-dimension statistics for a ListArray column
  *
- * @param list_array Shared pointer to the ListArray
- * @return JSON object containing the computed statistics
+ * Every non-null row must hold the same number of values, as LeRobot requires of a
+ * vector feature, and no null values. Null rows are left out.
+ *
+ * @param list_array Shared pointer to the ListArray; its values must be numeric
+ * @return JSON object with min, max, mean, std (one entry per dimension) and count (rows)
+ * @throws std::invalid_argument If the rows differ in length, a row holds a null value, or
+ *   the values are not numeric
  */
 nlohmann::ordered_json compute_list_stats(
   const std::shared_ptr<arrow::ListArray> &list_array);
@@ -40,10 +45,14 @@ nlohmann::ordered_json compute_list_stats(
 nlohmann::ordered_json compute_flat_stats(const std::shared_ptr<arrow::Array> &array);
 
 /**
- * @brief Compute statistics for a FixedSizeListArray
+ * @brief Compute per-dimension statistics for a FixedSizeListArray column
  *
- * @param fixed_list_array Shared pointer to the FixedSizeListArray
- * @return JSON object containing the computed statistics
+ * Null rows are left out. The result has one entry per dimension of the list type, even
+ * when no row is left.
+ *
+ * @param fixed_list_array Shared pointer to the FixedSizeListArray; its values must be numeric
+ * @return JSON object with min, max, mean, std (one entry per dimension) and count (rows)
+ * @throws std::invalid_argument If a row holds a null value or the values are not numeric
  */
 nlohmann::ordered_json compute_fixed_size_list_stats(
   const std::shared_ptr<arrow::FixedSizeListArray> &fixed_list_array);
