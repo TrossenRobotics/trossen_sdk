@@ -1,18 +1,36 @@
 /**
  * @file test_lerobot_v3_layout.cpp
- * @brief Unit tests for the LeRobot v3.0 chunk/file index advance and backend config.
+ * @brief Unit tests for the LeRobot v3.0 chunk/file index advance, backend config and
+ *        writer.
  */
 
 #include <gtest/gtest.h>
 
+#include <filesystem>
+#include <fstream>
 #include <string>
 
 #include "nlohmann/json.hpp"
 #include "trossen_sdk/configuration/types/backends/lerobot_v3_backend_config.hpp"
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_constants.hpp"
+#include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_writer.hpp"
 
 namespace v3 = trossen::io::backends::lerobot_v3;
+namespace fs = std::filesystem;
 using trossen::configuration::LeRobotV3BackendConfig;
+using trossen::io::backends::LeRobotV3DatasetWriter;
+
+namespace {
+
+/// @brief Writer options rooted at an emptied temp folder.
+LeRobotV3DatasetWriter::Options temp_options(const std::string& name) {
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = fs::temp_directory_path() / name;
+  fs::remove_all(opts.dataset_root);
+  return opts;
+}
+
+}  // namespace
 
 TEST(LeRobotV3Layout, FileIndexIncrementsWithinChunk) {
   int chunk = 0, file = 0;
@@ -91,4 +109,45 @@ TEST(LeRobotV3Config, JsonOverridesFields) {
   EXPECT_EQ(c.dataset_id, "blocks");
   EXPECT_FLOAT_EQ(c.fps, 15.0f);
   EXPECT_FALSE(c.encode_videos);
+}
+
+TEST(LeRobotV3Writer, OpenCreatesTheDatasetTree) {
+  const fs::path root = fs::temp_directory_path() / "trossen_lerobot_v3_open_test";
+  fs::remove_all(root);
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = root;
+  LeRobotV3DatasetWriter writer(opts);
+
+  ASSERT_TRUE(writer.open());
+  EXPECT_TRUE(fs::is_directory(root / v3::META_DIR / "episodes"));
+  EXPECT_TRUE(fs::is_directory(root / v3::DATA_DIR));
+  EXPECT_TRUE(fs::is_directory(root / v3::VIDEO_DIR));
+  fs::remove_all(root);
+}
+
+TEST(LeRobotV3Writer, OpenRejectsInvalidSizes) {
+  auto opts = temp_options("trossen_lerobot_v3_sizes_test");
+  opts.chunks_size = 0;
+  EXPECT_FALSE(LeRobotV3DatasetWriter(opts).open());
+  opts.chunks_size = 1000;
+  opts.data_files_size_in_mb = -1;
+  EXPECT_FALSE(LeRobotV3DatasetWriter(opts).open());
+  opts.data_files_size_in_mb = 100;
+  opts.video_files_size_in_mb = -1;
+  EXPECT_FALSE(LeRobotV3DatasetWriter(opts).open());
+  EXPECT_FALSE(fs::exists(opts.dataset_root));
+
+  // A budget of 0 is valid: every episode starts a new file.
+  opts.data_files_size_in_mb = 0;
+  opts.video_files_size_in_mb = 0;
+  EXPECT_TRUE(LeRobotV3DatasetWriter(opts).open());
+  fs::remove_all(opts.dataset_root);
+}
+
+TEST(LeRobotV3Writer, OpenFailsWhenADatasetFolderIsAFile) {
+  const auto opts = temp_options("trossen_lerobot_v3_blocked_test");
+  fs::create_directories(opts.dataset_root);
+  std::ofstream(opts.dataset_root / v3::DATA_DIR) << "x";
+  EXPECT_FALSE(LeRobotV3DatasetWriter(opts).open());
+  fs::remove_all(opts.dataset_root);
 }
