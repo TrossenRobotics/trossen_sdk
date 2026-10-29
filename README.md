@@ -113,7 +113,7 @@ sudo apt-get install -y \
 
 ### Apache Parquet
 
-In order to read and write Parquet files, you need to install the Apache Parquet C++ library. You can do this by adding the Apache Arrow APT repository and installing the necessary packages. This was tested on Ubuntu 24.04.
+In order to read and write Parquet files, you need to install the Apache Parquet C++ library. You can do this by adding the Apache Arrow APT repository and installing the necessary packages. This was tested on Ubuntu 24.04. The Arrow version is pinned because the APT repository always serves the newest release, and a new major release can remove APIs the SDK calls. CMake rejects Arrow older than 24.0.
 
 ```bash
 sudo apt update
@@ -122,20 +122,11 @@ wget -P /tmp https://packages.apache.org/artifactory/arrow/$(lsb_release --id --
 sudo apt install -y -V /tmp/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 rm /tmp/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 sudo apt update
+
+ARROW_VERSION=26.0.0-1
 sudo apt install -y -V \
-    libarrow-dev \
-    libarrow-glib-dev \
-    libarrow-dataset-dev \
-    libarrow-dataset-glib-dev \
-    libarrow-acero-dev \
-    libarrow-flight-dev \
-    libarrow-flight-glib-dev \
-    libarrow-flight-sql-dev \
-    libarrow-flight-sql-glib-dev \
-    libgandiva-dev \
-    libgandiva-glib-dev \
-    libparquet-dev \
-    libparquet-glib-dev
+    libarrow-dev=${ARROW_VERSION} \
+    libparquet-dev=${ARROW_VERSION}
 ```
 
 ### Trossen Arm library

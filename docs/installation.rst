@@ -57,14 +57,16 @@ Install them from the Apache Arrow APT repository.
     sudo apt install -y -V /tmp/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
     rm /tmp/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
     sudo apt update
+    ARROW_VERSION=26.0.0-1
     sudo apt install -y -V \
-        libarrow-dev \
-        libarrow-dataset-dev \
-        libparquet-dev
+        libarrow-dev=${ARROW_VERSION} \
+        libparquet-dev=${ARROW_VERSION}
 
 .. note::
 
     This was tested on Ubuntu 24.04.
+    The Arrow version is pinned because the APT repository always serves the newest release, and a new major release can remove APIs the SDK calls.
+    CMake rejects Arrow older than 24.0.
     On other Ubuntu releases, the Apache Arrow APT repo name is derived automatically from ``lsb_release``.
 
 Trossen Arm Library
