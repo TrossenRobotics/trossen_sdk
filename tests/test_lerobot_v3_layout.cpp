@@ -91,6 +91,10 @@ public:
     return writer.place_or_concat_video(video_key, episode_mp4, duration_s, slot);
   }
   static bool flush(LeRobotV3DatasetWriter& writer) { return writer.flush_videos(); }
+  static bool write_episodes(LeRobotV3DatasetWriter& writer) {
+    return writer.write_episodes_parquet();
+  }
+  static bool write_tasks(LeRobotV3DatasetWriter& writer) { return writer.write_tasks_parquet(); }
 };
 
 }  // namespace trossen::io::backends
@@ -178,6 +182,32 @@ bool make_test_video(const fs::path& mp4, int frames) {
     "ffmpeg -y -loglevel error -f lavfi -i testsrc=size=64x64:rate=30 -frames:v " +
     std::to_string(frames) + " -c:v libx264 -pix_fmt yuv420p '" + mp4.string() + "'";
   return std::system(cmd.c_str()) == 0;
+}
+
+/// @brief Values of an int64 column.
+std::vector<int64_t> int64_column(const arrow::Table& table, const std::string& name) {
+  const auto column = table.GetColumnByName(name);
+  EXPECT_NE(column, nullptr) << name;
+  const auto& values = static_cast<const arrow::Int64Array&>(*column->chunk(0));
+  std::vector<int64_t> out;
+  for (int64_t i = 0; i < values.length(); ++i) out.push_back(values.Value(i));
+  return out;
+}
+
+/// @brief A one-joint episode with `rows` rows, one camera and the given task.
+LeRobotV3DatasetWriter::PreparedEpisode joint_episode(size_t rows, const std::string& task) {
+  LeRobotV3DatasetWriter::PreparedEpisode pe;
+  pe.ep.leader_streams = {"leader"};
+  pe.ep.follower_streams = {"follower"};
+  pe.ep.joints_per_stream = 1;
+  pe.ep.frames.resize(rows);
+  for (auto& frame : pe.ep.frames) {
+    frame.action = {0.0};
+    frame.observation = {0.0};
+  }
+  pe.ep.cameras = {{"cam", "observation.images.cam"}};
+  pe.task_name = task;
+  return pe;
 }
 
 /// @brief Write a constant 16-bit depth frame named as the writer reads it.
@@ -960,5 +990,84 @@ TEST(LeRobotV3Writer, ImageSamplesRepresentEveryEpisode) {
   // Each image survives with probability 1/2; 1000 draws land well inside [400, 600].
   EXPECT_GT(white, 400u);
   EXPECT_LT(white, 600u);
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, EpisodesParquetRoundTripsTheSeekMetadata) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_episodes_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  opts.data_files_size_in_mb = 1;
+  opts.video_files_size_in_mb = 0;
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+
+  // 44 bytes per row: episodes 0 and 1 share data file 0, episode 2 rolls to file 1.
+  // Episode 1 has no video, so its video columns are null.
+  for (int i = 0; i < 3; ++i) {
+    auto pe = joint_episode(8000, "task");
+    if (i != 1) {
+      LeRobotV3DatasetWriter::PreparedEpisode::PreparedVideo pv;
+      pv.obs_key = "observation.images.cam";
+      pv.episode_mp4 = dir / ("ep" + std::to_string(i) + ".mp4");
+      pv.duration_s = 2.5;
+      ASSERT_TRUE(make_test_video(pv.episode_mp4, 75));
+      pe.videos = {pv};
+    }
+    ASSERT_TRUE(writer.consume_episode(pe));
+  }
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::write_episodes(writer));
+
+  const auto table =
+    read_parquet(opts.dataset_root / v3::META_DIR / "episodes" / "chunk-000" / "file-000.parquet");
+  ASSERT_NE(table, nullptr);
+  ASSERT_EQ(table->num_rows(), 3);
+  EXPECT_EQ(int64_column(*table, "episode_index"), (std::vector<int64_t>{0, 1, 2}));
+  EXPECT_EQ(int64_column(*table, "length"), (std::vector<int64_t>{8000, 8000, 8000}));
+  EXPECT_EQ(int64_column(*table, "data/chunk_index"), (std::vector<int64_t>{0, 0, 0}));
+  EXPECT_EQ(int64_column(*table, "data/file_index"), (std::vector<int64_t>{0, 0, 1}));
+  EXPECT_EQ(int64_column(*table, "dataset_from_index"), (std::vector<int64_t>{0, 8000, 16000}));
+  EXPECT_EQ(int64_column(*table, "dataset_to_index"),
+            (std::vector<int64_t>{8000, 16000, 24000}));
+
+  const std::string video = "videos/observation.images.cam/";
+  const auto file_index = table->GetColumnByName(video + "file_index")->chunk(0);
+  EXPECT_FALSE(file_index->IsNull(0));
+  EXPECT_TRUE(file_index->IsNull(1));
+  EXPECT_EQ(static_cast<const arrow::Int64Array&>(*file_index).Value(2), 1);
+  const auto& to_ts = static_cast<const arrow::DoubleArray&>(
+    *table->GetColumnByName(video + "to_timestamp")->chunk(0));
+  EXPECT_TRUE(to_ts.IsNull(1));
+  EXPECT_DOUBLE_EQ(to_ts.Value(2), 2.5);
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, TasksParquetHoldsEachTaskOnceWithPandasIndex) {
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_tasks_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  opts.encode_videos = false;
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  for (const char* task : {"pick", "place", "pick"}) {
+    auto pe = joint_episode(2, task);
+    ASSERT_TRUE(writer.consume_episode(pe));
+  }
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::write_tasks(writer));
+
+  const auto table = read_parquet(opts.dataset_root / v3::TASKS_PATH);
+  ASSERT_NE(table, nullptr);
+  ASSERT_EQ(table->num_rows(), 2);
+  EXPECT_EQ(int64_column(*table, "task_index"), (std::vector<int64_t>{0, 1}));
+  const auto& tasks =
+    static_cast<const arrow::StringArray&>(*table->GetColumnByName("task")->chunk(0));
+  EXPECT_EQ(tasks.GetString(0), "pick");
+  EXPECT_EQ(tasks.GetString(1), "place");
+
+  const auto metadata = table->schema()->metadata();
+  ASSERT_NE(metadata, nullptr);
+  const auto pandas = nlohmann::json::parse(metadata->Get("pandas").ValueOrDie());
+  EXPECT_EQ(pandas["index_columns"], nlohmann::json::array({"task"}));
   fs::remove_all(dir);
 }
