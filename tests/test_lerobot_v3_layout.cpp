@@ -14,9 +14,13 @@
 #include <fstream>
 #include <memory>
 #include <string>
+#include <thread>
+#include <utility>
 #include <vector>
 
 #include <arrow/api.h>
+#include <arrow/io/file.h>
+#include <parquet/arrow/reader.h>
 #include <unistd.h>
 #include <opencv2/imgcodecs.hpp>
 
@@ -56,6 +60,13 @@ public:
     writer.data_.frames_in_file = frames;
   }
   static fs::path data_path(const LeRobotV3DatasetWriter& writer) { return writer.data_.path; }
+  static const std::vector<std::string>& tasks(const LeRobotV3DatasetWriter& writer) {
+    return writer.task_list_;
+  }
+  static const std::vector<cv::Mat>& image_samples(const LeRobotV3DatasetWriter& writer,
+                                                   const std::string& key) {
+    return writer.image_samples_.at(key);
+  }
   static bool encode_color(const LeRobotV3DatasetWriter& writer, const fs::path& image_dir,
                            size_t frame_count, const fs::path& out_mp4) {
     return writer.encode_episode_video(image_dir, frame_count, out_mp4);
@@ -117,6 +128,18 @@ bool is_complete_parquet(const fs::path& path) {
   in.seekg(-4, std::ios::end);
   in.read(tail, 4);
   return in && std::string(head, 4) == "PAR1" && std::string(tail, 4) == "PAR1";
+}
+
+/// @brief A closed parquet file read back as one table, or nullptr if it cannot be read.
+std::shared_ptr<arrow::Table> read_parquet(const fs::path& path) {
+  auto file = arrow::io::ReadableFile::Open(path.string());
+  if (!file.ok()) return nullptr;
+  auto reader = parquet::arrow::OpenFile(*file, arrow::default_memory_pool());
+  if (!reader.ok()) return nullptr;
+  auto table = (*reader)->ReadTable();
+  if (!table.ok()) return nullptr;
+  auto combined = (*table)->CombineChunks();
+  return combined.ok() ? *combined : nullptr;
 }
 
 /// @brief True when ffmpeg and ffprobe are both on PATH.
@@ -788,5 +811,154 @@ TEST(LeRobotV3Writer, PrepareEpisodeFailsOnAMissingRecording) {
   EXPECT_FALSE(pe.ok);
   EXPECT_TRUE(pe.videos.empty());
   EXPECT_FALSE(fs::exists(dir / "episode_3"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, ConsumeEpisodeRunsOnlyOnTheWriterThread) {
+  LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+  LeRobotV3DatasetWriter::PreparedEpisode empty;
+
+  bool other_thread_result = true;
+  std::thread([&] { other_thread_result = writer.consume_episode(empty); }).join();
+  EXPECT_FALSE(other_thread_result);
+
+  // An episode with no frames is skipped successfully on the writer's own thread.
+  EXPECT_TRUE(writer.consume_episode(empty));
+}
+
+TEST(LeRobotV3Writer, DataFileRollsWhenTheNextEpisodeExceedsTheBudget) {
+  const fs::path root = fs::temp_directory_path() / "trossen_lerobot_v3_consume_roll_test";
+  fs::remove_all(root);
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = root;
+  opts.data_files_size_in_mb = 1;
+  opts.encode_videos = false;
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+
+  // One leader and one follower joint: 44 bytes per row, so one 20000-row episode
+  // (0.88 MB) fits the 1 MB budget and a second one does not.
+  LeRobotV3DatasetWriter::PreparedEpisode pe;
+  pe.ep.leader_streams = {"leader"};
+  pe.ep.follower_streams = {"follower"};
+  pe.ep.joints_per_stream = 1;
+  pe.ep.frames.resize(20000);
+  for (auto& frame : pe.ep.frames) {
+    frame.action = {0.0};
+    frame.observation = {0.0};
+  }
+  // Input indices are neither 0-based nor in order; the dataset numbers episodes itself.
+  // A repeated task reuses its row in the tasks table.
+  const std::vector<std::pair<int, std::string>> inputs = {{7, "pick"}, {3, "place"}, {9, "pick"}};
+  for (const auto& [input_index, task] : inputs) {
+    pe.ep.episode_index = input_index;
+    pe.task_name = task;
+    ASSERT_TRUE(writer.consume_episode(pe));
+  }
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::close(writer));
+  EXPECT_EQ(LeRobotV3WriterTestPeer::tasks(writer), (std::vector<std::string>{"pick", "place"}));
+
+  // Episode k sits in file k, and `index` runs on across each roll.
+  const std::vector<int64_t> task_indices = {0, 1, 0};
+  const fs::path chunk = root / v3::DATA_DIR / "chunk-000";
+  for (int64_t k = 0; k < 3; ++k) {
+    const auto table = read_parquet(chunk / ("file-00" + std::to_string(k) + ".parquet"));
+    ASSERT_NE(table, nullptr);
+    ASSERT_EQ(table->num_rows(), 20000);
+    const auto column = [&](const char* name) {
+      return std::static_pointer_cast<arrow::Int64Array>(table->GetColumnByName(name)->chunk(0));
+    };
+    const auto episode_index = column("episode_index");
+    const auto index = column("index");
+    const auto task_index = column("task_index");
+    for (int64_t i = 0; i < table->num_rows(); ++i) {
+      ASSERT_EQ(episode_index->Value(i), k);
+      ASSERT_EQ(index->Value(i), 20000 * k + i);
+      ASSERT_EQ(task_index->Value(i), task_indices[k]);
+    }
+  }
+  fs::remove_all(root);
+}
+
+TEST(LeRobotV3Writer, ConsumeEpisodeRejectsAVideoOfAnotherCodec) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_codec_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+
+  LeRobotV3DatasetWriter::PreparedEpisode pe;
+  pe.ep.leader_streams = {"leader"};
+  pe.ep.follower_streams = {"follower"};
+  pe.ep.joints_per_stream = 1;
+  pe.ep.frames.resize(3);
+  for (auto& frame : pe.ep.frames) {
+    frame.action = {0.0};
+    frame.observation = {0.0};
+  }
+  pe.ep.cameras = {{"cam", "observation.images.cam"}};
+  LeRobotV3DatasetWriter::PreparedEpisode::PreparedVideo pv;
+  pv.obs_key = "observation.images.cam";
+  pv.episode_mp4 = dir / "ep0.mp4";
+  // make_test_video() writes H.264, which the dataset adopts in place of the AV1 default.
+  pv.codec = "h264";
+  pv.pix_fmt = "yuv420p";
+  pv.duration_s = 3.0 / 30.0;
+  pe.videos = {pv};
+  ASSERT_TRUE(make_test_video(pv.episode_mp4, 3));
+  ASSERT_TRUE(writer.consume_episode(pe));
+
+  // A valid clip that would concatenate cleanly, labeled with another codec.
+  pe.videos[0].episode_mp4 = dir / "ep1.mp4";
+  pe.videos[0].codec = "av1";
+  ASSERT_TRUE(make_test_video(pe.videos[0].episode_mp4, 3));
+  EXPECT_FALSE(writer.consume_episode(pe));
+  // The episode is rejected before its video is placed.
+  EXPECT_TRUE(fs::exists(dir / "ep1.mp4"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, ImageSamplesRepresentEveryEpisode) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_image_samples_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+
+  LeRobotV3DatasetWriter::PreparedEpisode pe;
+  pe.ep.leader_streams = {"leader"};
+  pe.ep.follower_streams = {"follower"};
+  pe.ep.joints_per_stream = 1;
+  pe.ep.frames.resize(3);
+  for (auto& frame : pe.ep.frames) {
+    frame.action = {0.0};
+    frame.observation = {0.0};
+  }
+  pe.ep.cameras = {{"cam", "observation.images.cam"}};
+  LeRobotV3DatasetWriter::PreparedEpisode::PreparedVideo pv;
+  pv.obs_key = "observation.images.cam";
+  pv.codec = "h264";
+  pv.pix_fmt = "yuv420p";
+  pv.duration_s = 3.0 / 30.0;
+
+  // A black episode that alone fills the 1000-image bucket, then an equally long white one.
+  for (const float value : {0.0f, 1.0f}) {
+    pv.episode_mp4 = dir / ("ep" + std::to_string(static_cast<int>(value)) + ".mp4");
+    ASSERT_TRUE(make_test_video(pv.episode_mp4, 3));
+    pv.samples.assign(1000, cv::Mat());
+    for (auto& img : pv.samples) img = cv::Mat(1, 1, CV_32FC3, cv::Scalar::all(value));
+    pe.videos = {pv};
+    ASSERT_TRUE(writer.consume_episode(pe));
+  }
+
+  const auto& samples = LeRobotV3WriterTestPeer::image_samples(writer, "observation.images.cam");
+  ASSERT_EQ(samples.size(), 1000u);
+  size_t white = 0;
+  for (const auto& img : samples) white += img.at<cv::Vec3f>(0, 0)[0] == 1.0f ? 1 : 0;
+  // Each image survives with probability 1/2; 1000 draws land well inside [400, 600].
+  EXPECT_GT(white, 400u);
+  EXPECT_LT(white, 600u);
   fs::remove_all(dir);
 }
