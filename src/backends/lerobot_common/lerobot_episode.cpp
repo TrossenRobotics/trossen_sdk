@@ -6,6 +6,7 @@
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_episode.hpp"
 
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -188,6 +189,19 @@ nlohmann::ordered_json build_features(
   }
 
   return features;
+}
+
+VideoCodecInfo copied_stream_codec(const std::string& format) {
+  if (format == "h264") return {"h264", "yuv420p"};
+  if (format == "h265") return {"hevc", "gray12le"};
+  throw std::invalid_argument("copied_stream_codec: unsupported video format '" + format + "'");
+}
+
+void set_video_codec(
+  nlohmann::ordered_json& features, const std::string& obs_key, const VideoCodecInfo& codec) {
+  if (!features.contains(obs_key)) return;
+  features[obs_key]["info"]["video.codec"] = codec.codec;
+  features[obs_key]["info"]["video.pix_fmt"] = codec.pix_fmt;
 }
 
 }  // namespace trossen::io::backends

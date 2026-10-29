@@ -3,6 +3,7 @@
  * @brief Unit tests for build_features(): joint naming, signal blocks and camera specs.
  */
 
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -14,9 +15,11 @@
 using trossen::io::backends::AlignedEpisode;
 using trossen::io::backends::build_features;
 using trossen::io::backends::CameraInfo;
+using trossen::io::backends::copied_stream_codec;
 using trossen::io::backends::DatasetSignalOptions;
 using trossen::io::backends::episode_action_dim;
 using trossen::io::backends::episode_obs_dim;
+using trossen::io::backends::set_video_codec;
 
 namespace {
 
@@ -226,4 +229,29 @@ TEST(BuildFeaturesTest, DepthSuffixMarksAnUndescribedCamera) {
   const auto features = build_features(ep);
 
   EXPECT_TRUE(features["observation.images.cam_high_depth"]["info"]["is_depth_map"].get<bool>());
+}
+
+TEST(CopiedStreamCodecTest, MapsRecordedFormatsToLeRobotNames) {
+  EXPECT_EQ(copied_stream_codec("h264").codec, "h264");
+  EXPECT_EQ(copied_stream_codec("h264").pix_fmt, "yuv420p");
+  EXPECT_EQ(copied_stream_codec("h265").codec, "hevc");
+  EXPECT_EQ(copied_stream_codec("h265").pix_fmt, "gray12le");
+  EXPECT_THROW(copied_stream_codec("av1"), std::invalid_argument);
+}
+
+TEST(CopiedStreamCodecTest, RemuxedCamerasReplaceTheEncoderDefaults) {
+  auto ep = make_episode({"leader"}, {"follower"});
+  ep.cameras.push_back(make_camera("cam_high"));
+  ep.cameras.push_back(make_camera("cam_high_depth"));
+  auto features = build_features(ep);
+
+  set_video_codec(features, "observation.images.cam_high", copied_stream_codec("h264"));
+  set_video_codec(features, "observation.images.cam_high_depth", copied_stream_codec("h265"));
+  set_video_codec(features, "observation.images.not_a_camera", copied_stream_codec("h264"));
+
+  EXPECT_EQ(features["observation.images.cam_high"]["info"]["video.codec"], "h264");
+  EXPECT_EQ(features["observation.images.cam_high"]["info"]["video.pix_fmt"], "yuv420p");
+  EXPECT_EQ(features["observation.images.cam_high_depth"]["info"]["video.codec"], "hevc");
+  EXPECT_EQ(features["observation.images.cam_high_depth"]["info"]["video.pix_fmt"], "gray12le");
+  EXPECT_FALSE(features.contains("observation.images.not_a_camera"));
 }
