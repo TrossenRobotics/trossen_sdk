@@ -5,6 +5,7 @@
 
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_writer.hpp"
 
+#include <cstdint>
 #include <iostream>
 #include <system_error>
 #include <utility>
@@ -56,6 +57,68 @@ bool LeRobotV3DatasetWriter::open() {
     }
   }
   return true;
+}
+
+std::shared_ptr<arrow::Schema> LeRobotV3DatasetWriter::make_data_schema() const {
+  return arrow::schema({
+    arrow::field("action", arrow::fixed_size_list(arrow::float32(), action_dim_)),
+    arrow::field("observation.state", arrow::fixed_size_list(arrow::float32(), obs_dim_)),
+    arrow::field("timestamp", arrow::float32()),
+    arrow::field("frame_index", arrow::int64()),
+    arrow::field("episode_index", arrow::int64()),
+    arrow::field("index", arrow::int64()),
+    arrow::field("task_index", arrow::int64()),
+  });
+}
+
+std::shared_ptr<arrow::Table> LeRobotV3DatasetWriter::build_episode_table(
+  const AlignedEpisode& ep, int episode_index, int task_index, int64_t global_from) const
+{
+  arrow::FloatBuilder ts_b;
+  auto obs_vb = std::make_shared<arrow::FloatBuilder>();
+  arrow::FixedSizeListBuilder obs_b(arrow::default_memory_pool(), obs_vb, obs_dim_);
+  auto act_vb = std::make_shared<arrow::FloatBuilder>();
+  arrow::FixedSizeListBuilder act_b(arrow::default_memory_pool(), act_vb, action_dim_);
+  arrow::Int64Builder frame_b, epi_b, idx_b, task_b;
+  auto* obs_val = static_cast<arrow::FloatBuilder*>(obs_b.value_builder());
+  auto* act_val = static_cast<arrow::FloatBuilder*>(act_b.value_builder());
+
+  arrow::Status st;
+  for (size_t i = 0; i < ep.frames.size(); ++i) {
+    const auto& f = ep.frames[i];
+    if (f.observation.size() != static_cast<size_t>(obs_dim_) ||
+        f.action.size() != static_cast<size_t>(action_dim_)) {
+      std::cerr << "Error: Row " << i << " has " << f.observation.size() << " observation and "
+                << f.action.size() << " action values; the dataset has " << obs_dim_ << " and "
+                << action_dim_ << "\n";
+      return nullptr;
+    }
+    st &= ts_b.Append(f.timestamp_s);
+    st &= obs_b.Append();
+    for (double v : f.observation) st &= obs_val->Append(static_cast<float>(v));
+    st &= act_b.Append();
+    for (double v : f.action) st &= act_val->Append(static_cast<float>(v));
+    st &= frame_b.Append(static_cast<int64_t>(i));
+    st &= epi_b.Append(episode_index);
+    st &= idx_b.Append(global_from + static_cast<int64_t>(i));
+    st &= task_b.Append(task_index);
+  }
+
+  std::shared_ptr<arrow::Array> ts_a, obs_a, act_a, frame_a, epi_a, idx_a, task_a;
+  st &= ts_b.Finish(&ts_a);
+  st &= obs_b.Finish(&obs_a);
+  st &= act_b.Finish(&act_a);
+  st &= frame_b.Finish(&frame_a);
+  st &= epi_b.Finish(&epi_a);
+  st &= idx_b.Finish(&idx_a);
+  st &= task_b.Finish(&task_a);
+  if (!st.ok()) {
+    std::cerr << "Error: Failed to build episode table: " << st.ToString() << "\n";
+    return nullptr;
+  }
+
+  return arrow::Table::Make(data_schema_,
+                            {act_a, obs_a, ts_a, frame_a, epi_a, idx_a, task_a});
 }
 
 bool LeRobotV3DatasetWriter::close_data_writer() {
