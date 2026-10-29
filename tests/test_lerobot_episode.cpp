@@ -1,6 +1,6 @@
 /**
  * @file test_lerobot_episode.cpp
- * @brief Unit tests for build_features(): joint naming and signal blocks.
+ * @brief Unit tests for build_features(): joint naming, signal blocks and camera specs.
  */
 
 #include <string>
@@ -13,6 +13,7 @@
 
 using trossen::io::backends::AlignedEpisode;
 using trossen::io::backends::build_features;
+using trossen::io::backends::CameraInfo;
 using trossen::io::backends::DatasetSignalOptions;
 using trossen::io::backends::episode_action_dim;
 using trossen::io::backends::episode_obs_dim;
@@ -39,6 +40,13 @@ std::vector<std::string> arm_names(const std::string& prefix, const std::string&
   }
   names.push_back(prefix + "left_carriage_joint" + suffix);
   return names;
+}
+
+CameraInfo make_camera(const std::string& name) {
+  CameraInfo camera;
+  camera.name = name;
+  camera.obs_key = "observation.images." + name;
+  return camera;
 }
 
 std::vector<std::string> names_of(const nlohmann::ordered_json& feature) {
@@ -146,4 +154,76 @@ TEST(BuildFeaturesTest, RecordedBaseVelocityNamesAreUsed) {
   ep.dataset_info["base_velocity_names"] = {"vx", "wz"};
   const auto features = build_features(ep);
   EXPECT_EQ(names_of(features["action"]), concat(arm_names("left_"), {"vx", "wz"}));
+}
+
+TEST(BuildFeaturesTest, RecordedCameraSizeIsUsed) {
+  auto ep = make_episode({"leader"}, {"follower"});
+  ep.cameras.push_back(make_camera("cam_high"));
+  ep.dataset_info["cameras"]["cam_high"] = {{"height", 720}, {"width", 1280}, {"has_audio", true}};
+  const auto features = build_features(ep);
+  EXPECT_EQ(features["observation.images.cam_high"]["shape"], nlohmann::json({720, 1280, 3}));
+  EXPECT_TRUE(features["observation.images.cam_high"]["info"]["has_audio"].get<bool>());
+}
+
+TEST(BuildFeaturesTest, DepthCameraIsTwelveBitDepthVideo) {
+  auto ep = make_episode({"leader"}, {"follower"});
+  ep.cameras.push_back(make_camera("cam_wrist"));
+  ep.cameras.push_back(make_camera("cam_wrist_depth"));
+  ep.dataset_info["cameras"]["cam_wrist"] = {{"is_depth_map", false}};
+  ep.dataset_info["cameras"]["cam_wrist_depth"] = {{"is_depth_map", true}, {"channels", 1}};
+  const auto features = build_features(ep);
+
+  const auto& color = features["observation.images.cam_wrist"]["info"];
+  EXPECT_FALSE(color["is_depth_map"].get<bool>());
+  EXPECT_EQ(color["video.codec"], "av1");
+  EXPECT_EQ(color["video.pix_fmt"], "yuv420p");
+  EXPECT_EQ(color["video.channels"].get<int>(), 3);
+
+  const auto& depth = features["observation.images.cam_wrist_depth"]["info"];
+  EXPECT_TRUE(depth["is_depth_map"].get<bool>());
+  EXPECT_EQ(depth["video.codec"], "hevc");
+  EXPECT_EQ(depth["video.pix_fmt"], "gray12le");
+  EXPECT_EQ(depth["video.channels"].get<int>(), 1);
+  EXPECT_EQ(depth["depth_unit"], "mm");
+  EXPECT_TRUE(depth["video.use_log"].get<bool>());
+}
+
+TEST(BuildFeaturesTest, VideoFpsIsTheDatasetRate) {
+  auto ep = make_episode({"leader"}, {"follower"});
+  ep.fps = 30.0f;
+  ep.cameras.push_back(make_camera("cam_high"));
+  ep.dataset_info["cameras"]["cam_high"] = {{"fps", 15}};
+  const auto features = build_features(ep);
+
+  EXPECT_EQ(features["observation.images.cam_high"]["info"]["video.fps"].get<int>(), 30);
+}
+
+TEST(BuildFeaturesTest, DepthCameraIsAlwaysOneChannel) {
+  auto ep = make_episode({"leader"}, {"follower"});
+  ep.cameras.push_back(make_camera("cam_wrist_depth"));
+  ep.dataset_info["cameras"]["cam_wrist_depth"] = {{"is_depth_map", true}, {"channels", 3}};
+  const auto features = build_features(ep);
+
+  const auto& depth = features["observation.images.cam_wrist_depth"];
+  EXPECT_EQ(depth["shape"], nlohmann::json({480, 640, 1}));
+  EXPECT_EQ(depth["info"]["video.channels"].get<int>(), 1);
+}
+
+TEST(BuildFeaturesTest, ColorCameraIsAlwaysThreeChannels) {
+  auto ep = make_episode({"leader"}, {"follower"});
+  ep.cameras.push_back(make_camera("cam_high"));
+  ep.dataset_info["cameras"]["cam_high"] = {{"channels", 1}};
+  const auto features = build_features(ep);
+
+  const auto& color = features["observation.images.cam_high"];
+  EXPECT_EQ(color["shape"], nlohmann::json({480, 640, 3}));
+  EXPECT_EQ(color["info"]["video.channels"].get<int>(), 3);
+}
+
+TEST(BuildFeaturesTest, DepthSuffixMarksAnUndescribedCamera) {
+  auto ep = make_episode({"leader"}, {"follower"});
+  ep.cameras.push_back(make_camera("cam_high_depth"));
+  const auto features = build_features(ep);
+
+  EXPECT_TRUE(features["observation.images.cam_high_depth"]["info"]["is_depth_map"].get<bool>());
 }
