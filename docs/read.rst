@@ -21,13 +21,16 @@ Link ``trossen_sdk`` and include the loader header:
 
     AlignedEpisode ep;
     McapChannelMap channels;
-    if (load_aligned_episode("episode.mcap", /*episode_index=*/0, ep, channels)) {
+    AlignmentOptions alignment;  // fields and defaults under Options
+    if (load_aligned_episode("episode.mcap", /*episode_index=*/0, ep, channels,
+                             /*signals=*/{}, alignment)) {
       for (const AlignedFrame& f : ep.frames) {
         // f.timestamp_s, f.action, f.observation
       }
     }
 
-``load_aligned_episode()`` decodes the recording, detects the leader and follower joint streams, and aligns them by nearest timestamp into one frame per dataset row.
+``load_aligned_episode()`` decodes the recording, detects the leader and follower joint streams, and places rows on a fixed grid at ``AlignmentOptions::fps`` over the time every stream has data.
+Each row takes every stream's nearest sample, and a row where any stream has no sample within the match tolerance is dropped.
 It fills an ``AlignedEpisode``: per-row ``action`` and ``observation`` vectors, plus the source frame each camera contributes to each row.
 
 Camera Frames and Features
