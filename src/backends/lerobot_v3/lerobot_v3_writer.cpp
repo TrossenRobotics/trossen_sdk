@@ -524,6 +524,19 @@ bool LeRobotV3DatasetWriter::place_or_concat_video(
   VideoFileState& st = videos_[video_key];
 
   std::error_code ec;
+  const std::uintmax_t ep_bytes = fs::file_size(episode_mp4, ec);
+  if (ec) {
+    std::cerr << "Error: Failed to read video size for " << video_key << ": " << ec.message()
+              << "\n";
+    return false;
+  }
+
+  // A file holds at least one episode; it is written once, when the next episode would
+  // take it to the budget.
+  const double staged_mb = static_cast<double>(st.bytes + ep_bytes) / kBytesPerMegabyte;
+  if (!st.parts.empty() && staged_mb >= static_cast<double>(opts_.video_files_size_in_mb)) {
+    if (!flush_video_file(video_key, st)) return false;
+  }
 
   const fs::path staging = videos_dir_ / video_key /
                            (chunk_file_stem(st.chunk_index, st.file_index) + ".parts");
@@ -549,6 +562,7 @@ bool LeRobotV3DatasetWriter::place_or_concat_video(
   }
 
   st.parts.push_back(part);
+  st.bytes += ep_bytes;
   // Not up for review, changes in #360.
   const double from_ts = st.duration_s;
   st.duration_s += ep_duration_s;
@@ -613,6 +627,7 @@ bool LeRobotV3DatasetWriter::flush_video_file(const std::string& video_key, Vide
     std::cerr << "Warning: could not remove " << staging.string() << ": " << ec.message() << "\n";
   }
   st.parts.clear();
+  st.bytes = 0;
   st.duration_s = 0.0;
   update_chunk_file_indices(st.chunk_index, st.file_index, opts_.chunks_size);
   return true;
