@@ -12,6 +12,8 @@
     "license": "apache-2.0",
     "chunks_size": 1000,
     "data_files_size_in_mb": 100,
-    "video_files_size_in_mb": 200
+    "video_files_size_in_mb": 200,
+    "jobs": null,
+    "encoder_threads": null
   }
 }

@@ -57,11 +57,13 @@ static void print_usage(const char* program) {
   std::cerr << "  --set KEY=VALUE              Override a config value (repeatable)\n";
   std::cerr << "                               e.g. --set lerobot_v3_backend.dataset_id=my_ds\n";
   std::cerr << "  --jobs N                     Worker threads for decode/extract/encode\n";
-  std::cerr << "                               (default: min(cores, 8); the writer stays\n";
-  std::cerr << "                               single-threaded and ordered). Lower this when\n";
-  std::cerr << "                               running several datasets concurrently.\n";
+  std::cerr << "                               (overrides lerobot_v3_backend.jobs; default:\n";
+  std::cerr << "                               min(cores, 8); the writer stays single-threaded\n";
+  std::cerr << "                               and ordered). Lower this when running several\n";
+  std::cerr << "                               datasets concurrently.\n";
   std::cerr << "  --encoder-threads N          Parallelism cap per video encoder\n";
-  std::cerr << "                               (default: cores / jobs, so the workers together\n";
+  std::cerr << "                               (overrides lerobot_v3_backend.encoder_threads;\n";
+  std::cerr << "                               default: cores / jobs, so the workers together\n";
   std::cerr << "                               fill the machine without oversubscribing it).\n";
   std::cerr << "                               0 = uncapped: every encoder sizes itself to the\n";
   std::cerr << "                               whole machine.\n";
@@ -177,10 +179,12 @@ int main(int argc, char** argv) {
     }
   }
 
-  // Worker-thread count for the decode/extract/encode stage, at most kMaxDefaultJobs by
-  // default. Lower it with --jobs when running several conversions at once.
+  // Worker-thread count for the decode/extract/encode stage: --jobs, else the `jobs` config
+  // key, else the core count capped at kMaxDefaultJobs. Lower it when running several
+  // conversions at once.
   const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-  int jobs = cli.get_int("jobs", static_cast<int>(std::min(hw, kMaxDefaultJobs)));
+  int jobs =
+      cli.get_int("jobs", cfg->jobs.value_or(static_cast<int>(std::min(hw, kMaxDefaultJobs))));
   if (jobs < 1) jobs = 1;
   if (static_cast<size_t>(jobs) > mcap_files.size()) jobs = static_cast<int>(mcap_files.size());
   std::cout << "Worker threads (decode/extract/encode): " << jobs
@@ -188,11 +192,11 @@ int main(int argc, char** argv) {
 
   // Per-encoder parallelism cap, applied by the writer as SVT-AV1 lp= and x265 pools=
   // (ffmpeg's -threads does not reach the SVT-AV1 encoder, and only reaches x265's frame
-  // threads). The default splits the machine evenly across the workers. Uncapped (0), every
-  // encoder sizes itself to every core, so `jobs` workers oversubscribe the machine
-  // `jobs`-fold.
-  int encoder_threads =
-      cli.get_int("encoder-threads", std::max(1, static_cast<int>(hw) / jobs));
+  // threads). --encoder-threads, else the `encoder_threads` config key, else the machine split
+  // evenly across the workers. Uncapped (0), every encoder sizes itself to every core, so
+  // `jobs` workers oversubscribe the machine `jobs`-fold.
+  int encoder_threads = cli.get_int(
+      "encoder-threads", cfg->encoder_threads.value_or(std::max(1, static_cast<int>(hw) / jobs)));
   if (encoder_threads < 0) encoder_threads = 0;
   std::cout << "Encoder parallelism per episode: "
             << (encoder_threads > 0 ? std::to_string(encoder_threads) : std::string("uncapped"))
