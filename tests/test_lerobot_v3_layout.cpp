@@ -286,6 +286,8 @@ TEST(LeRobotV3Config, EmptyJsonKeepsDefaults) {
   EXPECT_EQ(c.task_name, trossen::configuration::LEROBOT_V3_DEFAULT_TASK_NAME);
   EXPECT_TRUE(c.encode_videos);
   EXPECT_FALSE(c.overwrite_existing);
+  EXPECT_FALSE(c.jobs.has_value());
+  EXPECT_FALSE(c.encoder_threads.has_value());
 }
 
 TEST(LeRobotV3Config, JsonOverridesFields) {
@@ -297,6 +299,8 @@ TEST(LeRobotV3Config, JsonOverridesFields) {
       {"dataset_id", "blocks"},
       {"fps", 15.0},
       {"encode_videos", false},
+      {"jobs", 2},
+      {"encoder_threads", 0},
   });
   EXPECT_EQ(c.chunks_size, 4);
   EXPECT_EQ(c.data_files_size_in_mb, 10);
@@ -305,6 +309,8 @@ TEST(LeRobotV3Config, JsonOverridesFields) {
   EXPECT_EQ(c.dataset_id, "blocks");
   EXPECT_FLOAT_EQ(c.fps, 15.0f);
   EXPECT_FALSE(c.encode_videos);
+  EXPECT_EQ(c.jobs, 2);
+  EXPECT_EQ(c.encoder_threads, 0);
 }
 
 TEST(LeRobotV3Writer, OpenCreatesTheDatasetTree) {
