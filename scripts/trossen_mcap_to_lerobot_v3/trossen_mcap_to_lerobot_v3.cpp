@@ -133,18 +133,31 @@ int main(int argc, char** argv) {
   }
   std::cout << "Found " << mcap_files.size() << " MCAP file(s) to convert\n";
 
-  // Worker-thread count for the decode/extract/encode stage: the core count, at most
-  // kMaxDefaultJobs.
+  // Worker-thread count for the decode/extract/encode stage: the `jobs` config key, else
+  // the core count capped at kMaxDefaultJobs. Lower it when running several conversions at
+  // once.
   const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
-  int jobs = static_cast<int>(std::min(hw, kMaxDefaultJobs));
+  int jobs = cfg->jobs.value_or(static_cast<int>(std::min(hw, kMaxDefaultJobs)));
+  if (jobs < 1) {
+    std::cerr << "Error: lerobot_v3_backend.jobs must be at least 1, got " << jobs << "\n";
+    return 1;
+  }
   if (static_cast<size_t>(jobs) > mcap_files.size()) jobs = static_cast<int>(mcap_files.size());
   std::cout << "Worker threads (decode/extract/encode): " << jobs
             << " (writer stays single-threaded, ordered)\n";
 
   // Per-encoder parallelism cap, applied by the writer as SVT-AV1 lp= and x265 pools=
   // (ffmpeg's -threads does not reach the SVT-AV1 encoder, and only reaches x265's frame
-  // threads). It splits the machine evenly across the workers.
-  const int encoder_threads = std::max(1, static_cast<int>(hw) / jobs);
+  // threads). The `encoder_threads` config key, else the machine split evenly across the
+  // workers. Uncapped (0), every encoder sizes itself to every core, so `jobs` workers
+  // oversubscribe the machine `jobs`-fold.
+  int encoder_threads =
+      cfg->encoder_threads.value_or(std::max(1, static_cast<int>(hw) / jobs));
+  if (encoder_threads < 0) {
+    std::cerr << "Error: lerobot_v3_backend.encoder_threads must be 0 (uncapped) or more, got "
+              << encoder_threads << "\n";
+    return 1;
+  }
   std::cout << "Encoder parallelism per episode: "
             << (encoder_threads > 0 ? std::to_string(encoder_threads) : std::string("uncapped"))
             << " (SVT-AV1 lp / x265 pools)\n";
