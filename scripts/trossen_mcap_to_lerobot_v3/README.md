@@ -30,7 +30,7 @@ Run from the repository root so the default config path resolves:
 # Single recording
 ./build/scripts/trossen_mcap_to_lerobot_v3 ~/recordings/<recording>.mcap
 
-# A folder of recordings (sorted by file name; converted episodes are numbered from 0 in that order)
+# A folder of recordings (sorted by recording_start_time; converted episodes are numbered from 0 in that order)
 ./build/scripts/trossen_mcap_to_lerobot_v3 ~/recordings/
 
 # Override any config value
