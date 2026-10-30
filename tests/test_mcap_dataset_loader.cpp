@@ -183,3 +183,60 @@ TEST(RowGridTest, AnEndOnTheGridGetsARow) {
   const auto rows = trossen::io::backends::row_grid(100, 400, 100);
   EXPECT_EQ(rows, (std::vector<uint64_t>{100, 200, 300, 400}));
 }
+
+namespace {
+
+using trossen::io::backends::GapSummary;
+using trossen::io::backends::summarize_gaps;
+
+// 50 ms rows with the default limits: 4 rows make the 200 ms single-gap limit, and 2 rows
+// in a 100-row grid make the 2% limit.
+constexpr uint64_t kGapPeriodNs = 50'000'000;
+constexpr size_t kGridRows = 100;
+
+}  // namespace
+
+TEST(SummarizeGapsTest, NoGapsPassBothLimits) {
+  const GapSummary summary = summarize_gaps({}, kGridRows, kGapPeriodNs, AlignmentOptions{});
+  EXPECT_EQ(summary.dropped_rows, 0u);
+  EXPECT_FALSE(summary.gap_too_long);
+  EXPECT_FALSE(summary.too_many_gaps);
+}
+
+TEST(SummarizeGapsTest, AGapExactlyAtTheSingleGapLimitIsAccepted) {
+  AlignmentOptions alignment;
+  alignment.max_gap_fraction = 1.0;
+  const GapSummary summary = summarize_gaps({4}, kGridRows, kGapPeriodNs, alignment);
+  EXPECT_EQ(summary.longest_gap_rows, 4u);
+  EXPECT_FALSE(summary.gap_too_long);
+}
+
+TEST(SummarizeGapsTest, OneGapOverTheSingleGapLimitIsRejected) {
+  AlignmentOptions alignment;
+  alignment.max_gap_fraction = 1.0;
+  const GapSummary summary = summarize_gaps({1, 5, 2}, kGridRows, kGapPeriodNs, alignment);
+  EXPECT_EQ(summary.longest_gap_rows, 5u);
+  EXPECT_TRUE(summary.gap_too_long);
+  EXPECT_FALSE(summary.too_many_gaps);
+}
+
+TEST(SummarizeGapsTest, DroppedRowsExactlyAtTheFractionLimitAreAccepted) {
+  const GapSummary summary =
+    summarize_gaps({1, 1}, kGridRows, kGapPeriodNs, AlignmentOptions{});
+  EXPECT_EQ(summary.dropped_rows, 2u);
+  EXPECT_DOUBLE_EQ(summary.dropped_fraction, 0.02);
+  EXPECT_FALSE(summary.too_many_gaps);
+}
+
+TEST(SummarizeGapsTest, ShortGapsAddUpPastTheFractionLimit) {
+  // No single gap is long, but together they drop 3% of the grid.
+  const GapSummary summary =
+    summarize_gaps({1, 1, 1}, kGridRows, kGapPeriodNs, AlignmentOptions{});
+  EXPECT_FALSE(summary.gap_too_long);
+  EXPECT_TRUE(summary.too_many_gaps);
+}
+
+TEST(RowsToMsTest, ConvertsRowsAtTheRowPeriod) {
+  EXPECT_DOUBLE_EQ(trossen::io::backends::rows_to_ms(4, kGapPeriodNs), 200.0);
+  EXPECT_DOUBLE_EQ(trossen::io::backends::rows_to_ms(0, kGapPeriodNs), 0.0);
+}
