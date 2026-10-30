@@ -82,6 +82,58 @@ All conversion settings live in a single JSON config file.
 By default, the tool loads ``scripts/trossen_mcap_to_lerobot_v3/config.json`` from the repository root.
 Point it at a different config with ``--config <path>``.
 
+.. code-block:: javascript
+
+    {
+      "lerobot_v3_backend": {
+        "type":                   "lerobot_v3_backend",
+        "root":                   "~/.cache/huggingface/lerobot",   // Output directory
+        "overwrite_existing":     false,                            // Refuse to replace an existing dataset
+        "encode_videos":          true,                             // Set false to skip MP4 encoding
+        "task_name":              "perform a generic task",         // Default task description
+        "repository_id":          "TrossenRoboticsCommunity",       // Top-level folder name
+        "dataset_id":             "mcap_converted_dataset_v3",      // Sub-folder for this dataset
+        "robot_name":             "bi_widowxai_follower_robot",     // Stored in meta/info.json
+        "fps":                    30.0,                             // Frame rate written to info.json
+        "license":                "apache-2.0",                     // Written to the dataset card
+        "chunks_size":            1000,                             // Files per chunk-NNN folder
+        "data_files_size_in_mb":  100,                              // Size at which a new data file starts
+        "video_files_size_in_mb": 200                               // Size at which a new video file starts
+      }
+    }
+
+Key fields to update for each new dataset:
+
+.. list-table::
+    :align: center
+    :header-rows: 1
+    :class: centered-table
+
+    * - Field
+      - Meaning
+    * - ``root``
+      - Directory where the dataset tree is written
+    * - ``repository_id`` / ``dataset_id``
+      - Identify the output dataset; produce ``<root>/<repository_id>/<dataset_id>/``
+    * - ``robot_name``
+      - Written into ``meta/info.json`` so consumers can distinguish robot types
+    * - ``task_name``
+      - Task for episodes whose recording carries none. Each distinct task gets its own row in ``meta/tasks.parquet``.
+    * - ``fps``
+      - Frame rate stored in ``info.json`` and used for the videos.
+        Leave it at 30: rows are generated at 30 Hz whatever this is set to, so any other value puts the videos out of step with the rows.
+    * - ``encode_videos``
+      - Disable to produce Parquet only (useful for joint-state-only pipelines)
+    * - ``overwrite_existing``
+      - The tool always writes a new dataset.
+        With ``false``, an existing dataset folder stops the run before anything is written; with ``true``, it is removed first.
+    * - ``data_files_size_in_mb`` / ``video_files_size_in_mb``
+      - Size budget of each data or video file.
+        A new file starts before an episode that would take the current one to the budget.
+        An episode is never split, so one larger than the budget gets a file of its own that exceeds it.
+        Data files are measured by uncompressed row size, so a Parquet file on disk is usually smaller than the budget.
+        The budget is a target, not a limit on file size.
+
 CLI Overrides
 -------------
 
@@ -170,8 +222,105 @@ The tool writes a LeRobot V3 dataset rooted at the repository ID and dataset ID 
                         ├── file-000.mp4       video of several episodes
                         └── ...
 
-A new data or video file starts when the current one reaches ``data_files_size_in_mb`` or ``video_files_size_in_mb``.
+Data and video files start a new file by size, as described for ``data_files_size_in_mb`` above.
 The metadata files are written once, after the last episode, so an interrupted run leaves no usable dataset.
+
+Parquet Schema
+==============
+
+Each data file holds the rows of several episodes (SNAPPY compression), with the following columns:
+
+.. list-table::
+    :align: center
+    :header-rows: 1
+    :class: centered-table
+
+    * - Column
+      - Type
+      - Description
+    * - ``timestamp``
+      - ``float32``
+      - Seconds from the episode's first row (``0.0`` at start)
+    * - ``observation.state``
+      - ``fixed_size_list<float32>``
+      - Concatenated follower joint observations, followed on a mobile robot by the base's linear and angular velocity
+    * - ``action``
+      - ``fixed_size_list<float32>``
+      - Concatenated leader joint actions, followed on a mobile robot by the base's linear and angular velocity
+    * - ``episode_index``
+      - ``int64``
+      - Zero-based episode number
+    * - ``frame_index``
+      - ``int64``
+      - Zero-based frame within episode
+    * - ``index``
+      - ``int64``
+      - Zero-based frame within the dataset
+    * - ``task_index``
+      - ``int64``
+      - Row of the episode's task in ``meta/tasks.parquet``
+
+Dataset Metadata (info.json)
+============================
+
+.. code-block:: javascript
+
+    {
+      "codebase_version": "v3.0",
+      "robot_type": "<robot_name>",
+      "total_episodes": <N>,
+      "total_frames": <N>,
+      "total_tasks": <N>,
+      "fps": 30,
+      "chunks_size": 1000,
+      "data_files_size_in_mb": 100,
+      "video_files_size_in_mb": 200,
+      "data_path": "data/chunk-{chunk_index:03d}/file-{file_index:03d}.parquet",
+      "video_path": "videos/{video_key}/chunk-{chunk_index:03d}/file-{file_index:03d}.mp4",
+      "splits": { "train": "0:<N>" },
+      "features": {
+        "observation.state": { "dtype": "float32", "shape": [<N>], "names": ["left_joint_0.pos", ...] },
+        "action":            { "dtype": "float32", "shape": [<N>], "names": ["left_joint_0.pos", ...] },
+        "observation.images.<camera_id>": {
+          "dtype": "video",
+          "shape": [<H>, <W>, 3],
+          "info": { "video.fps": 30, "video.codec": "av1", "video.pix_fmt": "yuv420p", ... }
+        },
+        "timestamp":     { "dtype": "float32", "shape": [1] },
+        "frame_index":   { "dtype": "int64",   "shape": [1] },
+        "episode_index": { "dtype": "int64",   "shape": [1] },
+        "index":         { "dtype": "int64",   "shape": [1] },
+        "task_index":    { "dtype": "int64",   "shape": [1] }
+      }
+    }
+
+The camera entry shows a color camera encoded by the tool.
+Other cameras differ:
+
+-   A depth camera has 1 channel and is stored as lossless HEVC: ``"video.codec": "hevc"``, ``"video.pix_fmt": "gray12le"`` and ``"is_depth_map": true``.
+    Its pixels are 12-bit codes, not the recorded distances: depth is clipped to 0.01 to 10 m and log-quantized first.
+    ``video.depth_min``, ``video.depth_max``, ``video.shift`` and ``video.use_log`` describe the mapping back to approximate meters.
+-   A camera recorded as compressed video is copied without re-encoding and keeps its codec: H.264 (``yuv420p``) for color, HEVC (``gray12le``) for depth.
+-   With ``encode_videos`` set to ``false``, there are no camera features and ``video_path`` is ``null``.
+
+Dataset Statistics (stats.json)
+===============================
+
+One JSON object for the whole dataset, written after the last episode:
+
+.. code-block:: javascript
+
+    {
+      "observation.state": { "min": [...], "max": [...], "mean": [...], "std": [...], "count": [<N>],
+                             "q01": [...], "q10": [...], "q50": [...], "q90": [...], "q99": [...] },
+      "action":            { ... },
+      "timestamp":         { ... },
+      "observation.images.<camera_id>": {
+        "mean": [[[<R>]], [[<G>]], [[<B>]]], "std": [[[<R>]], [[<G>]], [[<B>]]], ...
+      }
+    }
+
+Image statistics are computed from at most 1000 sampled frames per camera; depth cameras have none.
 
 What's Next
 ===========
