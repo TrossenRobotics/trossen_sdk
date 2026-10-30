@@ -9,7 +9,7 @@ For the LeRobot v2.1 converter and the recording format, read the [conversion gu
 The settings named here are config keys under `lerobot_v3_backend`; `jobs` can also be set with the `--jobs` flag.
 Two settings set the speed: `jobs` (throughput) and `encode_videos` (turn it off and conversion takes minutes instead of hours).
 `video_files_size_in_mb` sets how many episodes share one video file; each shared file is written once, when it rolls over or when the run ends.
-Leave `fps` at 30 (section 6.1).
+`fps` sets the row and video rate and must be a whole number (section 6.1).
 
 ---
 
@@ -90,6 +90,20 @@ This stage appends parquet rows and, at each video rollover, joins the staged ep
 
 `finalize()` writes the metadata that is known only once every episode is in: the episode index, the task table, and global statistics.
 
+### How alignment works
+
+`load_aligned_episode()` reads the MCAP and auto-detects leader and follower joint streams by topic name.
+It then lays rows on a uniform grid at `fps` over the stretch of time where every stream has data, and fills each row by **nearest-timestamp matching**.
+The match tolerance comes from `AlignmentOptions`, 50 ms by default.
+Rows where any stream has no sample within tolerance are dropped.
+So:
+
+- `action` comes from the leader joints (plus base velocities on a mobile robot)
+- `observation.state` comes from the follower joints (plus base velocities)
+- `timestamp` is synthetic, generated at the row rate rather than copied
+
+A recording whose streams free-run at slightly different rates still produces a dense table; the cost is that a row may pair with a camera image up to 50 ms away.
+
 ### Episodes that fail
 
 Both converters check each recording while aligning it. A recording that fails a check is
@@ -98,6 +112,8 @@ An episode fails when:
 
 - a stream's timestamps go backwards, such as after an NTP clock correction. The log names
   the stream and the message index.
+- no stretch of time has data from every leader, follower and camera stream, and from the
+  mobile base on a mobile robot.
 
 ---
 
@@ -146,7 +162,7 @@ Output lands in `<root>/<repository_id>/<dataset_id>/`.
 | `task_name` | `perform a generic task` | `perform a generic task` | **Fallback only**: used for episodes whose MCAP embeds no task |
 | `overwrite_existing` | `false` | `false` | Delete an existing dataset first. Without it, an existing dataset stops the run before anything is written |
 | `encode_videos` | `true` | `true` | Encode and concatenate camera video |
-| `fps` | `30` | `30` | See section 6.1; **not** a working knob |
+| `fps` | `30` | `30` | Row and video rate in frames per second, a whole number (section 6.1) |
 
 ### File partitioning
 
@@ -240,16 +256,14 @@ It only becomes relevant on very large datasets.
 
 ## 6. Settings that affect correctness
 
-### 6.1 `fps` is not a working knob: leave it at 30
+### 6.1 `fps` sets the row rate
 
-The converter does not pass `fps` to the loader, so rows are generated at the `AlignmentOptions` default of 30 Hz, and the match tolerance stays at 50 ms.
-The config's `fps` value reaches:
+Rows sit on a uniform grid at `fps`.
+The same value sets the encode and remux frame rates, each episode's video duration in the seek metadata, and the `fps` field in `info.json`, so rows, videos and metadata share one clock.
+`info.json` stores `fps` as an integer, so every episode fails when `fps` is not a whole number.
 
-1. the encode and remux frame rates (`-framerate` and `-r`),
-2. each episode's video duration in the seek metadata,
-3. the `fps` field in `info.json`.
-
-So `fps=60` keeps 30 Hz rows but writes the videos and `info.json` at 60, which is an internally inconsistent dataset.
+Each row takes every stream's sample nearest its grid time, within the 50 ms match tolerance.
+For compressed-video recordings, set `fps` to the cameras' frame rate: their streams are copied, not resampled, and every copied frame is stamped one `1/fps` period after the last.
 
 ### 6.2 `task_name` is a fallback, not an override
 
