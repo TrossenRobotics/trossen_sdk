@@ -290,6 +290,15 @@ This assumes the recording clocks are consistent.
 When merging ``.mcap`` files from multiple machines whose clocks are not synchronized, the cross-machine ordering is only as reliable as those clocks, and inserting a file with an earlier timestamp can shift later indices.
 Files missing ``recording_start_time`` sort last, ordered by filename.
 
+Episode fails
+-------------
+
+A recording that fails a check is logged as ``[FAILED]`` with the reason, and the tool continues with the next one.
+An episode fails when:
+
+- a stream's timestamps go backwards, such as after an NTP clock correction.
+  The log names the stream and the message index.
+
 What's Next
 ===========
 

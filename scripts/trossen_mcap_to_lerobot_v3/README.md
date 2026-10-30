@@ -90,6 +90,15 @@ This stage appends parquet rows and, at each video rollover, joins the staged ep
 
 `finalize()` writes the metadata that is known only once every episode is in: the episode index, the task table, and global statistics.
 
+### Episodes that fail
+
+Both converters check each recording while aligning it. A recording that fails a check is
+logged as `[FAILED]` with the reason, and the converter continues with the next one.
+An episode fails when:
+
+- a stream's timestamps go backwards, such as after an NTP clock correction. The log names
+  the stream and the message index.
+
 ---
 
 ## 3. The parallelism model
