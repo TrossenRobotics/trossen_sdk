@@ -27,6 +27,7 @@
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/utils/video_encoder.hpp"
 
+#include "FrameMeta.pb.h"
 #include "JointState.pb.h"
 #include "Odometry2D.pb.h"
 
@@ -539,6 +540,79 @@ TEST_F(TrossenMCAPBackendTest, RecordsCompressedVideoForColorCameras) {
     << "channel should be registered with the CompressedVideo schema";
   EXPECT_NE(contents.find("h264"), std::string::npos)
     << "video_format metadata should record h264 for a color stream";
+}
+
+// Every camera frame gets a companion message on <camera>/meta carrying the device
+// capture time, which the Foxglove image schemas have no field for.
+TEST_F(TrossenMCAPBackendTest, WritesDeviceTimestampOnCameraMetaTopic) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "frame_meta_test";
+  cfg->image_encoding = "video";
+  cfg->video_encoder = "x264";
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  trossen::data::ImageRecord img;
+  img.id = "cam_color";
+  img.width = 64;
+  img.height = 48;
+  img.channels = 3;
+  img.encoding = "bgr8";
+  img.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+  img.ts.device_clock = trossen::data::DeviceClock::Uptime;
+
+  // seq starts at 40, as it does when the producer ran before recording began; frame 2
+  // has no camera counter.
+  constexpr int kFrames = 5;
+  constexpr uint64_t kFirstSeq = 40;
+  for (int i = 0; i < kFrames; ++i) {
+    img.seq = kFirstSeq + static_cast<uint64_t>(i);
+    img.ts.realtime = trossen::data::now_real();
+    img.ts.monotonic = trossen::data::now_mono();
+    img.ts.device = trossen::data::Timespec::from_ns(1'000'000'000ull + 33'000'000ull * i);
+    img.device_frame_number =
+      i == 2 ? std::nullopt : std::optional<uint64_t>{100 + static_cast<uint64_t>(i)};
+    backend->write(img);
+  }
+  backend->close();
+
+  const std::filesystem::path mcap_path = only_mcap_in(episode_dir);
+  ASSERT_FALSE(mcap_path.empty());
+  const auto payloads = messages_with_schema(mcap_path, "trossen_sdk.msg.FrameMeta");
+  ASSERT_EQ(payloads.size(), static_cast<size_t>(kFrames)) << "one meta message per frame";
+  for (int i = 0; i < kFrames; ++i) {
+    trossen_sdk::msg::FrameMeta meta;
+    ASSERT_TRUE(meta.ParseFromString(payloads[i])) << "message " << i;
+    EXPECT_EQ(meta.stream_id(), "cam_color");
+    EXPECT_EQ(meta.seq(), kFirstSeq + static_cast<uint64_t>(i));
+    EXPECT_EQ(meta.frame_index(), static_cast<uint64_t>(i));
+    EXPECT_EQ(meta.ts().device_clock(), trossen_sdk::DEVICE_CLOCK_UPTIME);
+    ASSERT_TRUE(meta.ts().has_device());
+    EXPECT_EQ(ns_of(meta.ts().device()), 1'000'000'000ull + 33'000'000ull * i);
+    EXPECT_EQ(meta.has_device_frame_number(), i != 2) << "message " << i;
+    if (i != 2) EXPECT_EQ(meta.device_frame_number(), 100u + static_cast<uint64_t>(i));
+  }
+
+  std::ifstream mcap_file(mcap_path, std::ios::binary);
+  const std::string contents(
+    (std::istreambuf_iterator<char>(mcap_file)), std::istreambuf_iterator<char>());
+  EXPECT_NE(contents.find("/cameras/cam_color/meta"), std::string::npos)
+    << "a parallel meta topic should exist for the camera";
+  EXPECT_NE(contents.find("FrameMeta"), std::string::npos)
+    << "the meta channel should be registered with the FrameMeta schema";
+  EXPECT_NE(contents.find("DeviceClock"), std::string::npos)
+    << "the schema should carry the device clock enum so the domain is readable";
 }
 
 // A record that carries a companion depth_image alongside its primary color frame
