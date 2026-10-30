@@ -1,11 +1,12 @@
 /**
  * @file test_mcap_dataset_loader.cpp
- * @brief Unit tests for load_aligned_episode() option validation and
- *        nearest_sample_index().
+ * @brief Unit tests for load_aligned_episode() option validation,
+ *        nearest_sample_index() and first_backward_step().
  */
 
 #include <cstddef>
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -106,4 +107,31 @@ TEST(NearestSampleIndexTest, SuccessiveTargetsShareTheCursor) {
   EXPECT_EQ(cursor, 4u);
   // The cursor never moves back, so an earlier target is compared with entry 4 only.
   EXPECT_EQ(nearest(stamps, 0, 20, cursor), NO_SAMPLE);
+}
+
+namespace {
+
+/// first_backward_step() over a vector of times.
+std::optional<size_t> backward_step(const std::vector<uint64_t>& stamps) {
+  return trossen::io::backends::first_backward_step(
+    stamps.size(), [&](size_t i) { return stamps[i]; });
+}
+
+}  // namespace
+
+TEST(FirstBackwardStepTest, IncreasingTimesAreInOrder) {
+  EXPECT_FALSE(backward_step({0, 33, 66, 100}).has_value());
+}
+
+TEST(FirstBackwardStepTest, EqualTimesAreInOrder) {
+  EXPECT_FALSE(backward_step({10, 10, 10, 20}).has_value());
+}
+
+TEST(FirstBackwardStepTest, EmptyAndSingleEntryAreInOrder) {
+  EXPECT_FALSE(backward_step({}).has_value());
+  EXPECT_FALSE(backward_step({5}).has_value());
+}
+
+TEST(FirstBackwardStepTest, ReportsTheFirstEntryThatStepsBack) {
+  EXPECT_EQ(backward_step({0, 33, 20, 66, 10}), std::optional<size_t>{2});
 }
