@@ -22,6 +22,7 @@
 #include "trossen_sdk/configuration/types/backends/lerobot_v3_backend_config.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_worker_pool.hpp"
 #include "trossen_sdk/io/backends/lerobot_v3/lerobot_v3_writer.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
 
 namespace fs = std::filesystem;
 
@@ -99,7 +100,7 @@ int main(int argc, char** argv) {
         mcap_files.push_back(entry.path());
       }
     }
-    std::sort(mcap_files.begin(), mcap_files.end());
+    trossen::io::backends::sort_by_recording_start(mcap_files);
     if (mcap_files.empty()) {
       std::cerr << "Error: No MCAP files found in directory: " << input_path.string() << "\n";
       return 1;
