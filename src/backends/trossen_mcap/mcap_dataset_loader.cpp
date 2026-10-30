@@ -287,6 +287,33 @@ GapSummary summarize_gaps(
   return summary;
 }
 
+void sort_by_recording_start(std::vector<std::filesystem::path>& files) {
+  const auto start_ns = [](const std::filesystem::path& file) {
+    mcap::McapReader reader;
+    if (!reader.open(file.string()).ok() ||
+        !reader.readSummary(mcap::ReadSummaryMethod::NoFallbackScan).ok()) {
+      return std::numeric_limits<uint64_t>::max();
+    }
+    const auto range = reader.metadataIndexes().equal_range(
+      trossen_mcap_defs::kRecordingMetadataName);
+    for (auto it = range.first; it != range.second; ++it) {
+      mcap::Record raw;
+      mcap::Metadata meta;
+      if (!mcap::McapReader::ReadRecord(*reader.dataSource(), it->second.offset, &raw).ok() ||
+          !mcap::McapReader::ParseMetadata(raw, &meta).ok()) {
+        continue;
+      }
+      const auto start = meta.metadata.find(trossen_mcap_defs::kRecordingStartTimeKey);
+      if (start != meta.metadata.end()) return static_cast<uint64_t>(std::stoull(start->second));
+    }
+    return std::numeric_limits<uint64_t>::max();
+  };
+  std::vector<std::pair<uint64_t, std::filesystem::path>> keyed;
+  for (const auto& file : files) keyed.emplace_back(start_ns(file), file);
+  std::sort(keyed.begin(), keyed.end());
+  for (size_t i = 0; i < files.size(); ++i) files[i] = keyed[i].second;
+}
+
 bool load_aligned_episode(
   const std::string& mcap_file,
   int episode_index,

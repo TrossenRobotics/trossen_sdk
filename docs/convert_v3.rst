@@ -74,8 +74,7 @@ Examples per robot:
 
 .. note::
 
-    Batch mode processes the ``.mcap`` files in file-name order and numbers the converted episodes from 0 in that order.
-    The SDK names each recording with a time-ordered ID, so file-name order is recording order.
+    Batch mode processes the ``.mcap`` files in the order they were recorded, by the ``recording_start_time`` the recorder writes in each file, and numbers the converted episodes from 0 in that order.
 
 Configuring the Conversion
 ==========================
