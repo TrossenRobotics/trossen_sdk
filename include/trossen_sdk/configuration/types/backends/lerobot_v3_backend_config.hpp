@@ -10,6 +10,8 @@
 #ifndef TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_V3_BACKEND_CONFIG_HPP_
 #define TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_V3_BACKEND_CONFIG_HPP_
 
+#include <optional>
+
 #include "trossen_sdk/configuration/base_config.hpp"
 #include "trossen_sdk/configuration/config_registry.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
@@ -42,6 +44,12 @@ struct LeRobotV3BackendConfig : public BaseConfig {
   int data_files_size_in_mb{trossen::io::backends::lerobot_v3::DEFAULT_DATA_FILE_SIZE_IN_MB};
   int video_files_size_in_mb{trossen::io::backends::lerobot_v3::DEFAULT_VIDEO_FILE_SIZE_IN_MB};
 
+  // Converter parallelism. Unset means the converter derives the value from the core count.
+  // Worker threads that prepare episodes.
+  std::optional<int> jobs;
+  // Parallelism cap per video encoder; 0 means uncapped.
+  std::optional<int> encoder_threads;
+
   std::string type() const override { return "lerobot_v3_backend"; }
 
   static LeRobotV3BackendConfig from_json(const nlohmann::json& j) {
@@ -65,6 +73,8 @@ struct LeRobotV3BackendConfig : public BaseConfig {
       j.at("data_files_size_in_mb").get_to(c.data_files_size_in_mb);
     if (j.contains("video_files_size_in_mb"))
       j.at("video_files_size_in_mb").get_to(c.video_files_size_in_mb);
+    if (j.contains("jobs")) c.jobs = j.at("jobs").get<int>();
+    if (j.contains("encoder_threads")) c.encoder_threads = j.at("encoder_threads").get<int>();
 
     return c;
   }
