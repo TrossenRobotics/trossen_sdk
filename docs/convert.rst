@@ -12,8 +12,7 @@ The resulting dataset is usable directly with the `LeRobot <https://github.com/h
 What You Need
 =============
 
--   A completed build.
-    The conversion tool is always built as part of the standard SDK build (see :doc:`/installation`).
+-   The SDK's dependencies installed (see :doc:`/installation`).
 -   At least one ``.mcap`` episode recorded with the SDK.
     If you have not recorded anything yet, follow :doc:`/record`.
 -   ``ffmpeg`` on ``PATH`` for video encoding (installed in the system dependencies step).
@@ -25,6 +24,7 @@ The tool is produced by the standard build:
 
 .. code-block:: bash
 
+    mkdir -p build
     cd build
     cmake ..
     make trossen_mcap_to_lerobot_v2
@@ -71,7 +71,8 @@ Examples per robot:
 
 .. note::
 
-    Batch mode processes the ``.mcap`` files in the order they were recorded (by the ``recording_start_time`` stored in each file) and assigns LeRobot episode indices from that order, so episode 0 is the earliest recording.
+    Batch mode processes the ``.mcap`` files in file-name order and numbers the converted episodes from 0 in that order.
+    The SDK names each recording with a time-ordered ID, so file-name order is recording order.
 
 The frames extracted to ``images/`` are deleted once each episode's videos are encoded.
 Pass ``--keep-images`` to keep them.
@@ -177,6 +178,7 @@ The tool writes a LeRobot V2 dataset rooted at the repository ID and dataset ID 
     <root>/
     └── <repository_id>/
         └── <dataset_id>/
+            ├── README.md              dataset card
             ├── meta/
             │   ├── info.json              dataset metadata and feature descriptions
             │   ├── episodes.jsonl         one entry per episode
@@ -212,10 +214,10 @@ Each episode produces one ``.parquet`` file (SNAPPY compression) with the follow
       - Seconds from first frame (``0.0`` at start)
     * - ``observation.state``
       - ``list<float64>``
-      - Concatenated follower joint observations
+      - Concatenated follower joint observations, followed on a mobile robot by the base's linear and angular velocity
     * - ``action``
       - ``list<float64>``
-      - Concatenated leader joint actions
+      - Concatenated leader joint actions, followed on a mobile robot by the base's linear and angular velocity
     * - ``episode_index``
       - ``int64``
       - Zero-based episode number
@@ -247,6 +249,9 @@ Dataset Metadata (info.json)
       "total_episodes": <N>,
       "total_frames":   <N>
     }
+
+The camera entry shows a color camera encoded by the tool.
+A camera recorded as compressed H.264 video is copied without re-encoding and keeps ``"video.codec": "h264"``.
 
 Episode Statistics (episodes_stats.jsonl)
 =========================================
@@ -286,12 +291,13 @@ The tool shells out to FFmpeg for AV1 encoding of the image streams.
 Episode ordering
 ----------------
 
-The tool assigns LeRobot episode indices from the order the episodes were recorded (the ``recording_start_time`` in each file's metadata), not from their (random) filenames.
-A newly recorded episode has a later timestamp, so it sorts to the end and receives the next index; existing episodes keep their indices, and the idempotent skip lets you re-run after recording more without re-converting what is already done.
+The tool assigns LeRobot episode indices in file-name order.
+The SDK names each recording with a UUIDv7, which starts with the recording time, so a newly recorded episode sorts to the end and receives the next index; existing episodes keep their indices, and the idempotent skip lets you re-run after recording more without re-converting what is already done.
 
 This assumes the recording clocks are consistent.
 When merging ``.mcap`` files from multiple machines whose clocks are not synchronized, the cross-machine ordering is only as reliable as those clocks, and inserting a file with an earlier timestamp can shift later indices.
-Files missing ``recording_start_time`` sort last, ordered by filename.
+Recordings made before the SDK used UUIDv7 names are named ``episode_000000.mcap`` and so on, and every UUIDv7 name sorts before them, so convert those folders separately.
+Renamed files sort by their new names.
 
 Episode fails
 -------------

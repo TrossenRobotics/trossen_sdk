@@ -31,24 +31,20 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <limits>
 #include <map>
 #include <memory>
 #include <opencv2/opencv.hpp>
-#include <optional>
 #include <set>
 #include <string>
 #include <string_view>
 #include <vector>
 
 #include "trossen_sdk/utils/app_utils.hpp"
-#include "mcap/reader.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
 #include "nlohmann/json.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_constants.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
-#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/configuration/cli_parser.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
@@ -86,41 +82,6 @@ struct ParquetConfig {
   // Keep the extracted JPEG/PNG frames after the episode's videos are encoded.
   bool keep_images = false;
 };
-
-/**
- * @brief Read the "recording_start_time" (ns since epoch) from an MCAP file's
- *        "trossen_sdk_recording" file-level metadata.
- *
- * Used to order episodes chronologically. Returns std::nullopt if the file cannot be read
- * or the field is absent (e.g. older recordings), so callers can fall back to filename order.
- */
-static std::optional<uint64_t> read_recording_start_time(const std::filesystem::path& path) {
-  std::ifstream input(path, std::ios::binary);
-  if (!input.is_open()) return std::nullopt;
-
-  mcap::McapReader reader;
-  if (!reader.open(input).ok()) return std::nullopt;
-  if (!reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan).ok()) return std::nullopt;
-
-  auto* data_source = reader.dataSource();
-  const auto& meta_indexes = reader.metadataIndexes();
-  auto range = meta_indexes.equal_range(trossen::trossen_mcap_defs::kRecordingMetadataName);
-  for (auto it = range.first; it != range.second; ++it) {
-    mcap::Record raw_record;
-    if (!mcap::McapReader::ReadRecord(*data_source, it->second.offset, &raw_record).ok()) continue;
-    mcap::Metadata meta_record;
-    if (!mcap::McapReader::ParseMetadata(raw_record, &meta_record).ok()) continue;
-    auto ts_it = meta_record.metadata.find(trossen::trossen_mcap_defs::kRecordingStartTimeKey);
-    if (ts_it != meta_record.metadata.end()) {
-      try {
-        return static_cast<uint64_t>(std::stoull(ts_it->second));
-      } catch (const std::exception&) {
-        return std::nullopt;
-      }
-    }
-  }
-  return std::nullopt;
-}
 
 // ──────────────────────────────────────────────────────────
 // Statistics computation functions
@@ -499,31 +460,9 @@ int main(int argc, char** argv) {
       }
     }
 
-    // Order episodes by their recorded start time so LeRobot episode indices reflect
-    // collection order and stay stable when new episodes are added and the converter is
-    // re-run: newer recordings have later timestamps and append at the end rather than
-    // shifting existing indices. This uses the recording_start_time metadata (nanosecond
-    // precision, and present on legacy files too) rather than relying on filename order.
-    // Read each file's timestamp once; files missing it (e.g. older recordings) sort last,
-    // with the filename as a deterministic tiebreak throughout.
-    struct KeyedEpisode {
-      uint64_t start_time_ns;
-      std::string filename;
-      fs::path path;
-    };
-    std::vector<KeyedEpisode> keyed;
-    keyed.reserve(mcap_files.size());
-    for (const auto& p : mcap_files) {
-      keyed.push_back({
-        read_recording_start_time(p).value_or(std::numeric_limits<uint64_t>::max()),
-        p.filename().string(), p});
-    }
-    std::sort(keyed.begin(), keyed.end(), [](const KeyedEpisode& a, const KeyedEpisode& b) {
-      if (a.start_time_ns != b.start_time_ns) return a.start_time_ns < b.start_time_ns;
-      return a.filename < b.filename;
-    });
-    mcap_files.clear();
-    for (const auto& k : keyed) mcap_files.push_back(k.path);
+    // Episodes are numbered in file-name order. The recorder names each file with a UUIDv7,
+    // whose leading timestamp makes file-name order recording order.
+    std::sort(mcap_files.begin(), mcap_files.end());
 
     if (mcap_files.empty()) {
       std::cerr << "Error: No MCAP files found in directory: " << input_path.string() << "\n";

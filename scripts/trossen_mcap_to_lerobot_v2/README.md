@@ -46,7 +46,8 @@ Examples:
     ~/lerobot_datasets
 ```
 
-Batch mode processes all `.mcap` files in the order they were recorded (by the `recording_start_time` in each file's metadata) and assigns LeRobot episode indices from that order, so episode 0 is the earliest recording.
+Batch mode processes the `.mcap` files in file-name order and numbers the converted episodes from 0 in that order.
+The SDK names each recording with a time-ordered ID, so file-name order is recording order.
 
 ---
 
@@ -56,6 +57,7 @@ Batch mode processes all `.mcap` files in the order they were recorded (by the `
 <output_dir>/
 └── <repository_id>/
     └── <dataset_id>/
+        ├── README.md              dataset card
         ├── meta/
         │   ├── info.json              dataset metadata and feature descriptions
         │   ├── episodes.jsonl         one entry per episode
@@ -198,6 +200,6 @@ Written to the MCAP header at recording time:
 sudo apt-get install ffmpeg
 ```
 
-**Episode ordering:** LeRobot indices follow the order episodes were recorded (`recording_start_time`), not their filenames.
-Newly recorded episodes have later timestamps and append at the end, so you can re-run after recording more without re-converting existing episodes.
-Merging files from machines with unsynchronized clocks is only as reliable as those clocks; files missing `recording_start_time` sort last, by filename.
+**Episode ordering:** LeRobot indices follow file-name order, and the SDK's UUIDv7 file names start with the recording time.
+Newly recorded episodes sort to the end, so you can re-run after recording more without re-converting existing episodes.
+Merging files from machines with unsynchronized clocks is only as reliable as those clocks; older `episode_000000.mcap` names sort after every UUIDv7 name, so convert those folders separately.
