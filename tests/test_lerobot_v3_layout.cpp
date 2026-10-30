@@ -7,6 +7,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -82,13 +83,17 @@ public:
   static constexpr const char* kColorFramePattern = LeRobotV3DatasetWriter::kColorFramePattern;
   static constexpr const char* kDepthFramePattern = LeRobotV3DatasetWriter::kDepthFramePattern;
   static std::vector<cv::Mat> sample(const LeRobotV3DatasetWriter& writer, const fs::path& mp4,
-                                     size_t frame_count, const fs::path& tmp_dir) {
-    return writer.sample_video_frames(mp4, frame_count, tmp_dir);
+                                     size_t first_frame, size_t frame_count,
+                                     const fs::path& tmp_dir) {
+    return writer.sample_video_frames(mp4, first_frame, frame_count, tmp_dir);
   }
   static bool place(LeRobotV3DatasetWriter& writer, const std::string& video_key,
                     const fs::path& episode_mp4, double duration_s,
-                    std::array<double, 4>& slot) {
-    return writer.place_or_concat_video(video_key, episode_mp4, duration_s, slot);
+                    std::array<double, 4>& slot, double start_offset_s = 0.0,
+                    double played_s = -1.0) {
+    if (played_s < 0.0) played_s = duration_s - start_offset_s;
+    return writer.place_or_concat_video(video_key, episode_mp4, duration_s, start_offset_s,
+                                        played_s, slot);
   }
   static bool flush(LeRobotV3DatasetWriter& writer) { return writer.flush_videos(); }
   static bool write_episodes(LeRobotV3DatasetWriter& writer) {
@@ -163,6 +168,29 @@ int64_t probe_packet_count(const fs::path& video) {
   const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
   if (pclose(pipe) != 0 || !read_ok) return -1;
   return std::strtoll(buf, nullptr, 10);
+}
+
+/// @brief Mean gray level of the frame whose presentation time is nearest `t_s`, or -1 when
+///        ffprobe or ffmpeg fails.
+double level_of_frame_at(const fs::path& video, double t_s, const fs::path& scratch) {
+  const std::string probe = "ffprobe -v error -select_streams v:0 -show_entries "
+                            "frame=pts_time -of csv=p=0 '" + video.string() + "'";
+  FILE* pipe = popen(probe.c_str(), "r");
+  if (!pipe) return -1.0;
+  std::vector<double> pts;
+  char buf[64] = {0};
+  while (std::fgets(buf, sizeof(buf), pipe) != nullptr) pts.push_back(std::strtod(buf, nullptr));
+  if (pclose(pipe) != 0 || pts.empty()) return -1.0;
+  size_t nearest = 0;
+  for (size_t i = 1; i < pts.size(); ++i) {
+    if (std::abs(pts[i] - t_s) < std::abs(pts[nearest] - t_s)) nearest = i;
+  }
+  const fs::path png = scratch / ("frame_" + std::to_string(nearest) + ".png");
+  const std::string decode = "ffmpeg -y -loglevel error -i '" + video.string() +
+                             "' -vf \"select='eq(n\\," + std::to_string(nearest) +
+                             ")'\" -vsync passthrough -frames:v 1 '" + png.string() + "'";
+  if (std::system(decode.c_str()) != 0) return -1.0;
+  return cv::mean(cv::imread(png.string(), cv::IMREAD_GRAYSCALE))[0];
 }
 
 /// @brief A fresh, empty scratch directory under the system temp directory.
@@ -547,13 +575,37 @@ TEST(LeRobotV3Writer, SampleVideoFramesKeepsEveryStrideThFrame) {
   const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
 
   // 60 frames at a target of 30 samples: every second frame, starting at frame 0.
-  const auto samples = LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 60, dir);
+  const auto samples = LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 0, 60, dir);
   ASSERT_EQ(samples.size(), 30u);
   for (size_t i = 0; i < samples.size(); ++i) {
     const double expected = (100.0 + 4.0 * static_cast<double>(i)) / 255.0;
     EXPECT_NEAR(cv::mean(samples[i])[0], expected, 2.0 / 255.0) << "sample " << i;
   }
   EXPECT_FALSE(fs::exists(dir / "samples"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, SampleVideoFramesSkipsFramesOutsideTheRange) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_sample_range_test");
+  // Even frame n is gray level 2n and odd frames are black, so each still shows which
+  // frame it came from.
+  const std::string level = "if(mod(N\\,2)\\,0\\,2*N)";
+  const std::string cmd =
+    "ffmpeg -y -loglevel error -f lavfi -i \"color=black:s=64x64:r=30,format=rgb24,geq=r='" +
+    level + "':g='" + level + "':b='" + level + "'\" -frames:v 100 -c:v libx264 -qp 0 "
+    "-pix_fmt yuv444p '" + (dir / "camera.mp4").string() + "'";
+  ASSERT_EQ(std::system(cmd.c_str()), 0);
+  const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
+
+  // Frames 30 to 89 at a target of 30 samples: every second frame from 30 to 88. The 30
+  // frames before the range and the 10 after it are never sampled.
+  const auto samples = LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 30, 60, dir);
+  ASSERT_EQ(samples.size(), 30u);
+  for (size_t i = 0; i < samples.size(); ++i) {
+    const double expected = (60.0 + 4.0 * static_cast<double>(i)) / 255.0;
+    EXPECT_NEAR(cv::mean(samples[i])[0], expected, 2.0 / 255.0) << "sample " << i;
+  }
   fs::remove_all(dir);
 }
 
@@ -566,7 +618,7 @@ TEST(LeRobotV3Writer, SampleVideoFramesIgnoresStillsFromAnEarlierRun) {
                           cv::Mat(64, 64, CV_8UC3, cv::Scalar(0, 0, 0))));
   const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
 
-  const auto samples = LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 60, dir);
+  const auto samples = LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 0, 60, dir);
   EXPECT_EQ(samples.size(), 30u);
   fs::remove_all(dir);
 }
@@ -577,13 +629,13 @@ TEST(LeRobotV3Writer, SampleVideoFramesSkipsAFolderItCannotEmpty) {
   const fs::path dir = fresh_dir("trossen_lerobot_v3_sample_locked_test");
   ASSERT_TRUE(make_test_video(dir / "camera.mp4", 60));
   const LeRobotV3DatasetWriter writer(LeRobotV3DatasetWriter::Options{});
-  ASSERT_EQ(LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 60, dir).size(), 30u);
+  ASSERT_EQ(LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 0, 60, dir).size(), 30u);
 
   fs::create_directories(dir / "samples");
   ASSERT_TRUE(cv::imwrite((dir / "samples" / "sample_0001.jpg").string(),
                           cv::Mat(64, 64, CV_8UC3, cv::Scalar(0, 0, 0))));
   fs::permissions(dir / "samples", fs::perms::owner_read | fs::perms::owner_exec);
-  const auto samples = LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 60, dir);
+  const auto samples = LeRobotV3WriterTestPeer::sample(writer, dir / "camera.mp4", 0, 60, dir);
   fs::permissions(dir / "samples", fs::perms::owner_all);
   EXPECT_TRUE(samples.empty());
   fs::remove_all(dir);
@@ -664,6 +716,43 @@ TEST(LeRobotV3Writer, VideoRollsToANewFileOverTheBudget) {
   fs::remove_all(dir);
 }
 
+TEST(LeRobotV3Writer, VideoStartOffsetSeeksRowZeroToTheMatchedFrame) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_video_offset_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  // Frame n of each episode is gray level 40 + 40n, so a decoded frame shows its index.
+  for (const char* name : {"ep0.mp4", "ep1.mp4"}) {
+    const std::string cmd =
+      "ffmpeg -y -loglevel error -f lavfi -i \"color=black:s=64x64:r=30,format=rgb24,"
+      "geq=r='40+40*N':g='40+40*N':b='40+40*N'\" -frames:v 5 -c:v libx264 -qp 0 "
+      "-pix_fmt yuv444p '" + (dir / name).string() + "'";
+    ASSERT_EQ(std::system(cmd.c_str()), 0);
+  }
+  const double d = 5.0 / 30.0;
+
+  // Row 0 of episode 0 matched its frame 2 and it keeps 2 rows; row 0 of episode 1 matched
+  // its frame 1 and it keeps 4 rows.
+  std::array<double, 4> slot0{};
+  std::array<double, 4> slot1{};
+  ASSERT_TRUE(
+    LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep0.mp4", d, slot0, 2.0 / 30, 2.0 / 30));
+  ASSERT_TRUE(
+    LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep1.mp4", d, slot1, 1.0 / 30, 4.0 / 30));
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::flush(writer));
+  EXPECT_NEAR(slot0[2], 2.0 / 30, 1e-3);
+  EXPECT_NEAR(slot0[3], 4.0 / 30, 1e-3);
+  EXPECT_NEAR(slot1[2], d + 1.0 / 30, 1e-3);
+  EXPECT_NEAR(slot1[3], 2 * d, 1e-3);
+
+  // The frame presented nearest each from_timestamp in the shared file is the matched one.
+  const fs::path shared = opts.dataset_root / v3::VIDEO_DIR / "cam" / "chunk-000" / "file-000.mp4";
+  EXPECT_NEAR(level_of_frame_at(shared, slot0[2], dir), 120.0, 2.0);
+  EXPECT_NEAR(level_of_frame_at(shared, slot1[2], dir), 80.0, 2.0);
+  fs::remove_all(dir);
+}
 
 TEST(LeRobotV3Writer, VideoRollCountsTheStagedBytesOfEachFile) {
   if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
@@ -1045,7 +1134,8 @@ TEST(LeRobotV3Writer, EpisodesParquetRoundTripsTheSeekMetadata) {
   const auto& to_ts = static_cast<const arrow::DoubleArray&>(
     *table->GetColumnByName(video + "to_timestamp")->chunk(0));
   EXPECT_TRUE(to_ts.IsNull(1));
-  EXPECT_DOUBLE_EQ(to_ts.Value(2), 2.5);
+  // The span ends at the episode's last row, 8000 rows at 30 fps from the file start.
+  EXPECT_DOUBLE_EQ(to_ts.Value(2), 8000.0 / 30.0);
   fs::remove_all(dir);
 }
 
