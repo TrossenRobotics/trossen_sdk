@@ -114,6 +114,9 @@ An episode fails when:
   the stream and the message index.
 - no stretch of time has data from every leader, follower and camera stream, and from the
   mobile base on a mobile robot.
+- rows are missing for more than 200 ms in one gap, or for more than 2% of the
+  episode in total. Shorter gaps are listed in the log with their length and the stream
+  that had no sample.
 
 ---
 
