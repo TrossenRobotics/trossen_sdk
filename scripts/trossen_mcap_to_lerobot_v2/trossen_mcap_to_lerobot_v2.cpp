@@ -55,6 +55,8 @@
 #include "trossen_sdk/configuration/types/backends/lerobot_v2_backend_config.hpp"
 #include "trossen_sdk/utils/shell_quote.hpp"
 
+namespace lerobot_v2 = trossen::io::backends::lerobot_v2;
+
 /// @brief Name of this converter, credited in the generated dataset README
 constexpr char TOOL_NAME[] = "trossen_mcap_to_lerobot_v2";
 
@@ -200,7 +202,7 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
   }
   // Compute image statistics for each camera
   namespace fs = std::filesystem;
-  fs::path images_root = dataset_root / trossen::io::backends::IMAGES_DIR;
+  fs::path images_root = dataset_root / lerobot_v2::IMAGES_DIR;
   auto features = info["features"];
 
   for (auto it = features.begin(); it != features.end(); ++it) {
@@ -213,7 +215,7 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
         std::string camera_name = feature_name.substr(kImagesPrefix.size());
 
         // A camera with an episode video, encoded or remuxed, is sampled from that video.
-        fs::path videos_root = dataset_root / trossen::io::backends::VIDEO_DIR;
+        fs::path videos_root = dataset_root / lerobot_v2::VIDEO_DIR;
         bool is_video_camera = false;
         if (fs::exists(videos_root)) {
           for (const auto& chunk_entry : fs::directory_iterator(videos_root)) {
@@ -340,7 +342,7 @@ struct ConvertedEpisodes {
 /// @throws nlohmann::json::exception if a line is not valid JSON
 ConvertedEpisodes read_converted_episodes(const std::filesystem::path& meta_dir) {
   ConvertedEpisodes out;
-  std::ifstream in(meta_dir / trossen::io::backends::JSONL_EPISODES);
+  std::ifstream in(meta_dir / lerobot_v2::JSONL_EPISODES);
   std::string line;
   while (std::getline(in, line)) {
     if (line.empty()) continue;
@@ -364,14 +366,15 @@ void remove_episode_outputs(const std::filesystem::path& dataset_path, int episo
   namespace be = trossen::io::backends;
   const std::string chunk = be::format_chunk_dir(episode_index / chunk_size);
   std::error_code ec;
-  fs::remove(dataset_path / be::DATA_PATH_DIR / chunk / be::format_episode_parquet(episode_index),
-             ec);
+  fs::remove(
+      dataset_path / lerobot_v2::DATA_PATH_DIR / chunk / be::format_episode_parquet(episode_index),
+      ec);
   // Videos and images are laid out one directory per camera.
-  const fs::path videos_dir = dataset_path / be::VIDEO_DIR / chunk;
+  const fs::path videos_dir = dataset_path / lerobot_v2::VIDEO_DIR / chunk;
   for (const auto& camera : fs::directory_iterator(videos_dir, ec)) {
     fs::remove(camera.path() / be::format_video_filename(episode_index), ec);
   }
-  const fs::path images_dir = dataset_path / be::IMAGES_DIR / chunk;
+  const fs::path images_dir = dataset_path / lerobot_v2::IMAGES_DIR / chunk;
   for (const auto& camera : fs::directory_iterator(images_dir, ec)) {
     fs::remove_all(camera.path() / be::format_episode_folder(episode_index), ec);
   }
@@ -549,10 +552,10 @@ int main(int argc, char** argv) {
   ConvertedEpisodes converted;
   try {
     converted = read_converted_episodes(full_dataset_path_check /
-                                        trossen::io::backends::METADATA_DIR);
+                                        lerobot_v2::METADATA_DIR);
   } catch (const std::exception& e) {
     std::cerr << "Error: Failed to read the existing "
-              << trossen::io::backends::JSONL_EPISODES << ": " << e.what() << "\n";
+              << lerobot_v2::JSONL_EPISODES << ": " << e.what() << "\n";
     return 1;
   }
   if (converted.unsourced > 0) {
@@ -605,14 +608,14 @@ int main(int argc, char** argv) {
   std::cout << std::string(70, '=') << "\n";
 
   fs::path full_dataset_path = fs::path(dataset_root_dir) / repository_id / dataset_id;
-  fs::path meta_dir = full_dataset_path / trossen::io::backends::METADATA_DIR;
-  fs::path data_dir = full_dataset_path / trossen::io::backends::DATA_PATH_DIR;
+  fs::path meta_dir = full_dataset_path / lerobot_v2::METADATA_DIR;
+  fs::path data_dir = full_dataset_path / lerobot_v2::DATA_PATH_DIR;
 
   if (fs::exists(meta_dir) && fs::exists(data_dir)) {
     try {
-      fs::path info_path = meta_dir / trossen::io::backends::JSON_INFO;
+      fs::path info_path = meta_dir / lerobot_v2::JSON_INFO;
       if (!fs::exists(info_path)) {
-        std::cerr << "Warning: " << trossen::io::backends::JSON_INFO
+        std::cerr << "Warning: " << lerobot_v2::JSON_INFO
                   << " not found, skipping stats computation\n";
       } else {
         std::ifstream info_file(info_path);
@@ -669,7 +672,7 @@ int main(int argc, char** argv) {
             }
           }
 
-          fs::path stats_path = meta_dir / trossen::io::backends::JSONL_EPISODE_STATS;
+          fs::path stats_path = meta_dir / lerobot_v2::JSONL_EPISODE_STATS;
           std::ofstream stats_file(stats_path);
 
           if (stats_file.is_open()) {
@@ -691,8 +694,8 @@ int main(int argc, char** argv) {
 
   // Generate HuggingFace Hub compatibility files
   const std::filesystem::path info_json_path =
-      std::filesystem::path(trossen::io::backends::METADATA_DIR) /
-      trossen::io::backends::JSON_INFO;
+      std::filesystem::path(lerobot_v2::METADATA_DIR) /
+      lerobot_v2::JSON_INFO;
   if (trossen::io::backends::generate_dataset_readme(
           full_dataset_path, info_json_path, TOOL_NAME, license)) {
     std::cout << "  [ok] Generated README.md\n";
@@ -766,10 +769,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
   std::cout << "\nCreating LeRobotV2 dataset structure...\n";
 
-  fs::path data_dir = full_dataset_path / trossen::io::backends::DATA_PATH_DIR / chunk_dir_name;
-  fs::path images_dir = full_dataset_path / trossen::io::backends::IMAGES_DIR / chunk_dir_name;
-  fs::path videos_dir = full_dataset_path / trossen::io::backends::VIDEO_DIR / chunk_dir_name;
-  fs::path meta_dir = full_dataset_path / trossen::io::backends::METADATA_DIR;
+  fs::path data_dir = full_dataset_path / lerobot_v2::DATA_PATH_DIR / chunk_dir_name;
+  fs::path images_dir = full_dataset_path / lerobot_v2::IMAGES_DIR / chunk_dir_name;
+  fs::path videos_dir = full_dataset_path / lerobot_v2::VIDEO_DIR / chunk_dir_name;
+  fs::path meta_dir = full_dataset_path / lerobot_v2::METADATA_DIR;
 
   try {
     fs::create_directories(data_dir);
@@ -816,7 +819,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     return trossen::io::backends::camera_is_depth(entry.second, ep.dataset_info);
   });
   // An episode joins an existing dataset only with the dataset's features.
-  const fs::path info_path = meta_dir / trossen::io::backends::JSON_INFO;
+  const fs::path info_path = meta_dir / lerobot_v2::JSON_INFO;
   if (fs::exists(info_path)) {
     nlohmann::ordered_json features = trossen::io::backends::build_features(ep);
     trossen::io::backends::add_standard_metadata_features(features);
@@ -1206,7 +1209,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     // Use helper function to create initial info.json with custom features
     if (!trossen::io::backends::create_initial_info_json(
             meta_dir, cfg.robot_name, features, static_cast<int>(ep.fps),
-            trossen::io::backends::CODEBASE_VERSION, cfg.chunk_size)) {
+            lerobot_v2::CODEBASE_VERSION, cfg.chunk_size)) {
       std::cerr << "  Error: Failed to create " << info_path.string() << "\n";
       return 1;
     }
@@ -1220,11 +1223,11 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
           videos_created, nlohmann::json(), mcap_path.filename().string())) {
     std::cout << "  [ok] Updated " << info_path.string() << "\n";
     std::cout << "  [ok] Created/Updated "
-              << (meta_dir / trossen::io::backends::JSONL_TASKS).string() << "\n";
+              << (meta_dir / lerobot_v2::JSONL_TASKS).string() << "\n";
     std::cout << "  [ok] Appended to "
-              << (meta_dir / trossen::io::backends::JSONL_EPISODES).string() << "\n";
+              << (meta_dir / lerobot_v2::JSONL_EPISODES).string() << "\n";
     std::cout << "  [ok] Appended to "
-              << (meta_dir / trossen::io::backends::JSONL_EPISODE_STATS).string()
+              << (meta_dir / lerobot_v2::JSONL_EPISODE_STATS).string()
               << "\n";
   } else {
     std::cerr << "  Error: Failed to write metadata files\n";
