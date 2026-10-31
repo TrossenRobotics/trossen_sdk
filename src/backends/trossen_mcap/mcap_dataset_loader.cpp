@@ -660,6 +660,10 @@ bool load_aligned_episode(
             << static_cast<double>(span_ns) / static_cast<double>(data::S_TO_NS) << " s ("
             << row_times.size() << " rows)\n";
 
+  std::map<std::string, size_t> camera_frames;
+  for (const auto& cam : out.cameras) camera_frames[cam.name] = camera_timestamps[cam.name].size();
+  if (!check_frame_counts(camera_frames, row_times.size())) return false;
+
   const size_t max_rows = row_times.size();
   for (auto& cam : out.cameras) cam.row_source_index.reserve(max_rows);
 
@@ -1433,6 +1437,24 @@ bool extract_camera_video(
     std::cout << "\n";
   }
   return true;
+}
+
+bool check_frame_counts(const std::map<std::string, size_t>& camera_frames, size_t rows) {
+  size_t lowest = rows;
+  size_t highest = rows;
+  for (const auto& [camera, frames] : camera_frames) {
+    lowest = std::min(lowest, frames);
+    highest = std::max(highest, frames);
+  }
+  if (highest - lowest <= MAX_FRAME_COUNT_GAP) return true;
+
+  std::cerr << "Error: frame counts differ by " << (highest - lowest) << " (limit "
+            << MAX_FRAME_COUNT_GAP << "): " << rows << " rows";
+  for (const auto& [camera, frames] : camera_frames) {
+    std::cerr << ", " << camera << " " << frames;
+  }
+  std::cerr << ". A camera missed part of the task or recorded long before or after it.\n";
+  return false;
 }
 
 size_t video_start_offset(const CameraInfo& cam) {
