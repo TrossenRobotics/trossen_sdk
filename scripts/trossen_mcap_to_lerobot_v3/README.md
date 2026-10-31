@@ -125,6 +125,8 @@ An episode fails when:
   30 fps) away from the frame matched to it.
 - a camera's frame count differs from another camera's, or from the row count, by more
   than 10 frames (about 330 ms at 30 fps).
+- its features differ from the dataset's, which come from the first episode: a missing
+  or extra camera, a different camera size, or a different number of arms.
 
 ---
 
