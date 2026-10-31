@@ -73,6 +73,9 @@ Examples per robot:
 
     Batch mode processes the ``.mcap`` files in the order they were recorded (by the ``recording_start_time`` stored in each file) and assigns LeRobot episode indices from that order, so episode 0 is the earliest recording.
 
+The frames extracted to ``images/`` are deleted once each episode's videos are encoded.
+Pass ``--keep-images`` to keep them.
+
 Configuring the Conversion
 ==========================
 
