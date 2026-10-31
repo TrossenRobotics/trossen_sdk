@@ -123,6 +123,8 @@ An episode fails when:
   that had no sample.
 - a stream-copied camera plays some row's image more than 3 frames (about 100 ms at
   30 fps) away from the frame matched to it.
+- a camera's frame count differs from another camera's, or from the row count, by more
+  than 10 frames (about 330 ms at 30 fps).
 
 ---
 
