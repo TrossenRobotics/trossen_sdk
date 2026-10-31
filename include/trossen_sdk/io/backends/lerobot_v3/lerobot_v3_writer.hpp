@@ -159,6 +159,14 @@ public:
   bool consume_episode(PreparedEpisode& pe);
 
   /**
+   * @brief Features of a prepared episode that differ from the dataset's.
+   *
+   * @param pe Prepared episode from prepare_episode().
+   * @return One entry per difference; empty when they match or no episode is written yet.
+   */
+  std::vector<std::string> feature_mismatches(const PreparedEpisode& pe) const;
+
+  /**
    * @brief Flush episodes/tasks parquet, global stats.json, info.json, and README.
    * @return true on success.
    */

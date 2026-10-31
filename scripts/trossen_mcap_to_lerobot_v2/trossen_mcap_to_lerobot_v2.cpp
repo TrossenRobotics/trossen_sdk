@@ -815,6 +815,21 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   std::erase_if(channels.camera_channels, [&](const auto& entry) {
     return trossen::io::backends::camera_is_depth(entry.second, ep.dataset_info);
   });
+  // An episode joins an existing dataset only with the dataset's features.
+  const fs::path info_path = meta_dir / trossen::io::backends::JSON_INFO;
+  if (fs::exists(info_path)) {
+    nlohmann::ordered_json features = trossen::io::backends::build_features(ep);
+    trossen::io::backends::add_standard_metadata_features(features);
+    std::ifstream info_file(info_path);
+    const auto mismatches = trossen::io::backends::feature_mismatches(
+      nlohmann::ordered_json::parse(info_file).at("features"), features);
+    if (!mismatches.empty()) {
+      std::cerr << "Error: " << cfg.mcap_file << " has other features than the dataset:\n";
+      for (const auto& m : mismatches) std::cerr << "  " << m << "\n";
+      return 1;
+    }
+  }
+
   // Prefer the task embedded in this episode's MCAP; fall back to the config's.
   const std::string task_name = ep.task_name.empty() ? cfg.task_name : ep.task_name;
   // A new task is appended to tasks.jsonl at this index once the episode is written.
@@ -1174,7 +1189,6 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   std::cout << "\nGenerating metadata files...\n";
 
   // Check if info.json exists, create if needed
-  fs::path info_path = meta_dir / trossen::io::backends::JSON_INFO;
   if (!fs::exists(info_path)) {
     std::cout << "  Creating initial info.json...\n";
 

@@ -209,6 +209,18 @@ VideoCodecInfo copied_stream_codec(const std::string& format);
 void set_video_codec(
   nlohmann::ordered_json& features, const std::string& obs_key, const VideoCodecInfo& codec);
 
+/**
+ * @brief Differences between a dataset's features and an episode's.
+ *
+ * Compares feature keys, dtype and shape. Names and video codec details are not compared.
+ *
+ * @param dataset The dataset's `features` object.
+ * @param episode The episode's `features` object.
+ * @return One "<key>: <difference>" entry per differing feature; empty when they match.
+ */
+std::vector<std::string> feature_mismatches(
+  const nlohmann::ordered_json& dataset, const nlohmann::ordered_json& episode);
+
 }  // namespace trossen::io::backends
 
 #endif  // TROSSEN_SDK__IO__BACKENDS__LEROBOT_COMMON__LEROBOT_EPISODE_HPP_
