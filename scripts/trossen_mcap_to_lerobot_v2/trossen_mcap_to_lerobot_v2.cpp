@@ -855,8 +855,10 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
     // camera actually covers (shared with the v3 converter).
     trossen::io::backends::clamp_episode_to_video_frame_counts(ep, video_streams,
                                                                 /*start_offset_applied=*/false);
-    trossen::io::backends::report_unaligned_video_streams(ep, video_streams,
-                                                           /*start_offset_applied=*/false);
+    if (!trossen::io::backends::check_video_alignment(ep, video_streams,
+                                                      /*start_offset_applied=*/false)) {
+      return 1;
+    }
 
     // A recording stores every camera the same way: as compressed video or as raw images.
     if (video_streams.empty()) {
