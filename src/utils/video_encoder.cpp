@@ -295,6 +295,11 @@ std::unique_ptr<VideoEncoder> VideoEncoder::create(const Params& params) {
       try_set_opt(candidate_ctx, "preset", "p1");
       try_set_opt(candidate_ctx, "tune", "ll");
       try_set_opt(candidate_ctx, "zerolatency", "1");
+      // "delay" is how many frames nvenc holds before it returns the first packet, and it
+      // defaults to INT_MAX: without this, encode() gets nothing back for the opening frames
+      // and the caller sees an encoder that produces no output. "zerolatency" does not cover
+      // it; that one only disables reordering.
+      try_set_opt(candidate_ctx, "delay", "0");
     }
     // vaapi candidates are left unconfigured here: real hardware use needs an AVHWDeviceContext /
     // AVHWFramesContext wired up first, which is out of scope for now. Left as-is,
