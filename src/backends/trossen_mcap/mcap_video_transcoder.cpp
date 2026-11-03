@@ -37,31 +37,40 @@ void on_problem(const mcap::Status& problem) {
   std::cerr << "Warning: MCAP parsing issue: " << problem.message << "\n";
 }
 
-/// @brief Read `image_encoding` from the recording's metadata record.
+/// @brief Read and parse the metadata record that `index` points at.
 ///
-/// @param encoding Set to the value, or left empty when the record or key is absent.
+/// @return false when it cannot be read (reason logged to stderr).
+bool read_metadata(
+  mcap::McapReader& reader, const mcap::MetadataIndex& index, mcap::Metadata& record) {
+  mcap::Record raw_record;
+  auto status = mcap::McapReader::ReadRecord(*reader.dataSource(), index.offset, &raw_record);
+  if (status.ok()) status = mcap::McapReader::ParseMetadata(raw_record, &record);
+  if (!status.ok()) {
+    std::cerr << "Error: Failed to read metadata record '" << index.name
+              << "': " << status.message << "\n";
+    return false;
+  }
+  return true;
+}
+
+/// @brief Read the recording's metadata record.
+///
+/// @param fields Set to the record's keys and values; left empty when there is no record.
 /// @return false when the record exists but cannot be read (reason logged to stderr).
-bool read_image_encoding(mcap::McapReader& reader, std::string& encoding) {
-  encoding.clear();
+bool read_recording_metadata(mcap::McapReader& reader, mcap::KeyValueMap& fields) {
   const auto& indexes = reader.metadataIndexes();
   const auto index = indexes.find(trossen_mcap_defs::kRecordingMetadataName);
   if (index == indexes.end()) return true;
-  auto* data_source = reader.dataSource();
-  if (!data_source) {
-    std::cerr << "Error: No data source to read the recording metadata from\n";
-    return false;
-  }
-  mcap::Record raw_record;
-  auto status = mcap::McapReader::ReadRecord(*data_source, index->second.offset, &raw_record);
   mcap::Metadata record;
-  if (status.ok()) status = mcap::McapReader::ParseMetadata(raw_record, &record);
-  if (!status.ok()) {
-    std::cerr << "Error: Failed to read the recording metadata: " << status.message << "\n";
-    return false;
-  }
-  const auto value = record.metadata.find(trossen_mcap_defs::kImageEncodingKey);
-  if (value != record.metadata.end()) encoding = value->second;
+  if (!read_metadata(reader, index->second, record)) return false;
+  fields = std::move(record.metadata);
   return true;
+}
+
+/// @brief One key of a metadata record, or an empty string when it is absent.
+std::string field_or_empty(const mcap::KeyValueMap& fields, const char* key) {
+  const auto it = fields.find(key);
+  return it == fields.end() ? std::string() : it->second;
 }
 
 /// @brief What the transcode does with one input channel.
@@ -158,10 +167,17 @@ bool transcode_images_to_video(
     return false;
   }
 
-  // A recording without the key predates video storage, so its frames are raw.
-  std::string image_encoding;
-  if (!read_image_encoding(reader, image_encoding)) return false;
-  if (image_encoding == trossen::configuration::TROSSEN_MCAP_IMAGE_ENCODING_VIDEO) {
+  mcap::KeyValueMap recording;
+  if (!read_recording_metadata(reader, recording)) return false;
+  const std::string tool_version = field_or_empty(recording, trossen_mcap_defs::kToolVersionKey);
+  if (!trossen_mcap_defs::tool_version_supported(tool_version)) {
+    std::cerr << "Error: " << input << " "
+              << trossen_mcap_defs::unsupported_tool_version_message(tool_version) << "\n";
+    return false;
+  }
+  // The recorder only starts with "raw" or "video", so anything not "video" is raw.
+  if (field_or_empty(recording, trossen_mcap_defs::kImageEncodingKey) ==
+      trossen::configuration::TROSSEN_MCAP_IMAGE_ENCODING_VIDEO) {
     std::cout << input.string() << " is already in compressed format; nothing to do\n";
     stats.already_compressed = true;
     return true;
@@ -194,10 +210,10 @@ bool transcode_images_to_video(
       std::cerr << "Error: Output path is the input file\n";
       return false;
     }
-  }
-  if (output_exists && !options.overwrite) {
-    std::cerr << "Error: Output already exists: " << output << " (pass --overwrite)\n";
-    return false;
+    if (!options.overwrite) {
+      std::cerr << "Error: Output already exists: " << output << " (pass --overwrite)\n";
+      return false;
+    }
   }
 
   // Written beside the output and renamed onto it only once complete, so a failed run never
@@ -293,7 +309,7 @@ bool transcode_images_to_video(
   plans.clear();
   auto close_status = writer.close();
   if (close_status != foxglove::FoxgloveError::Ok) {
-    std::cerr << "Error: Failed to close " << output << ": " << foxglove::strerror(close_status)
+    std::cerr << "Error: Failed to close " << partial << ": " << foxglove::strerror(close_status)
               << "\n";
     return false;
   }
@@ -304,7 +320,6 @@ bool transcode_images_to_video(
     return false;
   }
   remove_partial.release();
-  reader.close();
   return true;
 }
 
