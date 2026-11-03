@@ -38,7 +38,9 @@ Run from the repository root:
 | `--metadata-only` | off | Update only the metadata; cameras keep the format they were stored in |
 
 The tool never writes to its input, and refuses an output path that resolves to
-the input file.
+the input file. Each output is written as `<output>.partial` and renamed into
+place only once complete, so a failed run leaves no partial file and an earlier
+output stays as it was.
 
 A recording whose `trossen_sdk_recording` metadata has `image_encoding: video`
 is already compressed: it is reported as skipped and nothing is written, unless
@@ -70,6 +72,9 @@ the dataset visualizer align on. Frame counts are preserved one for one.
   rather than guessing.
 - Color is lossy (H.264 at the configured bitrate); depth is bit-exact after the
   same log quantization the recorder applies.
+- The encoder spreads the bitrate as if every camera ran at 30 frames per
+  second, as the recorder does. A camera running slower gets proportionally
+  less: about half the configured bitrate at 15 fps.
 - Every frame must produce one packet, written at its frame's log time. An empty
   packet is fatal: it would shift every following frame's pairing with the joint
   data.
