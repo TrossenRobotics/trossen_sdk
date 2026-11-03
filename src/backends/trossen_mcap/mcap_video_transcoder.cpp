@@ -149,9 +149,12 @@ bool transcode_images_to_video(
     std::cerr << "Error: Failed to parse " << input << ": " << status.message << "\n";
     return false;
   }
-  status = reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+  // The recorder writes the summary when it closes a file, so a file without one was cut
+  // short. Scanning it instead would convert only the part that survived, with no error.
+  status = reader.readSummary(mcap::ReadSummaryMethod::NoFallbackScan);
   if (!status.ok()) {
-    std::cerr << "Error: Failed to read MCAP summary: " << status.message << "\n";
+    std::cerr << "Error: " << input << " is incomplete (no MCAP summary: " << status.message
+              << "); it was probably cut short\n";
     return false;
   }
 
