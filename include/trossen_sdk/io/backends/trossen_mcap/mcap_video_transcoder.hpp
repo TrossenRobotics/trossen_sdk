@@ -48,6 +48,9 @@ struct VideoTranscodeStats {
  * A recording whose `image_encoding` metadata is "video" is already compressed: nothing is
  * written, `stats.already_compressed` is set, and the call succeeds.
  *
+ * The output is written to `<output>.partial` and renamed onto `output` only once complete,
+ * so a failed run leaves no partial file and an earlier output stays untouched.
+ *
  * @param input Path to the recording to read.
  * @param output Path to the recording to write; must differ from `input`.
  * @param options Output-file settings.
