@@ -37,5 +37,4 @@ target_link_libraries(trossen_mcap_to_lerobot_v3 trossen_sdk arrow parquet proto
 # but reports that the build has no encoder.
 add_executable(trossen_mcap_transcode_video
   trossen_mcap_transcode_video/trossen_mcap_transcode_video.cpp)
-target_include_directories(trossen_mcap_transcode_video PRIVATE ${CMAKE_BINARY_DIR})
-target_link_libraries(trossen_mcap_transcode_video trossen_sdk protobuf ${OpenCV_LIBS})
+target_link_libraries(trossen_mcap_transcode_video trossen_sdk)
