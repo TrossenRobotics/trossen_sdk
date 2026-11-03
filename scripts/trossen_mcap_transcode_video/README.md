@@ -40,15 +40,19 @@ Run from the repository root:
 The tool never writes to its input, and refuses an output path that resolves to
 the input file.
 
+A recording whose `trossen_sdk_recording` metadata has `image_encoding: video`
+is already compressed: it is reported as skipped and nothing is written, unless
+`--metadata-only` is set. A recording without that key predates video storage
+and is converted.
+
 ## 2. What it does to each topic
 
 | Topic | Result |
 | --- | --- |
 | `/cameras/<name>/image` holding `foxglove.RawImage`, color | Re-encoded to H.264, `video_format: h264` added to the channel metadata |
 | `/cameras/<name>/image` holding `foxglove.RawImage`, depth | Log-quantized to 12-bit codes and encoded to **lossless** H.265, `video_format: h265` |
-| `/cameras/<name>/image` already holding `foxglove.CompressedVideo` | Copied packet for packet |
 | `/cameras/<name>/meta`, joint states, odometry, anything else | Copied byte for byte |
-| File-level metadata records (`dataset_info`, task description, ...) | Copied. In the recording record, `episode_id` is set to the output file name without `.mcap` (the input's name for a single file without `-o`, since `_video` only places the output beside it; or `--episode-id`), and a legacy `task` entry is renamed to `task_description`. `--keep-metadata` copies them as written |
+| File-level metadata records (`dataset_info`, task description, ...) | Copied. In the recording record, `episode_id` is set to the output file name without `.mcap` (the input's name for a single file without `-o`, since `_video` only places the output beside it; or `--episode-id`), a legacy `task` entry is renamed to `task_description`, and `image_encoding` is set to `video`. `--keep-metadata` copies them as written, apart from `image_encoding` |
 
 A channel counts as depth when its metadata says `stream_type: depth`; a
 recording made before that tag existed falls back to the topic name and the pixel
