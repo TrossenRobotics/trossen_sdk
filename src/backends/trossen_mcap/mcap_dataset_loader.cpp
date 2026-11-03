@@ -157,10 +157,6 @@ bool load_aligned_episode(
     if (read_string_field(out.dataset_info, "robot_name", out.robot_name)) {
       std::cout << "    Robot name from MCAP: " << out.robot_name << "\n";
     }
-    // Older recordings carry the task inside dataset_info instead.
-    if (out.task_name.empty()) {
-      read_string_field(out.dataset_info, "task", out.task_name);
-    }
   }
 
   // Left empty when the operator set no task; the converter then uses its configured one.
