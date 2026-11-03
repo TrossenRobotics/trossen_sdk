@@ -40,16 +40,14 @@ void on_problem(const mcap::Status& problem) {
 }
 
 /**
- * @brief Stream id in front of a topic suffix, without the leading `/` a topic may carry.
+ * @brief Stream id in front of a topic suffix.
  *
  * @param topic Full topic name, e.g. `follower_left/joints/state`.
  * @param suffix Suffix @p topic is known to end with.
  * @return The stream id, e.g. `follower_left`.
  */
 std::string stream_id_from_topic(const std::string& topic, std::string_view suffix) {
-  std::string stream_id = topic.substr(0, topic.size() - suffix.size());
-  if (!stream_id.empty() && stream_id.front() == '/') stream_id.erase(0, 1);
-  return stream_id;
+  return topic.substr(0, topic.size() - suffix.size());
 }
 
 /**
@@ -223,15 +221,7 @@ bool load_aligned_episode(
         trossen_mcap_defs::kImageTopicSuffix + "$");
       std::smatch m;
       if (std::regex_match(topic, m, camera_topic_re)) {
-        // The name becomes a directory and file name in the output, so one that could
-        // point outside it is not a camera.
-        const std::string name = m[1].str();
-        if (name == "." || name == ".." || name.find_first_of("/\\") != std::string::npos) {
-          std::cerr << "Warning: skipping camera topic '" << topic
-                    << "': the camera name must be a single path component\n";
-          continue;
-        }
-        channels.camera_channels[channel_id] = name;
+        channels.camera_channels[channel_id] = m[1].str();
       }
     }
   }
