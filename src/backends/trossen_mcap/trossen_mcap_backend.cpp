@@ -140,7 +140,7 @@ bool TrossenMCAPBackend::open() {
 
   // Write MCAP file-level metadata
   std::map<std::string, std::string> metadata;
-  metadata["tool_version"] = trossen::core::version();
+  metadata[trossen_mcap_defs::kToolVersionKey] = trossen::core::version();
   metadata["dataset_id"] = cfg_->dataset_id;
   metadata["robot_name"] = cfg_->robot_name;
   // Record the episode's id (the filename without the ".mcap" extension) so a file's
@@ -184,6 +184,8 @@ bool TrossenMCAPBackend::open() {
   }
 
   metadata[trossen_mcap_defs::kDatasetInfoKey] = dataset_info.dump();
+
+  unrecordable_streams_.clear();
 
   auto st = writer_->writeMetadata(
     trossen_mcap_defs::kRecordingMetadataName, metadata.begin(), metadata.end());
@@ -698,26 +700,34 @@ void TrossenMCAPBackend::write_image_frame(const data::ImageRecord& img, bool de
                           channel, depth ? &stats_.depth_images_written : &stats_.images_written);
 }
 
+bool TrossenMCAPBackend::depth_unit_known(
+  const data::ImageRecord& img, const std::string& id, const std::string& encoding) {
+  if (encoding == "32FC1" || img.depth_scale) return true;
+  if (unrecordable_streams_.insert(id).second) {
+    std::cerr << "Error: depth stream '" << id << "' has no depth_scale; its producer must "
+              << "set ImageRecord::depth_scale, so its frames are not recorded\n";
+  }
+  return false;
+}
+
 void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
   // Determine if this is a depth frame based on encoding or topic
   const bool depth =
     is_depth_encoding(img.encoding) || is_depth_topic(trossen_mcap_defs::image_topic(img.id));
+  if (depth && !depth_unit_known(img, img.id, img.encoding)) return;
   foxglove::RawChannel* channel = nullptr;
   if (depth) {
-    // Depth metadata; attempt to parse scale if provided in encoding (future) - for now leave
-    // blank
-    //
-    // We cannot know depth_scale_m here without augmenting ImageRecord; future extension could
-    // pass via id pattern.
-    //
-    // Minimal metadata: stream_type + semantics if derivable from encoding.
+    // Minimal metadata: stream_type + semantics if derivable from encoding. Integer depth
+    // always records its unit, so readers never have to guess it.
     std::unordered_map<std::string, std::string> md;
     md["stream_type"] = "depth";
     if (img.encoding == "depth16") {
       md["depth_encoding_semantics"] = "uint16_scaled";
-      // depth_scale_m left to producer-specific channel creation path later when available
     } else if (img.encoding == "32FC1") {
       md["depth_encoding_semantics"] = "float_m";
+    }
+    if (img.encoding != "32FC1") {
+      md["depth_scale_m"] = std::to_string(*img.depth_scale);
     }
     channel = ensure_image_channel_with_metadata(img.id, md);
   } else {
@@ -732,12 +742,11 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
   // Write optional depth image to a separate channel when ImageRecord carries depth
   if (img.has_depth()) {
     const std::string depth_topic_id = img.id + "_depth";
+    if (!depth_unit_known(img, depth_topic_id, "16UC1")) return;
     std::unordered_map<std::string, std::string> md;
     md["stream_type"] = "depth";
     md["depth_encoding"] = "16UC1";
-    if (img.depth_scale.has_value()) {
-      md["depth_scale_m"] = std::to_string(img.depth_scale.value());
-    }
+    md["depth_scale_m"] = std::to_string(*img.depth_scale);
 
     foxglove::RawChannel* depth_channel = ensure_image_channel_with_metadata(depth_topic_id, md);
     if (depth_channel) {

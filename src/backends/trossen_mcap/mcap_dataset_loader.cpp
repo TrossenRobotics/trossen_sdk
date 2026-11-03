@@ -213,6 +213,7 @@ bool load_aligned_episode(
   auto* data_source = reader.dataSource();
   const auto& meta_indexes = reader.metadataIndexes();
   auto range = meta_indexes.equal_range(trossen_mcap_defs::kRecordingMetadataName);
+  std::string tool_version;
   for (auto it = range.first; it != range.second; ++it) {
     mcap::Record raw_record;
     auto rs = mcap::McapReader::ReadRecord(*data_source, it->second.offset, &raw_record);
@@ -221,6 +222,9 @@ bool load_aligned_episode(
     mcap::Metadata meta_record;
     rs = mcap::McapReader::ParseMetadata(raw_record, &meta_record);
     if (!rs.ok()) continue;
+
+    auto version_it = meta_record.metadata.find(trossen_mcap_defs::kToolVersionKey);
+    if (version_it != meta_record.metadata.end()) tool_version = version_it->second;
 
     // The recorder writes the task prompt as its own field of this record.
     auto task_it = meta_record.metadata.find(trossen_mcap_defs::kTaskDescriptionKey);
@@ -242,6 +246,12 @@ bool load_aligned_episode(
     if (read_string_field(out.dataset_info, "robot_name", out.robot_name)) {
       std::cout << "    Robot name from MCAP: " << out.robot_name << "\n";
     }
+  }
+
+  if (!trossen_mcap_defs::tool_version_supported(tool_version)) {
+    std::cerr << "Error: '" << mcap_file << "' "
+              << trossen_mcap_defs::unsupported_tool_version_message(tool_version) << "\n";
+    return false;
   }
 
   // Left empty when the operator set no task; the converter then uses its configured one.
