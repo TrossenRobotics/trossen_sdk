@@ -43,7 +43,8 @@ struct VideoTranscodeStats {
  *
  * Every message is written with its log time unchanged, and every channel that has a message
  * is in the output. Camera topics are copied in the form they were stored. A read problem,
- * or a message on a channel missing from the summary, fails the copy.
+ * or a message on a channel missing from the summary, fails the copy. A file without a
+ * summary section was cut short and is refused.
  *
  * A recording whose `image_encoding` metadata is "video" is already compressed: nothing is
  * written, `stats.already_compressed` is set, and the call succeeds.
