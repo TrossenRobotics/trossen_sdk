@@ -148,6 +148,7 @@ bool TrossenMCAPBackend::open() {
   metadata["episode_id"] = path_.stem().string();
   auto now = trossen::data::now_real();
   metadata[trossen_mcap_defs::kRecordingStartTimeKey] = std::to_string(now.to_ns());
+  metadata[trossen_mcap_defs::kImageEncodingKey] = cfg_->image_encoding;
   if (!cfg_->task_description.empty()) {
     metadata[trossen_mcap_defs::kTaskDescriptionKey] = cfg_->task_description;
   }
