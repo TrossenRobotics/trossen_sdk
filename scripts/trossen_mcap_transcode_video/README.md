@@ -3,10 +3,10 @@
 Converts an existing TrossenMCAP recording whose camera topics hold
 `foxglove.RawImage` (one uncompressed frame per message) into one whose camera
 topics hold `foxglove.CompressedVideo`, the format the recorder now writes.
-Every other topic is copied unchanged, so this replaces re-recording an episode
-that was captured before video storage existed. By default the recording
-metadata is brought in line with the episode's file name (see section 2);
-`--keep-metadata` copies it as written.
+Every other topic is copied unchanged, so a recording made with
+`image_encoding: raw` can be compressed later instead of being recorded again.
+It reads recordings from SDK `v0.1.1` on (their `tool_version`) and refuses
+older ones.
 
 Typical result on a 640x480, 6-camera recording: **50 MB → 8 MB**.
 
@@ -15,8 +15,8 @@ Typical result on a 640x480, 6-camera recording: **50 MB → 8 MB**.
 Run from the repository root:
 
 ```bash
-# One recording -> episode_000056_video.mcap next to it
-./build/scripts/trossen_mcap_transcode_video ~/recordings/episode_000056.mcap
+# One recording -> <recording>_video.mcap next to it
+./build/scripts/trossen_mcap_transcode_video ~/recordings/<recording>.mcap
 
 # A whole folder -> <folder>_video/ with the same filenames
 ./build/scripts/trossen_mcap_transcode_video ~/recordings/
@@ -27,15 +27,12 @@ Run from the repository root:
 
 | Option | Default | Effect |
 | --- | --- | --- |
-| `-o`, `--output` | `<input>_video.mcap` / `<folder>_video/` | Output file or folder |
+| `-o`, `--output` | `<input>_video.mcap` / `<folder>_video/` | Output file or folder. For one recording, a path ending in `/` is a folder, created if needed |
 | `--encoder` | `auto` | `auto`, `nvenc`, `vaapi`, `x264`/`x265`, or a libavcodec encoder name |
 | `--bitrate-kbps` | `6000` | Color bitrate. Depth ignores it and encodes losslessly |
 | `--keyframe-interval` | `10` | Keyframe every n frames. Small values keep single-frame reads cheap |
 | `--compression` | `zstd` | Output chunk compression: `zstd`, `lz4`, `none` |
 | `--overwrite` | off | Replace an existing output file |
-| `--keep-metadata` | off | Copy the recording metadata as written, instead of updating it (section 2) |
-| `--episode-id` | output file name without `.mcap`; the input's for a single file without `-o` | Episode id to write; single file only, and not with `--keep-metadata` |
-| `--metadata-only` | off | Update only the metadata; cameras keep the format they were stored in |
 
 The tool never writes to its input, and refuses an output path that resolves to
 the input file. Each output is written as `<output>.partial` and renamed into
@@ -43,9 +40,7 @@ place only once complete, so a failed run leaves no partial file and an earlier
 output stays as it was.
 
 A recording whose `trossen_sdk_recording` metadata has `image_encoding: video`
-is already compressed: it is reported as skipped and nothing is written, unless
-`--metadata-only` is set. A recording without that key predates video storage
-and is converted.
+is already compressed: it is reported as skipped and nothing is written.
 
 ## 2. What it does to each topic
 
@@ -54,11 +49,11 @@ and is converted.
 | `/cameras/<name>/image` holding `foxglove.RawImage`, color | Re-encoded to H.264, `video_format: h264` added to the channel metadata |
 | `/cameras/<name>/image` holding `foxglove.RawImage`, depth | Log-quantized to 12-bit codes and encoded to **lossless** H.265, `video_format: h265` |
 | `/cameras/<name>/meta`, joint states, odometry, anything else | Copied byte for byte |
-| File-level metadata records (`dataset_info`, task description, ...) | Copied. In the recording record, `episode_id` is set to the output file name without `.mcap` (the input's name for a single file without `-o`, since `_video` only places the output beside it; or `--episode-id`), a legacy `task` entry is renamed to `task_description`, and `image_encoding` is set to `video`. `--keep-metadata` copies them as written, apart from `image_encoding` |
+| File-level metadata records (`dataset_info`, task description, ...) | Copied, with the recording record's `image_encoding` set to `video` |
 
-A channel counts as depth when its metadata says `stream_type: depth`; a
-recording made before that tag existed falls back to the topic name and the pixel
-encoding (`16UC1`, `mono16`, `depth16`).
+A channel counts as depth when its metadata says `stream_type: depth`, and its
+`depth_scale_m` (meters per raw unit) sets the quantization; a depth channel
+without a valid `depth_scale_m` aborts the file.
 
 Message log times are copied unchanged, which is what the LeRobot converter and
 the dataset visualizer align on. Frame counts are preserved one for one.
