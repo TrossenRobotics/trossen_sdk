@@ -17,7 +17,7 @@ inline constexpr uint32_t VERSION_MAJOR = 0;
 inline constexpr uint32_t VERSION_MINOR = 1;
 
 /// @brief Patch version number
-inline constexpr uint32_t VERSION_PATCH = 0;
+inline constexpr uint32_t VERSION_PATCH = 1;
 
 /**
  * @brief Get version string in "vMAJOR.MINOR.PATCH" format

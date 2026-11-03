@@ -6,6 +6,7 @@
  #ifndef TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__TROSSEN_MCAP_SCHEMAS_HPP_
  #define TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__TROSSEN_MCAP_SCHEMAS_HPP_
 
+#include <cstdio>
 #include <string>
 #include <string_view>
 
@@ -51,6 +52,47 @@ inline constexpr char kTaskDescriptionKey[] = "task_description";
 
 /// @brief Key inside that record holding how camera frames are stored: "raw" or "video".
 inline constexpr char kImageEncodingKey[] = "image_encoding";
+
+/// @brief Key inside that record holding the SDK version that wrote it, "vMAJOR.MINOR.PATCH".
+inline constexpr char kToolVersionKey[] = "tool_version";
+
+/// @brief Oldest SDK version whose recordings this SDK reads.
+inline constexpr char kMinToolVersion[] = "v0.1.1";
+
+/**
+ * @brief Check whether a recording's `tool_version` is one this SDK reads.
+ *
+ * @param version The recording's `tool_version`, e.g. "v0.1.1".
+ * @return True if it parses as "vMAJOR.MINOR.PATCH" and is at least kMinToolVersion.
+ */
+inline bool tool_version_supported(std::string_view version) {
+  // Parses "vMAJOR.MINOR.PATCH" into three numbers; false on anything else. %n stores how many
+  // characters were read, so trailing text such as "-rc1" fails.
+  const auto parse = [](std::string_view text, unsigned (&parts)[3]) {
+    const std::string s(text);
+    int read = -1;
+    return std::sscanf(s.c_str(), "v%u.%u.%u%n", &parts[0], &parts[1], &parts[2], &read) == 3 &&
+           read == static_cast<int>(s.size());
+  };
+  unsigned found[3];
+  unsigned minimum[3];
+  if (!parse(version, found) || !parse(kMinToolVersion, minimum)) return false;
+  for (int i = 0; i < 3; ++i) {
+    if (found[i] != minimum[i]) return found[i] > minimum[i];
+  }
+  return true;
+}
+
+/**
+ * @brief Why a recording's `tool_version` is refused, for an error after the file name.
+ *
+ * @param version The recording's `tool_version`; empty when it has none.
+ */
+inline std::string unsupported_tool_version_message(std::string_view version) {
+  return "was recorded with SDK " +
+         (version.empty() ? std::string("of unknown version") : std::string(version)) +
+         "; this SDK reads recordings from " + kMinToolVersion + " on";
+}
 
 /**
  * @brief Check whether a stream id is named with a role: exactly `role`, or `role_<side>`.
