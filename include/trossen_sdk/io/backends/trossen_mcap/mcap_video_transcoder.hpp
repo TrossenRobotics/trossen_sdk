@@ -33,9 +33,9 @@ struct VideoTranscodeOptions {
 struct VideoTranscodeStats {
   /// @brief Messages copied through untouched (joint states, odometry, frame meta, ...).
   size_t messages_copied{0};
-  /// @brief Camera streams already stored as `foxglove.CompressedVideo`. Raw-image camera
-  /// streams are copied too but are not counted here.
-  size_t cameras_passthrough{0};
+  /// @brief True when the recording's metadata says its camera frames are already video, so
+  /// nothing was written.
+  bool already_compressed{false};
 };
 
 /**
@@ -44,6 +44,9 @@ struct VideoTranscodeStats {
  * Every message is written with its log time unchanged, and every channel that has a message
  * is in the output. Camera topics are copied in the form they were stored. A read problem,
  * or a message on a channel missing from the summary, fails the copy.
+ *
+ * A recording whose `image_encoding` metadata is "video" is already compressed: nothing is
+ * written, `stats.already_compressed` is set, and the call succeeds.
  *
  * @param input Path to the recording to read.
  * @param output Path to the recording to write; must differ from `input`.
