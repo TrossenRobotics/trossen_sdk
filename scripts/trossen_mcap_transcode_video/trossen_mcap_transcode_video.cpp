@@ -31,7 +31,8 @@ void print_usage(const char* argv0) {
   std::cout
     << "Usage: " << argv0 << " <input.mcap|folder> [options]\n\n"
     << "Converts raw camera images in a TrossenMCAP recording to compressed video\n"
-    << "(H.264 color, lossless H.265 depth). All other topics are copied unchanged.\n\n"
+    << "(H.264 color, lossless H.265 depth). All other topics are copied unchanged.\n"
+    << "A recording already stored as video is skipped and nothing is written.\n\n"
     << "Options:\n"
     << "  -o, --output <path>        Output file (file input) or folder (folder input).\n"
     << "                             Default: <input>_video.mcap, or <folder>_video/.\n"
@@ -205,15 +206,15 @@ int main(int argc, char** argv) {
       ++failed;
       continue;
     }
+    if (stats.already_compressed) {
+      std::cout << "  [skip] nothing written\n";
+      continue;
+    }
 
     std::cout << "  [ok] " << stats.color_frames_encoded << " color + "
               << stats.depth_frames_encoded << " depth frames encoded from "
               << stats.cameras_transcoded << " camera(s), " << stats.messages_copied
               << " other messages copied";
-    if (stats.cameras_passthrough > 0) {
-      std::cout << ", " << stats.cameras_passthrough << " camera(s) "
-                << (options.metadata_only ? "copied as stored" : "already video");
-    }
     if (stats.metadata_rewritten) {
       std::cout << ", metadata renamed to match the file";
     }
