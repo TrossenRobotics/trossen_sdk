@@ -31,20 +31,36 @@ namespace trossen::io::backends {
 
 namespace {
 
-/// @brief Schema name of compressed camera messages.
-constexpr char kCompressedVideoSchema[] = "foxglove.CompressedVideo";
-
 /// @brief mcap reader callback: log a recoverable parsing issue and keep reading.
 void on_problem(const mcap::Status& problem) {
   std::cerr << "Warning: MCAP parsing issue: " << problem.message << "\n";
 }
 
-/// @brief True when a topic is a camera image stream (`/cameras/<name>/image`).
-bool is_camera_image_topic(const std::string& topic) {
-  const std::string prefix = trossen_mcap_defs::kCameraTopicPrefix;
-  const std::string suffix = trossen_mcap_defs::kImageTopicSuffix;
-  return topic.size() > prefix.size() + suffix.size() && topic.starts_with(prefix) &&
-         topic.ends_with(suffix);
+/// @brief Read `image_encoding` from the recording's metadata record.
+///
+/// @param encoding Set to the value, or left empty when the record or key is absent.
+/// @return false when the record exists but cannot be read (reason logged to stderr).
+bool read_image_encoding(mcap::McapReader& reader, std::string& encoding) {
+  encoding.clear();
+  const auto& indexes = reader.metadataIndexes();
+  const auto index = indexes.find(trossen_mcap_defs::kRecordingMetadataName);
+  if (index == indexes.end()) return true;
+  auto* data_source = reader.dataSource();
+  if (!data_source) {
+    std::cerr << "Error: No data source to read the recording metadata from\n";
+    return false;
+  }
+  mcap::Record raw_record;
+  auto status = mcap::McapReader::ReadRecord(*data_source, index->second.offset, &raw_record);
+  mcap::Metadata record;
+  if (status.ok()) status = mcap::McapReader::ParseMetadata(raw_record, &record);
+  if (!status.ok()) {
+    std::cerr << "Error: Failed to read the recording metadata: " << status.message << "\n";
+    return false;
+  }
+  const auto value = record.metadata.find(trossen_mcap_defs::kImageEncodingKey);
+  if (value != record.metadata.end()) encoding = value->second;
+  return true;
 }
 
 /// @brief What the transcode does with one input channel.
@@ -109,6 +125,15 @@ bool transcode_images_to_video(
   if (!status.ok()) {
     std::cerr << "Error: Failed to read MCAP summary: " << status.message << "\n";
     return false;
+  }
+
+  // A recording without the key predates video storage, so its frames are raw.
+  std::string image_encoding;
+  if (!read_image_encoding(reader, image_encoding)) return false;
+  if (image_encoding == trossen::configuration::TROSSEN_MCAP_IMAGE_ENCODING_VIDEO) {
+    std::cout << input.string() << " is already in compressed format; nothing to do\n";
+    stats.already_compressed = true;
+    return true;
   }
 
   // The output directory is created before the path checks, because a path through a
@@ -176,14 +201,10 @@ bool transcode_images_to_video(
     const auto schema_it = input_schemas.find(channel->schemaId);
     const mcap::Schema* schema =
       schema_it != input_schemas.end() ? schema_it->second.get() : nullptr;
-    const std::string schema_name = schema ? schema->name : "";
 
     ChannelPlan plan;
     plan.metadata.insert(channel->metadata.begin(), channel->metadata.end());
 
-    if (is_camera_image_topic(channel->topic) && schema_name == kCompressedVideoSchema) {
-      ++stats.cameras_passthrough;
-    }
     auto created = foxglove::RawChannel::create(
       channel->topic, channel->messageEncoding,
       schema ? std::optional<foxglove::Schema>(schema_from(*schema)) : std::nullopt, context,
