@@ -122,6 +122,8 @@ struct ChannelPlan {
   /// @brief Frame dimensions the encoder was built for; every later frame must match.
   uint32_t width{0};
   uint32_t height{0};
+  /// @brief Frames this camera has encoded.
+  size_t frames_encoded{0};
 };
 
 /// @brief Build the encoder parameters for one camera stream.
@@ -379,7 +381,6 @@ bool transcode_images_to_video(
       plan.channel.emplace(std::move(created.value()));
     } else {
       plan.camera = camera_name_of(channel->topic);
-      ++stats.cameras_transcoded;
     }
     plans.emplace(channel_id, std::move(plan));
   }
@@ -475,6 +476,7 @@ bool transcode_images_to_video(
         return false;
       }
       plan.channel.emplace(std::move(created.value()));
+      ++stats.cameras_transcoded;
 
       std::cout << "  " << plan.camera << ": " << raw_image.width() << "x" << raw_image.height()
                 << " " << raw_image.encoding() << " -> "
@@ -498,7 +500,7 @@ bool transcode_images_to_video(
       // video with the nth frame-meta message, so a dropped packet shifts every later
       // frame. Fail rather than write a file whose misalignment nothing can detect.
       std::cerr << "Error: Encoder produced no packet for " << plan.camera << " frame "
-                << stats.color_frames_encoded << "\n";
+                << plan.frames_encoded << "\n";
       return false;
     }
 
@@ -520,6 +522,7 @@ bool transcode_images_to_video(
                 << foxglove::strerror(st) << "\n";
       return false;
     }
+    ++plan.frames_encoded;
     ++stats.color_frames_encoded;
   }
 
