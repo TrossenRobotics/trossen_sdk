@@ -16,6 +16,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "foxglove/channel.hpp"
@@ -90,6 +91,33 @@ std::optional<foxglove::McapCompression> compression_from(const std::string& nam
   if (name.empty()) return foxglove::McapCompression::None;
   return std::nullopt;
 }
+
+/**
+ * @brief RAII guard that deletes a file on destruction unless released.
+ *
+ * Holds the in-progress output, so every failed return removes it and leaves any earlier
+ * output at the final path untouched.
+ */
+class RemoveOnExit {
+public:
+  explicit RemoveOnExit(fs::path path) : path_(std::move(path)) {}
+  ~RemoveOnExit() {
+    if (path_.empty()) return;
+    std::error_code ec;
+    fs::remove(path_, ec);
+  }
+
+  RemoveOnExit(const RemoveOnExit&) = delete;
+  RemoveOnExit& operator=(const RemoveOnExit&) = delete;
+  RemoveOnExit(RemoveOnExit&&) = delete;
+  RemoveOnExit& operator=(RemoveOnExit&&) = delete;
+
+  /// @brief Keep the file: it has been moved to its final path.
+  void release() { path_.clear(); }
+
+private:
+  fs::path path_;
+};
 
 }  // namespace
 
@@ -169,20 +197,26 @@ bool transcode_images_to_video(
     return false;
   }
 
+  // Written beside the output and renamed onto it only once complete, so a failed run never
+  // leaves a partial file at the output path. A `.partial` left by a killed run is replaced.
+  fs::path partial = output;
+  partial += ".partial";
+  RemoveOnExit remove_partial(partial);
+
   auto context = foxglove::Context::create();
   foxglove::McapWriterOptions writer_options;
   writer_options.context = context;
-  const std::string output_str = output.string();
-  writer_options.path = output_str;
+  const std::string partial_str = partial.string();
+  writer_options.path = partial_str;
   writer_options.profile = "trossen";
   writer_options.compression = *compression;
   writer_options.chunk_size =
     static_cast<uint64_t>(trossen::configuration::TROSSEN_MCAP_DEFAULT_CHUNK_SIZE_BYTES);
-  writer_options.truncate = options.overwrite;
+  writer_options.truncate = true;
 
   auto writer_result = foxglove::McapWriter::create(writer_options);
   if (!writer_result.has_value()) {
-    std::cerr << "Error: Failed to open " << output << " for writing: "
+    std::cerr << "Error: Failed to open " << partial << " for writing: "
               << foxglove::strerror(writer_result.error()) << "\n";
     return false;
   }
@@ -260,6 +294,13 @@ bool transcode_images_to_video(
               << "\n";
     return false;
   }
+  fs::rename(partial, output, ec);
+  if (ec) {
+    std::cerr << "Error: Failed to move " << partial << " to " << output << ": " << ec.message()
+              << "\n";
+    return false;
+  }
+  remove_partial.release();
   reader.close();
   return true;
 }
