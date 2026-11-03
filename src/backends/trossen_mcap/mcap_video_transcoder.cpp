@@ -156,19 +156,6 @@ utils::VideoEncoder::Params encoder_params_for(int width, int height, bool depth
   return params;
 }
 
-/// @brief Decide whether a camera channel carries depth.
-///
-/// The recorder tags depth channels in their metadata, so that is authoritative; a
-/// recording made before the tag existed is classified by topic and pixel encoding.
-bool channel_is_depth(const mcap::Channel& channel, const std::string& encoding) {
-  auto it = channel.metadata.find("stream_type");
-  if (it != channel.metadata.end()) {
-    return it->second == "depth";
-  }
-  return channel.topic.find("depth") != std::string::npos || encoding == "16UC1" ||
-         encoding == "mono16" || encoding == "depth16";
-}
-
 /// @brief Copy an MCAP schema into the Foxglove writer's schema type.
 ///
 /// The returned Schema points into `source`, which must outlive it.
@@ -426,6 +413,20 @@ bool transcode_images_to_video(
       plan.channel.emplace(std::move(created.value()));
     } else {
       plan.camera = camera_name_of(channel->topic);
+      const auto stream_type = channel->metadata.find("stream_type");
+      plan.depth = stream_type != channel->metadata.end() && stream_type->second == "depth";
+      if (plan.depth) {
+        // A depth channel records the size of one raw unit, in meters, as `depth_scale_m`.
+        const auto scale_it = channel->metadata.find("depth_scale_m");
+        const auto scale_m = scale_it == channel->metadata.end()
+                               ? std::nullopt
+                               : utils::parse_depth_scale_m(scale_it->second);
+        if (!scale_m) {
+          std::cerr << "Error: " << plan.camera << " has no valid depth_scale_m\n";
+          return false;
+        }
+        plan.depth_lut = utils::build_depth_quantization_lut(*scale_m);
+      }
     }
     plans.emplace(channel_id, std::move(plan));
   }
@@ -501,7 +502,6 @@ bool transcode_images_to_video(
     if (!plan.encoder) {
       plan.width = raw_image.width();
       plan.height = raw_image.height();
-      plan.depth = channel_is_depth(*message_view.channel, raw_image.encoding());
 
       plan.encoder = utils::VideoEncoder::create(
         encoder_params_for(static_cast<int>(raw_image.width()),
@@ -535,23 +535,6 @@ bool transcode_images_to_video(
                 << " " << raw_image.encoding() << " -> "
                 << utils::video_codec_format(plan.encoder->codec()) << " via "
                 << plan.encoder->encoder_name() << "\n";
-    }
-
-    // A depth channel records the size of one raw unit, in meters, as `depth_scale_m`.
-    if (plan.depth && plan.depth_lut.empty()) {
-      double scale_m = utils::DEFAULT_DEPTH_SCALE_M;
-      auto scale_it = message_view.channel->metadata.find("depth_scale_m");
-      if (scale_it == message_view.channel->metadata.end()) {
-        std::cerr << "Warning: " << plan.camera << " records no depth_scale_m; assuming "
-                  << scale_m << " m per unit\n";
-      } else if (auto parsed = utils::parse_depth_scale_m(scale_it->second)) {
-        scale_m = *parsed;
-      } else {
-        std::cerr << "Error: " << plan.camera << " has an invalid depth_scale_m '"
-                  << scale_it->second << "'\n";
-        return false;
-      }
-      plan.depth_lut = utils::build_depth_quantization_lut(scale_m);
     }
 
     const cv::Mat image(static_cast<int>(raw_image.height()), static_cast<int>(raw_image.width()),
