@@ -2,11 +2,11 @@
  * @file mcap_video_transcoder.hpp
  * @brief Re-encoding a raw-image TrossenMCAP recording into a compressed-video one.
  *
- * Older recordings store camera frames as `foxglove.RawImage`, one uncompressed frame per
- * message. The recorder can now store them as `foxglove.CompressedVideo` instead. This
- * converts an existing recording of the first kind into the second, in place of
- * re-recording it. Every topic, camera topics included, is copied through unchanged, and the
- * file-level metadata records are not copied.
+ * A recording made with `image_encoding: raw` stores camera frames as `foxglove.RawImage`,
+ * one uncompressed frame per message; one made with `image_encoding: video` stores them as
+ * `foxglove.CompressedVideo`. This converts a recording of the first kind into the second,
+ * in place of re-recording it. Every topic, camera topics included, is copied through
+ * unchanged, and the file-level metadata records are not copied.
  */
 
 #ifndef TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__MCAP_VIDEO_TRANSCODER_HPP_
@@ -46,8 +46,9 @@ struct VideoTranscodeStats {
  * or a message on a channel missing from the summary, fails the copy. A file without a
  * summary section was cut short and is refused.
  *
- * A recording whose `image_encoding` metadata is "video" is already compressed: nothing is
- * written, `stats.already_compressed` is set, and the call succeeds.
+ * A recording must come from SDK kMinToolVersion or newer (its `tool_version`). One whose
+ * `image_encoding` metadata is "video" is already compressed: nothing is written,
+ * `stats.already_compressed` is set, and the call succeeds.
  *
  * The output is written to `<output>.partial` and renamed onto `output` only once complete,
  * so a failed run leaves no partial file and an earlier output stays untouched.
