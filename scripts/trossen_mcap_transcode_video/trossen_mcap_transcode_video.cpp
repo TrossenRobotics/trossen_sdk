@@ -28,6 +28,7 @@ using trossen::io::backends::VideoTranscodeStats;
 namespace {
 
 void print_usage(const char* argv0) {
+  const VideoTranscodeOptions defaults;
   std::cout
     << "Usage: " << argv0 << " <input.mcap|folder> [options]\n\n"
     << "Converts raw camera images in a TrossenMCAP recording to compressed video\n"
@@ -37,20 +38,14 @@ void print_usage(const char* argv0) {
     << "  -o, --output <path>        Output file (file input) or folder (folder input).\n"
     << "                             Default: <input>_video.mcap, or <folder>_video/.\n"
     << "      --encoder <name>       auto | nvenc | vaapi | x264 | x265 | <libav name>\n"
-    << "                             (default: auto)\n"
-    << "      --bitrate-kbps <n>     Color bitrate (default: 6000). Depth is lossless.\n"
-    << "      --keyframe-interval <n>  Keyframe every n frames (default: 10)\n"
-    << "      --compression <name>   zstd | lz4 | none (default: zstd)\n"
+    << "                             (default: " << defaults.encoder << ")\n"
+    << "      --bitrate-kbps <n>     Color bitrate (default: " << defaults.bitrate_kbps
+    << "). Depth is lossless.\n"
+    << "      --keyframe-interval <n>  Keyframe every n frames (default: "
+    << defaults.keyframe_interval << ")\n"
+    << "      --compression <name>   zstd | lz4 | none (default: "
+    << (defaults.compression.empty() ? "none" : defaults.compression) << ")\n"
     << "      --overwrite            Replace an existing output file\n"
-    << "      --keep-metadata        Copy the recording metadata as written,\n"
-    << "                             instead of setting episode_id from the\n"
-    << "                             filename and renaming task ->\n"
-    << "                             task_description\n"
-    << "      --episode-id <id>      Episode id to write (single file only;\n"
-    << "                             default: the output filename)\n"
-    << "      --metadata-only        Copy the recording unchanged apart from its\n"
-    << "                             metadata; cameras keep the format they were\n"
-    << "                             stored in\n"
     << "  -h, --help                 Show this message\n";
 }
 
@@ -126,13 +121,6 @@ int main(int argc, char** argv) {
       options.compression = std::string(argv[i]) == "none" ? "" : argv[i];
     } else if (arg == "--overwrite") {
       options.overwrite = true;
-    } else if (arg == "--metadata-only") {
-      options.metadata_only = true;
-    } else if (arg == "--keep-metadata") {
-      options.rewrite_episode_metadata = false;
-    } else if (arg == "--episode-id") {
-      if (!take_value(argc, argv, i, "--episode-id")) return 1;
-      options.episode_id = argv[i];
     } else if (!arg.empty() && arg[0] == '-') {
       std::cerr << "Error: Unknown option " << arg << "\n";
       return 1;
@@ -146,19 +134,6 @@ int main(int argc, char** argv) {
 
   if (input.empty()) {
     std::cerr << "Error: No input given\n";
-    return 1;
-  }
-  if (options.metadata_only && !options.rewrite_episode_metadata) {
-    std::cerr << "Error: --metadata-only with --keep-metadata would copy the file "
-                 "to no purpose\n";
-    return 1;
-  }
-  if (!options.episode_id.empty() && !options.rewrite_episode_metadata) {
-    std::cerr << "Error: --episode-id with --keep-metadata would not write the id\n";
-    return 1;
-  }
-  if (!options.episode_id.empty() && fs::is_directory(input)) {
-    std::cerr << "Error: --episode-id names one episode; it cannot apply to a folder\n";
     return 1;
   }
   if (!fs::exists(input)) {
@@ -187,10 +162,8 @@ int main(int argc, char** argv) {
     fs::path out_file = output;
     if (out_file.empty()) {
       out_file = input.parent_path() / (input.stem().string() + "_video.mcap");
-      // The suffix only keeps the output beside its input; the episode is still the
-      // input's, so its id stays the input's name.
-      if (options.episode_id.empty()) options.episode_id = input.stem().string();
-    } else if (fs::is_directory(out_file)) {
+    } else if (fs::is_directory(out_file) || !out_file.has_filename()) {
+      // A trailing separator names a folder, which the transcoder creates if needed.
       out_file /= input.filename();
     }
     jobs.emplace_back(input, out_file);
@@ -214,11 +187,7 @@ int main(int argc, char** argv) {
     std::cout << "  [ok] " << stats.color_frames_encoded << " color + "
               << stats.depth_frames_encoded << " depth frames encoded from "
               << stats.cameras_transcoded << " camera(s), " << stats.messages_copied
-              << " other messages copied";
-    if (stats.metadata_rewritten) {
-      std::cout << ", metadata renamed to match the file";
-    }
-    std::cout << "\n";
+              << " other messages copied\n";
   }
 
   if (failed > 0) {
