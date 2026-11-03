@@ -70,6 +70,8 @@ the dataset visualizer align on. Frame counts are preserved one for one.
 - Supported input pixel encodings: `bgr8`, `rgb8`, `rgba8`, `bgra8`, `8UC3`,
   `mono8`, `8UC1`, `mono16`, `16UC1`, `depth16`. Anything else aborts the file
   rather than guessing.
+- A recording cut short, such as by a crash, has no MCAP summary section. It is
+  refused rather than converted in part.
 - Color is lossy (H.264 at the configured bitrate); depth is bit-exact after the
   same log quantization the recorder applies.
 - The encoder spreads the bitrate as if every camera ran at 30 frames per
