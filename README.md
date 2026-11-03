@@ -490,15 +490,17 @@ This keeps lifecycle settings (`session`) separate from format parameters (`back
 
 The SDK is designed to be extended. You can add support for new hardware devices or new data types without modifying the core library.
 
-- **Custom hardware component** — implement `HardwareComponent` and register with `REGISTER_HARDWARE`
-- **Custom producer** — implement `PolledProducer` and register with `REGISTER_PRODUCER`
+- Custom hardware component: implement `HardwareComponent` and register with `REGISTER_HARDWARE`.
+- Custom producer: implement `PolledProducer` (`poll()`, `metadata()`) and register with `REGISTER_PRODUCER`, or implement `PushProducer` (`start()`, `stop()`, `metadata()`) and register with `REGISTER_PUSH_PRODUCER`.
+  `metadata()` describes every stream the producer records; see [Custom Producers](docs/producers.rst).
 
 The key headers are:
-- [`include/trossen_sdk/hw/hardware_component.hpp`](include/trossen_sdk/hw/hardware_component.hpp) — base class for hardware
-- [`include/trossen_sdk/hw/hardware_registry.hpp`](include/trossen_sdk/hw/hardware_registry.hpp) — `REGISTER_HARDWARE` macro
-- [`include/trossen_sdk/hw/producer_base.hpp`](include/trossen_sdk/hw/producer_base.hpp) — `PolledProducer` base class
-- [`include/trossen_sdk/runtime/producer_registry.hpp`](include/trossen_sdk/runtime/producer_registry.hpp) — `REGISTER_PRODUCER` macro
-- [`include/trossen_sdk/runtime/session_manager.hpp`](include/trossen_sdk/runtime/session_manager.hpp) — episode lifecycle API
+- [`include/trossen_sdk/hw/hardware_component.hpp`](include/trossen_sdk/hw/hardware_component.hpp): base class for hardware
+- [`include/trossen_sdk/hw/hardware_registry.hpp`](include/trossen_sdk/hw/hardware_registry.hpp): `REGISTER_HARDWARE` macro
+- [`include/trossen_sdk/hw/producer_base.hpp`](include/trossen_sdk/hw/producer_base.hpp): `PolledProducer` and `PushProducer` base classes
+- [`include/trossen_sdk/runtime/producer_registry.hpp`](include/trossen_sdk/runtime/producer_registry.hpp): `REGISTER_PRODUCER` macro
+- [`include/trossen_sdk/runtime/push_producer_registry.hpp`](include/trossen_sdk/runtime/push_producer_registry.hpp): `REGISTER_PUSH_PRODUCER` macro
+- [`include/trossen_sdk/runtime/session_manager.hpp`](include/trossen_sdk/runtime/session_manager.hpp): episode lifecycle API
 
 See the example scripts in `examples/` for complete, working implementations of hardware setup and episode recording loops.
 
