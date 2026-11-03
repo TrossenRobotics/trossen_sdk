@@ -19,6 +19,7 @@
 #include <sstream>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "foxglove/channel.hpp"
@@ -336,6 +337,23 @@ private:
 
   /// @brief Helper to identify depth encodings
   static bool is_depth_encoding(const std::string& enc);
+
+  /// @brief Streams already reported as not recordable this episode
+  std::unordered_set<std::string> unrecordable_streams_;
+
+  /**
+   * @brief Whether a depth frame carries the unit its raw values are in.
+   *
+   * Integer depth needs ImageRecord::depth_scale; float depth is in meters.
+   *
+   * @param img Depth image record
+   * @param id Stream id the frame is recorded under
+   * @param encoding The frame's pixel encoding
+   * @return false (reported once) when integer depth has no depth_scale; the frame is not
+   *         recorded
+   */
+  bool depth_unit_known(
+    const data::ImageRecord& img, const std::string& id, const std::string& encoding);
 
   /// @brief Map of joint state channels by stream ID
   std::unordered_map<std::string, foxglove::RawChannel> joint_channels_;

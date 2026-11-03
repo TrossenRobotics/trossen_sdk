@@ -151,6 +151,22 @@ TEST(StreamRole, RejectsNamesWithoutTheRolePrefix) {
   EXPECT_FALSE(is_follower_stream_id(""));
 }
 
+// Recordings from the minimum SDK version on are read; older, missing or malformed ones are not.
+TEST(ToolVersion, AcceptsOnlySupportedVersions) {
+  using trossen::trossen_mcap_defs::tool_version_supported;
+
+  EXPECT_TRUE(tool_version_supported("v0.1.1"));
+  EXPECT_TRUE(tool_version_supported("v0.1.10"));
+  EXPECT_TRUE(tool_version_supported("v0.2.0"));
+  EXPECT_TRUE(tool_version_supported("v1.0.0"));
+  EXPECT_FALSE(tool_version_supported("v0.1.0"));
+  EXPECT_FALSE(tool_version_supported("v0.0.9"));
+  EXPECT_FALSE(tool_version_supported(""));
+  EXPECT_FALSE(tool_version_supported("0.1.1"));
+  EXPECT_FALSE(tool_version_supported("v0.1"));
+  EXPECT_FALSE(tool_version_supported("v0.1.1-rc1"));
+}
+
 // Restores GlobalConfig root/dataset_id on scope exit so a test can't leak state.
 namespace {
 struct RootDatasetRestorer {
@@ -259,6 +275,51 @@ TEST_F(TrossenMCAPBackendTest, ScanCountsLegacyAndNewEpisodeFiles) {
   auto backend = BackendRegistry::create("trossen_mcap");
   ASSERT_NE(backend, nullptr);
   EXPECT_EQ(backend->scan_existing_episodes(), 3u);
+}
+
+// Integer depth without a depth_scale has no known unit, so it is not recorded; the color
+// frame it came with still is.
+TEST_F(TrossenMCAPBackendTest, DepthWithoutScaleIsNotRecorded) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  RootDatasetRestorer restorer{cfg.get(), cfg->root, cfg->dataset_id};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "depth_without_scale_test";
+  std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  auto mcap_backend =
+    std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
+  ASSERT_NE(mcap_backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  // A color frame carrying a depth plane, and a standalone depth frame; neither sets a scale.
+  trossen::data::ImageRecord rgbd;
+  rgbd.id = "cam_rgbd";
+  rgbd.width = 64;
+  rgbd.height = 48;
+  rgbd.channels = 3;
+  rgbd.encoding = "bgr8";
+  rgbd.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+  rgbd.depth_image = cv::Mat(48, 64, CV_16UC1, cv::Scalar(1500));
+  backend->write(rgbd);
+
+  trossen::data::ImageRecord depth;
+  depth.id = "cam_depth";
+  depth.width = 64;
+  depth.height = 48;
+  depth.channels = 1;
+  depth.encoding = "depth16";
+  depth.image = cv::Mat(48, 64, CV_16UC1, cv::Scalar(1500));
+  backend->write(depth);
+  backend->close();
+
+  EXPECT_EQ(mcap_backend->stats().images_written, 1u);
+  EXPECT_EQ(mcap_backend->stats().depth_images_written, 0u);
 }
 
 #ifdef TROSSEN_ENABLE_VIDEO_ENCODE
