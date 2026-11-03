@@ -22,7 +22,8 @@ namespace trossen::io::backends {
 
 /// @brief Output-file settings for a transcode run.
 struct VideoTranscodeOptions {
-  /// @brief Chunk compression for the output file: "zstd", "lz4" or "" for none.
+  /// @brief Chunk compression for the output file: "zstd", "lz4" or "" for none. Any other
+  /// name fails the run.
   std::string compression{"zstd"};
   /// @brief Overwrite the output file when it already exists.
   bool overwrite{false};
@@ -32,7 +33,8 @@ struct VideoTranscodeOptions {
 struct VideoTranscodeStats {
   /// @brief Messages copied through untouched (joint states, odometry, frame meta, ...).
   size_t messages_copied{0};
-  /// @brief Camera streams copied through untouched, because they already held video.
+  /// @brief Camera streams already stored as `foxglove.CompressedVideo`. Raw-image camera
+  /// streams are copied too but are not counted here.
   size_t cameras_passthrough{0};
 };
 
