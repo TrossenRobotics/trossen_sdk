@@ -67,14 +67,12 @@ foxglove::Schema schema_from(const mcap::Schema& source) {
   return schema;
 }
 
-/// @brief Translate a compression name to the writer's enum, defaulting to none.
-foxglove::McapCompression compression_from(const std::string& name) {
+/// @brief Translate a compression name to the writer's enum; nullopt for an unknown name.
+std::optional<foxglove::McapCompression> compression_from(const std::string& name) {
   if (name == "zstd") return foxglove::McapCompression::Zstd;
   if (name == "lz4") return foxglove::McapCompression::Lz4;
-  if (!name.empty()) {
-    std::cerr << "Warning: Unknown compression '" << name << "' (using none)\n";
-  }
-  return foxglove::McapCompression::None;
+  if (name.empty()) return foxglove::McapCompression::None;
+  return std::nullopt;
 }
 
 }  // namespace
@@ -85,6 +83,33 @@ bool transcode_images_to_video(
   const VideoTranscodeOptions& options,
   VideoTranscodeStats& stats) {
   stats = VideoTranscodeStats{};
+
+  const auto compression = compression_from(options.compression);
+  if (!compression) {
+    std::cerr << "Error: Unknown compression '" << options.compression
+              << "' (expected \"zstd\", \"lz4\" or \"\" for none)\n";
+    return false;
+  }
+
+  // The input is opened before anything is created on disk, so a missing or unreadable
+  // recording leaves no output folder behind.
+  std::ifstream stream(input, std::ios::binary);
+  if (!stream.is_open()) {
+    std::cerr << "Error: Failed to open " << input << "\n";
+    return false;
+  }
+
+  mcap::McapReader reader;
+  auto status = reader.open(stream);
+  if (!status.ok()) {
+    std::cerr << "Error: Failed to parse " << input << ": " << status.message << "\n";
+    return false;
+  }
+  status = reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+  if (!status.ok()) {
+    std::cerr << "Error: Failed to read MCAP summary: " << status.message << "\n";
+    return false;
+  }
 
   // The output directory is created before the path checks, because a path through a
   // directory that does not exist yet (`new/../episode.mcap`) only resolves once it does.
@@ -119,31 +144,13 @@ bool transcode_images_to_video(
     return false;
   }
 
-  std::ifstream stream(input, std::ios::binary);
-  if (!stream.is_open()) {
-    std::cerr << "Error: Failed to open " << input << "\n";
-    return false;
-  }
-
-  mcap::McapReader reader;
-  auto status = reader.open(stream);
-  if (!status.ok()) {
-    std::cerr << "Error: Failed to parse " << input << ": " << status.message << "\n";
-    return false;
-  }
-  status = reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
-  if (!status.ok()) {
-    std::cerr << "Error: Failed to read MCAP summary: " << status.message << "\n";
-    return false;
-  }
-
   auto context = foxglove::Context::create();
   foxglove::McapWriterOptions writer_options;
   writer_options.context = context;
   const std::string output_str = output.string();
   writer_options.path = output_str;
   writer_options.profile = "trossen";
-  writer_options.compression = compression_from(options.compression);
+  writer_options.compression = *compression;
   writer_options.chunk_size =
     static_cast<uint64_t>(trossen::configuration::TROSSEN_MCAP_DEFAULT_CHUNK_SIZE_BYTES);
   writer_options.truncate = options.overwrite;
