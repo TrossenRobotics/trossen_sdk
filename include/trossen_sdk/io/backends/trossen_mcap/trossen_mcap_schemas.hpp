@@ -49,6 +49,9 @@ inline constexpr char kRecordingStartTimeKey[] = "recording_start_time";
 /// @brief Key inside that record holding the episode's task prompt, when one was set.
 inline constexpr char kTaskDescriptionKey[] = "task_description";
 
+/// @brief Key inside that record holding how camera frames are stored: "raw" or "video".
+inline constexpr char kImageEncodingKey[] = "image_encoding";
+
 /**
  * @brief Check whether a stream id is named with a role: exactly `role`, or `role_<side>`.
  *
