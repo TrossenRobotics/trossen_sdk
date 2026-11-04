@@ -40,6 +40,8 @@ public:
     int chunk_size{1000};
     /// @brief Task for an episode whose recording embeds none.
     std::string task_name;
+    /// @brief Cores each AV1 encode may use (SVT-AV1 lp=).
+    int encoder_threads{0};
   };
 
   /// @brief One recording converted into a scratch folder, not yet part of the dataset.
@@ -60,7 +62,7 @@ public:
 
   /**
    * @brief Store the options; nothing is written until a write call.
-   * @param opts Dataset location, license, chunk size and default task.
+   * @param opts Dataset location, license, chunk size, default task and encoder threads.
    */
   explicit LeRobotV2DatasetWriter(Options opts);
 
@@ -68,21 +70,11 @@ public:
   std::filesystem::path dataset_path() const;
 
   /**
-   * @brief Whether an episode's parquet is already in the dataset.
-   *
-   * A readable parquet moves the dataset-wide row index past its rows, so the next episode
-   * written continues after it. An unreadable one is deleted.
-   *
-   * @param episode_index Zero-based episode index.
-   * @return true if the episode's parquet exists and is readable.
-   */
-  bool is_converted(int episode_index);
-
-  /**
    * @brief Decode one recording and build its images and videos under tmp_dir.
    *
    * Every check that can reject a recording runs here, and nothing in the dataset is
-   * written, so a rejected recording leaves the dataset as it was.
+   * written, so a rejected recording leaves the dataset as it was. It changes no writer
+   * state, so several recordings can be prepared at once on different threads.
    *
    * @param mcap_file Path to the input MCAP file.
    * @param input_index Position of the recording in the input, used for logging only.
@@ -94,17 +86,19 @@ public:
                        const std::filesystem::path& tmp_dir, PreparedEpisode& out) const;
 
   /**
-   * @brief Write a prepared episode into the dataset as episode_index.
+   * @brief Write a prepared episode into the dataset as the next episode index.
    *
-   * Writes the parquet, moves the images and videos to their names for episode_index and
-   * updates the metadata files. A failure after the parquet is written removes it, so a
-   * rerun converts the episode again.
+   * Writes the parquet, moves the images and videos to their names for that index and
+   * updates the metadata files. Indices start at 0 and advance only when an episode is
+   * written. A failure after the parquet is written removes it, so the episode leaves no
+   * rows behind.
+   *
+   * Call it from one thread, in the order the episodes are to be numbered.
    *
    * @param pe Episode from prepare_episode().
-   * @param episode_index Zero-based episode index.
    * @return true on success.
    */
-  bool consume_episode(PreparedEpisode& pe, int episode_index);
+  bool consume_episode(PreparedEpisode& pe);
 
   /**
    * @brief Write the per-episode stats of every episode in the dataset, then the README.
@@ -132,6 +126,8 @@ private:
   Options opts_;
   /// @brief Dataset-wide index of the next row written.
   int64_t global_index_offset_{0};
+  /// @brief Index of the next episode written.
+  int next_episode_index_{0};
 };
 
 }  // namespace trossen::io::backends
