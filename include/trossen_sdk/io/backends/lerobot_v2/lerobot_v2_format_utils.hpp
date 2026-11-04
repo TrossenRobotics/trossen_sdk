@@ -185,7 +185,12 @@ inline bool create_initial_info_json(
   }
 
   info_file << info_json.dump(4);
+  // Closed before the check, so a failed flush is reported too.
   info_file.close();
+  if (info_file.fail()) {
+    std::cerr << "Error: Failed to write " << info_path << "\n";
+    return false;
+  }
   return true;
 }
 
@@ -301,7 +306,12 @@ inline bool update_info_json(
   }
 
   info_file << info_json.dump(4);
+  // Closed before the check, so a failed flush is reported too.
   info_file.close();
+  if (info_file.fail()) {
+    std::cerr << "Error: Failed to write " << info_path << "\n";
+    return false;
+  }
   return true;
 }
 
@@ -336,7 +346,12 @@ inline bool write_episode_entry(
   episode_entry["length"] = episode_length;
 
   episodes_file << episode_entry.dump() << "\n";
+  // Closed before the check, so a failed flush is reported too.
   episodes_file.close();
+  if (episodes_file.fail()) {
+    std::cerr << "Error: Failed to write " << episodes_path << "\n";
+    return false;
+  }
   return true;
 }
 
@@ -371,7 +386,12 @@ inline bool write_task_entry(
   task_entry["task"] = task_name;
 
   tasks_file << task_entry.dump() << "\n";
+  // Closed before the check, so a failed flush is reported too.
   tasks_file.close();
+  if (tasks_file.fail()) {
+    std::cerr << "Error: Failed to write " << tasks_path << "\n";
+    return false;
+  }
   return true;
 }
 
@@ -521,7 +541,12 @@ inline bool write_episode_stats(
   }
 
   stats_file << stats_entry.dump() << "\n";
+  // Closed before the check, so a failed flush is reported too.
   stats_file.close();
+  if (stats_file.fail()) {
+    std::cerr << "Error: Failed to write " << stats_path << "\n";
+    return false;
+  }
   return true;
 }
 
@@ -552,7 +577,12 @@ inline bool write_episode_stats_with_data(
   stats_entry["stats"] = stats;
 
   stats_file << stats_entry.dump() << "\n";
+  // Closed before the check, so a failed flush is reported too.
   stats_file.close();
+  if (stats_file.fail()) {
+    std::cerr << "Error: Failed to write " << stats_path << "\n";
+    return false;
+  }
   return true;
 }
 

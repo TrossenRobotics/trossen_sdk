@@ -3,6 +3,7 @@
     "type": "lerobot_v2_backend",
     "root": "~/.cache/huggingface/lerobot",
     "encoder_threads": 2,
+    "jobs": null,
     "max_image_queue": 10,
     "png_compression_level": 5,
     "overwrite_existing": false,

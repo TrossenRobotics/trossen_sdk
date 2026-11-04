@@ -48,7 +48,7 @@ TEST(LeRobotV2DatasetWriter, FinalizeFailsWithoutEpisodes) {
   fs::remove_all(root);
 }
 
-TEST(LeRobotV2DatasetWriter, ConsumedEpisodeIsConvertedAndContinuesTheRowIndex) {
+TEST(LeRobotV2DatasetWriter, ConsumedEpisodesTakeTheNextIndexAndContinueTheRowIndex) {
   const fs::path root = fs::temp_directory_path() / "trossen_lerobot_v2_writer_consume_test";
   fs::remove_all(root);
   LeRobotV2DatasetWriter::PreparedEpisode pe;
@@ -64,22 +64,19 @@ TEST(LeRobotV2DatasetWriter, ConsumedEpisodeIsConvertedAndContinuesTheRowIndex) 
   }
 
   LeRobotV2DatasetWriter writer({root, "repo", "ds", "apache-2.0"});
-  ASSERT_TRUE(writer.consume_episode(pe, 0));
+  ASSERT_TRUE(writer.consume_episode(pe));
+  ASSERT_TRUE(writer.consume_episode(pe));
   const fs::path dataset = writer.dataset_path();
   EXPECT_TRUE(fs::exists(dataset / "meta" / "info.json"));
-  EXPECT_EQ(read_lines(dataset / "meta" / "episodes.jsonl").size(), 1u);
+  EXPECT_EQ(read_lines(dataset / "meta" / "episodes.jsonl").size(), 2u);
   const auto stats_lines = read_lines(dataset / "meta" / "episodes_stats.jsonl");
-  ASSERT_EQ(stats_lines.size(), 1u);
+  ASSERT_EQ(stats_lines.size(), 2u);
   const auto stats_line = nlohmann::json::parse(stats_lines[0]);
   EXPECT_EQ(stats_line["episode_index"], 0);
   EXPECT_EQ(stats_line["stats"]["action"]["count"][0], 3);
+  EXPECT_TRUE(writer.finalize());
 
-  // A second run finds episode 0 and writes episode 1's rows after its 3 rows.
-  LeRobotV2DatasetWriter rerun({root, "repo", "ds", "apache-2.0"});
-  EXPECT_TRUE(rerun.is_converted(0));
-  EXPECT_FALSE(rerun.is_converted(1));
-  ASSERT_TRUE(rerun.consume_episode(pe, 1));
-  EXPECT_TRUE(rerun.finalize());
+  // The second episode is episode 1, and its rows follow the first episode's 3 rows.
   auto file = arrow::io::ReadableFile::Open(
     (dataset / "data" / "chunk-000" / "episode_000001.parquet").string());
   ASSERT_TRUE(file.ok());

@@ -63,24 +63,6 @@ std::filesystem::path LeRobotV2DatasetWriter::dataset_path() const {
   return opts_.root / opts_.repository_id / opts_.dataset_id;
 }
 
-bool LeRobotV2DatasetWriter::is_converted(int episode_index) {
-  namespace fs = std::filesystem;
-  const fs::path parquet = dataset_path() / DATA_PATH_DIR /
-                           format_chunk_dir(episode_index / opts_.chunk_size) /
-                           format_episode_parquet(episode_index);
-  if (!fs::exists(parquet)) return false;
-  try {
-    auto reader = parquet::ParquetFileReader::OpenFile(parquet.string(), false);
-    global_index_offset_ += reader->metadata()->num_rows();
-    return true;
-  } catch (const std::exception& e) {
-    std::cerr << "Corrupt parquet for episode " << episode_index
-              << ", deleting and re-converting: " << e.what() << "\n";
-    fs::remove(parquet);
-    return false;
-  }
-}
-
 bool LeRobotV2DatasetWriter::prepare_episode(const std::filesystem::path& mcap_file,
                                              int input_index,
                                              const std::filesystem::path& tmp_dir,
@@ -266,7 +248,7 @@ bool LeRobotV2DatasetWriter::prepare_episode(const std::filesystem::path& mcap_f
 
       const auto encode_start = std::chrono::steady_clock::now();
       if (!trossen::io::backends::encode_episode_video(camera_dir, cnt_it->second, ep.fps,
-                                                       /*encoder_threads=*/0, video_output)) {
+                                                       opts_.encoder_threads, video_output)) {
         std::cout << " [FAILED]\n";
         return false;
       }
@@ -289,7 +271,8 @@ bool LeRobotV2DatasetWriter::prepare_episode(const std::filesystem::path& mcap_f
   return true;
 }
 
-bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe, int episode_index) {
+bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe) {
+  const int episode_index = next_episode_index_;
   namespace fs = std::filesystem;
 
   trossen::io::backends::AlignedEpisode& ep = pe.ep;
@@ -381,13 +364,7 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe, int episode_in
   const size_t rows_written = ep.frames.size();
   std::cout << "  [ok] Wrote " << rows_written << " rows\n";
 
-  // Advance the global index offset now that the parquet is on disk, so a failure while
-  // moving the videos or writing the metadata cannot give the next episode overlapping
-  // indices.
-  global_index_offset_ += static_cast<int64_t>(rows_written);
-
-  // A rerun skips every episode whose parquet exists, so a failure from here on removes the
-  // parquet and the episode is converted again.
+  // A failure from here on removes the parquet, so the episode leaves no rows behind.
   const auto fail = [&cfg]() {
     std::error_code ec;
     fs::remove(cfg.output_file, ec);
@@ -487,11 +464,9 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe, int episode_in
   }
 
   // Use utility functions to write metadata
-  int num_cameras = static_cast<int>(channels.camera_channels.size());
-
   if (trossen::io::backends::write_episode_metadata(
           meta_dir, cfg.episode_index, task_name, static_cast<int>(rows_written),
-          num_cameras, stats)) {
+          static_cast<int>(pe.videos.size()), stats)) {
     std::cout << "  [ok] Updated " << info_path.string() << "\n";
     std::cout << "  [ok] Created/Updated "
               << (meta_dir / trossen::io::backends::JSONL_TASKS).string() << "\n";
@@ -504,6 +479,10 @@ bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe, int episode_in
     std::cerr << "  Error: Failed to write metadata files\n";
     return fail();
   }
+
+  // Only a fully written episode claims its rows.
+  global_index_offset_ += static_cast<int64_t>(rows_written);
+  ++next_episode_index_;
 
   std::cout << "\n[ok] Successfully created LeRobotV2 dataset episode!\n";
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
