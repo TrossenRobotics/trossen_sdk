@@ -23,7 +23,9 @@
 #include <iostream>
 #include <limits>
 #include <optional>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "mcap/reader.hpp"
@@ -34,6 +36,7 @@
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/configuration/types/backends/lerobot_v2_backend_config.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_worker_pool.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_constants.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_dataset_writer.hpp"
@@ -235,54 +238,93 @@ int main(int argc, char** argv) {
 
   // Process all MCAP files
   int successful = 0;
-  int skipped = 0;
   int failed = 0;
 
-  trossen::io::backends::LeRobotV2DatasetWriter writer(
-    {dataset_root_dir, repository_id, dataset_id, license, chunk_size, lerobot_config->task_name});
+  fs::path full_dataset_path_check = fs::path(dataset_root_dir) / repository_id / dataset_id;
   // Each recording is prepared in its own folder here, on the dataset's filesystem so that
   // committing it is a rename.
-  const fs::path tmp_root = writer.dataset_path() / ".tmp_convert";
+  const fs::path tmp_root = full_dataset_path_check / ".tmp_convert";
 
-  for (size_t i = 0; i < mcap_files.size(); ++i) {
-    const auto& mcap_path = mcap_files[i];
+  // Worker count: `jobs`, else the core count capped at kMaxDefaultJobs. Each AV1
+  // encode gets an even share of the cores; uncapped, every encoder would size itself to all
+  // of them and the workers would oversubscribe the machine.
+  const unsigned hw = std::thread::hardware_concurrency();
+  int jobs = lerobot_config->jobs.value_or(trossen::io::backends::default_jobs(hw));
+  if (static_cast<size_t>(jobs) > mcap_files.size()) {
+    jobs = static_cast<int>(mcap_files.size());
+  }
+  const int encoder_threads = std::max(1, static_cast<int>(hw) / jobs);
+  std::cout << "Worker threads: " << jobs << ", AV1 encoder threads each: " << encoder_threads
+            << "\n";
 
-    // MCAP filenames are UUIDs, so the episode index is no longer encoded in the
-    // name. Assign LeRobot episode indices from the chronological processing order
-    // established above (by recorded start time).
-    int episode_index = static_cast<int>(i);
+  using PreparedEpisode = trossen::io::backends::LeRobotV2DatasetWriter::PreparedEpisode;
+  trossen::io::backends::LeRobotV2DatasetWriter writer({dataset_root_dir, repository_id,
+                                                        dataset_id, license, chunk_size,
+                                                        lerobot_config->task_name,
+                                                        encoder_threads});
 
-    // Idempotent: skip episodes whose parquet already exists
-    if (writer.is_converted(episode_index)) {
-      std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
-                << episode_index << " (already converted): "
-                << mcap_path.filename().string() << "\n";
-      ++skipped;
-      continue;
+  // Workers prepare recordings concurrently; the main thread commits them in input order,
+  // which is what gives each its episode index.
+  const size_t num_files = mcap_files.size();
+  const auto tmp_dir_for = [&](size_t i) { return tmp_root / ("episode_" + std::to_string(i)); };
+
+  // Returns the prepared episode, or nothing when the recording is rejected.
+  const auto prepare = [&](size_t i) {
+    PreparedEpisode prepared;
+    bool ok = false;
+    // An exception would end the process from this thread, so it fails the recording.
+    try {
+      ok = writer.prepare_episode(mcap_files[i], static_cast<int>(i), tmp_dir_for(i), prepared);
+    } catch (const std::exception& e) {
+      std::cerr << "Error: " << mcap_files[i].filename().string() << ": " << e.what() << "\n";
     }
+    return ok ? std::optional<PreparedEpisode>(std::move(prepared)) : std::nullopt;
+  };
+
+  bool commit_failed = false;
+  const auto commit = [&](size_t i, std::optional<PreparedEpisode>& prepared) {
+    bool ok = prepared.has_value();
 
     std::cout << "\n" << std::string(70, '=') << "\n";
-    std::cout << "Processing file " << (i + 1) << "/" << mcap_files.size() << ": "
-              << mcap_path.filename().string() << "\n";
+    std::cout << "[" << (i + 1) << "/" << num_files << "] " << mcap_files[i].filename().string()
+              << "\n";
     std::cout << std::string(70, '=') << "\n";
 
-    const fs::path tmp_dir = tmp_root / ("episode_" + std::to_string(i));
-    trossen::io::backends::LeRobotV2DatasetWriter::PreparedEpisode prepared;
-    const bool ok = writer.prepare_episode(mcap_path, static_cast<int>(i), tmp_dir, prepared) &&
-                    writer.consume_episode(prepared, episode_index);
-    std::error_code tmp_ec;
-    fs::remove_all(tmp_dir, tmp_ec);
-
     if (ok) {
-      successful++;
-    } else {
-      failed++;
-      std::cerr << "\n[FAILED] Failed to process: " << mcap_path.string() << "\n";
+      // A throw would leave main() with the workers still running, which terminates the
+      // process, so it takes the failed-commit path instead.
+      try {
+        ok = writer.consume_episode(*prepared);
+      } catch (const std::exception& e) {
+        std::cerr << "Error: " << mcap_files[i].filename().string() << ": " << e.what() << "\n";
+        ok = false;
+      }
+      // Only a write can fail here, after part of the episode may be in the dataset.
+      commit_failed = !ok;
     }
-  }
+    std::error_code tmp_ec;
+    fs::remove_all(tmp_dir_for(i), tmp_ec);
+
+    if (commit_failed) return false;
+    if (ok) {
+      ++successful;
+    } else {
+      ++failed;
+      std::cerr << "\n[FAILED] Failed to process: " << mcap_files[i].string() << "\n";
+    }
+    return true;
+  };
+
+  trossen::io::backends::run_ordered(num_files, jobs, prepare, commit);
 
   std::error_code tmp_ec;
   fs::remove_all(tmp_root, tmp_ec);
+
+  if (commit_failed) {
+    std::cerr << "\nError: Failed to write an episode into " << full_dataset_path_check.string()
+              << "; the dataset may be incomplete. Convert into a new dataset_id.\n";
+    return 1;
+  }
 
   if (!writer.finalize()) {
     std::cerr << "\nError: failed to finalize dataset.\n";
@@ -296,7 +338,6 @@ int main(int argc, char** argv) {
   std::cout << std::string(70, '=') << "\n";
   std::cout << "  Total files:      " << mcap_files.size() << "\n";
   std::cout << "  Successful:       " << successful << "\n";
-  std::cout << "  Skipped:          " << skipped << " (already converted)\n";
   std::cout << "  Failed:           " << failed << "\n";
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
   std::cout << std::string(70, '=') << "\n";

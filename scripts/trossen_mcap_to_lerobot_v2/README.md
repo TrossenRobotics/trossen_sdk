@@ -41,6 +41,11 @@ Examples:
 
 Batch mode processes all `.mcap` files in the order they were recorded (by the `recording_start_time` in each file's metadata) and assigns LeRobot episode indices from that order, so episode 0 is the earliest recording.
 
+- `jobs` in the config sets how many recordings are prepared in parallel (default: the core count, at most 8).
+  It must be at least 1.
+  Episodes are still added to the dataset one at a time, in input order.
+- A recording that fails gets no index, so the indices have no gaps.
+
 ---
 
 ## LeRobot V2 output structure
