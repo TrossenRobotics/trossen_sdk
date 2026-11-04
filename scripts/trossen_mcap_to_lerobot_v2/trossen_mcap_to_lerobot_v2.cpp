@@ -19,7 +19,6 @@
 #include <arrow/api.h>
 #include <arrow/io/api.h>
 #include <parquet/arrow/reader.h>
-#include <parquet/arrow/writer.h>
 
 #include <algorithm>
 #include <chrono>
@@ -44,6 +43,8 @@
 #include "RawImage.pb.h"
 #include "mcap/reader.hpp"
 #include "nlohmann/json.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_table.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_video.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_constants.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
@@ -991,38 +992,8 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   if (has_slate_base) std::cout << " + 2 base velocities";
   std::cout << ")\n";
 
-  auto schema = arrow::schema({
-      arrow::field("action", arrow::fixed_size_list(arrow::float32(), action_dim)),
-      arrow::field("observation.state", arrow::fixed_size_list(arrow::float32(), obs_dim)),
-      arrow::field("timestamp", arrow::float32()),
-      arrow::field("frame_index", arrow::int64()),
-      arrow::field("episode_index", arrow::int64()),
-      arrow::field("index", arrow::int64()),
-      arrow::field("task_index", arrow::int64()),
-  });
-
-  auto outfile_result = arrow::io::FileOutputStream::Open(cfg.output_file);
-  if (!outfile_result.ok()) {
-    std::cerr << "Error: Failed to create output file: " << cfg.output_file << "\n";
-    return 1;
-  }
-  auto outfile = *outfile_result;
-
-  auto writer_props =
-      parquet::WriterProperties::Builder().compression(parquet::Compression::SNAPPY)->build();
-  auto arrow_props = parquet::ArrowWriterProperties::Builder()
-                         .store_schema()
-                         ->build();
-
-  auto writer_result = parquet::arrow::FileWriter::Open(*schema, arrow::default_memory_pool(),
-                                                        outfile, writer_props, arrow_props);
-
-  if (!writer_result.ok()) {
-    std::cerr << "Error: Failed to create Parquet writer: " << writer_result.status().ToString()
-              << "\n";
-    return 1;
-  }
-  auto writer = std::move(writer_result).ValueUnsafe();
+  // Rows collected for the episode table, written once all rows are aligned.
+  trossen::io::backends::AlignedEpisode rows;
 
   std::cout << "Writing data to Parquet...\n";
 
@@ -1074,7 +1045,6 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
 
   int64_t frame_index = 0;
-  int64_t global_index = global_index_offset;
   size_t rows_written = 0;
   size_t rows_skipped = 0;
 
@@ -1176,76 +1146,15 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
       observations.insert(observations.end(), base_velocities.begin(), base_velocities.end());
     }
 
-    arrow::FloatBuilder ts_builder;
-    auto obs_value_builder = std::make_shared<arrow::FloatBuilder>();
-    arrow::FixedSizeListBuilder obs_builder(
-        arrow::default_memory_pool(), obs_value_builder, obs_dim);
-    auto act_value_builder = std::make_shared<arrow::FloatBuilder>();
-    arrow::FixedSizeListBuilder act_builder(
-        arrow::default_memory_pool(), act_value_builder, action_dim);
-    arrow::Int64Builder epi_idx_builder, frame_idx_builder, index_builder, task_idx_builder;
-
-    auto* obs_val = static_cast<arrow::FloatBuilder*>(obs_builder.value_builder());
-    auto* act_val = static_cast<arrow::FloatBuilder*>(act_builder.value_builder());
-
     // Generate synthetic timestamps at exactly 30fps using double precision for consistency
     // Calculate in double precision then cast to float32 for storage
-    float timestamp_s = static_cast<float>(static_cast<double>(frame_index) * frame_duration_s);
-
-    if (!ts_builder.Append(timestamp_s).ok()) {
-      std::cerr << "Error: Failed to append timestamp\n";
-      return 1;
-    }
-
-    if (!obs_builder.Append().ok()) {
-      std::cerr << "Error: Failed to append observation list\n";
-      return 1;
-    }
-    for (auto v : observations) {
-      if (!obs_val->Append(v).ok()) {
-        std::cerr << "Error: Failed to append observation value\n";
-        return 1;
-      }
-    }
-
-    if (!act_builder.Append().ok()) {
-      std::cerr << "Error: Failed to append action list\n";
-      return 1;
-    }
-    for (auto v : actions) {
-      if (!act_val->Append(v).ok()) {
-        std::cerr << "Error: Failed to append action value\n";
-        return 1;
-      }
-    }
-
-    if (!epi_idx_builder.Append(cfg.episode_index).ok() ||
-        !frame_idx_builder.Append(frame_index).ok() || !index_builder.Append(global_index).ok() ||
-        !task_idx_builder.Append(0).ok()) {
-      std::cerr << "Error: Failed to append scalar values\n";
-      return 1;
-    }
-
-    std::shared_ptr<arrow::Array> ts_arr, obs_arr, act_arr, epi_arr, frame_arr, idx_arr, task_arr;
-
-    if (!ts_builder.Finish(&ts_arr).ok() || !obs_builder.Finish(&obs_arr).ok() ||
-        !act_builder.Finish(&act_arr).ok() || !epi_idx_builder.Finish(&epi_arr).ok() ||
-        !frame_idx_builder.Finish(&frame_arr).ok() || !index_builder.Finish(&idx_arr).ok() ||
-        !task_idx_builder.Finish(&task_arr).ok()) {
-      std::cerr << "Error: Failed to finish builders\n";
-      return 1;
-    }
-
-    auto batch = arrow::RecordBatch::Make(
-        schema, 1, {act_arr, obs_arr, ts_arr, frame_arr, epi_arr, idx_arr, task_arr});
-
-    if (!writer->WriteRecordBatch(*batch).ok()) {
-      std::cerr << "Error: Failed to write record batch\n";
-      return 1;
-    }
+    trossen::io::backends::AlignedFrame row;
+    row.timestamp_s = static_cast<float>(static_cast<double>(frame_index) * frame_duration_s);
+    row.action = std::move(actions);
+    row.observation = std::move(observations);
+    rows.frames.push_back(std::move(row));
 
     ++frame_index;
-    ++global_index;
     ++rows_written;
 
     if (rows_written % 100 == 0) {
@@ -1259,20 +1168,17 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   }
   std::cout << "                    \n";
 
-  if (!writer->Close().ok()) {
-    std::cerr << "Error: Failed to close Parquet writer\n";
-    return 1;
-  }
-
-  if (!outfile->Close().ok()) {
-    std::cerr << "Error: Failed to close output file\n";
-    return 1;
-  }
-
   // Validate that we actually wrote some data
   if (rows_written == 0) {
     std::cerr << "\nError: No data rows were written to Parquet file!\n";
     std::cerr << "This usually means joint state streams were misaligned or missing.\n";
+    return 1;
+  }
+
+  auto table = trossen::io::backends::build_episode_table(
+      rows, action_dim, obs_dim, cfg.episode_index, /*task_index=*/0, global_index_offset);
+  if (!table || !trossen::io::backends::write_parquet_file(*table, cfg.output_file,
+                                                           /*store_schema=*/true)) {
     return 1;
   }
 
@@ -1459,32 +1365,23 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
           video_camera_dir /
           trossen::io::backends::format_video_filename(cfg.episode_index);
 
-      fs::path input_pattern = camera_dir / "image_%06d.jpg";
-
-      std::ostringstream ffmpeg_cmd;
-      // Force output to exactly 30fps for perfect timestamp alignment
-      ffmpeg_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps << " -start_number 0"
-                 << " -i " << input_pattern.string() << " -frames:v "
-                 << camera_frame_indices[camera_name]
-                 << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p -r 30 "
-                 << video_output.string();
-
       std::cout << "  Encoding " << camera_name << "...";
       std::cout.flush();
 
       auto encode_start = std::chrono::steady_clock::now();
-      int ret = std::system(ffmpeg_cmd.str().c_str());
+      const bool encoded = trossen::io::backends::encode_episode_video(
+          camera_dir, camera_frame_indices[camera_name], cfg.camera_fps,
+          /*encoder_threads=*/0, video_output);
       auto encode_end = std::chrono::steady_clock::now();
 
-      if (ret == 0) {
+      if (encoded) {
         auto duration =
             std::chrono::duration_cast<std::chrono::milliseconds>(encode_end - encode_start)
                 .count();
         std::cout << " [ok] (" << (duration / 1000.0) << "s)\n";
         videos_created++;
       } else {
-        std::cout << " [FAILED] Failed (exit code " << ret << ")\n";
-        std::cerr << "    Command: " << ffmpeg_cmd.str() << "\n";
+        std::cout << " [FAILED]\n";
       }
     }
 
