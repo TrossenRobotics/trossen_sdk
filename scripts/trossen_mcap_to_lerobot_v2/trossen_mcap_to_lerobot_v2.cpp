@@ -21,8 +21,10 @@
 #include <parquet/arrow/reader.h>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
+#include <condition_variable>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -31,9 +33,13 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <opencv2/opencv.hpp>
 #include <optional>
+#include <semaphore>
+#include <stdexcept>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "trossen_sdk/utils/app_utils.hpp"
@@ -56,6 +62,13 @@ constexpr char TOOL_NAME[] = "trossen_mcap_to_lerobot_v2";
 
 /// @brief Config file used when --config is not given, relative to the repository root
 constexpr char DEFAULT_CONFIG_PATH[] = "scripts/trossen_mcap_to_lerobot_v2/config.json";
+
+/// @brief Default worker count when --jobs is not given: the core count, capped here
+constexpr unsigned kMaxDefaultJobs = 8;
+
+/// @brief Prepared episodes the workers may hold beyond one per worker, so they can start
+/// the next recordings while the main thread commits one
+constexpr std::ptrdiff_t kPrefetchSlack = 2;
 
 /**
  * @brief Configuration for LeRobotV2 dataset conversion
@@ -297,10 +310,12 @@ struct PreparedEpisode {
 /// @param mcap_file Path to the input MCAP file
 /// @param input_index Position of the recording in the input, used for logging only
 /// @param tmp_dir Scratch folder for this recording; the caller removes it
+/// @param encoder_threads Cores each AV1 encode may use (SVT-AV1 lp=)
 /// @param out Filled with the episode on success
 /// @return true on success
 bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
-                     const std::filesystem::path& tmp_dir, PreparedEpisode& out);
+                     const std::filesystem::path& tmp_dir, int encoder_threads,
+                     PreparedEpisode& out);
 
 /// @brief Write a prepared episode into the dataset as episode_index.
 ///
@@ -314,13 +329,50 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
 /// @param chunk_size Number of episodes per chunk directory
 /// @param default_task Task for an episode whose recording embeds none
 /// @param global_index_offset In/out parameter tracking the next available
-///   global row index across episodes. Pass 0 for a fresh conversion; on
-///   successful return the value is advanced by the number of rows written.
+///   global row index across episodes. Advanced by the number of rows written only
+///   when the whole episode is written.
 /// @return true on success
 bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
                     int episode_index, const std::string& repository_id,
                     const std::string& dataset_id, int chunk_size,
                     const std::string& default_task, int64_t& global_index_offset);
+
+/// @brief The episodes an earlier run already wrote, read back from meta/episodes.jsonl.
+struct ConvertedEpisodes {
+  /// Entries in episodes.jsonl, which is also the next free episode index.
+  int count{0};
+  /// Sum of their lengths, which is also the next free global row index.
+  int64_t total_rows{0};
+  /// Episode index of each `source_file` value.
+  std::map<std::string, int> sources;
+  /// Entries with no `source_file`, written by a converter that did not record it.
+  int unsourced{0};
+};
+
+/// @brief Read meta/episodes.jsonl; a missing file reads as an empty dataset.
+/// @throws std::runtime_error if the file exists but cannot be read, and
+///   nlohmann::json::exception if a line is not valid JSON
+ConvertedEpisodes read_converted_episodes(const std::filesystem::path& meta_dir) {
+  ConvertedEpisodes out;
+  const std::filesystem::path path = meta_dir / trossen::io::backends::JSONL_EPISODES;
+  if (!std::filesystem::exists(path)) return out;
+  std::ifstream in(path);
+  if (!in.is_open()) throw std::runtime_error("cannot open " + path.string());
+  std::string line;
+  while (std::getline(in, line)) {
+    if (line.empty()) continue;
+    const auto entry = nlohmann::json::parse(line);
+    if (entry.contains("source_file")) {
+      out.sources[entry["source_file"].get<std::string>()] = entry.value("episode_index", -1);
+    } else {
+      ++out.unsourced;
+    }
+    ++out.count;
+    out.total_rows += entry.value("length", 0);
+  }
+  if (in.bad()) throw std::runtime_error("cannot read " + path.string());
+  return out;
+}
 
 // ──────────────────────────────────────────────────────────
 // Main entry point
@@ -337,6 +389,9 @@ static void print_usage(const char* program) {
             << "(default: " << DEFAULT_CONFIG_PATH << ")\n";
   std::cerr << "  --set KEY=VALUE              Override a config value (repeatable)\n";
   std::cerr << "                               e.g. --set lerobot_v2_backend.dataset_id=my_ds\n";
+  std::cerr << "  --jobs <n>                   Recordings prepared in parallel\n";
+  std::cerr << "                               (default: core count, at most "
+            << kMaxDefaultJobs << ")\n";
   std::cerr << "  --dump-config                Print resolved config and exit\n";
   std::cerr << "  --help                       Show this help message\n";
   std::cerr << "\nExamples:\n";
@@ -481,71 +536,170 @@ int main(int argc, char** argv) {
   int successful = 0;
   int skipped = 0;
   int failed = 0;
-  int64_t global_index_offset = 0;
 
   fs::path full_dataset_path_check = fs::path(dataset_root_dir) / repository_id / dataset_id;
   // Each recording is prepared in its own folder here, on the dataset's filesystem so that
   // committing it is a rename.
   const fs::path tmp_root = full_dataset_path_check / ".tmp_convert";
 
-  for (size_t i = 0; i < mcap_files.size(); ++i) {
-    const auto& mcap_path = mcap_files[i];
+  // Resume after whatever an earlier run wrote. Indices are handed out only to
+  // recordings that convert, so a rejected recording leaves no gap, and a re-run
+  // recognizes finished recordings by name rather than by their position in the folder.
+  ConvertedEpisodes converted;
+  try {
+    converted = read_converted_episodes(full_dataset_path_check /
+                                        trossen::io::backends::METADATA_DIR);
+  } catch (const std::exception& e) {
+    std::cerr << "Error: Failed to read the existing "
+              << trossen::io::backends::JSONL_EPISODES << ": " << e.what() << "\n";
+    return 1;
+  }
+  if (converted.unsourced > 0) {
+    std::cerr << "Error: " << converted.unsourced << " episode(s) in "
+              << full_dataset_path_check.string()
+              << " do not record their source recording, so a re-run cannot tell which "
+              << "recordings are already converted. Convert into a new dataset_id.\n";
+    return 1;
+  }
+  int next_episode_index = converted.count;
+  int64_t global_index_offset = converted.total_rows;
 
-    // MCAP filenames are UUIDs, so the episode index is no longer encoded in the
-    // name. Assign LeRobot episode indices from the chronological processing order
-    // established above (by recorded start time).
-    int episode_index = static_cast<int>(i);
+  std::vector<fs::path> pending;
+  for (const auto& mcap_path : mcap_files) {
+    const std::string source_file = mcap_path.filename().string();
+    const auto done = converted.sources.find(source_file);
+    if (done == converted.sources.end()) {
+      pending.push_back(mcap_path);
+      continue;
+    }
+    // The index is taken, so a damaged episode cannot be rebuilt in place.
+    const int done_index = done->second;
+    const fs::path parquet = full_dataset_path_check / trossen::io::backends::DATA_PATH_DIR /
+                             trossen::io::backends::format_chunk_dir(done_index / chunk_size) /
+                             trossen::io::backends::format_episode_parquet(done_index);
+    try {
+      parquet::ParquetFileReader::OpenFile(parquet.string(), false);
+    } catch (const std::exception& e) {
+      std::cerr << "Error: " << source_file << " is listed as episode " << done_index
+                << ", but " << parquet.string() << " cannot be read (" << e.what()
+                << "). Convert into a new dataset_id.\n";
+      return 1;
+    }
+    std::cout << "Skipping (already converted): " << source_file << "\n";
+    ++skipped;
+  }
 
-    // Idempotent: skip episodes whose parquet already exists
-    int ep_chunk = episode_index / chunk_size;
-    fs::path expected_parquet = full_dataset_path_check / "data" /
-                                trossen::io::backends::format_chunk_dir(ep_chunk) /
-                                trossen::io::backends::format_episode_parquet(episode_index);
+  // Worker count: --jobs, else the core count capped at kMaxDefaultJobs. Each AV1 encode
+  // gets an even share of the cores; uncapped, every encoder would size itself to all of
+  // them and the workers would oversubscribe the machine.
+  const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
+  int jobs = cli.get_int("jobs", static_cast<int>(std::min(hw, kMaxDefaultJobs)));
+  if (jobs < 1) jobs = 1;
+  if (!pending.empty() && static_cast<size_t>(jobs) > pending.size()) {
+    jobs = static_cast<int>(pending.size());
+  }
+  const int encoder_threads = std::max(1, static_cast<int>(hw) / jobs);
+  std::cout << "Worker threads: " << jobs << ", AV1 encoder threads each: " << encoder_threads
+            << "\n";
 
-    if (fs::exists(expected_parquet)) {
-      // Advance global index past the skipped episode's rows.
-      // If the parquet is corrupt / unreadable, delete it and fall through
-      // to re-convert so we don't end up with overlapping indices.
-      try {
-        auto reader = parquet::ParquetFileReader::OpenFile(expected_parquet.string(), false);
-        global_index_offset += reader->metadata()->num_rows();
-        std::cout << "\n[" << (i + 1) << "/" << mcap_files.size() << "] Skipping episode "
-                  << episode_index << " (already converted): "
-                  << mcap_path.filename().string() << "\n";
-        ++skipped;
-        continue;
-      } catch (const std::exception& e) {
-        std::cerr << "\n[" << (i + 1) << "/" << mcap_files.size()
-                  << "] Corrupt parquet for episode " << episode_index
-                  << ", deleting and re-converting: " << e.what() << "\n";
-        fs::remove(expected_parquet);
+  // Workers prepare recordings concurrently; the main thread commits them in input order,
+  // which is what gives each its episode index. The semaphore bounds how far the workers
+  // run ahead, so at most `window` prepared episodes are held at once. window >= jobs
+  // guarantees progress: inputs are handed out in increasing order, so the one the main
+  // thread waits for is always already on some worker, which holds its permit until done.
+  const size_t num_pending = pending.size();
+  const auto tmp_dir_for = [&](size_t i) { return tmp_root / ("episode_" + std::to_string(i)); };
+  std::vector<PreparedEpisode> slots(num_pending);
+  std::vector<uint8_t> prepared_ok(num_pending, 0);
+  std::vector<uint8_t> ready(num_pending, 0);
+  std::mutex mtx;
+  std::condition_variable ready_cv;
+  std::atomic<size_t> next_input{0};
+  std::counting_semaphore<> slots_free(static_cast<std::ptrdiff_t>(jobs) + kPrefetchSlack);
+
+  auto worker = [&]() {
+    while (true) {
+      slots_free.acquire();
+      const size_t i = next_input.fetch_add(1);
+      if (i >= num_pending) {
+        slots_free.release();  // nothing to do with this permit
+        break;
       }
+      PreparedEpisode prepared;
+      bool ok = false;
+      // An exception would end the process from this thread, so it fails the recording.
+      try {
+        ok = prepare_episode(pending[i], static_cast<int>(i), tmp_dir_for(i), encoder_threads,
+                             prepared);
+      } catch (const std::exception& e) {
+        std::cerr << "Error: " << pending[i].filename().string() << ": " << e.what() << "\n";
+      }
+      {
+        std::lock_guard<std::mutex> lk(mtx);
+        slots[i] = std::move(prepared);
+        prepared_ok[i] = ok;
+        ready[i] = 1;
+      }
+      ready_cv.notify_all();
+    }
+  };
+
+  std::vector<std::thread> pool;
+  pool.reserve(static_cast<size_t>(jobs));
+  for (int w = 0; w < jobs; ++w) pool.emplace_back(worker);
+
+  bool commit_failed = false;
+  for (size_t i = 0; i < num_pending; ++i) {
+    PreparedEpisode prepared;
+    bool ok = false;
+    {
+      std::unique_lock<std::mutex> lk(mtx);
+      ready_cv.wait(lk, [&] { return ready[i] != 0; });
+      prepared = std::move(slots[i]);
+      ok = prepared_ok[i] != 0;
     }
 
     std::cout << "\n" << std::string(70, '=') << "\n";
-    std::cout << "Processing file " << (i + 1) << "/" << mcap_files.size() << ": "
-              << mcap_path.filename().string() << "\n";
+    std::cout << "[" << (i + 1) << "/" << num_pending << "] " << pending[i].filename().string()
+              << "\n";
     std::cout << std::string(70, '=') << "\n";
 
-    const fs::path tmp_dir = tmp_root / ("episode_" + std::to_string(i));
-    PreparedEpisode prepared;
-    const bool ok = prepare_episode(mcap_path, static_cast<int>(i), tmp_dir, prepared) &&
-                    commit_episode(prepared, dataset_root_dir, episode_index, repository_id,
-                                   dataset_id, chunk_size, lerobot_config->task_name,
-                                   global_index_offset);
-    std::error_code tmp_ec;
-    fs::remove_all(tmp_dir, tmp_ec);
-
     if (ok) {
-      successful++;
+      ok = commit_episode(prepared, dataset_root_dir, next_episode_index, repository_id,
+                          dataset_id, chunk_size, lerobot_config->task_name,
+                          global_index_offset);
+      // Only a write can fail here, after part of the episode may be in the dataset.
+      commit_failed = !ok;
+    }
+    std::error_code tmp_ec;
+    fs::remove_all(tmp_dir_for(i), tmp_ec);
+    slots_free.release();
+
+    if (commit_failed) {
+      // Hand out no more work, and give every worker a permit so none stays blocked.
+      next_input.store(num_pending);
+      slots_free.release(static_cast<std::ptrdiff_t>(jobs));
+      break;
+    }
+    if (ok) {
+      ++successful;
+      ++next_episode_index;
     } else {
-      failed++;
-      std::cerr << "\n[FAILED] Failed to process: " << mcap_path.string() << "\n";
+      ++failed;
+      std::cerr << "\n[FAILED] Failed to process: " << pending[i].string() << "\n";
     }
   }
 
+  for (auto& th : pool) th.join();
+
   std::error_code tmp_ec;
   fs::remove_all(tmp_root, tmp_ec);
+
+  if (commit_failed) {
+    std::cerr << "\nError: Failed to write an episode into " << full_dataset_path_check.string()
+              << "; the dataset may be incomplete. Convert into a new dataset_id.\n";
+    return 1;
+  }
 
   // Update dataset statistics
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -663,7 +817,8 @@ int main(int argc, char** argv) {
 }
 
 bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
-                     const std::filesystem::path& tmp_dir, PreparedEpisode& out) {
+                     const std::filesystem::path& tmp_dir, int encoder_threads,
+                     PreparedEpisode& out) {
   namespace fs = std::filesystem;
   using trossen::io::backends::AlignedEpisode;
   using trossen::io::backends::McapChannelMap;
@@ -816,7 +971,7 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
 
       const auto encode_start = std::chrono::steady_clock::now();
       if (!trossen::io::backends::encode_episode_video(camera_dir, cnt_it->second, ep.fps,
-                                                       /*encoder_threads=*/0, video_output)) {
+                                                       encoder_threads, video_output)) {
         std::cout << " [FAILED]\n";
         return false;
       }
@@ -934,11 +1089,6 @@ bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
   const size_t rows_written = ep.frames.size();
   std::cout << "  [ok] Wrote " << rows_written << " rows\n";
 
-  // Advance the global index offset now that the parquet is on disk, so a failure while
-  // moving the videos or writing the metadata cannot give the next episode overlapping
-  // indices.
-  global_index_offset += static_cast<int64_t>(rows_written);
-
   std::cout << "\n[ok] Successfully created Parquet file: " << cfg.output_file << "\n";
   std::cout << "\nSummary:\n";
   std::cout << "  Total frames:      " << rows_written << "\n";
@@ -1016,11 +1166,9 @@ bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
   }
 
   // Use utility functions to write metadata
-  int num_cameras = static_cast<int>(channels.camera_channels.size());
-
   if (trossen::io::backends::write_episode_metadata(
           meta_dir, cfg.episode_index, task_name, static_cast<int>(rows_written),
-          num_cameras)) {
+          static_cast<int>(pe.videos.size()), nlohmann::json(), pe.mcap_file.filename().string())) {
     std::cout << "  [ok] Updated " << info_path.string() << "\n";
     std::cout << "  [ok] Created/Updated "
               << (meta_dir / trossen::io::backends::JSONL_TASKS).string() << "\n";
@@ -1033,6 +1181,9 @@ bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
     std::cerr << "  Error: Failed to write metadata files\n";
     return false;
   }
+
+  // Only a fully written episode claims its rows.
+  global_index_offset += static_cast<int64_t>(rows_written);
 
   std::cout << "\n[ok] Successfully created LeRobotV2 dataset episode!\n";
   std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
