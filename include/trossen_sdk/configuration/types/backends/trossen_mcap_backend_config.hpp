@@ -6,6 +6,8 @@
 #ifndef TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__TROSSEN_MCAP_BACKEND_CONFIG_HPP_
 #define TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__TROSSEN_MCAP_BACKEND_CONFIG_HPP_
 
+#include <cstddef>
+
 #include "trossen_sdk/configuration/base_config.hpp"
 #include "trossen_sdk/configuration/config_registry.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
@@ -28,6 +30,9 @@ inline constexpr char TROSSEN_MCAP_DEFAULT_VIDEO_ENCODER[] = "auto";
 
 // Nominal frame rate for the encoder's stream time base only
 inline constexpr int TROSSEN_MCAP_VIDEO_NOMINAL_FPS = 30;
+
+// Frames each camera stream may queue for its encoder; one second at 30 fps
+inline constexpr std::size_t TROSSEN_MCAP_VIDEO_QUEUE_FRAMES = 30;
 
 struct TrossenMCAPBackendConfig : public BaseConfig {
   std::string root{trossen::io::backends::get_default_root_path().string()};
