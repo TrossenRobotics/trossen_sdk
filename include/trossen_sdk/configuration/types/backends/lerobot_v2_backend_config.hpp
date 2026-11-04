@@ -6,6 +6,10 @@
 #ifndef TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_V2_BACKEND_CONFIG_HPP_
 #define TROSSEN_SDK__CONFIGURATION__TYPES__BACKENDS__LEROBOT_V2_BACKEND_CONFIG_HPP_
 
+#include <optional>
+#include <stdexcept>
+#include <string>
+
 #include "trossen_sdk/configuration/base_config.hpp"
 #include "trossen_sdk/configuration/config_registry.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
@@ -26,6 +30,9 @@ inline constexpr char LEROBOT_V2_DEFAULT_LICENSE[] = "apache-2.0";
 
 struct LeRobotV2BackendConfig : public BaseConfig {
   int encoder_threads{trossen::io::backends::DEFAULT_ENCODER_THREADS};
+  // Videos encoded at once (the converter also prepares this many recordings at once); at
+  // least 1, unset = automatic
+  std::optional<int> jobs;
   int max_image_queue{trossen::io::backends::DEFAULT_MAX_IMAGE_QUEUE};
   int png_compression_level{trossen::io::backends::DEFAULT_PNG_COMPRESSION_LEVEL};
   bool overwrite_existing{LEROBOT_V2_DEFAULT_OVERWRITE_EXISTING};
@@ -53,6 +60,13 @@ struct LeRobotV2BackendConfig : public BaseConfig {
       c.root = trossen::io::backends::expand_user(raw_root).string();
     }
     if (j.contains("encoder_threads")) j.at("encoder_threads").get_to(c.encoder_threads);
+    if (j.contains("jobs") && !j.at("jobs").is_null()) {
+      c.jobs = j.at("jobs").get<int>();
+      if (*c.jobs < 1) {
+        throw std::runtime_error(
+          "LeRobotV2BackendConfig: 'jobs' must be at least 1, got " + std::to_string(*c.jobs));
+      }
+    }
     if (j.contains("max_image_queue")) j.at("max_image_queue").get_to(c.max_image_queue);
     if (j.contains("png_compression_level"))
       j.at("png_compression_level").get_to(c.png_compression_level);
