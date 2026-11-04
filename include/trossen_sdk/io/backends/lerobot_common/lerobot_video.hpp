@@ -1,0 +1,90 @@
+/**
+ * @file lerobot_video.hpp
+ * @brief Per-episode video helpers shared by the LeRobot v2.1 and v3.0 converters.
+ *
+ * They run ffmpeg and ffprobe, which must be on PATH, and check every video they write
+ * against the frame count the episode's rows expect.
+ */
+
+#ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_COMMON__LEROBOT_VIDEO_HPP_
+#define TROSSEN_SDK__IO__BACKENDS__LEROBOT_COMMON__LEROBOT_VIDEO_HPP_
+
+#include <cstddef>
+#include <cstdint>
+#include <filesystem>
+#include <string>
+#include <vector>
+
+namespace trossen::io::backends {
+
+/// @brief File name pattern of extracted color frames, numbered from 0.
+inline constexpr char kColorFramePattern[] = "image_%06d.jpg";
+
+/// @brief Codec of re-encoded color video.
+inline constexpr char kColorCodec[] = "av1";
+
+/// @brief Pixel format of re-encoded color video.
+inline constexpr char kColorPixFmt[] = "yuv420p";
+
+/// @brief File decode_video_rows() writes a depth camera's rows to, as gray12le codes.
+inline constexpr char kDepthCodesFile[] = "depth_codes.gray12le";
+
+/**
+ * @brief Exit code of a process from its std::system or pclose status.
+ *
+ * @param status Wait status returned by std::system or pclose.
+ * @return The exit code, or -1 when the process did not exit normally, such as when a
+ *   signal killed it.
+ */
+int exit_code(int status);
+
+/**
+ * @brief Packets in the first video stream of a file, one per frame in an mp4.
+ *
+ * @param video Video file to probe.
+ * @return The packet count, or -1 when ffprobe fails or prints no count.
+ */
+int64_t count_video_packets(const std::filesystem::path& video);
+
+/**
+ * @brief Encode an episode's color frames as AV1 video.
+ *
+ * @param image_dir Folder holding the frames, named by kColorFramePattern from 0.
+ * @param frame_count Frames to encode, checked against the written video.
+ * @param fps Frame rate of the frames and of the video.
+ * @param encoder_threads Cores the encoder may use (SVT-AV1 lp=); 0 leaves it uncapped.
+ * @param out_mp4 Output mp4.
+ * @return true when the video holds exactly frame_count frames.
+ */
+bool encode_episode_video(
+  const std::filesystem::path& image_dir, size_t frame_count, double fps, int encoder_threads,
+  const std::filesystem::path& out_mp4);
+
+/**
+ * @brief Write a video camera's frames one per row by decoding its stream.
+ *
+ * A camera recorded at another rate than the rows cannot be stream-copied: its video holds
+ * one frame per recorded frame, while LeRobot plays one per row. Recorded frame
+ * `row_source_index[r]` is written for row r, so a slower camera's frames repeat and a
+ * faster camera's are skipped, as LeRobot's recorder does.
+ *
+ * An H.264 (color) camera's rows are written to `dir` as kColorFramePattern JPEGs, the input
+ * of encode_episode_video(). An H.265 (depth) camera holds 12-bit codes, written in row
+ * order to `dir / kDepthCodesFile` as gray12le, the input of the lossless depth encode.
+ *
+ * @param annexb The camera's Annex B stream (extract_camera_video()).
+ * @param storage The camera's recorded storage, "h264" or "h265".
+ * @param width Frame width.
+ * @param height Frame height.
+ * @param row_source_index Recorded frame each row plays (CameraInfo::row_source_index), in
+ *   increasing order.
+ * @param dir Output folder.
+ * @return false (reason on stderr) when decoding fails or ends before some row's frame.
+ */
+bool decode_video_rows(
+  const std::filesystem::path& annexb, const std::string& storage, int width, int height,
+  const std::vector<size_t>& row_source_index, const std::filesystem::path& dir);
+
+}  // namespace trossen::io::backends
+
+#endif  // TROSSEN_SDK__IO__BACKENDS__LEROBOT_COMMON__LEROBOT_VIDEO_HPP_
