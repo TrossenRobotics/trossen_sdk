@@ -41,6 +41,11 @@ Examples:
 
 Batch mode processes all `.mcap` files in the order they were recorded (by the `recording_start_time` in each file's metadata) and assigns LeRobot episode indices from that order, so episode 0 is the earliest recording.
 
+- `--jobs <n>` prepares that many recordings in parallel (default: the core count, at most 8). Episodes are still added to the dataset one at a time, in input order.
+- A recording that fails gets no index, so the indices have no gaps.
+- A re-run skips the recordings already in the dataset, matched by file name, and gives each new recording the next free index. New recordings are numbered after the existing episodes even when they were recorded earlier.
+- A dataset whose `meta/episodes.jsonl` entries have no `source_file` (written by an earlier converter version) cannot be resumed; the tool stops and asks for a new `dataset_id`.
+
 ---
 
 ## LeRobot V2 output structure
