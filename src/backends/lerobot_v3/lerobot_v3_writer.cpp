@@ -7,12 +7,19 @@
 
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <utility>
+#include <vector>
 
 #include <arrow/io/api.h>
+
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_video.hpp"
+#include "trossen_sdk/utils/depth_quantization.hpp"
 
 namespace trossen::io::backends {
 
@@ -58,6 +65,17 @@ double row_bytes(const arrow::Schema& schema) {
   }
   return bytes;
 }
+
+/// @brief Removes a file when it goes out of scope, on success and error paths alike.
+struct RemoveOnExit {
+  /// @brief File to remove.
+  fs::path path;
+
+  ~RemoveOnExit() {
+    std::error_code ec;
+    fs::remove(path, ec);
+  }
+};
 
 }  // namespace
 
@@ -193,8 +211,83 @@ bool LeRobotV3DatasetWriter::roll_data_file_if_needed(int64_t next_ep_frames) {
 bool LeRobotV3DatasetWriter::encode_depth_video(
   const fs::path& image_dir, size_t frame_count, const fs::path& out_mp4) const
 {
-  // TODO(shantanuparab-tr): encode an episode's depth frames to video (#354).
-  return false;
+  // 16-bit depth (mm) to 12-bit log-quantized codes to lossless HEVC gray12le. Decoding
+  // with any other mapping gives wrong distances without an error, so the codes come
+  // from the shared table in trossen_sdk/utils/depth_quantization.hpp.
+  const std::vector<uint16_t> lut = trossen::utils::build_depth_quantization_lut();
+
+  int width = 0;
+  int height = 0;
+  const RemoveOnExit raw_file{fs::path(out_mp4.string() + ".gray12.raw")};
+  const fs::path& raw_path = raw_file.path;
+  {
+    std::ofstream raw(raw_path, std::ios::binary);
+    if (!raw) {
+      std::cerr << "Error: cannot open depth raw temp: " << raw_path.string() << "\n";
+      return false;
+    }
+    std::vector<uint16_t> codes;
+    for (size_t f = 0; f < frame_count; ++f) {
+      char namebuf[32];
+      std::snprintf(namebuf, sizeof(namebuf), kDepthFramePattern, f);
+      cv::Mat img = cv::imread((image_dir / namebuf).string(), cv::IMREAD_UNCHANGED);
+      if (img.empty() || img.type() != CV_16UC1) {
+        std::cerr << "Error: depth frame missing or not 16-bit mono: " << namebuf << "\n";
+        return false;
+      }
+      if (width == 0) {
+        width = img.cols;
+        height = img.rows;
+      } else if (img.cols != width || img.rows != height) {
+        // The raw stream has one frame size, taken from the first frame.
+        std::cerr << "Error: depth frame " << namebuf << " is " << img.cols << "x" << img.rows
+                  << " but the first frame is " << width << "x" << height << "\n";
+        return false;
+      }
+      codes.resize(static_cast<size_t>(img.rows) * static_cast<size_t>(img.cols));
+      size_t k = 0;
+      for (int y = 0; y < img.rows; ++y) {
+        const uint16_t* row = img.ptr<uint16_t>(y);
+        for (int x = 0; x < img.cols; ++x) codes[k++] = lut[row[x]];
+      }
+      raw.write(reinterpret_cast<const char*>(codes.data()),
+                static_cast<std::streamsize>(codes.size() * sizeof(uint16_t)));
+      if (!raw) {
+        std::cerr << "Error: failed to write depth raw temp: " << raw_path.string() << "\n";
+        return false;
+      }
+    }
+    raw.close();
+    if (!raw) {
+      std::cerr << "Error: failed to close depth raw temp: " << raw_path.string() << "\n";
+      return false;
+    }
+  }
+  if (width == 0 || height == 0) {
+    std::cerr << "Error: no depth frames read from " << image_dir.string() << "\n";
+    return false;
+  }
+
+  // x265 pools= caps its worker pool. ffmpeg's -threads only reaches x265's
+  // frame-threads, which leaves most of the pool uncapped, so use pools=.
+  std::ostringstream x265_params;
+  x265_params << "lossless=1:log-level=error";
+  if (opts_.encoder_threads > 0) {
+    x265_params << ":pools=" << opts_.encoder_threads;
+  }
+
+  std::ostringstream cmd;
+  cmd << "ffmpeg -y -loglevel error -f rawvideo -pix_fmt gray12le -s " << width << "x" << height
+      << " -framerate " << opts_.fps << " -i " << raw_path.string() << " -frames:v " << frame_count
+      << " -c:v libx265 -x265-params " << x265_params.str() << " -pix_fmt gray12le -r "
+      << opts_.fps << " " << out_mp4.string();
+  const int ret = std::system(cmd.str().c_str());
+  if (ret != 0) {
+    std::cerr << "Error: ffmpeg depth encode failed (exit " << exit_code(ret) << "): " << cmd.str()
+              << "\n";
+    return false;
+  }
+  return true;
 }
 
 bool LeRobotV3DatasetWriter::place_or_concat_video(
