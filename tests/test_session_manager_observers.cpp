@@ -20,6 +20,8 @@
 #include "trossen_sdk/observer/observer_base.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
+#include "stub_producer_metadata.hpp"
+
 using trossen::data::JointStateRecord;
 using trossen::data::RecordBase;
 using trossen::hw::PolledProducer;
@@ -30,7 +32,7 @@ namespace {
 
 class MockPolledProducer : public PolledProducer {
 public:
-  explicit MockPolledProducer(std::string stream_id = "mock/joints")
+  explicit MockPolledProducer(std::string stream_id = "mock_joints")
     : stream_id_(std::move(stream_id)) {}
   ~MockPolledProducer() override = default;
 
@@ -44,7 +46,7 @@ public:
   }
 
   std::shared_ptr<ProducerMetadata> metadata() const override {
-    auto meta = std::make_shared<ProducerMetadata>();
+    auto meta = std::make_shared<StubProducerMetadata>();
     meta->type = "mock";
     meta->id = stream_id_;
     meta->name = "Mock Producer";
@@ -70,7 +72,7 @@ public:
 class DeadObserver : public ObserverBase {
 public:
   DeadObserver() : ObserverBase("dead") {
-    add_subscription("mock/joints", 100.0,
+    add_subscription("mock_joints", 100.0,
                      [](const std::shared_ptr<RecordBase>&) {});
   }
 
@@ -83,7 +85,7 @@ protected:
 class EpisodeBoundaryObserver : public ObserverBase {
 public:
   EpisodeBoundaryObserver() : ObserverBase("episode_boundary") {
-    add_subscription("mock/joints", 100.0,
+    add_subscription("mock_joints", 100.0,
                      [](const std::shared_ptr<RecordBase>&) {});
   }
 
@@ -129,7 +131,7 @@ TEST_F(SessionManagerObserversTest, AddObserver_AfterFirstEpisode_Throws) {
   SessionManager sm;
   std::atomic<int> counter{0};
   sm.add_observer(std::make_shared<CountingObserver>(
-    "obs", "mock/joints", 100.0, &counter));
+    "obs", "mock_joints", 100.0, &counter));
   sm.add_producer(std::make_shared<MockPolledProducer>(),
                   std::chrono::milliseconds(10));
   ASSERT_TRUE(sm.start_episode());
@@ -137,7 +139,7 @@ TEST_F(SessionManagerObserversTest, AddObserver_AfterFirstEpisode_Throws) {
 
   // observers_started_ is true now - new observers must be rejected.
   EXPECT_THROW(sm.add_observer(std::make_shared<CountingObserver>(
-                 "obs2", "mock/joints", 100.0, &counter)),
+                 "obs2", "mock_joints", 100.0, &counter)),
                std::runtime_error);
 }
 
@@ -149,7 +151,7 @@ TEST_F(SessionManagerObserversTest, Records_ReachObservers_DuringEpisode) {
   SessionManager sm;
   std::atomic<int> handler_calls{0};
   auto obs = std::make_shared<CountingObserver>(
-    "obs", "mock/joints", 200.0, &handler_calls);
+    "obs", "mock_joints", 200.0, &handler_calls);
   sm.add_observer(obs);
   sm.add_producer(std::make_shared<MockPolledProducer>(),
                   std::chrono::milliseconds(5));
@@ -167,7 +169,7 @@ TEST_F(SessionManagerObserversTest, Records_ReachObservers_DuringEpisode) {
 TEST_F(SessionManagerObserversTest, UnsubscribedRecords_AreNotDispatched) {
   SessionManager sm;
   std::atomic<int> handler_calls{0};
-  // Subscribe to "other" - producer emits "mock/joints".
+  // Subscribe to "other" - producer emits "mock_joints".
   auto obs = std::make_shared<CountingObserver>(
     "obs", "other", 100.0, &handler_calls);
   sm.add_observer(obs);
@@ -191,7 +193,7 @@ TEST_F(SessionManagerObserversTest, Observer_StartsLazily_OnFirstEpisode) {
   SessionManager sm;
   std::atomic<int> counter{0};
   auto obs = std::make_shared<CountingObserver>(
-    "obs", "mock/joints", 100.0, &counter);
+    "obs", "mock_joints", 100.0, &counter);
   sm.add_observer(obs);
 
   EXPECT_FALSE(obs->is_running());
@@ -212,7 +214,7 @@ TEST_F(SessionManagerObserversTest, Observer_PersistsAcross_Episodes) {
   SessionManager sm;
   std::atomic<int> counter{0};
   auto obs = std::make_shared<CountingObserver>(
-    "obs", "mock/joints", 100.0, &counter);
+    "obs", "mock_joints", 100.0, &counter);
   sm.add_observer(obs);
   sm.add_producer(std::make_shared<MockPolledProducer>(),
                   std::chrono::milliseconds(5));
@@ -235,7 +237,7 @@ TEST_F(SessionManagerObserversTest, Observer_PersistsAcross_Episodes) {
 TEST_F(SessionManagerObserversTest, Shutdown_StopsObservers) {
   std::atomic<int> counter{0};
   auto obs = std::make_shared<CountingObserver>(
-    "obs", "mock/joints", 100.0, &counter);
+    "obs", "mock_joints", 100.0, &counter);
   {
     SessionManager sm;
     sm.add_observer(obs);
@@ -255,7 +257,7 @@ TEST_F(SessionManagerObserversTest, DeadObserver_DoesNotAbortEpisode) {
   sm.add_observer(std::make_shared<DeadObserver>());
   std::atomic<int> healthy_counter{0};
   auto healthy = std::make_shared<CountingObserver>(
-    "healthy", "mock/joints", 100.0, &healthy_counter);
+    "healthy", "mock_joints", 100.0, &healthy_counter);
   sm.add_observer(healthy);
   sm.add_producer(std::make_shared<MockPolledProducer>(),
                   std::chrono::milliseconds(5));
@@ -280,7 +282,7 @@ namespace {
 class ThrowingObserver : public ObserverBase {
 public:
   ThrowingObserver() : ObserverBase("throwing") {
-    add_subscription("mock/joints", 100.0,
+    add_subscription("mock_joints", 100.0,
                      [](const std::shared_ptr<RecordBase>&) {
                        throw std::runtime_error("boom");
                      });
@@ -321,7 +323,7 @@ TEST_F(SessionManagerObserversTest, ThrowingHandler_DoesNotAffectSession) {
   auto throwing = std::make_shared<ThrowingObserver>();
   std::atomic<int> healthy_counter{0};
   auto healthy = std::make_shared<CountingObserver>(
-    "healthy", "mock/joints", 100.0, &healthy_counter);
+    "healthy", "mock_joints", 100.0, &healthy_counter);
   sm.add_observer(throwing);
   sm.add_observer(healthy);
   sm.add_producer(std::make_shared<MockPolledProducer>(),
@@ -342,7 +344,7 @@ TEST_F(SessionManagerObserversTest, ObserverStats_ReturnsAllObservers) {
   SessionManager sm;
   std::atomic<int> a{0}, b{0};
   sm.add_observer(std::make_shared<CountingObserver>(
-    "obs_a", "mock/joints", 100.0, &a));
+    "obs_a", "mock_joints", 100.0, &a));
   sm.add_observer(std::make_shared<CountingObserver>(
     "obs_b", "other_stream", 100.0, &b));
   sm.add_producer(std::make_shared<MockPolledProducer>(),
@@ -371,7 +373,7 @@ TEST_F(SessionManagerObserversTest, StartEpisode_AfterShutdown_IsRefused) {
   SessionManager sm;
   std::atomic<int> counter{0};
   sm.add_observer(std::make_shared<CountingObserver>(
-    "obs", "mock/joints", 100.0, &counter));
+    "obs", "mock_joints", 100.0, &counter));
   sm.add_producer(std::make_shared<MockPolledProducer>(),
                   std::chrono::milliseconds(5));
   ASSERT_TRUE(sm.start_episode());
@@ -387,7 +389,7 @@ TEST_F(SessionManagerObserversTest, DiscardEpisode_PreservesObservers) {
   SessionManager sm;
   std::atomic<int> counter{0};
   auto obs = std::make_shared<CountingObserver>(
-    "obs", "mock/joints", 100.0, &counter);
+    "obs", "mock_joints", 100.0, &counter);
   sm.add_observer(obs);
   sm.add_producer(std::make_shared<MockPolledProducer>(),
                   std::chrono::milliseconds(5));
@@ -417,7 +419,7 @@ TEST_F(SessionManagerObserversTest, OnEpisodeEndedCallback_CanCallObserverStats)
   SessionManager sm;
   std::atomic<int> counter{0};
   sm.add_observer(std::make_shared<CountingObserver>(
-    "obs", "mock/joints", 100.0, &counter));
+    "obs", "mock_joints", 100.0, &counter));
   sm.add_producer(std::make_shared<MockPolledProducer>(),
                   std::chrono::milliseconds(5));
 
@@ -500,7 +502,7 @@ TEST_F(SessionManagerObserversTest, EpisodeEndHook_CanCallObserverStats) {
    public:
     explicit CallbackObserver(SessionManager* sm)
       : ObserverBase("callback"), sm_(sm) {
-      add_subscription("mock/joints", 100.0,
+      add_subscription("mock_joints", 100.0,
                        [](const std::shared_ptr<RecordBase>&) {});
     }
     std::atomic<size_t> end_observer_count{0};

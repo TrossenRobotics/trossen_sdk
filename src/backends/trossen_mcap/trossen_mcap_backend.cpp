@@ -288,7 +288,15 @@ bool TrossenMCAPBackend::open() {
 
   metadata[trossen_mcap_defs::kDatasetInfoKey] = dataset_info.dump();
 
+  stream_is_depth_.clear();
   unrecordable_streams_.clear();
+  if (dataset_info.contains("cameras")) {
+    for (const auto& [id, camera] : dataset_info["cameras"].items()) {
+      if (camera.contains("is_depth_map") && camera["is_depth_map"].is_boolean()) {
+        stream_is_depth_[id] = camera["is_depth_map"].get<bool>();
+      }
+    }
+  }
 
   auto st = writer_->writeMetadata(
     trossen_mcap_defs::kRecordingMetadataName, metadata.begin(), metadata.end());
@@ -304,7 +312,6 @@ nlohmann::ordered_json TrossenMCAPBackend::build_dataset_info() const {
   dataset_info["robot_name"] = cfg_->robot_name;
 
   for (const auto& producer_meta : producer_metadata_) {
-    if (!producer_meta) continue;
     nlohmann::ordered_json stream_info = producer_meta->get_stream_info();
     if (stream_info.empty()) continue;
 
@@ -875,6 +882,17 @@ void TrossenMCAPBackend::add_depth_scale_metadata(
   md["depth_scale_m"] = std::to_string(*img.depth_scale);
 }
 
+std::optional<bool> TrossenMCAPBackend::stream_is_depth(const std::string& id) {
+  const auto it = stream_is_depth_.find(id);
+  if (it != stream_is_depth_.end()) return it->second;
+  if (unrecordable_streams_.insert(id).second) {
+    std::cerr << "Error: image stream '" << id << "' has no camera entry with a boolean "
+              << "is_depth_map in its producer's get_stream_info(); its frames are not "
+              << "recorded\n";
+  }
+  return std::nullopt;
+}
+
 bool TrossenMCAPBackend::depth_unit_known(
   const data::ImageRecord& img, const std::string& id, const std::string& encoding) {
   if (encoding == "32FC1" || img.depth_scale) return true;
@@ -886,9 +904,10 @@ bool TrossenMCAPBackend::depth_unit_known(
 }
 
 void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
-  // Determine if this is a depth frame based on encoding or topic
-  const bool depth =
-    is_depth_encoding(img.encoding) || is_depth_topic(trossen_mcap_defs::image_topic(img.id));
+  // Depth or color is what the stream's producer declared.
+  const auto is_depth = stream_is_depth(img.id);
+  if (!is_depth) return;
+  const bool depth = *is_depth;
   if (depth && !depth_unit_known(img, img.id, img.encoding)) return;
   foxglove::RawChannel* channel = nullptr;
   if (depth) {
@@ -912,7 +931,8 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
 
   // Write optional depth image to a separate channel when ImageRecord carries depth
   if (img.has_depth()) {
-    const std::string depth_topic_id = img.id + "_depth";
+    const std::string depth_topic_id = data::ImageRecord::depth_stream_id(img.id);
+    if (!stream_is_depth(depth_topic_id).has_value()) return;
     if (!depth_unit_known(img, depth_topic_id, "16UC1")) return;
     std::unordered_map<std::string, std::string> md;
     md["depth_encoding"] = "16UC1";
@@ -972,15 +992,6 @@ void TrossenMCAPBackend::register_schemas_once() {
     "trossen_sdk/io/backends/trossen_mcap/proto/JointState.proto");
   schema_data_odom2d_ = build_schema_blob(
     "trossen_sdk/io/backends/trossen_mcap/proto/Odometry2D.proto");
-}
-
-bool TrossenMCAPBackend::is_depth_topic(const std::string& topic) {
-  // Simple heuristic: contains "/depth/" before final name
-  return topic.find("/depth/") != std::string::npos;
-}
-
-bool TrossenMCAPBackend::is_depth_encoding(const std::string& enc) {
-  return enc == "depth16" || enc == "32FC1" || enc == "16UC1";  // allow alias
 }
 
 

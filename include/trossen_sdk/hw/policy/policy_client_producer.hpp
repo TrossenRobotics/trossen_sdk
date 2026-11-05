@@ -101,16 +101,15 @@ public:
   void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
 
   std::shared_ptr<ProducerMetadata> metadata() const override {
-    return std::make_shared<PolicyClientProducerMetadata>(pc_metadata_);
+    return std::make_shared<PolicyClientProducerMetadata>(metadata_);
   }
 
 private:
   std::shared_ptr<PolicyClient> client_;
   Config cfg_;
-  // Named distinctly from the base PolledProducer's protected `metadata_` so it
-  // does not shadow it; this producer's metadata is the richer subtype and the
-  // base member is intentionally unused here.
-  PolicyClientProducerMetadata pc_metadata_;
+
+  /// @brief Producer metadata
+  PolicyClientProducerMetadata metadata_;
 };
 
 }  // namespace trossen::hw::policy

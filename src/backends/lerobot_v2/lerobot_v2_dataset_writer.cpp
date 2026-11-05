@@ -50,7 +50,7 @@ struct ParquetConfig {
   std::string dataset_root;
   std::string repository_id = "TrossenRoboticsCommunity";  // repo_id in the folder structure
   std::string dataset_id = "mcap_converted_dataset";    // dataset_name in the folder structure
-  std::string robot_name = trossen::io::backends::DEFAULT_ROBOT_NAME;
+  std::string robot_name;  // the recording's robot_name
   std::string task_name;
   int episode_index = 0;
   int episode_chunk = 0;
