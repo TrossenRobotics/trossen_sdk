@@ -139,7 +139,7 @@ Each entry describes one data stream that the SDK will poll and record.
 Add one producer per arm, one per camera, and one per mobile base.
 
 An arm or ``policy_client`` producer needs a ``role``: ``leader`` (its positions become the dataset action) or ``follower`` (the dataset observation).
-The role is recorded with the stream.
+The role is recorded with the stream, and a config without one fails to load.
 ``stream_id`` is free-form.
 
 .. code-block:: javascript
