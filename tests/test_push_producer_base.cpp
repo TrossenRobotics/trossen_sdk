@@ -18,6 +18,8 @@
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
+#include "stub_producer_metadata.hpp"
+
 using trossen::data::ImageRecord;
 using trossen::data::RecordBase;
 using trossen::hw::PushProducer;
@@ -51,6 +53,9 @@ public:
     return true;
   }
 
+  std::shared_ptr<trossen::hw::PolledProducer::ProducerMetadata> metadata() const override {
+    return std::make_shared<StubProducerMetadata>();
+  }
   void stop() override {
     running_.store(false);
     if (thread_.joinable()) {
@@ -77,11 +82,6 @@ private:
 // ============================================================================
 // Default behavior tests
 // ============================================================================
-
-TEST(PushProducerBaseTest, DefaultMetadataReturnsNullptr) {
-  TestPushProducer producer;
-  EXPECT_EQ(producer.metadata(), nullptr);
-}
 
 TEST(PushProducerBaseTest, DefaultStatsAreZero) {
   TestPushProducer producer;

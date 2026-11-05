@@ -24,6 +24,8 @@
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
+#include "stub_producer_metadata.hpp"
+
 using trossen::data::JointStateRecord;
 using trossen::data::RecordBase;
 using trossen::data::Timestamp;
@@ -50,7 +52,7 @@ public:
   }
 
   std::shared_ptr<ProducerMetadata> metadata() const override {
-    auto meta = std::make_shared<ProducerMetadata>();
+    auto meta = std::make_shared<StubProducerMetadata>();
     meta->type = "mock";
     meta->id = "mock_producer";
     meta->name = "Mock Producer";

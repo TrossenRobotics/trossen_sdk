@@ -13,6 +13,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "gtest/gtest.h"
@@ -333,7 +334,9 @@ TEST_F(TrossenMCAPBackendTest, DepthWithoutScaleIsNotRecorded) {
   cfg->dataset_id = "depth_without_scale_test";
   std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
 
-  auto backend = BackendRegistry::create("trossen_mcap");
+  auto backend = BackendRegistry::create(
+    "trossen_mcap",
+    camera_streams({{"cam_rgbd", false}, {"cam_rgbd_depth", true}, {"cam_depth", true}}));
   ASSERT_NE(backend, nullptr);
   auto mcap_backend =
     std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
@@ -363,6 +366,38 @@ TEST_F(TrossenMCAPBackendTest, DepthWithoutScaleIsNotRecorded) {
 
   EXPECT_EQ(mcap_backend->stats().images_written, 1u);
   EXPECT_EQ(mcap_backend->stats().depth_images_written, 0u);
+}
+
+// The recorder records an image stream only when its producer described it.
+TEST_F(TrossenMCAPBackendTest, UndescribedImageStreamIsNotRecorded) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  RootDatasetRestorer restorer{cfg.get(), cfg->root, cfg->dataset_id};
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "undescribed_stream_test";
+  std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
+
+  auto backend = BackendRegistry::create("trossen_mcap", camera_streams({{"cam_known", false}}));
+  auto mcap_backend =
+    std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
+  ASSERT_NE(mcap_backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  trossen::data::ImageRecord img;
+  img.width = 64;
+  img.height = 48;
+  img.channels = 3;
+  img.encoding = "bgr8";
+  img.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+  img.id = "cam_unknown";
+  backend->write(img);
+  img.id = "cam_known";
+  backend->write(img);
+  backend->close();
+
+  EXPECT_EQ(mcap_backend->stats().images_written, 1u);
 }
 
 #ifdef TROSSEN_ENABLE_VIDEO_ENCODE
@@ -461,7 +496,7 @@ TEST_F(TrossenMCAPBackendTest, DropsVideoFramesWhenEncodeQueueIsFull) {
   cfg->video_encoder = "x264";
   std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
 
-  auto backend = BackendRegistry::create("trossen_mcap");
+  auto backend = BackendRegistry::create("trossen_mcap", camera_streams({{"cam_color", false}}));
   auto mcap_backend =
     std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
   ASSERT_NE(mcap_backend, nullptr);
@@ -572,7 +607,8 @@ TEST_F(TrossenMCAPBackendTest, DepthCodesFollowEachStreamsScale) {
   cfg->video_encoder = "x264";
   std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
 
-  auto backend = BackendRegistry::create("trossen_mcap");
+  auto backend = BackendRegistry::create(
+    "trossen_mcap", camera_streams({{"cam_fine", true}, {"cam_coarse", true}}));
   ASSERT_NE(backend, nullptr);
   auto mcap_backend =
     std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);

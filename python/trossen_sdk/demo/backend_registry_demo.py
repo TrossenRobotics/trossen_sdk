@@ -31,7 +31,7 @@ def main():
     record = trossen_sdk.JointStateRecord(
         ts=trossen_sdk.make_timestamp_now(),
         seq=0,
-        id="demo/joints",
+        id="demo_joints",
         positions=[0.1, 0.2, 0.3],
         velocities=[0.0, 0.0, 0.0],
         efforts=[0.0, 0.0, 0.0],

@@ -592,6 +592,9 @@ private:
   /// @brief Set when shutdown() has been called; start_episode() refuses afterwards.
   bool shutdown_called_{false};
 
+  /// @brief Metadata of every registered producer, polled then push.
+  ProducerMetadataList collect_producer_metadata() const;
+
   /**
    * @brief Create backend instance for the given episode
    *
