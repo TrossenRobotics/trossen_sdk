@@ -15,6 +15,28 @@ namespace trossen::trossen_mcap_defs {
 // Joint state topic: <robot_name>/joints/state (e.g., "/robots/default/joints/state")
 // Optional per-camera metadata: /cameras/<camera_name>/meta
 
+/// @brief `role` of a joint stream whose positions become the dataset action.
+inline constexpr char kLeaderRole[] = "leader";
+
+/// @brief `role` of a joint stream whose positions become the dataset observation.
+inline constexpr char kFollowerRole[] = "follower";
+
+/// @brief `storage` of a camera recorded as raw images.
+inline constexpr char kRawStorage[] = "raw";
+
+/// @brief `storage` of a color camera recorded as H.264 video.
+inline constexpr char kH264Storage[] = "h264";
+
+/// @brief `storage` of a depth camera recorded as lossless H.265 video.
+inline constexpr char kH265Storage[] = "h265";
+
+/// @brief Key inside the recording's metadata record holding the recording format version.
+inline constexpr char kFormatVersionKey[] = "format_version";
+
+/// @brief Recording format this SDK writes and reads. Raised when a key readers rely on is
+/// added, removed or changes meaning; readers refuse any other version.
+inline constexpr char kRecordingFormatVersion[] = "1";
+
 /**
  * @brief Get topic name for a given camera's image stream
  *

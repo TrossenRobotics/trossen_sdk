@@ -39,6 +39,7 @@
 #include "trossen_sdk/hw/arm/trossen_arm_component.hpp"
 #include "trossen_sdk/hw/base/slate_base_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/configuration/cli_parser.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 
@@ -178,6 +179,113 @@ int main(int argc, char** argv) {
   trossen::utils::install_signal_handler();
 
   // ──────────────────────────────────────────────────────────
+  // Read the MCAP file and check it can be replayed, before any hardware moves
+  // ──────────────────────────────────────────────────────────
+
+  std::cout << "\nReading MCAP file: " << cfg.mcap_file << "\n";
+
+  std::ifstream input(cfg.mcap_file, std::ios::binary);
+  if (!input.is_open()) {
+    std::cerr << "Error: Failed to open MCAP file\n";
+    return 1;
+  }
+
+  mcap::McapReader reader;
+  auto status = reader.open(input);
+  if (!status.ok()) {
+    std::cerr << "Error: Failed to parse MCAP file: " << status.message << "\n";
+    return 1;
+  }
+
+  auto summary_status = reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
+  if (!summary_status.ok()) {
+    std::cerr << "Error: Failed to read MCAP summary: " << summary_status.message << "\n";
+    return 1;
+  }
+
+  struct JointStateMessage {
+    uint64_t timestamp_ns;
+    std::vector<double> positions;
+    std::vector<double> velocities;
+  };
+
+  std::map<std::string, std::vector<JointStateMessage>> messages_by_stream;
+  std::map<mcap::ChannelId, std::string> channel_id_to_stream;
+
+  std::cout << "  Available channels in MCAP file:\n";
+  for (const auto& [channel_id, channel_ptr] : reader.channels()) {
+    std::cout << "    - Topic: '" << channel_ptr->topic << "' (Schema: "
+              << channel_ptr->schemaId << ", ID: " << channel_id << ")\n";
+  }
+
+  // Streams are found by the topics the recording's dataset_info describes.
+  std::string format_version;
+  nlohmann::json dataset_info;
+  const auto& metadata_indexes = reader.metadataIndexes();
+  const auto record_it = metadata_indexes.find("trossen_sdk_recording");
+  if (record_it != metadata_indexes.end()) {
+    mcap::Record raw_record;
+    mcap::Metadata record;
+    if (mcap::McapReader::ReadRecord(*reader.dataSource(), record_it->second.offset, &raw_record)
+          .ok() &&
+        mcap::McapReader::ParseMetadata(raw_record, &record).ok()) {
+      const auto& fields = record.metadata;
+      if (const auto it = fields.find(trossen::trossen_mcap_defs::kFormatVersionKey);
+          it != fields.end()) {
+        format_version = it->second;
+      }
+      if (const auto it = fields.find("dataset_info");
+          it != fields.end()) {
+        dataset_info = nlohmann::json::parse(it->second, nullptr, /*allow_exceptions=*/false);
+      }
+    }
+  }
+  if (format_version != trossen::trossen_mcap_defs::kRecordingFormatVersion ||
+      !dataset_info.is_object()) {
+    std::cerr << "Error: the recording has format "
+              << (format_version.empty() ? std::string("of no version") : format_version)
+              << " or no readable dataset_info; this SDK reads format "
+              << trossen::trossen_mcap_defs::kRecordingFormatVersion << "\n";
+    return 1;
+  }
+  std::map<std::string, std::string> joint_topics;  // topic -> stream id
+  const nlohmann::json streams = dataset_info.value("streams", nlohmann::json::object());
+  for (const auto& [id, stream] : streams.items()) {
+    if (stream.contains("topic") && stream["topic"].is_string()) {
+      joint_topics[stream["topic"].get<std::string>()] = id;
+    }
+  }
+  std::string base_topic;
+  std::string base_id;
+  if (dataset_info.contains("mobile_base") && dataset_info["mobile_base"].is_object()) {
+    base_topic = dataset_info["mobile_base"].value("topic", std::string{});
+    base_id = dataset_info["mobile_base"].value("id", std::string{});
+  }
+
+  std::map<mcap::ChannelId, std::string> odom_channel_id_to_stream;
+  std::set<std::string> slate_stream_ids;
+
+  for (const auto& [channel_id, channel_ptr] : reader.channels()) {
+    const std::string& topic = channel_ptr->topic;
+    if (const auto it = joint_topics.find(topic); it != joint_topics.end()) {
+      channel_id_to_stream[channel_id] = it->second;
+      std::cout << "  Found joint state channel: " << topic
+                << " (stream_id: " << it->second << ")\n";
+    } else if (!base_topic.empty() && topic == base_topic) {
+      odom_channel_id_to_stream[channel_id] = base_id;
+      slate_stream_ids.insert(base_id);
+      std::cout << "  Found odometry channel:   " << topic << " (stream_id: " << base_id
+                << ")\n";
+    }
+  }
+
+  if (channel_id_to_stream.empty() && odom_channel_id_to_stream.empty()) {
+    std::cerr << "Error: No replayable channels found in MCAP file: dataset_info describes no "
+              << "joint stream or mobile base with a recorded topic\n";
+    return 1;
+  }
+
+  // ──────────────────────────────────────────────────────────
   // Initialize hardware
   // ──────────────────────────────────────────────────────────
 
@@ -237,79 +345,6 @@ int main(int argc, char** argv) {
   }
   std::this_thread::sleep_for(std::chrono::duration<float>(moving_time_s + 0.1f));
   std::cout << "  [ok] Arms staged to ready position\n";
-
-  // ──────────────────────────────────────────────────────────
-  // Read MCAP file and parse joint states
-  // ──────────────────────────────────────────────────────────
-
-  std::cout << "\nReading MCAP file: " << cfg.mcap_file << "\n";
-
-  std::ifstream input(cfg.mcap_file, std::ios::binary);
-  if (!input.is_open()) {
-    std::cerr << "Error: Failed to open MCAP file\n";
-    return 1;
-  }
-
-  mcap::McapReader reader;
-  auto status = reader.open(input);
-  if (!status.ok()) {
-    std::cerr << "Error: Failed to parse MCAP file: " << status.message << "\n";
-    return 1;
-  }
-
-  auto summary_status = reader.readSummary(mcap::ReadSummaryMethod::AllowFallbackScan);
-  if (!summary_status.ok()) {
-    std::cerr << "Error: Failed to read MCAP summary: " << summary_status.message << "\n";
-    return 1;
-  }
-
-  struct JointStateMessage {
-    uint64_t timestamp_ns;
-    std::vector<double> positions;
-    std::vector<double> velocities;
-  };
-
-  std::map<std::string, std::vector<JointStateMessage>> messages_by_stream;
-  std::map<mcap::ChannelId, std::string> channel_id_to_stream;
-
-  std::cout << "  Available channels in MCAP file:\n";
-  for (const auto& [channel_id, channel_ptr] : reader.channels()) {
-    std::cout << "    - Topic: '" << channel_ptr->topic << "' (Schema: "
-              << channel_ptr->schemaId << ", ID: " << channel_id << ")\n";
-  }
-
-  // Detect arm joint state channels ({stream_id}/joints/state)
-  // and base odometry channels ({stream_id}/odom/state) separately.
-  std::map<mcap::ChannelId, std::string> odom_channel_id_to_stream;
-  std::set<std::string> slate_stream_ids;
-
-  for (const auto& [channel_id, channel_ptr] : reader.channels()) {
-    const std::string& topic = channel_ptr->topic;
-
-    size_t pos = topic.find("/joints/state");
-    if (pos != std::string::npos) {
-      std::string stream_id = topic.substr(0, pos);
-      channel_id_to_stream[channel_id] = stream_id;
-      std::cout << "  Found joint state channel: " << topic
-                << " (stream_id: " << stream_id << ")\n";
-      continue;
-    }
-
-    pos = topic.find("/odom/state");
-    if (pos != std::string::npos) {
-      std::string stream_id = topic.substr(0, pos);
-      odom_channel_id_to_stream[channel_id] = stream_id;
-      slate_stream_ids.insert(stream_id);
-      std::cout << "  Found odometry channel:   " << topic
-                << " (stream_id: " << stream_id << ")\n";
-    }
-  }
-
-  if (channel_id_to_stream.empty() && odom_channel_id_to_stream.empty()) {
-    std::cerr << "Error: No replayable channels found in MCAP file\n";
-    std::cerr << "Expected topics: '{stream_id}/joints/state' or '{stream_id}/odom/state'\n";
-    return 1;
-  }
 
   std::cout << "\nParsing messages...\n";
   size_t total_messages = 0;

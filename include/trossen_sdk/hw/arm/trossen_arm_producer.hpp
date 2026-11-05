@@ -16,6 +16,7 @@
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
+#include "trossen_sdk/hw/joint_stream_info.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
 namespace trossen::hw::arm {
@@ -49,6 +50,12 @@ public:
     /// @brief Gripper type
     std::string gripper_type;
 
+    /// @brief "leader" or "follower"
+    std::string role;
+
+    /// @brief Rate the stream is polled at, in Hz
+    double rate_hz{0.0};
+
     /**
      * @brief Get producer info as JSON (LeRobot feature format)
      *
@@ -69,12 +76,10 @@ public:
     /**
      * @brief Get per-stream dataset metadata for MCAP recording
      *
-     * @return JSON with "streams.<stream_id>.joint_names"
+     * @return JSON with "streams.<stream_id>": joint_names, role and rate_hz
      */
     nlohmann::ordered_json get_stream_info() const override {
-      nlohmann::ordered_json info;
-      info["streams"][id]["joint_names"] = joint_names;
-      return info;
+      return joint_stream_info(id, joint_names, role, rate_hz);
     }
   };
 
@@ -82,8 +87,10 @@ public:
    * @brief Construct a TrossenArmProducer from hardware component
    *
    * @param hardware Hardware component (must be TrossenArmComponent)
-   * @param config JSON configuration with fields: stream_id, use_device_time
-   * @throws std::invalid_argument if hardware is null or wrong type
+   * @param config JSON configuration with fields: stream_id, role, poll_rate_hz,
+   *   use_device_time
+   * @throws std::invalid_argument if hardware is null or wrong type, or role is not
+   *   "leader" or "follower"
    */
   TrossenArmProducer(
     std::shared_ptr<hw::HardwareComponent> hardware,
