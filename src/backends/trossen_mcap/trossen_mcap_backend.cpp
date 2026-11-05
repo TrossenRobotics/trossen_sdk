@@ -5,7 +5,11 @@
 
 #include <chrono>
 #include <iostream>
+#include <map>
+#include <sstream>
+#include <string>
 #include <unordered_set>
+#include <vector>
 
 #include "google/protobuf/descriptor.h"
 #include "google/protobuf/descriptor.pb.h"
@@ -21,6 +25,65 @@
 #include "trossen_sdk/version.hpp"
 
 namespace trossen::io::backends {
+
+namespace {
+
+/**
+ * @brief Add what the backend decides to the producers' dataset_info: each stream's topic and
+ * each camera's storage.
+ *
+ * @param dataset_info Merged producer stream info; updated in place
+ * @param video Whether cameras are recorded as video rather than raw images
+ */
+void add_recording_layout(nlohmann::ordered_json& dataset_info, bool video) {
+  if (dataset_info.contains("streams")) {
+    for (auto& [id, stream] : dataset_info["streams"].items()) {
+      stream["topic"] = trossen_mcap_defs::joint_state_topic(id);
+    }
+  }
+  if (dataset_info.contains("cameras")) {
+    for (auto& [id, camera] : dataset_info["cameras"].items()) {
+      camera["topic"] = trossen_mcap_defs::image_topic(id);
+      const bool depth = camera.value("is_depth_map", false);
+      camera["storage"] = !video ? trossen_mcap_defs::kRawStorage
+                          : depth ? trossen_mcap_defs::kH265Storage
+                                  : trossen_mcap_defs::kH264Storage;
+    }
+  }
+  if (dataset_info.contains("mobile_base")) {
+    auto& base = dataset_info["mobile_base"];
+    base["topic"] = trossen_mcap_defs::odometry_2d_topic(base.value("id", std::string{}));
+  }
+}
+
+/**
+ * @brief Warn when the cameras record at different rates.
+ *
+ * Conversion handles this the way LeRobot's recorder does: every camera gets one frame per
+ * row, so a slower camera's frames repeat and a faster camera's are skipped.
+ *
+ * @param dataset_info Merged producer stream info
+ */
+void warn_on_mixed_camera_rates(const nlohmann::ordered_json& dataset_info) {
+  if (!dataset_info.contains("cameras")) return;
+  std::map<double, std::vector<std::string>> cameras_by_fps;
+  for (const auto& [id, camera] : dataset_info["cameras"].items()) {
+    cameras_by_fps[camera.value("fps", 0.0)].push_back(id);
+  }
+  if (cameras_by_fps.size() < 2) return;
+  std::ostringstream msg;
+  msg << "Warning: cameras record at different rates:";
+  for (const auto& [fps, ids] : cameras_by_fps) {
+    msg << " " << fps << " fps (";
+    for (size_t i = 0; i < ids.size(); ++i) msg << (i ? ", " : "") << ids[i];
+    msg << ")";
+  }
+  msg << ". Conversion gives every camera one frame per row, as LeRobot's recorder does: a "
+      << "slower camera's frames repeat and a faster camera's are skipped.\n";
+  std::cerr << msg.str();
+}
+
+}  // namespace
 
 REGISTER_BACKEND(TrossenMCAPBackend, "trossen_mcap")
 
@@ -147,6 +210,7 @@ bool TrossenMCAPBackend::open() {
   metadata["episode_id"] = path_.stem().string();
   auto now = trossen::data::now_real();
   metadata["recording_start_time"] = std::to_string(now.to_ns());
+  metadata[trossen_mcap_defs::kFormatVersionKey] = trossen_mcap_defs::kRecordingFormatVersion;
   if (!cfg_->task_description.empty()) {
     metadata["task_description"] = cfg_->task_description;
   }
@@ -160,26 +224,16 @@ bool TrossenMCAPBackend::open() {
     nlohmann::ordered_json stream_info = producer_meta->get_stream_info();
     if (stream_info.empty()) continue;
 
-    // Merge "streams" entries
-    if (stream_info.contains("streams")) {
-      for (auto& [key, val] : stream_info["streams"].items()) {
-        dataset_info["streams"][key] = val;
-      }
+    for (const char* group : {"streams", "cameras"}) {
+      if (!stream_info.contains(group)) continue;
+      for (auto& [key, val] : stream_info[group].items()) dataset_info[group][key] = val;
     }
-    // Merge "cameras" entries
-    if (stream_info.contains("cameras")) {
-      for (auto& [key, val] : stream_info["cameras"].items()) {
-        dataset_info["cameras"][key] = val;
-      }
-    }
-    // Mobile base flag
-    if (stream_info.value("has_mobile_base", false)) {
-      dataset_info["has_mobile_base"] = true;
-      if (stream_info.contains("base_velocity_names")) {
-        dataset_info["base_velocity_names"] = stream_info["base_velocity_names"];
-      }
+    if (stream_info.contains("mobile_base")) {
+      dataset_info["mobile_base"] = stream_info["mobile_base"];
     }
   }
+  add_recording_layout(dataset_info, cfg_->records_video());
+  warn_on_mixed_camera_rates(dataset_info);
 
   metadata["dataset_info"] = dataset_info.dump();
 
@@ -336,7 +390,7 @@ foxglove::RawChannel* TrossenMCAPBackend::ensure_jointstate_channel(const std::s
 }
 
 foxglove::RawChannel* TrossenMCAPBackend::ensure_image_channel(const std::string& camera_name) {
-  return ensure_image_channel_with_metadata(camera_name, { {"stream_type", "color"} });
+  return ensure_image_channel_with_metadata(camera_name, {});
 }
 
 foxglove::RawChannel* TrossenMCAPBackend::ensure_image_channel_with_metadata(
@@ -355,15 +409,6 @@ foxglove::RawChannel* TrossenMCAPBackend::ensure_image_channel_with_metadata(
 
   // Convert metadata to std::map
   std::map<std::string, std::string> channel_metadata(metadata.begin(), metadata.end());
-  if (video) {
-    // Recorded in the channel metadata so a reader can tell which codec a
-    // stream carries without decoding a packet to find out. Depth is HEVC
-    // because it needs 12-bit; color is H.264.
-    const auto stream_type = channel_metadata.find("stream_type");
-    const bool depth_stream =
-        stream_type != channel_metadata.end() && stream_type->second == "depth";
-    channel_metadata["video_format"] = depth_stream ? "h265" : "h264";
-  }
 
   // Create channel
   auto channel_result = foxglove::RawChannel::create(
@@ -707,9 +752,8 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
     // We cannot know depth_scale_m here without augmenting ImageRecord; future extension could
     // pass via id pattern.
     //
-    // Minimal metadata: stream_type + semantics if derivable from encoding.
+    // Minimal metadata: semantics if derivable from encoding.
     std::unordered_map<std::string, std::string> md;
-    md["stream_type"] = "depth";
     if (img.encoding == "depth16") {
       md["depth_encoding_semantics"] = "uint16_scaled";
       // depth_scale_m left to producer-specific channel creation path later when available
@@ -730,7 +774,6 @@ void TrossenMCAPBackend::write_image_record(const data::ImageRecord& img) {
   if (img.has_depth()) {
     const std::string depth_topic_id = img.id + "_depth";
     std::unordered_map<std::string, std::string> md;
-    md["stream_type"] = "depth";
     md["depth_encoding"] = "16UC1";
     if (img.depth_scale.has_value()) {
       md["depth_scale_m"] = std::to_string(img.depth_scale.value());
