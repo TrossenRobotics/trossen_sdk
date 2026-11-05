@@ -14,6 +14,7 @@
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
+#include "trossen_sdk/hw/joint_stream_info.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
 namespace trossen::hw::arm {
@@ -35,6 +36,9 @@ public:
 
     /// @brief Logical stream identifier
     std::string id{"mock"};
+
+    /// @brief "leader" or "follower"
+    std::string role{"follower"};
 
     /// @brief Amplitude of joint position sine wave oscillation
     double amplitude{1.0};
@@ -70,6 +74,12 @@ public:
     /// @brief Gripper type
     std::string gripper_type;
 
+    /// @brief "leader" or "follower"
+    std::string role;
+
+    /// @brief Rate the stream is polled at, in Hz
+    double rate_hz{0.0};
+
     /**
      * @brief Get producer info as JSON
      *
@@ -77,6 +87,15 @@ public:
      */
     nlohmann::ordered_json   get_info() const override {
       return nlohmann::ordered_json{};
+    }
+
+    /**
+     * @brief Get per-stream dataset metadata for MCAP recording
+     *
+     * @return JSON with "streams.<stream_id>": joint_names, role and rate_hz
+     */
+    nlohmann::ordered_json get_stream_info() const override {
+      return joint_stream_info(id, joint_names, role, rate_hz);
     }
   };
 

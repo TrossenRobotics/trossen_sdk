@@ -92,7 +92,7 @@ public:
       // Depth stream feature (when present)
       if (has_depth) {
         nlohmann::ordered_json depth_feature;
-        std::string depth_id = id + "_depth";
+        const std::string depth_id = trossen::data::ImageRecord::depth_stream_id(id);
         depth_feature["id"] = depth_id;
         depth_feature["dtype"] = "video";
         depth_feature["shape"] = {height, width, 1};
@@ -129,7 +129,7 @@ public:
         {"has_audio", has_audio}};
 
       if (has_depth) {
-        std::string depth_id = id + "_depth";
+        const std::string depth_id = trossen::data::ImageRecord::depth_stream_id(id);
         // TODO(shantanuparab-tr): depth codec/pix_fmt — see TODO in get_info()
         info["cameras"][depth_id] = {
           {"width", width},
