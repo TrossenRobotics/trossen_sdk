@@ -12,6 +12,7 @@
 #include <string>
 #include <system_error>
 #include <thread>
+#include <vector>
 
 #include "gtest/gtest.h"
 #include "opencv2/core.hpp"
@@ -21,6 +22,8 @@
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
+#include "trossen_sdk/utils/depth_quantization.hpp"
 
 using trossen::io::BackendRegistry;
 
@@ -47,6 +50,23 @@ trossen::ProducerMetadataList camera_streams(std::vector<std::pair<std::string, 
 }
 
 }  // namespace
+
+namespace trossen::io::backends {
+
+/// @brief Reads TrossenMCAPBackend's private state for the unit tests.
+class TrossenMCAPBackendTestPeer {
+public:
+  /// @brief The depth quantization table the backend built for a stream, or nullptr.
+  static const std::vector<uint16_t>* depth_lut(const TrossenMCAPBackend& backend,
+                                                const std::string& id) {
+    const auto it = backend.video_streams_.find(id);
+    return it == backend.video_streams_.end() ? nullptr : &it->second->depth_lut;
+  }
+};
+
+}  // namespace trossen::io::backends
+
+using trossen::io::backends::TrossenMCAPBackendTestPeer;
 
 // Test fixture to load configuration before running tests
 class TrossenMCAPBackendTest : public ::testing::Test {
@@ -274,6 +294,51 @@ TEST_F(TrossenMCAPBackendTest, ScanCountsLegacyAndNewEpisodeFiles) {
   EXPECT_EQ(backend->scan_existing_episodes(), 3u);
 }
 
+// Integer depth without a depth_scale has no known unit, so it is not recorded; the color
+// frame it came with still is.
+TEST_F(TrossenMCAPBackendTest, DepthWithoutScaleIsNotRecorded) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  RootDatasetRestorer restorer{cfg.get(), cfg->root, cfg->dataset_id};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "depth_without_scale_test";
+  std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  auto mcap_backend =
+    std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
+  ASSERT_NE(mcap_backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  // A color frame carrying a depth plane, and a standalone depth frame; neither sets a scale.
+  trossen::data::ImageRecord rgbd;
+  rgbd.id = "cam_rgbd";
+  rgbd.width = 64;
+  rgbd.height = 48;
+  rgbd.channels = 3;
+  rgbd.encoding = "bgr8";
+  rgbd.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+  rgbd.depth_image = cv::Mat(48, 64, CV_16UC1, cv::Scalar(1500));
+  backend->write(rgbd);
+
+  trossen::data::ImageRecord depth;
+  depth.id = "cam_depth";
+  depth.width = 64;
+  depth.height = 48;
+  depth.channels = 1;
+  depth.encoding = "depth16";
+  depth.image = cv::Mat(48, 64, CV_16UC1, cv::Scalar(1500));
+  backend->write(depth);
+  backend->close();
+
+  EXPECT_EQ(mcap_backend->stats().images_written, 1u);
+  EXPECT_EQ(mcap_backend->stats().depth_images_written, 0u);
+}
+
 #ifdef TROSSEN_ENABLE_VIDEO_ENCODE
 // Restores every video-related config field a test below touches, on top of what
 // RootDatasetRestorer already covers -- so a video test can't leak "image_encoding
@@ -460,5 +525,57 @@ TEST_F(TrossenMCAPBackendTest, RecordsDepthPlaneAsLosslessVideoChannel) {
     << "color storage should be h264";
   EXPECT_NE(contents.find(R"("storage":"h265")"), std::string::npos)
     << "depth storage should be h265";
+  // Video depth holds metric codes, so the sensor's raw unit is not recorded with it.
+  EXPECT_EQ(contents.find("depth_scale_m"), std::string::npos)
+    << "video depth channel should not carry depth_scale_m";
+}
+
+// Video depth is quantized in metric units, so two cameras with different raw units must
+// give the same code for the same distance: 600 mm is 6000 units at 0.1 mm and 600 at 1 mm.
+TEST_F(TrossenMCAPBackendTest, DepthCodesFollowEachStreamsScale) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "video_depth_scale_test";
+  cfg->image_encoding = "video";
+  cfg->video_encoder = "x264";
+  std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(backend, nullptr);
+  auto mcap_backend =
+    std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
+  ASSERT_NE(mcap_backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  auto depth_record = [](const std::string& id, uint16_t raw, float scale) {
+    trossen::data::ImageRecord img;
+    img.id = id;
+    img.width = 64;
+    img.height = 48;
+    img.channels = 1;
+    img.encoding = "depth16";
+    img.image = cv::Mat(48, 64, CV_16UC1, cv::Scalar(raw));
+    img.depth_scale = scale;
+    return img;
+  };
+  backend->write(depth_record("cam_fine", 6000, 0.0001f));
+  backend->write(depth_record("cam_coarse", 600, 0.001f));
+  // Read before close(), which clears the tables.
+  const auto* fine = TrossenMCAPBackendTestPeer::depth_lut(*mcap_backend, "cam_fine");
+  const auto* coarse = TrossenMCAPBackendTestPeer::depth_lut(*mcap_backend, "cam_coarse");
+  if (fine == nullptr || coarse == nullptr) {
+    backend->close();
+    GTEST_SKIP() << "libx265 not available in this ffmpeg build";
+  }
+  const uint16_t expected = trossen::utils::build_depth_quantization_lut()[600];
+  EXPECT_EQ((*fine)[6000], expected);
+  EXPECT_EQ((*coarse)[600], expected);
+  backend->close();
 }
 #endif  // TROSSEN_ENABLE_VIDEO_ENCODE
