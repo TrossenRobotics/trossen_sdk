@@ -130,7 +130,7 @@ public:
   }
   std::shared_ptr<trossen::hw::PolledProducer::ProducerMetadata> metadata()
       const override {
-    PYBIND11_OVERRIDE(
+    PYBIND11_OVERRIDE_PURE(
         std::shared_ptr<trossen::hw::PolledProducer::ProducerMetadata>,
         PushProducer, metadata);
   }
@@ -380,6 +380,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("num_joints", &arm::MockJointStateProducer::Config::num_joints)
     .def_readwrite("rate_hz", &arm::MockJointStateProducer::Config::rate_hz)
     .def_readwrite("id", &arm::MockJointStateProducer::Config::id)
+    .def_readwrite("role", &arm::MockJointStateProducer::Config::role)
     .def_readwrite("amplitude", &arm::MockJointStateProducer::Config::amplitude);
 
   py::class_<arm::MockJointStateProducer, PolledProducer,

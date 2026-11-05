@@ -54,17 +54,17 @@ PolicyClientProducer::PolicyClientProducer(
       "PolicyClientProducer: backing PolicyClient must be configured before the "
       "producer is created (total_joint_count() is " + std::to_string(n) + ")");
   }
-  pc_metadata_.type = "policy_client";
-  pc_metadata_.id = cfg_.stream_id;
-  pc_metadata_.role = config.value("role", "");
-  check_joint_role(pc_metadata_.role, cfg_.stream_id);
-  pc_metadata_.rate_hz = config.value("poll_rate_hz", 0.0);
-  pc_metadata_.name = "Policy Client Producer";
-  pc_metadata_.description = "Emits the policy server's currently commanded action row";
-  pc_metadata_.joint_count = n;
-  pc_metadata_.joint_names.reserve(static_cast<std::size_t>(n));
+  metadata_.type = "policy_client";
+  metadata_.id = cfg_.stream_id;
+  metadata_.role = config.value("role", "");
+  check_joint_role(metadata_.role, cfg_.stream_id);
+  metadata_.rate_hz = config.value("poll_rate_hz", 0.0);
+  metadata_.name = "Policy Client Producer";
+  metadata_.description = "Emits the policy server's currently commanded action row";
+  metadata_.joint_count = n;
+  metadata_.joint_names.reserve(static_cast<std::size_t>(n));
   for (int i = 0; i < n; ++i) {
-    pc_metadata_.joint_names.push_back("joint_" + std::to_string(i));
+    metadata_.joint_names.push_back("joint_" + std::to_string(i));
   }
 }
 
