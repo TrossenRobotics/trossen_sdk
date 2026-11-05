@@ -181,6 +181,7 @@ TEST_F(PolicyClientProducerTest, PollEmitsJointStateRecordMatchingCurrentCommand
 
   nlohmann::json prod_cfg = {
     {"stream_id", "policy_action"},
+    {"role", "leader"},
     {"use_device_time", false}};
   PolicyClientProducer producer(client, prod_cfg);
 
@@ -226,6 +227,7 @@ TEST_F(PolicyClientProducerTest, UseDeviceTimeStampsFromChunkReceivedAt) {
 
   nlohmann::json prod_cfg = {
     {"stream_id", "policy_action"},
+    {"role", "leader"},
     {"use_device_time", true}};
   PolicyClientProducer producer(client, prod_cfg);
 
@@ -267,7 +269,7 @@ TEST_F(PolicyClientProducerTest, PollBeforeFirstChunkEmitsZeroVector) {
                 {make_layout("policy_left", 0, 5)}),
     std::move(fake));
 
-  PolicyClientProducer producer(client, nlohmann::json::object());
+  PolicyClientProducer producer(client, nlohmann::json{{"role", "leader"}});
 
   std::shared_ptr<RecordBase> emitted;
   producer.poll([&](std::shared_ptr<RecordBase> rec) { emitted = std::move(rec); });
@@ -287,7 +289,7 @@ TEST_F(PolicyClientProducerTest, SeqIncrementsAcrossPolls) {
                 {make_joint_sub("follower_left", "state.left")},
                 {make_layout("policy_left", 0, 2)}),
     std::move(fake));
-  PolicyClientProducer producer(client, nlohmann::json::object());
+  PolicyClientProducer producer(client, nlohmann::json{{"role", "leader"}});
 
   std::vector<uint64_t> seqs;
   for (int i = 0; i < 3; ++i) {
@@ -310,7 +312,7 @@ TEST_F(PolicyClientProducerTest, MetadataReflectsJointCount) {
                  make_layout("policy_right", 7, 7)}),
     std::move(fake));
 
-  nlohmann::json prod_cfg = {{"stream_id", "policy_action"}};
+  nlohmann::json prod_cfg = {{"stream_id", "policy_action"}, {"role", "leader"}};
   PolicyClientProducer producer(client, prod_cfg);
 
   auto md = producer.metadata();
@@ -342,7 +344,7 @@ TEST_F(PolicyClientProducerTest, ProducerRegistryCreatesByType) {
                 {make_layout("policy_left", 0, 3)}),
     std::move(fake));
 
-  nlohmann::json prod_cfg = {{"stream_id", "policy_action_via_registry"}};
+  nlohmann::json prod_cfg = {{"stream_id", "policy_action_via_registry"}, {"role", "leader"}};
   auto producer = ProducerRegistry::create("policy_client", client, prod_cfg);
   ASSERT_NE(producer, nullptr);
 

@@ -44,6 +44,7 @@ SlateBaseProducer::SlateBaseProducer(
   // Populate metadata
   metadata_.type = "base";
   metadata_.id = cfg_.stream_id;
+  metadata_.rate_hz = config.value("poll_rate_hz", 0.0);
   metadata_.name = "SLATE Base Producer";
   metadata_.description = "Produces velocity states from SLATE mobile base";
   metadata_.base_model = "SLATE";

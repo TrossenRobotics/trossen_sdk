@@ -16,12 +16,37 @@
 #include "gtest/gtest.h"
 #include "opencv2/core.hpp"
 
+#include "trossen_sdk/hw/joint_stream_info.hpp"
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/configuration/loaders/json_loader.hpp"
 #include "trossen_sdk/io/backend_registry.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_backend.hpp"
 
 using trossen::io::BackendRegistry;
+
+namespace {
+
+/// @brief Producer metadata describing image streams: stream id and its is_depth_map.
+struct CameraStreamsMetadata : public trossen::hw::PolledProducer::ProducerMetadata {
+  std::vector<std::pair<std::string, bool>> streams;
+  nlohmann::ordered_json get_stream_info() const override {
+    nlohmann::ordered_json info;
+    for (const auto& [stream, depth] : streams) {
+      info["cameras"][stream] = {{"width", 64}, {"height", 48}, {"is_depth_map", depth}};
+    }
+    return info;
+  }
+};
+
+/// @brief Metadata list for a backend that records the given image streams.
+trossen::ProducerMetadataList camera_streams(std::vector<std::pair<std::string, bool>> streams) {
+  auto metadata = std::make_shared<CameraStreamsMetadata>();
+  metadata->id = "cameras";
+  metadata->streams = std::move(streams);
+  return {metadata};
+}
+
+}  // namespace
 
 // Test fixture to load configuration before running tests
 class TrossenMCAPBackendTest : public ::testing::Test {
@@ -120,6 +145,23 @@ TEST(EpisodeId, IsTimeOrdered) {
   std::this_thread::sleep_for(std::chrono::milliseconds(2));
   const std::string later = trossen::io::backends::generate_episode_id();
   EXPECT_LT(earlier, later) << earlier << " should sort before " << later;
+}
+
+// A joint stream records its role and rate next to its joint names.
+TEST(JointStreamInfo, RecordsRoleAndRate) {
+  const auto info = trossen::hw::joint_stream_info("arm_left", {"j0", "j1"}, "leader", 30.0);
+  const auto& stream = info.at("streams").at("arm_left");
+  EXPECT_EQ(stream.at("role"), "leader");
+  EXPECT_DOUBLE_EQ(stream.at("rate_hz").get<double>(), 30.0);
+  EXPECT_EQ(stream.at("joint_names").size(), 2u);
+}
+
+// Only "leader" and "follower" are roles; anything else, including no role, is refused.
+TEST(JointStreamInfo, RejectsUnknownRoles) {
+  EXPECT_NO_THROW(trossen::hw::check_joint_role("leader", "a"));
+  EXPECT_NO_THROW(trossen::hw::check_joint_role("follower", "a"));
+  EXPECT_THROW(trossen::hw::check_joint_role("", "a"), std::invalid_argument);
+  EXPECT_THROW(trossen::hw::check_joint_role("leader_left", "a"), std::invalid_argument);
 }
 
 // Restores GlobalConfig root/dataset_id on scope exit so a test can't leak state.
@@ -271,7 +313,7 @@ TEST_F(TrossenMCAPBackendTest, RecordsCompressedVideoForColorCameras) {
   const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
   std::filesystem::remove_all(episode_dir);
 
-  auto backend = BackendRegistry::create("trossen_mcap");
+  auto backend = BackendRegistry::create("trossen_mcap", camera_streams({{"cam_color", false}}));
   ASSERT_NE(backend, nullptr);
   // BackendRegistry::create() returns the polymorphic Backend base pointer; stats()
   // is a TrossenMCAPBackend-specific accessor, not part of that base interface.
@@ -309,8 +351,8 @@ TEST_F(TrossenMCAPBackendTest, RecordsCompressedVideoForColorCameras) {
     (std::istreambuf_iterator<char>(mcap_file)), std::istreambuf_iterator<char>());
   EXPECT_NE(contents.find("CompressedVideo"), std::string::npos)
     << "channel should be registered with the CompressedVideo schema";
-  EXPECT_NE(contents.find("h264"), std::string::npos)
-    << "video_format metadata should record h264 for a color stream";
+  EXPECT_NE(contents.find(R"("storage":"h264")"), std::string::npos)
+    << "dataset_info should record h264 storage for a color stream";
 }
 
 // A record that carries a companion depth_image alongside its primary color frame
@@ -334,7 +376,8 @@ TEST_F(TrossenMCAPBackendTest, RecordsDepthPlaneAsLosslessVideoChannel) {
   const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
   std::filesystem::remove_all(episode_dir);
 
-  auto backend = BackendRegistry::create("trossen_mcap");
+  auto backend = BackendRegistry::create(
+    "trossen_mcap", camera_streams({{"cam_rgbd", false}, {"cam_rgbd_depth", true}}));
   ASSERT_NE(backend, nullptr);
   auto mcap_backend =
     std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
@@ -371,7 +414,9 @@ TEST_F(TrossenMCAPBackendTest, RecordsDepthPlaneAsLosslessVideoChannel) {
   std::ifstream mcap_file(mcap_path, std::ios::binary);
   const std::string contents(
     (std::istreambuf_iterator<char>(mcap_file)), std::istreambuf_iterator<char>());
-  EXPECT_NE(contents.find("h264"), std::string::npos) << "color channel should be h264";
-  EXPECT_NE(contents.find("h265"), std::string::npos) << "depth channel should be h265";
+  EXPECT_NE(contents.find(R"("storage":"h264")"), std::string::npos)
+    << "color storage should be h264";
+  EXPECT_NE(contents.find(R"("storage":"h265")"), std::string::npos)
+    << "depth storage should be h265";
 }
 #endif  // TROSSEN_ENABLE_VIDEO_ENCODE

@@ -70,6 +70,15 @@ public:
    */
   int get_device_index() const { return device_index_; }
 
+  /// @brief Frame width the device opened at, in pixels
+  int get_width() const { return width_; }
+
+  /// @brief Frame height the device opened at, in pixels
+  int get_height() const { return height_; }
+
+  /// @brief Frame rate the device opened at, as it reports it; 0 when it reports none
+  int get_fps() const { return fps_; }
+
   /**
    * @brief Get the underlying hardware (VideoCapture) instance
    *
@@ -90,13 +99,13 @@ private:
   /// @brief Camera device index
   int device_index_ = 0;
 
-  /// @brief Configured width
+  /// @brief Requested width, then the width the device opened at
   int width_ = 640;
 
-  /// @brief Configured height
+  /// @brief Requested height, then the height the device opened at
   int height_ = 480;
 
-  /// @brief Configured frame rate
+  /// @brief Requested frame rate, then the rate the device opened at
   int fps_ = 30;
 
   /// @brief OpenCV backend API (e.g., CAP_V4L2, CAP_ANY)
