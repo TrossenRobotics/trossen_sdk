@@ -181,10 +181,10 @@ Two settings default to a value derived from the core count:
     * - Config key
       - Meaning
     * - ``jobs``
-      - Worker threads that decode, extract and encode episodes.
+      - Worker threads that decode, extract and encode episodes, at least 1.
         Default: the number of cores, at most 8.
     * - ``encoder_threads``
-      - Parallelism level per video encoder; ``0`` leaves it to the encoder.
+      - Parallelism level per video encoder, 0 or more; ``0`` leaves it to the encoder.
         Default: cores divided by ``jobs``.
 
 Inspect the merged config (JSON plus overrides) before running:
