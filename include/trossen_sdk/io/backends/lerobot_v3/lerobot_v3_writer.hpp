@@ -67,6 +67,9 @@ public:
     /// @brief Threads per video encoder, passed as SVT-AV1 `lp=` (color) and x265
     /// `pools=` (depth); 0 sets no cap.
     int encoder_threads{0};
+    /// @brief Re-encode every compressed camera one frame per row instead of copying its
+    /// stream, so no camera drifts from its rows.
+    bool reencode_videos{false};
   };
 
   /**

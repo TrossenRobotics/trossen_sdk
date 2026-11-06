@@ -186,6 +186,7 @@ int main(int argc, char** argv) {
   opts.video_files_size_in_mb = cfg->video_files_size_in_mb;
   opts.encode_videos = cfg->encode_videos;
   opts.encoder_threads = encoder_threads;
+  opts.reencode_videos = cfg->reencode_videos;
 
   trossen::io::backends::LeRobotV3DatasetWriter writer(opts);
   if (!writer.open()) {
