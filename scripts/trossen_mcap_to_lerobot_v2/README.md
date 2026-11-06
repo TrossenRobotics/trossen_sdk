@@ -166,10 +166,7 @@ Written to the MCAP header at recording time:
 
 ## Troubleshooting
 
-**Missing Arrow/Parquet:**
-```bash
-sudo apt-get install libarrow-dev libparquet-dev
-```
+**Missing Arrow/Parquet:** install the pinned Arrow version from the Apache Arrow APT repository, as described in [Apache Parquet](../../README.md#apache-parquet).
 
 **FFmpeg not found or codec error:**
 ```bash
