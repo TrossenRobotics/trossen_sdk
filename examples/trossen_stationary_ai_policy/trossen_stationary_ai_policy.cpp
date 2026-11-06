@@ -39,6 +39,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -102,7 +103,12 @@ int main(int argc, char** argv) {
   auto j = trossen::configuration::JsonLoader::load(config_path);
   const auto overrides = cli.get_set_overrides();
   if (!overrides.empty()) {
-    j = trossen::configuration::merge_overrides(j, overrides);
+    try {
+      j = trossen::configuration::merge_overrides(j, overrides);
+    } catch (const std::invalid_argument& e) {
+      std::cerr << "Error: " << e.what() << "\n";
+      return 1;
+    }
   }
 
   if (cli.has_flag("dump-config")) {

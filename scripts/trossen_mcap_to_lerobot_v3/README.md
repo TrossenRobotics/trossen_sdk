@@ -74,9 +74,11 @@ How a camera gets its episode MP4 depends on how the recording stored its images
 
 ### Consume: in input order, on the main thread (`consume_episode`)
 
-1. Append the rows to the open data Parquet file, rolling to a new file when it is full.
-2. Stage the episode MP4; at rollover, join the staged MP4s into one file with a stream copy.
-3. Accumulate statistics, register the task, and buffer the seek metadata.
+1. The first converted episode sets the dataset's row widths, cameras and video codecs.
+   An episode with no rows is refused: nothing is written, it is logged as `[FAILED]`, and the run continues.
+2. Append the rows to the open data Parquet file, rolling to a new file when it is full.
+3. Stage the episode MP4; at rollover, join the staged MP4s into one file with a stream copy.
+4. Accumulate statistics, register the task, and buffer the seek metadata.
 
 This stage changes the shared output, so it runs on one thread, once per episode, in input order.
 v3 aggregates episodes into shared files, and every episode's seek metadata records row and timestamp offsets into those files, so the order matters.
@@ -105,6 +107,9 @@ A camera recording at the row rate pairs within half a frame period (16.7 ms at 
 
 Both converters check each recording while aligning it, log a recording that fails a check as `[FAILED]` with the reason, and continue with the next one.
 The checks are listed under "Episode fails" in the [conversion guide](../../docs/convert.rst).
+
+A write error while appending an episode stops the run, since the shared files may already hold part of it.
+The run removes the dataset it created when it stops this way, when no episode converts, or when finalize fails, so a rerun starts fresh.
 
 ---
 
@@ -166,10 +171,11 @@ Output lands in `<root>/<repository_id>/<dataset_id>/`.
 
 | Key | Omitted | config.json | Meaning |
 |---|---|---|---|
-| `jobs` | `min(cores, 8)` | `null` | Worker threads that prepare episodes (section 5.1) |
-| `encoder_threads` | `max(1, cores / jobs)` | `null` | Parallelism level per video encoder; `0` = encoder default (section 5.1) |
+| `jobs` | `min(cores, 8)` | `null` | Worker threads that prepare episodes, at least `1` (section 5.1) |
+| `encoder_threads` | `max(1, cores / jobs)` | `null` | Parallelism level per video encoder, `0` or more; `0` = encoder default (section 5.1) |
 
 `null` means the same as an omitted key.
+A value out of range stops the run with an error before anything is written.
 
 ---
 
@@ -306,6 +312,7 @@ ffmpeg -fflags +genpts -r <fps> -i <stream> -c copy -movflags +faststart out.mp4
 ```
 
 `ffprobe -count_packets` then counts the MP4's frames, and the episode fails unless the count equals the number of video messages in the recording.
+When a copied video has fewer playable frames than the episode has rows, the episode's last rows are dropped to match, and the log says how many.
 
 A camera recorded at another rate than the rows cannot be copied this way, since its stream holds one frame per recorded frame and LeRobot plays one per row.
 Its stream is decoded, each row's matched frame is written in row order (a slower camera's frames repeat, a faster camera's are skipped, as LeRobot's recorder does), and the result is encoded as in 7.1.
