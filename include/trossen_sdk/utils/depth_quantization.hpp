@@ -1,23 +1,13 @@
 /**
  * @file depth_quantization.hpp
- * @brief 16-bit depth -> 12-bit log-quantized codes, matching LeRobot's depth codec.
+ * @brief 16-bit depth to 12-bit log-quantized codes, matching LeRobot's depth codec.
  *
- * LeRobot stores depth maps as lossless HEVC Main 12 `gray12le` video. Raw depth
- * does not fit in 12 bits, so it is first log-quantized over a configurable
- * metric range: fine resolution up close, coarse far away. Any producer of
- * LeRobot depth video must use exactly the mapping the consumer expects, or
- * dequantization returns wrong distances -- silently, with plausible-looking
- * output.
+ * LeRobot stores depth maps as lossless HEVC Main 12 `gray12le` video, so raw depth is
+ * quantized to 12-bit codes over a configurable metric range: fine resolution up close,
+ * coarse far away. A reader must dequantize with the depth_min/depth_max/depth_shift/use_log
+ * the codes were written with, or it gets wrong distances with no error.
  *
- * This header is the single definition of that mapping, shared by the two
- * places that need it: the TrossenMCAP recorder (encoding depth at capture
- * time) and the offline LeRobot converter. Two independent copies would be
- * free to drift apart, and the failure mode is corrupt training data that
- * looks fine until a policy misjudges distance.
- *
- * depth_min/depth_max/depth_shift/use_log are parameters, defaulted to
- * lerobot 0.6.0's own `DepthEncoderConfig` values, so an unconfigured call
- * behaves identically to a dataset lerobot itself would produce.
+ * The parameters default to lerobot 0.6.0's `DepthEncoderConfig` values.
  */
 
 #ifndef TROSSEN_SDK__UTILS__DEPTH_QUANTIZATION_HPP_
@@ -56,14 +46,8 @@ inline constexpr double DEFAULT_DEPTH_SHIFT_M = 3.5;
 ///   `DepthEncoderConfig.use_log`.
 inline constexpr bool DEFAULT_DEPTH_USE_LOG = true;
 
-/// @brief Millimeters per meter. Raw depth_mm samples arrive in millimeters
-///   (the sensor's native mono16/Z16 unit), while depth_min_m/depth_max_m/
-///   depth_shift_m are in meters, matching lerobot's units and reading
-///   naturally in config.json.
-// Converting once here, per call, keeps that one unit boundary in a single
-// place instead of hand-converting every constant/parameter to millimeters
-// at its definition site -- and the conversion itself is negligible next to
-// the log() calls below it.
+/// @brief Millimeters per meter. Raw depth_mm samples are in millimeters, while
+///   depth_min_m/depth_max_m/depth_shift_m are in meters.
 inline constexpr double MM_PER_METER = 1000.0;
 
 /**
@@ -132,17 +116,14 @@ inline uint16_t quantize_depth_mm(uint16_t depth_mm,
 /**
  * @brief Recover an approximate depth in meters from a 12-bit code.
  *
- * Inverse of quantize_depth_mm(): undoes the scale-to-code step, then the
- * normalize step, then (in log mode) the log itself via exp().
- * @param code 12-bit code in [0, DEPTH_QMAX], as produced by
- * quantize_depth_mm().
- * @param depth_min_m Depth in meters mapped to code 0. Must match the value
- * used to encode this code, or the recovered depth will be silently wrong.
- * @param depth_max_m Depth in meters mapped to DEPTH_QMAX. Must match the
- * encoder.
- * @param depth_shift_m Pre-log offset in meters used during encoding. Must
- * match.
- * @param use_log Must match the mode (log vs. linear) used to encode this code.
+ * Inverse of quantize_depth_mm(). Every parameter must match the one the code was encoded
+ * with, or the recovered depth is wrong with no error.
+ *
+ * @param code 12-bit code in [0, DEPTH_QMAX], as produced by quantize_depth_mm().
+ * @param depth_min_m Depth in meters mapped to code 0.
+ * @param depth_max_m Depth in meters mapped to DEPTH_QMAX.
+ * @param depth_shift_m Pre-log offset in meters used during encoding.
+ * @param use_log True for codes quantized in log space, false for linear.
  * @return Approximate depth in meters.
  */
 inline double dequantize_depth_m(uint16_t code,

@@ -146,6 +146,12 @@ find_package(ZLIB REQUIRED)
 find_package(BZip2 REQUIRED)
 
 find_package(Arrow REQUIRED)
+# The Parquet reader calls the arrow::Result forms of FileReader::Make and
+# ReadTable(), which require Arrow 24.0 or newer. Arrow's package version check
+# also requires a matching major version, so the minimum is checked here.
+if(Arrow_VERSION VERSION_LESS "24.0")
+  message(FATAL_ERROR "trossen_sdk requires Arrow >= 24.0 (found ${Arrow_VERSION}).")
+endif()
 find_package(Parquet REQUIRED)
 find_package(libtrossen_arm REQUIRED)
 

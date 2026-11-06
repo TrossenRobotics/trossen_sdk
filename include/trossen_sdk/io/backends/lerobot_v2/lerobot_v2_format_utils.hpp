@@ -23,9 +23,6 @@
  *         episodes.jsonl                one line appended per episode
  *         episodes_stats.jsonl          one line appended per episode
  *         tasks.jsonl                   one line per distinct task
- *
- * v3.0 aggregates many episodes into shared, size-rolled files and tracks
- * metadata as parquet, so it does not use these helpers.
  */
 
 #ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2__LEROBOT_V2_FORMAT_UTILS_HPP_
