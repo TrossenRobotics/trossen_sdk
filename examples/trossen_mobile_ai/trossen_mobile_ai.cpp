@@ -27,6 +27,7 @@
 #include <filesystem>
 #include <iostream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -95,7 +96,12 @@ int main(int argc, char** argv) {
   auto j = trossen::configuration::JsonLoader::load(config_path);
   const auto overrides = cli.get_set_overrides();
   if (!overrides.empty()) {
-    j = trossen::configuration::merge_overrides(j, overrides);
+    try {
+      j = trossen::configuration::merge_overrides(j, overrides);
+    } catch (const std::invalid_argument& e) {
+      std::cerr << "Error: " << e.what() << "\n";
+      return 1;
+    }
   }
 
   if (cli.has_flag("dump-config")) {
@@ -175,22 +181,28 @@ int main(int argc, char** argv) {
   std::unordered_map<std::string,
     std::shared_ptr<trossen::hw::arm::TrossenArmComponent>> arm_components;
 
-  for (const auto& [id, arm_cfg] : cfg.hardware.arms) {
-    auto component = trossen::hw::HardwareRegistry::create(
-      "trossen_arm", id, arm_cfg.to_json(), true);
-    arm_components[id] =
-      std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(component);
-    std::cout << "  [ok] Arm [" << id << "] configured (" << arm_cfg.ip_address << ")\n";
-  }
-
-  // Initialize SLATE mobile base (if configured)
+  // An unreachable arm or base throws; report it instead of aborting.
   std::shared_ptr<trossen::hw::HardwareComponent> slate_base_component;
-  if (cfg.hardware.mobile_base.has_value()) {
-    slate_base_component =
-      std::make_shared<trossen::hw::base::SlateBaseComponent>("slate_base");
-    slate_base_component->configure(cfg.hardware.mobile_base->to_json());
-    trossen::hw::ActiveHardwareRegistry::register_active("slate_base", slate_base_component);
-    std::cout << "  [ok] SLATE mobile base configured\n";
+  try {
+    for (const auto& [id, arm_cfg] : cfg.hardware.arms) {
+      auto component = trossen::hw::HardwareRegistry::create(
+        "trossen_arm", id, arm_cfg.to_json(), true);
+      arm_components[id] =
+        std::dynamic_pointer_cast<trossen::hw::arm::TrossenArmComponent>(component);
+      std::cout << "  [ok] Arm [" << id << "] configured (" << arm_cfg.ip_address << ")\n";
+    }
+
+    // Initialize SLATE mobile base (if configured)
+    if (cfg.hardware.mobile_base.has_value()) {
+      slate_base_component =
+        std::make_shared<trossen::hw::base::SlateBaseComponent>("slate_base");
+      slate_base_component->configure(cfg.hardware.mobile_base->to_json());
+      trossen::hw::ActiveHardwareRegistry::register_active("slate_base", slate_base_component);
+      std::cout << "  [ok] SLATE mobile base configured\n";
+    }
+  } catch (const std::exception& e) {
+    std::cerr << "Error: " << e.what() << "\n";
+    return 1;
   }
 
   // ──────────────────────────────────────────────────────────
@@ -274,12 +286,6 @@ int main(int argc, char** argv) {
 
   if (!cfg.observers.empty()) {
     std::cout << "Creating observers...\n";
-    // Fail loud on construction errors so a typo'd observer type or missing build flag
-    // does not silently leave the operator with an empty viewer. On failure we print a
-    // diagnostic hint (registered types + rerun build flag) and `return 1`. Returning
-    // (rather than rethrowing) keeps `mgr` in scope so its destructor runs ~SessionManager
-    // -> shutdown(), which joins producer threads cleanly; an exception escaping main()
-    // would invoke std::terminate before unwinding on most GCC builds.
     for (const auto& obs_cfg : cfg.observers) {
       if (!obs_cfg.enabled) {
         std::cout << "  [disabled] Observer [" << obs_cfg.id << "] type=" << obs_cfg.type

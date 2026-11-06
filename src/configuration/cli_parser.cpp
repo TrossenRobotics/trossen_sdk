@@ -6,6 +6,7 @@
 #include "trossen_sdk/configuration/cli_parser.hpp"
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <iostream>
 #include <sstream>
@@ -116,6 +117,32 @@ std::unordered_map<std::string, std::string> CliParser::get_set_overrides() cons
   return result;
 }
 
+namespace {
+
+/// @brief The child of `node` named by `segment`, creating an object member when missing.
+///        In an array, `segment` must be the index of an existing element.
+/// @throws std::invalid_argument when `segment` does not name a child `--set` can reach.
+nlohmann::json& child_for_set(nlohmann::json& node, const std::string& segment,
+                              const std::string& key) {
+  if (node.is_array()) {
+    const bool numeric = !segment.empty() &&
+      std::all_of(segment.begin(), segment.end(), [](unsigned char c) { return std::isdigit(c); });
+    if (!numeric || std::stoull(segment) >= node.size()) {
+      throw std::invalid_argument("--set " + key + ": '" + segment +
+                                  "' is not an index of an existing array element");
+    }
+    return node[std::stoull(segment)];
+  }
+  if (node.is_null()) node = nlohmann::json::object();
+  if (!node.is_object()) {
+    throw std::invalid_argument("--set " + key + ": '" + segment +
+                                "' is inside a value, not an object");
+  }
+  return node[segment];
+}
+
+}  // namespace
+
 nlohmann::json merge_overrides(
   const nlohmann::json& base,
   const std::unordered_map<std::string, std::string>& overrides)
@@ -135,22 +162,20 @@ nlohmann::json merge_overrides(
       continue;
     }
 
-    // Navigate to the nested location
+    // Navigate to the nested location. A numeric segment indexes an existing array element.
     nlohmann::json* current = &result;
     for (size_t i = 0; i < path.size() - 1; ++i) {
-      const auto& segment_key = path[i];
-      if (!current->contains(segment_key)) {
-        (*current)[segment_key] = nlohmann::json::object();
-      }
-      current = &((*current)[segment_key]);
+      current = &child_for_set(*current, path[i], key);
     }
 
     // Set the value (try to parse as number or bool, otherwise string)
-    const std::string& final_key = path.back();
+    nlohmann::json& target = child_for_set(*current, path.back(), key);
 
-    // Try to parse as boolean
-    if (value == "true" || value == "false") {
-      (*current)[final_key] = (value == "true");
+    // A key that already holds a string stays a string, so a numeric serial number is kept.
+    if (target.is_string()) {
+      target = value;
+    } else if (value == "true" || value == "false") {
+      target = (value == "true");
     } else if (!value.empty() && (std::isdigit(value[0]) ||
                value[0] == '-' || value[0] == '.')) {
       // Try to parse as number - only when the entire string is consumed.
@@ -161,24 +186,24 @@ nlohmann::json merge_overrides(
           std::size_t pos = 0;
           const double dval = std::stod(value, &pos);
           if (pos == value.size()) {
-            (*current)[final_key] = dval;
+            target = dval;
             parsed = true;
           }
         } else {
           std::size_t pos = 0;
           const int64_t ival = std::stoll(value, &pos);
           if (pos == value.size()) {
-            (*current)[final_key] = ival;
+            target = ival;
             parsed = true;
           }
         }
       } catch (const std::exception&) {}
       if (!parsed) {
-        (*current)[final_key] = value;
+        target = value;
       }
     } else {
       // Default to string
-      (*current)[final_key] = value;
+      target = value;
     }
   }
 
