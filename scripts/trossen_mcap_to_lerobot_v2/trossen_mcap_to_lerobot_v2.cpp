@@ -149,19 +149,20 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
   std::unique_ptr<parquet::ParquetFileReader> parquet_reader =
       parquet::ParquetFileReader::OpenFile(parquet_path.string(), false);
 
-  std::unique_ptr<parquet::arrow::FileReader> arrow_reader;
-  auto st = parquet::arrow::FileReader::Make(arrow::default_memory_pool(),
-                                             std::move(parquet_reader), &arrow_reader);
+  auto reader_result =
+      parquet::arrow::FileReader::Make(arrow::default_memory_pool(), std::move(parquet_reader));
 
-  if (!st.ok()) {
-    throw std::runtime_error("Failed to create FileReader: " + st.ToString());
+  if (!reader_result.ok()) {
+    throw std::runtime_error("Failed to create FileReader: " + reader_result.status().ToString());
   }
+  std::unique_ptr<parquet::arrow::FileReader> arrow_reader =
+      std::move(reader_result).ValueUnsafe();
 
-  std::shared_ptr<arrow::Table> table;
-  st = arrow_reader->ReadTable(&table);
-  if (!st.ok()) {
-    throw std::runtime_error("Failed to read Parquet table: " + st.ToString());
+  auto table_result = arrow_reader->ReadTable();
+  if (!table_result.ok()) {
+    throw std::runtime_error("Failed to read Parquet table: " + table_result.status().ToString());
   }
+  std::shared_ptr<arrow::Table> table = std::move(table_result).ValueUnsafe();
 
   nlohmann::json stats;
 
