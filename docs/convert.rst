@@ -100,6 +100,7 @@ Point it at a different config with ``--config <path>``.
         "fps":                   30.0,                             // Frame rate written to info.json
         "encode_videos":         true,                             // Set false to skip MP4 encoding
         "keep_images":           false,                            // Keep images/ after encoding
+        "reencode_videos":       false,                            // Re-encode every camera; slower
         "encoder_threads":       2,                                // FFmpeg threads per camera
         "jobs":                  null,                             // Recordings at once; null = auto
         "max_image_queue":       10,                               // Back-pressure bound
@@ -132,6 +133,9 @@ Key fields to update for each new dataset:
         Should match the camera poll rate used at recording time.
     * - ``encode_videos``
       - Disable to produce Parquet only (useful for joint-state-only pipelines)
+    * - ``reencode_videos``
+      - Re-encode every compressed-video camera one frame per row instead of copying it.
+        Slower, but removes the drift that fails long episodes.
 
 CLI Overrides
 -------------
@@ -323,7 +327,13 @@ An episode fails when:
 - rows are missing for more than 200 ms in one gap, or for more than 2% of the episode in total.
   Shorter gaps are listed in the log with their length and the stream that had no sample.
 - a stream-copied camera plays some row's image more than 3 frames (about 100 ms at 30 fps) away from the frame matched to it.
+  Camera clocks run slightly off the row rate, so long episodes drift, and a camera that started before the other streams starts its video early.
+  With ``reencode_videos`` set to ``true``, every camera is re-encoded one frame per row instead, so each row plays its matched frame.
+  On a 32-core machine this takes about 0.6 minutes per minute of recording with 3 color cameras, where copying takes seconds.
 - a camera recorded more than 2% fewer frames over the rows' span than the ``fps`` it recorded promises (it dropped frames or ran slower than that rate, so rows would repeat images).
+- a camera's video would have another codec than the dataset's earlier episodes hold, such as AV1 for a raw-image recording in a dataset of copied H.264 videos.
+  The log names the camera and both codecs.
+  One dataset holds one codec per camera, so convert a folder that mixes raw-image and compressed-video recordings with ``reencode_videos`` set to ``true``, or first transcode the raw-image recordings with ``trossen_mcap_transcode_video``.
 
 What's Next
 ===========
