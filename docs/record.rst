@@ -76,10 +76,13 @@ A recording session proceeds through the following phases:
     The ``SessionManager`` opens a new ``.mcap`` file, starts all producers, and begins logging.
     The process runs for at most ``session.max_duration`` seconds.
     If your config defines an ``observers`` block, each observer receives the same records in parallel — see :doc:`/visualize` for the ReRun live-viewer setup.
+    Press right arrow to end the episode early and keep it, or left arrow to discard it and record it again.
 #.  **Reset.**
-    After each episode, the demo pauses for ``session.reset_duration`` seconds before starting the next episode.
+    After each episode, including the last, the demo pauses as set by ``session.reset_duration`` (see :doc:`/configuration`).
+    Press right arrow to skip the pause, or left arrow to discard the episode just recorded and record it again.
 #.  **Shutdown.**
-    After ``session.max_episodes`` episodes the teleop thread stops and the process exits cleanly.
+    Once the dataset holds ``session.max_episodes`` episodes, the demo runs the reset, prints the next episode's header, reports that collection is complete, stops the teleop thread and exits.
+    Ctrl+C stops the session at any point.
 
 Episodes are written to ``<backend.root>/<backend.dataset_id>/<id>.mcap``, where ``<id>`` is a UUIDv7 (e.g. ``0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap``).
 Because UUIDv7 leads with a timestamp, filenames are globally unique and sort chronologically.

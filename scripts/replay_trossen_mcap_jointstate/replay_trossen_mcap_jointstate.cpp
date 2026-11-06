@@ -29,6 +29,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
@@ -147,7 +148,12 @@ int main(int argc, char** argv) {
   auto j = trossen::configuration::JsonLoader::load(config_path);
   const auto overrides = cli.get_set_overrides();
   if (!overrides.empty()) {
-    j = trossen::configuration::merge_overrides(j, overrides);
+    try {
+      j = trossen::configuration::merge_overrides(j, overrides);
+    } catch (const std::invalid_argument& e) {
+      std::cerr << "Error: " << e.what() << "\n";
+      return 1;
+    }
   }
 
   ReplayConfig cfg = load_replay_config(j);
