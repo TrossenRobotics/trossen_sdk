@@ -143,6 +143,7 @@ int main(int argc, char** argv) {
   const int chunk_size = lerobot_config->chunk_size;
   const std::string license = lerobot_config->license;
   const bool keep_images = lerobot_config->keep_images;
+  const bool reencode_videos = lerobot_config->reencode_videos;
 
   // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -212,7 +213,8 @@ int main(int argc, char** argv) {
   trossen::io::backends::LeRobotV2DatasetWriter writer({dataset_root_dir, repository_id,
                                                         dataset_id, license, chunk_size,
                                                         lerobot_config->task_name,
-                                                        encoder_threads, keep_images});
+                                                        encoder_threads, keep_images,
+                                                        reencode_videos});
 
   // Workers prepare recordings concurrently; the main thread commits them in input order,
   // which is what gives each its episode index.
@@ -241,6 +243,23 @@ int main(int argc, char** argv) {
               << "\n";
     std::cout << std::string(70, '=') << "\n";
 
+    if (ok) {
+      // A throw would leave main() with the workers still running, which terminates the
+      // process, so it fails the recording instead.
+      try {
+        ok = writer.episode_fits_dataset(*prepared);
+        if (!ok) {
+          std::cerr << "  Every episode of a dataset needs the same codec per camera. Convert "
+                    << "into a new dataset_id with lerobot_v2_backend.reencode_videos=true, or "
+                    << "transcode raw-image recordings first with "
+                    << "trossen_mcap_transcode_video.\n";
+        }
+      } catch (const std::exception& e) {
+        std::cerr << "Error: Failed to read the existing " << v2::JSON_INFO << ": "
+                  << e.what() << "\n";
+        ok = false;
+      }
+    }
     if (ok) {
       // A throw would leave main() with the workers still running, which terminates the
       // process, so it takes the failed-commit path instead.

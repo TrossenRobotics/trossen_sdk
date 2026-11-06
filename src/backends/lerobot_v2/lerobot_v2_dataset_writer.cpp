@@ -163,6 +163,12 @@ bool LeRobotV2DatasetWriter::prepare_episode(const std::filesystem::path& mcap_f
       }
     }
 
+    // A camera whose clock runs off the row rate, or that drops frames, drifts from its rows
+    // as the episode goes on, and this format cannot start a copied video at row 0's frame;
+    // one frame per row keeps every row on its matched frame. Every camera is re-encoded, so
+    // each one keeps a single codec across the dataset.
+    if (opts_.reencode_videos) copied_streams.clear();
+
     // A camera that free-ran short would otherwise leave more parquet rows than its
     // remuxed video has frames; trim the whole episode to whatever every stream-copied
     // camera actually covers (shared with the v3 converter).
@@ -170,6 +176,8 @@ bool LeRobotV2DatasetWriter::prepare_episode(const std::filesystem::path& mcap_f
                                                                 /*start_offset_applied=*/false);
     if (!trossen::io::backends::check_video_alignment(ep, copied_streams,
                                                       /*start_offset_applied=*/false)) {
+      std::cerr << "  Convert into a new dataset_id with lerobot_v2_backend.reencode_videos=true "
+                << "to re-encode every camera one frame per row; conversion takes longer.\n";
       return false;
     }
 
@@ -283,6 +291,21 @@ bool LeRobotV2DatasetWriter::prepare_episode(const std::filesystem::path& mcap_f
   }
 
   return true;
+}
+
+bool LeRobotV2DatasetWriter::episode_fits_dataset(const PreparedEpisode& pe) const {
+  namespace fs = std::filesystem;
+  const fs::path info_path = dataset_path() / v2::METADATA_DIR / v2::JSON_INFO;
+  if (!fs::exists(info_path)) return true;
+  std::map<std::string, std::string> codecs;
+  for (const auto& [camera_name, video] : pe.videos) {
+    const auto copied = pe.remuxed_codecs.find(camera_name);
+    codecs[camera_name] = copied != pe.remuxed_codecs.end()
+                            ? copied->second.codec
+                            : std::string(trossen::io::backends::kColorCodec);
+  }
+  std::ifstream info_file(info_path);
+  return trossen::io::backends::episode_codecs_match(nlohmann::json::parse(info_file), codecs);
 }
 
 bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe) {

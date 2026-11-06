@@ -44,6 +44,9 @@ public:
     int encoder_threads{0};
     /// @brief Keep the extracted frames, for images/, once the videos are encoded.
     bool keep_images{false};
+    /// @brief Re-encode every compressed camera one frame per row instead of copying its
+    ///        stream.
+    bool reencode_videos{false};
   };
 
   /// @brief One recording converted into a scratch folder, not yet part of the dataset.
@@ -86,6 +89,17 @@ public:
    */
   bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
                        const std::filesystem::path& tmp_dir, PreparedEpisode& out) const;
+
+  /**
+   * @brief Whether a prepared episode's videos keep the codecs the dataset's info.json names.
+   *
+   * Nothing is written either way.
+   *
+   * @param pe Episode from prepare_episode().
+   * @return true if the dataset has no info.json yet or every camera keeps its codec.
+   * @throws nlohmann::json::exception if info.json is not valid JSON.
+   */
+  bool episode_fits_dataset(const PreparedEpisode& pe) const;
 
   /**
    * @brief Write a prepared episode into the dataset as the next episode index.
