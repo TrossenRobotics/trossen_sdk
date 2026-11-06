@@ -327,6 +327,8 @@ bool LeRobotV3DatasetWriter::encode_depth_codes(
   const fs::path& raw_path, int width, int height, size_t frame_count,
   const fs::path& out_mp4) const
 {
+  // The encode is lossless, so the preset changes only speed and size: superfast encodes
+  // about 2.5x faster than the default for about 24% larger files.
   // x265 pools= caps its worker pool. ffmpeg's -threads only reaches x265's
   // frame-threads, which leaves most of the pool uncapped, so use pools=.
   std::ostringstream x265_params;
@@ -339,7 +341,8 @@ bool LeRobotV3DatasetWriter::encode_depth_codes(
   cmd << "ffmpeg -y -loglevel error -f rawvideo -pix_fmt gray12le -s " << width << "x" << height
       << " -framerate " << opts_.fps << " -i " << trossen::utils::shell_quote(raw_path)
       << " -frames:v " << frame_count
-      << " -c:v libx265 -x265-params " << x265_params.str() << " -pix_fmt gray12le -r "
+      << " -c:v libx265 -preset superfast -x265-params " << x265_params.str()
+      << " -pix_fmt gray12le -r "
       << opts_.fps << " " << trossen::utils::shell_quote(out_mp4);
   const int ret = std::system(cmd.str().c_str());
   if (ret != 0) {
@@ -585,8 +588,14 @@ try {
     for (const auto& [name, vs] : video_streams) {
       if (described.at(name).at("fps").get<double>() == opts_.fps) copied.emplace(name, vs);
     }
+    // A camera whose clock runs off the row rate, or that drops frames, drifts from its
+    // rows as the episode goes on; one frame per row keeps every row on its matched frame.
+    // Every camera is re-encoded, so each one keeps a single codec across the dataset.
+    if (opts_.reencode_videos) copied.clear();
     clamp_episode_to_video_frame_counts(out.ep, copied, /*start_offset_applied=*/true);
     if (!check_video_alignment(out.ep, copied, /*start_offset_applied=*/true)) {
+      std::cerr << "  Convert into a new dataset_id with lerobot_v3_backend.reencode_videos=true "
+                << "to re-encode every camera one frame per row; conversion takes longer.\n";
       return out;  // ok == false
     }
 

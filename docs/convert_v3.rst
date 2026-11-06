@@ -100,7 +100,8 @@ Point it at a different config with ``--config <path>``.
         "data_files_size_in_mb":  100,                              // Size budget of each data file
         "video_files_size_in_mb": 200,                              // Size budget of each video file
         "jobs":                   null,                             // Worker threads; null = auto
-        "encoder_threads":        null                              // Threads per video encoder; null = auto
+        "encoder_threads":        null,                             // Threads per video encoder; null = auto
+        "reencode_videos":        false                             // Re-encode every camera; slower
       }
     }
 
@@ -125,6 +126,9 @@ Key fields to update for each new dataset:
         Must be a whole number, and should match the frame rate the cameras recorded at.
     * - ``encode_videos``
       - Disable to produce Parquet only (useful for joint-state-only pipelines)
+    * - ``reencode_videos``
+      - Re-encode every compressed-video camera one frame per row instead of copying it.
+        Slower, but removes the drift that fails long episodes.
     * - ``overwrite_existing``
       - The tool always writes a new dataset.
         With ``false``, an existing dataset folder stops the run before anything is written; with ``true``, it is removed first.
@@ -298,6 +302,10 @@ Other cameras differ:
     ``video.depth_min``, ``video.depth_max``, ``video.shift`` and ``video.use_log`` describe the mapping back to approximate meters.
     A sensor's invalid value 0 also becomes code 0, so invalid pixels decode as 0.01 m.
 -   A camera recorded as compressed video is copied without re-encoding and keeps its codec: H.264 (``yuv420p``) for color, HEVC (``gray12le``) for depth.
+-   A copied camera plays one recorded frame per row, so a camera clock slightly off the row rate drifts over a long episode.
+    An episode in which some row's image is more than 3 frames from its matched frame fails.
+    With ``reencode_videos`` set to ``true``, every camera is re-encoded one frame per row instead: color as AV1, depth as lossless HEVC.
+    On a 32-core machine this takes about 1.5 minutes per minute of 4-camera recording, where copying takes seconds.
 -   With ``encode_videos`` set to ``false``, there are no camera features and ``video_path`` is ``null``.
 
 Dataset Statistics (stats.json)

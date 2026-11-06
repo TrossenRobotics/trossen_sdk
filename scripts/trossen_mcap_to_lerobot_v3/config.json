@@ -13,6 +13,7 @@
     "data_files_size_in_mb": 100,
     "video_files_size_in_mb": 200,
     "jobs": null,
-    "encoder_threads": null
+    "encoder_threads": null,
+    "reencode_videos": false
   }
 }

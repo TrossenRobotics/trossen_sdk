@@ -44,6 +44,9 @@ public:
     int encoder_threads{0};
     /// @brief Keep the extracted frames, for images/, once the videos are encoded.
     bool keep_images{false};
+    /// @brief Re-encode every compressed camera one frame per row instead of copying its
+    ///        stream.
+    bool reencode_videos{false};
   };
 
   /// @brief One recording converted into a scratch folder, not yet part of the dataset.

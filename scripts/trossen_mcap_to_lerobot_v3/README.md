@@ -151,6 +151,7 @@ Output lands in `<root>/<repository_id>/<dataset_id>/`.
 | `task_name` | `perform a generic task` | `perform a generic task` | Fallback only: used for episodes whose MCAP embeds no task |
 | `overwrite_existing` | `false` | `false` | Delete an existing dataset first. Without it, an existing dataset stops the run before anything is written |
 | `encode_videos` | `true` | `true` | Encode and concatenate camera video |
+| `reencode_videos` | `false` | `false` | Re-encode every compressed-video camera one frame per row instead of copying it (section 7.2) |
 | `fps` | `30` | `30` | Row and video rate in frames per second, a whole number (section 6.1) |
 
 ### File partitioning
@@ -286,13 +287,14 @@ Depth:
 
 ```
 ffmpeg -f rawvideo -pix_fmt gray12le -s <W>x<H> -framerate <fps> -i <temp>.gray12.raw -frames:v <n> \
-       -c:v libx265 -x265-params lossless=1[:pools=<encoder_threads>] -pix_fmt gray12le -r <fps> out.mp4
+       -c:v libx265 -preset superfast -x265-params lossless=1[:pools=<encoder_threads>] -pix_fmt gray12le -r <fps> out.mp4
 ```
 
 16-bit depth is log-quantized to 12-bit codes through a precomputed 65536-entry lookup table, then encoded losslessly.
 The quantization uses lerobot 0.6.0's `DepthEncoderConfig` values: shift 3.5 m, range 0.01 to 10 m, 4095 codes.
 Raw depth is in millimeters, so the parameters are scaled by 1000.
 Lossless HEVC makes depth video much larger than color, so budget disk for it.
+The encode is lossless, so the `superfast` preset changes only speed and size: about 2.5x faster than the default preset for files about 24% larger.
 
 ### 7.2 Compressed-video recordings
 
@@ -307,6 +309,10 @@ ffmpeg -fflags +genpts -r <fps> -i <stream> -c copy -movflags +faststart out.mp4
 
 A camera recorded at another rate than the rows cannot be copied this way, since its stream holds one frame per recorded frame and LeRobot plays one per row.
 Its stream is decoded, each row's matched frame is written in row order (a slower camera's frames repeat, a faster camera's are skipped, as LeRobot's recorder does), and the result is encoded as in 7.1.
+
+A copied camera plays one recorded frame per row, so a camera clock slightly off the row rate drifts over a long episode, and an episode that drifts more than 3 frames fails.
+With `reencode_videos=true`, every camera is decoded and re-encoded one frame per row as above, which removes the drift.
+On a 32-core machine this takes about 1.5 minutes per minute of 4-camera recording, where copying takes seconds.
 
 ---
 
