@@ -143,7 +143,8 @@ A camera recorded at another rate is decoded and re-encoded with one frame per r
 A stream copy starts at the camera's first recorded frame, while row 0 starts once every stream is live.
 A camera that started before the last stream therefore has frames in front of row 0, and LeRobot v2 has no per-episode start offset to skip them, so its images lag the joints.
 Each such camera is reported with a `Warning: episode <index> <camera> video is offset by N frame(s)` line, where N is the lag in source frames.
-`trossen_mcap_to_lerobot_v3` applies the offset through `from_timestamp`; use it when images must match the joints exactly.
+An episode in which some row's image is more than 3 frames (about 100 ms at 30 fps) from the frame matched to it fails, whether from the start offset or from dropped frames.
+`trossen_mcap_to_lerobot_v3` applies the offset through `from_timestamp`, so it converts an episode that fails here only because of the start offset; use it when images must match the joints exactly.
 
 ---
 
