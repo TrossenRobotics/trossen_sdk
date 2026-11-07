@@ -322,7 +322,7 @@ ReRun-specific fields (used only when ``type`` is ``"rerun"``):
 
     ReRun support is a build-time option.
     Configure with ``-DTROSSEN_ENABLE_RERUN_OBSERVER=ON`` to compile the observer in.
-    With the option off (default), any ``"type": "rerun"`` entry in your config fails to load with an "unknown observer type" error.
+    With the option off (default), the demo skips any ``"type": "rerun"`` observer with a warning and records without it.
     See :doc:`/visualize` for the full setup walkthrough.
 
 Session
@@ -515,6 +515,9 @@ This is the fastest way to tweak one value without editing JSON:
                 --set backend.dataset_id=trial_01
 
 Flags can be repeated.
+A number in the key indexes an existing array element, as in ``--set hardware.cameras.0.serial_number=130322272628``.
+A key that already holds a string keeps the value as a string; otherwise ``true`` and ``false`` become booleans and a whole number or decimal becomes a number.
+A key that indexes past the end of an array, or names a member inside a value that is not an object, stops the tool with an error.
 Overrides are applied after the JSON file is loaded and before the config is validated, so you can inspect the merged result without running hardware by appending ``--dump-config``.
 
 What's Next
