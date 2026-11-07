@@ -88,6 +88,7 @@ Episodes are written to ``<backend.root>/<backend.dataset_id>/<id>.mcap``, where
 Because UUIDv7 leads with a timestamp, filenames are globally unique and sort chronologically.
 
 Re-running the demo against the same ``dataset_id`` appends rather than overwriting.
+``session.max_episodes`` counts the episodes already in the dataset, so raise it to record more; a dataset that already holds ``max_episodes`` episodes records nothing.
 A dataset holds one setup: if the robot name, a joint stream's role or joint names, a camera's size or depth flag, or the mobile base differ from the dataset's existing episodes, the first episode fails to start and the log lists each difference.
 Record into a new ``dataset_id``, or restore the setup.
 
@@ -127,5 +128,7 @@ With ``.mcap`` episodes on disk:
     See :doc:`/visualize`.
 -   Replay an episode back on hardware.
     See :doc:`/replay`.
+-   Convert them to LeRobot V3.
+    See :doc:`/convert_v3`.
 -   Convert them to LeRobot V2 for training.
     See :doc:`/convert`.

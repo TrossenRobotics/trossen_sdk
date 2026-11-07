@@ -28,6 +28,7 @@ The tool is produced by the standard build:
     cd build
     cmake ..
     make trossen_mcap_to_lerobot_v2
+    cd ..
 
 The resulting binary lives at ``build/scripts/trossen_mcap_to_lerobot_v2``.
 
@@ -95,18 +96,15 @@ Point it at a different config with ``--config <path>``.
         "root":                  "~/.cache/huggingface/lerobot",   // Output directory
         "repository_id":         "TrossenRoboticsCommunity",       // Top-level folder name
         "dataset_id":            "mcap_converted_dataset",         // Sub-folder for this dataset
-        "robot_name":            "trossen_solo_ai",                // Stored in meta/info.json
         "task_name":             "perform a generic task",         // Default task description
-        "fps":                   30.0,                             // Frame rate written to info.json
+        "fps":                   30.0,                             // Row and video rate; a whole number
         "encode_videos":         true,                             // Set false to skip MP4 encoding
         "keep_images":           false,                            // Keep images/ after encoding
         "reencode_videos":       false,                            // Re-encode every camera; slower
-        "encoder_threads":       2,                                // FFmpeg threads per camera
+        "encoder_threads":       null,                             // Threads per video encoder; null = cores / jobs
         "jobs":                  null,                             // Recordings at once; null = auto
-        "max_image_queue":       10,                               // Back-pressure bound
-        "png_compression_level": 5,                                // Intermediate PNG quality
         "chunk_size":            2,                                // Episodes per chunk-NNN folder
-        "overwrite_existing":    false                             // Refuse to clobber existing files
+        "overwrite_existing":    false                             // Refuse to replace an existing dataset
       }
     }
 
@@ -123,19 +121,25 @@ Key fields to update for each new dataset:
       - Directory where the dataset tree is written
     * - ``repository_id`` / ``dataset_id``
       - Identify the output dataset; produce ``<root>/<repository_id>/<dataset_id>/``
-    * - ``robot_name``
-      - Written into ``meta/info.json`` so consumers can distinguish robot types
     * - ``task_name``
       - Task for episodes whose recording carries none.
         Each distinct task gets its own line in ``meta/tasks.jsonl``.
     * - ``fps``
-      - Frame rate stored in ``info.json``.
-        Should match the camera poll rate used at recording time.
+      - Rate of the rows and videos in frames per second, stored in ``info.json``; default 30.
+        Must be a whole number, and should match the frame rate the cameras recorded at.
     * - ``encode_videos``
-      - Disable to produce Parquet only (useful for joint-state-only pipelines)
+      - Disable to produce Parquet only, with no camera features (useful for joint-state-only pipelines)
     * - ``reencode_videos``
       - Re-encode every compressed-video camera one frame per row instead of copying it.
         Slower, but removes the drift that fails long episodes.
+    * - ``encoder_threads``
+      - Parallelism level of each AV1 encode.
+        ``null`` (the default) uses the cores divided by ``jobs``; ``0`` leaves it to the encoder.
+    * - ``overwrite_existing``
+      - The tool always writes a new dataset.
+        With ``false``, an existing dataset folder stops the run before anything is written; with ``true``, it is removed first.
+
+``robot_type`` in ``info.json`` is the ``robot_name`` the recording carries.
 
 CLI Overrides
 -------------
@@ -151,7 +155,6 @@ This is useful for batch scripting without editing the config file:
 
             ./build/scripts/trossen_mcap_to_lerobot_v2 \
                 ~/.trossen_sdk/solo_dataset/ \
-                --set lerobot_v2_backend.robot_name=trossen_solo_ai \
                 --set lerobot_v2_backend.dataset_id=solo_v1
 
     .. group-tab:: Stationary
@@ -160,7 +163,6 @@ This is useful for batch scripting without editing the config file:
 
             ./build/scripts/trossen_mcap_to_lerobot_v2 \
                 ~/.trossen_sdk/stationary_dataset/ \
-                --set lerobot_v2_backend.robot_name=trossen_stationary_ai \
                 --set lerobot_v2_backend.dataset_id=stationary_v1
 
     .. group-tab:: Mobile
@@ -169,7 +171,6 @@ This is useful for batch scripting without editing the config file:
 
             ./build/scripts/trossen_mcap_to_lerobot_v2 \
                 ~/.trossen_sdk/mobile_dataset/ \
-                --set lerobot_v2_backend.robot_name=trossen_mobile_ai \
                 --set lerobot_v2_backend.dataset_id=mobile_v1
 
 Inspect the merged config (JSON plus overrides) before running:
@@ -219,21 +220,27 @@ Each episode produces one ``.parquet`` file (SNAPPY compression) with the follow
     * - Column
       - Type
       - Description
+    * - ``action``
+      - ``fixed_size_list<float32>``
+      - Concatenated leader joint positions, followed on a mobile robot by the base's linear and angular velocity
+    * - ``observation.state``
+      - ``fixed_size_list<float32>``
+      - Concatenated follower joint positions, followed on a mobile robot by the base's linear and angular velocity
     * - ``timestamp``
       - ``float32``
-      - Seconds from first frame (``0.0`` at start)
-    * - ``observation.state``
-      - ``list<float64>``
-      - Concatenated follower joint observations, followed on a mobile robot by the base's linear and angular velocity
-    * - ``action``
-      - ``list<float64>``
-      - Concatenated leader joint actions, followed on a mobile robot by the base's linear and angular velocity
+      - Seconds from the first row, at the row rate (``fps``)
+    * - ``frame_index``
+      - ``int64``
+      - Zero-based row within the episode
     * - ``episode_index``
       - ``int64``
       - Zero-based episode number
-    * - ``frame_index``
+    * - ``index``
       - ``int64``
-      - Zero-based frame within episode
+      - Zero-based row across the whole dataset
+    * - ``task_index``
+      - ``int64``
+      - Row of the episode's task in ``meta/tasks.jsonl``
 
 Dataset Metadata (info.json)
 ============================
@@ -245,16 +252,18 @@ Dataset Metadata (info.json)
       "robot_type": "<robot_name>",
       "fps": 30,
       "features": {
-        "observation.state": { "dtype": "float32", "shape": [<N>], "names": ["joint_0", ...] },
-        "action":            { "dtype": "float32", "shape": [<N>], "names": ["joint_0", ...] },
+        "observation.state": { "dtype": "float32", "shape": [<N>], "names": ["left_joint_0.pos", ...] },
+        "action":            { "dtype": "float32", "shape": [<N>], "names": ["left_joint_0.pos", ...] },
         "observation.images.<camera_id>": {
           "dtype": "video",
           "shape": [<H>, <W>, 3],
-          "video_info": { "video.fps": 30.0, "video.codec": "av1", "video.pix_fmt": "yuv420p" }
+          "info": { "video.fps": 30, "video.codec": "av1", "video.pix_fmt": "yuv420p", ... }
         },
         "timestamp":     { "dtype": "float32", "shape": [1] },
         "frame_index":   { "dtype": "int64",   "shape": [1] },
-        "episode_index": { "dtype": "int64",   "shape": [1] }
+        "episode_index": { "dtype": "int64",   "shape": [1] },
+        "index":         { "dtype": "int64",   "shape": [1] },
+        "task_index":    { "dtype": "int64",   "shape": [1] }
       },
       "total_episodes": <N>,
       "total_frames":   <N>
@@ -304,10 +313,16 @@ Episode ordering
 ----------------
 
 The tool assigns LeRobot episode indices in recording order, by the ``recording_start_time`` in each file's metadata, so a newly recorded episode sorts to the end.
+To add recordings to a dataset, add them to the input folder and convert the whole set again with ``overwrite_existing`` set to ``true``.
 A recording that fails gets no index, so the indices have no gaps.
 
 This assumes the recording clocks are consistent.
 When merging ``.mcap`` files from multiple machines whose clocks are not synchronized, the cross-machine ordering is only as reliable as those clocks.
+
+"dataset already exists"
+------------------------
+
+Set ``overwrite_existing`` to ``true`` to replace the dataset, or choose another ``dataset_id``.
 
 Episode fails
 -------------
