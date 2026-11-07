@@ -22,6 +22,7 @@
 #include <string>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "foxglove/channel.hpp"
@@ -181,6 +182,9 @@ public:
   std::string current_output_path() const override { return path_.string(); }
 
 private:
+  /// @brief Gives the unit tests access to the private state.
+  friend class TrossenMCAPBackendTestPeer;
+
   /**
    * @brief Close all channels and writer without deleting files.
    *
@@ -255,7 +259,7 @@ private:
     foxglove::RawChannel* channel{nullptr};
     /// @brief True for a lossless H.265 depth stream, false for H.264 color.
     bool depth{false};
-    /// @brief Depth quantization table; depth streams only.
+    /// @brief Raw-unit to code table; integer depth only.
     std::vector<uint16_t> depth_lut;
     /// @brief Guards queue and stopping.
     std::mutex mutex;
@@ -336,6 +340,19 @@ private:
   void write_image_frame(const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel);
 
   /**
+   * @brief Add `depth_scale_m` (meters per raw depth unit) to a depth channel's metadata
+   *
+   * Only for raw integer depth. Video depth is stored as metric codes and float depth in
+   * meters, which the raw unit does not describe.
+   *
+   * @param img Image record carrying the producer's depth scale (checked by
+   *        depth_unit_known())
+   * @param md Channel metadata to add the entry to
+   */
+  void add_depth_scale_metadata(
+    const data::ImageRecord& img, std::unordered_map<std::string, std::string>& md) const;
+
+  /**
    * @brief Write a joint state record
    *
    * @param js Joint state record to write
@@ -389,6 +406,23 @@ private:
 
   /// @brief Helper to identify depth encodings
   static bool is_depth_encoding(const std::string& enc);
+
+  /// @brief Streams already reported as not recordable this episode
+  std::unordered_set<std::string> unrecordable_streams_;
+
+  /**
+   * @brief Whether a depth frame carries the unit its raw values are in.
+   *
+   * Integer depth needs ImageRecord::depth_scale; float depth is in meters.
+   *
+   * @param img Depth image record
+   * @param id Stream id the frame is recorded under
+   * @param encoding The frame's pixel encoding
+   * @return false (reported once) when integer depth has no depth_scale; the frame is not
+   *         recorded
+   */
+  bool depth_unit_known(
+    const data::ImageRecord& img, const std::string& id, const std::string& encoding);
 
   /// @brief Map of joint state channels by stream ID
   std::unordered_map<std::string, foxglove::RawChannel> joint_channels_;

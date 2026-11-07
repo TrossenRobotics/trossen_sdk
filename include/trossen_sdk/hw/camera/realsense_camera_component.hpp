@@ -41,9 +41,13 @@ public:
    *   "height": 480,
    *   "fps": 30,
    *   "use_depth": false,
+   *   "depth_scale": 0.001,
    *   "align_depth_to_color": false,
    *   "force_hardware_reset": false
    * }
+   *
+   * `depth_scale` (meters per depth unit) is optional: without it the camera records in
+   * 1 mm units. The scale recorded is always the one read back from the device.
    *
    * @param config JSON configuration object
    * @throws std::runtime_error if configuration fails
@@ -102,7 +106,7 @@ public:
 
   /**
    * @brief Get depth scale factor (multiply Z16 raw value by this to get meters)
-   * @return Depth scale in m/Z16 unit, 0 if depth not enabled
+   * @return Depth scale in m/Z16 unit as read from the device, 0 before configure()
    */
   float get_depth_scale() const { return depth_scale_; }
 
@@ -144,7 +148,7 @@ private:
   /// @brief Shared pointer to the active pipeline (used by RealsensePushProducer)
   std::shared_ptr<rs2::pipeline> pipeline_;
 
-  /// @brief Depth scale factor (meters per Z16 unit), 0 if depth not enabled
+  /// @brief Depth scale factor (meters per Z16 unit) read from the device, 0 before configure()
   float depth_scale_ = 0.0f;
 
   /// @brief Configure force_hardware_reset flag
