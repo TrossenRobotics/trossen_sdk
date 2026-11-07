@@ -17,13 +17,16 @@ MockJointStateProducer::MockJointStateProducer(Config cfg)
   // Populate metadata
   metadata_.type = "mock_arm";
   metadata_.id = cfg_.id;
+  check_joint_role(cfg_.role, cfg_.id);
+  metadata_.role = cfg_.role;
+  metadata_.rate_hz = cfg_.rate_hz;
   metadata_.name = "Mock Joint State Producer";
   metadata_.description = "Produces synthetic joint states for testing and diagnostics";
   // TODO(shantanuparab-tr): Extract from driver / User Config
   metadata_.arm_model = "MOCK_WIDOWX_AI";
-  // TODO(shantanuparab-tr): Extract from driver / User Config
-  metadata_.joint_names = {
-    "joint_1", "joint_2", "joint_3", "joint_4", "joint_5", "joint_6", "joint_7"};
+  for (size_t i = 0; i < cfg_.num_joints; ++i) {
+    metadata_.joint_names.push_back("joint_" + std::to_string(i + 1));
+  }
   // TODO(shantanuparab-tr): Extract from driver / User Config
   metadata_.gripper_type = "STANDARD";
 }
