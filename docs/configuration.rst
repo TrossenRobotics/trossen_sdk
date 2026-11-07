@@ -110,6 +110,9 @@ Each entry accepts:
     * - ``fps``
       - int
       - Capture frame rate
+    * - ``use_depth``
+      - bool
+      - Also capture the depth stream next to color (RealSense and Stereolabs ZED); default ``false``
 
 ``hardware.mobile_base`` (optional) accepts:
 
@@ -165,7 +168,7 @@ Supported producer types:
     * - ``zed_camera``
       - Stereolabs ZED (Jetson only; requires ``-DTROSSEN_ENABLE_ZED=ON``)
     * - ``realsense_camera``
-      - RealSense RGB
+      - RealSense color, plus depth when the camera sets ``use_depth``
     * - ``opencv_camera``
       - V4L2 USB camera (any ``/dev/video*``)
     * - ``slate_base``
@@ -197,14 +200,33 @@ Backend
 .. code-block:: javascript
 
     "backend": {
-      "root":             "~/.trossen_sdk",   // Directory where episodes are written
-      "dataset_id":       "my_dataset",       // Sub-directory for this dataset
-      "compression":      "",                 // "" | "lz4" | "zstd"
-      "chunk_size_bytes": 4194304             // MCAP chunk size (4 MB default)
+      "root":                    "~/.trossen_sdk",   // Directory where episodes are written
+      "dataset_id":              "my_dataset",       // Sub-directory for this dataset
+      "compression":             "",                 // "" | "lz4" | "zstd"
+      "chunk_size_bytes":        4194304,            // MCAP chunk size (4 MB default)
+      "task_description":        "",                 // Task stored with each episode
+      "image_encoding":          "raw",              // "raw" | "video"
+      "video_bitrate_kbps":      6000,               // Color bitrate; depth is lossless
+      "video_keyframe_interval": 10,                 // Keyframe every n frames
+      "video_encoder":           "auto"              // "auto" | "nvenc" | "vaapi" | "x264"/"x265"
     }
 
 Episodes land at ``<root>/<dataset_id>/<id>.mcap``, where ``<id>`` is a UUIDv7 (e.g. ``0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap``).
 Because UUIDv7 leads with a timestamp, filenames are globally unique and sort chronologically.
+
+``task_description`` becomes the episode's task in the LeRobot converters.
+Episodes recorded with different values convert into one multi-task dataset.
+
+``image_encoding`` sets how camera frames are stored.
+``raw`` stores every frame uncompressed.
+``video`` encodes color to H.264 and depth to lossless H.265 while recording, which makes recordings several times smaller.
+The ``video_*`` keys apply only to ``video``; ``auto`` tries NVENC, then VAAPI, then the x264/x265 software encoders.
+A recording made with ``raw`` can be compressed later with ``trossen_mcap_transcode_video`` (see ``scripts/trossen_mcap_transcode_video/README.md``).
+
+.. note::
+
+    ``video`` needs the SDK built with ``-DTROSSEN_ENABLE_VIDEO_ENCODE=ON``, which requires the ``libavcodec-dev``, ``libavutil-dev`` and ``libswscale-dev`` packages.
+    Without it, recording fails to start.
 
 Observers
 ---------
