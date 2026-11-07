@@ -37,6 +37,7 @@
       "type":            "trossen_arm",
       "hardware_id":     "leader",
       "stream_id":       "leader",
+      "role":            "leader",
       "poll_rate_hz":    30.0,
       "use_device_time": false
     },
@@ -44,6 +45,7 @@
       "type":            "trossen_arm",
       "hardware_id":     "follower",
       "stream_id":       "follower",
+      "role":            "follower",
       "poll_rate_hz":    30.0,
       "use_device_time": false
     },

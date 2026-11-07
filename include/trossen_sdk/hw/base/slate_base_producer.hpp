@@ -48,6 +48,9 @@ public:
     /// @brief Base model type
     std::string base_model;
 
+    /// @brief Rate the base is polled at, in Hz
+    double rate_hz{0.0};
+
     /**
      * @brief Get producer info as JSON
      *
@@ -60,12 +63,15 @@ public:
     /**
      * @brief Get per-stream dataset metadata for MCAP recording
      *
-     * @return JSON indicating a mobile base is present with its velocity feature names
+     * @return JSON holding "mobile_base": the stream id, its two velocity feature names and
+     *   its poll rate
      */
     nlohmann::ordered_json get_stream_info() const override {
       nlohmann::ordered_json info;
-      info["has_mobile_base"] = true;
-      info["base_velocity_names"] = nlohmann::json::array({"linear_vel", "angular_vel"});
+      info["mobile_base"] = {
+        {"id", id},
+        {"velocity_names", nlohmann::json::array({"linear_vel", "angular_vel"})},
+        {"rate_hz", rate_hz}};
       return info;
     }
   };

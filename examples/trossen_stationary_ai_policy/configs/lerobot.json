@@ -110,6 +110,7 @@
       "type":            "trossen_arm",
       "hardware_id":     "follower_left",
       "stream_id":       "follower_left",
+      "role":            "follower",
       "poll_rate_hz":    30.0,
       "use_device_time": false
     },
@@ -117,6 +118,7 @@
       "type":            "trossen_arm",
       "hardware_id":     "follower_right",
       "stream_id":       "follower_right",
+      "role":            "follower",
       "poll_rate_hz":    30.0,
       "use_device_time": false
     },
@@ -156,6 +158,7 @@
       "type":            "policy_client",
       "hardware_id":     "policy_main",
       "stream_id":       "policy_action",
+      "role":            "leader",
       "poll_rate_hz":    30.0,
       "use_device_time": false
     }

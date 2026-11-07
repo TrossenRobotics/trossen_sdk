@@ -25,6 +25,7 @@ namespace trossen::configuration {
  *   "type":            "trossen_arm",   // producer/hardware registry key
  *   "hardware_id":     "leader",        // references hardware config id
  *   "stream_id":       "leader",        // data stream name written to the backend
+ *   "role":            "leader",        // joint-state producers only: "leader" or "follower"
  *   "poll_rate_hz":    30.0,
  *   "use_device_time": false,
  *   "encoding":        "bgr8"           // camera producers only
@@ -32,12 +33,13 @@ namespace trossen::configuration {
  * @endcode
  *
  * Known types:
- *  - "trossen_arm"      - arm joint-state producer
+ *  - "trossen_arm"      - arm joint-state producer; needs a `role`
  *  - "zed_camera"       - StereoLabs ZED stereo camera producer
  *  - "realsense_camera" - RealSense image producer
  *  - "opencv_camera"    - OpenCV/V4L2 image producer
  *  - "slate_base"       - SLATE mobile base velocity producer
- *  - "policy_client"    - polls a PolicyClient hardware entry; emits JointStateRecord
+ *  - "policy_client"    - polls a PolicyClient hardware entry; emits JointStateRecord and
+ *                         needs a `role`
  */
 struct ProducerConfig {
   /// @brief Producer/hardware registry key (e.g. "trossen_arm", "realsense_camera")
@@ -48,6 +50,10 @@ struct ProducerConfig {
 
   /// @brief Stream identifier written to the recording backend
   std::string stream_id;
+
+  /// @brief Joint-state producers only: "leader" (the dataset action) or "follower" (the
+  /// dataset observation). Recorded in the stream's metadata.
+  std::string role;
 
   /// @brief Polling frequency in Hz
   float poll_rate_hz{30.0f};
@@ -63,6 +69,7 @@ struct ProducerConfig {
     if (j.contains("type"))            j.at("type").get_to(c.type);
     if (j.contains("hardware_id"))     j.at("hardware_id").get_to(c.hardware_id);
     if (j.contains("stream_id"))       j.at("stream_id").get_to(c.stream_id);
+    if (j.contains("role"))            j.at("role").get_to(c.role);
     if (j.contains("poll_rate_hz"))    j.at("poll_rate_hz").get_to(c.poll_rate_hz);
     if (j.contains("use_device_time")) j.at("use_device_time").get_to(c.use_device_time);
     if (j.contains("encoding"))        j.at("encoding").get_to(c.encoding);
@@ -73,6 +80,8 @@ struct ProducerConfig {
   nlohmann::json to_registry_json() const {
     return nlohmann::json{
       {"stream_id",       stream_id},
+      {"role",            role},
+      {"poll_rate_hz",    poll_rate_hz},
       {"use_device_time", use_device_time}
     };
   }

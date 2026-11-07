@@ -97,9 +97,9 @@ public:
      *
      * Returns a JSON object with stream and sensor info for use as MCAP file-level metadata.
      * The object may contain:
-     *   - "streams": { "<stream_id>": { "joint_names": [...] } }
+     *   - "streams": { "<stream_id>": { "joint_names": [...], "role", "rate_hz" } }
      *   - "cameras": { "<camera_id>": { "width", "height", "fps", "channels", ... } }
-     *   - "has_mobile_base": true
+     *   - "mobile_base": { "id", "velocity_names": [...], "rate_hz" }
      *
      * @return JSON object with dataset stream/sensor metadata, or empty if not applicable
      */

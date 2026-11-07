@@ -56,6 +56,9 @@ PolicyClientProducer::PolicyClientProducer(
   }
   pc_metadata_.type = "policy_client";
   pc_metadata_.id = cfg_.stream_id;
+  pc_metadata_.role = config.value("role", "");
+  check_joint_role(pc_metadata_.role, cfg_.stream_id);
+  pc_metadata_.rate_hz = config.value("poll_rate_hz", 0.0);
   pc_metadata_.name = "Policy Client Producer";
   pc_metadata_.description = "Emits the policy server's currently commanded action row";
   pc_metadata_.joint_count = n;
