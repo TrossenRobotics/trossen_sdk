@@ -279,15 +279,19 @@ struct PreparedEpisode {
 /// @param mcap_file Path to the input MCAP file
 /// @param input_index Position of the recording in the input, used for logging only
 /// @param tmp_dir Scratch folder for this recording; the caller removes it
-/// @param encoder_threads Cores each AV1 encode may use (SVT-AV1 lp=)
+/// @param fps Row rate in frames per second, a whole number above zero
+/// @param encode_videos Build each camera's video; false leaves the episode without cameras
+/// @param encoder_threads Parallelism level of each AV1 encode (SVT-AV1 lp=); 0 leaves it to
+///   the encoder
 /// @param keep_images Keep the extracted frames, for images/, once the videos are encoded
 /// @param reencode_videos Re-encode every compressed camera one frame per row instead of
 ///   copying its stream
 /// @param out Filled with the episode on success
 /// @return true on success
 bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
-                     const std::filesystem::path& tmp_dir, int encoder_threads,
-                     bool keep_images, bool reencode_videos, PreparedEpisode& out);
+                     const std::filesystem::path& tmp_dir, double fps, bool encode_videos,
+                     int encoder_threads, bool keep_images, bool reencode_videos,
+                     PreparedEpisode& out);
 
 /// @brief Whether a prepared episode's videos keep the codecs the dataset's info.json names.
 ///
@@ -456,6 +460,8 @@ int main(int argc, char** argv) {
   const std::string license = lerobot_config->license;
   const bool keep_images = lerobot_config->keep_images;
   const bool reencode_videos = lerobot_config->reencode_videos;
+  const double fps = lerobot_config->fps;
+  const bool encode_videos = lerobot_config->encode_videos;
 
   // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -506,6 +512,12 @@ int main(int argc, char** argv) {
   // committing it is a rename.
   const fs::path tmp_root = full_dataset_path_check / ".tmp_convert";
 
+  // overwrite_existing starts a new dataset; otherwise a re-run adds to the existing one.
+  if (lerobot_config->overwrite_existing && fs::exists(full_dataset_path_check) &&
+      !trossen::io::backends::remove_dataset_for_overwrite(full_dataset_path_check, mcap_files)) {
+    return 1;
+  }
+
   // Resume after whatever an earlier run wrote. Indices are handed out only to
   // recordings that convert, so a rejected recording leaves no gap, and a re-run
   // recognizes finished recordings by name rather than by their position in the folder.
@@ -553,9 +565,9 @@ int main(int argc, char** argv) {
     ++skipped;
   }
 
-  // Worker count: `jobs`, else the core count capped at kMaxDefaultJobs. Each AV1
-  // encode gets an even share of the cores; uncapped, every encoder would size itself to all
-  // of them and the workers would oversubscribe the machine.
+  // Worker count: `jobs`, else the core count capped at kMaxDefaultJobs. Each AV1 encode gets
+  // `encoder_threads`, else an even share of the cores; uncapped, every encoder would size
+  // itself to all of them and the workers would oversubscribe the machine.
   const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
   int jobs = lerobot_config->jobs.value_or(static_cast<int>(std::min(hw, kMaxDefaultJobs)));
   if (jobs < 1) {
@@ -565,8 +577,11 @@ int main(int argc, char** argv) {
   if (!pending.empty() && static_cast<size_t>(jobs) > pending.size()) {
     jobs = static_cast<int>(pending.size());
   }
-  const int encoder_threads = std::max(1, static_cast<int>(hw) / jobs);
-  std::cout << "Worker threads: " << jobs << ", AV1 encoder threads each: " << encoder_threads
+  const int encoder_threads =
+    lerobot_config->encoder_threads.value_or(std::max(1, static_cast<int>(hw) / jobs));
+  std::cout << "Worker threads: " << jobs << ", AV1 encoder threads each: "
+            << (encoder_threads > 0 ? std::to_string(encoder_threads)
+                                    : std::string("encoder default"))
             << "\n";
 
   // Workers prepare recordings concurrently; the main thread commits them in input order,
@@ -596,8 +611,8 @@ int main(int argc, char** argv) {
       bool ok = false;
       // An exception would end the process from this thread, so it fails the recording.
       try {
-        ok = prepare_episode(pending[i], static_cast<int>(i), tmp_dir_for(i), encoder_threads,
-                             keep_images, reencode_videos, prepared);
+        ok = prepare_episode(pending[i], static_cast<int>(i), tmp_dir_for(i), fps, encode_videos,
+                             encoder_threads, keep_images, reencode_videos, prepared);
       } catch (const std::exception& e) {
         std::cerr << "Error: " << pending[i].filename().string() << ": " << e.what() << "\n";
       }
@@ -808,8 +823,9 @@ int main(int argc, char** argv) {
 }
 
 bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
-                     const std::filesystem::path& tmp_dir, int encoder_threads,
-                     bool keep_images, bool reencode_videos, PreparedEpisode& out) {
+                     const std::filesystem::path& tmp_dir, double fps, bool encode_videos,
+                     int encoder_threads, bool keep_images, bool reencode_videos,
+                     PreparedEpisode& out) {
   namespace fs = std::filesystem;
   using trossen::io::backends::AlignedEpisode;
   using trossen::io::backends::McapChannelMap;
@@ -841,10 +857,17 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
   McapChannelMap& channels = out.channels;
   // LeRobot v2.1 has no depth format, so depth cameras are left out before loading.
   trossen::io::backends::AlignmentOptions alignment;
+  alignment.fps = fps;
   alignment.skip_depth_cameras = true;
   if (!trossen::io::backends::load_aligned_episode(mcap_file.string(), input_index, ep, channels,
                                                    {}, alignment)) {
     return false;
+  }
+  // Without videos the episode carries no cameras, so neither its rows nor info.json refer to
+  // any.
+  if (!encode_videos) {
+    ep.cameras.clear();
+    channels.camera_channels.clear();
   }
   // Camera names come from the MCAP topics and name folders below, so each must be a
   // single path component.

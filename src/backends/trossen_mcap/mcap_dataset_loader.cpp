@@ -314,6 +314,34 @@ void sort_by_recording_start(std::vector<std::filesystem::path>& files) {
   for (size_t i = 0; i < files.size(); ++i) files[i] = keyed[i].second;
 }
 
+bool remove_dataset_for_overwrite(const std::filesystem::path& dataset_root,
+                                  std::vector<std::filesystem::path>& inputs) {
+  namespace fs = std::filesystem;
+  const fs::path canonical_root = fs::weakly_canonical(dataset_root);
+  for (auto& input : inputs) {
+    const fs::path canonical_input = fs::weakly_canonical(input);
+    const auto root_end = std::mismatch(canonical_root.begin(), canonical_root.end(),
+                                        canonical_input.begin(), canonical_input.end())
+                            .first;
+    if (root_end == canonical_root.end()) {
+      std::cerr << "Error: input " << input.string() << " is inside the dataset "
+                << dataset_root.string() << ", which overwrite_existing=true would remove.\n"
+                << "Move the recordings or choose another dataset_id.\n";
+      return false;
+    }
+    input = canonical_input;
+  }
+  std::cout << "Removing existing dataset at " << dataset_root.string() << "\n";
+  std::error_code ec;
+  fs::remove_all(dataset_root, ec);
+  if (ec) {
+    std::cerr << "Error: could not remove " << dataset_root.string() << ": " << ec.message()
+              << "\n";
+    return false;
+  }
+  return true;
+}
+
 bool load_aligned_episode(
   const std::string& mcap_file,
   int episode_index,
