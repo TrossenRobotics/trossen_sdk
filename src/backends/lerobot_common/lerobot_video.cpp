@@ -22,6 +22,7 @@
 
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_stats_utils.hpp"
+#include "trossen_sdk/utils/shell_quote.hpp"
 
 namespace trossen::io::backends {
 
@@ -49,7 +50,7 @@ constexpr size_t kTargetSamples = 30;
 std::optional<std::string> probe_video_stream(const std::string& options, const fs::path& video) {
   std::ostringstream probe;
   probe << "ffprobe -v error -select_streams v:0 " << options << " -of default=nw=1:nk=1 "
-        << video.string();
+        << trossen::utils::shell_quote(video);
   FILE* pipe = popen(probe.str().c_str(), "r");
   if (!pipe) return std::nullopt;
   char buf[64] = {0};
@@ -92,7 +93,7 @@ bool encode_episode_video(
   // SVT_LOG=1 limits SVT-AV1's own log, which -loglevel does not reach, to errors.
   std::ostringstream cmd;
   cmd << "SVT_LOG=1 ffmpeg -y -loglevel error -framerate " << fps << " -start_number 0"
-      << " -i " << input_pattern.string() << " -frames:v " << frame_count
+      << " -i " << trossen::utils::shell_quote(input_pattern) << " -frames:v " << frame_count
       << " -c:v libsvtav1 -crf " << kAv1Crf << " -g " << kAv1KeyframeInterval << " -preset "
       << kAv1Preset;
   // SVT-AV1's level of parallelism. ffmpeg's -threads is silently ignored by this encoder,
@@ -103,7 +104,8 @@ bool encode_episode_video(
   }
   // The output rate matches the input rate; -frames:v counts output frames, so any other
   // rate would cut the video short or duplicate frames.
-  cmd << " -pix_fmt " << kColorPixFmt << " -r " << fps << " " << out_mp4.string();
+  cmd << " -pix_fmt " << kColorPixFmt << " -r " << fps << " "
+      << trossen::utils::shell_quote(out_mp4);
   const int ret = std::system(cmd.str().c_str());
   if (ret != 0) {
     std::cerr << "Error: ffmpeg encode failed (exit " << exit_code(ret) << "): " << cmd.str()
@@ -129,8 +131,9 @@ bool remux_episode_video(
   // timestamps, so -r stamps them at `fps` and +genpts fills in the presentation timestamps
   // the mp4 muxer needs.
   std::ostringstream cmd;
-  cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << fps << " -i " << annexb.string()
-      << " -c copy -movflags +faststart " << out_mp4.string();
+  cmd << "ffmpeg -y -loglevel error -fflags +genpts -r " << fps << " -i "
+      << trossen::utils::shell_quote(annexb) << " -c copy -movflags +faststart "
+      << trossen::utils::shell_quote(out_mp4);
   const int ret = std::system(cmd.str().c_str());
   if (ret != 0) {
     std::cerr << "Error: ffmpeg remux failed (exit " << exit_code(ret) << "): " << cmd.str()
@@ -167,7 +170,7 @@ bool decode_video_rows(
   // -vsync is used because FFmpeg 4.4 (Ubuntu 22.04) has no -fps_mode.
   std::ostringstream cmd;
   cmd << "ffmpeg -loglevel error -f " << (depth ? "hevc" : "h264") << " -i "
-      << annexb.string() << " -vsync passthrough -f rawvideo -pix_fmt "
+      << trossen::utils::shell_quote(annexb) << " -vsync passthrough -f rawvideo -pix_fmt "
       << (depth ? "gray12le" : "bgr24") << " -";
   FILE* pipe = popen(cmd.str().c_str(), "r");
   if (pipe == nullptr) {
@@ -248,10 +251,10 @@ std::vector<cv::Mat> sample_video_frames(
   const size_t last_frame = first_frame + frame_count - 1;
 
   std::ostringstream cmd;
-  cmd << "ffmpeg -y -loglevel error -i " << mp4.string()
+  cmd << "ffmpeg -y -loglevel error -i " << trossen::utils::shell_quote(mp4)
       << " -vf \"select='between(n\\," << first_frame << "\\," << last_frame
       << ")*not(mod(n-" << first_frame << "\\," << stride << "))'\" -vsync passthrough -q:v "
-      << kSampleJpegQuality << " " << (sample_dir / "sample_%04d.jpg").string();
+      << kSampleJpegQuality << " " << trossen::utils::shell_quote(sample_dir / "sample_%04d.jpg");
   const int ret = std::system(cmd.str().c_str());
   if (ret != 0) {
     std::cerr << "Warning: could not sample frames from " << mp4.string() << " (exit "
