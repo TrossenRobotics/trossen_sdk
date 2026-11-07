@@ -145,10 +145,18 @@ int main(int argc, char** argv) {
   const std::string dataset_root_dir = lerobot_config->root;
   const std::string repository_id = lerobot_config->repository_id;
   const std::string dataset_id = lerobot_config->dataset_id;
+  if (!trossen::io::backends::is_dataset_folder_name("lerobot_v2_backend.repository_id",
+                                                     repository_id) ||
+      !trossen::io::backends::is_dataset_folder_name("lerobot_v2_backend.dataset_id",
+                                                     dataset_id)) {
+    return 1;
+  }
   const int chunk_size = lerobot_config->chunk_size;
   const std::string license = lerobot_config->license;
   const bool keep_images = lerobot_config->keep_images;
   const bool reencode_videos = lerobot_config->reencode_videos;
+  const double fps = lerobot_config->fps;
+  const bool encode_videos = lerobot_config->encode_videos;
 
   // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -198,9 +206,22 @@ int main(int argc, char** argv) {
   // committing it is a rename.
   const fs::path tmp_root = full_dataset_path_check / ".tmp_convert";
 
-  // Worker count: `jobs`, else the core count capped at kMaxDefaultJobs. Each AV1
-  // encode gets an even share of the cores; uncapped, every encoder would size itself to all
-  // of them and the workers would oversubscribe the machine.
+  // An existing dataset is either removed, with overwrite_existing, or left untouched.
+  if (fs::exists(full_dataset_path_check)) {
+    if (!lerobot_config->overwrite_existing) {
+      std::cerr << "Error: dataset already exists: " << full_dataset_path_check.string() << "\n"
+                << "Set overwrite_existing=true to replace it, or choose another dataset_id.\n";
+      return 1;
+    }
+    if (!trossen::io::backends::remove_dataset_for_overwrite(full_dataset_path_check,
+                                                             mcap_files)) {
+      return 1;
+    }
+  }
+
+  // Worker count: `jobs`, else the core count capped at kMaxDefaultJobs. Each AV1 encode gets
+  // `encoder_threads`, else an even share of the cores; uncapped, every encoder would size
+  // itself to all of them and the workers would oversubscribe the machine.
   const unsigned hw = std::max(1u, std::thread::hardware_concurrency());
   int jobs = lerobot_config->jobs.value_or(trossen::io::backends::default_jobs(hw));
   if (jobs < 1) {
@@ -210,16 +231,27 @@ int main(int argc, char** argv) {
   if (static_cast<size_t>(jobs) > mcap_files.size()) {
     jobs = static_cast<int>(mcap_files.size());
   }
-  const int encoder_threads = std::max(1, static_cast<int>(hw) / jobs);
-  std::cout << "Worker threads: " << jobs << ", AV1 encoder threads each: " << encoder_threads
+  const int encoder_threads =
+    lerobot_config->encoder_threads.value_or(std::max(1, static_cast<int>(hw) / jobs));
+  std::cout << "Worker threads: " << jobs << ", AV1 encoder threads each: "
+            << (encoder_threads > 0 ? std::to_string(encoder_threads)
+                                    : std::string("encoder default"))
             << "\n";
 
   using PreparedEpisode = trossen::io::backends::LeRobotV2DatasetWriter::PreparedEpisode;
-  trossen::io::backends::LeRobotV2DatasetWriter writer({dataset_root_dir, repository_id,
-                                                        dataset_id, license, chunk_size,
-                                                        lerobot_config->task_name,
-                                                        encoder_threads, keep_images,
-                                                        reencode_videos});
+  trossen::io::backends::LeRobotV2DatasetWriter writer({
+    .root = dataset_root_dir,
+    .repository_id = repository_id,
+    .dataset_id = dataset_id,
+    .license = license,
+    .chunk_size = chunk_size,
+    .task_name = lerobot_config->task_name,
+    .fps = fps,
+    .encode_videos = encode_videos,
+    .encoder_threads = encoder_threads,
+    .keep_images = keep_images,
+    .reencode_videos = reencode_videos,
+  });
 
   // Workers prepare recordings concurrently; the main thread commits them in input order,
   // which is what gives each its episode index.

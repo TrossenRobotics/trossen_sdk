@@ -40,7 +40,11 @@ public:
     int chunk_size{1000};
     /// @brief Task for an episode whose recording embeds none.
     std::string task_name;
-    /// @brief Cores each AV1 encode may use (SVT-AV1 lp=).
+    /// @brief Row rate in frames per second, a whole number above zero.
+    double fps{30.0};
+    /// @brief Build each camera's video; false leaves the episodes without cameras.
+    bool encode_videos{true};
+    /// @brief Parallelism level of each AV1 encode (SVT-AV1 lp=); 0 leaves it to the encoder.
     int encoder_threads{0};
     /// @brief Keep the extracted frames, for images/, once the videos are encoded.
     bool keep_images{false};

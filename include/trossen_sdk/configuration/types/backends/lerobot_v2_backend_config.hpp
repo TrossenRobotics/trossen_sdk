@@ -19,7 +19,7 @@ namespace trossen::configuration {
 
 // LeRobotV2 backend specific constants
 inline constexpr bool LEROBOT_V2_DEFAULT_OVERWRITE_EXISTING = false;
-inline constexpr bool LEROBOT_V2_DEFAULT_ENCODE_VIDEOS = false;
+inline constexpr bool LEROBOT_V2_DEFAULT_ENCODE_VIDEOS = true;
 inline constexpr bool LEROBOT_V2_DEFAULT_KEEP_IMAGES = false;
 inline constexpr bool LEROBOT_V2_DEFAULT_REENCODE_VIDEOS = false;
 inline constexpr char LEROBOT_V2_DEFAULT_TASK_NAME[] = "perform a generic task";
@@ -31,7 +31,8 @@ inline constexpr int LEROBOT_V2_DEFAULT_CHUNK_SIZE = 1000;
 inline constexpr char LEROBOT_V2_DEFAULT_LICENSE[] = "apache-2.0";
 
 struct LeRobotV2BackendConfig : public BaseConfig {
-  int encoder_threads{trossen::io::backends::DEFAULT_ENCODER_THREADS};
+  // Parallelism level per video encoder; 0 leaves it to the encoder, unset = automatic
+  std::optional<int> encoder_threads;
   // Videos encoded at once (the converter also prepares this many recordings at once); at
   // least 1, unset = automatic
   std::optional<int> jobs;
@@ -66,7 +67,14 @@ struct LeRobotV2BackendConfig : public BaseConfig {
       j.at("root").get_to(raw_root);
       c.root = trossen::io::backends::expand_user(raw_root).string();
     }
-    if (j.contains("encoder_threads")) j.at("encoder_threads").get_to(c.encoder_threads);
+    if (j.contains("encoder_threads") && !j.at("encoder_threads").is_null()) {
+      c.encoder_threads = j.at("encoder_threads").get<int>();
+      if (*c.encoder_threads < 0) {
+        throw std::runtime_error(
+          "LeRobotV2BackendConfig: 'encoder_threads' must be 0 or more, got " +
+          std::to_string(*c.encoder_threads));
+      }
+    }
     if (j.contains("jobs") && !j.at("jobs").is_null()) {
       c.jobs = j.at("jobs").get<int>();
       if (*c.jobs < 1) {
