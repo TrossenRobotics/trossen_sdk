@@ -35,6 +35,7 @@ add_library(trossen_sdk SHARED
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
   src/backends/lerobot_v3/lerobot_v3_writer.cpp
   src/backends/trossen_mcap/mcap_dataset_loader.cpp
+  src/backends/trossen_mcap/mcap_video_transcoder.cpp
   src/backends/trossen_mcap/trossen_mcap_backend.cpp
   src/backends/null/null_backend.cpp
   src/configuration/global_config.cpp
@@ -63,6 +64,7 @@ add_library(trossen_sdk SHARED
   src/runtime/push_producer_registry.cpp
   src/utils/app_utils.cpp
   src/utils/keyboard_input_utils.cpp
+  src/utils/remove_on_exit.cpp
 )
 
 if(TROSSEN_ENABLE_REALSENSE)

@@ -165,7 +165,7 @@ bool TrossenMCAPBackend::open() {
   foxglove::McapWriterOptions opts;
   opts.context = context_;
   opts.path = path_str;
-  opts.profile = "trossen";
+  opts.profile = trossen_mcap_defs::kMcapProfile;
   opts.chunk_size = cfg_->chunk_size_bytes;
 
   if (cfg_->compression == "zstd") {
