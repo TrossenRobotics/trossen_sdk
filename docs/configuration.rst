@@ -14,8 +14,7 @@ What You Need
 Before editing a config, complete :doc:`/installation` and have the following information available:
 
 -   Arm controller IP addresses.
--   Camera serial numbers (for Stereolabs ZED or RealSense) or ``/dev/video*`` paths (for V4L2 USB cameras).
--   The mobile base serial port, if applicable.
+-   Camera serial numbers (for Stereolabs ZED or RealSense) or device indexes (for V4L2 USB cameras, ``N`` in ``/dev/videoN``).
 
 Starting From an Example
 ========================
@@ -64,7 +63,7 @@ Hardware
 --------
 
 The ``hardware`` block describes the physical devices connected to the PC.
-It contains ``arms`` and ``cameras`` (always required), plus an optional ``mobile_base``.
+It contains ``arms`` and ``cameras``, plus an optional ``mobile_base``.
 
 ``hardware.arms`` is a map of arm ID to arm config.
 Each entry accepts:
@@ -98,12 +97,24 @@ Each entry accepts:
     * - Field
       - Type
       - Description
+    * - ``type``
+      - string
+      - ``"realsense_camera"`` (default), ``"zed_camera"`` or ``"opencv_camera"``; must match the camera's producer ``type``
     * - ``id``
       - string
       - User-chosen label referenced by ``producers``
     * - ``serial_number``
       - string
       - Camera serial (Stereolabs ZED or RealSense)
+    * - ``device_index``
+      - int
+      - V4L2 device ``N`` of ``/dev/videoN`` (``opencv_camera`` only); default ``0``
+    * - ``backend``
+      - string
+      - OpenCV capture backend, ``"v4l2"`` or ``"any"`` (``opencv_camera`` only)
+    * - ``force_hardware_reset``
+      - bool
+      - Reset the camera when it opens (``realsense_camera`` only); default ``false``
     * - ``width`` / ``height``
       - int
       - Frame resolution in pixels
@@ -170,7 +181,7 @@ Supported producer types:
     * - ``realsense_camera``
       - RealSense color, plus depth when the camera sets ``use_depth``
     * - ``opencv_camera``
-      - V4L2 USB camera (any ``/dev/video*``)
+      - V4L2 USB camera, opened by ``device_index``
     * - ``slate_base``
       - SLATE mobile base
 

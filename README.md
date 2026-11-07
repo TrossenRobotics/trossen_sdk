@@ -1,6 +1,6 @@
 # Trossen SDK
 
-A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Stereolabs ZED cameras, RealSense cameras, and the SLATE mobile base. Episodes are recorded to the **TrossenMCAP** format and can be converted to **LeRobot V2** format for training.
+A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Stereolabs ZED cameras, RealSense cameras, and the SLATE mobile base. Episodes are recorded to the **TrossenMCAP** format and can be converted to **LeRobot V2** or **LeRobot V3** format for training.
 
 ---
 
@@ -15,7 +15,7 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Stereolab
 - [Quick Start](#quick-start)
 - [Interactive Episode Controls](#interactive-episode-controls)
 - [Configuration Reference](#configuration-reference)
-- [Converting to LeRobot V2](#converting-to-lerobot-v2)
+- [Converting to LeRobot](#converting-to-lerobot)
 - [Architecture Overview](#architecture-overview)
 - [Extending the SDK](#extending-the-sdk)
 - [Further Reading](#further-reading)
@@ -29,7 +29,8 @@ A C++ SDK for recording robot demonstrations with Trossen AI Kit arms, Stereolab
 - CLI overrides via `--set key=value` dot-notation for quick iteration without editing JSON
 - Unique, time-ordered episode filenames (UUIDv7) with resumption from existing episodes in the output directory
 - Joint states recordable up to 200 Hz; cameras at configurable frame rates
-- Converts recorded TrossenMCAP files to LeRobot V2 format (Parquet + MP4 video) with per-episode statistics computed during conversion
+- Converts recorded TrossenMCAP files to LeRobot V2 or V3 format (Parquet + MP4 video) with statistics computed during conversion
+- Compresses raw-image recordings to video afterwards with `trossen_mcap_transcode_video`
 - Interactive episode controls: re-record, skip, and discard episodes with keyboard shortcuts during recording
 - Audio announcements via text-to-speech for hands-free session feedback
 - Configurable reset duration between episodes (countdown, skip, or wait for input)
@@ -53,7 +54,7 @@ The diagram below shows how sensor data flows through the SDK — from hardware 
 ```
 Record demonstrations           Convert to training format
 ─────────────────────────       ─────────────────────────────────────────────
-Run example script          →   trossen_mcap_to_lerobot_v2 <input> <output>
+Run example script          →   trossen_mcap_to_lerobot_v2 <input>  (or _v3)
   ↓ 0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap   ↓ Parquet + MP4 per episode
   ↓ 0190b3c2-2f5a-7e91-b0c4-7d8e9f0a1b2c.mcap   ↓ info.json with per-episode statistics
   ↓ ...
@@ -62,7 +63,7 @@ Run example script          →   trossen_mcap_to_lerobot_v2 <input> <output>
 1. Choose the example that matches your robot setup (solo, stationary, or mobile)
 2. Edit `config.json` to match your hardware (IP addresses, camera serial numbers, episode duration)
 3. Run the recording script to collect `.mcap` episode files
-4. Run the conversion tool to produce a LeRobot V2 dataset
+4. Run a conversion tool to produce a LeRobot V2 or V3 dataset
 
 ---
 
@@ -72,7 +73,7 @@ Run example script          →   trossen_mcap_to_lerobot_v2 <input> <output>
 |---|---|---|
 | Trossen AI Kit arm | `trossen_arm` | wxai_v0 arms (leader and follower) |
 | Stereolabs ZED camera | `zed_camera` | Stereo camera — Color + Depth (Jetson only, requires GMSL) |
-| RealSense camera | `realsense_camera` | Depth camera — RGB stream only (see note below) |
+| RealSense camera | `realsense_camera` | Depth camera — color, plus depth with `use_depth` (see note below) |
 | OpenCV / USB camera | `opencv_camera` | Any V4L2-compatible USB camera |
 | SLATE mobile base | `slate_base` | Differential drive base with odometry |
 
@@ -89,7 +90,7 @@ Run example script          →   trossen_mcap_to_lerobot_v2 <input> <output>
 ### Data modalities recorded
 
 - **Joint states** — position, velocity, and effort for each arm at up to 200 Hz
-- **Camera images** — BGR8 frames at configurable resolution and frame rate
+- **Camera images** — color frames at configurable resolution and frame rate, stored raw or as H.264 video (`backend.image_encoding`), plus depth from cameras with `use_depth`
 - **Mobile base odometry** — 2D velocity (vx, vy, wz) from the SLATE base
 
 ---
@@ -159,23 +160,24 @@ Examples and the conversion script are always included in the build.
 
 ### Standard build
 
-### Building with Stereolabs ZED support (Jetson only)
-
-ZED camera support is disabled by default. To enable it on a Jetson platform:
-
-```bash
-cmake .. -DTROSSEN_ENABLE_ZED=ON
-make -j$(nproc)
-```
-
-### Standard build (RealSense)
-
-RealSense support is **enabled by default**. The standard build includes it automatically:
+RealSense support is **enabled by default**. From the repository root:
 
 ```bash
 mkdir -p build
 cd build
 cmake ..
+make -j$(nproc)
+cd ..
+```
+
+Run the examples and tools from the repository root, since their default config paths are relative to it.
+
+### Building with Stereolabs ZED support (Jetson only)
+
+ZED camera support is disabled by default. To enable it on a Jetson platform, from `build/`:
+
+```bash
+cmake .. -DTROSSEN_ENABLE_ZED=ON
 make -j$(nproc)
 ```
 
@@ -204,7 +206,7 @@ All examples follow the same pattern:
 ./build/examples/trossen_solo_ai --dump-config
 ```
 
-Episodes are saved to the directory set in `backend.root` (default: `~/.trossen_sdk/<dataset_id>/`).
+Episodes are saved to `<backend.root>/<dataset_id>/`. The example configs set `backend.root` to `~/.trossen_sdk`; without it, the root is `~/.cache/trossen_sdk`.
 
 > The example scripts are starting points. The [Architecture Overview](#architecture-overview) section below explains how to write your own recording script or extend the SDK with new hardware.
 
@@ -319,7 +321,7 @@ All examples share the same JSON config schema. Key sections:
       "hardware_id": "camera_main",  // Must match an id in hardware.cameras
       "stream_id": "camera_main",
       "poll_rate_hz": 30.0,
-      "encoding": "bgr8",            // RGB only — depth not recommended
+      "encoding": "bgr8",            // Pixel format of the color frames
       "use_device_time": true
     }
   ],
@@ -340,15 +342,15 @@ All examples share the same JSON config schema. Key sections:
   },
 
   "session": {
-    "max_duration": 20.0,            // Episode length in seconds — always set a limit
-    "max_episodes": 50,              // Total episodes to record — always set a limit
+    "max_duration": 20.0,            // Episode length in seconds (default 20)
+    "max_episodes": 50,              // Episodes in the dataset, counting earlier runs
     "backend_type": "trossen_mcap",  // The recommended backend
     "reset_duration": 5.0            // Seconds between episodes (0 = skip, omit = wait for input)
   }
 }
 ```
 
-> Always set both `max_duration` and `max_episodes`. Running without limits requires manual Ctrl+C to stop each episode and risks inconsistent dataset sizes.
+> `max_duration` defaults to 20 seconds. `max_episodes` counts the episodes already in the dataset, so raise it to add episodes to an existing `dataset_id`; without it, recording continues until Ctrl+C.
 
 ### CLI overrides
 
@@ -363,27 +365,33 @@ Any JSON key can be overridden at runtime using dot-notation:
 
 ---
 
-## Converting to LeRobot V2
+## Converting to LeRobot
 
-After recording, convert your `.mcap` episodes to LeRobot V2 format:
+After recording, convert your `.mcap` episodes to LeRobot V2 format.
+The output location comes from the config (`lerobot_v2_backend.root`, `repository_id` and `dataset_id`), set in `scripts/trossen_mcap_to_lerobot_v2/config.json` or with `--set`:
 
 ```bash
 # Convert a single episode
-./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/my_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap ~/lerobot_datasets
+./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/my_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
+    --set lerobot_v2_backend.root=~/lerobot_datasets
 
 # Convert all episodes in a folder (batch mode)
-./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/my_dataset/ ~/lerobot_datasets
+./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/my_dataset/ \
+    --set lerobot_v2_backend.root=~/lerobot_datasets \
+    --set lerobot_v2_backend.dataset_id=my_dataset
 ```
 
 The tool produces a dataset compatible with the LeRobot training framework, including per-episode statistics (min/max/mean/std for all joint streams and image statistics):
 
 ```
 lerobot_datasets/
-└── trossen_robotics/
+└── TrossenRoboticsCommunity/
     └── my_dataset/
+        ├── README.md                        # Dataset card
         ├── meta/
-        │   ├── info.json                    # Dataset statistics and feature descriptions
+        │   ├── info.json                    # Dataset metadata and feature descriptions
         │   ├── episodes.jsonl               # Per-episode metadata
+        │   ├── episodes_stats.jsonl         # Per-episode statistics
         │   └── tasks.jsonl                  # Task descriptions
         ├── data/
         │   └── chunk-000/
@@ -394,7 +402,9 @@ lerobot_datasets/
                     └── episode_000000.mp4
 ```
 
-For full conversion options and format details see the [Conversion Tool Guide](scripts/trossen_mcap_to_lerobot_v2/README.md).
+`trossen_mcap_to_lerobot_v3` converts to LeRobot V3 the same way, with its settings under `lerobot_v3_backend` in `scripts/trossen_mcap_to_lerobot_v3/config.json`.
+
+For full conversion options and format details see the [V2 Conversion Tool Guide](scripts/trossen_mcap_to_lerobot_v2/README.md) and the [V3 Conversion Tool Guide](scripts/trossen_mcap_to_lerobot_v3/README.md).
 
 ---
 
@@ -418,7 +428,7 @@ counter, and a dual `Timestamp`.
 
 | Type | Fields | Hardware |
 |---|---|---|
-| `JointStateRecord` | positions (rad), velocities (rad/s), efforts (Nm) | Trossen arm, SO101 arm |
+| `JointStateRecord` | positions (rad), velocities (rad/s), efforts (Nm) | Trossen arm |
 | `ImageRecord` | width, height, encoding, pixel data | Cameras |
 | `Odometry2DRecord` | pose (m, rad), velocity (m/s, rad/s) | SLATE base |
 
@@ -510,7 +520,10 @@ See the example scripts in `examples/` for complete, working implementations of 
 
 | Document | Contents |
 |---|---|
-| [Conversion Tool Guide](scripts/trossen_mcap_to_lerobot_v2/README.md) | Conversion usage, TrossenMCAP channel/schema reference, LeRobot V2 Parquet/metadata schema |
+| [Documentation](docs/index.rst) | Installation, configuration, recording, replay, conversion and visualization guides |
+| [V2 Conversion Tool Guide](scripts/trossen_mcap_to_lerobot_v2/README.md) | V2 conversion usage, TrossenMCAP channel/schema reference, LeRobot V2 Parquet/metadata schema |
+| [V3 Conversion Tool Guide](scripts/trossen_mcap_to_lerobot_v3/README.md) | V3 conversion internals and tuning |
+| [Transcode Tool Guide](scripts/trossen_mcap_transcode_video/README.md) | Compressing raw-image recordings to video |
 | [Replay Tool Guide](scripts/replay_trossen_mcap_jointstate/README.md) | Replaying recorded episodes on hardware |
 | [Solo Example Guide](examples/trossen_solo_ai/README.md) | Hardware setup and recording for the solo AI kit |
 | [Stationary Example Guide](examples/trossen_stationary_ai/README.md) | Bimanual stationary setup |
