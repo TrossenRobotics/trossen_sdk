@@ -241,6 +241,20 @@ void drop_depth_cameras(McapChannelMap& channels, const nlohmann::json& dataset_
 void sort_by_recording_start(std::vector<std::filesystem::path>& files);
 
 /**
+ * @brief Remove an existing dataset before converting into it again
+ *
+ * Refuses when an input recording sits inside the dataset, since removing the dataset would
+ * delete it. On success each input is replaced by its resolved path, which stays valid when a
+ * symlink inside the dataset is removed.
+ *
+ * @param dataset_root Dataset folder to remove.
+ * @param inputs Recordings to convert, resolved in place.
+ * @return true if the dataset was removed, false (with the reason logged) otherwise.
+ */
+bool remove_dataset_for_overwrite(const std::filesystem::path& dataset_root,
+                                  std::vector<std::filesystem::path>& inputs);
+
+/**
  * @brief Read an MCAP file and align its joint/camera streams into a frame sequence.
  *
  * Decodes the embedded dataset_info metadata, maps each channel to the stream it

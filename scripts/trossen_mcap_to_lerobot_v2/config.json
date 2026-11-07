@@ -2,10 +2,8 @@
   "lerobot_v2_backend": {
     "type": "lerobot_v2_backend",
     "root": "~/.cache/huggingface/lerobot",
-    "encoder_threads": 2,
+    "encoder_threads": null,
     "jobs": null,
-    "max_image_queue": 10,
-    "png_compression_level": 5,
     "overwrite_existing": false,
     "encode_videos": true,
     "keep_images": false,
@@ -15,7 +13,6 @@
     "dataset_id": "mcap_converted_dataset",
     "episode_index": 0,
     "chunk_size": 2,
-    "robot_name": "trossen_solo_ai",
     "fps": 30.0
   }
 }
