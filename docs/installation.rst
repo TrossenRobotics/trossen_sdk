@@ -129,6 +129,9 @@ Standard Build
     cd build
     cmake ..
     make -j$(nproc)
+    cd ..
+
+Run the examples and tools from the repository root, since their default config paths are relative to it.
 
 The build produces:
 
@@ -142,7 +145,7 @@ Enabling Stereolabs ZED Support
 -------------------------------
 
 Stereolabs ZED camera support is **off** by default.
-On a Jetson platform, enable it with:
+On a Jetson platform, enable it from ``build/``:
 
 .. code-block:: bash
 
@@ -153,7 +156,7 @@ Disabling RealSense
 -------------------
 
 RealSense support is **on** by default.
-If you are building without librealsense installed, or are not using RealSense cameras, disable it explicitly.
+If you are building without librealsense installed, or are not using RealSense cameras, disable it explicitly from ``build/``.
 
 .. code-block:: bash
 
@@ -169,7 +172,6 @@ From the repo root:
 .. code-block:: bash
 
     make build           # Standard build
-    make test            # Build and run tests
     make realsense       # Shortcut for -DTROSSEN_ENABLE_REALSENSE=ON
 
 Verifying the Install

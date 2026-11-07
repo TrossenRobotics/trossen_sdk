@@ -50,9 +50,8 @@ Both build only when the SDK is configured with
 ./build/examples/trossen_stationary_ai_openpi --set session.max_duration=30
 ```
 
-> **`--set` limitation.** `--set` walks JSON *map* keys only; it cannot index
-> into `hardware.policy_clients[]`. Edit the prompt, server URL, inference rate,
-> transport, and joint layout **directly in the config file**.
+> `--set` reaches array elements by index, for example
+> `--set hardware.policy_clients.0.server_url=ws://192.168.1.20:8001`.
 
 The program will:
 1. Connect to both follower arms and move them to the staged starting position.
@@ -64,10 +63,10 @@ The program will:
 4. Record an episode (default 60 s) including the followers, cameras, and the
    policy's commanded action stream.
 5. Stop, flush, and save the `.mcap` file.
-6. Repeat until `max_episodes` is reached or Ctrl+C is pressed.
+6. Repeat until the dataset holds `max_episodes` episodes (counting earlier runs) or Ctrl+C is pressed.
 7. Return arms to the sleep position.
 
-Episodes are saved to `~/.trossen_sdk/<dataset_id>/episode_NNNNNN.mcap`.
+Episodes are saved to `~/.trossen_sdk/<dataset_id>/<id>.mcap` (`<id>` is a UUIDv7).
 
 ---
 
@@ -93,8 +92,8 @@ commanded row is held indefinitely (hold-last-action invariant).
 
 ## openpi variant (`configs/openpi.json`)
 
-Serves over a **WebSocket**; `server_url` is `ws://host:port` (default
-`ws://localhost:8000`). See <https://github.com/Physical-Intelligence/openpi>.
+Serves over a **WebSocket**; `server_url` is `ws://host:port` (the config
+sets `ws://localhost:8001`). See <https://github.com/Physical-Intelligence/openpi>.
 
 The observation dict matches openpi's Aloha-family schema:
 
@@ -113,8 +112,8 @@ openpi carries **no client-declared policy contract** — there is no
 
 ## LeRobot variant (`configs/lerobot.json`)
 
-Serves over **gRPC**; `server_url` is a **bare `host:port`** (default
-`localhost:8080`) — no `ws://`/`grpc://` scheme (the `lerobot_grpc` factory
+Serves over **gRPC**; `server_url` is a **bare `host:port`** (the config
+sets `localhost:8080`) — no `ws://`/`grpc://` scheme (the `lerobot_grpc` factory
 rejects a scheme). See <https://github.com/huggingface/lerobot>
 (`lerobot/async_inference`).
 

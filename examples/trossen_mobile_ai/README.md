@@ -95,7 +95,7 @@ The script will:
    - Arms and cameras are polled at 30 Hz
    - Mobile base odometry (vx, vy, wz) is polled at 30 Hz
 4. Stop, flush, and save the `.mcap` file
-5. Repeat until `max_episodes` is reached or Ctrl+C is pressed
+5. Repeat until the dataset holds `max_episodes` episodes (counting earlier runs) or Ctrl+C is pressed
 6. Return arms to the sleep position
 
 Episodes are saved to `~/.trossen_sdk/<dataset_id>/<id>.mcap` (`<id>` is a UUIDv7).
@@ -195,8 +195,9 @@ before recording resumes.
 
 Build with `-DTROSSEN_ENABLE_RERUN_OBSERVER=ON`, launch a ReRun viewer
 listening on the default gRPC port (`rerun` — the native viewer listens on
-`127.0.0.1:9876` by default), and add an `observers` array to your top-level
-`config.json` object (alongside `hardware`, `producers`, etc.):
+`127.0.0.1:9876` by default). The shipped `config.json` already has this `observers`
+array at the top level (alongside `hardware`, `producers`, etc.); without the build
+option, the demo skips it with a warning:
 
 > **Keep the viewer reasonably current.** This SDK builds against rerun-cpp
 > `0.32.0` (pinned as `RERUN_SDK_VERSION` in `CMakeLists.txt`); a viewer of
@@ -247,7 +248,8 @@ Set `"enabled": false` to silence an observer without deleting its block.
 After recording, convert the episodes:
 
 ```bash
-./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/mobile_dataset/ ~/lerobot_datasets
+./build/scripts/trossen_mcap_to_lerobot_v2 ~/.trossen_sdk/mobile_dataset/ \
+    --set lerobot_v2_backend.root=~/lerobot_datasets
 ```
 
 See [scripts/trossen_mcap_to_lerobot_v2/README.md](../../scripts/trossen_mcap_to_lerobot_v2/README.md) for full options.

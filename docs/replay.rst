@@ -26,9 +26,11 @@ The tool is produced by the standard build:
 
 .. code-block:: bash
 
+    mkdir -p build
     cd build
     cmake ..
     make replay_trossen_mcap_jointstate
+    cd ..
 
 The resulting binary lives at ``build/scripts/replay_trossen_mcap_jointstate``.
 
@@ -40,6 +42,8 @@ Usage
     ./build/scripts/replay_trossen_mcap_jointstate <path/to/episode.mcap> [--config <config.json>] [--speed <factor>]
 
 Without ``--config``, the tool loads ``scripts/replay_trossen_mcap_jointstate/config.json`` relative to the directory you launch it from.
+That file lists the stationary and mobile followers (``follower_left``, ``follower_right``) and the SLATE base.
+The tool connects to every listed arm, so for a solo kit save the Solo config under `Configuring the Replay`_ to a file and pass it with ``--config``.
 ``--speed`` overrides ``playback_speed``.
 
 Example:
@@ -52,7 +56,7 @@ Example:
 
             ./build/scripts/replay_trossen_mcap_jointstate \
                 ~/.trossen_sdk/solo_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
-                --config scripts/replay_trossen_mcap_jointstate/config.json
+                --config solo_replay.json
 
     .. group-tab:: Stationary
 
