@@ -129,6 +129,10 @@ struct AlignedEpisode {
   std::vector<CameraInfo> cameras;
 };
 
+/// @brief Number of planar base velocities every mobile-base block starts with: the linear
+/// and angular velocity, named by the recording's `mobile_base.velocity_names`.
+inline constexpr int BASE_VELOCITY_WIDTH = 2;
+
 /**
  * @brief Width of the mobile-base block appended to `action` and `observation.state`.
  *
@@ -166,7 +170,8 @@ int episode_obs_dim(const AlignedEpisode& ep, const DatasetSignalOptions& signal
 /**
  * @brief Build the LeRobot `features` schema for an episode.
  *
- * Not implemented until #408: it returns an empty object.
+ * The observation.images.<cam> entries are not implemented until #309: the result holds
+ * only observation.state and action.
  *
  * Produces the observation.state / action / observation.images.<cam> entries with
  * joint names (the lerobot_trossen convention, `<side>_joint_<i>.pos` with the gripper
