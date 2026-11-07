@@ -251,9 +251,9 @@ void LeRobotV2Backend::convert_to_videos() const {
   // TODO(shantanuparab-tr): Use recorded fps from metadata if available
   const int fps = static_cast<int>(std::round(30.0));  // Use recorded fps if available
   const int episode_chunk = 0;
-  const size_t max_concurrent_encoders = std::max<size_t>(
-    2,
-    std::thread::hardware_concurrency() / 2);
+  const size_t max_concurrent_encoders =
+    cfg_->jobs ? static_cast<size_t>(*cfg_->jobs)
+               : std::max<size_t>(2, std::thread::hardware_concurrency() / 2);
 
   const std::string images_path = images_root_.string();
 

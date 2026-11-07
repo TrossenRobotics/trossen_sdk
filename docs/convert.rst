@@ -44,6 +44,10 @@ The tool operates in two modes, distinguished by the first argument:
     # Batch mode (first argument is a directory containing .mcap files)
     ./build/scripts/trossen_mcap_to_lerobot_v2 <path/to/dataset_folder/>
 
+``jobs`` in the config sets how many recordings are prepared in parallel (default: the core count, at most 8).
+It must be at least 1.
+Episodes are still added to the dataset one at a time, in input order.
+
 Examples per robot:
 
 .. tabs::
@@ -93,6 +97,7 @@ Point it at a different config with ``--config <path>``.
         "fps":                   30.0,                             // Frame rate written to info.json
         "encode_videos":         true,                             // Set false to skip MP4 encoding
         "encoder_threads":       2,                                // FFmpeg threads per camera
+        "jobs":                  null,                             // Recordings at once; null = auto
         "max_image_queue":       10,                               // Back-pressure bound
         "png_compression_level": 5,                                // Intermediate PNG quality
         "chunk_size":            2,                                // Episodes per chunk-NNN folder
@@ -285,10 +290,13 @@ Episode ordering
 ----------------
 
 The tool assigns LeRobot episode indices from the order the episodes were recorded (the ``recording_start_time`` in each file's metadata), not from their (random) filenames.
-A newly recorded episode has a later timestamp, so it sorts to the end and receives the next index; existing episodes keep their indices, and the idempotent skip lets you re-run after recording more without re-converting what is already done.
+A re-run skips the recordings already in the dataset, matched by file name, and gives each new recording the next free index, so existing episodes keep their indices.
+New recordings are numbered after the existing episodes even when they were recorded earlier, so across runs the indices follow the order of conversion.
+A recording that fails gets no index, so the indices have no gaps.
+A dataset whose ``meta/episodes.jsonl`` entries have no ``source_file`` cannot be resumed; the tool stops and asks for a new ``dataset_id``.
 
 This assumes the recording clocks are consistent.
-When merging ``.mcap`` files from multiple machines whose clocks are not synchronized, the cross-machine ordering is only as reliable as those clocks, and inserting a file with an earlier timestamp can shift later indices.
+When merging ``.mcap`` files from multiple machines whose clocks are not synchronized, the cross-machine ordering is only as reliable as those clocks.
 Files missing ``recording_start_time`` sort last, ordered by filename.
 
 Episode fails
