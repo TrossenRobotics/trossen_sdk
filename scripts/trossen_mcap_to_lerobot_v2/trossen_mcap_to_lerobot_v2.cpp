@@ -227,8 +227,10 @@ nlohmann::ordered_json compute_episode_stats(const std::filesystem::path& parque
         fs::path episode_image_dir;
         bool found = false;
 
-        // First check the expected path: images/camera_name/episode_folder
-        for (const auto& chunk_entry : fs::directory_iterator(images_root)) {
+        // First check the expected path: images/camera_name/episode_folder; images/ is gone
+        // once the videos are encoded.
+        std::error_code images_ec;
+        for (const auto& chunk_entry : fs::directory_iterator(images_root, images_ec)) {
           if (chunk_entry.is_directory() &&
               chunk_entry.path().filename().string().starts_with("chunk-")) {
             fs::path potential_dir = chunk_entry.path() / camera_name / episode_folder_name;
@@ -314,11 +316,12 @@ struct PreparedEpisode {
 /// @param input_index Position of the recording in the input, used for logging only
 /// @param tmp_dir Scratch folder for this recording; the caller removes it
 /// @param encoder_threads Cores each AV1 encode may use (SVT-AV1 lp=)
+/// @param keep_images Keep the extracted frames, for images/, once the videos are encoded
 /// @param out Filled with the episode on success
 /// @return true on success
 bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
                      const std::filesystem::path& tmp_dir, int encoder_threads,
-                     PreparedEpisode& out);
+                     bool keep_images, PreparedEpisode& out);
 
 /// @brief Write a prepared episode into the dataset as episode_index.
 ///
@@ -469,6 +472,7 @@ int main(int argc, char** argv) {
   const std::string dataset_id = lerobot_config->dataset_id;
   const int chunk_size = lerobot_config->chunk_size;
   const std::string license = lerobot_config->license;
+  const bool keep_images = lerobot_config->keep_images;
 
   // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -634,7 +638,7 @@ int main(int argc, char** argv) {
       // An exception would end the process from this thread, so it fails the recording.
       try {
         ok = prepare_episode(pending[i], static_cast<int>(i), tmp_dir_for(i), encoder_threads,
-                             prepared);
+                             keep_images, prepared);
       } catch (const std::exception& e) {
         std::cerr << "Error: " << pending[i].filename().string() << ": " << e.what() << "\n";
       }
@@ -829,7 +833,7 @@ int main(int argc, char** argv) {
 
 bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
                      const std::filesystem::path& tmp_dir, int encoder_threads,
-                     PreparedEpisode& out) {
+                     bool keep_images, PreparedEpisode& out) {
   namespace fs = std::filesystem;
   using trossen::io::backends::AlignedEpisode;
   using trossen::io::backends::McapChannelMap;
@@ -1029,6 +1033,15 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
     } else {
       std::cout << "  Warning: No videos were created\n";
     }
+
+    // Every camera's video now holds its frames, and the stats sample the videos, so the
+    // extracted frames are deleted and never reach the dataset.
+    if (!keep_images) {
+      std::error_code rm_ec;
+      for (const auto& [camera_name, camera_dir] : camera_dirs) {
+        fs::remove_all(camera_dir, rm_ec);
+      }
+    }
   }
 
   return true;
@@ -1086,12 +1099,10 @@ bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
 
   try {
     fs::create_directories(data_dir);
-    fs::create_directories(images_dir);
     fs::create_directories(videos_dir);
     fs::create_directories(meta_dir);
 
     std::cout << "  [ok] Created data directory:   " << data_dir.string() << "\n";
-    std::cout << "  [ok] Created images directory: " << images_dir.string() << "\n";
     std::cout << "  [ok] Created videos directory: " << videos_dir.string() << "\n";
     std::cout << "  [ok] Created meta directory:   " << meta_dir.string() << "\n";
   } catch (const std::exception& e) {
