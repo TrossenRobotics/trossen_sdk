@@ -55,9 +55,6 @@ struct AlignmentOptions {
 /**
  * @brief Read an MCAP file and align its joint/camera streams into a frame sequence.
  *
- * Row alignment is not implemented until #319: on success it maps the streams and returns
- * true with no frames.
- *
  * Decodes the embedded dataset_info metadata, maps each channel to the stream it
  * describes (leader and follower joint streams by their `role`), parses all joint and
  * odometry messages, and produces one AlignedFrame per dataset row via
