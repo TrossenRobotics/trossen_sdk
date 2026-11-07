@@ -125,16 +125,6 @@ public:
   /**
    * @brief Register a new periodic task
    *
-   * @param cb Function to invoke
-   * @param period_ms Interval in milliseconds
-   */
-  void add_task(Callback cb, uint32_t period_ms, const TaskOptions& opts) {
-    add_task(std::chrono::milliseconds(period_ms), std::move(cb), opts);
-  }
-
-  /**
-   * @brief Register a new periodic task
-   *
    * @tparam Rep std::chrono representation type (e.g. int, float)
    * @tparam Period std::chrono period type (e.g. std::milliseconds)
    * @param cb Function to invoke
