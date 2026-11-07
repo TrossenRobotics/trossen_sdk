@@ -12,8 +12,7 @@ The resulting dataset is usable directly with the `LeRobot <https://github.com/h
 What You Need
 =============
 
--   A completed build.
-    The conversion tool is always built as part of the standard SDK build (see :doc:`/installation`).
+-   The SDK's dependencies installed (see :doc:`/installation`).
 -   At least one ``.mcap`` episode recorded with the SDK.
     If you have not recorded anything yet, follow :doc:`/record`.
 -   ``ffmpeg`` on ``PATH`` for video encoding (installed in the system dependencies step).
@@ -25,6 +24,7 @@ The tool is produced by the standard build:
 
 .. code-block:: bash
 
+    mkdir -p build
     cd build
     cmake ..
     make trossen_mcap_to_lerobot_v2
@@ -75,7 +75,7 @@ Examples per robot:
 
 .. note::
 
-    Batch mode processes the ``.mcap`` files in the order they were recorded (by the ``recording_start_time`` stored in each file) and assigns LeRobot episode indices from that order, so episode 0 is the earliest recording.
+    Batch mode processes the ``.mcap`` files in the order they were recorded, by the ``recording_start_time`` the recorder writes in each file, and numbers the converted episodes from 0 in that order.
 
 The frames extracted to ``images/`` are deleted once each episode's videos are encoded.
 Set ``keep_images`` to ``true`` in the config to keep them.
@@ -184,6 +184,7 @@ The tool writes a LeRobot V2 dataset rooted at the repository ID and dataset ID 
     <root>/
     └── <repository_id>/
         └── <dataset_id>/
+            ├── README.md              dataset card
             ├── meta/
             │   ├── info.json              dataset metadata and feature descriptions
             │   ├── episodes.jsonl         one entry per episode
@@ -219,10 +220,10 @@ Each episode produces one ``.parquet`` file (SNAPPY compression) with the follow
       - Seconds from first frame (``0.0`` at start)
     * - ``observation.state``
       - ``list<float64>``
-      - Concatenated follower joint observations
+      - Concatenated follower joint observations, followed on a mobile robot by the base's linear and angular velocity
     * - ``action``
       - ``list<float64>``
-      - Concatenated leader joint actions
+      - Concatenated leader joint actions, followed on a mobile robot by the base's linear and angular velocity
     * - ``episode_index``
       - ``int64``
       - Zero-based episode number
@@ -254,6 +255,11 @@ Dataset Metadata (info.json)
       "total_episodes": <N>,
       "total_frames":   <N>
     }
+
+The camera entry shows a color camera encoded by the tool.
+A camera recorded as compressed H.264 video at the dataset ``fps`` is copied without re-encoding and keeps ``"video.codec": "h264"``.
+A camera recorded at another rate is decoded and re-encoded with one frame per row, so frames are repeated or skipped, and it takes the configured codec.
+Record every camera at the dataset ``fps`` so videos are copied as recorded.
 
 Episode Statistics (episodes_stats.jsonl)
 =========================================
@@ -293,7 +299,7 @@ The tool shells out to FFmpeg for AV1 encoding of the image streams.
 Episode ordering
 ----------------
 
-The tool assigns LeRobot episode indices from the order the episodes were recorded (the ``recording_start_time`` in each file's metadata), not from their (random) filenames.
+The tool assigns LeRobot episode indices in recording order, by the ``recording_start_time`` in each file's metadata, so a newly recorded episode sorts to the end.
 A re-run skips the recordings already in the dataset, matched by file name, and gives each new recording the next free index, so existing episodes keep their indices.
 New recordings are numbered after the existing episodes even when they were recorded earlier, so across runs the indices follow the order of conversion.
 A recording that fails gets no index, so the indices have no gaps.
@@ -301,7 +307,7 @@ A dataset whose ``meta/episodes.jsonl`` entries have no ``source_file`` cannot b
 
 This assumes the recording clocks are consistent.
 When merging ``.mcap`` files from multiple machines whose clocks are not synchronized, the cross-machine ordering is only as reliable as those clocks.
-Files missing ``recording_start_time`` sort last, ordered by filename.
+A re-run does not recognize a renamed recording as converted.
 
 Episode fails
 -------------
