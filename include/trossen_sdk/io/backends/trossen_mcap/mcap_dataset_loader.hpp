@@ -232,6 +232,32 @@ void drop_depth_cameras(McapChannelMap& channels, const nlohmann::json& dataset_
 void sort_by_recording_start(std::vector<std::filesystem::path>& files);
 
 /**
+ * @brief Check that a name is a single folder name
+ *
+ * The converters write and may remove root / repository_id / dataset_id, so each name must be
+ * non-empty, not "." or "..", and contain no '/'.
+ *
+ * @param key Config key the name came from, used in the error message.
+ * @param name Name to check.
+ * @return true if the name is a single folder name, false (with the reason logged) otherwise.
+ */
+bool is_dataset_folder_name(const std::string& key, const std::string& name);
+
+/**
+ * @brief Remove an existing dataset before converting into it again
+ *
+ * Refuses when an input recording sits inside the dataset, since removing the dataset would
+ * delete it. On success each input is replaced by its resolved path, which stays valid when a
+ * symlink inside the dataset is removed.
+ *
+ * @param dataset_root Dataset folder to remove.
+ * @param inputs Recordings to convert, resolved in place.
+ * @return true if the dataset was removed, false (with the reason logged) otherwise.
+ */
+bool remove_dataset_for_overwrite(const std::filesystem::path& dataset_root,
+                                  std::vector<std::filesystem::path>& inputs);
+
+/**
  * @brief Read an MCAP file and align its streams into one row per tick of `alignment.fps`.
  *
  * Rows span the time every joint stream, camera and mobile base has data.
