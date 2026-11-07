@@ -273,17 +273,39 @@ void TrossenMCAPBackend::close_resources() {
   // Encoders hold per-stream state (reference frames, GOP position), so they
   // must not survive into the next episode: a stream that begins mid-GOP is not
   // independently decodable, which is exactly what a per-episode file has to be.
-  video_encoders_.clear();
+  // close() and discard_episode() have already joined their threads.
+  video_streams_.clear();
   video_encode_failed_.clear();
   opened_ = false;
 }
 
+void TrossenMCAPBackend::stop_video_streams(bool drain) {
+  for (auto& [id, stream] : video_streams_) {
+    {
+      std::scoped_lock lk(stream->mutex);
+      stream->stopping = true;
+      if (!drain) stream->queue.clear();
+    }
+    stream->cv.notify_one();
+  }
+  for (auto& [id, stream] : video_streams_) {
+    stream->thread.join();
+    if (stream->dropped > 0) {
+      std::cerr << "Video: dropped " << stream->dropped << " frames for " << id
+                << "; the encoder could not keep up\n";
+    }
+  }
+}
+
 void TrossenMCAPBackend::close() {
+  stop_video_streams(/*drain=*/true);
   std::scoped_lock lk(writer_mutex_);
   close_resources();
 }
 
 void TrossenMCAPBackend::discard_episode() {
+  // The file is deleted, so queued frames are dropped rather than encoded.
+  stop_video_streams(/*drain=*/false);
   std::scoped_lock lk(writer_mutex_);
   close_resources();
 
@@ -589,11 +611,11 @@ void TrossenMCAPBackend::write_raw_image_message(const cv::Mat& image, const std
   }
 }
 
-utils::VideoEncoder* TrossenMCAPBackend::ensure_video_encoder(const data::ImageRecord& img,
-                                                              bool depth) {
+TrossenMCAPBackend::VideoStream* TrossenMCAPBackend::ensure_video_stream(
+    const data::ImageRecord& img, bool depth, foxglove::RawChannel* channel) {
 #ifdef TROSSEN_ENABLE_VIDEO_ENCODE
-  auto it = video_encoders_.find(img.id);
-  if (it != video_encoders_.end()) {
+  auto it = video_streams_.find(img.id);
+  if (it != video_streams_.end()) {
     return it->second.get();
   }
 
@@ -616,52 +638,80 @@ utils::VideoEncoder* TrossenMCAPBackend::ensure_video_encoder(const data::ImageR
     p.bitrate_kbps = cfg_->video_bitrate_kbps;
   }
 
-  auto encoder = utils::VideoEncoder::create(p);
-  if (!encoder) {
+  auto stream = std::make_unique<VideoStream>();
+  stream->encoder = utils::VideoEncoder::create(p);
+  if (!stream->encoder) {
     std::cerr << "Failed to create video encoder for camera " << img.id << "\n";
     return nullptr;
   }
-  auto [inserted, _] = video_encoders_.emplace(img.id, std::move(encoder));
-  return inserted->second.get();
+  stream->channel = channel;
+  stream->depth = depth;
+  if (depth) stream->depth_lut = utils::build_depth_quantization_lut();
+  stream->thread = std::thread([this, s = stream.get()]() {
+    std::unique_lock lk(s->mutex);
+    while (true) {
+      s->cv.wait(lk, [s]() { return s->stopping || !s->queue.empty(); });
+      if (s->queue.empty()) return;
+      data::ImageRecord img = std::move(s->queue.front());
+      s->queue.pop_front();
+      lk.unlock();
+      encode_video_frame(*s, img);
+      lk.lock();
+    }
+  });
+  return video_streams_.emplace(img.id, std::move(stream)).first->second.get();
 #else
   (void)img;
   (void)depth;
+  (void)channel;
   return nullptr;
 #endif
 }
 
 void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool depth,
                                            foxglove::RawChannel* channel) {
-#ifdef TROSSEN_ENABLE_VIDEO_ENCODE
-  auto* encoder = ensure_video_encoder(img, depth);
-  if (!encoder) {
-    if (!video_encode_failed_[img.id]) {
-      video_encode_failed_[img.id] = true;
-      std::cerr << "Dropping frames for " << img.id << ": no video encoder\n";
-    }
+  if (video_encode_failed_[img.id]) return;
+  VideoStream* stream = ensure_video_stream(img, depth, channel);
+  if (!stream) {
+    video_encode_failed_[img.id] = true;
+    std::cerr << "Dropping frames for " << img.id << ": no video encoder\n";
     return;
   }
+  {
+    std::scoped_lock lk(stream->mutex);
+    if (stream->queue.size() >= trossen::configuration::TROSSEN_MCAP_VIDEO_QUEUE_FRAMES) {
+      // A dropped frame writes nothing, so every recorded frame still has its own packet.
+      ++stream->dropped;
+      ++stats_.video_frames_dropped;
+      return;
+    }
+    // The copy shares the producer's pixel buffer: cv::Mat copies are reference-counted.
+    stream->queue.push_back(img);
+  }
+  stream->cv.notify_one();
+}
+
+void TrossenMCAPBackend::encode_video_frame(VideoStream& stream, const data::ImageRecord& img) {
+#ifdef TROSSEN_ENABLE_VIDEO_ENCODE
+  const bool depth = stream.depth;
 
   // Color is handed over as BGR8; depth is log-quantized to 12-bit codes first
   // so the stored stream is exactly what LeRobot's depth decoder expects.
   cv::Mat source;
   if (depth) {
     if (img.image.type() != CV_16UC1) {
-      if (!video_encode_failed_[img.id]) {
-        video_encode_failed_[img.id] = true;
+      if (!stream.failed) {
+        stream.failed = true;
         std::cerr << "Depth video for " << img.id << " needs CV_16UC1, got type "
                   << img.image.type() << "\n";
       }
       return;
     }
-    if (depth_quant_lut_.empty()) {
-      depth_quant_lut_ = utils::build_depth_quantization_lut();
-    }
     source.create(img.image.rows, img.image.cols, CV_16UC1);
     for (int y = 0; y < img.image.rows; ++y) {
       const uint16_t* src = img.image.ptr<uint16_t>(y);
       uint16_t* dst = source.ptr<uint16_t>(y);
-      for (int x = 0; x < img.image.cols; ++x) dst[x] = depth_quant_lut_[src[x]];
+      for (int x = 0; x < img.image.cols; ++x) dst[x] = stream.depth_lut[src[x]];
     }
   } else {
     // The encoder converts BGR to YUV itself, so anything else is normalized
@@ -681,13 +731,13 @@ void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
 
   const auto* src_data = reinterpret_cast<const uint8_t*>(source.data);
   const size_t src_size = source.total() * source.elemSize();
-  const utils::VideoEncoder::EncodedFrame packet = encoder->encode(src_data, src_size);
+  const utils::VideoEncoder::EncodedFrame packet = stream.encoder->encode(src_data, src_size);
   if (packet.data.empty()) {
     // One packet per frame is an invariant, not a nicety: the converter pairs
     // camera frames to joint samples, so a dropped packet shifts every later
     // frame's alignment. Report it rather than letting it pass quietly.
-    if (!video_encode_failed_[img.id]) {
-      video_encode_failed_[img.id] = true;
+    if (!stream.failed) {
+      stream.failed = true;
       std::cerr << "Video encoder produced no packet for " << img.id
                 << "; frame alignment would drift, dropping frame\n";
     }
@@ -699,7 +749,7 @@ void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
       foxglove::schemas::Timestamp{.sec = static_cast<uint32_t>(img.ts.realtime.sec),
                                    .nsec = static_cast<uint32_t>(img.ts.realtime.nsec)};
   vmsg.frame_id = img.id;
-  vmsg.format = utils::video_codec_format(encoder->codec());
+  vmsg.format = utils::video_codec_format(stream.encoder->codec());
   vmsg.data.assign(packet.data.begin(), packet.data.end());
 
   std::vector<uint8_t> payload(TROSSEN_MCAP_INITIAL_ENCODED_BUFFER_SIZE);
@@ -714,8 +764,9 @@ void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
     return;
   }
 
-  auto st = channel->log(reinterpret_cast<const std::byte*>(payload.data()), encoded_len,
-                         img.ts.realtime.to_ns());
+  std::scoped_lock lk(writer_mutex_);
+  auto st = stream.channel->log(reinterpret_cast<const std::byte*>(payload.data()), encoded_len,
+                                img.ts.realtime.to_ns());
   if (st != foxglove::FoxgloveError::Ok) {
     std::cerr << "Failed to write video frame: " << foxglove::strerror(st) << "\n";
   } else {
@@ -726,9 +777,8 @@ void TrossenMCAPBackend::write_video_frame(const data::ImageRecord& img, bool de
     }
   }
 #else
+  (void)stream;
   (void)img;
-  (void)depth;
-  (void)channel;
 #endif
 }
 
