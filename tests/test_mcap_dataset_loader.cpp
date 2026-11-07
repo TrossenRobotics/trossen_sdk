@@ -8,6 +8,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <filesystem>
+#include <fstream>
 #include <map>
 #include <optional>
 #include <string>
@@ -25,9 +27,11 @@ using trossen::io::backends::check_frame_counts;
 using trossen::io::backends::check_video_alignment;
 using trossen::io::backends::clamp_episode_to_video_frame_counts;
 using trossen::io::backends::frames_in_row_window;
+using trossen::io::backends::is_dataset_folder_name;
 using trossen::io::backends::load_aligned_episode;
 using trossen::io::backends::McapChannelMap;
 using trossen::io::backends::MAX_VIDEO_DRIFT_FRAMES;
+using trossen::io::backends::remove_dataset_for_overwrite;
 
 namespace {
 
@@ -41,6 +45,15 @@ std::string stderr_for_fps(double fps) {
   testing::internal::CaptureStderr();
   EXPECT_FALSE(load_aligned_episode("/nonexistent.mcap", 0, episode, channels, alignment));
   return testing::internal::GetCapturedStderr();
+}
+
+/// Creates an empty file, and its parent folders, under a fresh folder named after the test.
+std::filesystem::path make_file(const std::filesystem::path& relative) {
+  const auto base = std::filesystem::temp_directory_path() /
+    ("trossen_sdk_" + std::string(testing::UnitTest::GetInstance()->current_test_info()->name()));
+  std::filesystem::create_directories((base / relative).parent_path());
+  std::ofstream(base / relative).put('x');
+  return base / relative;
 }
 
 }  // namespace
@@ -417,4 +430,35 @@ TEST(CheckFrameCountsTest, ASlowerCameraIsMeasuredAgainstItsOwnRate) {
   EXPECT_TRUE(check_frame_counts({{"cam_depth", {300, 15.0}}, {"cam_high", {600, 30.0}}}, 20.0,
                                  0.02));
   EXPECT_FALSE(check_frame_counts({{"cam_depth", {300, 30.0}}}, 20.0, 0.02));
+}
+
+TEST(DatasetFolderNameTest, AcceptsOnlyASingleFolderName) {
+  testing::internal::CaptureStderr();
+  EXPECT_TRUE(is_dataset_folder_name("dataset_id", "my_ds"));
+  EXPECT_FALSE(is_dataset_folder_name("dataset_id", ""));
+  EXPECT_FALSE(is_dataset_folder_name("dataset_id", "."));
+  EXPECT_FALSE(is_dataset_folder_name("dataset_id", ".."));
+  EXPECT_FALSE(is_dataset_folder_name("dataset_id", "a/b"));
+  testing::internal::GetCapturedStderr();
+}
+
+TEST(RemoveDatasetForOverwriteTest, AnInputInsideTheDatasetKeepsIt) {
+  const auto input = make_file("ds/episode.mcap");
+  std::vector<std::filesystem::path> inputs{input};
+  testing::internal::CaptureStderr();
+  EXPECT_FALSE(remove_dataset_for_overwrite(input.parent_path(), inputs));
+  testing::internal::GetCapturedStderr();
+  EXPECT_TRUE(std::filesystem::exists(input));
+  std::filesystem::remove_all(input.parent_path().parent_path());
+}
+
+TEST(RemoveDatasetForOverwriteTest, ASiblingWithTheSamePrefixIsNotInside) {
+  const auto input = make_file("ds_recordings/episode.mcap");
+  const auto dataset = input.parent_path().parent_path() / "ds";
+  std::filesystem::create_directories(dataset);
+  std::vector<std::filesystem::path> inputs{input};
+  EXPECT_TRUE(remove_dataset_for_overwrite(dataset, inputs));
+  EXPECT_FALSE(std::filesystem::exists(dataset));
+  EXPECT_TRUE(std::filesystem::exists(input));
+  std::filesystem::remove_all(dataset.parent_path());
 }

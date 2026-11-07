@@ -59,7 +59,9 @@ LeRobotV2Backend::LeRobotV2Backend(
   std::cout << "================= LeRobotV2 Backend Config =================" << std::endl;
   std::cout << "Backend Config Loaded:" << std::endl;
   std::cout << "  root = " << cfg_->root << std::endl;
-  std::cout << "  encoder_threads = " << cfg_->encoder_threads << std::endl;
+  const int encoder_threads =
+    cfg_->encoder_threads.value_or(trossen::io::backends::DEFAULT_ENCODER_THREADS);
+  std::cout << "  encoder_threads = " << encoder_threads << std::endl;
   std::cout << "  max_image_queue = " << cfg_->max_image_queue << std::endl;
   std::cout << "  png_compression_level = " << cfg_->png_compression_level << std::endl;
   std::cout << "  overwrite_existing = "
@@ -155,7 +157,9 @@ bool LeRobotV2Backend::open() {
 
   // Start image worker threads
   image_worker_running_ = true;
-  size_t nthreads = cfg_->encoder_threads == 0 ? 1 : cfg_->encoder_threads;
+  const int encoder_threads =
+    cfg_->encoder_threads.value_or(trossen::io::backends::DEFAULT_ENCODER_THREADS);
+  size_t nthreads = encoder_threads == 0 ? 1 : static_cast<size_t>(encoder_threads);
   image_workers_.reserve(nthreads);
   for (size_t i = 0; i < nthreads; ++i) {
     image_workers_.emplace_back(&LeRobotV2Backend::image_worker_loop, this);
