@@ -361,7 +361,7 @@ bool LeRobotV3DatasetWriter::encode_depth_codes(
 
 bool LeRobotV3DatasetWriter::place_or_concat_video(
   const std::string& video_key, const fs::path& episode_mp4, double ep_duration_s,
-  std::array<double, 4>& out_slot)
+  double start_offset_s, double played_s, std::array<double, 4>& out_slot)
 {
   VideoFileState& st = videos_[video_key];
 
@@ -422,11 +422,12 @@ bool LeRobotV3DatasetWriter::place_or_concat_video(
   st.parts.push_back(part);
   st.part_durations_s.push_back(measured_s);
   st.bytes += ep_bytes;
-  // Not up for review, changes in #360.
-  const double from_ts = st.duration_s;
+  // The episode's frames begin where the staged videos end; its first row reads
+  // start_offset_s further in, at the frame matched to row 0.
+  const double from_ts = st.duration_s + start_offset_s;
   st.duration_s += measured_s;
   out_slot = {static_cast<double>(st.chunk_index), static_cast<double>(st.file_index), from_ts,
-              st.duration_s};
+              from_ts + played_s};
   return true;
 }
 
@@ -592,8 +593,7 @@ try {
     for (const auto& [name, vs] : video_streams) {
       if (described.at(name).at("fps").get<double>() == opts_.fps) copied.emplace(name, vs);
     }
-    // Not up for review, changes in #360.
-    clamp_episode_to_video_frame_counts(out.ep, copied);
+    clamp_episode_to_video_frame_counts(out.ep, copied, /*start_offset_applied=*/true);
 
     for (const auto& cam : out.ep.cameras) {
       auto vs_it = video_streams.find(cam.name);
@@ -634,16 +634,19 @@ try {
       if (!remux_episode_video(vs.annexb_path, vs.frame_count, opts_.fps, pv.episode_mp4)) {
         return out;  // ok == false
       }
-      // Not up for review, changes in #360.
       pv.duration_s = static_cast<double>(vs.frame_count) / static_cast<double>(opts_.fps);
+      pv.start_offset_s =
+        static_cast<double>(video_start_offset(cam)) / static_cast<double>(opts_.fps);
       const VideoCodecInfo codec = copied_stream_codec(vs.format);
       pv.codec = codec.codec;
       pv.pix_fmt = codec.pix_fmt;
 
       // 12-bit depth codes are not [0,1] RGB, so they are not sampled for image
-      // stats, matching how the raw-image path treats depth.
+      // stats, matching how the raw-image path treats depth. Only the frames the rows play
+      // are sampled; the clamp above keeps them inside the video.
       if (!is_depth) {
-        pv.samples = sample_video_frames(pv.episode_mp4, 0, vs.frame_count, out.tmp_dir);
+        pv.samples = sample_video_frames(pv.episode_mp4, video_start_offset(cam), rows,
+                                         out.tmp_dir);
       }
 
       out.videos.push_back(std::move(pv));
@@ -866,7 +869,10 @@ LeRobotV3DatasetWriter::ConsumeResult LeRobotV3DatasetWriter::consume_episode(
       }
 
       std::array<double, 4> slot{};
-      if (!place_or_concat_video(pv.obs_key, pv.episode_mp4, pv.duration_s, slot)) {
+      const double played_s =
+        static_cast<double>(ep.frames.size()) / static_cast<double>(opts_.fps);
+      if (!place_or_concat_video(pv.obs_key, pv.episode_mp4, pv.duration_s, pv.start_offset_s,
+                                 played_s, slot)) {
         return ConsumeResult::kFailed;
       }
       meta.videos[pv.obs_key] = slot;
