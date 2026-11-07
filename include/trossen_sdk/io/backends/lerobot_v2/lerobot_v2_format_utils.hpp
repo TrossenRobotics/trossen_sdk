@@ -36,6 +36,7 @@
 #include <fstream>
 #include <iomanip>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -662,6 +663,36 @@ inline bool write_episode_metadata(
     return false;
   }
 
+  return true;
+}
+
+/**
+ * @brief Check that each camera of an episode keeps the codec info.json names for it.
+ *
+ * info.json names one codec per camera for every episode, so an episode whose video has
+ * another codec cannot join the dataset. A camera info.json does not list yet is accepted.
+ *
+ * @param info Parsed meta/info.json of the dataset
+ * @param codecs Codec of each camera's episode video ("av1", "h264" or "hevc"), keyed by
+ *   camera name
+ * @return true if every listed camera keeps its codec; false, after naming the camera and
+ *   both codecs on stderr, otherwise
+ */
+inline bool episode_codecs_match(
+    const nlohmann::json& info,
+    const std::map<std::string, std::string>& codecs) {
+  const auto features = info.find("features");
+  if (features == info.end()) return true;
+  for (const auto& [camera_name, codec] : codecs) {
+    const auto feature = features->find("observation.images." + camera_name);
+    if (feature == features->end()) continue;
+    const std::string recorded = feature->at("info").value("video.codec", "");
+    if (codec != recorded) {
+      std::cerr << "Error: " << camera_name << " would be written as " << codec
+                << ", but the dataset's earlier episodes hold " << recorded << "\n";
+      return false;
+    }
+  }
   return true;
 }
 

@@ -281,11 +281,24 @@ struct PreparedEpisode {
 /// @param tmp_dir Scratch folder for this recording; the caller removes it
 /// @param encoder_threads Cores each AV1 encode may use (SVT-AV1 lp=)
 /// @param keep_images Keep the extracted frames, for images/, once the videos are encoded
+/// @param reencode_videos Re-encode every compressed camera one frame per row instead of
+///   copying its stream
 /// @param out Filled with the episode on success
 /// @return true on success
 bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
                      const std::filesystem::path& tmp_dir, int encoder_threads,
-                     bool keep_images, PreparedEpisode& out);
+                     bool keep_images, bool reencode_videos, PreparedEpisode& out);
+
+/// @brief Whether a prepared episode's videos keep the codecs the dataset's info.json names.
+///
+/// A copied camera keeps the recorder's codec and an encoded one takes the configured codec,
+/// so a dataset that mixes the two for one camera, such as raw-image and compressed-video
+/// recordings, refuses the later kind. Nothing is written either way.
+/// @param pe Episode from prepare_episode()
+/// @param dataset_path Dataset folder, holding meta/info.json once an episode is written
+/// @return true if the dataset has no info.json yet or every camera keeps its codec
+/// @throws nlohmann::json::exception if info.json is not valid JSON
+bool codecs_fit_dataset(const PreparedEpisode& pe, const std::filesystem::path& dataset_path);
 
 /// @brief Write a prepared episode into the dataset as episode_index.
 ///
@@ -437,6 +450,7 @@ int main(int argc, char** argv) {
   const int chunk_size = lerobot_config->chunk_size;
   const std::string license = lerobot_config->license;
   const bool keep_images = lerobot_config->keep_images;
+  const bool reencode_videos = lerobot_config->reencode_videos;
 
   // Display configuration
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -578,7 +592,7 @@ int main(int argc, char** argv) {
       // An exception would end the process from this thread, so it fails the recording.
       try {
         ok = prepare_episode(pending[i], static_cast<int>(i), tmp_dir_for(i), encoder_threads,
-                             keep_images, prepared);
+                             keep_images, reencode_videos, prepared);
       } catch (const std::exception& e) {
         std::cerr << "Error: " << pending[i].filename().string() << ": " << e.what() << "\n";
       }
@@ -612,6 +626,23 @@ int main(int argc, char** argv) {
               << "\n";
     std::cout << std::string(70, '=') << "\n";
 
+    if (ok) {
+      // A throw would leave main() with the workers still running, which terminates the
+      // process, so it fails the recording instead.
+      try {
+        ok = codecs_fit_dataset(prepared, full_dataset_path_check);
+        if (!ok) {
+          std::cerr << "  Every episode of a dataset needs the same codec per camera. Convert "
+                    << "into a new dataset_id with lerobot_v2_backend.reencode_videos=true, or "
+                    << "transcode raw-image recordings first with "
+                    << "trossen_mcap_transcode_video.\n";
+        }
+      } catch (const std::exception& e) {
+        std::cerr << "Error: Failed to read the existing " << v2::JSON_INFO << ": "
+                  << e.what() << "\n";
+        ok = false;
+      }
+    }
     if (ok) {
       // A throw would leave main() with the workers still running, which terminates the
       // process, so it takes the failed-commit path instead.
@@ -773,7 +804,7 @@ int main(int argc, char** argv) {
 
 bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
                      const std::filesystem::path& tmp_dir, int encoder_threads,
-                     bool keep_images, PreparedEpisode& out) {
+                     bool keep_images, bool reencode_videos, PreparedEpisode& out) {
   namespace fs = std::filesystem;
   using trossen::io::backends::AlignedEpisode;
   using trossen::io::backends::McapChannelMap;
@@ -868,6 +899,12 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
       }
     }
 
+    // A camera whose clock runs off the row rate, or that drops frames, drifts from its rows
+    // as the episode goes on, and this format cannot start a copied video at row 0's frame;
+    // one frame per row keeps every row on its matched frame. Every camera is re-encoded, so
+    // each one keeps a single codec across the dataset.
+    if (reencode_videos) copied_streams.clear();
+
     // A camera that free-ran short would otherwise leave more parquet rows than its
     // remuxed video has frames; trim the whole episode to whatever every stream-copied
     // camera actually covers (shared with the v3 converter).
@@ -875,6 +912,8 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
                                                                 /*start_offset_applied=*/false);
     if (!trossen::io::backends::check_video_alignment(ep, copied_streams,
                                                       /*start_offset_applied=*/false)) {
+      std::cerr << "  Convert into a new dataset_id with lerobot_v2_backend.reencode_videos=true "
+                << "to re-encode every camera one frame per row; conversion takes longer.\n";
       return false;
     }
 
@@ -988,6 +1027,21 @@ bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
   }
 
   return true;
+}
+
+bool codecs_fit_dataset(const PreparedEpisode& pe, const std::filesystem::path& dataset_path) {
+  namespace fs = std::filesystem;
+  const fs::path info_path = dataset_path / v2::METADATA_DIR / v2::JSON_INFO;
+  if (!fs::exists(info_path)) return true;
+  std::map<std::string, std::string> codecs;
+  for (const auto& [camera_name, video] : pe.videos) {
+    const auto copied = pe.remuxed_codecs.find(camera_name);
+    codecs[camera_name] = copied != pe.remuxed_codecs.end()
+                            ? copied->second.codec
+                            : std::string(trossen::io::backends::kColorCodec);
+  }
+  std::ifstream info_file(info_path);
+  return trossen::io::backends::episode_codecs_match(nlohmann::json::parse(info_file), codecs);
 }
 
 bool commit_episode(PreparedEpisode& pe, const std::string& dataset_root_dir,
