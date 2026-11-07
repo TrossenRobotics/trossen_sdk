@@ -317,6 +317,7 @@ An episode fails when:
 - rows are missing for more than 200 ms in one gap, or for more than 2% of the episode in total.
   Shorter gaps are listed in the log with their length and the stream that had no sample.
 - a stream-copied camera plays some row's image more than 3 frames (about 100 ms at 30 fps) away from the frame matched to it.
+- a camera recorded more than 2% fewer frames over the rows' span than the ``fps`` it recorded promises (it dropped frames or ran slower than that rate, so rows would repeat images).
 
 What's Next
 ===========

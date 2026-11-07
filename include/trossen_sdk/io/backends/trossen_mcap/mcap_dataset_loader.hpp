@@ -65,6 +65,10 @@ struct AlignmentOptions {
   ///        first and last kept row. Scales with episode length: 0.02 allows 36 rows in a
   ///        60 s episode at 30 fps. Past it the episode is rejected.
   double max_gap_fraction{DEFAULT_MAX_GAP_FRACTION};
+  /// @brief Largest share, from 0 to 1, of the frames a camera's recorded fps promises over
+  ///        the rows' span that may be missing. Past it the episode is rejected, since the
+  ///        rows around each lost frame repeat an image.
+  double max_missing_frame_fraction{DEFAULT_MAX_MISSING_FRAME_FRACTION};
   /// @brief Leave depth cameras out of the episode before they are checked or aligned, for
   ///        a format that cannot store depth. A depth camera then cannot reject the episode
   ///        or cost it rows.
@@ -240,11 +244,12 @@ void drop_depth_cameras(McapChannelMap& channels, const nlohmann::json& dataset_
  * are dropped. Camera frames are NOT decoded here; call extract_camera_images() for
  * that.
  *
- * Fails on input it cannot align: an `alignment.fps` that is not a whole number from 1 to
- * 1e9, a file it cannot read, no leader or follower stream, or a follower, camera or
- * mobile base channel with no data. Also fails when a stream's timestamps go backwards,
- * when no stretch of time has data from every stream, or when the rows dropped between
- * the first and last kept row exceed `alignment.max_single_gap_ms` in any one gap or
+ * Fails on input it cannot align: an `alignment.fps` that is not a positive whole number,
+ * a file it cannot read, no leader or follower stream, or a follower, camera or mobile base
+ * channel with no data. Also fails when a stream's timestamps go backwards,
+ * when no stretch of time has data from every stream, when check_frame_counts() finds a
+ * camera short of the frames its fps promises, or when the rows dropped between the first
+ * and last kept row exceed `alignment.max_single_gap_ms` in any one gap or
  * `alignment.max_gap_fraction` in total.
  *
  * Camera keys keep the name the recording gave them.
@@ -340,6 +345,46 @@ size_t video_start_offset(const CameraInfo& cam);
 /// @brief Most frames a row's image may be from the frame matched to it, about 100 ms at
 /// 30 fps. A stream-copied camera further off than this fails the episode.
 inline constexpr size_t MAX_VIDEO_DRIFT_FRAMES = 3;
+
+/**
+ * @brief Frames whose time falls within the span the rows cover
+ *
+ * Each row stands for one row period centered on its time, so the span runs from half a
+ * period before the first row to half a period after the last. A camera at the row rate
+ * records about one frame per row in it.
+ *
+ * @param stamps The camera's frame times, in ns, in increasing order
+ * @param first_row_ns Time of the first row, in ns
+ * @param last_row_ns Time of the last row, in ns
+ * @param row_period_ns Spacing between rows, in ns
+ * @return Number of frames from half a period before the first row up to, but not
+ *   including, half a period after the last row.
+ */
+size_t frames_in_row_window(const std::vector<uint64_t>& stamps, uint64_t first_row_ns,
+                            uint64_t last_row_ns, uint64_t row_period_ns);
+
+/// @brief A camera's frames within the rows' span, and the rate it was recorded at.
+struct CameraFrameCount {
+  /// @brief Frames within the rows' span (frames_in_row_window()).
+  size_t frames{0};
+  /// @brief The camera's recorded fps.
+  double fps{0.0};
+};
+
+/**
+ * @brief Check that every camera recorded the frames its fps promises over the rows' span
+ *
+ * A camera that loses frames still has one near most rows, so the row gap limits pass it,
+ * and the rows around each lost frame repeat an image.
+ *
+ * @param cameras Each camera's frame count and fps, keyed by camera name
+ * @param span_s Length of the rows' span, in seconds: rows times the row period
+ * @param max_missing_fraction AlignmentOptions::max_missing_frame_fraction
+ * @return False if a camera is missing more than @p max_missing_fraction of `fps * span_s`
+ *   frames, and more than one frame (message logged to stderr); true otherwise.
+ */
+bool check_frame_counts(const std::map<std::string, CameraFrameCount>& cameras, double span_s,
+                        double max_missing_fraction);
 
 /**
  * @brief Check that each stream-copied camera's rows play the frames matched to them
