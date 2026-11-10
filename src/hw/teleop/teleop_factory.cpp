@@ -7,6 +7,7 @@
 
 #include <iostream>
 #include <stdexcept>
+#include <string>
 #include <utility>
 
 #include "trossen_sdk/configuration/global_config.hpp"
@@ -22,9 +23,26 @@ TeleopCapable::Space parse_space(const std::string& s) {
   if (auto space = space_from_name(s)) {
     return *space;
   }
-  throw std::invalid_argument(
-    "teleop pair: unknown space '" + s +
-    "' (must match one of the names in kSpaceDescriptors)");
+  std::string names;
+  for (const auto& d : kSpaceDescriptors) {
+    if (!names.empty()) names += ", ";
+    names += d.name;
+  }
+  throw std::invalid_argument("unknown space '" + s + "'; use one of: " + names);
+}
+
+/// @brief Names a pair's follower for logs and errors.
+/// @param pair The pair from the teleop config.
+/// @return The follower id, or "(none)" for a leader-only pair.
+std::string follower_name(const trossen::configuration::TeleoperationPair& pair) {
+  return pair.follower.empty() ? "(none)" : pair.follower;
+}
+
+/// @brief Names a pair at the start of an error message.
+/// @param pair The pair from the teleop config.
+/// @return For example "teleop pair 'leader_left' -> 'follower_left'".
+std::string pair_label(const trossen::configuration::TeleoperationPair& pair) {
+  return "teleop pair '" + pair.leader + "' -> '" + follower_name(pair) + "'";
 }
 
 }  // namespace
@@ -43,31 +61,33 @@ create_controllers_from_global_config() {
   for (const auto& pair : cfg->pairs) {
     auto leader_hw = ActiveHardwareRegistry::get(pair.leader);
     if (!leader_hw) {
-      std::cout << "  [warn] Leader '" << pair.leader
-                << "' not registered, skipping pair\n";
-      continue;
+      throw std::invalid_argument(
+        pair_label(pair) + ": leader '" + pair.leader +
+        "' is not registered; add it to the hardware config or fix the leader id");
     }
     auto leader = as_capable<TeleopCapable>(leader_hw);
     if (!leader) {
-      std::cout << "  [warn] Leader '" << pair.leader
-                << "' is not teleop-capable, skipping pair\n";
-      continue;
+      throw std::invalid_argument(
+        pair_label(pair) + ": leader '" + pair.leader + "' (type '" +
+        leader_hw->get_type() +
+        "') is not teleop-capable; the leader must implement TeleopCapable");
     }
 
     std::shared_ptr<TeleopCapable> follower;
     if (!pair.follower.empty()) {
       auto follower_hw = ActiveHardwareRegistry::get(pair.follower);
       if (!follower_hw) {
-        std::cout << "  [warn] Follower '" << pair.follower
-                  << "' not registered, running leader-only for '"
-                  << pair.leader << "'\n";
-      } else {
-        follower = as_capable<TeleopCapable>(follower_hw);
-        if (!follower) {
-          std::cout << "  [warn] Follower '" << pair.follower
-                    << "' is not teleop-capable, running leader-only for '"
-                    << pair.leader << "'\n";
-        }
+        throw std::invalid_argument(
+          pair_label(pair) + ": follower '" + pair.follower +
+          "' is not registered; add it to the hardware config, fix the follower id, "
+          "or remove the follower for a leader-only pair");
+      }
+      follower = as_capable<TeleopCapable>(follower_hw);
+      if (!follower) {
+        throw std::invalid_argument(
+          pair_label(pair) + ": follower '" + pair.follower + "' (type '" +
+          follower_hw->get_type() +
+          "') is not teleop-capable; the follower must implement TeleopCapable");
       }
     }
 
@@ -77,17 +97,13 @@ create_controllers_from_global_config() {
       tc.control_rate_hz = cfg->rate_hz;
       controllers.push_back(std::make_unique<TeleopController>(
         std::move(leader), std::move(follower), std::move(tc)));
-
-      const std::string follower_label =
-        pair.follower.empty() ? "(none)"
-        : (follower ? pair.follower : pair.follower + " (leader-only)");
-      std::cout << "  [ok] " << pair.leader << " -> " << follower_label
-                << " @ " << cfg->rate_hz << " Hz (" << pair.space << ")\n";
-    } catch (const std::exception& e) {
-      std::cout << "  [warn] Failed to create pair '" << pair.leader
-                << "' -> '" << pair.follower << "' (" << pair.space
-                << "): " << e.what() << ", skipping\n";
+    } catch (const std::invalid_argument& e) {
+      // The space and controller checks do not know which pair they are checking.
+      throw std::invalid_argument(pair_label(pair) + ": " + e.what());
     }
+
+    std::cout << "  [ok] " << pair.leader << " -> " << follower_name(pair)
+              << " @ " << cfg->rate_hz << " Hz (" << pair.space << ")\n";
   }
   return controllers;
 }

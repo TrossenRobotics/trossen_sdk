@@ -130,6 +130,9 @@ target_link_libraries(test_teleop_controller PRIVATE trossen_sdk GTest::gtest_ma
 add_executable(test_teleop_config test_teleop_config.cpp)
 target_link_libraries(test_teleop_config PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_teleop_factory test_teleop_factory.cpp)
+target_link_libraries(test_teleop_factory PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_observer_base test_observer_base.cpp)
 target_link_libraries(test_observer_base PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -231,6 +234,7 @@ gtest_discover_tests(test_announce)
 gtest_discover_tests(test_teleop_space_helpers)
 gtest_discover_tests(test_teleop_controller)
 gtest_discover_tests(test_teleop_config)
+gtest_discover_tests(test_teleop_factory)
 gtest_discover_tests(test_observer_base)
 gtest_discover_tests(test_observer_registry)
 gtest_discover_tests(test_session_manager_observers)
