@@ -106,13 +106,18 @@ public:
   /**
    * @brief Stop the mirror loop and return hardware to rest.
    *
-   * Joins the control thread, then calls end_teleop() on both components
-   * to neutralize and release driver resources.
+   * Joins the control thread, then calls end_teleop() on the leader and the
+   * follower to neutralize and release driver resources. An exception from
+   * either is logged and not rethrown, so the other is still brought to rest.
    */
   void stop_teleop();
 
   /// @brief Check if the control loop is running.
   bool is_running() const { return running_.load(); }
+
+  /// @brief Check if the mirror loop stopped on an exception from a read or write.
+  /// @return true once a failure has happened; it stays true for the controller's life.
+  bool failed() const { return failed_.load(); }
 
   /// @brief Access the leader component (for session lifecycle calls).
   std::shared_ptr<TeleopCapable> leader() const { return leader_; }
@@ -138,6 +143,8 @@ private:
   Config cfg_;
   std::thread thread_;
   std::atomic<bool> running_{false};
+  /// Set by control_loop() when it stops on an exception; never cleared.
+  std::atomic<bool> failed_{false};
 };
 
 }  // namespace trossen::hw::teleop
