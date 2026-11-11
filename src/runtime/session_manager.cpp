@@ -952,6 +952,15 @@ std::optional<std::string> SessionManager::hardware_fault() const {
   return std::nullopt;
 }
 
+UserAction SessionManager::checked(UserAction action) {
+  const auto fault = hardware_fault();
+  if (!fault) return action;
+  if (!fault_reported_.exchange(true)) {
+    std::cerr << "\n" << *fault << "; ending the session.\n";
+  }
+  return UserAction::kStop;
+}
+
 void SessionManager::print_episode_header() {
   std::cout << "\n╔════════════════════════════════════════════════════════════╗\n";
   std::cout << "║  Episode " << next_episode_index_ << " | Target Duration: ";
@@ -1005,25 +1014,29 @@ UserAction SessionManager::wait_for_reset() {
     });
   };
 
-  auto poll_keys = [this]() -> UserAction {
+  // Arrow keys set the same flags as signal_reset_complete() and request_rerecord().
+  auto poll_keys = [this]() {
     auto key = trossen::utils::poll_keypress();
-    if (key == trossen::utils::KeyPress::kRightArrow) {
-      reset_signaled_.store(true);
-      return UserAction::kContinue;
-    }
-    if (key == trossen::utils::KeyPress::kLeftArrow) {
-      rerecord_requested_.store(true);
-      return UserAction::kReRecord;
-    }
-    return UserAction::kContinue;
+    if (key == trossen::utils::KeyPress::kRightArrow) reset_signaled_.store(true);
+    if (key == trossen::utils::KeyPress::kLeftArrow) rerecord_requested_.store(true);
   };
 
-  if (cfg_->reset_duration.has_value()) {
-    // Zero duration = skip reset phase entirely
-    if (cfg_->reset_duration->count() <= 0.0) {
-      return trossen::utils::g_stop_requested ? UserAction::kStop : UserAction::kContinue;
+  // True once the reset should end; a re-record request sets the action.
+  UserAction action{UserAction::kContinue};
+  auto ended = [&]() {
+    poll_keys();
+    if (rerecord_requested_.load()) {
+      action = UserAction::kReRecord;
+      return true;
     }
+    return trossen::utils::g_stop_requested || reset_signaled_.load() ||
+           hardware_fault().has_value();
+  };
 
+  const bool timed = cfg_->reset_duration.has_value();
+  if (hardware_fault() || (timed && cfg_->reset_duration->count() <= 0.0)) {
+    // No reset phase: a fault ends the session, and a zero duration skips the reset.
+  } else if (timed) {
     // Countdown mode: wait for the configured duration
     int total_seconds = static_cast<int>(std::ceil(cfg_->reset_duration->count()));
     if (total_seconds < 1) total_seconds = 1;
@@ -1033,17 +1046,14 @@ UserAction SessionManager::wait_for_reset() {
               << "  (-> skip | <- re-record)\n";
     trossen::utils::announce("Reset time");
 
-    for (int i = total_seconds; i > 0; --i) {
-      if (trossen::utils::g_stop_requested || reset_signaled_.load()) break;
-      if (rerecord_requested_.load()) return UserAction::kReRecord;
-      std::cout << "  " << i << "...\n";
-      for (int ms = 0; ms < 10; ++ms) {
-        if (trossen::utils::g_stop_requested || reset_signaled_.load()) break;
-        if (rerecord_requested_.load()) return UserAction::kReRecord;
-        auto action = poll_keys();
-        if (action == UserAction::kReRecord) return UserAction::kReRecord;
-        wait_or_signal();
+    // One tick per wait_or_signal(), so ended() runs once after every wait, including the last.
+    constexpr int kTicksPerSecond{10};
+    const int total_ticks{total_seconds * kTicksPerSecond};
+    for (int tick = 0; !ended() && tick < total_ticks; ++tick) {
+      if (tick % kTicksPerSecond == 0) {
+        std::cout << "  " << total_seconds - tick / kTicksPerSecond << "...\n";
       }
+      wait_or_signal();
     }
   } else {
     // Infinite wait: block until keypress, signal, or Ctrl+C
@@ -1051,18 +1061,13 @@ UserAction SessionManager::wait_for_reset() {
               << "  (-> continue | <- re-record)\n";
     trossen::utils::announce("Reset time. Waiting for input.");
 
-    while (!trossen::utils::g_stop_requested &&
-           !reset_signaled_.load() &&
-           !rerecord_requested_.load()) {
-      auto action = poll_keys();
-      if (action == UserAction::kReRecord) return UserAction::kReRecord;
+    while (!ended()) {
       wait_or_signal();
     }
   }
 
-  if (trossen::utils::g_stop_requested) return UserAction::kStop;
-  if (rerecord_requested_.load()) return UserAction::kReRecord;
-  return UserAction::kContinue;
+  if (trossen::utils::g_stop_requested) action = UserAction::kStop;
+  return checked(action);
 }
 
 void SessionManager::signal_reset_complete() {
@@ -1082,20 +1087,23 @@ UserAction SessionManager::monitor_episode(
 
   auto last_update = std::chrono::steady_clock::now();
 
-  while (!are_final_stats_emitted()) {
+  UserAction action{UserAction::kContinue};
+  while (!are_final_stats_emitted() && !trossen::utils::g_stop_requested && !hardware_fault()) {
     // Check for re-record request
     if (rerecord_requested_.load()) {
-      return UserAction::kReRecord;
+      action = UserAction::kReRecord;
+      break;
     }
 
     // Poll for arrow keys: left = re-record, right = early exit to next episode
     auto key = trossen::utils::poll_keypress();
     if (key == trossen::utils::KeyPress::kLeftArrow) {
       rerecord_requested_.store(true);
-      return UserAction::kReRecord;
+      action = UserAction::kReRecord;
+      break;
     }
     if (key == trossen::utils::KeyPress::kRightArrow) {
-      return UserAction::kContinue;
+      break;
     }
 
     auto now = std::chrono::steady_clock::now();
@@ -1109,8 +1117,8 @@ UserAction SessionManager::monitor_episode(
     std::this_thread::sleep_for(sleep_interval);
   }
 
-  if (trossen::utils::g_stop_requested) return UserAction::kStop;
-  return UserAction::kContinue;
+  if (trossen::utils::g_stop_requested) action = UserAction::kStop;
+  return checked(action);
 }
 
 void SessionManager::start_async_monitoring(
