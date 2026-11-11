@@ -565,6 +565,8 @@ private:
     std::shared_ptr<hw::PolledProducer> producer;
     std::chrono::nanoseconds period;
     Scheduler::TaskOptions opts;
+    /// Set when poll() throws; never cleared, so the producer is not polled again.
+    std::shared_ptr<std::atomic<bool>> failed{std::make_shared<std::atomic<bool>>(false)};
   };
 
   /// @brief Registered producers (persists across episodes)

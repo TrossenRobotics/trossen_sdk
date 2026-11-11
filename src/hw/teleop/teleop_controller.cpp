@@ -144,9 +144,18 @@ void TeleopController::stop_teleop() {
   // A repeated stop_teleop() is harmless: the arms' end_teleop()
   // implementations are expected to be idempotent once their driver has
   // been released.
-  leader_->end_teleop();
+  auto end_and_log = [](TeleopCapable& hw, const char* role) {
+    try {
+      hw.end_teleop();
+    } catch (const std::exception& e) {
+      std::cerr << "  [teleop] " << role << " end_teleop failed: " << e.what() << '\n';
+    } catch (...) {
+      std::cerr << "  [teleop] " << role << " end_teleop failed with an unknown error\n";
+    }
+  };
+  end_and_log(*leader_, "leader");
   if (follower_) {
-    follower_->end_teleop();
+    end_and_log(*follower_, "follower");
   }
 }
 
@@ -172,9 +181,11 @@ void TeleopController::control_loop() {
     }
   } catch (const std::exception& e) {
     std::cerr << "  [teleop] mirror loop terminated: " << e.what() << '\n';
+    failed_.store(true);
     running_.store(false);
   } catch (...) {
     std::cerr << "  [teleop] mirror loop terminated with unknown error\n";
+    failed_.store(true);
     running_.store(false);
   }
 }
