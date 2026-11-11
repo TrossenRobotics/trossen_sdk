@@ -138,7 +138,8 @@ int episode_obs_dim(const AlignedEpisode& ep);
 /**
  * @brief Build the LeRobot `features` schema for an episode.
  *
- * Not implemented until #408: it returns an empty object.
+ * The observation.images.<cam> entries are not implemented until #309: the result holds
+ * only observation.state and action.
  *
  * Produces the observation.state / action / observation.images.<cam> entries with
  * joint names (the lerobot_trossen convention, `<side>_joint_<i>.pos` with the gripper
