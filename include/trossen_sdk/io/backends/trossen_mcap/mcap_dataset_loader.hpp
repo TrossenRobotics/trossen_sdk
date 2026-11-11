@@ -121,8 +121,6 @@ bool extract_camera_images(
 /**
  * @brief Extract already-compressed camera video straight out of an MCAP.
  *
- * Not implemented until #308: it returns false.
- *
  * Handles camera channels whose schema is `foxglove.CompressedVideo`. Each
  * camera's message payloads are appended, in file order, to a single Annex B
  * elementary stream under `dir_for(camera_name)`. Nothing is decoded: the point
@@ -146,14 +144,14 @@ bool extract_camera_video(
 /**
  * @brief Trim an aligned episode to whatever every video-mode camera actually covers.
  *
- * Not implemented until #308: it leaves the episode unchanged.
- *
  * Compressed camera streams are remuxed verbatim (extract_camera_video(), arrival order,
  * not row-aligned), so a camera that free-ran short ends up with fewer frames than the
  * joint-aligned episode has rows: lerobot then queries that video by row timestamp and
  * walks off the end. Raw-image cameras always yield exactly one frame per row, because
  * extract_camera_images() writes each row's matched source frame and writes it again when
  * two rows match the same one, so only video-mode cameras are considered here.
+ *
+ * Trimming drops rows from the end and prints a warning naming the shortest camera.
  *
  * @param ep Aligned episode to trim in place; a no-op if no camera is shorter than the
  *   episode already is.
