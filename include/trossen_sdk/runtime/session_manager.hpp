@@ -139,7 +139,8 @@ public:
   /**
    * @brief Start a new episode
    *
-   * @return true on success, false if max_episodes reached or setup fails
+   * @return true on success, false if max_episodes reached, setup fails, or a teleop
+   *   controller or polled producer stopped on an exception earlier in the session
    *
    * - Creates the episode's backend output file (e.g. a UUIDv7 <id>.mcap file)
    * - Instantiates Backend + Sink
@@ -163,6 +164,8 @@ public:
    * - Fires episode-ended callbacks
    *
    * @note Safe to call if no episode running (no-op).
+   * @note After a teleop controller or polled producer fault, the episode is discarded
+   *   instead, as discard_current_episode() does.
    */
   void stop_episode();
 
@@ -186,6 +189,8 @@ public:
    * the same index.
    *
    * @note No-op if no episodes have been completed.
+   * @note Refuses after a teleop controller or polled producer fault, since no episode can
+   *   start again to replace it; the last saved episode is kept.
    */
   void discard_last_episode();
 
@@ -626,6 +631,14 @@ private:
    * Checks elapsed time and calls stop_episode() when max_duration reached
    */
   void monitor_duration();
+
+  /**
+   * @brief Find a teleop controller or polled producer that stopped on an exception.
+   *
+   * @return A description of the first failure, such as "teleop.pairs[0] stopped
+   *   mirroring", or std::nullopt if nothing failed.
+   */
+  std::optional<std::string> hardware_fault() const;
 
   /**
    * @brief Collect the unique hardware components that opt into the per-episode
