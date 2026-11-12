@@ -43,6 +43,7 @@
 #include "mcap/reader.hpp"
 #include "nlohmann/json.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_table.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_video.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_constants.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_backend.hpp"
 #include "trossen_sdk/io/backend_utils.hpp"
@@ -1363,32 +1364,23 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
           video_camera_dir /
           trossen::io::backends::format_video_filename(cfg.episode_index);
 
-      fs::path input_pattern = camera_dir / "image_%06d.jpg";
-
-      std::ostringstream ffmpeg_cmd;
-      // Force output to exactly 30fps for perfect timestamp alignment
-      ffmpeg_cmd << "ffmpeg -y -loglevel error -framerate " << cfg.camera_fps << " -start_number 0"
-                 << " -i " << input_pattern.string() << " -frames:v "
-                 << camera_frame_indices[camera_name]
-                 << " -c:v libsvtav1 -crf 30 -g 30 -preset 6 -pix_fmt yuv420p -r 30 "
-                 << video_output.string();
-
       std::cout << "  Encoding " << camera_name << "...";
       std::cout.flush();
 
       auto encode_start = std::chrono::steady_clock::now();
-      int ret = std::system(ffmpeg_cmd.str().c_str());
+      const bool encoded = trossen::io::backends::encode_episode_video(
+          camera_dir, camera_frame_indices[camera_name], cfg.camera_fps,
+          /*encoder_threads=*/0, video_output);
       auto encode_end = std::chrono::steady_clock::now();
 
-      if (ret == 0) {
+      if (encoded) {
         auto duration =
             std::chrono::duration_cast<std::chrono::milliseconds>(encode_end - encode_start)
                 .count();
         std::cout << " [ok] (" << (duration / 1000.0) << "s)\n";
         videos_created++;
       } else {
-        std::cout << " [FAILED] Failed (exit code " << ret << ")\n";
-        std::cerr << "    Command: " << ffmpeg_cmd.str() << "\n";
+        std::cout << " [FAILED]\n";
       }
     }
 
