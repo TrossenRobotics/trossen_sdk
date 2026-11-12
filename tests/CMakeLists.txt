@@ -79,6 +79,9 @@ target_link_libraries(test_lerobot_episode PRIVATE trossen_sdk GTest::gtest_main
 add_executable(test_lerobot_table test_lerobot_table.cpp)
 target_link_libraries(test_lerobot_table PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_lerobot_video test_lerobot_video.cpp)
+target_link_libraries(test_lerobot_video PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_queue_adapter test_queue_adapter.cpp)
 target_link_libraries(test_queue_adapter PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -196,6 +199,7 @@ gtest_discover_tests(test_lerobot_utils)
 gtest_discover_tests(test_lerobot_stats_utils)
 gtest_discover_tests(test_lerobot_episode)
 gtest_discover_tests(test_lerobot_table)
+gtest_discover_tests(test_lerobot_video)
 gtest_discover_tests(test_queue_adapter)
 gtest_discover_tests(test_producer_registry)
 gtest_discover_tests(test_sink)
