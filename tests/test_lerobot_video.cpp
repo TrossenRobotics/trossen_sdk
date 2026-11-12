@@ -95,6 +95,35 @@ TEST(LeRobotVideo, ColorEncodeRejectsAShortImageSequence) {
   fs::remove_all(dir);
 }
 
+TEST(LeRobotVideo, DecodeVideoRowsWritesTheFrameEachRowPlays) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_decode_rows_test");
+  const fs::path annexb = dir / "color.h264";
+  const std::string cmd =
+    "ffmpeg -y -loglevel error -f lavfi -i testsrc=size=64x64:rate=30 -frames:v 3 "
+    "-c:v libx264 -pix_fmt yuv420p -f h264 '" + annexb.string() + "'";
+  ASSERT_EQ(std::system(cmd.c_str()), 0);
+  auto row_image = [&dir](int row) {
+    char name[32];
+    std::snprintf(name, sizeof(name), kColorFramePattern, row);
+    return cv::imread((dir / name).string());
+  };
+
+  // Rows 1 and 2 play the same recorded frame.
+  ASSERT_TRUE(trossen::io::backends::decode_video_rows(annexb, "h264", 64, 64, {0, 1, 1, 2},
+                                                       dir));
+  for (int row = 0; row < 4; ++row) {
+    const cv::Mat image = row_image(row);
+    ASSERT_FALSE(image.empty()) << "row " << row;
+    EXPECT_EQ(image.size(), cv::Size(64, 64));
+  }
+  EXPECT_EQ(cv::norm(row_image(1), row_image(2), cv::NORM_INF), 0.0);
+
+  // The stream holds 3 frames, so a row that plays frame 5 cannot be written.
+  EXPECT_FALSE(trossen::io::backends::decode_video_rows(annexb, "h264", 64, 64, {0, 5}, dir));
+  fs::remove_all(dir);
+}
+
 TEST(LeRobotVideo, ColorEncodeReportsTheExitCode) {
   if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
   const fs::path dir = fresh_dir("trossen_lerobot_color_exit_test");
