@@ -5,10 +5,15 @@
 
 #include <gtest/gtest.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
 #include <string>
+#include <vector>
 
 #include <opencv2/imgcodecs.hpp>
 
@@ -92,6 +97,74 @@ TEST(LeRobotVideo, ColorEncodeRejectsAShortImageSequence) {
 
   ASSERT_TRUE(encode_episode_video(dir, 2, 30.0, 0, dir / "two.mp4"));
   EXPECT_FALSE(encode_episode_video(dir, 3, 30.0, 0, dir / "color.mp4"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotVideo, DecodeVideoRowsWritesTheFrameEachRowPlays) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_decode_rows_test");
+  const fs::path annexb = dir / "color.h264";
+  const std::string cmd =
+    "ffmpeg -y -loglevel error -f lavfi -i testsrc=size=64x64:rate=30 -frames:v 3 "
+    "-c:v libx264 -pix_fmt yuv420p -f h264 '" + annexb.string() + "'";
+  ASSERT_EQ(std::system(cmd.c_str()), 0);
+  auto row_image = [&dir](int row) {
+    char name[32];
+    std::snprintf(name, sizeof(name), kColorFramePattern, row);
+    return cv::imread((dir / name).string());
+  };
+
+  // Rows 1 and 2 play the same recorded frame.
+  ASSERT_TRUE(trossen::io::backends::decode_video_rows(annexb, "h264", 64, 64, {0, 1, 1, 2},
+                                                       dir));
+  for (int row = 0; row < 4; ++row) {
+    const cv::Mat image = row_image(row);
+    ASSERT_FALSE(image.empty()) << "row " << row;
+    EXPECT_EQ(image.size(), cv::Size(64, 64));
+  }
+  EXPECT_EQ(cv::norm(row_image(1), row_image(2), cv::NORM_INF), 0.0);
+
+  // The stream holds 3 frames, so a row that plays frame 5 cannot be written.
+  EXPECT_FALSE(trossen::io::backends::decode_video_rows(annexb, "h264", 64, 64, {0, 5}, dir));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotVideo, DecodeVideoRowsWritesDepthCodesInRowOrder) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_decode_depth_test");
+  constexpr int kSide = 16;
+  constexpr size_t kFramePixels = kSide * kSide;
+  // Frame f holds the 12-bit code (1000 * f + i) % 4096 at pixel i, so every frame differs.
+  std::vector<uint16_t> codes(3 * kFramePixels);
+  for (size_t i = 0; i < codes.size(); ++i) {
+    codes[i] = static_cast<uint16_t>((1000 * (i / kFramePixels) + i % kFramePixels) % 4096);
+  }
+  const fs::path raw = dir / "depth.gray12le";
+  {
+    std::ofstream out(raw, std::ios::binary);
+    out.write(reinterpret_cast<const char*>(codes.data()),
+              static_cast<std::streamsize>(codes.size() * sizeof(uint16_t)));
+  }
+  const fs::path annexb = dir / "depth.h265";
+  const std::string cmd =
+    "ffmpeg -y -loglevel error -f rawvideo -pix_fmt gray12le -s 16x16 -r 30 -i '" +
+    raw.string() + "' -c:v libx265 -x265-params lossless=1:log-level=error -pix_fmt gray12le "
+    "-f hevc '" + annexb.string() + "'";
+  ASSERT_EQ(std::system(cmd.c_str()), 0);
+
+  // Row 0 plays frame 0, frame 1 is skipped, and rows 1 and 2 both play frame 2.
+  ASSERT_TRUE(trossen::io::backends::decode_video_rows(annexb, "h265", kSide, kSide, {0, 2, 2},
+                                                       dir));
+  std::ifstream in(dir / trossen::io::backends::kDepthCodesFile, std::ios::binary);
+  const std::vector<char> bytes((std::istreambuf_iterator<char>(in)),
+                                std::istreambuf_iterator<char>());
+  std::vector<uint16_t> expected;
+  for (const size_t frame : {0, 2, 2}) {
+    expected.insert(expected.end(), codes.begin() + frame * kFramePixels,
+                    codes.begin() + (frame + 1) * kFramePixels);
+  }
+  ASSERT_EQ(bytes.size(), expected.size() * sizeof(uint16_t));
+  EXPECT_EQ(std::memcmp(bytes.data(), expected.data(), bytes.size()), 0);
   fs::remove_all(dir);
 }
 
