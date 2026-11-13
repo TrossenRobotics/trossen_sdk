@@ -9,6 +9,7 @@
 #include <iostream>
 #include <regex>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -292,6 +293,31 @@ TEST_F(TrossenMCAPBackendTest, ScanCountsLegacyAndNewEpisodeFiles) {
   auto backend = BackendRegistry::create("trossen_mcap");
   ASSERT_NE(backend, nullptr);
   EXPECT_EQ(backend->scan_existing_episodes(), 3u);
+}
+
+// A dataset holds one setup: a session with another camera set cannot record into it.
+TEST_F(TrossenMCAPBackendTest, CheckDatasetSetupRefusesAnotherSetup) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  RootDatasetRestorer restorer{cfg.get(), cfg->root, cfg->dataset_id};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "scan_setup_test";
+  std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
+
+  auto first = BackendRegistry::create("trossen_mcap", camera_streams({{"cam_high", false}}));
+  ASSERT_TRUE(first->open());
+  first->close();
+
+  EXPECT_NO_THROW(BackendRegistry::create("trossen_mcap", camera_streams({{"cam_high", false}}))
+                    ->check_dataset_setup());
+  EXPECT_THROW(
+    BackendRegistry::create("trossen_mcap",
+                            camera_streams({{"cam_high", false}, {"cam_wrist", false}}))
+      ->check_dataset_setup(),
+    std::runtime_error);
 }
 
 // Integer depth without a depth_scale has no known unit, so it is not recorded; the color

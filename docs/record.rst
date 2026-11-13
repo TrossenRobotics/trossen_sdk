@@ -85,6 +85,8 @@ Episodes are written to ``<backend.root>/<backend.dataset_id>/<id>.mcap``, where
 Because UUIDv7 leads with a timestamp, filenames are globally unique and sort chronologically.
 
 Re-running the demo against the same ``dataset_id`` appends rather than overwriting.
+A dataset holds one setup: if the robot name, a joint stream's role or joint names, a camera's size or depth flag, or the mobile base differ from the dataset's existing episodes, the first episode fails to start and the log lists each difference.
+Record into a new ``dataset_id``, or restore the setup.
 
 What Gets Recorded
 ==================
