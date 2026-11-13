@@ -330,6 +330,10 @@ An episode fails when:
 - a camera's video would have another codec than the dataset's earlier episodes hold, such as AV1 for a raw-image recording in a dataset of copied H.264 videos.
   The log names the camera and both codecs.
   One dataset holds one codec per camera, so convert a folder that mixes raw-image and compressed-video recordings with ``reencode_videos`` set to ``true``, or first transcode the raw-image recordings with ``trossen_mcap_transcode_video``.
+- (V3) the episode has a different set of cameras, or a different number of action or ``observation.state`` values per row, than the first converted episode.
+  The log names both.
+
+When a stream-copied video has fewer playable frames than the episode has rows, the episode's last rows are dropped to match, and the log says how many.
 
 What's Next
 ===========
