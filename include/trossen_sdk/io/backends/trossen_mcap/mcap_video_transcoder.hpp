@@ -6,8 +6,9 @@
  * one uncompressed frame per message; one made with `image_encoding: video` stores them as
  * `foxglove.CompressedVideo`. This converts a recording of the first kind into the second,
  * in place of re-recording it: camera topics are decoded and re-encoded (H.264 color,
- * lossless H.265 for 12-bit depth), every other topic is copied through unchanged, and the
- * file-level metadata records are not copied.
+ * lossless H.265 for 12-bit depth), and every other topic, along with the file-level
+ * metadata records, is copied through unchanged, except that each transcoded camera's
+ * `storage` in `dataset_info` becomes `h264` (color) or `h265` (depth).
  */
 
 #ifndef TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__MCAP_VIDEO_TRANSCODER_HPP_
@@ -67,7 +68,8 @@ struct VideoTranscodeStats {
  *
  * A recording must have the recording format this SDK writes (its `format_version`). One
  * whose cameras are all stored as video is already compressed: nothing is written,
- * `stats.already_compressed` is set, and the call succeeds.
+ * `stats.already_compressed` is set, and the call succeeds. The output's dataset_info names
+ * each camera's video storage.
  *
  * The output is written to `<output>.partial` and renamed onto `output` only once complete,
  * so a failed run leaves no partial file and an earlier output stays untouched.
