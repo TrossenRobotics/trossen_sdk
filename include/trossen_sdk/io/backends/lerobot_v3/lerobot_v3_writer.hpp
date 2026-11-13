@@ -13,6 +13,7 @@
 #ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_V3__LEROBOT_V3_WRITER_HPP_
 #define TROSSEN_SDK__IO__BACKENDS__LEROBOT_V3__LEROBOT_V3_WRITER_HPP_
 
+#include <array>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -149,6 +150,40 @@ public:
 private:
   /// @brief Close the open data file, if any. @return false when closing it fails.
   bool close_data_writer();
+
+  // Video helpers. They run ffmpeg/ffprobe. The color encode, the remux and the frame
+  // sampling are shared with the v2 converter (lerobot_common/lerobot_video.hpp).
+  /// @brief Encode 16-bit depth PNGs as HEVC gray12le video with 12-bit log quantization.
+  bool encode_depth_video(
+    const std::filesystem::path& image_dir, size_t frame_count,
+    const std::filesystem::path& out_mp4) const;
+  // Not up for review, changes in #360.
+  bool place_or_concat_video(
+    const std::string& video_key, const std::filesystem::path& episode_mp4,
+    double ep_duration_s, std::array<double, 4>& out_slot);
+
+  /**
+   * @brief Index of a task in the tasks table, adding it at the next index when new.
+   * @param task_name Task string.
+   * @return The task's task_index.
+   */
+  int task_index_for(const std::string& task_name);
+
+  /// @brief Write the episodes metadata parquet, one row of seek metadata per episode.
+  /// @return false when the file cannot be written.
+  bool write_episodes_parquet();
+  /// @brief Write TASKS_PATH, one row per task in task_index order.
+  /// @return false when the file cannot be written.
+  bool write_tasks_parquet();
+  /// @brief Write STATS_PATH with the statistics of every feature over the whole dataset.
+  /// @return false when the file cannot be written.
+  bool write_stats_json();
+  /// @brief Write INFO_PATH with the dataset totals, features and path templates.
+  /// @return false when the file cannot be written.
+  bool write_info_json();
+  /// @brief Write the dataset README.
+  /// @return false when the file cannot be written.
+  bool write_readme();
 
   /// @brief Options given at construction.
   Options opts_;
