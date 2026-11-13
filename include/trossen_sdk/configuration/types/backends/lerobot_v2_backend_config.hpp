@@ -20,6 +20,7 @@ namespace trossen::configuration {
 // LeRobotV2 backend specific constants
 inline constexpr bool LEROBOT_V2_DEFAULT_OVERWRITE_EXISTING = false;
 inline constexpr bool LEROBOT_V2_DEFAULT_ENCODE_VIDEOS = false;
+inline constexpr bool LEROBOT_V2_DEFAULT_KEEP_IMAGES = false;
 inline constexpr char LEROBOT_V2_DEFAULT_TASK_NAME[] = "perform a generic task";
 inline constexpr char LEROBOT_V2_DEFAULT_REPOSITORY_ID[] = "TrossenRoboticsCommunity";
 inline constexpr float LEROBOT_V2_DEFAULT_FPS = 30.0f;
@@ -37,6 +38,8 @@ struct LeRobotV2BackendConfig : public BaseConfig {
   int png_compression_level{trossen::io::backends::DEFAULT_PNG_COMPRESSION_LEVEL};
   bool overwrite_existing{LEROBOT_V2_DEFAULT_OVERWRITE_EXISTING};
   bool encode_videos{LEROBOT_V2_DEFAULT_ENCODE_VIDEOS};
+  // Keep each episode's images once its videos are encoded
+  bool keep_images{LEROBOT_V2_DEFAULT_KEEP_IMAGES};
   std::string task_name{LEROBOT_V2_DEFAULT_TASK_NAME};
   std::string repository_id{LEROBOT_V2_DEFAULT_REPOSITORY_ID};
   std::string dataset_id{trossen::io::backends::auto_generate_dataset_id()};
@@ -72,6 +75,7 @@ struct LeRobotV2BackendConfig : public BaseConfig {
       j.at("png_compression_level").get_to(c.png_compression_level);
     if (j.contains("overwrite_existing")) j.at("overwrite_existing").get_to(c.overwrite_existing);
     if (j.contains("encode_videos")) j.at("encode_videos").get_to(c.encode_videos);
+    if (j.contains("keep_images")) j.at("keep_images").get_to(c.keep_images);
     if (j.contains("task_name")) j.at("task_name").get_to(c.task_name);
     if (j.contains("repository_id")) j.at("repository_id").get_to(c.repository_id);
     if (j.contains("dataset_id")) j.at("dataset_id").get_to(c.dataset_id);
