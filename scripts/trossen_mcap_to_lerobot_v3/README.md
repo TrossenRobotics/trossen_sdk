@@ -85,6 +85,22 @@ v3 aggregates episodes into shared files, and every episode's seek metadata reco
 
 Writes each camera's last staged video file and the metadata known only once every episode is in: the episodes and tasks Parquet files, `stats.json` with the global statistics, `info.json`, and the dataset card.
 
+### How alignment works
+
+`load_aligned_episode()` reads the MCAP and takes the leader and follower joint streams from the roles in its `dataset_info`.
+It then lays rows on a uniform grid at `fps` over the stretch of time where every stream has data, and fills each row by nearest-timestamp matching.
+The match tolerance comes from `AlignmentOptions`, 50 ms by default.
+A camera slower than the rows gets that tolerance plus half the difference between its frame period and the row period, 133 ms for a 5 fps camera on 30 Hz rows, so each of its frames can fill the rows around it.
+Rows where any stream has no sample within tolerance are dropped.
+So:
+
+- `action` comes from the leader joints (plus base velocities on a mobile robot)
+- `observation.state` comes from the follower joints (plus base velocities)
+- `timestamp` is synthetic, generated at the row rate rather than copied
+
+A recording whose streams free-run at slightly different rates still produces a dense table.
+A camera recording at the row rate pairs within half a frame period (16.7 ms at 30 fps); rows next to a stall can pair up to the 50 ms tolerance away.
+
 ### Episodes that fail
 
 Both converters check each recording while aligning it, log a recording that fails a check as `[FAILED]` with the reason, and continue with the next one.
@@ -135,7 +151,7 @@ Output lands in `<root>/<repository_id>/<dataset_id>/`.
 | `task_name` | `perform a generic task` | `perform a generic task` | Fallback only: used for episodes whose MCAP embeds no task |
 | `overwrite_existing` | `false` | `false` | Delete an existing dataset first. Without it, an existing dataset stops the run before anything is written |
 | `encode_videos` | `true` | `true` | Encode and concatenate camera video |
-| `fps` | `30` | `30` | Leave at 30: rows are generated at 30 Hz whatever this is set to |
+| `fps` | `30` | `30` | Row and video rate in frames per second, a whole number (section 6.1) |
 
 ### File partitioning
 
@@ -217,16 +233,15 @@ The setting only matters for very large datasets.
 
 ## 6. Settings that affect correctness
 
-### 6.1 `fps`: leave it at 30
+### 6.1 `fps` sets the row rate
 
-The converter does not pass `fps` to the loader, so rows are generated at the `AlignmentOptions` default of 30 Hz, and the match tolerance stays at 50 ms.
-The config's `fps` value reaches:
+Rows sit on a uniform grid at `fps`.
+The same value sets the encode and remux frame rates, each episode's video duration in the seek metadata, and the `fps` field in `info.json`, so rows, videos and metadata share one clock.
+`info.json` stores `fps` as an integer, so every episode fails when `fps` is not a whole number.
 
-1. the encode and remux frame rates (`-framerate` and `-r`),
-2. each episode's video duration in the seek metadata,
-3. the `fps` field in `info.json`.
-
-So `fps=60` keeps 30 Hz rows but writes the videos and `info.json` at 60, which is an internally inconsistent dataset.
+Each row takes every stream's sample nearest its grid time, within the match tolerance (50 ms, wider for cameras slower than the rows).
+For compressed-video recordings, a camera recorded at `fps` has its stream copied without re-encoding, and every copied frame is stamped one `1/fps` period after the last.
+A camera at another rate is decoded and re-encoded with one frame per row, so set `fps` to the cameras' frame rate to keep the quality they were recorded with.
 
 ### 6.2 `task_name` is a fallback, not an override
 
