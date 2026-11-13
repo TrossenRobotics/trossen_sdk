@@ -48,6 +48,8 @@
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/utils/app_utils.hpp"
 
+namespace v2 = trossen::io::backends::lerobot_v2;
+
 /// @brief Config file used when --config is not given, relative to the repository root
 constexpr char DEFAULT_CONFIG_PATH[] = "scripts/trossen_mcap_to_lerobot_v2/config.json";
 
