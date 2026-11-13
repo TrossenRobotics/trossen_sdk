@@ -57,6 +57,44 @@ struct RunningStats {
 };
 
 /**
+ * @brief Quantile of a sorted sample, interpolated linearly between the two nearest ranks
+ *
+ * @param sorted Sample values in ascending order
+ * @param q Quantile to take, in [0, 1]; a value outside it is clamped and NaN counts as 0
+ * @return The interpolated value, or 0 for an empty sample
+ */
+float interpolated_quantile(const std::vector<float> &sorted, double q);
+
+/**
+ * @brief Per-dimension statistics with quantiles for a vector feature
+ *
+ * An empty column reports 0 for every statistic.
+ *
+ * @param per_dim One value column per feature dimension
+ * @param count Row count to report as `count`
+ * @return JSON object with min, max, mean, std, q01, q10, q50, q90 and q99, each a list
+ *   with one entry per dimension, and count as a one-element list
+ */
+nlohmann::ordered_json compute_vector_quantile_stats(
+  const std::vector<std::vector<float>> &per_dim,
+  int64_t count);
+
+/**
+ * @brief Per-channel statistics with quantiles for a set of images
+ *
+ * Statistics are reported in RGB order with shape [3, 1, 1]. A channel with no pixels
+ * reports 0.
+ *
+ * @param images Samples from sample_images(): CV_32FC3, BGR, scaled to [0, 1]
+ * @param count Number of images to report as `count`
+ * @return JSON object with min, max, mean, std, q01, q10, q50, q90 and q99, each a
+ *   [3, 1, 1] list, and count as a one-element list
+ */
+nlohmann::ordered_json compute_image_quantile_stats(
+  const std::vector<cv::Mat> &images,
+  int64_t count);
+
+/**
  * @brief Compute per-dimension statistics for a ListArray column
  *
  * Every non-null row must hold the same number of values, as LeRobot requires of a
