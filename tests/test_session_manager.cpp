@@ -23,6 +23,8 @@
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
+#include "stub_producer_metadata.hpp"
+
 using trossen::data::JointStateRecord;
 using trossen::data::RecordBase;
 using trossen::data::Timestamp;
@@ -48,7 +50,7 @@ public:
   }
 
   std::shared_ptr<ProducerMetadata> metadata() const override {
-    auto meta = std::make_shared<ProducerMetadata>();
+    auto meta = std::make_shared<StubProducerMetadata>();
     meta->type = "mock";
     meta->id = "mock_producer";
     meta->name = "Mock Producer";
@@ -96,6 +98,23 @@ TEST_F(SessionManagerTest, AddProducer_NullThrows) {
   SessionManager sm;
   EXPECT_THROW(
     sm.add_producer(nullptr, std::chrono::milliseconds(100)),
+    std::invalid_argument);
+}
+
+// add_producer refuses a stream id that cannot name a topic
+TEST_F(SessionManagerTest, AddProducer_PathStreamIdThrows) {
+  class SlashIdProducer : public PolledProducer {
+  public:
+    void poll(const std::function<void(std::shared_ptr<RecordBase>)>&) override {}
+    std::shared_ptr<ProducerMetadata> metadata() const override {
+      auto meta = std::make_shared<StubProducerMetadata>();
+      meta->id = "arm/left";
+      return meta;
+    }
+  };
+  SessionManager sm;
+  EXPECT_THROW(
+    sm.add_producer(std::make_shared<SlashIdProducer>(), std::chrono::milliseconds(100)),
     std::invalid_argument);
 }
 
@@ -391,6 +410,9 @@ TEST_F(SessionManagerTest, AddPushProducer_DuringEpisode_Throws) {
   public:
     bool start(const std::function<void(std::shared_ptr<RecordBase>)>&) override {
       return true;
+    }
+    std::shared_ptr<trossen::hw::PolledProducer::ProducerMetadata> metadata() const override {
+      return std::make_shared<StubProducerMetadata>();
     }
     void stop() override {}
   };

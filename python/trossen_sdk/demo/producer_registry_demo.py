@@ -30,7 +30,7 @@ def main():
     joint_cfg = trossen_sdk.MockJointStateProducerConfig()
     joint_cfg.num_joints = 7
     joint_cfg.rate_hz = 30.0
-    joint_cfg.id = "mock_arm/joints"
+    joint_cfg.id = "mock_arm"
     joint_cfg.amplitude = 1.0
 
     joint_producer = trossen_sdk.MockJointStateProducer(joint_cfg)
@@ -42,7 +42,7 @@ def main():
     cam_cfg.width = 320
     cam_cfg.height = 240
     cam_cfg.fps = 30
-    cam_cfg.stream_id = "mock_cam/color"
+    cam_cfg.stream_id = "mock_cam"
     cam_cfg.encoding = "rgb8"
     cam_cfg.pattern = trossen_sdk.MockCameraPattern.Gradient
 

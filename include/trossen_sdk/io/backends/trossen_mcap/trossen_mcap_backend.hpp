@@ -419,14 +419,20 @@ private:
   /// @brief Cameras whose encoder could not be created
   std::unordered_map<std::string, bool> video_encode_failed_;
 
-  /// @brief Helper to identify depth topics
-  static bool is_depth_topic(const std::string& topic);
-
-  /// @brief Helper to identify depth encodings
-  static bool is_depth_encoding(const std::string& enc);
+  /// @brief Each camera stream's `is_depth_map`, from its producer's get_stream_info().
+  std::unordered_map<std::string, bool> stream_is_depth_;
 
   /// @brief Streams already reported as not recordable this episode
   std::unordered_set<std::string> unrecordable_streams_;
+
+  /**
+   * @brief Whether an image stream is depth, as its producer declared it.
+   *
+   * @param id Image stream id
+   * @return The stream's `is_depth_map`, or nullopt (reported once) for a stream its
+   *         producer did not describe; its frames are not recorded
+   */
+  std::optional<bool> stream_is_depth(const std::string& id);
 
   /**
    * @brief Whether a depth frame carries the unit its raw values are in.
