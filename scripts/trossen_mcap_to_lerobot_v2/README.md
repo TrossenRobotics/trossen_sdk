@@ -8,7 +8,7 @@ with the [LeRobot](https://github.com/huggingface/lerobot) training framework.
 ## Building
 
 ```bash
-cd build && cmake .. && make trossen_mcap_to_lerobot_v2
+mkdir -p build && cd build && cmake .. && make trossen_mcap_to_lerobot_v2 && cd ..
 ```
 
 The tool is always built as part of the standard SDK build.
@@ -19,13 +19,15 @@ The tool is always built as part of the standard SDK build.
 
 ```bash
 # Convert a single episode
-./build/scripts/trossen_mcap_to_lerobot_v2 <path/to/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap> [output_dir]
+./build/scripts/trossen_mcap_to_lerobot_v2 <path/to/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap>
 
 # Convert all episodes in a folder (batch mode)
-./build/scripts/trossen_mcap_to_lerobot_v2 <path/to/dataset_folder/> [output_dir]
+./build/scripts/trossen_mcap_to_lerobot_v2 <path/to/dataset_folder/>
 ```
 
-If `output_dir` is omitted, output is written to `~/.cache/trossen_sdk/`.
+Run it from the repository root, so the default config `scripts/trossen_mcap_to_lerobot_v2/config.json` resolves, or pass `--config <path>`.
+The dataset is written to `<root>/<repository_id>/<dataset_id>/`, with all three keys under `lerobot_v2_backend` in the config; `root` defaults to `~/.cache/huggingface/lerobot`.
+Override any key with `--set`.
 
 The frames extracted to `images/` are deleted once the episode's videos are encoded.
 Set `keep_images` to `true` in the config to keep them.
@@ -35,11 +37,12 @@ Examples:
 ```bash
 ./build/scripts/trossen_mcap_to_lerobot_v2 \
     ~/.trossen_sdk/my_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
-    ~/lerobot_datasets
+    --set lerobot_v2_backend.root=~/lerobot_datasets
 
 ./build/scripts/trossen_mcap_to_lerobot_v2 \
     ~/.trossen_sdk/my_dataset/ \
-    ~/lerobot_datasets
+    --set lerobot_v2_backend.root=~/lerobot_datasets \
+    --set lerobot_v2_backend.dataset_id=my_dataset
 ```
 
 Batch mode processes the `.mcap` files in the order they were recorded, by the `recording_start_time` the recorder writes in each file, and numbers the converted episodes from 0 in that order.
@@ -48,15 +51,19 @@ Batch mode processes the `.mcap` files in the order they were recorded, by the `
   It must be at least 1.
   Episodes are still added to the dataset one at a time, in input order.
 - A recording that fails gets no index, so the indices have no gaps.
+- The tool always writes a new dataset.
+  Without `overwrite_existing=true`, an existing dataset stops the run before anything is written; with it, the dataset is removed first.
+  To add recordings to a dataset, add them to the input folder and convert the whole set again.
 
 ---
 
 ## LeRobot V2 output structure
 
 ```
-<output_dir>/
+<root>/
 └── <repository_id>/
     └── <dataset_id>/
+        ├── README.md              dataset card
         ├── meta/
         │   ├── info.json              dataset metadata and feature descriptions
         │   ├── episodes.jsonl         one entry per episode
@@ -82,14 +89,18 @@ Each episode produces one `.parquet` file (SNAPPY compression):
 
 | Column | Type | Description |
 |---|---|---|
-| `timestamp` | `float32` | seconds from first frame (0.0 at start) |
-| `observation.state` | `list<float64>` | concatenated follower joint observations |
-| `action` | `list<float64>` | concatenated leader joint actions |
+| `action` | `fixed_size_list<float32>` | concatenated leader joint positions (plus base velocities on a mobile robot) |
+| `observation.state` | `fixed_size_list<float32>` | concatenated follower joint positions (plus base velocities) |
+| `timestamp` | `float32` | seconds from the first row, at the row rate (`fps`) |
+| `frame_index` | `int64` | zero-based row within the episode |
 | `episode_index` | `int64` | zero-based episode number |
-| `frame_index` | `int64` | zero-based frame within episode |
+| `index` | `int64` | zero-based row across the whole dataset |
+| `task_index` | `int64` | row of the episode's task in `meta/tasks.jsonl` |
 
 For bimanual setups, `observation.state` and `action` are concatenated across streams in
 the order defined in `info.json`.
+Joint names are `<side>_joint_<i>.pos`, with the gripper as `<side>_left_carriage_joint.pos`, where `<side>` comes from the stream id (`left`, `right`); a stream id with no side gives `joint_<i>.pos`.
+`robot_type` is the `robot_name` the recording carries.
 
 ### meta/info.json
 
@@ -104,11 +115,13 @@ the order defined in `info.json`.
     "observation.images.<camera_id>": {
       "dtype": "video",
       "shape": [<H>, <W>, 3],
-      "video_info": { "video.fps": 30.0, "video.codec": "av1", "video.pix_fmt": "yuv420p" }
+      "info": { "video.fps": 30, "video.codec": "av1", "video.pix_fmt": "yuv420p", ... }
     },
     "timestamp":     { "dtype": "float32", "shape": [1] },
     "frame_index":   { "dtype": "int64",   "shape": [1] },
-    "episode_index": { "dtype": "int64",   "shape": [1] }
+    "episode_index": { "dtype": "int64",   "shape": [1] },
+    "index":         { "dtype": "int64",   "shape": [1] },
+    "task_index":    { "dtype": "int64",   "shape": [1] }
   },
   "total_episodes": <N>,
   "total_frames": <N>
@@ -156,33 +169,30 @@ Files are viewable in [Foxglove Studio](https://foxglove.dev).
 
 | Channel | Schema | Content |
 |---|---|---|
-| `{stream_id}/joints/state` | `foxglove.JointState` | positions (rad), velocities (rad/s), efforts (Nm) |
-| `/cameras/{camera_name}/image` | `foxglove.RawImage` | width, height, encoding, pixel data |
-| `/cameras/{camera_name}/meta` | key/value | camera metadata |
-| `{stream_id}/odometry_2d/state` | `Odometry2D` | pose (m, rad), velocity (m/s, rad/s) |
+| `{stream_id}/joints/state` | `trossen_sdk.msg.JointState` | positions (rad), velocities (rad/s), efforts (Nm) |
+| `/cameras/{camera_name}/image` | `foxglove.RawImage` or `foxglove.CompressedVideo` | color frames: uncompressed with `image_encoding` `raw`, H.264 packets with `video` |
+| `/cameras/{camera_name}_depth/image` | `foxglove.RawImage` or `foxglove.CompressedVideo` | depth frames from a camera with `use_depth` |
+| `{stream_id}/odom/state` | `trossen_sdk.msg.Odometry2D` | pose (m, rad), velocity (m/s, rad/s) |
 
 ### Timestamps
 
-Each message carries two timestamps:
-
-| MCAP field | Clock | Purpose |
-|---|---|---|
-| `log_time` | `CLOCK_MONOTONIC` | replay ordering, inter-frame deltas |
-| `publish_time` | `CLOCK_REALTIME` (UTC) | wall-clock correlation |
+Each message's `log_time` and `publish_time` both hold the record's `CLOCK_REALTIME` time, in nanoseconds since the Unix epoch.
+The converters and replay align and pace on `log_time`.
 
 ### File-level metadata
 
-Written to the MCAP header at recording time:
+Written once per recording, in the MCAP metadata record `trossen_sdk_recording`:
 
 | Key | Value |
 |---|---|
-| `robot_name` | from backend config |
-| `dataset_id` | from backend config |
-| `episode_index` | zero-based integer |
+| `tool_version` | SDK version that recorded the file |
+| `robot_name` | from the recording config |
+| `dataset_id` | from the backend config |
+| `episode_id` | the file name without `.mcap` |
+| `recording_start_time` | nanoseconds since the Unix epoch |
 | `format_version` | recording format; readers refuse any other version |
-| `streams` | JSON: `{ "<stream_id>": { "joint_names", "role", "rate_hz", "topic" } }` |
-| `cameras` | JSON: `{ "<camera_id>": { "width", "height", "fps", "is_depth_map", "topic", "storage", ... } }` |
-| `mobile_base` | JSON: `{ "id", "velocity_names", "rate_hz", "topic" }`, when a mobile base is recorded |
+| `task_description` | the episode's task, when the config sets one |
+| `dataset_info` | JSON with `streams` (`{ "<stream_id>": { "joint_names", "role", "rate_hz", "topic" } }`), `cameras` (`{ "<camera_id>": { "width", "height", "fps", "is_depth_map", "topic", "storage", ... } }`) and, when a mobile base is recorded, `mobile_base` (`{ "id", "velocity_names", "rate_hz", "topic" }`) |
 
 ---
 
@@ -196,5 +206,7 @@ sudo apt-get install ffmpeg
 ```
 
 **Episode ordering:** LeRobot indices follow the order episodes were recorded (`recording_start_time`).
-Newly recorded episodes sort to the end.
+Newly recorded episodes sort to the end, so converting the whole set again after recording more keeps the existing episodes' indices.
 Merging files from machines with unsynchronized clocks is only as reliable as those clocks.
+
+**"dataset already exists":** set `overwrite_existing=true` to replace the dataset, or choose another `dataset_id`.

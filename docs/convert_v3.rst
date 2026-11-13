@@ -100,7 +100,7 @@ Point it at a different config with ``--config <path>``.
         "data_files_size_in_mb":  100,                              // Size budget of each data file
         "video_files_size_in_mb": 200,                              // Size budget of each video file
         "jobs":                   null,                             // Worker threads; null = auto
-        "encoder_threads":        null,                             // Threads per video encoder; null = auto
+        "encoder_threads":        null,                             // Threads per video encoder; null = cores / jobs
         "reencode_videos":        false                             // Re-encode every camera; slower
       }
     }
@@ -184,8 +184,8 @@ Two settings default to a value derived from the core count:
       - Worker threads that decode, extract and encode episodes, at least 1.
         Default: the number of cores, at most 8.
     * - ``encoder_threads``
-      - Parallelism level per video encoder, 0 or more; ``0`` leaves it to the encoder.
-        Default: cores divided by ``jobs``.
+      - Parallelism level per video encoder, 0 or more.
+        ``null`` (the default) uses the cores divided by ``jobs``; ``0`` leaves it to the encoder.
 
 Inspect the merged config (JSON plus overrides) before running:
 
