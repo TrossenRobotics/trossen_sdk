@@ -104,8 +104,11 @@ Topic names are derived from the ``stream_id`` of each producer.
       - ``trossen_sdk.msg.JointState``
       - Joint positions (rad), velocities (rad/s), efforts (Nm)
     * - ``/cameras/{camera_id}/image``
-      - ``foxglove.RawImage``
-      - Width, height, encoding, pixel data
+      - ``foxglove.RawImage`` or ``foxglove.CompressedVideo``
+      - Color frames: uncompressed with ``backend.image_encoding`` ``raw``, H.264 packets with ``video``
+    * - ``/cameras/{camera_id}_depth/image``
+      - ``foxglove.RawImage`` or ``foxglove.CompressedVideo``
+      - Depth frames from a camera with ``use_depth``: 16-bit frames with ``raw``, lossless H.265 packets with ``video``
     * - ``{stream_id}/odom/state``
       - ``trossen_sdk.msg.Odometry2D``
       - Pose (m, rad), twist (m/s, rad/s)
