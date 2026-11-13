@@ -142,6 +142,8 @@ A camera that started before the last stream therefore has frames in front of ro
 Each such camera is reported with a `Warning: episode <index> <camera> video is offset by N frame(s)` line, where N is the lag in source frames.
 An episode in which some row's image is more than 3 frames (about 100 ms at 30 fps) from the frame matched to it fails, whether from the start offset or from dropped frames.
 `trossen_mcap_to_lerobot_v3` applies the offset through `from_timestamp`, so it converts an episode that fails here only because of the start offset; use it when images must match the joints exactly.
+With `reencode_videos` set to `true`, every camera is re-encoded one frame per row instead, which removes both the start offset and the drift.
+On a 32-core machine this takes about 0.6 minutes per minute of recording with 3 color cameras, where copying takes seconds.
 
 ---
 
