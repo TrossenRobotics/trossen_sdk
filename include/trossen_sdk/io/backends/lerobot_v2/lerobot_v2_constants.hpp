@@ -54,6 +54,9 @@ const char VIDEO_DIR[] = "videos";
 /// @brief Data directory
 const char DATA_PATH_DIR[] = "data";
 
+/// @brief Converter credited in the dataset README
+const char TOOL_NAME[] = "trossen_mcap_to_lerobot_v2";
+
 // Versioning
 
 /// @brief Codebase version
