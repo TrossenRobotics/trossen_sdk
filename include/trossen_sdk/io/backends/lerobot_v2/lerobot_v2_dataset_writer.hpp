@@ -6,17 +6,23 @@
 #ifndef TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2__LEROBOT_V2_DATASET_WRITER_HPP_
 #define TROSSEN_SDK__IO__BACKENDS__LEROBOT_V2__LEROBOT_V2_DATASET_WRITER_HPP_
 
+#include <cstdint>
 #include <filesystem>
+#include <map>
 #include <string>
 
 #include "nlohmann/json.hpp"
+
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_episode.hpp"
+#include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
 
 namespace trossen::io::backends {
 
 /**
  * @brief Writes MCAP recordings into a LeRobot v2.1 dataset.
  *
- * Usage: construct with Options, write the episodes, then call finalize() once.
+ * Usage: construct with Options, then per recording prepare_episode() followed by
+ * consume_episode(), then finalize() once.
  */
 class LeRobotV2DatasetWriter {
 public:
@@ -30,16 +36,71 @@ public:
     std::string dataset_id;
     /// @brief License identifier written to the README.
     std::string license;
+    /// @brief Episodes per chunk folder.
+    int chunk_size{1000};
+  };
+
+  /// @brief One recording converted into a scratch folder, not yet part of the dataset.
+  struct PreparedEpisode {
+    /// @brief The input MCAP file.
+    std::filesystem::path mcap_file;
+    /// @brief The aligned rows and camera info from load_aligned_episode().
+    AlignedEpisode ep;
+    /// @brief The recording's channel maps from load_aligned_episode().
+    McapChannelMap channels;
+    /// @brief Extracted frames of each camera, under the scratch folder.
+    std::map<std::string, std::filesystem::path> image_dirs;
+    /// @brief Episode video of each camera, under the scratch folder.
+    std::map<std::string, std::filesystem::path> videos;
   };
 
   /**
    * @brief Store the options; nothing is written until a write call.
-   * @param opts Dataset location and license.
+   * @param opts Dataset location, license and chunk size.
    */
   explicit LeRobotV2DatasetWriter(Options opts);
 
   /// @brief The dataset folder: root / repository_id / dataset_id.
   std::filesystem::path dataset_path() const;
+
+  /**
+   * @brief Whether an episode's parquet is already in the dataset.
+   *
+   * A readable parquet moves the dataset-wide row index past its rows, so the next episode
+   * written continues after it. An unreadable one is deleted.
+   *
+   * @param episode_index Zero-based episode index.
+   * @return true if the episode's parquet exists and is readable.
+   */
+  bool is_converted(int episode_index);
+
+  /**
+   * @brief Decode one recording and build its images and videos under tmp_dir.
+   *
+   * Every check that can reject a recording runs here, and nothing in the dataset is
+   * written, so a rejected recording leaves the dataset as it was.
+   *
+   * @param mcap_file Path to the input MCAP file.
+   * @param input_index Position of the recording in the input, used for logging only.
+   * @param tmp_dir Scratch folder for this recording; the caller removes it.
+   * @param out Filled with the episode on success.
+   * @return true on success.
+   */
+  bool prepare_episode(const std::filesystem::path& mcap_file, int input_index,
+                       const std::filesystem::path& tmp_dir, PreparedEpisode& out) const;
+
+  /**
+   * @brief Write a prepared episode into the dataset as episode_index.
+   *
+   * Writes the parquet, moves the images and videos to their names for episode_index and
+   * updates the metadata files. A failure after the parquet is written removes it, so a
+   * rerun converts the episode again.
+   *
+   * @param pe Episode from prepare_episode().
+   * @param episode_index Zero-based episode index.
+   * @return true on success.
+   */
+  bool consume_episode(PreparedEpisode& pe, int episode_index);
 
   /**
    * @brief Write the per-episode stats of every episode in the dataset, then the README.
@@ -65,6 +126,8 @@ private:
 
   /// @brief Options from the constructor.
   Options opts_;
+  /// @brief Dataset-wide index of the next row written.
+  int64_t global_index_offset_{0};
 };
 
 }  // namespace trossen::io::backends
