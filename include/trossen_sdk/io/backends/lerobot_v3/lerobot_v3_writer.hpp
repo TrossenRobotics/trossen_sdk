@@ -155,6 +155,9 @@ private:
   /// @brief Gives the unit tests access to the private helpers.
   friend class LeRobotV3WriterTestPeer;
 
+  /// @brief File name pattern of extracted depth frames, numbered from 0.
+  static constexpr char kDepthFramePattern[] = "image_%06zu.png";
+
   /// @brief Running state for the shared data parquet stream.
   struct DataFileState {
     /// @brief Chunk index of the open data file.
