@@ -1212,28 +1212,51 @@ size_t video_start_offset(const CameraInfo& cam) {
   return cam.row_source_index.empty() ? 0 : cam.row_source_index.front();
 }
 
-void warn_video_start_offset(
-  const AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams) {
+bool check_video_alignment(
+  const AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams,
+  bool start_offset_applied) {
   // A video stream is copied out packet by packet in recording order, starting at the
   // camera's first frame. The copy cannot start mid-stream, because every frame after a
-  // keyframe is stored as a change from the one before it.
+  // keyframe is stored as a change from the one before it. A dropped or duplicated frame
+  // shifts every later row's image, and nothing downstream can tell.
   // Episodes are prepared concurrently, so each message is built locally and written in
   // one call.
+  bool aligned = true;
   for (const auto& cam : ep.cameras) {
     auto it = video_streams.find(cam.name);
     if (it == video_streams.end() || it->second.frame_count == 0) continue;
+
     const size_t offset = video_start_offset(cam);
-    if (offset == 0) continue;
-    std::ostringstream msg;
-    msg << "\n  Warning: episode " << ep.episode_index << " " << cam.name
-        << " video is offset by " << offset
-        << " frame(s). Row 0 was matched to frame " << offset << ", but the copied "
-        << "video starts at frame 0, so the first image lags its joint state by "
-        << offset << " source frame(s). This format cannot start a copied video "
-        << "mid-stream; convert with trossen_mcap_to_lerobot_v3 for offset-correct "
-        << "video.\n\n";
-    std::cerr << msg.str();
+    if (offset > 0 && !start_offset_applied) {
+      std::ostringstream msg;
+      msg << "\n  Warning: episode " << ep.episode_index << " " << cam.name
+          << " video is offset by " << offset
+          << " frame(s). Row 0 was matched to frame " << offset << ", but the copied "
+          << "video starts at frame 0, so the first image lags its joint state by "
+          << offset << " source frame(s). This format cannot start a copied video "
+          << "mid-stream; convert with trossen_mcap_to_lerobot_v3 for offset-correct "
+          << "video.\n\n";
+      std::cerr << msg.str();
+    }
+
+    // Row n plays frame played_start + n; how far that lands from the frame it matched.
+    const size_t played_start = start_offset_applied ? offset : 0;
+    size_t drift = 0;
+    for (size_t row = 0; row < cam.row_source_index.size(); ++row) {
+      const size_t matched = cam.row_source_index[row];
+      const size_t played = played_start + row;
+      drift = std::max(drift, matched > played ? matched - played : played - matched);
+    }
+    if (drift > MAX_VIDEO_DRIFT_FRAMES) {
+      std::ostringstream msg;
+      msg << "Error: episode " << ep.episode_index << " " << cam.name
+          << " video plays frames up to " << drift << " away from the ones matched to its rows"
+          << " (limit " << MAX_VIDEO_DRIFT_FRAMES << "); failing the episode\n";
+      std::cerr << msg.str();
+      aligned = false;
+    }
   }
+  return aligned;
 }
 
 void clamp_episode_to_video_frame_counts(
