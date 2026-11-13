@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -14,6 +15,7 @@
 #include <string>
 
 #include <arrow/api.h>
+#include <unistd.h>
 #include <opencv2/imgcodecs.hpp>
 
 #include "nlohmann/json.hpp"
@@ -51,6 +53,12 @@ public:
     return writer.encode_depth_video(image_dir, frame_count, out_mp4);
   }
   static constexpr const char* kDepthFramePattern = LeRobotV3DatasetWriter::kDepthFramePattern;
+  static bool place(LeRobotV3DatasetWriter& writer, const std::string& video_key,
+                    const fs::path& episode_mp4, double duration_s,
+                    std::array<double, 4>& slot) {
+    return writer.place_or_concat_video(video_key, episode_mp4, duration_s, slot);
+  }
+  static bool flush(LeRobotV3DatasetWriter& writer) { return writer.flush_videos(); }
 };
 
 }  // namespace trossen::io::backends
@@ -102,6 +110,17 @@ fs::path fresh_dir(const std::string& name) {
   fs::remove_all(dir);
   fs::create_directories(dir);
   return dir;
+}
+
+/// @brief True when file permissions bind this process; root ignores them.
+bool permissions_apply() { return geteuid() != 0; }
+
+/// @brief Encode `frames` frames of a 64x64 test pattern at 30 fps as H.264 mp4.
+bool make_test_video(const fs::path& mp4, int frames) {
+  const std::string cmd =
+    "ffmpeg -y -loglevel error -f lavfi -i testsrc=size=64x64:rate=30 -frames:v " +
+    std::to_string(frames) + " -c:v libx264 -pix_fmt yuv420p '" + mp4.string() + "'";
+  return std::system(cmd.c_str()) == 0;
 }
 
 /// @brief Write a constant 16-bit depth frame named as the writer reads it.
@@ -325,5 +344,91 @@ TEST(LeRobotV3Writer, DepthEncodeWritesEveryFrame) {
   ASSERT_TRUE(LeRobotV3WriterTestPeer::encode_depth(writer, dir, 3, mp4));
   EXPECT_EQ(probe_packet_count(mp4), 3);
   EXPECT_FALSE(fs::exists(mp4.string() + ".gray12.raw"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, VideoFlushWritesTheStagedEpisodesAsOneFile) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_concat_test");
+  const fs::path cwd = fs::current_path();
+  fs::current_path(dir);
+  fs::create_directories("scratch");
+  const bool made = make_test_video("scratch/ep0.mp4", 5) &&
+                    make_test_video("scratch/ep1.mp4", 5) && make_test_video("scratch/ep2.mp4", 5);
+  // Relative paths reach ffmpeg's concat list, which resolves them against its own folder.
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = "dataset";
+  LeRobotV3DatasetWriter writer(opts);
+  const bool opened = writer.open();
+  const double d = 5.0 / 30.0;
+  std::array<double, 4> slot{};
+  bool placed = true;
+  for (const char* name : {"scratch/ep0.mp4", "scratch/ep1.mp4", "scratch/ep2.mp4"}) {
+    placed = placed && LeRobotV3WriterTestPeer::place(writer, "cam", name, d, slot);
+  }
+  const bool flushed = LeRobotV3WriterTestPeer::flush(writer);
+  fs::current_path(cwd);
+
+  ASSERT_TRUE(made && opened && placed && flushed);
+  EXPECT_NEAR(slot[2], 2.0 * d, 1e-3);
+  EXPECT_NEAR(slot[3], 3.0 * d, 1e-3);
+  const fs::path chunk = dir / "dataset" / v3::VIDEO_DIR / "cam" / "chunk-000";
+  EXPECT_EQ(probe_packet_count(chunk / "file-000.mp4"), 15);
+  EXPECT_FALSE(fs::exists(chunk / "file-000.parts"));
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, FailedFlushKeepsTheStagedEpisodes) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  if (!permissions_apply()) GTEST_SKIP() << "running as root";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_concat_fail_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  ASSERT_TRUE(make_test_video(dir / "ep0.mp4", 5));
+  ASSERT_TRUE(make_test_video(dir / "ep1.mp4", 5));
+  const double d = 5.0 / 30.0;
+  std::array<double, 4> slot{};
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep0.mp4", d, slot));
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::place(writer, "cam", dir / "ep1.mp4", d, slot));
+
+  // A read-only chunk folder stops ffmpeg from writing the joined file.
+  const fs::path chunk = opts.dataset_root / v3::VIDEO_DIR / "cam" / "chunk-000";
+  fs::permissions(chunk, fs::perms::owner_read | fs::perms::owner_exec);
+  const bool flushed = LeRobotV3WriterTestPeer::flush(writer);
+  fs::permissions(chunk, fs::perms::owner_all);
+  EXPECT_FALSE(flushed);
+  EXPECT_FALSE(fs::exists(chunk / "file-000.mp4"));
+  EXPECT_FALSE(fs::exists(chunk / "file-000.parts" / "concat_list.txt"));
+  EXPECT_TRUE(fs::exists(chunk / "file-000.parts" / "part-000001.mp4"));
+
+  // The staged episodes are kept, so a later flush still writes them.
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::flush(writer));
+  EXPECT_EQ(probe_packet_count(chunk / "file-000.mp4"), 10);
+  fs::remove_all(dir);
+}
+
+TEST(LeRobotV3Writer, VideoPlacementSucceedsWhenTheSourceCannotBeRemoved) {
+  if (!have_ffmpeg()) GTEST_SKIP() << "ffmpeg or ffprobe is not on PATH";
+  if (!permissions_apply()) GTEST_SKIP() << "running as root";
+  const fs::path dir = fresh_dir("trossen_lerobot_v3_video_source_locked_test");
+  LeRobotV3DatasetWriter::Options opts;
+  opts.dataset_root = dir / "dataset";
+  LeRobotV3DatasetWriter writer(opts);
+  ASSERT_TRUE(writer.open());
+  fs::create_directories(dir / "scratch");
+  ASSERT_TRUE(make_test_video(dir / "scratch" / "ep0.mp4", 5));
+  // A read-only folder blocks both moving and deleting its files, so staging falls back
+  // to a copy whose source cannot be removed.
+  fs::permissions(dir / "scratch", fs::perms::owner_read | fs::perms::owner_exec);
+
+  std::array<double, 4> slot{};
+  const bool placed =
+    LeRobotV3WriterTestPeer::place(writer, "cam", dir / "scratch" / "ep0.mp4", 5.0 / 30.0, slot);
+  fs::permissions(dir / "scratch", fs::perms::owner_all);
+  EXPECT_TRUE(placed);
+  ASSERT_TRUE(LeRobotV3WriterTestPeer::flush(writer));
+  EXPECT_TRUE(fs::exists(opts.dataset_root / v3::VIDEO_DIR / "cam" / "chunk-000" / "file-000.mp4"));
   fs::remove_all(dir);
 }
