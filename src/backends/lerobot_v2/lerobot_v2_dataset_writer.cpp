@@ -6,12 +6,16 @@
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_dataset_writer.hpp"
 
 #include <algorithm>
+#include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <memory>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -19,16 +23,401 @@
 #include <parquet/arrow/reader.h>
 
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_readme_utils.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_schema_utils.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_stats_utils.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_table.hpp"
+#include "trossen_sdk/io/backends/lerobot_common/lerobot_video.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_constants.hpp"
 #include "trossen_sdk/io/backends/lerobot_v2/lerobot_v2_format_utils.hpp"
+#include "trossen_sdk/utils/app_utils.hpp"
 
 namespace trossen::io::backends {
+
+namespace {
+
+/**
+ * @brief Configuration for LeRobotV2 dataset conversion
+ *
+ * The folder structure is: dataset_root / repository_id / dataset_id / [data, images, videos, meta]
+ * Example: ~/lerobot_v2_datasets/TrossenRoboticsCommunity/pick_and_place_001/data/chunk-000/episode_000000.parquet
+ */
+struct ParquetConfig {
+  std::string mcap_file;
+  std::string output_file;
+  std::string output_dir;
+  std::string dataset_root;
+  std::string repository_id = "TrossenRoboticsCommunity";  // repo_id in the folder structure
+  std::string dataset_id = "mcap_converted_dataset";    // dataset_name in the folder structure
+  std::string robot_name = trossen::io::backends::DEFAULT_ROBOT_NAME;
+  std::string task_name = "Pick and Place";
+  int episode_index = 0;
+  int episode_chunk = 0;
+  int chunk_size = 1000;
+};
+
+}  // namespace
 
 LeRobotV2DatasetWriter::LeRobotV2DatasetWriter(Options opts) : opts_{std::move(opts)} {}
 
 std::filesystem::path LeRobotV2DatasetWriter::dataset_path() const {
   return opts_.root / opts_.repository_id / opts_.dataset_id;
+}
+
+bool LeRobotV2DatasetWriter::is_converted(int episode_index) {
+  namespace fs = std::filesystem;
+  const fs::path parquet = dataset_path() / DATA_PATH_DIR /
+                           format_chunk_dir(episode_index / opts_.chunk_size) /
+                           format_episode_parquet(episode_index);
+  if (!fs::exists(parquet)) return false;
+  try {
+    auto reader = parquet::ParquetFileReader::OpenFile(parquet.string(), false);
+    global_index_offset_ += reader->metadata()->num_rows();
+    return true;
+  } catch (const std::exception& e) {
+    std::cerr << "Corrupt parquet for episode " << episode_index
+              << ", deleting and re-converting: " << e.what() << "\n";
+    fs::remove(parquet);
+    return false;
+  }
+}
+
+bool LeRobotV2DatasetWriter::prepare_episode(const std::filesystem::path& mcap_file,
+                                             int input_index,
+                                             const std::filesystem::path& tmp_dir,
+                                             PreparedEpisode& out) const {
+  namespace fs = std::filesystem;
+  using trossen::io::backends::AlignedEpisode;
+  using trossen::io::backends::McapChannelMap;
+
+  out.mcap_file = mcap_file;
+  if (!fs::exists(mcap_file)) {
+    std::cerr << "Error: MCAP file not found: " << mcap_file.string() << std::endl;
+    return false;
+  }
+
+  // A killed earlier run can leave frames in this folder, and a shorter recording would
+  // then pick up the old tail.
+  std::error_code clear_ec;
+  fs::remove_all(tmp_dir, clear_ec);
+  if (clear_ec) {
+    std::cerr << "Error: could not clear " << tmp_dir.string() << ": " << clear_ec.message()
+              << "\n";
+    return false;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Decode + align with load_aligned_episode(): reads the embedded dataset_info, detects
+  // leader/follower streams and aligns every stream into rows.
+  // ──────────────────────────────────────────────────────────
+  std::cout << "\nReading MCAP file...\n";
+
+  AlignedEpisode& ep = out.ep;
+  McapChannelMap& channels = out.channels;
+  // LeRobot v2.1 has no depth format, so depth cameras are left out before loading.
+  trossen::io::backends::AlignmentOptions alignment;
+  alignment.skip_depth_cameras = true;
+  if (!trossen::io::backends::load_aligned_episode(mcap_file.string(), input_index, ep, channels,
+                                                   alignment)) {
+    return false;
+  }
+  // Camera names come from the MCAP topics and name folders below, so each must be a
+  // single path component.
+  for (const auto& [channel_id, camera_name] : channels.camera_channels) {
+    if (camera_name.empty() || camera_name == "." || camera_name == ".." ||
+        camera_name.find_first_of("/\\") != std::string::npos) {
+      std::cerr << "Error: camera name '" << camera_name << "' in " << mcap_file.string()
+                << " is not a valid folder name\n";
+      return false;
+    }
+  }
+  if (ep.frames.empty()) {
+    std::cerr << "Error: No aligned frames in " << mcap_file.string() << "\n";
+    return false;
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Extract camera images
+  // ──────────────────────────────────────────────────────────
+
+  std::map<std::string, fs::path>& camera_dirs = out.image_dirs;
+  std::map<std::string, size_t> image_counts;
+
+  if (!channels.camera_channels.empty()) {
+    for (const auto& [channel_id, camera_name] : channels.camera_channels) {
+      camera_dirs[camera_name] = tmp_dir / "images" / ("observation.images." + camera_name);
+    }
+
+    std::cout << "\nExtracting camera images...\n";
+    if (!trossen::io::backends::extract_camera_images(
+            mcap_file.string(), channels, ep,
+            [&](const std::string& camera_name) -> fs::path {
+              fs::path dir = camera_dirs[camera_name];
+              fs::create_directories(dir);
+              return dir;
+            },
+            image_counts)) {
+      return false;
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Encode images to videos
+  // ──────────────────────────────────────────────────────────
+
+  // A camera whose video fails fails the whole episode: the parquet rows would otherwise
+  // point at frames that do not exist, or at frames from the wrong instant.
+  int videos_created = 0;
+  if (!camera_dirs.empty()) {
+    std::cout << "\nEncoding videos from images...\n";
+
+    for (const auto& [camera_name, camera_dir] : camera_dirs) {
+      const std::string video_key = "observation.images." + camera_name;
+      const fs::path video_output = tmp_dir / "videos" / (video_key + ".mp4");
+      fs::create_directories(video_output.parent_path());
+
+      auto cnt_it = image_counts.find(camera_name);
+      if (cnt_it == image_counts.end() || cnt_it->second == 0) {
+        std::cout << "  Skipping " << camera_name << " (no images)\n";
+        continue;
+      }
+
+      std::cout << "  Encoding " << camera_name << "...";
+      std::cout.flush();
+
+      const auto encode_start = std::chrono::steady_clock::now();
+      if (!trossen::io::backends::encode_episode_video(camera_dir, cnt_it->second, ep.fps,
+                                                       /*encoder_threads=*/0, video_output)) {
+        std::cout << " [FAILED]\n";
+        return false;
+      }
+      const auto encode_end = std::chrono::steady_clock::now();
+      const auto duration =
+          std::chrono::duration_cast<std::chrono::milliseconds>(encode_end - encode_start)
+              .count();
+      std::cout << " [ok] (" << (duration / 1000.0) << "s)\n";
+      out.videos[camera_name] = video_output;
+      videos_created++;
+    }
+
+    if (videos_created > 0) {
+      std::cout << "  [ok] Created " << videos_created << " video(s)\n";
+    } else {
+      std::cout << "  Warning: No videos were created\n";
+    }
+  }
+
+  return true;
+}
+
+bool LeRobotV2DatasetWriter::consume_episode(PreparedEpisode& pe, int episode_index) {
+  namespace fs = std::filesystem;
+
+  trossen::io::backends::AlignedEpisode& ep = pe.ep;
+  const trossen::io::backends::McapChannelMap& channels = pe.channels;
+  ep.episode_index = episode_index;
+
+  ParquetConfig cfg;
+  cfg.mcap_file = pe.mcap_file.string();
+  cfg.dataset_root = opts_.root.string();
+  cfg.repository_id = opts_.repository_id;
+  cfg.dataset_id = opts_.dataset_id;
+  cfg.chunk_size = opts_.chunk_size;
+  cfg.robot_name = ep.robot_name;
+
+  cfg.episode_index = episode_index;
+  cfg.episode_chunk = episode_index / opts_.chunk_size;
+
+  // Create LeRobotV2 folder structure: dataset_root / repo_id / dataset_name
+  fs::path full_dataset_path = fs::path(cfg.dataset_root) / cfg.repository_id / cfg.dataset_id;
+
+  cfg.output_dir = full_dataset_path.string();
+
+  std::string chunk_dir_name = trossen::io::backends::format_chunk_dir(cfg.episode_chunk);
+  std::string parquet_filename = trossen::io::backends::format_episode_parquet(cfg.episode_index);
+  cfg.output_file = (full_dataset_path / "data" / chunk_dir_name / parquet_filename).string();
+
+  std::vector<std::string> config_lines = {
+      "Input MCAP:       " + cfg.mcap_file,
+      "Dataset Root:     " + full_dataset_path.string(),
+      "Repository ID:    " + cfg.repository_id,
+      "Dataset ID:       " + cfg.dataset_id,
+      "Episode Index:    " + std::to_string(cfg.episode_index),
+      "Episode Chunk:    " + std::to_string(cfg.episode_chunk),
+      "Output Parquet:   " + cfg.output_file,
+      "Arms/Cameras:     Auto-detect from MCAP"};
+
+  trossen::utils::print_config_banner("TrossenMCAP to LeRobotV2 Converter", config_lines);
+
+  std::cout << "\nCreating LeRobotV2 dataset structure...\n";
+
+  fs::path data_dir = full_dataset_path / trossen::io::backends::DATA_PATH_DIR / chunk_dir_name;
+  fs::path images_dir = full_dataset_path / trossen::io::backends::IMAGES_DIR / chunk_dir_name;
+  fs::path videos_dir = full_dataset_path / trossen::io::backends::VIDEO_DIR / chunk_dir_name;
+  fs::path meta_dir = full_dataset_path / trossen::io::backends::METADATA_DIR;
+
+  try {
+    fs::create_directories(data_dir);
+    fs::create_directories(images_dir);
+    fs::create_directories(videos_dir);
+    fs::create_directories(meta_dir);
+
+    std::cout << "  [ok] Created data directory:   " << data_dir.string() << "\n";
+    std::cout << "  [ok] Created images directory: " << images_dir.string() << "\n";
+    std::cout << "  [ok] Created videos directory: " << videos_dir.string() << "\n";
+    std::cout << "  [ok] Created meta directory:   " << meta_dir.string() << "\n";
+  } catch (const std::exception& e) {
+    std::cerr << "Error: Failed to create directories: " << e.what() << "\n";
+    return false;
+  }
+
+  // Width of every action and observation.state row.
+  const int action_dim = trossen::io::backends::episode_action_dim(ep);
+  const int obs_dim = trossen::io::backends::episode_obs_dim(ep);
+
+  std::cout << "\nCreating Parquet file...\n";
+  std::cout << "  Joint dimensions per stream: " << ep.joints_per_stream << "\n";
+  std::cout << "  Action dimension: " << action_dim << " ("
+            << ep.leader_streams.size() << " stream(s) x " << ep.joints_per_stream;
+  if (ep.has_mobile_base) std::cout << " + 2 base velocities";
+  std::cout << ")\n";
+  std::cout << "  Observation dimension: " << obs_dim << " ("
+            << ep.follower_streams.size() << " stream(s) x " << ep.joints_per_stream;
+  if (ep.has_mobile_base) std::cout << " + 2 base velocities";
+  std::cout << ")\n";
+
+  // prepare_episode() rejects an episode without rows, so the table is never empty.
+  const auto table = trossen::io::backends::build_episode_table(
+    ep, action_dim, obs_dim, cfg.episode_index, /*task_index=*/0, global_index_offset_);
+  if (!table ||
+      !trossen::io::backends::write_parquet_file(*table, cfg.output_file, /*store_schema=*/true)) {
+    return false;
+  }
+  const size_t rows_written = ep.frames.size();
+  std::cout << "  [ok] Wrote " << rows_written << " rows\n";
+
+  // Advance the global index offset now that the parquet is on disk, so a failure while
+  // moving the videos or writing the metadata cannot give the next episode overlapping
+  // indices.
+  global_index_offset_ += static_cast<int64_t>(rows_written);
+
+  // A rerun skips every episode whose parquet exists, so a failure from here on removes the
+  // parquet and the episode is converted again.
+  const auto fail = [&cfg]() {
+    std::error_code ec;
+    fs::remove(cfg.output_file, ec);
+    if (ec) {
+      std::cerr << "Error: Failed to remove " << cfg.output_file << ": " << ec.message()
+                << "\n";
+    }
+    return false;
+  };
+
+  std::cout << "\n[ok] Successfully created Parquet file: " << cfg.output_file << "\n";
+  std::cout << "\nSummary:\n";
+  std::cout << "  Total frames:      " << rows_written << "\n";
+  std::cout << "  Episode index:     " << cfg.episode_index << "\n";
+  std::cout << "  Actions per row:   " << action_dim;
+  if (ep.has_mobile_base) std::cout << " (incl. 2 base velocities)";
+  std::cout << "\n";
+  std::cout << "  Observations/row:  " << obs_dim;
+  if (ep.has_mobile_base) std::cout << " (incl. 2 base velocities)";
+  std::cout << "\n";
+
+  // ──────────────────────────────────────────────────────────
+  // Move the episode's images and videos to their place in the dataset
+  // ──────────────────────────────────────────────────────────
+
+  // The episode index names these folders and files, so they are placed only now. A target
+  // left by an earlier, interrupted run is replaced.
+  const auto place = [](const fs::path& from, const fs::path& to) {
+    std::error_code ec;
+    fs::create_directories(to.parent_path(), ec);
+    if (!ec) fs::remove_all(to, ec);
+    if (!ec) fs::rename(from, to, ec);
+    if (ec) {
+      std::cerr << "Error: Failed to move " << from.string() << " to " << to.string() << ": "
+                << ec.message() << "\n";
+      return false;
+    }
+    return true;
+  };
+  const std::string episode_folder = trossen::io::backends::format_episode_folder(episode_index);
+  for (const auto& [camera_name, dir] : pe.image_dirs) {
+    if (!fs::exists(dir)) continue;
+    if (!place(dir, images_dir / ("observation.images." + camera_name) / episode_folder)) {
+      return fail();
+    }
+  }
+  const std::string video_file = trossen::io::backends::format_video_filename(episode_index);
+  for (const auto& [camera_name, path] : pe.videos) {
+    if (!place(path, videos_dir / ("observation.images." + camera_name) / video_file)) {
+      return fail();
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────
+  // Generate LeRobotV2 metadata files
+  // ──────────────────────────────────────────────────────────
+
+  std::cout << "\nGenerating metadata files...\n";
+
+  // Check if info.json exists, create if needed
+  fs::path info_path = meta_dir / trossen::io::backends::JSON_INFO;
+  if (!fs::exists(info_path)) {
+    std::cout << "  Creating initial info.json...\n";
+
+    nlohmann::ordered_json features =
+        trossen::io::backends::build_features(ep);
+
+    // Add standard metadata features (timestamp, frame_index, episode_index, index, task_index)
+    trossen::io::backends::add_standard_metadata_features(features);
+
+    // Use helper function to create initial info.json with custom features
+    if (!trossen::io::backends::create_initial_info_json(
+            meta_dir, cfg.robot_name, features, static_cast<int>(ep.fps),
+            trossen::io::backends::CODEBASE_VERSION, cfg.chunk_size)) {
+      std::cerr << "  Error: Failed to create " << info_path.string() << "\n";
+      return fail();
+    }
+
+    std::cout << "  [ok] Created " << info_path.string() << "\n";
+  }
+
+  // The episode's parquet, images, videos and info.json are in place, so its stats are
+  // computed here and written with its metadata.
+  nlohmann::ordered_json stats;
+  try {
+    std::ifstream info_file(info_path);
+    stats = compute_episode_stats(cfg.output_file, episode_index, nlohmann::json::parse(info_file));
+  } catch (const std::exception& e) {
+    std::cerr << "  Error: Failed to compute stats for episode " << episode_index << ": "
+              << e.what() << "\n";
+    return fail();
+  }
+
+  // Use utility functions to write metadata
+  int num_cameras = static_cast<int>(channels.camera_channels.size());
+
+  if (trossen::io::backends::write_episode_metadata(
+          meta_dir, cfg.episode_index, cfg.task_name, 0, static_cast<int>(rows_written),
+          num_cameras, stats)) {
+    std::cout << "  [ok] Updated " << info_path.string() << "\n";
+    std::cout << "  [ok] Created/Updated "
+              << (meta_dir / trossen::io::backends::JSONL_TASKS).string() << "\n";
+    std::cout << "  [ok] Appended to "
+              << (meta_dir / trossen::io::backends::JSONL_EPISODES).string() << "\n";
+    std::cout << "  [ok] Appended to "
+              << (meta_dir / trossen::io::backends::JSONL_EPISODE_STATS).string()
+              << "\n";
+  } else {
+    std::cerr << "  Error: Failed to write metadata files\n";
+    return fail();
+  }
+
+  std::cout << "\n[ok] Successfully created LeRobotV2 dataset episode!\n";
+  std::cout << "  Dataset location: " << full_dataset_path.string() << "\n";
+
+  return true;
 }
 
 bool LeRobotV2DatasetWriter::finalize() const {
@@ -41,8 +430,6 @@ bool LeRobotV2DatasetWriter::finalize() const {
     std::cerr << "Error: no episodes were written; nothing to finalize.\n";
     return false;
   }
-
-  // TODO(shantanuparab-tr): compute each episode's stats into meta/episodes_stats.jsonl.
 
   // The README is best-effort, so a failure is a warning.
   const std::filesystem::path info_json_path =
