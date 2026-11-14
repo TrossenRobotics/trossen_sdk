@@ -27,16 +27,17 @@ namespace trossen::hw::teleop {
  * Behavior:
  * - If teleop is disabled (`enabled = false`), returns an empty vector.
  * - For each pair: looks up `leader` and `follower` IDs in
- *   `ActiveHardwareRegistry`. If the leader is missing, prints a warning
- *   and skips that pair. If the follower is missing or absent, the
- *   controller is constructed in leader-only mode.
- * - If a referenced component does not implement `TeleopCapable`, prints
- *   a warning and skips that pair.
+ *   `ActiveHardwareRegistry`. A pair with no `follower` is constructed in
+ *   leader-only mode.
  * - Each returned controller is constructed but not yet running; the
  *   caller drives its lifecycle via `prepare_teleop()`, `teleop()`,
  *   `reset_teleop()`, and `stop_teleop()`.
  *
- * Throws `std::runtime_error` if the global "teleop" key is missing.
+ * @return One controller per pair, in config order.
+ * @throws std::runtime_error if the global "teleop" key is missing.
+ * @throws std::invalid_argument naming the pair if its leader or a named
+ *   follower is not registered or does not implement `TeleopCapable`, or if its
+ *   space is unknown or not implemented by both components.
  */
 std::vector<std::unique_ptr<TeleopController>>
 create_controllers_from_global_config();
