@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <functional>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -59,6 +60,36 @@ public:
     return meta;
   }
 };
+
+// Polled producer whose poll() throws, like an arm producer reading an arm that lost power.
+class ThrowingPolledProducer : public PolledProducer {
+public:
+  void poll(const std::function<void(std::shared_ptr<RecordBase>)>&) override {
+    ++polls;
+    throw std::runtime_error("arm unreachable");
+  }
+
+  std::shared_ptr<ProducerMetadata> metadata() const override {
+    auto meta = std::make_shared<StubProducerMetadata>();
+    meta->type = "mock";
+    meta->id = "throwing_producer";
+    meta->name = "Throwing Producer";
+    return meta;
+  }
+
+  /// Number of poll() calls.
+  std::atomic<int> polls{0};
+};
+
+/// Checks @p done every millisecond for up to 2 s; returns true once it holds.
+bool wait_until(const std::function<bool()>& done) {
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!done()) {
+    if (std::chrono::steady_clock::now() >= deadline) return false;
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  return true;
+}
 
 // Test fixture: loads minimal GlobalConfig with null backend
 class SessionManagerDiscardTest : public ::testing::Test {
@@ -229,6 +260,22 @@ TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_WithProducer) {
   // Should be able to start another episode after discard
   ASSERT_TRUE(sm.start_episode());
   sm.stop_episode();
+}
+
+// SD-10: A polled producer whose poll() throws is not polled again; the process keeps running
+// and the episode still stops.
+TEST_F(SessionManagerDiscardTest, ProducerPollThrows_DoesNotTerminate) {
+  SessionManager sm;
+  auto producer = std::make_shared<ThrowingPolledProducer>();
+  sm.add_producer(producer, std::chrono::milliseconds(10));
+
+  ASSERT_TRUE(sm.start_episode());
+  ASSERT_TRUE(wait_until([&producer]() { return producer->polls.load() > 0; }));
+  std::this_thread::sleep_for(std::chrono::milliseconds(50));  // five more periods
+  EXPECT_EQ(producer->polls.load(), 1);
+  sm.stop_episode();
+
+  EXPECT_FALSE(sm.is_episode_active());
 }
 
 // End-to-end: SessionManager wired to the real TrossenMCAP backend, verifying that

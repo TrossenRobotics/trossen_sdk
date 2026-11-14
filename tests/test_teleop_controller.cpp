@@ -43,6 +43,23 @@ public:
   TeleopTypeIO* as_space_io(Space) override { return &io_; }
 };
 
+/// A joint-space component whose end_teleop() throws, like an arm that lost power.
+class EndThrowingComponent : public JointSpaceTeleop {
+public:
+  std::vector<float> read() override { return {0.0f}; }
+  void write(const std::vector<float>&) override {}
+  void end_teleop() override { throw std::runtime_error("arm unreachable"); }
+};
+
+/// A joint-space component that records whether end_teleop() ran.
+class EndRecordingComponent : public JointSpaceTeleop {
+public:
+  std::vector<float> read() override { return {0.0f}; }
+  void write(const std::vector<float>&) override {}
+  void end_teleop() override { ended = true; }
+  bool ended{false};
+};
+
 // Wait (bounded) for the control loop to observe its own exit. A ThrowingLeader
 // makes control_loop() throw on the first read(), which clears running_; poll for
 // that transition rather than assuming a fixed delay, so the test is deterministic
@@ -68,6 +85,31 @@ TEST(TeleopControllerTest, ControlLoopExceptionDoesNotTerminate) {
   ctrl.teleop();
   EXPECT_TRUE(wait_until_stopped(ctrl));
   // Destruction here must complete without std::terminate.
+}
+
+// A loop that stops on an exception reports failed(); one stopped by the caller does not.
+TEST(TeleopControllerTest, FailedOnlyAfterControlLoopException) {
+  TeleopController::Config cfg{};
+
+  TeleopController throwing(std::make_shared<ThrowingLeader>(), nullptr, cfg);
+  EXPECT_FALSE(throwing.failed());
+  throwing.teleop();
+  ASSERT_TRUE(wait_until_stopped(throwing));
+  EXPECT_TRUE(throwing.failed());
+
+  TeleopController stub(std::make_shared<StubLeader>(), nullptr, cfg);
+  stub.teleop();
+  stub.pause_teleop();
+  EXPECT_FALSE(stub.failed());
+}
+
+// A leader that throws from end_teleop() does not stop the follower from resting.
+TEST(TeleopControllerTest, StopTeleopRestsFollowerWhenLeaderEndThrows) {
+  auto follower = std::make_shared<EndRecordingComponent>();
+  TeleopController ctrl(std::make_shared<EndThrowingComponent>(), follower, {});
+
+  EXPECT_NO_THROW(ctrl.stop_teleop());
+  EXPECT_TRUE(follower->ended);
 }
 
 // Regression: when the control loop exits via exception it clears running_ but
