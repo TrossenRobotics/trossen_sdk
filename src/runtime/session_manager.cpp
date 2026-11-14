@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <future>
 #include <iomanip>
 #include <iostream>
@@ -237,6 +238,15 @@ bool SessionManager::start_episode() {
               << "SessionManager is terminal." << std::endl;
     return false;
   }
+  auto refuse_after_fault = [](const std::string& fault) {
+    std::cerr << "SessionManager::start_episode() refused: " << fault
+              << " earlier in this session; check the hardware and start a new session."
+              << std::endl;
+  };
+  if (const auto fault = hardware_fault()) {
+    refuse_after_fault(*fault);
+    return false;
+  }
   // Guard: already active
   if (episode_active_) {
     std::cerr << "Episode already active. Call stop_episode() first." << std::endl;
@@ -323,14 +333,20 @@ bool SessionManager::start_episode() {
     }
   }
 
-  // Helper to tear down push producers, sink, and backend on early abort
+  // Helper to tear down push producers, sink, and backend on early abort. The episode's
+  // file is deleted, so an aborted start leaves nothing in the dataset.
   auto cleanup_and_abort = [&]() -> bool {
     for (const auto& ppe : push_producer_entries_) {
       ppe.producer->stop();
     }
     current_sink_->stop();
     current_sink_.reset();
+    current_backend_->discard_episode();
     current_backend_.reset();
+    {
+      std::lock_guard<std::mutex> path_lock(episode_mutex_);
+      current_episode_path_.clear();
+    }
     return false;
   };
 
@@ -397,6 +413,12 @@ bool SessionManager::start_episode() {
   // (e.g. arms re-home to their staged pose), then re-arm teleop modes before the
   // mirror restarts at episode start.
   for (auto& ctrl : teleop_controllers_) ctrl->pause_teleop();
+  // The mirrors run until pause_teleop() joins them, so a fault they hit after the check
+  // at the top shows here, before any hardware is staged or re-armed.
+  if (const auto fault = hardware_fault()) {
+    refuse_after_fault(*fault);
+    return cleanup_and_abort();
+  }
   // Run the components' pre-episode hooks in parallel. Each drives independent
   // hardware (its own arm/driver), and staging is a blocking point-to-point move, so
   // running them concurrently bounds the episode-boundary wait by the slowest component
@@ -551,6 +573,18 @@ void SessionManager::teardown_episode(bool discard) {
     scheduler_.reset();
   }
 
+  // A fault recorded during the episode leaves its data incomplete, so it is discarded
+  // instead of saved. Checked after the scheduler stops, so no later poll can fault. A
+  // mirror fault after this point happens after recording stopped, so the saved records
+  // are complete.
+  if (!discard) {
+    if (const auto fault = hardware_fault()) {
+      std::cerr << *fault << "; discarding episode " << next_episode_index_
+                << " instead of saving it." << std::endl;
+      discard = true;
+    }
+  }
+
   // Stop sink - drain queue and write all pending records
   if (current_sink_) {
     current_sink_->stop();
@@ -581,6 +615,19 @@ void SessionManager::teardown_episode(bool discard) {
   auto lifecycle_controllers = teleop_controllers_;
   auto lifecycle_components = collect_lifecycle_components_();
 
+  // Wakes wait_for_auto_stop(); an episode stopped by the duration monitor's thread is
+  // reported as an auto-stop whether it was saved or discarded.
+  auto notify_auto_stop = [this]() {
+    {
+      std::lock_guard<std::mutex> cv_lock(auto_stop_mutex_);
+      if (monitor_thread_.joinable() &&
+          std::this_thread::get_id() == monitor_thread_.get_id()) {
+        auto_stop_triggered_ = true;
+      }
+    }
+    auto_stop_cv_.notify_all();
+  };
+
   if (discard) {
     // The episode's file was just deleted, so don't let stats() report a path that no
     // longer exists on disk. (Runs under episode_mutex_, held from the top of this fn.)
@@ -589,12 +636,12 @@ void SessionManager::teardown_episode(bool discard) {
     // Signal stats emitted so monitor_episode() can exit
     stats_emitted_.store(true);
 
-    // Notify auto-stop waiters so they can observe the discard,
-    // but don't set auto_stop_triggered_ -- this was a manual discard, not an auto-stop.
-    auto_stop_cv_.notify_all();
+    // A manual discard is not an auto-stop; a discard by the duration monitor after a
+    // fault is.
+    notify_auto_stop();
 
     std::cout << "Episode " << next_episode_index_
-              << " discarded. Will re-record at same index." << std::endl;
+              << " discarded; its index will be reused." << std::endl;
 
     // Run the episode-end lifecycle on discard too, so teleop and components are left
     // in the same between-episode state as a clean stop. No user episode-ended
@@ -619,15 +666,7 @@ void SessionManager::teardown_episode(bool discard) {
     trossen::utils::announce(
       "Episode " + std::to_string(finished_episode_index) + " complete");
 
-    // Notify any threads waiting for auto-stop
-    {
-      std::lock_guard<std::mutex> cv_lock(auto_stop_mutex_);
-      if (monitor_thread_.joinable() &&
-          std::this_thread::get_id() == monitor_thread_.get_id()) {
-        auto_stop_triggered_ = true;
-      }
-    }
-    auto_stop_cv_.notify_all();
+    notify_auto_stop();
 
     // Compute final stats, correct episode index for callbacks
     Stats final_stats = stats_unlocked();
@@ -672,6 +711,12 @@ void SessionManager::teardown_episode(bool discard) {
 void SessionManager::discard_last_episode() {
   std::lock_guard<std::mutex> lock(episode_mutex_);
 
+  if (const auto fault = hardware_fault()) {
+    std::cerr << "SessionManager::discard_last_episode() refused: " << *fault
+              << " earlier in this session; the last saved episode is kept." << std::endl;
+    return;
+  }
+
   if (next_episode_index_ == 0) {
     std::cerr << "No episodes to discard." << std::endl;
     return;
@@ -701,7 +746,7 @@ void SessionManager::discard_last_episode() {
   }
 
   std::cout << "Episode " << discard_index
-            << " discarded. Will re-record at same index." << std::endl;
+            << " discarded; its index will be reused." << std::endl;
 }
 
 void SessionManager::request_rerecord() {
@@ -891,6 +936,20 @@ void SessionManager::monitor_duration() {
       break;
     }
   }
+}
+
+std::optional<std::string> SessionManager::hardware_fault() const {
+  for (std::size_t i = 0; i < teleop_controllers_.size(); ++i) {
+    if (teleop_controllers_[i]->failed()) {
+      return "teleop.pairs[" + std::to_string(i) + "] stopped mirroring";
+    }
+  }
+  for (const auto& pt : producer_tasks_) {
+    if (pt.failed->load()) {
+      return "producer '" + pt.producer->metadata()->id + "' stopped polling";
+    }
+  }
+  return std::nullopt;
 }
 
 void SessionManager::print_episode_header() {
