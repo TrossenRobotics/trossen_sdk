@@ -92,18 +92,20 @@ public:
   }
 
   /**
-   * @brief Stop draining, flush, and close backend
+   * @brief Stop and join the drain thread; idempotent
+   *
+   * The backend is left open; the caller flushes and closes it, or discards the episode.
+   *
+   * @param discard True to drop the queued records unwritten; false writes them all first
    */
-  void stop() {
+  void stop(bool discard = false) {
+    // Set before running_ turns false: the drain thread reads it only after it sees that.
+    discard_.store(discard);
     if (!running_.exchange(false)) {
       return;
     }
     if (worker_.joinable()) {
       worker_.join();
-    }
-    if (backend_) {
-      backend_->flush();
-      backend_->close();
     }
   }
 
@@ -147,6 +149,10 @@ private:
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
       }
     }
+    // Records left in the queue are freed with the sink, never written
+    if (discard_.load()) {
+      return;
+    }
     // final flush
     std::shared_ptr<data::RecordBase> rec2;
     size_t count2 = 0;
@@ -177,6 +183,9 @@ private:
 
   /// @brief Whether the sink is running
   std::atomic<bool> running_{false};
+
+  /// @brief Whether the drain thread drops the queued records when it stops
+  std::atomic<bool> discard_{false};
 
   /// @brief Worker thread
   std::thread worker_;

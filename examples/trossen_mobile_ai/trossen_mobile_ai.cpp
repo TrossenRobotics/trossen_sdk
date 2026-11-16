@@ -402,7 +402,7 @@ int main(int argc, char** argv) {
     auto action = mgr.monitor_episode();
 
     if (action == trossen::runtime::UserAction::kReRecord) {
-      mgr.discard_current_episode();
+      mgr.stop_episode(/*discard=*/true);
       if (velocity_thread.joinable()) {
         velocity_thread.join();
       }

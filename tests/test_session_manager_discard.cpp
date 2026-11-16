@@ -209,15 +209,15 @@ TEST_F(SessionManagerDiscardTest, UserAction_HasExpectedValues) {
   EXPECT_NE(rerecord_action, stop_action);
 }
 
-// SD-02: discard_current_episode is no-op when no episode active
+// SD-02: stop_episode(discard=true) is no-op when no episode active
 TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_NoOp_WhenNotActive) {
   SessionManager sm;
   EXPECT_FALSE(sm.is_episode_active());
-  EXPECT_NO_THROW(sm.discard_current_episode());
+  EXPECT_NO_THROW(sm.stop_episode(/*discard=*/true));
   EXPECT_FALSE(sm.is_episode_active());
 }
 
-// SD-03: discard_current_episode during active episode
+// SD-03: stop_episode(discard=true) during active episode
 TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_DuringActiveEpisode) {
   SessionManager sm;
 
@@ -231,7 +231,7 @@ TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_DuringActiveEpisode) {
   EXPECT_TRUE(sm.is_episode_active());
 
   // Discard the active episode
-  sm.discard_current_episode();
+  sm.stop_episode(/*discard=*/true);
 
   // Episode should no longer be active
   EXPECT_FALSE(sm.is_episode_active());
@@ -244,7 +244,7 @@ TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_DuringActiveEpisode) {
   EXPECT_EQ(post_stats.current_episode_index, initial_index);
 }
 
-// SD-04: discard_current_episode does NOT fire episode-ended callbacks
+// SD-04: stop_episode(discard=true) does NOT fire episode-ended callbacks
 TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_DoesNotFireEndedCallbacks) {
   SessionManager sm;
 
@@ -254,7 +254,7 @@ TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_DoesNotFireEndedCallback
   });
 
   ASSERT_TRUE(sm.start_episode());
-  sm.discard_current_episode();
+  sm.stop_episode(/*discard=*/true);
 
   EXPECT_FALSE(ended_fired.load());
 }
@@ -308,7 +308,7 @@ TEST_F(SessionManagerDiscardTest, RequestRerecord_ThreadSafe) {
   }
 }
 
-// SD-08: After discard_current_episode, can start a new episode at same index
+// SD-08: After stop_episode(discard=true), can start a new episode at same index
 TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_CanRestartAtSameIndex) {
   SessionManager sm;
 
@@ -317,7 +317,7 @@ TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_CanRestartAtSameIndex) {
 
   // Start and discard
   ASSERT_TRUE(sm.start_episode());
-  sm.discard_current_episode();
+  sm.stop_episode(/*discard=*/true);
 
   // Index should still be the same
   EXPECT_EQ(sm.stats().current_episode_index, start_index);
@@ -333,7 +333,7 @@ TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_CanRestartAtSameIndex) {
   EXPECT_EQ(sm.stats().current_episode_index, start_index + 1);
 }
 
-// SD-09: discard_current_episode with a polled producer registered
+// SD-09: stop_episode(discard=true) with a polled producer registered
 TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_WithProducer) {
   SessionManager sm;
   auto producer = std::make_shared<MockPolledProducer>();
@@ -343,7 +343,7 @@ TEST_F(SessionManagerDiscardTest, DiscardCurrentEpisode_WithProducer) {
   // Let the scheduler poll a few times
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-  sm.discard_current_episode();
+  sm.stop_episode(/*discard=*/true);
   EXPECT_FALSE(sm.is_episode_active());
 
   // Should be able to start another episode after discard
@@ -554,7 +554,7 @@ TEST_F(SessionManagerDiscardTest, RerecordDuringEpisode_ReRecords) {
   EXPECT_EQ(status, std::future_status::ready);
   EXPECT_EQ(action, UserAction::kReRecord);
   EXPECT_TRUE(sm.is_episode_active());
-  sm.discard_current_episode();
+  sm.stop_episode(/*discard=*/true);
 }
 
 // SD-24: Ctrl+C during an episode ends monitor_episode() with kStop, leaving the episode for

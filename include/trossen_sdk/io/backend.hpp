@@ -109,8 +109,7 @@ public:
    *
    * Closes the backend without finalizing, then deletes the output file(s) the backend
    * wrote for the current episode. Used for re-recording. How the backend identifies those
-   * files is implementation-defined. Safe to call even if the backend was already closed
-   * (e.g., by Sink::stop()).
+   * files is implementation-defined. Safe to call even if the backend was already closed.
    */
   virtual void discard_episode() = 0;
 

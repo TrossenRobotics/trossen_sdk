@@ -266,8 +266,7 @@ The keyboard controls in the examples are just one way to drive the session. The
 |---|---|---|
 | `request_rerecord()` | Yes | Signals `monitor_episode()` to exit with `UserAction::kReRecord` |
 | `signal_reset_complete()` | Yes | Wakes `wait_for_reset()` to proceed to the next episode |
-| `stop_episode()` | No | Stops recording immediately |
-| `discard_current_episode()` | No | Stops and deletes the current episode |
+| `stop_episode(discard=false)` | No | Stops recording immediately; saves the episode, or deletes it when `discard` is true |
 | `discard_last_episode()` | No | Deletes the most recently completed episode |
 
 For example, a web UI could call `request_rerecord()` when the user clicks a "discard" button, or `signal_reset_complete()` when they click "next episode" — no keyboard required.
@@ -463,17 +462,15 @@ start_episode()
 
   --- recording in progress ---
 
-stop_episode()
+stop_episode(discard)
   1. Signal and join monitor thread
   2. Stop push producers
   3. Stop Scheduler (producers stop polling)
-  4. Stop Sink (drain remaining queue, flush and close backend)
-  5. Update state and increment episode index
-  6. Fire episode-ended callbacks
-
-discard_current_episode()
-  Same teardown as stop_episode(), but deletes all episode files
-  and does NOT increment the episode index or fire callbacks.
+  4. Stop Sink: write the queued records, or drop them when discarding
+  5. Save: flush and close the backend, increment the episode index,
+     fire episode-ended callbacks
+     Discard: delete the episode's files; the index is not incremented
+     and no callbacks fire
 
 discard_last_episode()
   Deletes files for the most recently completed episode and
@@ -484,7 +481,7 @@ wait_for_reset()
   Returns a UserAction indicating what the operator chose.
 ```
 
-`monitor_episode()` blocks while recording and returns a `UserAction` — **kContinue** (episode completed normally), **kReRecord** (operator wants to discard and retry), or **kStop** (Ctrl+C). The re-record path calls `discard_current_episode()` which tears down the episode and deletes its files without advancing the episode index. Between episodes, `wait_for_reset()` provides a configurable pause with the same three-way `UserAction` return, allowing the operator to discard the *last completed* episode via `discard_last_episode()`.
+`monitor_episode()` blocks while recording and returns a `UserAction` — **kContinue** (episode completed normally), **kReRecord** (operator wants to discard and retry), or **kStop** (Ctrl+C). The re-record path calls `stop_episode(true)`, which tears down the episode and deletes its files without advancing the episode index. Between episodes, `wait_for_reset()` provides a configurable pause with the same three-way `UserAction` return, allowing the operator to discard the *last completed* episode via `discard_last_episode()`.
 
 Each episode gets its own Backend file handle, Sink queue, and Scheduler — no state is
 shared between episodes.

@@ -9,7 +9,9 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <memory>
+#include <span>
 #include <stdexcept>
 #include <thread>
 #include <vector>
@@ -298,4 +300,53 @@ TEST(SinkTest, MixedRecordTypes) {
   sink.stop();
 
   EXPECT_EQ(backend->count(), 2);
+}
+
+// Counts close() calls, so a test can tell whether the sink closed the backend.
+class CloseCountingBackend : public NullBackend {
+public:
+  void close() override {
+    ++closes;
+    NullBackend::close();
+  }
+
+  int closes{0};
+};
+
+// SINK-13: stop() writes the queued records but leaves closing the backend to the caller
+TEST(SinkTest, Stop_LeavesBackendOpen) {
+  auto backend = std::make_shared<CloseCountingBackend>();
+  Sink sink(backend);
+  sink.start();
+  sink.emplace<JointStateRecord>();
+
+  sink.stop();
+
+  EXPECT_EQ(backend->count(), 1);
+  EXPECT_EQ(backend->closes, 0);
+}
+
+// Takes 10 ms per batch, so records are still queued when the test stops the sink.
+class SlowBackend : public NullBackend {
+public:
+  void write_batch(std::span<const RecordBase* const> records) override {
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    NullBackend::write_batch(records);
+  }
+};
+
+// SINK-14: stop(discard=true) drops the queued records instead of writing them
+TEST(SinkTest, StopDiscard_DropsQueuedRecords) {
+  auto backend = std::make_shared<SlowBackend>();
+  Sink sink(backend);
+  constexpr int N = 1000;
+  for (int i = 0; i < N; ++i) {
+    sink.emplace<JointStateRecord>();
+  }
+  sink.start();
+
+  sink.stop(/*discard=*/true);
+
+  EXPECT_LT(backend->count(), static_cast<uint64_t>(N));
+  EXPECT_EQ(sink.processed_count(), backend->count());
 }

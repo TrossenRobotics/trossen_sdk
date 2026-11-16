@@ -397,7 +397,7 @@ TEST_F(SessionManagerObserversTest, DiscardEpisode_PreservesObservers) {
   ASSERT_TRUE(sm.start_episode());
   std::this_thread::sleep_for(std::chrono::milliseconds(60));
   const auto accepted_before = obs->stats().accepted;
-  sm.discard_current_episode();
+  sm.stop_episode(/*discard=*/true);
 
   EXPECT_TRUE(obs->is_running());
 

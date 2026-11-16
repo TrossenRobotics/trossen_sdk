@@ -153,32 +153,19 @@ public:
   bool start_episode();
 
   /**
-   * @brief Stop the current episode
+   * @brief Stop the current episode, saving it or discarding it
    *
-   * - Joins monitor thread
-   * - Stops push producers
-   * - Stops Scheduler (producers stop polling)
-   * - Drains Sink queue (writes all pending records)
-   * - Flushes and closes Backend
-   * - Updates episode index for next start
-   * - Fires episode-ended callbacks
-   *
-   * @note Safe to call if no episode running (no-op).
-   * @note After a teleop controller or polled producer fault, the episode is discarded
-   *   instead, as discard_current_episode() does.
-   */
-  void stop_episode();
-
-  /**
-   * @brief Discard the current episode (while recording)
-   *
-   * Same teardown as stop_episode() but calls backend->discard_episode()
-   * to delete all files. Does NOT increment episode index or fire
+   * Saving writes every queued record, closes the episode's file, advances the episode
+   * index and fires the episode-ended callbacks. Discarding drops the queued records,
+   * deletes the episode's file, keeps its index for the next start and fires no
    * episode-ended callbacks.
    *
+   * @param discard True to delete the episode instead of saving it
    * @note Safe to call if no episode running (no-op).
+   * @note After a teleop controller or polled producer fault, the episode is discarded even
+   *   when @p discard is false.
    */
-  void discard_current_episode();
+  void stop_episode(bool discard = false);
 
   /**
    * @brief Discard the last completed episode (during reset)
@@ -625,14 +612,6 @@ private:
    * @brief Compute stats without acquiring episode_mutex_ (caller must hold it)
    */
   Stats stats_unlocked() const;
-
-  /**
-   * @brief Shared teardown logic for stop_episode() and discard_current_episode()
-   *
-   * @param discard If true, discard episode files; if false, finalize normally
-   * @note Caller must NOT hold episode_mutex_ (this method acquires it)
-   */
-  void teardown_episode(bool discard);
 
   /**
    * @brief Background monitoring loop for auto-stop
