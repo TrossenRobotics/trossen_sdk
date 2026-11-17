@@ -12,6 +12,7 @@
 #include "nlohmann/json.hpp"
 
 #include "trossen_sdk/hw/producer_base.hpp"
+#include "trossen_sdk/runtime/producer_registry.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 
 #include "stub_producer_metadata.hpp"
@@ -48,6 +49,12 @@ TEST(PushProducerRegistryTest, CreateThrowsForUnknownType) {
   EXPECT_THROW(
     PushProducerRegistry::create("nonexistent_push_type_xyz", nullptr, {}),
     std::runtime_error);
+}
+
+// The OpenCV camera runs its own capture thread, so apps add it with add_push_producer().
+TEST(PushProducerRegistryTest, OpenCvCameraIsAPushProducer) {
+  EXPECT_TRUE(PushProducerRegistry::is_registered("opencv_camera"));
+  EXPECT_FALSE(trossen::runtime::ProducerRegistry::is_registered("opencv_camera"));
 }
 
 TEST(PushProducerRegistryTest, GetRegisteredTypesIsCallable) {
