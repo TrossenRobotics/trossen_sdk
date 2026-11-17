@@ -429,12 +429,25 @@ bool SessionManager::start_episode() {
     // The outer lambda owns observers_snapshot by value (its lifetime spans the task);
     // the inner lambda captures it by reference since poll() invokes emit synchronously
     // and never stores it, avoiding a per-tick vector copy.
+    // An exception escaping poll() would call std::terminate from the scheduler thread, so
+    // it is caught and recorded, and the task stops polling.
     scheduler_->add_task(pt.period,
-      [producer = pt.producer, sink_ptr, observers_snapshot]() {
-        producer->poll(
-          [sink_ptr, &observers_snapshot](std::shared_ptr<data::RecordBase> rec) {
-            fan_out_record_(sink_ptr, observers_snapshot, std::move(rec));
-          });
+      [producer = pt.producer, failed = pt.failed, sink_ptr, observers_snapshot]() {
+        if (failed->load()) return;
+        try {
+          producer->poll(
+            [sink_ptr, &observers_snapshot](std::shared_ptr<data::RecordBase> rec) {
+              fan_out_record_(sink_ptr, observers_snapshot, std::move(rec));
+            });
+        } catch (const std::exception& e) {
+          std::cerr << "  [producer] '" << producer->metadata()->id
+                    << "' poll failed: " << e.what() << '\n';
+          failed->store(true);
+        } catch (...) {
+          std::cerr << "  [producer] '" << producer->metadata()->id
+                    << "' poll failed with an unknown error\n";
+          failed->store(true);
+        }
       }, pt.opts);
   }
 
