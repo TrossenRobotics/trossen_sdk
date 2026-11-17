@@ -355,6 +355,48 @@ TEST_F(TrossenMCAPBackendTest, RecordsCompressedVideoForColorCameras) {
     << "dataset_info should record h264 storage for a color stream";
 }
 
+// Frames arriving faster than a stream encodes them fill its bounded queue; the rest
+// are dropped and counted, and the queued ones are still encoded on close.
+TEST_F(TrossenMCAPBackendTest, DropsVideoFramesWhenEncodeQueueIsFull) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "video_queue_test";
+  cfg->image_encoding = "video";
+  cfg->video_encoder = "x264";
+  std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
+
+  auto backend = BackendRegistry::create("trossen_mcap");
+  auto mcap_backend =
+    std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
+  ASSERT_NE(mcap_backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  // Full camera size, so each encode takes far longer than one write() call.
+  trossen::data::ImageRecord img;
+  img.id = "cam_color";
+  img.width = 1920;
+  img.height = 1200;
+  img.channels = 3;
+  img.encoding = "bgr8";
+  img.image = cv::Mat(1200, 1920, CV_8UC3, cv::Scalar(30, 60, 90));
+
+  constexpr uint64_t kFrames = 100;
+  for (uint64_t i = 0; i < kFrames; ++i) {
+    backend->write(img);
+  }
+  backend->close();
+
+  const auto stats = mcap_backend->stats();
+  EXPECT_GT(stats.video_frames_dropped, 0u);
+  EXPECT_GE(stats.images_written, trossen::configuration::TROSSEN_MCAP_VIDEO_QUEUE_FRAMES);
+  EXPECT_EQ(stats.images_written + stats.video_frames_dropped, kFrames);
+}
+
 // A record that carries a companion depth_image alongside its primary color frame
 // must land in its own lossless H.265 video channel, distinct from the color
 // stream's H.264 channel.
@@ -418,5 +460,67 @@ TEST_F(TrossenMCAPBackendTest, RecordsDepthPlaneAsLosslessVideoChannel) {
     << "color storage should be h264";
   EXPECT_NE(contents.find(R"("storage":"h265")"), std::string::npos)
     << "depth storage should be h265";
+}
+// video_encoder picks the color encoder only: a color-only encoder name still records depth
+// through libx265.
+TEST_F(TrossenMCAPBackendTest, DepthUsesLibx265WhicheverColorEncoderIsSet) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "video_depth_color_encoder_test";
+  cfg->image_encoding = "video";
+  cfg->video_encoder = "libx264";
+  std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
+
+  auto backend = BackendRegistry::create(
+    "trossen_mcap", camera_streams({{"cam_rgbd", false}, {"cam_rgbd_depth", true}}));
+  ASSERT_NE(backend, nullptr);
+  auto mcap_backend =
+    std::dynamic_pointer_cast<trossen::io::backends::TrossenMCAPBackend>(backend);
+  ASSERT_NE(mcap_backend, nullptr);
+  ASSERT_TRUE(backend->open());
+
+  trossen::data::ImageRecord img;
+  img.id = "cam_rgbd";
+  img.width = 64;
+  img.height = 48;
+  img.channels = 3;
+  img.encoding = "bgr8";
+  img.image = cv::Mat(48, 64, CV_8UC3, cv::Scalar(30, 60, 90));
+  img.depth_image = cv::Mat(48, 64, CV_16UC1, cv::Scalar(1500));
+  img.depth_scale = 0.001f;
+
+  backend->write(img);
+  backend->close();
+
+  EXPECT_EQ(mcap_backend->stats().depth_images_written, 1u);
+}
+
+// An encoder that cannot open refuses the episode before any file is written.
+TEST_F(TrossenMCAPBackendTest, RefusesAVideoEpisodeWhoseEncoderCannotOpen) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  VideoConfigRestorer restorer{
+    cfg.get(), cfg->root, cfg->dataset_id, cfg->image_encoding, cfg->video_encoder};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "video_encoder_refused_test";
+  cfg->image_encoding = "video";
+  cfg->video_encoder = "no_such_encoder";
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
+
+  auto backend = BackendRegistry::create("trossen_mcap", camera_streams({{"cam_color", false}}));
+  ASSERT_NE(backend, nullptr);
+
+  EXPECT_FALSE(backend->open());
+  EXPECT_FALSE(std::filesystem::exists(episode_dir));
 }
 #endif  // TROSSEN_ENABLE_VIDEO_ENCODE
