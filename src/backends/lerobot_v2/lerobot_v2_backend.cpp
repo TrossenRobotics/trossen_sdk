@@ -779,11 +779,11 @@ void LeRobotV2Backend::write_image(const data::RecordBase& base) {
 
   // Enqueue depth image if available (written as 16-bit PNG to a parallel depth directory)
   if (img.has_depth()) {
-    const std::string depth_key = img.id + "_depth";
+    const std::string depth_key = data::ImageRecord::depth_stream_id(img.id);
     auto depth_it = image_dir_cache_.find(depth_key);
     if (depth_it == image_dir_cache_.end()) {
       fs::path depth_dir =
-        images_root_ / (img.id + "_depth") / format_episode_folder(episode_index_);
+        images_root_ / depth_key / format_episode_folder(episode_index_);
       std::error_code ec;
       fs::create_directories(depth_dir, ec);
       depth_it = image_dir_cache_.emplace(depth_key, std::move(depth_dir)).first;

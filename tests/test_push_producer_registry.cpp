@@ -14,6 +14,8 @@
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/runtime/push_producer_registry.hpp"
 
+#include "stub_producer_metadata.hpp"
+
 using trossen::runtime::PushProducerRegistry;
 
 // Minimal concrete PushProducer for testing purposes
@@ -28,6 +30,9 @@ public:
     return true;
   }
 
+  std::shared_ptr<trossen::hw::PolledProducer::ProducerMetadata> metadata() const override {
+    return std::make_shared<StubProducerMetadata>();
+  }
   void stop() override {}
 };
 

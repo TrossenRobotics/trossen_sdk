@@ -39,7 +39,6 @@
 #include "trossen_sdk/hw/camera/opencv_camera_component.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
 #include "trossen_sdk/hw/camera/mock_producer.hpp"
-#include "trossen_sdk/hw/camera/mock_synced_producer.hpp"
 
 #ifdef TROSSEN_ENABLE_REALSENSE
 #include "trossen_sdk/hw/camera/realsense_camera_component.hpp"

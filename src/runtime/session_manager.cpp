@@ -125,6 +125,25 @@ void SessionManager::shutdown() {
   }
 }
 
+namespace {
+
+/**
+ * @brief Refuse a stream id that cannot name its topics.
+ *
+ * The stream id becomes a topic (`<id>/joints/state`, `/cameras/<id>/image`) and, for a
+ * camera, a directory and file name in converted datasets, so it is one path component.
+ *
+ * @throws std::invalid_argument naming the id
+ */
+void check_stream_id(const std::string& id) {
+  if (id.find_first_of("/\\") != std::string::npos) {
+    throw std::invalid_argument(
+      "Producer stream id '" + id + "' must be a single path component (no '/' or '\\')");
+  }
+}
+
+}  // namespace
+
 void SessionManager::add_producer(
   std::shared_ptr<hw::PolledProducer> producer,
   std::chrono::nanoseconds poll_period,
@@ -133,6 +152,7 @@ void SessionManager::add_producer(
   if (!producer) {
     throw std::invalid_argument("Cannot add null producer");
   }
+  check_stream_id(producer->metadata()->id);
 
   if (episode_active_) {
     throw std::runtime_error(
@@ -151,6 +171,7 @@ void SessionManager::add_push_producer(std::shared_ptr<hw::PushProducer> produce
   if (!producer) {
     throw std::invalid_argument("Cannot add null push producer");
   }
+  check_stream_id(producer->metadata()->id);
 
   if (episode_active_) {
     throw std::runtime_error(
@@ -227,27 +248,9 @@ bool SessionManager::start_episode() {
   // Start a timer to measure pre-processing duration
   auto prep_start_time = std::chrono::steady_clock::now();
 
-  ProducerMetadataList producer_metadata;
-
-  // Fetch Metadata from producers as a vector of the base class
-  for (const auto& pt : producer_tasks_) {
-    // Dynamic cast to PolledProducer to access metadata()
-    if (auto polled_producer = std::dynamic_pointer_cast<hw::PolledProducer>(pt.producer)) {
-      producer_metadata.push_back(polled_producer->metadata());
-    }
-  }
-
-  // Collect metadata from push producers
-  for (const auto& ppe : push_producer_entries_) {
-    auto meta = ppe.producer->metadata();
-    if (meta) {
-      producer_metadata.push_back(meta);
-    }
-  }
-
   // Create backend
   try {
-    current_backend_ = create_backend(producer_metadata);
+    current_backend_ = create_backend(collect_producer_metadata());
   } catch (const std::exception& e) {
     std::cerr << "Backend creation failed: " << e.what() << std::endl;
     return false;
@@ -665,21 +668,8 @@ void SessionManager::discard_last_episode() {
   std::cout << "Discarding last episode " << discard_index << "..." << std::endl;
 
   // Create a temporary backend to perform the discard
-  ProducerMetadataList producer_metadata;
-  for (const auto& pt : producer_tasks_) {
-    if (auto polled = std::dynamic_pointer_cast<hw::PolledProducer>(pt.producer)) {
-      producer_metadata.push_back(polled->metadata());
-    }
-  }
-  for (const auto& ppe : push_producer_entries_) {
-    auto meta = ppe.producer->metadata();
-    if (meta) {
-      producer_metadata.push_back(meta);
-    }
-  }
-
   try {
-    auto backend = create_backend(producer_metadata);
+    auto backend = create_backend(collect_producer_metadata());
     backend->set_episode_index(discard_index);
     backend->discard_episode();
   } catch (const std::exception& e) {
@@ -840,6 +830,15 @@ void SessionManager::on_pre_shutdown(PreShutdownCallback cb) {
       "Cannot register callbacks while episode is active.");
   }
   pre_shutdown_cbs_.push_back(std::move(cb));
+}
+
+ProducerMetadataList SessionManager::collect_producer_metadata() const {
+  ProducerMetadataList producer_metadata;
+  for (const auto& pt : producer_tasks_) producer_metadata.push_back(pt.producer->metadata());
+  for (const auto& ppe : push_producer_entries_) {
+    producer_metadata.push_back(ppe.producer->metadata());
+  }
+  return producer_metadata;
 }
 
 std::shared_ptr<io::Backend> SessionManager::create_backend(

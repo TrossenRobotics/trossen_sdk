@@ -25,6 +25,8 @@
 #include "trossen_sdk/hw/producer_base.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
+#include "stub_producer_metadata.hpp"
+
 using trossen::data::ImageRecord;
 using trossen::data::RecordBase;
 using trossen::hw::PushProducer;
@@ -65,6 +67,9 @@ public:
     return true;
   }
 
+  std::shared_ptr<trossen::hw::PolledProducer::ProducerMetadata> metadata() const override {
+    return std::make_shared<StubProducerMetadata>();
+  }
   void stop() override {
     if (!running_.load()) {
       return;

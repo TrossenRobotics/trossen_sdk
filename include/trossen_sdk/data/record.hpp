@@ -168,6 +168,9 @@ struct ImageRecord : public RecordBase {
 
   /// @brief Check if this record contains depth data
   bool has_depth() const { return depth_image.has_value(); }
+
+  /// @brief Stream id under which camera @p id's depth_image is recorded.
+  static std::string depth_stream_id(const std::string& id) { return id + "_depth"; }
 };
 }  // namespace trossen::data
 

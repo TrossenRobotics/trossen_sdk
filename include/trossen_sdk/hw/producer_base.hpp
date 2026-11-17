@@ -95,17 +95,17 @@ public:
     /**
      * @brief Get per-stream dataset metadata for MCAP recording
      *
-     * Returns a JSON object with stream and sensor info for use as MCAP file-level metadata.
-     * The object may contain:
-     *   - "streams": { "<stream_id>": { "joint_names": [...], "role", "rate_hz" } }
-     *   - "cameras": { "<camera_id>": { "width", "height", "fps", "channels", ... } }
-     *   - "mobile_base": { "id", "velocity_names": [...], "rate_hz" }
+     * Returns a JSON object with stream and sensor info, merged into the recording's
+     * `dataset_info` metadata. Every producer describes the streams it records:
+     *   - a camera: "cameras": { "<camera_id>": { "width", "height", "fps", "is_depth_map",
+     *     ... } }; the recorder records no frames of an image stream without an entry;
+     *   - an arm: "streams": { "<stream_id>": { "joint_names": [...], "role", "rate_hz" } };
+     *   - a mobile base: "mobile_base": { "id", "velocity_names": [...], "rate_hz" }.
      *
-     * @return JSON object with dataset stream/sensor metadata, or empty if not applicable
+     * @return JSON object with dataset stream/sensor metadata; empty for a producer whose
+     *         records need none
      */
-    virtual nlohmann::ordered_json get_stream_info() const {
-      return nlohmann::ordered_json{};
-    }
+    virtual nlohmann::ordered_json get_stream_info() const = 0;
   };
 
   /**
@@ -158,9 +158,6 @@ protected:
   /// @brief Monotonic sequence number for emitted records
   uint64_t seq_{0};
 
-  /// @brief Producer metadata
-  PolledProducer::ProducerMetadata metadata_{};
-
   /// @brief Backing hardware component (see hardware()).
   std::shared_ptr<HardwareComponent> component_;
 };
@@ -191,9 +188,9 @@ public:
   /**
    * @brief Get producer metadata
    *
-   * @return Shared pointer to ProducerMetadata, or nullptr if not applicable
+   * @return Shared pointer to ProducerMetadata
    */
-  virtual std::shared_ptr<PolledProducer::ProducerMetadata> metadata() const { return nullptr; }
+  virtual std::shared_ptr<PolledProducer::ProducerMetadata> metadata() const = 0;
 
   /**
    * @brief Get producer statistics

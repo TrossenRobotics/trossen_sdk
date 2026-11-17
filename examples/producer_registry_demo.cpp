@@ -38,6 +38,11 @@ private:
   int num_joints_ = 6;
 };
 
+// The demo records are neither joint states nor camera frames, so they need no stream info.
+struct DemoMetadata : public trossen::hw::PolledProducer::ProducerMetadata {
+  nlohmann::ordered_json get_stream_info() const override { return {}; }
+};
+
 // Mock producer that requires hardware
 class MockArmProducer : public trossen::hw::PolledProducer {
 public:
@@ -56,7 +61,7 @@ public:
   }
 
   std::shared_ptr<ProducerMetadata> metadata() const override {
-    auto meta = std::make_shared<ProducerMetadata>();
+    auto meta = std::make_shared<DemoMetadata>();
     meta->type = "mock_arm";
     meta->id = stream_id_;
     meta->name = hardware_->get_identifier();
@@ -87,7 +92,7 @@ public:
   }
 
   std::shared_ptr<ProducerMetadata> metadata() const override {
-    auto meta = std::make_shared<ProducerMetadata>();
+    auto meta = std::make_shared<DemoMetadata>();
     meta->type = "synthetic";
     meta->id = stream_id_;
     meta->name = "Synthetic Producer";
