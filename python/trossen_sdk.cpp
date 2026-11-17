@@ -532,6 +532,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def_readwrite("type", &ProducerConfig::type)
     .def_readwrite("hardware_id", &ProducerConfig::hardware_id)
     .def_readwrite("stream_id", &ProducerConfig::stream_id)
+    .def_readwrite("role", &ProducerConfig::role)
     .def_readwrite("poll_rate_hz", &ProducerConfig::poll_rate_hz)
     .def_readwrite("use_device_time", &ProducerConfig::use_device_time)
     .def_readwrite("encoding", &ProducerConfig::encoding)

@@ -41,13 +41,13 @@ public:
     /// @brief Desired output image encoding (e.g. "bgr8", "rgb8", "mono8")
     std::string encoding{"bgr8"};
 
-    /// @brief Desired image width (pixels). 0 = leave default
+    /// @brief Image width the camera opened at (pixels)
     int width{0};
 
-    /// @brief Desired image height (pixels). 0 = leave default
+    /// @brief Image height the camera opened at (pixels)
     int height{0};
 
-    /// @brief Desired frame rate (fps). 0 = leave default
+    /// @brief Frame rate the camera opened at (fps)
     int fps{0};
 
     /// @brief Prefer device timestamp if available

@@ -158,9 +158,10 @@ Written to the MCAP header at recording time:
 | `robot_name` | from backend config |
 | `dataset_id` | from backend config |
 | `episode_index` | zero-based integer |
-| `streams` | JSON: `{ "<stream_id>": { "joint_names": [...] } }` |
-| `cameras` | JSON: `{ "<camera_id>": { "width", "height", "fps", "channels" } }` |
-| `has_mobile_base` | `"true"` if a mobile base stream is present |
+| `format_version` | recording format; readers refuse any other version |
+| `streams` | JSON: `{ "<stream_id>": { "joint_names", "role", "rate_hz", "topic" } }` |
+| `cameras` | JSON: `{ "<camera_id>": { "width", "height", "fps", "is_depth_map", "topic", "storage", ... } }` |
+| `mobile_base` | JSON: `{ "id", "velocity_names", "rate_hz", "topic" }`, when a mobile base is recorded |
 
 ---
 

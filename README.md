@@ -308,6 +308,7 @@ All examples share the same JSON config schema. Key sections:
       "type": "trossen_arm",         // Hardware type string
       "hardware_id": "leader",       // Must match a key in hardware.arms
       "stream_id": "leader",         // Name used inside the MCAP file
+      "role": "leader",              // Arms: leader (dataset action) or follower
       "poll_rate_hz": 30.0,          // Supports up to 200 Hz for arms
       "use_device_time": false
     },

@@ -135,12 +135,17 @@ Producers
 Each entry describes one data stream that the SDK will poll and record.
 Add one producer per arm, one per camera, and one per mobile base.
 
+An arm or ``policy_client`` producer needs a ``role``: ``leader`` (its positions become the dataset action) or ``follower`` (the dataset observation).
+The role is recorded with the stream.
+``stream_id`` is free-form.
+
 .. code-block:: javascript
 
     {
       "type":           "trossen_arm",      // Producer type (table below)
       "hardware_id":    "leader",           // Must match a key in hardware
       "stream_id":      "leader",           // Label used inside the MCAP file
+      "role":           "leader",           // Arms and policy_client only
       "poll_rate_hz":   30.0,
       "use_device_time": false,
       "encoding":       "bgr8"              // Cameras only

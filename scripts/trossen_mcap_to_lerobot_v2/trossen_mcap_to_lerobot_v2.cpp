@@ -707,7 +707,7 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
   //   - robot_name: e.g., "trossen_solo_ai", "trossen_mobile_ai"
   //   - streams: per-stream joint names (e.g., streams.leader_left.joint_names)
   //   - cameras: per-camera specs (height, width, fps, codec)
-  //   - base_velocity_names: names for mobile base velocity dimensions
+  //   - mobile_base.velocity_names: names for mobile base velocity dimensions
   // If present, this metadata is used to populate info.json with accurate names
   // instead of generic placeholders like "joint_0", "joint_1", etc.
   // ────────────────────────────────────────────────────────────────────────────
@@ -1539,8 +1539,9 @@ int process_mcap_file(const std::string& mcap_file, const std::string& dataset_r
 
     // Base velocity names (from MCAP metadata or default)
     std::vector<std::string> base_vel_names = {"linear_vel", "angular_vel"};
-    if (!mcap_dataset_info.empty() && mcap_dataset_info.contains("base_velocity_names")) {
-      base_vel_names = mcap_dataset_info["base_velocity_names"].get<std::vector<std::string>>();
+    if (!mcap_dataset_info.empty() && mcap_dataset_info.contains("mobile_base")) {
+      base_vel_names =
+        mcap_dataset_info["mobile_base"]["velocity_names"].get<std::vector<std::string>>();
     }
 
     // Build observation.state feature

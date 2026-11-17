@@ -38,9 +38,16 @@ OpenCvCameraProducer::OpenCvCameraProducer(
   cfg_.device_index = camera_component->get_device_index();
   cfg_.stream_id = config.value("stream_id", "camera" + std::to_string(cfg_.device_index));
   cfg_.encoding = config.value("encoding", "bgr8");
-  cfg_.width = config.value("width", 0);
-  cfg_.height = config.value("height", 0);
-  cfg_.fps = config.value("fps", 0);
+  // The size and rate the device opened at, which can differ from the request (0 asks for
+  // the device default), so the recording describes the frames it actually holds.
+  cfg_.width = camera_component->get_width();
+  cfg_.height = camera_component->get_height();
+  cfg_.fps = camera_component->get_fps();
+  if (cfg_.fps <= 0) {
+    throw std::runtime_error(
+      "OpenCvCameraProducer: camera " + std::to_string(cfg_.device_index) +
+      " reports no frame rate; set its fps in the config");
+  }
   cfg_.use_device_time = config.value("use_device_time", true);
   cfg_.enforce_requested_fps = config.value("enforce_requested_fps", true);
 

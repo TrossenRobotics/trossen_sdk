@@ -15,6 +15,7 @@
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
+#include "trossen_sdk/hw/joint_stream_info.hpp"
 #include "trossen_sdk/hw/policy/policy_client.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
@@ -57,6 +58,12 @@ public:
     /// Synthesized joint names (``joint_0`` .. ``joint_{N-1}``).
     std::vector<std::string> joint_names;
 
+    /// "leader" or "follower".
+    std::string role;
+
+    /// Rate the stream is polled at, in Hz.
+    double rate_hz{0.0};
+
     nlohmann::ordered_json get_info() const override {
       nlohmann::ordered_json features;
       features["action"]["dtype"] = "float32";
@@ -66,9 +73,7 @@ public:
     }
 
     nlohmann::ordered_json get_stream_info() const override {
-      nlohmann::ordered_json info;
-      info["streams"][id]["joint_names"] = joint_names;
-      return info;
+      return joint_stream_info(id, joint_names, role, rate_hz);
     }
   };
 
@@ -76,8 +81,9 @@ public:
    * @brief Construct from a PolicyClient hardware component and a JSON config.
    *
    * @param hardware Hardware component; must be a ``PolicyClient``.
-   * @param config   JSON object with optional ``stream_id`` (default ``policy_action``)
-   *                 and ``use_device_time`` (default false) fields.
+   * @param config   JSON object with a ``role`` ("leader" or "follower"), ``poll_rate_hz``,
+   *                 and optional ``stream_id`` (default ``policy_action``) and
+   *                 ``use_device_time`` (default false) fields.
    *
    * @throws std::invalid_argument if @p hardware is null or not a ``PolicyClient``.
    */

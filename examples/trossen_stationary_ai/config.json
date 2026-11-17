@@ -65,6 +65,7 @@
       "type":            "trossen_arm",
       "hardware_id":     "leader_left",
       "stream_id":       "leader_left",
+      "role":            "leader",
       "poll_rate_hz":    30.0,
       "use_device_time": false
     },
@@ -72,6 +73,7 @@
       "type":            "trossen_arm",
       "hardware_id":     "leader_right",
       "stream_id":       "leader_right",
+      "role":            "leader",
       "poll_rate_hz":    30.0,
       "use_device_time": false
     },
@@ -79,6 +81,7 @@
       "type":            "trossen_arm",
       "hardware_id":     "follower_left",
       "stream_id":       "follower_left",
+      "role":            "follower",
       "poll_rate_hz":    30.0,
       "use_device_time": false
     },
@@ -86,6 +89,7 @@
       "type":            "trossen_arm",
       "hardware_id":     "follower_right",
       "stream_id":       "follower_right",
+      "role":            "follower",
       "poll_rate_hz":    30.0,
       "use_device_time": false
     },

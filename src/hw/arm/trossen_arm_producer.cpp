@@ -39,6 +39,9 @@ TrossenArmProducer::TrossenArmProducer(
   // Parse JSON config into Config struct
   cfg_.stream_id = config.value("stream_id", "joint_states");
   cfg_.use_device_time = config.value("use_device_time", false);
+  metadata_.role = config.value("role", "");
+  check_joint_role(metadata_.role, cfg_.stream_id);
+  metadata_.rate_hz = config.value("poll_rate_hz", 0.0);
 
   // Preallocate buffers based on number of joints
   pos_d_.resize(driver_->get_num_joints());
