@@ -154,6 +154,9 @@ An arm or ``policy_client`` producer needs a ``role``: ``leader`` (its positions
 The role is recorded with the stream, and a config without one fails to load.
 ``stream_id`` is free-form.
 
+``poll_rate_hz`` sets how often the SDK reads an arm, a mobile base or a ``policy_client``.
+Cameras deliver frames on their own thread at the ``fps`` set in ``hardware.cameras``, so a camera producer's ``poll_rate_hz`` is not used.
+
 .. code-block:: javascript
 
     {
@@ -205,6 +208,10 @@ Teleop
     }
 
 ``leader`` and ``follower`` values must match keys in ``hardware.arms``.
+A pair without a ``follower`` runs leader-only: the leader is prepared for teleop and nothing mirrors it.
+
+The demo refuses to start, naming the pair and the fix, when a pair has no ``leader``, names an arm that is not in ``hardware``, or names a component that cannot teleoperate.
+A ``rate_hz`` that is not a positive number also stops the config from loading.
 
 Backend
 -------
@@ -347,11 +354,13 @@ Session
 .. code-block:: javascript
 
     "session": {
-      "max_duration":   20.0,            // Seconds per episode
+      "max_duration":   20.0,            // Seconds per episode (see below)
       "max_episodes":   50,              // Total episodes to record
       "backend_type":   "trossen_mcap",  // Selects the backend implementation
       "reset_duration": 5.0              // Pause between episodes (see table)
     }
+
+``max_duration`` is 20 seconds when omitted; ``null`` records each episode until it is stopped.
 
 ``reset_duration`` behavior:
 

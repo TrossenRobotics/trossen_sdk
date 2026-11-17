@@ -222,10 +222,10 @@ During a recording session the operator can control episode flow using keyboard 
 |---|---|---|
 | **Recording** | Left arrow | Discard current episode and re-record at the same index |
 | **Recording** | Right arrow | Stop recording early and proceed to reset |
-| **Recording** | Ctrl+C | End the session |
+| **Recording** | Ctrl+C or SIGTERM | Save the episode and end the session |
 | **Reset** | Left arrow | Discard the last completed episode and re-record |
 | **Reset** | Right arrow | Continue to next episode (skip countdown / end wait) |
-| **Reset** | Ctrl+C | End the session |
+| **Reset** | Ctrl+C or SIGTERM | End the session |
 
 ### Reset duration
 
@@ -349,7 +349,7 @@ All examples share the same JSON config schema. Key sections:
 }
 ```
 
-> `max_duration` defaults to 20 seconds. `max_episodes` counts the episodes already in the dataset, so raise it to add episodes to an existing `dataset_id`; without it, recording continues until Ctrl+C.
+> `max_duration` defaults to 20 seconds; `null` records each episode until it is stopped. `max_episodes` counts the episodes already in the dataset, so raise it to add episodes to an existing `dataset_id`; without it, recording continues until Ctrl+C.
 
 ### CLI overrides
 
@@ -481,7 +481,7 @@ wait_for_reset()
   Returns a UserAction indicating what the operator chose.
 ```
 
-`monitor_episode()` blocks while recording and returns a `UserAction` — **kContinue** (episode completed normally), **kReRecord** (operator wants to discard and retry), or **kStop** (Ctrl+C). The re-record path calls `stop_episode(true)`, which tears down the episode and deletes its files without advancing the episode index. Between episodes, `wait_for_reset()` provides a configurable pause with the same three-way `UserAction` return, allowing the operator to discard the *last completed* episode via `discard_last_episode()`.
+`monitor_episode()` blocks while recording and returns a `UserAction` — **kContinue** (episode completed normally), **kReRecord** (operator wants to discard and retry), or **kStop** (Ctrl+C, SIGTERM or a hardware fault). The re-record path calls `stop_episode(true)`, which tears down the episode and deletes its files without advancing the episode index. Between episodes, `wait_for_reset()` provides a configurable pause with the same three-way `UserAction` return, allowing the operator to discard the *last completed* episode via `discard_last_episode()`.
 
 Each episode gets its own Backend file handle, Sink queue, and Scheduler — no state is
 shared between episodes.

@@ -80,9 +80,21 @@ A recording session proceeds through the following phases:
 #.  **Reset.**
     After each episode, including the last, the demo pauses as set by ``session.reset_duration`` (see :doc:`/configuration`).
     Press right arrow to skip the pause, or left arrow to discard the episode just recorded and record it again.
+    If its file cannot be deleted, the demo prints the error and keeps the episode, and the next episode takes the next index.
 #.  **Shutdown.**
     Once the dataset holds ``session.max_episodes`` episodes, the demo runs the reset, prints the next episode's header, reports that collection is complete, stops the teleop thread and exits.
-    Ctrl+C stops the session at any point.
+    Ctrl+C, or SIGTERM from ``kill`` or ``systemctl stop``, stops the session at any point: the episode being recorded is saved and the arms return to rest.
+
+.. warning::
+
+    If a teleop pair stops mirroring or an arm or base producer stops reading, for example after an arm driver error, the demo prints which one, discards the episode being recorded and ends the session.
+    Episodes saved before the fault are kept.
+
+.. note::
+
+    A camera that delivers frames below 93% of its configured ``fps`` over a 10 second window prints ``camera '<id>': <rate> fps over the last <seconds> s, below the requested <fps> fps``, followed by the longest gap between frames.
+    A healthy camera prints nothing.
+    If a RealSense camera stays below its rate, set ``force_hardware_reset: true`` on it in ``hardware.cameras`` (see :doc:`/configuration`) so it resets when the demo opens it.
 
 Episodes are written to ``<backend.root>/<backend.dataset_id>/<id>.mcap``, where ``<id>`` is a UUIDv7 (e.g. ``0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap``).
 Because UUIDv7 leads with a timestamp, filenames are globally unique and sort chronologically.
