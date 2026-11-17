@@ -85,6 +85,11 @@ v3 aggregates episodes into shared files, and every episode's seek metadata reco
 
 Writes each camera's last staged video file and the metadata known only once every episode is in: the episodes and tasks Parquet files, `stats.json` with the global statistics, `info.json`, and the dataset card.
 
+### Episodes that fail
+
+Both converters check each recording while aligning it, log a recording that fails a check as `[FAILED]` with the reason, and continue with the next one.
+The checks are listed under "Episode fails" in the [conversion guide](../../docs/convert.rst).
+
 ---
 
 ## 3. The parallelism model
