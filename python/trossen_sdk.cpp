@@ -4,7 +4,10 @@
  */
 
 #include <chrono>
+#include <cmath>
+#include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include <pybind11/pybind11.h>
@@ -813,8 +816,16 @@ PYBIND11_MODULE(trossen_sdk, m) {
 
     py::class_<SessionManager>(m, "SessionManager")
       .def(py::init<>())
-      .def("add_producer", &SessionManager::add_producer,
-           py::arg("producer"), py::arg("poll_period"),
+      .def("add_producer",
+           [](SessionManager& self, std::shared_ptr<trossen::hw::PolledProducer> producer,
+              double poll_period_ms, const Scheduler::TaskOptions& opts) {
+             self.add_producer(std::move(producer),
+                               std::chrono::nanoseconds(std::llround(poll_period_ms * 1e6)),
+                               opts);
+           },
+           "Register a polled producer. poll_period_ms is in milliseconds and may be "
+           "fractional (1000.0 / 30 for 30 Hz).",
+           py::arg("producer"), py::arg("poll_period_ms"),
            py::arg("opts") = Scheduler::TaskOptions{})
       .def("add_push_producer", &SessionManager::add_push_producer,
            py::arg("producer"))

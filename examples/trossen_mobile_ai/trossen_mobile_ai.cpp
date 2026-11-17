@@ -226,8 +226,7 @@ int main(int argc, char** argv) {
 
   // One producer per entry in the producers list
   for (const auto& prod_cfg : cfg.producers) {
-    const auto period =
-      std::chrono::milliseconds(static_cast<int>(1000.0f / prod_cfg.poll_rate_hz));
+    const auto period = prod_cfg.poll_period();
 
     if (prod_cfg.type == "trossen_arm") {
       auto prod = trossen::runtime::ProducerRegistry::create(
