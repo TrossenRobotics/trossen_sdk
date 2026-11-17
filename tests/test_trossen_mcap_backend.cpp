@@ -11,10 +11,11 @@
 #include <set>
 #include <stdexcept>
 #include <string>
-#include <system_error>
 #include <thread>
 #include <utility>
 #include <vector>
+
+#include <unistd.h>
 
 #include "gtest/gtest.h"
 #include "opencv2/core.hpp"
@@ -228,10 +229,8 @@ TEST_F(TrossenMCAPBackendTest, DiscardEpisodeRemovesOwnOpenFile) {
   EXPECT_FALSE(std::filesystem::exists(file)) << "discard should remove the backend's own file";
 }
 
-// A fresh backend that never opened a file (as SessionManager::discard_last_episode creates
-// for the re-record path) has no stored path, so discard deletes the most recently written
-// episode file -- the just-finished one -- and leaves older episodes untouched.
-TEST_F(TrossenMCAPBackendTest, DiscardEpisodeRemovesLatestEpisodeFile) {
+// A backend that never opened a file deletes nothing, so the dataset's episodes stay.
+TEST_F(TrossenMCAPBackendTest, DiscardEpisodeWithoutAFileDeletesNothing) {
   auto cfg = trossen::configuration::GlobalConfig::instance()
                .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
                  "trossen_mcap_backend");
@@ -239,40 +238,52 @@ TEST_F(TrossenMCAPBackendTest, DiscardEpisodeRemovesLatestEpisodeFile) {
   RootDatasetRestorer restorer{cfg.get(), cfg->root, cfg->dataset_id};
 
   cfg->root = std::filesystem::temp_directory_path().string();
-  cfg->dataset_id = "discard_latest_test";
+  cfg->dataset_id = "discard_no_file_test";
   const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
   std::filesystem::remove_all(episode_dir);
 
-  // Record two completed episodes.
-  auto first_backend = BackendRegistry::create("trossen_mcap");
-  ASSERT_TRUE(first_backend->open());
-  const std::filesystem::path first = first_backend->current_output_path();
-  first_backend->close();
+  auto recorder = BackendRegistry::create("trossen_mcap");
+  ASSERT_TRUE(recorder->open());
+  const std::filesystem::path saved = recorder->current_output_path();
+  recorder->close();
 
-  auto second_backend = BackendRegistry::create("trossen_mcap");
-  ASSERT_TRUE(second_backend->open());
-  const std::filesystem::path second = second_backend->current_output_path();
-  second_backend->close();
+  auto fresh = BackendRegistry::create("trossen_mcap");
+  ASSERT_NE(fresh, nullptr);
+  fresh->discard_episode();
+  EXPECT_TRUE(std::filesystem::exists(saved));
+}
 
-  ASSERT_NE(first, second);
-  ASSERT_TRUE(std::filesystem::exists(first));
-  ASSERT_TRUE(std::filesystem::exists(second));
+// A file that cannot be deleted throws an error naming it, and the file stays.
+TEST_F(TrossenMCAPBackendTest, DiscardEpisodeThrowsWhenTheFileCannotBeDeleted) {
+  if (geteuid() == 0) GTEST_SKIP() << "running as root";
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  RootDatasetRestorer restorer{cfg.get(), cfg->root, cfg->dataset_id};
 
-  // Make `first` unambiguously older so `second` is deterministically the latest, regardless
-  // of filesystem timestamp resolution. Use the error_code overload so a filesystem that
-  // rejects the call fails this assertion cleanly instead of throwing out of the test.
-  std::error_code ec;
-  std::filesystem::last_write_time(
-    first, std::filesystem::file_time_type::clock::now() - std::chrono::seconds(10), ec);
-  ASSERT_FALSE(ec) << "failed to backdate episode mtime: " << ec.message();
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "discard_locked_test";
+  const auto episode_dir = std::filesystem::path(cfg->root) / cfg->dataset_id;
+  std::filesystem::remove_all(episode_dir);
 
-  // Fresh backend -> empty path_ -> discard falls back to deleting the newest episode.
-  auto discarder = BackendRegistry::create("trossen_mcap");
-  ASSERT_NE(discarder, nullptr);
-  discarder->discard_episode();
+  auto backend = BackendRegistry::create("trossen_mcap");
+  ASSERT_TRUE(backend->open());
+  const std::filesystem::path file = backend->current_output_path();
+  backend->close();
 
-  EXPECT_FALSE(std::filesystem::exists(second)) << "latest episode should be removed";
-  EXPECT_TRUE(std::filesystem::exists(first)) << "older episode should be kept";
+  // A read-only folder blocks deleting its files.
+  namespace fs = std::filesystem;
+  fs::permissions(episode_dir, fs::perms::owner_read | fs::perms::owner_exec);
+  std::string message;
+  try {
+    backend->discard_episode();
+  } catch (const std::runtime_error& e) {
+    message = e.what();
+  }
+  fs::permissions(episode_dir, fs::perms::owner_all);
+  EXPECT_NE(message.find(file.string()), std::string::npos) << "message: " << message;
+  EXPECT_TRUE(fs::exists(file));
 }
 
 // scan_existing_episodes() must count both new UUID names and legacy zero-padded

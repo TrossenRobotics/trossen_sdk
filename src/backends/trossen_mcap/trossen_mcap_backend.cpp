@@ -10,6 +10,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <unordered_set>
 #include <vector>
 
@@ -414,28 +415,18 @@ void TrossenMCAPBackend::discard_episode() {
   std::scoped_lock lk(writer_mutex_);
   close_resources();
 
-  // Determine which file to delete (works even if already closed by the sink).
-  //
-  // Filenames are UUIDs, so the file cannot be reconstructed from an index.
-  // A live backend that called open() knows its own file via path_. The re-record path
-  // (SessionManager::discard_last_episode) instead spins up a fresh backend that never
-  // opened a file, so path_ is empty; there we delete the most-recently-written episode,
-  // which is the just-finished one this local operation is meant to discard.
-  std::filesystem::path target = path_;
-  if (target.empty()) {
-    target = find_latest_episode_file();
-  }
-
-  if (target.empty()) {
-    std::cerr << "Warning: No MCAP episode file found to discard.\n";
+  // A backend that never opened a file wrote nothing to delete.
+  if (path_.empty()) {
     return;
   }
 
-  try {
-    std::filesystem::remove(target);
-  } catch (const std::filesystem::filesystem_error& e) {
-    std::cerr << "Warning: Failed to remove MCAP file during discard: "
-              << e.what() << "\n";
+  std::error_code ec;
+  std::filesystem::remove(path_, ec);
+  if (ec) {
+    throw std::runtime_error(
+      "trossen_mcap: could not delete episode file '" + path_.string() + "': " +
+      ec.message() + "; it is still in the dataset. Fix the folder's permissions and "
+      "delete it by hand");
   }
 }
 
@@ -1038,36 +1029,6 @@ static const std::regex& episode_filename_pattern() {
   static const std::regex pattern(
     R"(([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|episode_[0-9]{6})\.mcap)");
   return pattern;
-}
-
-std::filesystem::path TrossenMCAPBackend::find_latest_episode_file() const {
-  // "Latest" is decided by last-write time.
-  std::filesystem::path base_path = std::filesystem::path(cfg_->root) / cfg_->dataset_id;
-  if (!std::filesystem::is_directory(base_path)) {
-    return {};
-  }
-
-  std::filesystem::path latest;
-  std::filesystem::file_time_type latest_time{};
-  try {
-    for (const auto& entry : std::filesystem::directory_iterator(base_path)) {
-      if (!entry.is_regular_file()) {
-        continue;
-      }
-      if (!std::regex_match(entry.path().filename().string(), episode_filename_pattern())) {
-        continue;
-      }
-      auto mtime = entry.last_write_time();
-      if (latest.empty() || mtime > latest_time) {
-        latest = entry.path();
-        latest_time = mtime;
-      }
-    }
-  } catch (const std::filesystem::filesystem_error& e) {
-    std::cerr << "Filesystem error while locating latest episode: " << e.what() << std::endl;
-    return {};
-  }
-  return latest;
 }
 
 uint32_t TrossenMCAPBackend::scan_existing_episodes() {

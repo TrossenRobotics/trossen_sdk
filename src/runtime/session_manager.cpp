@@ -341,7 +341,11 @@ bool SessionManager::start_episode() {
     }
     current_sink_->stop(/*discard=*/true);
     current_sink_.reset();
-    current_backend_->discard_episode();
+    try {
+      current_backend_->discard_episode();
+    } catch (const std::exception& e) {
+      std::cerr << e.what() << "; the aborted episode's file is kept." << std::endl;
+    }
     current_backend_.reset();
     {
       std::lock_guard<std::mutex> path_lock(episode_mutex_);
@@ -592,10 +596,16 @@ void SessionManager::stop_episode(bool discard) {
   // Backend: finalize or discard
   if (current_backend_) {
     if (discard) {
-      current_backend_->discard_episode();
+      try {
+        current_backend_->discard_episode();
+      } catch (const std::exception& e) {
+        std::cerr << e.what() << "; episode " << next_episode_index_ << " is kept."
+                  << std::endl;
+      }
     } else {
       current_backend_->flush();
       current_backend_->close();
+      last_backend_ = current_backend_;
     }
     current_backend_.reset();
   }
@@ -653,7 +663,8 @@ void SessionManager::stop_episode(bool discard) {
     auto shutdown_end_time = std::chrono::steady_clock::now();
     postprocess_duration_s_ =
       std::chrono::duration<double>(shutdown_end_time - shutdown_start_time).count();
-    std::cout << "\nEpisode stopped. Total completed: " << total_episodes_completed_
+    std::cout << "\nEpisode " << finished_episode_index << " saved to " << current_episode_path_
+              << ". Total completed: " << total_episodes_completed_
               << ", Next index: " << next_episode_index_ << std::endl;
 
     trossen::utils::announce(
@@ -710,24 +721,22 @@ void SessionManager::discard_last_episode() {
     return;
   }
 
-  if (next_episode_index_ == 0) {
-    std::cerr << "No episodes to discard." << std::endl;
+  if (!last_backend_) {
+    std::cerr << "No episode saved in this session to discard." << std::endl;
     return;
   }
 
   uint32_t discard_index = next_episode_index_ - 1;
-  std::cout << "Discarding last episode " << discard_index << "..." << std::endl;
+  std::cout << "Discarding last episode " << discard_index << " ("
+            << last_backend_->current_output_path() << ")..." << std::endl;
 
-  // Create a temporary backend to perform the discard
   try {
-    auto backend = create_backend(collect_producer_metadata());
-    backend->set_episode_index(discard_index);
-    backend->discard_episode();
+    last_backend_->discard_episode();
   } catch (const std::exception& e) {
-    std::cerr << "Failed to discard episode " << discard_index
-              << ": " << e.what() << std::endl;
+    std::cerr << e.what() << "; episode " << discard_index << " is kept." << std::endl;
     return;
   }
+  last_backend_.reset();
 
   // The discarded episode's file was deleted; mirror stop_episode(/*discard=*/true) so
   // stats() never reports a path that no longer exists on disk.
