@@ -135,6 +135,8 @@ The build produces:
 -   The example recording binaries in ``build/examples/``.
 -   The conversion tools ``build/scripts/trossen_mcap_to_lerobot_v2`` and ``build/scripts/trossen_mcap_to_lerobot_v3``.
 -   The replay tool ``build/scripts/replay_trossen_mcap_jointstate``.
+-   The transcode tool ``build/scripts/trossen_mcap_transcode_video``.
+    It encodes only when the SDK is built with ``-DTROSSEN_ENABLE_VIDEO_ENCODE=ON``.
 
 Enabling Stereolabs ZED Support
 -------------------------------
