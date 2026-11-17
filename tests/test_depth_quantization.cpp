@@ -28,6 +28,7 @@ using trossen::utils::DEPTH_QMAX;
 using trossen::utils::DEPTH_QUANT_BITS;
 using trossen::utils::DEFAULT_DEPTH_SHIFT_M;
 using trossen::utils::MM_PER_METER;
+using trossen::utils::parse_depth_scale_m;
 using trossen::utils::quantize_depth_mm;
 
 // ============================================================================
@@ -228,4 +229,24 @@ TEST(DepthQuantizationTest, RoundTripHoldsForCustomParameters) {
     const double tolerance_m = (expected_m + custom_shift_m) * log_step;
     EXPECT_NEAR(recovered_m, expected_m, tolerance_m) << "at " << mm << " mm";
   }
+}
+
+// ============================================================================
+// parse_depth_scale_m() — reads the recorder's `depth_scale_m` channel metadata
+// ============================================================================
+
+TEST(DepthQuantizationTest, ParsesRecordedDepthScale) {
+  // The recorder writes the scale with std::to_string, so six decimals.
+  EXPECT_DOUBLE_EQ(parse_depth_scale_m("0.000100").value(), 0.0001);
+  EXPECT_DOUBLE_EQ(parse_depth_scale_m("0.001000").value(), 0.001);
+  EXPECT_DOUBLE_EQ(parse_depth_scale_m(" 0.001000\n").value(), 0.001);
+}
+
+TEST(DepthQuantizationTest, RejectsInvalidDepthScale) {
+  EXPECT_FALSE(parse_depth_scale_m("").has_value());
+  EXPECT_FALSE(parse_depth_scale_m("abc").has_value());
+  EXPECT_FALSE(parse_depth_scale_m("0").has_value());
+  EXPECT_FALSE(parse_depth_scale_m("-0.001").has_value());
+  EXPECT_FALSE(parse_depth_scale_m("inf").has_value());
+  EXPECT_FALSE(parse_depth_scale_m("nan").has_value());
 }
