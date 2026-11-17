@@ -32,6 +32,7 @@ add_library(trossen_sdk SHARED
   src/backends/lerobot_common/lerobot_stats_utils.cpp
   src/backends/lerobot_common/lerobot_table.cpp
   src/backends/lerobot_common/lerobot_video.cpp
+  src/backends/lerobot_common/lerobot_worker_pool.cpp
   src/backends/lerobot_v2/lerobot_v2_backend.cpp
   src/backends/lerobot_v2/lerobot_v2_dataset_writer.cpp
   src/backends/lerobot_v3/lerobot_v3_writer.cpp
