@@ -176,9 +176,10 @@ void SdkConfig::populate_global_config() const {
   {
     nlohmann::json sm;
     sm["type"] = "session_manager";
-    if (session.max_duration.has_value()) {
-      sm["max_duration"] = session.max_duration->count();
-    }
+    // null keeps "no limit"; an absent key would read back as the 20 s default.
+    sm["max_duration"] = session.max_duration.has_value()
+      ? nlohmann::json(session.max_duration->count())
+      : nlohmann::json(nullptr);
     if (session.max_episodes.has_value()) {
       sm["max_episodes"] = session.max_episodes.value();
     }
