@@ -52,6 +52,7 @@ RealsensePushProducer::RealsensePushProducer(
     cfg_.timeout_ms = 3000;
   }
   cfg_.fps = config.value("fps", 30);
+  fps_health_ = FpsHealth{cfg_.stream_id, cfg_.fps};
 
   // Populate metadata
   metadata_.type = "realsense_camera";
@@ -88,6 +89,7 @@ bool RealsensePushProducer::start(
     return false;
   }
 
+  fps_health_.restart();
   running_.store(true);
   push_thread_ = std::thread([this, emit]() { push_loop(emit); });
 
@@ -192,14 +194,7 @@ void RealsensePushProducer::push_loop(
     }
     ts.realtime = data::now_real();
 
-    // Inter-frame timing
-    if (last_capture_mono_ != 0) {
-      uint64_t dt = mono_now - last_capture_mono_;
-      if_accum_ns_ += dt;
-      if (dt > if_max_ns_) if_max_ns_ = dt;
-      ++if_samples_;
-    }
-    last_capture_mono_ = mono_now;
+    fps_health_.on_frame(mono_now);
 
     rec->ts = ts;
     rec->seq = seq_++;
@@ -214,33 +209,6 @@ void RealsensePushProducer::push_loop(
     } catch (...) {
       ++stats_.dropped;
       std::cerr << "[RealsensePushProducer] emit failed with unknown exception" << std::endl;
-    }
-
-    // Periodic FPS health report
-    if (cfg_.fps > 0 && stats_.produced >= next_health_report_frame_) {
-      double avg_if_ms = 0.0;
-      double max_if_ms = 0.0;
-      if (if_samples_ > 0) {
-        avg_if_ms = (if_accum_ns_ / 1e6) / static_cast<double>(if_samples_);
-        max_if_ms = if_max_ns_ / 1e6;
-      }
-      double produced_fps = 0.0;
-      if (if_samples_ > 0 && if_accum_ns_ > 0) {
-        produced_fps =
-          1e9 / (static_cast<double>(if_accum_ns_) / static_cast<double>(if_samples_));
-      }
-      if (produced_fps > 0 && (produced_fps + 0.5) < cfg_.fps) {
-        std::cerr << "[RealsensePushProducer] FPS health: produced=" << produced_fps
-                  << " requested=" << cfg_.fps
-                  << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
-      } else {
-        std::cout << "[RealsensePushProducer] FPS health: produced=" << produced_fps
-                  << " requested=" << cfg_.fps
-                  << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
-      }
-      uint64_t interval = static_cast<uint64_t>(cfg_.fps) * 10;
-      if (interval == 0) interval = 300;
-      next_health_report_frame_ += interval;
     }
   }
 }
