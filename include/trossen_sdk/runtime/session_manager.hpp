@@ -43,7 +43,7 @@ namespace trossen::runtime {
 enum class UserAction {
   kContinue,   ///< Proceed normally (episode ended or reset completed)
   kReRecord,   ///< Discard current/last episode, retry same index
-  kStop        ///< End session (Ctrl+C)
+  kStop        ///< End session (Ctrl+C, or a teleop controller or polled producer failed)
 };
 
 /**
@@ -398,9 +398,11 @@ public:
    * If reset_duration is unset (nullopt), blocks until signal_reset_complete()
    * is called or right arrow is pressed.
    * Both timed and infinite modes can be interrupted by Ctrl+C or skipped with
-   * right arrow key.
+   * right arrow key. A hardware fault, at entry or during the wait, ends the wait.
    *
-   * @return UserAction::kContinue, kReRecord (left arrow), or kStop (Ctrl+C)
+   * @return UserAction::kContinue, kReRecord (left arrow or request_rerecord()), or
+   *   kStop (Ctrl+C, or a teleop controller or polled producer stopped on an exception).
+   *   A fault overrides every other result.
    */
   UserAction wait_for_reset();
 
@@ -418,13 +420,16 @@ public:
   * Sleeps for the specified duration but checks g_stop_requested
   * periodically and returns early if stop is requested.
   * Also, keeps a track of stats while monitoring the episode.
+  * Never stops the episode; if it is still active, the caller stops or discards it.
   *
   * @param update_interval How often to update stats (and print if enabled)
   * @param sleep_interval How long to sleep between checks
   * @param print_stats Whether to print stats to console (default: false)
   * @return UserAction::kContinue if completed normally,
   *         UserAction::kReRecord if re-record requested,
-  *         or UserAction::kStop if interrupted by Ctrl+C
+  *         or UserAction::kStop if interrupted by Ctrl+C or if a teleop controller or
+  *         polled producer stopped on an exception. A fault overrides every other
+  *         result, and stop_episode() then discards the episode.
   */
   UserAction monitor_episode(
     std::chrono::duration<double> update_interval = std::chrono::milliseconds(500),
@@ -535,6 +540,9 @@ private:
   /// @brief Flag indicating that re-record was requested
   std::atomic<bool> rerecord_requested_{false};
 
+  /// @brief Set once checked() has printed the hardware fault, so it prints once per session
+  std::atomic<bool> fault_reported_{false};
+
   /// @brief Flag indicating that episode final statistics were emitted
   mutable std::atomic<bool> stats_emitted_{false};
 
@@ -639,6 +647,17 @@ private:
    *   mirroring", or std::nullopt if nothing failed.
    */
   std::optional<std::string> hardware_fault() const;
+
+  /**
+   * @brief Apply the hardware fault to the action monitor_episode() or wait_for_reset() returns.
+   *
+   * Each of those functions returns only through this, so a fault set at any point before
+   * the return ends the session. The first call that sees the fault prints it.
+   *
+   * @param action The action the caller decided on.
+   * @return UserAction::kStop if a hardware fault is set, otherwise @p action.
+   */
+  UserAction checked(UserAction action);
 
   /**
    * @brief Collect the unique hardware components that opt into the per-episode

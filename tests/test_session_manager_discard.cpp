@@ -11,7 +11,9 @@
 #include <cstddef>
 #include <filesystem>
 #include <functional>
+#include <future>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
@@ -27,6 +29,7 @@
 #include "trossen_sdk/hw/teleop/teleop_capable.hpp"
 #include "trossen_sdk/hw/teleop/teleop_controller.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
+#include "trossen_sdk/utils/app_utils.hpp"
 
 #include "stub_producer_metadata.hpp"
 
@@ -115,17 +118,82 @@ bool wait_until(const std::function<bool()>& done) {
 // Test fixture: loads minimal GlobalConfig with null backend
 class SessionManagerDiscardTest : public ::testing::Test {
 protected:
-  static void SetUpTestSuite() {
-    nlohmann::json config = {
-      {"session_manager", {
-        {"type", "session_manager"},
-        {"max_duration", 10.0},
-        {"max_episodes", 100},
-        {"backend_type", "null"}
-      }}
-    };
+  /// Ways a reset can be asked to end besides the fault itself.
+  enum class Trigger { kNone, kResetSignal, kRerecord };
 
-    trossen::configuration::GlobalConfig::instance().load_from_json(config);
+  /// Loads the null-backend config; an unset @p reset_duration waits for input.
+  static void load_config(std::optional<double> reset_duration) {
+    nlohmann::json session = {
+      {"type", "session_manager"},
+      {"max_duration", 10.0},
+      {"max_episodes", 100},
+      {"backend_type", "null"}
+    };
+    if (reset_duration) session["reset_duration"] = *reset_duration;
+    trossen::configuration::GlobalConfig::instance().load_from_json(
+      {{"session_manager", session}});
+  }
+
+  static void SetUpTestSuite() { load_config(std::nullopt); }
+
+  /**
+   * @brief Run wait_for_reset() on its own thread and end it with @p trigger.
+   *
+   * With @p fault, the leader fails 150 ms into the wait and the trigger is sent as soon as
+   * the controller reports the failure; without it, the trigger starts 150 ms into the wait.
+   * The trigger repeats every 50 ms until the wait ends.
+   *
+   * @param timed True for a 5 s countdown reset, false to wait for input.
+   * @param trigger What to call to end the wait, if anything.
+   * @param fault True to fail the mirror before the trigger.
+   * @return The action wait_for_reset() returned, or std::nullopt if start_episode() failed
+   *   or the wait was still running after 3 s (it is then released with g_stop_requested).
+   */
+  std::optional<UserAction> run_reset(bool timed, Trigger trigger, bool fault) {
+    load_config(timed ? std::optional<double>{5.0} : std::nullopt);
+    SessionManager sm;
+    // Restore the suite config; sm keeps the reset_duration it was built with.
+    load_config(std::nullopt);
+
+    auto leader = std::make_shared<FailOnDemandLeader>();
+    auto controller = std::make_shared<TeleopController>(
+      leader, nullptr, TeleopController::Config{});
+    sm.add_teleop(controller);
+    if (!sm.start_episode()) {
+      ADD_FAILURE() << "start_episode() failed";
+      return std::nullopt;
+    }
+    sm.stop_episode();
+
+    auto send_trigger = [&sm, trigger]() {
+      if (trigger == Trigger::kResetSignal) sm.signal_reset_complete();
+      if (trigger == Trigger::kRerecord) sm.request_rerecord();
+    };
+    auto reset = std::async(std::launch::async, [&sm]() { return sm.wait_for_reset(); });
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    if (fault) {
+      leader->fail.store(true);
+      const bool reported = wait_until([&controller]() { return controller->failed(); });
+      if (!reported) ADD_FAILURE() << "the controller never reported the leader failure";
+      send_trigger();
+    }
+    // wait_for_reset() clears both flags when it starts, so the trigger is sent until it ends.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+    while (reset.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready &&
+           std::chrono::steady_clock::now() < deadline) {
+      send_trigger();
+    }
+
+    std::optional<UserAction> result;
+    if (reset.wait_for(std::chrono::seconds(0)) == std::future_status::ready) {
+      result = reset.get();
+    } else {
+      trossen::utils::g_stop_requested.store(true);
+      reset.wait();
+      trossen::utils::g_stop_requested.store(false);
+    }
+    sm.shutdown();
+    return result;
   }
 };
 
@@ -394,6 +462,118 @@ TEST_F(SessionManagerDiscardTest, DurationStopAfterFault_IsAutoStop) {
   ASSERT_TRUE(sm.start_episode());
   EXPECT_TRUE(sm.wait_for_auto_stop(std::chrono::seconds(3)));
   EXPECT_EQ(sm.stats().total_episodes_completed, before.total_episodes_completed);
+}
+
+// SD-16: A mirror failure during an episode ends the session, and stopping the episode discards it.
+TEST_F(SessionManagerDiscardTest, MirrorFailureMidEpisode_DiscardsAndStops) {
+  SessionManager sm;
+  sm.add_teleop(std::make_shared<TeleopController>(
+    std::make_shared<FailOnDemandLeader>(true), nullptr, TeleopController::Config{}));
+  const auto before = sm.stats();
+
+  ASSERT_TRUE(sm.start_episode());
+  EXPECT_EQ(sm.monitor_episode(), UserAction::kStop);
+  EXPECT_TRUE(sm.is_episode_active());  // the caller tears the episode down
+  sm.stop_episode();
+
+  EXPECT_FALSE(sm.is_episode_active());
+  const auto after = sm.stats();
+  EXPECT_EQ(after.total_episodes_completed, before.total_episodes_completed);
+  EXPECT_EQ(after.current_episode_index, before.current_episode_index);
+}
+
+// SD-17: A producer whose poll() throws ends the session, and stopping the episode discards it.
+TEST_F(SessionManagerDiscardTest, ProducerFailureMidEpisode_DiscardsAndStops) {
+  SessionManager sm;
+  sm.add_producer(std::make_shared<ThrowingPolledProducer>(), std::chrono::milliseconds(10));
+  const auto before = sm.stats();
+
+  ASSERT_TRUE(sm.start_episode());
+  EXPECT_EQ(sm.monitor_episode(), UserAction::kStop);
+  EXPECT_TRUE(sm.is_episode_active());  // the caller tears the episode down
+  sm.stop_episode();
+
+  EXPECT_FALSE(sm.is_episode_active());
+  const auto after = sm.stats();
+  EXPECT_EQ(after.total_episodes_completed, before.total_episodes_completed);
+  EXPECT_EQ(after.current_episode_index, before.current_episode_index);
+}
+
+// SD-18: A fault during the reset ends it with kStop, for a timed and an untimed reset.
+TEST_F(SessionManagerDiscardTest, FaultDuringReset_Stops) {
+  EXPECT_EQ(run_reset(false, Trigger::kNone, true), UserAction::kStop);
+  EXPECT_EQ(run_reset(true, Trigger::kNone, true), UserAction::kStop);
+}
+
+// SD-19: A fault followed by signal_reset_complete() still returns kStop.
+TEST_F(SessionManagerDiscardTest, FaultThenResetSignal_Stops) {
+  EXPECT_EQ(run_reset(false, Trigger::kResetSignal, true), UserAction::kStop);
+  EXPECT_EQ(run_reset(true, Trigger::kResetSignal, true), UserAction::kStop);
+}
+
+// SD-20: A fault followed by request_rerecord() returns kStop, so the caller does not
+// discard the previous episode for a retry that start_episode() would refuse.
+TEST_F(SessionManagerDiscardTest, FaultThenRerecord_Stops) {
+  EXPECT_EQ(run_reset(false, Trigger::kRerecord, true), UserAction::kStop);
+  EXPECT_EQ(run_reset(true, Trigger::kRerecord, true), UserAction::kStop);
+}
+
+// SD-21: Without a fault, signal_reset_complete() ends the reset with kContinue.
+TEST_F(SessionManagerDiscardTest, ResetSignal_Continues) {
+  EXPECT_EQ(run_reset(false, Trigger::kResetSignal, false), UserAction::kContinue);
+  EXPECT_EQ(run_reset(true, Trigger::kResetSignal, false), UserAction::kContinue);
+}
+
+// SD-22: Without a fault, request_rerecord() ends the reset with kReRecord.
+TEST_F(SessionManagerDiscardTest, RerecordDuringReset_ReRecords) {
+  EXPECT_EQ(run_reset(false, Trigger::kRerecord, false), UserAction::kReRecord);
+  EXPECT_EQ(run_reset(true, Trigger::kRerecord, false), UserAction::kReRecord);
+}
+
+// SD-23: request_rerecord() during an episode returns kReRecord with the episode still active.
+TEST_F(SessionManagerDiscardTest, RerecordDuringEpisode_ReRecords) {
+  SessionManager sm;
+  ASSERT_TRUE(sm.start_episode());
+
+  // monitor_episode() clears the request when it starts, so it is sent until the call ends.
+  auto monitor = std::async(std::launch::async, [&sm]() { return sm.monitor_episode(); });
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(3);
+  while (monitor.wait_for(std::chrono::milliseconds(50)) != std::future_status::ready &&
+         std::chrono::steady_clock::now() < deadline) {
+    sm.request_rerecord();
+  }
+
+  const auto status = monitor.wait_for(std::chrono::seconds(0));
+  if (status != std::future_status::ready) {
+    trossen::utils::g_stop_requested.store(true);  // release the call before asserting
+    monitor.wait();
+    trossen::utils::g_stop_requested.store(false);
+  }
+  const auto action = monitor.get();
+
+  EXPECT_EQ(status, std::future_status::ready);
+  EXPECT_EQ(action, UserAction::kReRecord);
+  EXPECT_TRUE(sm.is_episode_active());
+  sm.discard_current_episode();
+}
+
+// SD-24: Ctrl+C during an episode ends monitor_episode() with kStop, leaving the episode for
+// the caller to stop.
+TEST_F(SessionManagerDiscardTest, CtrlCDuringEpisode_Stops) {
+  SessionManager sm;
+  ASSERT_TRUE(sm.start_episode());
+
+  auto monitor = std::async(std::launch::async, [&sm]() { return sm.monitor_episode(); });
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+  trossen::utils::g_stop_requested.store(true);
+  const auto status = monitor.wait_for(std::chrono::seconds(3));
+  const auto action = status == std::future_status::ready ? monitor.get() : UserAction::kContinue;
+  trossen::utils::g_stop_requested.store(false);
+
+  EXPECT_EQ(status, std::future_status::ready);
+  EXPECT_EQ(action, UserAction::kStop);
+  EXPECT_TRUE(sm.is_episode_active());
+  sm.stop_episode();
 }
 
 // End-to-end: SessionManager wired to the real TrossenMCAP backend, verifying that
