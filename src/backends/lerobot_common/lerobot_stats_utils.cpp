@@ -6,6 +6,7 @@
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_stats_utils.hpp"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstring>
 #include <iostream>
@@ -228,55 +229,30 @@ nlohmann::ordered_json compute_image_stats(
     return stats_json;
   }
 
-  int num_channels = images[0].channels();
-  int count = static_cast<int>(images.size());
-
-  // Create a vector for each channel
-  std::vector<std::vector<float>> channel_values(num_channels);
-
+  // LeRobot reports image statistics per channel in RGB order; OpenCV images are BGR.
+  std::array<RunningStats, 3> rgb;
   for (const auto &img : images) {
-    std::vector<cv::Mat> channels;
-    cv::split(img, channels);
-
-    for (int c = 0; c < num_channels; ++c) {
-      // Flatten and push pixels into channel_values[c]
-      channel_values[c].insert(
-        channel_values[c].end(),
-        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].datastart)),
-        reinterpret_cast<float *>(const_cast<uchar *>(channels[c].dataend)));
+    for (int y = 0; y < img.rows; ++y) {
+      const cv::Vec3f *row = img.ptr<cv::Vec3f>(y);
+      for (int x = 0; x < img.cols; ++x) {
+        rgb[0].add(row[x][2]);
+        rgb[1].add(row[x][1]);
+        rgb[2].add(row[x][0]);
+      }
     }
   }
 
-  // Helper lambda to convert a vector to a nested JSON array
-  auto to_nested = [](const std::vector<float> &vec) {
+  // Shape [3, 1, 1]: one [[value]] per channel.
+  auto per_channel = [&rgb](auto value_of) {
     nlohmann::ordered_json result = nlohmann::ordered_json::array();
-    for (float v : vec) {
-      result.push_back({{v}});
-    }
+    for (const auto &channel : rgb) result.push_back({{value_of(channel)}});
     return result;
   };
-
-  std::vector<float> min_vals, max_vals, mean_vals, std_vals;
-  for (int c = 0; c < num_channels; ++c) {
-    cv::Mat channel_mat(channel_values[c]);
-    cv::Scalar mean, stddev;
-    cv::meanStdDev(channel_mat, mean, stddev);
-
-    double min_val, max_val;
-    cv::minMaxLoc(channel_mat, &min_val, &max_val);
-
-    min_vals.push_back(static_cast<float>(min_val));
-    max_vals.push_back(static_cast<float>(max_val));
-    mean_vals.push_back(static_cast<float>(mean[0]));
-    std_vals.push_back(static_cast<float>(stddev[0]));
-  }
-
-  stats_json["min"] = to_nested(min_vals);
-  stats_json["max"] = to_nested(max_vals);
-  stats_json["mean"] = to_nested(mean_vals);
-  stats_json["std"] = to_nested(std_vals);
-  stats_json["count"] = {count};
-
+  stats_json["min"] = per_channel([](const RunningStats &s) { return s.min(); });
+  stats_json["max"] = per_channel([](const RunningStats &s) { return s.max(); });
+  stats_json["mean"] = per_channel([](const RunningStats &s) { return s.mean(); });
+  stats_json["std"] = per_channel([](const RunningStats &s) { return s.stddev(); });
+  stats_json["count"] = {static_cast<int64_t>(images.size())};
   return stats_json;
 }
 
