@@ -28,7 +28,7 @@ Producer Kinds
       - ``start()``, ``stop()``, ``metadata()``
 
 Register a producer type with ``REGISTER_PRODUCER(ClassName, "type")`` or ``REGISTER_PUSH_PRODUCER(ClassName, "type")``.
-The shipped producers are working examples: ``src/hw/camera/opencv_producer.cpp`` (polled camera), ``src/hw/arm/trossen_arm_producer.cpp`` (polled arm) and ``src/hw/camera/realsense_push_producer.cpp`` (push camera with depth).
+The shipped producers are working examples: ``src/hw/arm/trossen_arm_producer.cpp`` (polled arm), ``src/hw/camera/opencv_producer.cpp`` (push camera) and ``src/hw/camera/realsense_push_producer.cpp`` (push camera with depth).
 
 Metadata
 ========
