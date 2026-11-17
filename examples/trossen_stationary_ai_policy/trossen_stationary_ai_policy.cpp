@@ -474,7 +474,7 @@ int main(int argc, char** argv) {
 
   while (true) {
     if (trossen::utils::g_stop_requested) {
-      std::cout << "\n\nStopping at user request (Ctrl+C).\n";
+      std::cout << "\n\nStopping at user request.\n";
       break;
     }
 
@@ -491,7 +491,7 @@ int main(int argc, char** argv) {
     if (!policy_ready) {
       mgr.stop_episode(/*discard=*/true);
       if (trossen::utils::g_stop_requested) {
-        std::cout << "\nStopping at user request (Ctrl+C).\n";
+        std::cout << "\nStopping at user request.\n";
       } else {
         std::cerr << "\nERROR: no policy returned an action within "
                   << kPolicyReadyTimeout.count()
@@ -517,7 +517,7 @@ int main(int argc, char** argv) {
     }
 
     if (trossen::utils::g_stop_requested) {
-      std::cout << "\nStopping at user request (Ctrl+C).\n";
+      std::cout << "\nStopping at user request.\n";
       break;
     }
 

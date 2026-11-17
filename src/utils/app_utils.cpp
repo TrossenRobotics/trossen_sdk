@@ -23,14 +23,16 @@ namespace trossen::utils {
 std::atomic<bool> g_stop_requested{false};
 
 static void signal_handler(int signal) {
-  if (signal == SIGINT) {
-    std::cout << "\n[Signal] Ctrl+C received. Stopping current episode...\n";
+  if (signal == SIGINT || signal == SIGTERM) {
+    std::cout << "\n[Signal] " << (signal == SIGINT ? "Ctrl+C" : "SIGTERM")
+              << " received. Stopping current episode...\n";
     g_stop_requested = true;
   }
 }
 
 void install_signal_handler() {
   std::signal(SIGINT, signal_handler);
+  std::signal(SIGTERM, signal_handler);
 }
 
 void print_episode_summary(const std::string& file_path, runtime::SessionManager::Stats stats) {

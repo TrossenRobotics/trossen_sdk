@@ -869,7 +869,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
     using namespace trossen::utils;
 
     m.def("install_signal_handler", &install_signal_handler,
-          "Install SIGINT handler for graceful shutdown");
+          "Install SIGINT and SIGTERM handlers for graceful shutdown");
     m.def("get_stop_requested", []() { return g_stop_requested.load(); },
           "Get the global stop-requested flag");
     m.def("set_stop_requested", [](bool val) { g_stop_requested.store(val); },
