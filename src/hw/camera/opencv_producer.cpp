@@ -13,7 +13,7 @@
 
 #include "trossen_sdk/hw/camera/opencv_camera_component.hpp"
 #include "trossen_sdk/hw/camera/opencv_producer.hpp"
-#include "trossen_sdk/runtime/producer_registry.hpp"
+#include "trossen_sdk/runtime/push_producer_registry.hpp"
 
 namespace trossen::hw::camera {
 
@@ -79,75 +79,81 @@ OpenCvCameraProducer::OpenCvCameraProducer(
   metadata_.has_audio = false;
 }
 
-void OpenCvCameraProducer::poll(
+OpenCvCameraProducer::~OpenCvCameraProducer() {
+  stop();
+}
+
+bool OpenCvCameraProducer::start(
   const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
 {
-  // TODO(lukeschmitt-tr): silently fails if cannot open
-  if (!cap_ || !cap_->isOpened()) {
+  if (running_.load()) {
+    std::cerr << "[OpenCvCameraProducer] Already running." << std::endl;
+    return false;
+  }
+  if (!cap_->isOpened()) {
+    std::cerr << "[OpenCvCameraProducer] camera '" << cfg_.stream_id
+              << "' is not open; check that /dev/video" << cfg_.device_index
+              << " exists and no other program uses it" << std::endl;
+    return false;
+  }
+
+  fps_health_.restart();
+  running_.store(true);
+  push_thread_ = std::thread([this, emit]() { push_loop(emit); });
+  return true;
+}
+
+void OpenCvCameraProducer::stop() {
+  if (!running_.load()) {
     return;
   }
-
-  auto img = std::make_shared<data::ImageRecord>();
-  if (!cap_->read(img->image)) {
-    ++stats_.dropped;
-    return;
-  }
-
-  data::Timestamp ts;
-  // TODO(lukeschmitt-tr): use device timestamp if available and cfg_.use_device_time
-  uint64_t mono_now = data::now_mono().to_ns();
-  ts.monotonic = data::now_mono();
-  ts.realtime = data::now_real();
-
-  // Inter-frame timing instrumentation
-  if (last_capture_mono_ != 0) {
-    uint64_t dt = mono_now - last_capture_mono_;
-    if_accum_ns_ += dt;
-    if (dt > if_max_ns_) if_max_ns_ = dt;
-    ++if_samples_;
-  }
-  last_capture_mono_ = mono_now;
-
-  img->ts = ts;
-  img->seq = seq_++;
-  img->id = cfg_.stream_id;
-  img->width = static_cast<uint32_t>(img->image.cols);
-  img->height = static_cast<uint32_t>(img->image.rows);
-  img->encoding = cfg_.encoding;
-  img->channels = static_cast<uint32_t>(img->image.channels());
-
-  emit(img);
-  ++stats_.produced;
-
-  // Periodically report FPS health
-
-  // TODO(lukeschmitt-tr): make this all configurable via config
-  if (cfg_.fps > 0 && stats_.produced >= next_health_report_frame_) {
-    double avg_if_ms = 0.0;
-    double max_if_ms = 0.0;
-    if (if_samples_ > 0) {
-      avg_if_ms = (if_accum_ns_ / 1e6) / static_cast<double>(if_samples_);
-      max_if_ms = if_max_ns_ / 1e6;
-    }
-    double produced_fps = 0.0;
-    if (if_samples_ > 0 && if_accum_ns_ > 0) {
-      produced_fps = 1e9 / (static_cast<double>(if_accum_ns_) / static_cast<double>(if_samples_));
-    }
-    if (produced_fps > 0 && (produced_fps + 0.5) < cfg_.fps) {
-      std::cerr << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps
-                << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
-    } else {
-      std::cout << "Camera FPS health: produced_fps=" << produced_fps << " requested=" << cfg_.fps
-                << " avg_if_ms=" << avg_if_ms << " max_if_ms=" << max_if_ms << std::endl;
-    }
-    // schedule next report ~10 seconds later
-    uint64_t interval = static_cast<uint64_t>(cfg_.fps) * 10;
-    if (interval == 0) interval = 300;
-    next_health_report_frame_ += interval;
+  running_.store(false);
+  if (push_thread_.joinable()) {
+    push_thread_.join();
   }
 }
 
-// Register with ProducerRegistry
-REGISTER_PRODUCER(OpenCvCameraProducer, "opencv_camera")
+void OpenCvCameraProducer::push_loop(
+  const std::function<void(std::shared_ptr<data::RecordBase>)>& emit)
+{
+  while (running_.load(std::memory_order_relaxed)) {
+    auto img = std::make_shared<data::ImageRecord>();
+    // Blocks until the camera delivers the next frame.
+    if (!cap_->read(img->image)) {
+      ++stats_.dropped;
+      continue;
+    }
+
+    data::Timestamp ts;
+    // TODO(lukeschmitt-tr): use device timestamp if available and cfg_.use_device_time
+    const uint64_t mono_now = data::now_mono().to_ns();
+    ts.monotonic = data::now_mono();
+    ts.realtime = data::now_real();
+
+    fps_health_.on_frame(mono_now);
+
+    img->ts = ts;
+    img->seq = seq_++;
+    img->id = cfg_.stream_id;
+    img->width = static_cast<uint32_t>(img->image.cols);
+    img->height = static_cast<uint32_t>(img->image.rows);
+    img->encoding = cfg_.encoding;
+    img->channels = static_cast<uint32_t>(img->image.channels());
+
+    try {
+      emit(img);
+      ++stats_.produced;
+    } catch (const std::exception& e) {
+      ++stats_.dropped;
+      std::cerr << "[OpenCvCameraProducer] emit failed: " << e.what() << std::endl;
+    } catch (...) {
+      ++stats_.dropped;
+      std::cerr << "[OpenCvCameraProducer] emit failed with unknown exception" << std::endl;
+    }
+  }
+}
+
+// Register in PushProducerRegistry as "opencv_camera"
+REGISTER_PUSH_PRODUCER(OpenCvCameraProducer, "opencv_camera")
 
 }  // namespace trossen::hw::camera

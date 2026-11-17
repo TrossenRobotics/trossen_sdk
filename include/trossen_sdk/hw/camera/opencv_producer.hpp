@@ -6,10 +6,12 @@
 #ifndef TROSSEN_SDK__HW__CAMERA__OPENCV_PRODUCER_HPP
 #define TROSSEN_SDK__HW__CAMERA__OPENCV_PRODUCER_HPP
 
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "opencv2/core.hpp"
@@ -18,6 +20,7 @@
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
+#include "trossen_sdk/hw/camera/fps_health.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
@@ -26,7 +29,7 @@ namespace trossen::hw::camera {
 /**
  * @brief Camera producer using OpenCV VideoCapture for real hardware.
  */
-class OpenCvCameraProducer : public ::trossen::hw::PolledProducer {
+class OpenCvCameraProducer : public ::trossen::hw::PushProducer {
 public:
   /**
    * @brief Configuration parameters for OpenCvCameraProducer
@@ -146,19 +149,27 @@ public:
    */
   OpenCvCameraProducer(std::shared_ptr<HardwareComponent> hardware, const nlohmann::json& config);
 
+  ~OpenCvCameraProducer() override;
+
   /**
-   * @brief Poll the producer for new data and emit records via the callback
+   * @brief Start the capture thread and register the emit callback
    *
-   * @param emit Callback to invoke for each produced record
+   * @param emit Callback invoked once per captured frame, from the capture thread
+   * @return true on success; false if the capture thread is already running
    */
-  void poll(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
+  bool start(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit) override;
+
+  /**
+   * @brief Stop the capture thread (blocks until the thread exits)
+   */
+  void stop() override;
 
   /**
    * @brief Get producer metadata
    *
-   * @return const reference to ProducerMetadata
+   * @return Shared pointer to OpenCvCameraProducerMetadata
    */
-  std::shared_ptr<ProducerMetadata> metadata() const override {
+  std::shared_ptr<PolledProducer::ProducerMetadata> metadata() const override {
     return std::make_shared<OpenCvCameraProducerMetadata>(metadata_);
   }
 
@@ -170,8 +181,24 @@ protected:
   std::shared_ptr<cv::VideoCapture> cap_;
 
 private:
+  /**
+   * @brief Main push loop (runs on push_thread_): reads each frame and emits it
+   *
+   * @param emit Callback invoked once per captured frame
+   */
+  void push_loop(const std::function<void(std::shared_ptr<data::RecordBase>)>& emit);
+
   /// @brief Producer metadata
   OpenCvCameraProducerMetadata metadata_;
+
+  /// @brief Thread that reads frames; runs between start() and stop()
+  std::thread push_thread_;
+
+  /// @brief Whether the capture thread should keep running
+  std::atomic<bool> running_{false};
+
+  /// @brief Warns when the camera delivers frames below cfg_.fps
+  FpsHealth fps_health_{"", 0};
 };
 
 }  // namespace trossen::hw::camera
