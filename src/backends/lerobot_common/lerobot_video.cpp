@@ -12,6 +12,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iostream>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <system_error>
@@ -39,6 +40,25 @@ constexpr int kSampleJpegQuality = 2;
 /// @brief Stills sampled from each video for image statistics, roughly.
 constexpr size_t kTargetSamples = 30;
 
+/**
+ * @brief First line ffprobe prints about the first video stream of a file.
+ * @param options ffprobe options that select what to print.
+ * @param video File to probe.
+ * @return The line, or std::nullopt when ffprobe fails or prints nothing.
+ */
+std::optional<std::string> probe_video_stream(const std::string& options, const fs::path& video) {
+  std::ostringstream probe;
+  probe << "ffprobe -v error -select_streams v:0 " << options << " -of default=nw=1:nk=1 "
+        << video.string();
+  FILE* pipe = popen(probe.str().c_str(), "r");
+  if (!pipe) return std::nullopt;
+  char buf[64] = {0};
+  const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
+  const int status = pclose(pipe);
+  if (status != 0 || !read_ok) return std::nullopt;
+  return std::string(buf);
+}
+
 }  // namespace
 
 int exit_code(int status) {
@@ -46,18 +66,22 @@ int exit_code(int status) {
 }
 
 int64_t count_video_packets(const fs::path& video) {
-  std::ostringstream probe;
-  probe << "ffprobe -v error -count_packets -select_streams v:0 "
-        << "-show_entries stream=nb_read_packets -of default=nw=1:nk=1 " << video.string();
-  FILE* pipe = popen(probe.str().c_str(), "r");
-  if (!pipe) return -1;
-  char buf[64] = {0};
-  const bool read_ok = std::fgets(buf, sizeof(buf), pipe) != nullptr;
-  const int status = pclose(pipe);
+  const auto line =
+    probe_video_stream("-count_packets -show_entries stream=nb_read_packets", video);
+  if (!line) return -1;
   char* end = nullptr;
-  const int64_t count = read_ok ? std::strtoll(buf, &end, 10) : -1;
-  if (status != 0 || !read_ok || end == buf || count < 0) return -1;
+  const int64_t count = std::strtoll(line->c_str(), &end, 10);
+  if (end == line->c_str() || count < 0) return -1;
   return count;
+}
+
+double video_duration_s(const fs::path& video) {
+  const auto line = probe_video_stream("-show_entries stream=duration", video);
+  if (!line) return -1.0;
+  char* end = nullptr;
+  const double duration = std::strtod(line->c_str(), &end);
+  if (end == line->c_str() || duration < 0.0) return -1.0;
+  return duration;
 }
 
 bool encode_episode_video(
