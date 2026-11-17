@@ -572,6 +572,14 @@ void LeRobotV2Backend::close() {
 
   // Compute dataset statistics
   compute_statistics();
+
+  // Each encoded video now holds its camera's frames and the stats are written, so the
+  // episode's images are deleted unless keep_images is set. A camera without a video keeps
+  // its images.
+  if (!cfg_->keep_images) {
+    remove_encoded_episode_images(images_root_, root_ / VIDEO_DIR / format_chunk_dir(0),
+                                  episode_index_);
+  }
 }
 
 void LeRobotV2Backend::discard_episode() {

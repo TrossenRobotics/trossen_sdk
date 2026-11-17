@@ -36,6 +36,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
 #include <vector>
 
 #include <nlohmann/json.hpp>
@@ -118,6 +119,31 @@ inline std::string format_depth_filename(int frame_index) {
   std::ostringstream oss;
   oss << "image_" << std::setfill('0') << std::setw(6) << frame_index << ".png";
   return oss.str();
+}
+
+/**
+ * @brief Delete one episode's extracted images for every camera whose video exists.
+ *
+ * A camera without a video keeps its images, so no frames are lost when an encode failed.
+ *
+ * @param images_root Chunk folder holding one `<camera>/episode_NNNNNN/` image folder per camera
+ * @param videos_root Chunk folder holding one `observation.images.<camera>/` video folder per
+ *   camera
+ * @param episode_index Episode whose images are deleted (0-based)
+ */
+inline void remove_encoded_episode_images(
+  const std::filesystem::path& images_root,
+  const std::filesystem::path& videos_root,
+  int episode_index) {
+  namespace fs = std::filesystem;
+  const std::string episode = format_episode_folder(episode_index);
+  std::error_code ec;
+  for (const auto& cam_dir : fs::directory_iterator(images_root, ec)) {
+    const fs::path video = videos_root /
+      ("observation.images." + cam_dir.path().filename().string()) /
+      format_video_filename(episode_index);
+    if (fs::exists(video, ec)) fs::remove_all(cam_dir.path() / episode, ec);
+  }
 }
 
 // ============================================================================
