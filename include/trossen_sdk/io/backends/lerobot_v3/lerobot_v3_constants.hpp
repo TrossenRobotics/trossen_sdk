@@ -23,6 +23,8 @@ inline constexpr char META_DIR[] = "meta";
 inline constexpr char DATA_DIR[] = "data";
 /// @brief Video directory.
 inline constexpr char VIDEO_DIR[] = "videos";
+/// @brief Per-episode metadata directory, under META_DIR.
+inline constexpr char EPISODES_DIR[] = "episodes";
 
 // ── Metadata filenames (relative to the dataset root) ──
 
