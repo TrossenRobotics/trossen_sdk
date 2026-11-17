@@ -48,6 +48,9 @@ struct LeRobotV3BackendConfig : public BaseConfig {
   std::optional<int> jobs;
   // Parallelism cap per video encoder; 0 means uncapped.
   std::optional<int> encoder_threads;
+  // Re-encode every compressed camera one frame per row instead of copying its stream, so
+  // no camera drifts from its rows. Slower.
+  bool reencode_videos{false};
 
   std::string type() const override { return "lerobot_v3_backend"; }
 
@@ -74,6 +77,8 @@ struct LeRobotV3BackendConfig : public BaseConfig {
     if (j.contains("jobs") && !j.at("jobs").is_null()) c.jobs = j.at("jobs").get<int>();
     if (j.contains("encoder_threads") && !j.at("encoder_threads").is_null())
       c.encoder_threads = j.at("encoder_threads").get<int>();
+    if (j.contains("reencode_videos"))
+      j.at("reencode_videos").get_to(c.reencode_videos);
 
     return c;
   }
