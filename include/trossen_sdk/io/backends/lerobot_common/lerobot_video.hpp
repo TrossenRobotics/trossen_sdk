@@ -28,6 +28,12 @@ inline constexpr char kColorCodec[] = "av1";
 /// @brief Pixel format of re-encoded color video.
 inline constexpr char kColorPixFmt[] = "yuv420p";
 
+/// @brief Codec of depth video, re-encoded or remuxed.
+inline constexpr char kDepthCodec[] = "hevc";
+
+/// @brief Pixel format of depth video, re-encoded or remuxed.
+inline constexpr char kDepthPixFmt[] = "gray12le";
+
 /// @brief File decode_video_rows() writes a depth camera's rows to, as gray12le codes.
 inline constexpr char kDepthCodesFile[] = "depth_codes.gray12le";
 
