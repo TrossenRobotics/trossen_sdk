@@ -3,6 +3,9 @@
  * @brief Unit tests for TeleoperationConfig and TeleoperationPair parsing.
  */
 
+#include <stdexcept>
+#include <string>
+
 #include "gtest/gtest.h"
 
 #include "nlohmann/json.hpp"
@@ -50,6 +53,38 @@ TEST(TeleoperationConfigTest, FullParse) {
   ASSERT_EQ(c.pairs.size(), 2);
   EXPECT_EQ(c.pairs[0].space, "cartesian");
   EXPECT_EQ(c.pairs[1].space, "joint");  // default
+}
+
+// A pair without a leader fails at parse, naming its index in "teleop.pairs".
+TEST(TeleoperationConfigTest, PairWithoutLeaderThrowsNamingTheIndex) {
+  auto j = nlohmann::json::parse(R"({
+    "pairs": [
+      { "leader": "a", "follower": "b" },
+      { "follower": "d" }
+    ]
+  })");
+
+  try {
+    TeleoperationConfig::from_json(j);
+    ADD_FAILURE() << "a pair without a leader was accepted";
+  } catch (const std::invalid_argument& e) {
+    const std::string what = e.what();
+    EXPECT_NE(what.find("teleop.pairs[1]: 'leader' is required"), std::string::npos) << what;
+  }
+}
+
+// A rate that is zero or negative fails at parse, naming the key.
+TEST(TeleoperationConfigTest, NonPositiveRateThrows) {
+  for (const double rate : {0.0, -1.0}) {
+    try {
+      TeleoperationConfig::from_json({{"rate_hz", rate}});
+      ADD_FAILURE() << "rate_hz " << rate << " was accepted";
+    } catch (const std::invalid_argument& e) {
+      const std::string what = e.what();
+      EXPECT_NE(what.find("teleop.rate_hz: must be positive and finite"), std::string::npos)
+        << what;
+    }
+  }
 }
 
 }  // namespace
