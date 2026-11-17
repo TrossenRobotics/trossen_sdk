@@ -30,6 +30,7 @@
 #include "trossen_sdk/io/backends/trossen_mcap/mcap_dataset_loader.hpp"
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/utils/depth_quantization.hpp"
+#include "trossen_sdk/utils/remove_on_exit.hpp"
 
 namespace trossen::io::backends {
 
@@ -103,17 +104,6 @@ bool write_json_file(const nlohmann::ordered_json& json, const fs::path& path) {
   }
   return true;
 }
-
-/// @brief Removes a file when it goes out of scope, on success and error paths alike.
-struct RemoveOnExit {
-  /// @brief File to remove.
-  fs::path path;
-
-  ~RemoveOnExit() {
-    std::error_code ec;
-    fs::remove(path, ec);
-  }
-};
 
 /// @brief Removes a directory tree when it goes out of scope, unless `keep` is true by then.
 struct RemoveTreeUnlessKept {
@@ -279,8 +269,8 @@ bool LeRobotV3DatasetWriter::encode_depth_video(
 
   int width = 0;
   int height = 0;
-  const RemoveOnExit raw_file{fs::path(out_mp4.string() + ".gray12.raw")};
-  const fs::path& raw_path = raw_file.path;
+  const trossen::utils::RemoveOnExit raw_file{fs::path(out_mp4.string() + ".gray12.raw")};
+  const fs::path& raw_path = raw_file.path();
   {
     std::ofstream raw(raw_path, std::ios::binary);
     if (!raw) {
@@ -468,10 +458,10 @@ bool LeRobotV3DatasetWriter::flush_video_file(const std::string& video_key, Vide
     // track, or a container duration rounded to milliseconds), so each part gets its
     // measured video duration. Both temporary files are removed on every path, and
     // the output sits next to the target, so replacing it is a rename within one directory.
-    const RemoveOnExit list_guard{staging / "concat_list.txt"};
-    const RemoveOnExit out_guard{fs::path(target.string() + ".concat.mp4")};
+    const trossen::utils::RemoveOnExit list_guard{staging / "concat_list.txt"};
+    const trossen::utils::RemoveOnExit out_guard{fs::path(target.string() + ".concat.mp4")};
     {
-      std::ofstream lf(list_guard.path);
+      std::ofstream lf(list_guard.path());
       lf << std::fixed << std::setprecision(6);
       for (size_t i = 0; i < st.parts.size(); ++i) {
         const fs::path part_abs = fs::absolute(st.parts[i], ec);
@@ -480,21 +470,21 @@ bool LeRobotV3DatasetWriter::flush_video_file(const std::string& video_key, Vide
       }
       lf.close();
       if (ec || !lf) {
-        std::cerr << "Error: Failed to write concat list " << list_guard.path.string() << "\n";
+        std::cerr << "Error: Failed to write concat list " << list_guard.path().string() << "\n";
         return false;
       }
     }
     std::ostringstream cmd;
-    cmd << "ffmpeg -y -loglevel error -f concat -safe 0 -i " << list_guard.path.string()
-        << " -c copy " << out_guard.path.string();
+    cmd << "ffmpeg -y -loglevel error -f concat -safe 0 -i " << list_guard.path().string()
+        << " -c copy " << out_guard.path().string();
     const int ret = std::system(cmd.str().c_str());
     if (ret != 0) {
       std::cerr << "Error: ffmpeg concat failed (exit " << exit_code(ret) << "): " << cmd.str()
                 << "\n";
       return false;
     }
-    if (!lasts_as_staged(out_guard.path)) return false;
-    fs::rename(out_guard.path, target, ec);
+    if (!lasts_as_staged(out_guard.path())) return false;
+    fs::rename(out_guard.path(), target, ec);
     if (ec) {
       std::cerr << "Error: Failed to write shared video " << target.string() << ": "
                 << ec.message() << "\n";
