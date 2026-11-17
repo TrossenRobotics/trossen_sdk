@@ -6,6 +6,7 @@
 #ifndef INCLUDE_TROSSEN_SDK_IO_BACKEND_UTILS_HPP_
 #define INCLUDE_TROSSEN_SDK_IO_BACKEND_UTILS_HPP_
 
+#include <cstdint>
 #include <filesystem>
 
 namespace trossen::io::backends {
@@ -67,6 +68,7 @@ inline constexpr int DEFAULT_MAX_IMAGE_QUEUE = 0;
 inline constexpr int DEFAULT_PNG_COMPRESSION_LEVEL = 3;
 inline constexpr char DEFAULT_ROBOT_NAME[] = "trossen_ai_stationary";
 inline constexpr float DEFAULT_DATASET_FPS = 30.0f;
+inline constexpr uint64_t DEFAULT_MATCH_TOLERANCE_NS = 50'000'000;  // 50 ms
 
 }  // namespace trossen::io::backends
 

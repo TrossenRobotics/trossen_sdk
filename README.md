@@ -107,6 +107,8 @@ sudo apt-get install -y \
     libprotobuf-dev \
     libfastcdr-dev \
     libfastrtps-dev \
+    libzstd-dev \
+    liblz4-dev \
     protobuf-compiler \
     ffmpeg
 ```
