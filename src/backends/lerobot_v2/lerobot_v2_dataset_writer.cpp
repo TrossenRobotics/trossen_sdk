@@ -100,10 +100,17 @@ bool LeRobotV2DatasetWriter::prepare_episode(const std::filesystem::path& mcap_f
   McapChannelMap& channels = out.channels;
   // LeRobot v2.1 has no depth format, so depth cameras are left out before loading.
   trossen::io::backends::AlignmentOptions alignment;
+  alignment.fps = opts_.fps;
   alignment.skip_depth_cameras = true;
   if (!trossen::io::backends::load_aligned_episode(mcap_file.string(), input_index, ep, channels,
                                                    alignment)) {
     return false;
+  }
+  // Without videos the episode carries no cameras, so neither its rows nor info.json refer to
+  // any.
+  if (!opts_.encode_videos) {
+    ep.cameras.clear();
+    channels.camera_channels.clear();
   }
   // Camera names come from the MCAP topics and name folders below, so each must be a
   // single path component.

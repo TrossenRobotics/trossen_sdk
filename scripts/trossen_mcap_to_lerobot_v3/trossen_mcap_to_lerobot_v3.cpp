@@ -86,6 +86,12 @@ int main(int argc, char** argv) {
   auto cfg = trossen::configuration::GlobalConfig::instance()
                  .get_as<trossen::configuration::LeRobotV3BackendConfig>("lerobot_v3_backend");
 
+  if (!trossen::io::backends::is_dataset_folder_name("lerobot_v3_backend.repository_id",
+                                                     cfg->repository_id) ||
+      !trossen::io::backends::is_dataset_folder_name("lerobot_v3_backend.dataset_id",
+                                                     cfg->dataset_id)) {
+    return 1;
+  }
   fs::path dataset_root = fs::path(cfg->root) / cfg->repository_id / cfg->dataset_id;
 
   std::cout << "\n" << std::string(70, '=') << "\n";
@@ -156,31 +162,7 @@ int main(int argc, char** argv) {
                 << "Set overwrite_existing=true to replace it, or choose another dataset_id.\n";
       return 1;
     }
-    // Removing the dataset would delete any input recording stored inside it. The inputs
-    // are converted from their resolved paths, which stay valid when a symlink inside the
-    // dataset is removed.
-    const fs::path canonical_root = fs::weakly_canonical(dataset_root);
-    for (auto& mcap : mcap_files) {
-      const fs::path canonical_mcap = fs::weakly_canonical(mcap);
-      const auto root_end = std::mismatch(canonical_root.begin(), canonical_root.end(),
-                                          canonical_mcap.begin(), canonical_mcap.end())
-                              .first;
-      if (root_end == canonical_root.end()) {
-        std::cerr << "Error: input " << mcap.string() << " is inside the dataset "
-                  << dataset_root.string() << ", which overwrite_existing=true would remove.\n"
-                  << "Move the recordings or choose another dataset_id.\n";
-        return 1;
-      }
-      mcap = canonical_mcap;
-    }
-    std::cout << "Removing existing dataset at " << dataset_root.string() << "\n";
-    std::error_code ec;
-    fs::remove_all(dataset_root, ec);
-    if (ec) {
-      std::cerr << "Error: could not remove " << dataset_root.string() << ": " << ec.message()
-                << "\n";
-      return 1;
-    }
+    if (!trossen::io::backends::remove_dataset_for_overwrite(dataset_root, mcap_files)) return 1;
   }
 
   trossen::io::backends::LeRobotV3DatasetWriter::Options opts;
