@@ -33,4 +33,4 @@ class Episode:
     def discard(self):
         """Discard the current episode (re-record)."""
         self._discarded = True
-        self._mgr.discard_current_episode()
+        self._mgr.stop_episode(discard=True)

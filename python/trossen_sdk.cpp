@@ -458,7 +458,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
     .def(py::init<std::shared_ptr<Backend>>(), py::arg("backend"))
     .def("enqueue", &Sink::enqueue, py::arg("record"))
     .def("start", &Sink::start)
-    .def("stop", &Sink::stop)
+    .def("stop", &Sink::stop, py::arg("discard") = false)
     .def("processed_count", &Sink::processed_count);
 
   py::class_<BackendRegistry>(m, "BackendRegistry")
@@ -831,8 +831,7 @@ PYBIND11_MODULE(trossen_sdk, m) {
       .def("add_push_producer", &SessionManager::add_push_producer,
            py::arg("producer"))
       .def("start_episode", &SessionManager::start_episode)
-      .def("stop_episode", &SessionManager::stop_episode)
-      .def("discard_current_episode", &SessionManager::discard_current_episode)
+      .def("stop_episode", &SessionManager::stop_episode, py::arg("discard") = false)
       .def("discard_last_episode", &SessionManager::discard_last_episode)
       .def("request_rerecord", &SessionManager::request_rerecord)
       .def("is_episode_active", &SessionManager::is_episode_active)

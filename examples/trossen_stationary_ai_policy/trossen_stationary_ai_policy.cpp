@@ -489,7 +489,7 @@ int main(int argc, char** argv) {
     // followers at the staged pose with no policy motion, so discard it (nothing
     // usable was captured) and stop rather than record more empty episodes.
     if (!policy_ready) {
-      mgr.discard_current_episode();
+      mgr.stop_episode(/*discard=*/true);
       if (trossen::utils::g_stop_requested) {
         std::cout << "\nStopping at user request (Ctrl+C).\n";
       } else {
@@ -508,7 +508,7 @@ int main(int argc, char** argv) {
     auto action = mgr.monitor_episode();
 
     if (action == trossen::runtime::UserAction::kReRecord) {
-      mgr.discard_current_episode();
+      mgr.stop_episode(/*discard=*/true);
       continue;
     }
 

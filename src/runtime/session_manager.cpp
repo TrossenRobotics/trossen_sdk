@@ -339,7 +339,7 @@ bool SessionManager::start_episode() {
     for (const auto& ppe : push_producer_entries_) {
       ppe.producer->stop();
     }
-    current_sink_->stop();
+    current_sink_->stop(/*discard=*/true);
     current_sink_.reset();
     current_backend_->discard_episode();
     current_backend_.reset();
@@ -367,7 +367,7 @@ bool SessionManager::start_episode() {
   // is_running() rather than reusing observers_snapshot's !is_stopped() filter because
   // the hook contract is "fired on observers that are currently running".
   // start_episode() does not hold episode_mutex_, so this is naturally outside the
-  // lock - same contract as on_episode_ended below (see teardown_episode comment).
+  // lock - same contract as on_episode_ended below (see stop_episode comment).
   // Note: if push-producer startup below fails and triggers cleanup_and_abort(), this
   // observer-side "started" hook will have fired without a matching "ended". Treated
   // as acceptable: producer failures are rare and surface their own diagnostics, and
@@ -523,15 +523,8 @@ bool SessionManager::start_episode() {
   return true;
 }
 
-void SessionManager::stop_episode() {
-  teardown_episode(false);
-}
-
-void SessionManager::discard_current_episode() {
-  teardown_episode(true);
-}
-
-void SessionManager::teardown_episode(bool discard) {
+// The caller must not hold episode_mutex_: this function acquires it.
+void SessionManager::stop_episode(bool discard) {
   // Start timer to measure shutdown duration
   auto shutdown_start_time = std::chrono::steady_clock::now();
 
@@ -585,9 +578,9 @@ void SessionManager::teardown_episode(bool discard) {
     }
   }
 
-  // Stop sink - drain queue and write all pending records
+  // Stop the sink; a discarded episode's queued records are dropped, not written
   if (current_sink_) {
-    current_sink_->stop();
+    current_sink_->stop(/*discard=*/discard);
     if (!discard) {
       final_records_written_ = current_sink_->processed_count() - episode_start_record_count_;
     }
@@ -736,7 +729,7 @@ void SessionManager::discard_last_episode() {
     return;
   }
 
-  // The discarded episode's file was deleted; mirror teardown_episode(discard=true) so
+  // The discarded episode's file was deleted; mirror stop_episode(/*discard=*/true) so
   // stats() never reports a path that no longer exists on disk.
   current_episode_path_.clear();
 

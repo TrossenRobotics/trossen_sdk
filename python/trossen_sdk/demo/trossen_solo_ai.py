@@ -136,7 +136,7 @@ def main():
         action = mgr.monitor_episode(print_stats=True)
 
         if action == ts.UserAction.kReRecord:
-            mgr.discard_current_episode()
+            mgr.stop_episode(discard=True)
             continue
 
         if mgr.is_episode_active():
