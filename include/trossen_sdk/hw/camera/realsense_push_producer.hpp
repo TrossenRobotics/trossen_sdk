@@ -18,6 +18,7 @@
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
+#include "trossen_sdk/hw/camera/fps_health.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
@@ -201,6 +202,9 @@ private:
 
   /// @brief Running flag (atomic for thread-safe stop)
   std::atomic<bool> running_{false};
+
+  /// @brief Warns when the camera delivers frames below cfg_.fps
+  FpsHealth fps_health_{"", 0};
 
   /// @brief RealSense pipeline (shared from RealsenseCameraComponent)
   std::shared_ptr<rs2::pipeline> pipeline_;

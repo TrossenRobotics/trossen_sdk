@@ -221,21 +221,6 @@ protected:
   /// @brief Whether we've opened the device
   bool opened_{false};
 
-  /// @brief Last capture monotonic timestamp for inter-frame delta
-  uint64_t last_capture_mono_{0};
-
-  /// @brief Accumulated inter-frame delta nanoseconds
-  uint64_t if_accum_ns_{0};
-
-  /// @brief Max inter-frame delta nanoseconds
-  uint64_t if_max_ns_{0};
-
-  /// @brief Sample count for inter-frame delta
-  uint64_t if_samples_{0};
-
-  /// @brief Next frame count threshold for FPS health log
-  uint64_t next_health_report_frame_{300};
-
   /// @brief Internal statistics
   ProducerStats stats_{};
 

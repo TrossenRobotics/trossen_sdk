@@ -268,8 +268,9 @@ std::unique_ptr<VideoEncoder> VideoEncoder::create(const Params& params) {
       if (params.lossless) {
         // libx265's own lossless switch, passed through its "x265-params" option string. This is
         // what actually makes HEVC12 depth encoding lossless. Ordinary H265 encoding is lossy
-        // by default even at very high quality settings.
-        try_set_opt(candidate_ctx, "x265-params", "lossless=1");
+        // by default even at very high quality settings. log-level=error drops the info banner
+        // and warnings x265 prints each time an encoder opens; its errors still print.
+        try_set_opt(candidate_ctx, "x265-params", "lossless=1:log-level=error");
       }
     } else if (name.find("nvenc") != std::string::npos) {
       // nvenc (NVIDIA's hardware encoder) uses its own preset/tune vocabulary, not libx264/265's:

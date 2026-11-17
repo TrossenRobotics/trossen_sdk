@@ -124,6 +124,9 @@ target_link_libraries(test_announce PRIVATE trossen_sdk GTest::gtest_main)
 add_executable(test_app_utils test_app_utils.cpp)
 target_link_libraries(test_app_utils PRIVATE trossen_sdk GTest::gtest_main)
 
+add_executable(test_fps_health test_fps_health.cpp)
+target_link_libraries(test_fps_health PRIVATE trossen_sdk GTest::gtest_main)
+
 add_executable(test_teleop_space_helpers test_teleop_space_helpers.cpp)
 target_link_libraries(test_teleop_space_helpers PRIVATE trossen_sdk GTest::gtest_main)
 
@@ -235,6 +238,7 @@ gtest_discover_tests(test_session_manager_discard)
 gtest_discover_tests(test_keyboard_input_utils)
 gtest_discover_tests(test_announce)
 gtest_discover_tests(test_app_utils)
+gtest_discover_tests(test_fps_health)
 gtest_discover_tests(test_teleop_space_helpers)
 gtest_discover_tests(test_teleop_controller)
 gtest_discover_tests(test_teleop_config)

@@ -24,6 +24,7 @@
 
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/data/timestamp.hpp"
+#include "trossen_sdk/hw/camera/fps_health.hpp"
 #include "trossen_sdk/hw/hardware_component.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
 
@@ -100,6 +101,9 @@ private:
   ZedPushProducerMetadata metadata_;
   std::thread push_thread_;
   std::atomic<bool> running_{false};
+
+  /// @brief Warns when the camera delivers frames below cfg_.fps
+  FpsHealth fps_health_{"", 0};
 
   /// @brief Shared ZED camera handle (from ZedCameraComponent)
   std::shared_ptr<sl::Camera> camera_;
