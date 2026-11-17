@@ -31,6 +31,7 @@
 #include "trossen_sdk/io/backends/trossen_mcap/trossen_mcap_schemas.hpp"
 #include "trossen_sdk/utils/depth_quantization.hpp"
 #include "trossen_sdk/utils/remove_on_exit.hpp"
+#include "trossen_sdk/utils/shell_quote.hpp"
 
 namespace trossen::io::backends {
 
@@ -336,9 +337,10 @@ bool LeRobotV3DatasetWriter::encode_depth_codes(
 
   std::ostringstream cmd;
   cmd << "ffmpeg -y -loglevel error -f rawvideo -pix_fmt gray12le -s " << width << "x" << height
-      << " -framerate " << opts_.fps << " -i " << raw_path.string() << " -frames:v " << frame_count
+      << " -framerate " << opts_.fps << " -i " << trossen::utils::shell_quote(raw_path)
+      << " -frames:v " << frame_count
       << " -c:v libx265 -x265-params " << x265_params.str() << " -pix_fmt gray12le -r "
-      << opts_.fps << " " << out_mp4.string();
+      << opts_.fps << " " << trossen::utils::shell_quote(out_mp4);
   const int ret = std::system(cmd.str().c_str());
   if (ret != 0) {
     std::cerr << "Error: ffmpeg depth encode failed (exit " << exit_code(ret) << "): " << cmd.str()
@@ -466,7 +468,8 @@ bool LeRobotV3DatasetWriter::flush_video_file(const std::string& video_key, Vide
       for (size_t i = 0; i < st.parts.size(); ++i) {
         const fs::path part_abs = fs::absolute(st.parts[i], ec);
         if (ec) break;
-        lf << "file '" << part_abs.string() << "'\nduration " << st.part_durations_s[i] << "\n";
+        lf << "file " << trossen::utils::shell_quote(part_abs) << "\nduration "
+           << st.part_durations_s[i] << "\n";
       }
       lf.close();
       if (ec || !lf) {
@@ -475,8 +478,9 @@ bool LeRobotV3DatasetWriter::flush_video_file(const std::string& video_key, Vide
       }
     }
     std::ostringstream cmd;
-    cmd << "ffmpeg -y -loglevel error -f concat -safe 0 -i " << list_guard.path().string()
-        << " -c copy " << out_guard.path().string();
+    cmd << "ffmpeg -y -loglevel error -f concat -safe 0 -i "
+        << trossen::utils::shell_quote(list_guard.path()) << " -c copy "
+        << trossen::utils::shell_quote(out_guard.path());
     const int ret = std::system(cmd.str().c_str());
     if (ret != 0) {
       std::cerr << "Error: ffmpeg concat failed (exit " << exit_code(ret) << "): " << cmd.str()
