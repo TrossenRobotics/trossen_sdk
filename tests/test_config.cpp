@@ -7,6 +7,7 @@
  */
 
 #include <memory>
+#include <stdexcept>
 #include <string>
 
 #include "gtest/gtest.h"
@@ -240,4 +241,53 @@ TEST(ArmConfigTest, ToJson_OmitsEmptyStagedPosition) {
   EXPECT_FALSE(j.contains("staged_position"));
   EXPECT_TRUE(j.contains("staging_time_s"));
   EXPECT_FLOAT_EQ(j.at("staging_time_s").get<float>(), 2.0f);
+}
+
+// ============================================================================
+// CFG-11: joint-state producers must have a leader or follower role
+// ============================================================================
+
+TEST(SdkConfigTest, FromJson_AcceptsLeaderAndFollowerRoles) {
+  const auto j = nlohmann::json::parse(R"({
+    "producers": [
+      {"type": "trossen_arm", "hardware_id": "a", "stream_id": "glide_left", "role": "leader"},
+      {"type": "trossen_arm", "hardware_id": "b", "stream_id": "arm_left", "role": "follower"},
+      {"type": "policy_client", "hardware_id": "p", "stream_id": "policy", "role": "leader"}
+    ]
+  })");
+
+  const auto c = trossen::configuration::SdkConfig::from_json(j);
+  EXPECT_EQ(c.producers[0].role, "leader");
+  EXPECT_EQ(c.producers[1].role, "follower");
+}
+
+TEST(SdkConfigTest, FromJson_RejectsArmWithoutRole) {
+  const auto j = nlohmann::json::parse(R"({
+    "producers": [
+      {"type": "trossen_arm", "hardware_id": "a", "stream_id": "leader_left"}
+    ]
+  })");
+
+  EXPECT_THROW(trossen::configuration::SdkConfig::from_json(j), std::runtime_error);
+}
+
+TEST(SdkConfigTest, FromJson_RejectsUnknownRole) {
+  const auto j = nlohmann::json::parse(R"({
+    "producers": [
+      {"type": "trossen_arm", "hardware_id": "a", "stream_id": "arm", "role": "observer"}
+    ]
+  })");
+
+  EXPECT_THROW(trossen::configuration::SdkConfig::from_json(j), std::runtime_error);
+}
+
+// Only joint-state producers carry a role.
+TEST(SdkConfigTest, FromJson_CamerasNeedNoRole) {
+  const auto j = nlohmann::json::parse(R"({
+    "producers": [
+      {"type": "realsense_camera", "hardware_id": "c", "stream_id": "camera_high"}
+    ]
+  })");
+
+  EXPECT_NO_THROW(trossen::configuration::SdkConfig::from_json(j));
 }

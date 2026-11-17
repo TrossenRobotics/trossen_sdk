@@ -6,11 +6,13 @@
 #include "trossen_sdk/configuration/sdk_config.hpp"
 
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
 
 #include "trossen_sdk/configuration/global_config.hpp"
+#include "trossen_sdk/hw/joint_stream_info.hpp"
 
 namespace trossen::configuration {
 
@@ -77,6 +79,19 @@ SdkConfig SdkConfig::from_json(const nlohmann::json& j) {
   if (j.contains("producers") && j.at("producers").is_array()) {
     for (const auto& p : j.at("producers")) {
       c.producers.push_back(ProducerConfig::from_json(p));
+    }
+  }
+
+  // Each joint-state producer records its role, which decides whether its positions become
+  // the dataset action or the observation, so a missing or unknown role fails here rather than
+  // when the hardware starts.
+  for (size_t i = 0; i < c.producers.size(); ++i) {
+    const auto& p = c.producers[i];
+    if (p.type != "trossen_arm" && p.type != "policy_client") continue;
+    try {
+      hw::check_joint_role(p.role, p.stream_id);
+    } catch (const std::invalid_argument& e) {
+      throw std::runtime_error("SdkConfig: producers[" + std::to_string(i) + "]: " + e.what());
     }
   }
 
