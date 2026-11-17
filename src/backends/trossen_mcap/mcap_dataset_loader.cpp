@@ -226,6 +226,15 @@ bool map_described_channels(mcap::McapReader& reader, const nlohmann::json& info
 
 }  // namespace
 
+void drop_depth_cameras(McapChannelMap& channels, const nlohmann::json& dataset_info) {
+  std::erase_if(channels.camera_channels, [&](const auto& entry) {
+    if (!camera_is_depth(entry.second, dataset_info)) return false;
+    std::cerr << "Warning: skipping depth camera " << entry.second
+              << "; the output format cannot store depth\n";
+    return true;
+  });
+}
+
 bool load_aligned_episode(
   const std::string& mcap_file,
   int episode_index,
@@ -323,7 +332,8 @@ bool load_aligned_episode(
   }
 
   // ── PHASE 2: Map channels to the streams dataset_info describes ──
-  if (!map_described_channels(reader, out.dataset_info, channels, out.leader_streams,
+  const nlohmann::json& info = out.dataset_info;
+  if (!map_described_channels(reader, info, channels, out.leader_streams,
                               out.follower_streams)) {
     return false;
   }
@@ -335,6 +345,8 @@ bool load_aligned_episode(
   if (!channels.camera_channels.empty()) {
     std::cout << "  Found " << channels.camera_channels.size() << " camera channel(s)\n";
   }
+
+  if (alignment.skip_depth_cameras) drop_depth_cameras(channels, info);
 
   // ── Single pass over the message stream: joint states and odometry are parsed into
   //    per-stream buffers, and every camera frame's log time is recorded ──

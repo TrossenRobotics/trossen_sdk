@@ -17,6 +17,8 @@
 #include <map>
 #include <string>
 
+#include "nlohmann/json.hpp"
+
 #include "trossen_sdk/io/backend_utils.hpp"
 #include "trossen_sdk/io/backends/lerobot_common/lerobot_episode.hpp"
 
@@ -47,7 +49,23 @@ struct AlignmentOptions {
   double fps{DEFAULT_DATASET_FPS};
   /// @brief Largest gap, in nanoseconds, allowed between a row and the sample it matches.
   uint64_t tolerance_ns{DEFAULT_MATCH_TOLERANCE_NS};
+  /// @brief Leave depth cameras out of the episode before they are checked or aligned, for
+  ///        a format that cannot store depth. A depth camera then cannot reject the episode
+  ///        or cost it rows.
+  bool skip_depth_cameras{false};
 };
+
+/**
+ * @brief Remove every depth camera from a channel map.
+ *
+ * load_aligned_episode() calls this when AlignmentOptions::skip_depth_cameras is set, before
+ * any camera is checked or aligned. Each removed camera is named in a warning on stderr.
+ *
+ * @param channels Channel maps to filter in place; only camera_channels changes.
+ * @param dataset_info The recording's dataset_info metadata, which describes every camera.
+ * @throws nlohmann::json::exception if a camera has no boolean `is_depth_map` in dataset_info.
+ */
+void drop_depth_cameras(McapChannelMap& channels, const nlohmann::json& dataset_info);
 
 /**
  * @brief Read an MCAP file and align its streams into one row per tick of `alignment.fps`.
