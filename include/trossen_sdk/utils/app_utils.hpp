@@ -22,13 +22,13 @@
 
 namespace trossen::utils {
 
-/// @brief Global flag indicating if Ctrl+C has been pressed
+/// @brief Global flag set when the process receives SIGINT (Ctrl+C) or SIGTERM
 extern std::atomic<bool> g_stop_requested;
 
 /**
- * @brief Install signal handler for graceful shutdown on Ctrl+C
+ * @brief Install signal handlers for graceful shutdown on Ctrl+C or SIGTERM
  *
- * Sets up SIGINT handler that sets g_stop_requested to true.
+ * Sets up a SIGINT and SIGTERM handler that sets g_stop_requested to true.
  * Should be called once at application startup.
  */
 void install_signal_handler();
