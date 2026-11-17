@@ -9,9 +9,15 @@
 
 #include <cstdio>
 #include <cstdlib>
+#include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
+
+#include <opencv2/imgcodecs.hpp>
+
+#include "trossen_sdk/io/backend_utils.hpp"
 
 namespace trossen::io::backends {
 
@@ -83,6 +89,74 @@ bool encode_episode_video(
     return false;
   }
   return true;
+}
+
+bool decode_video_rows(
+  const fs::path& annexb, const std::string& storage, int width, int height,
+  const std::vector<size_t>& row_source_index, const fs::path& dir)
+{
+  const bool depth = storage == "h265";
+  const size_t frame_bytes =
+    static_cast<size_t>(width) * static_cast<size_t>(height) * (depth ? 2 : 3);
+  // passthrough keeps one output frame per decoded frame; the default would retime them.
+  // -vsync is used because FFmpeg 4.4 (Ubuntu 22.04) has no -fps_mode.
+  std::ostringstream cmd;
+  cmd << "ffmpeg -loglevel error -f " << (depth ? "hevc" : "h264") << " -i "
+      << annexb.string() << " -vsync passthrough -f rawvideo -pix_fmt "
+      << (depth ? "gray12le" : "bgr24") << " -";
+  FILE* pipe = popen(cmd.str().c_str(), "r");
+  if (pipe == nullptr) {
+    std::cerr << "Error: could not start ffmpeg to decode " << annexb.string() << "\n";
+    return false;
+  }
+
+  std::ofstream codes;
+  if (depth) codes.open(dir / kDepthCodesFile, std::ios::binary);
+  const std::vector<int> jpeg_params{cv::IMWRITE_JPEG_QUALITY, DEFAULT_JPEG_QUALITY};
+  std::vector<unsigned char> frame(frame_bytes);
+  bool ok = !depth || static_cast<bool>(codes);
+  size_t row = 0;
+  for (size_t source = 0; ok && row < row_source_index.size(); ++source) {
+    if (std::fread(frame.data(), 1, frame_bytes, pipe) != frame_bytes) {
+      std::cerr << "Error: " << annexb.filename().string() << " decodes to " << source
+                << " frames, but row " << row << " plays frame " << row_source_index[row]
+                << "\n";
+      ok = false;
+      break;
+    }
+    // Rows match frames in time order, so the rows that play this frame come next.
+    for (; row < row_source_index.size() && row_source_index[row] == source; ++row) {
+      if (depth) {
+        codes.write(reinterpret_cast<const char*>(frame.data()),
+                    static_cast<std::streamsize>(frame_bytes));
+        continue;
+      }
+      const cv::Mat image(height, width, CV_8UC3, frame.data());
+      char name[32];
+      std::snprintf(name, sizeof(name), kColorFramePattern, static_cast<int>(row));
+      if (!cv::imwrite((dir / name).string(), image, jpeg_params)) {
+        std::cerr << "Error: failed to write " << (dir / name).string() << "\n";
+        ok = false;
+        break;
+      }
+    }
+  }
+  // Read to the end, so ffmpeg finishes rather than failing on a closed pipe.
+  while (std::fread(frame.data(), 1, frame_bytes, pipe) == frame_bytes) {}
+  const int status = pclose(pipe);
+  if (ok && exit_code(status) != 0) {
+    std::cerr << "Error: ffmpeg decode failed (exit " << exit_code(status) << "): " << cmd.str()
+              << "\n";
+    ok = false;
+  }
+  if (depth) {
+    codes.close();
+    if (ok && !codes) {
+      std::cerr << "Error: failed to write " << (dir / kDepthCodesFile).string() << "\n";
+      ok = false;
+    }
+  }
+  return ok;
 }
 
 }  // namespace trossen::io::backends
