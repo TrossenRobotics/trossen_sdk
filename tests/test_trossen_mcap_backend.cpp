@@ -9,6 +9,7 @@
 #include <iostream>
 #include <regex>
 #include <set>
+#include <stdexcept>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -32,20 +33,25 @@ namespace {
 /// @brief Producer metadata describing image streams: stream id and its is_depth_map.
 struct CameraStreamsMetadata : public trossen::hw::PolledProducer::ProducerMetadata {
   std::vector<std::pair<std::string, bool>> streams;
+  /// @brief Frame rate of every stream.
+  int fps{30};
   nlohmann::ordered_json get_stream_info() const override {
     nlohmann::ordered_json info;
     for (const auto& [stream, depth] : streams) {
-      info["cameras"][stream] = {{"width", 64}, {"height", 48}, {"is_depth_map", depth}};
+      info["cameras"][stream] = {
+        {"width", 64}, {"height", 48}, {"fps", fps}, {"is_depth_map", depth}};
     }
     return info;
   }
 };
 
-/// @brief Metadata list for a backend that records the given image streams.
-trossen::ProducerMetadataList camera_streams(std::vector<std::pair<std::string, bool>> streams) {
+/// @brief Metadata list for a backend that records the given image streams at `fps`.
+trossen::ProducerMetadataList camera_streams(std::vector<std::pair<std::string, bool>> streams,
+                                             int fps = 30) {
   auto metadata = std::make_shared<CameraStreamsMetadata>();
   metadata->id = "cameras";
   metadata->streams = std::move(streams);
+  metadata->fps = fps;
   return {metadata};
 }
 
@@ -292,6 +298,42 @@ TEST_F(TrossenMCAPBackendTest, ScanCountsLegacyAndNewEpisodeFiles) {
   auto backend = BackendRegistry::create("trossen_mcap");
   ASSERT_NE(backend, nullptr);
   EXPECT_EQ(backend->scan_existing_episodes(), 3u);
+}
+
+// A dataset holds one setup: a session with another camera set cannot record into it.
+TEST_F(TrossenMCAPBackendTest, CheckDatasetSetupRefusesAnotherSetup) {
+  auto cfg = trossen::configuration::GlobalConfig::instance()
+               .get_as<trossen::configuration::TrossenMCAPBackendConfig>(
+                 "trossen_mcap_backend");
+  ASSERT_NE(cfg, nullptr);
+  RootDatasetRestorer restorer{cfg.get(), cfg->root, cfg->dataset_id};
+
+  cfg->root = std::filesystem::temp_directory_path().string();
+  cfg->dataset_id = "scan_setup_test";
+  std::filesystem::remove_all(std::filesystem::path(cfg->root) / cfg->dataset_id);
+
+  auto first = BackendRegistry::create("trossen_mcap", camera_streams({{"cam_high", false}}));
+  ASSERT_TRUE(first->open());
+  first->close();
+
+  EXPECT_NO_THROW(BackendRegistry::create("trossen_mcap", camera_streams({{"cam_high", false}}))
+                    ->check_dataset_setup());
+  EXPECT_THROW(
+    BackendRegistry::create("trossen_mcap",
+                            camera_streams({{"cam_high", false}, {"cam_wrist", false}}))
+      ->check_dataset_setup(),
+    std::runtime_error);
+  // A camera's frame rate and storage decide its converted codec, so they are part of the
+  // setup too.
+  EXPECT_THROW(BackendRegistry::create("trossen_mcap", camera_streams({{"cam_high", false}}, 15))
+                 ->check_dataset_setup(),
+               std::runtime_error);
+  const std::string image_encoding = cfg->image_encoding;
+  cfg->image_encoding = trossen::configuration::TROSSEN_MCAP_IMAGE_ENCODING_VIDEO;
+  EXPECT_THROW(BackendRegistry::create("trossen_mcap", camera_streams({{"cam_high", false}}))
+                 ->check_dataset_setup(),
+               std::runtime_error);
+  cfg->image_encoding = image_encoding;
 }
 
 // Integer depth without a depth_scale has no known unit, so it is not recorded; the color

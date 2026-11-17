@@ -465,6 +465,10 @@ private:
   /// @brief Next episode index to use
   uint32_t next_episode_index_{0};
 
+  /// @brief Whether this session has checked the dataset's existing episodes against its
+  ///        setup (Backend::check_dataset_setup())
+  bool dataset_setup_checked_{false};
+
   /// @brief Output path of the current/last episode, captured from the backend after
   /// open() so it survives the backend being reset during teardown (for reporting).
   std::string current_episode_path_;

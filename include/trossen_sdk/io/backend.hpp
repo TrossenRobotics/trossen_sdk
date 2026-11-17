@@ -121,6 +121,16 @@ public:
   virtual uint32_t scan_existing_episodes() = 0;
 
   /**
+   * @brief Refuse a session whose setup differs from the dataset's existing episodes
+   *
+   * SessionManager calls this once per session, before the first episode, when the dataset
+   * already holds episodes.
+   *
+   * @throws std::runtime_error listing each difference
+   */
+  virtual void check_dataset_setup() const {}
+
+  /**
    * @brief Set episode index
    *
    * Default implementation sets the episode_index_ member.
