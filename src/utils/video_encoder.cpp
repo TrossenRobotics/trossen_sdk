@@ -133,11 +133,7 @@ struct VideoEncoder::Impl {
   /**
    * @brief Frees every owned FFmpeg resource, in reverse order of allocation.
    *
-   * `frame`, `packet`, and `sws` don't structurally depend on `ctx` (each owns only its own
-   * memory, and every FFmpeg `_free` call below is safe on an already-null pointer), so this
-   * order isn't required for correctness. It follows RAII convention (destroy in the reverse
-   * of construction order) rather than a real ownership dependency. `codec` is never freed: it's
-   * a borrowed pointer into libavcodec's own static registry, not something we allocated.
+   * `codec` is not freed: it points into libavcodec's static registry.
    */
   ~Impl() {
     sws_freeContext(sws);
@@ -176,24 +172,11 @@ std::unique_ptr<VideoEncoder> VideoEncoder::create(const Params& params) {
     return nullptr;
   }
 
-  // AVPixelFormat is libavutil's enum naming every raw pixel memory layout FFmpeg understands:
-  // how many planes there are, what each plane stores, what bit depth, byte order, etc. It has
-  // nothing to do with compression yet; it just describes the *uncompressed* frame data we're
-  // about to hand the encoder, so the encoder knows how to read it.
-  //
-  // AV_PIX_FMT_YUV420P ("4:2:0" chroma subsampling) is the standard 8-bit color layout for H264:
-  // three separate planes, Y (luma/brightness, full resolution), U and V (chroma/color, each
-  // stored at HALF resolution in both width and height, i.e. one U and one V sample cover a 2x2
-  // block of Y samples). This works because human vision is far more sensitive to brightness
-  // detail than color detail, so throwing away 3/4 of the color samples is nearly invisible while
-  // cutting the raw data size roughly in half before compression even starts. This is also why
-  // H264 frames need even width/height (validated above): a 2x2 subsampling block can't be formed
-  // from an odd dimension.
-  //
-  // AV_PIX_FMT_GRAY12LE is one plane, no subsampling, 12 bits per sample, little-endian byte
-  // order. Depth has no "color" to subsample: each pixel is a single quantized 12-bit code from
-  // depth_quantization.hpp, so this format stores every value at full resolution and full
-  // precision, which lossless HEVC12 encoding then preserves exactly.
+  // The raw pixel layout handed to the encoder. AV_PIX_FMT_YUV420P is 8-bit 4:2:0 color for
+  // H264: a full-resolution Y plane plus U and V planes at half width and height, which is
+  // why H264 needs even width and height (validated above). AV_PIX_FMT_GRAY12LE is one plane
+  // of 12-bit little-endian depth codes from depth_quantization.hpp, kept exact by lossless
+  // HEVC12.
   const AVPixelFormat pix_fmt =
       params.codec == VideoCodec::H264 ? AV_PIX_FMT_YUV420P : AV_PIX_FMT_GRAY12LE;
 
