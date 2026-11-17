@@ -124,6 +124,16 @@ Per-episode statistics appended after each conversion:
 }
 ```
 
+### Compressed video cameras
+
+A camera recorded with `image_encoding="video"` at the row rate is stream-copied into the episode mp4, not re-encoded.
+A camera recorded at another rate is decoded and re-encoded with one frame per row, as a raw camera is, so the rest of this section does not apply to it.
+
+A stream copy starts at the camera's first recorded frame, while row 0 starts once every stream is live.
+A camera that started before the last stream therefore has frames in front of row 0, and LeRobot v2 has no per-episode start offset to skip them, so its images lag the joints.
+Each such camera is reported with a `Warning: episode <index> <camera> video is offset by N frame(s)` line, where N is the lag in source frames.
+`trossen_mcap_to_lerobot_v3` applies the offset through `from_timestamp`; use it when images must match the joints exactly.
+
 ---
 
 ## TrossenMCAP format reference
