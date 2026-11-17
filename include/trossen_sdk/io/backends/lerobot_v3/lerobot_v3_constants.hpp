@@ -15,6 +15,9 @@ namespace trossen::io::backends::lerobot_v3 {
 /// @brief Codebase version written to info.json.
 inline constexpr char CODEBASE_VERSION[] = "v3.0";
 
+/// @brief Converter binary credited in the dataset README.
+inline constexpr char TOOL_NAME[] = "trossen_mcap_to_lerobot_v3";
+
 // ── Directory names ──
 
 /// @brief Metadata directory.
