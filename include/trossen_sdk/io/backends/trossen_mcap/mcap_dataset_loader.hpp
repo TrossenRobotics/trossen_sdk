@@ -65,6 +65,57 @@ bool load_aligned_episode(
   McapChannelMap& channels,
   const AlignmentOptions& alignment = {});
 
+/**
+ * @brief Write each dataset row's matched camera frame from an MCAP file as an image file.
+ *
+ * Not implemented yet: returns false and writes nothing.
+ *
+ * @param mcap_file Path to the input MCAP file.
+ * @param channels Channel maps from load_aligned_episode() on the same file.
+ * @param episode Aligned episode supplying the per-row frame selection.
+ * @param dir_for Called once per camera; returns the directory for its frames, which it must
+ *        create.
+ * @param out_counts Output per-camera written-frame counts (one per dataset row).
+ * @return true on success; false if a matched frame could not be decoded or written, or on
+ *         a fatal read error (message logged to stderr).
+ */
+bool extract_camera_images(
+  const std::string& mcap_file,
+  const McapChannelMap& channels,
+  const AlignedEpisode& episode,
+  const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
+  std::map<std::string, size_t>& out_counts);
+
+/**
+ * @brief Extract already-compressed camera video straight out of an MCAP.
+ *
+ * Not implemented yet: returns false and writes nothing.
+ *
+ * @param mcap_file Path to the input MCAP file.
+ * @param channels Channel maps from load_aligned_episode().
+ * @param dir_for Maps a camera name to a directory to write into (created by the callback).
+ * @param out_streams Output per-camera video streams; empty when the recording has none.
+ * @return true on success; false on a fatal read error (message logged to stderr).
+ */
+bool extract_camera_video(
+  const std::string& mcap_file,
+  const McapChannelMap& channels,
+  const std::function<std::filesystem::path(const std::string& camera_name)>& dir_for,
+  std::map<std::string, CameraVideoStream>& out_streams);
+
+/**
+ * @brief Trim an aligned episode to whatever every video-mode camera actually covers.
+ *
+ * Not implemented yet: leaves the episode unchanged.
+ *
+ * @param ep Aligned episode to trim in place; a no-op if no camera is shorter than the
+ *   episode already is.
+ * @param video_streams Per-camera compressed video streams from extract_camera_video(),
+ *   keyed by camera name (AlignedEpisode::cameras[i].name).
+ */
+void clamp_episode_to_video_frame_counts(
+  AlignedEpisode& ep, const std::map<std::string, CameraVideoStream>& video_streams);
+
 }  // namespace trossen::io::backends
 
 #endif  // TROSSEN_SDK__IO__BACKENDS__TROSSEN_MCAP__MCAP_DATASET_LOADER_HPP_
