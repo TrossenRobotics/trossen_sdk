@@ -133,7 +133,10 @@ Names include the ``stream_id`` from your ``producers`` config.
       - ``trossen_sdk.msg.JointState``
       - Plot (positions, velocities), State Transitions
     * - ``/cameras/{camera_id}/image``
-      - ``foxglove.RawImage``
+      - ``foxglove.RawImage`` (``image_encoding`` ``raw``) or ``foxglove.CompressedVideo`` (``video``)
+      - Image
+    * - ``/cameras/{camera_id}_depth/image``
+      - ``foxglove.RawImage`` or ``foxglove.CompressedVideo``, from a camera with ``use_depth``
       - Image
     * - ``{stream_id}/odom/state``
       - ``trossen_sdk.msg.Odometry2D``
@@ -160,7 +163,7 @@ ReRun support is gated behind a build flag and a runtime viewer.
         cmake -B build -DTROSSEN_ENABLE_RERUN_OBSERVER=ON
         cmake --build build -j$(nproc)
 
-    With the flag off (default), any ``"type": "rerun"`` entry in your config fails to load.
+    With the flag off (default), the demo skips any ``"type": "rerun"`` observer with a warning and records without it.
 
 #.  **Install the ReRun viewer.**
     The quickest option is the snap, which bundles the viewer with no Python

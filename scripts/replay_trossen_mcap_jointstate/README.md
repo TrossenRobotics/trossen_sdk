@@ -8,7 +8,7 @@ and/or a SLATE mobile base. Useful for verifying recorded trajectories on hardwa
 ## Building
 
 ```bash
-cd build && cmake .. && make replay_trossen_mcap_jointstate
+mkdir -p build && cd build && cmake .. && make replay_trossen_mcap_jointstate && cd ..
 ```
 
 The tool is always built as part of the standard SDK build.
@@ -18,18 +18,19 @@ The tool is always built as part of the standard SDK build.
 ## Usage
 
 ```bash
-./build/scripts/replay_trossen_mcap_jointstate <path/to/episode.mcap> [config.json]
+./build/scripts/replay_trossen_mcap_jointstate <path/to/episode.mcap> [--config <config.json>] [--speed <factor>]
 ```
 
-If no config file is specified, a default config is expected at
-`scripts/replay_trossen_mcap_jointstate/config.json` relative to the repository root.
+Without `--config`, the tool loads `scripts/replay_trossen_mcap_jointstate/config.json` relative to the directory you launch it from.
+That file lists the stationary and mobile followers and the SLATE base; the tool connects to every listed arm, so a solo kit needs its own config.
+`--speed` overrides `playback_speed`.
 
 Example:
 
 ```bash
 ./build/scripts/replay_trossen_mcap_jointstate \
     ~/.trossen_sdk/my_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
-    scripts/replay_trossen_mcap_jointstate/config.json
+    --config scripts/replay_trossen_mcap_jointstate/config.json
 ```
 
 ---
@@ -41,7 +42,7 @@ Example:
 ```jsonc
 {
   "replay": {
-    "playback_speed": 1.0,        // 1.0 = real-time, 0.5 = half speed
+    "playback_speed": 1.0,        // multiplier on the recorded rate; 0.5 = half speed
     "arms": [
       {
         "stream_id": "follower",  // must match the stream_id in the MCAP file
@@ -71,7 +72,7 @@ the config are skipped.
 
 ## Notes
 
-- The tool reads `log_time` (monotonic) timestamps from the MCAP file to pace playback.
-  `playback_speed` scales the inter-frame delay.
+- Playback runs at a fixed rate: the recorded rate of the stream whose ID sorts first (its message count over its `log_time` span) times `playback_speed`.
+  Gaps in the recording are not reproduced.
 - Arms are moved to the recorded starting position before playback begins.
 - The tool requires `libtrossen_arm` to be installed for arm control.
