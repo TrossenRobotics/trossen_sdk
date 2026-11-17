@@ -15,6 +15,8 @@
 namespace trossen::configuration {
 
 struct SessionManagerConfig : public BaseConfig {
+  /// Maximum length of each episode. 20 s when the field is absent; nullopt (JSON null) =
+  /// no limit.
   std::optional<std::chrono::duration<double>> max_duration{std::chrono::seconds(20)};
   std::optional<uint32_t> max_episodes{std::nullopt};
   std::string backend_type{"trossen_mcap"};
@@ -29,7 +31,12 @@ struct SessionManagerConfig : public BaseConfig {
     SessionManagerConfig c;
 
     if (j.contains("max_duration")) {
-      c.max_duration = std::chrono::duration<double>{j.at("max_duration").get<double>()};
+      const auto& md = j.at("max_duration");
+      if (md.is_null()) {
+        c.max_duration = std::nullopt;
+      } else {
+        c.max_duration = std::chrono::duration<double>{md.get<double>()};
+      }
     }
     if (j.contains("max_episodes")) {
       c.max_episodes = j.at("max_episodes").get<uint32_t>();

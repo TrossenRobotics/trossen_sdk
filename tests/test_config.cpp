@@ -97,6 +97,12 @@ TEST(SessionManagerConfigTest, FromJson_Partial) {
   EXPECT_EQ(cfg.backend_type, "trossen_mcap");
 }
 
+// A null max_duration means no limit.
+TEST(SessionManagerConfigTest, FromJson_NullMaxDurationIsUnlimited) {
+  const nlohmann::json j = {{"type", "session_manager"}, {"max_duration", nullptr}};
+  EXPECT_FALSE(SessionManagerConfig::from_json(j).max_duration.has_value());
+}
+
 // ============================================================================
 // CFG-04: GlobalConfig load and retrieve
 // ============================================================================
@@ -282,6 +288,16 @@ TEST(SdkConfigTest, FromJson_RejectsUnknownRole) {
   })");
 
   EXPECT_THROW(trossen::configuration::SdkConfig::from_json(j), std::runtime_error);
+}
+
+// No limit survives the write-back that SessionManager reads.
+TEST(SdkConfigTest, PopulateGlobalConfig_KeepsUnlimitedMaxDuration) {
+  const auto j = nlohmann::json::parse(R"({"session": {"max_duration": null}})");
+  SdkConfig::from_json(j).populate_global_config();
+
+  const auto sm_cfg = GlobalConfig::instance().get_as<SessionManagerConfig>("session_manager");
+  ASSERT_NE(sm_cfg, nullptr);
+  EXPECT_FALSE(sm_cfg->max_duration.has_value());
 }
 
 // Only joint-state producers carry a role.
