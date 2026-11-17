@@ -9,6 +9,7 @@
 
 #include "trossen_sdk/hw/camera/realsense_camera_component.hpp"
 #include "trossen_sdk/hw/hardware_registry.hpp"
+#include "trossen_sdk/utils/depth_quantization.hpp"
 
 namespace trossen::hw::camera {
 
@@ -37,6 +38,12 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
   }
   if (config.contains("use_depth")) {
     use_depth_ = config.at("use_depth").get<bool>();
+  }
+  if (config.contains("depth_scale")) {
+    depth_scale_ = config.at("depth_scale").get<float>();
+    if (!(depth_scale_ > 0.0f)) {
+      throw std::runtime_error("RealsenseCameraComponent: 'depth_scale' must be positive");
+    }
   }
   if (config.contains("align_depth_to_color")) {
     align_depth_to_color_ = config.at("align_depth_to_color").get<bool>();
@@ -82,6 +89,26 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
     cam_cfg.enable_stream(RS2_STREAM_DEPTH, width_, height_, RS2_FORMAT_Z16, fps_);
   }
 
+  // Record depth in the configured unit, else in 1 mm, the unit LeRobot reads integer depth
+  // in. Most models default to 1 mm; the D405 defaults to 0.1 mm. The unit is set before the
+  // stream starts: on a running stream the reported scale changes but the frames keep the old
+  // unit.
+  if (use_depth_) {
+    try {
+      auto depth_sensor = cam_cfg.resolve(*camera_).get_device().first<rs2::depth_sensor>();
+      if (depth_sensor.supports(RS2_OPTION_DEPTH_UNITS) &&
+          !depth_sensor.is_option_read_only(RS2_OPTION_DEPTH_UNITS)) {
+        depth_sensor.set_option(
+          RS2_OPTION_DEPTH_UNITS,
+          depth_scale_ > 0.0f ? depth_scale_
+                              : static_cast<float>(trossen::utils::DEFAULT_DEPTH_SCALE_M));
+      }
+    } catch (const rs2::error& e) {
+      std::cerr << "RealsenseCameraComponent: Could not set depth units: "
+                << e.what() << std::endl;
+    }
+  }
+
   // Start the camera pipeline
   try {
     profile = camera_->start(cam_cfg);
@@ -94,15 +121,16 @@ void RealsenseCameraComponent::configure(const nlohmann::json& config) {
   // Set pipeline_ only after successful start
   pipeline_ = camera_;
 
-  // Store depth scale if depth stream is enabled
+  // Record the unit the device is using, which differs from the configured one if the
+  // device rejected it
   if (use_depth_) {
     try {
-      auto depth_sensor = profile.get_device().first<rs2::depth_sensor>();
-      depth_scale_ = depth_sensor.get_depth_scale();
+      depth_scale_ = profile.get_device().first<rs2::depth_sensor>().get_depth_scale();
     } catch (const rs2::error& e) {
-      std::cerr << "RealsenseCameraComponent: Could not read depth scale: "
-                << e.what() << std::endl;
-      depth_scale_ = 0.001f;  // fallback: 1mm per Z16 unit
+      camera_->stop();
+      throw std::runtime_error(
+        "RealsenseCameraComponent: Could not read the depth scale of camera " + serial_number +
+        ": " + std::string(e.what()));
     }
   }
 
