@@ -37,9 +37,10 @@ Usage
 
 .. code-block:: bash
 
-    ./build/scripts/replay_trossen_mcap_jointstate <path/to/episode.mcap> [config.json]
+    ./build/scripts/replay_trossen_mcap_jointstate <path/to/episode.mcap> [--config <config.json>] [--speed <factor>]
 
-If no config file is specified, the tool loads ``scripts/replay_trossen_mcap_jointstate/config.json`` from the repository root.
+Without ``--config``, the tool loads ``scripts/replay_trossen_mcap_jointstate/config.json`` relative to the directory you launch it from.
+``--speed`` overrides ``playback_speed``.
 
 Example:
 
@@ -51,7 +52,7 @@ Example:
 
             ./build/scripts/replay_trossen_mcap_jointstate \
                 ~/.trossen_sdk/solo_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
-                scripts/replay_trossen_mcap_jointstate/config.json
+                --config scripts/replay_trossen_mcap_jointstate/config.json
 
     .. group-tab:: Stationary
 
@@ -59,7 +60,7 @@ Example:
 
             ./build/scripts/replay_trossen_mcap_jointstate \
                 ~/.trossen_sdk/stationary_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
-                scripts/replay_trossen_mcap_jointstate/config.json
+                --config scripts/replay_trossen_mcap_jointstate/config.json
 
     .. group-tab:: Mobile
 
@@ -67,7 +68,7 @@ Example:
 
             ./build/scripts/replay_trossen_mcap_jointstate \
                 ~/.trossen_sdk/mobile_dataset/0190b3c2-1a2b-7c3d-8e4f-5a6b7c8d9e0f.mcap \
-                scripts/replay_trossen_mcap_jointstate/config.json
+                --config scripts/replay_trossen_mcap_jointstate/config.json
 
 Configuring the Replay
 ======================
@@ -167,8 +168,8 @@ Key fields:
     * - Field
       - Meaning
     * - ``playback_speed``
-      - Multiplier on the inter-frame delay.
-        ``1.0`` plays in real time, ``0.5`` plays at half speed.
+      - Multiplier on the playback rate.
+        ``1.0`` plays at the recorded rate, ``0.5`` plays at half speed.
     * - ``arms[].stream_id``
       - Must match a joint-state channel in the MCAP file.
     * - ``arms[].ip_address``
@@ -183,8 +184,8 @@ Key fields:
 Playback Behavior
 =================
 
--   Playback is paced using ``log_time`` (monotonic) timestamps in the MCAP file.
-    ``playback_speed`` scales the inter-frame delay.
+-   Playback runs at a fixed rate: the recorded rate of the stream whose ID sorts first (its message count over its ``log_time`` span) times ``playback_speed``.
+    Gaps in the recording are not reproduced.
 -   Before playback begins, the tool moves each listed arm to the recorded starting position so the trajectory starts from a known state.
 -   The tool requires ``libtrossen_arm`` to be installed for arm control.
     This is the same library the SDK uses for recording.

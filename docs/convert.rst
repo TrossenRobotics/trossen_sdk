@@ -328,6 +328,8 @@ An episode fails when:
   On a 32-core machine this takes about 0.6 minutes per minute of recording with 3 color cameras, where copying takes seconds.
 - a camera recorded more than 2% fewer frames over the rows' span than the ``fps`` it recorded promises (it dropped frames or ran slower than that rate, so rows would repeat images).
 
+When a stream-copied video has fewer playable frames than the episode has rows, the episode's last rows are dropped to match, and the log says how many.
+
 What's Next
 ===========
 

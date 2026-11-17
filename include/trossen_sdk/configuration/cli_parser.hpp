@@ -56,11 +56,13 @@ private:
 /**
  * @brief Merge CLI overrides into a JSON object
  *
- * Supports dot notation for nested keys: "camera.width=640"
+ * Supports dot notation for nested keys: "camera.width=640". A numeric segment indexes an
+ * existing array element: "hardware.cameras.0.serial_number=123".
  *
  * @param base Base JSON configuration
  * @param overrides Key-value pairs from CLI (e.g., from --set)
  * @return Merged JSON configuration
+ * @throws std::invalid_argument if a key indexes past an array or descends into a non-object value
  */
 nlohmann::json merge_overrides(
   const nlohmann::json& base,
