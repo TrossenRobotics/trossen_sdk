@@ -222,6 +222,16 @@ uint64_t camera_match_window_ns(double camera_fps, double row_fps, uint64_t tole
 void drop_depth_cameras(McapChannelMap& channels, const nlohmann::json& dataset_info);
 
 /**
+ * @brief Sort recordings by the recording_start_time the recorder writes in each one
+ *
+ * Episodes are numbered in this order, so episode 0 is the earliest recording. A file whose
+ * start time cannot be read, such as one cut short by a crash, sorts last; loading it fails.
+ *
+ * @param files Recording paths, sorted in place.
+ */
+void sort_by_recording_start(std::vector<std::filesystem::path>& files);
+
+/**
  * @brief Read an MCAP file and align its streams into one row per tick of `alignment.fps`.
  *
  * Rows span the time every joint stream, camera and mobile base has data.
