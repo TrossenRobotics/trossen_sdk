@@ -8,6 +8,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -23,6 +24,8 @@
 #include "trossen_sdk/configuration/global_config.hpp"
 #include "trossen_sdk/data/record.hpp"
 #include "trossen_sdk/hw/producer_base.hpp"
+#include "trossen_sdk/hw/teleop/teleop_capable.hpp"
+#include "trossen_sdk/hw/teleop/teleop_controller.hpp"
 #include "trossen_sdk/runtime/session_manager.hpp"
 
 #include "stub_producer_metadata.hpp"
@@ -31,6 +34,8 @@ using trossen::data::JointStateRecord;
 using trossen::data::RecordBase;
 using trossen::data::Timestamp;
 using trossen::hw::PolledProducer;
+using trossen::hw::teleop::JointSpaceTeleop;
+using trossen::hw::teleop::TeleopController;
 using trossen::runtime::SessionManager;
 using trossen::runtime::UserAction;
 
@@ -79,6 +84,22 @@ public:
 
   /// Number of poll() calls.
   std::atomic<int> polls{0};
+};
+
+// Leader whose read() throws once fail is set, like an arm whose driver drops its
+// connection.
+class FailOnDemandLeader : public JointSpaceTeleop {
+public:
+  /// @param fail_now true to throw from the first read.
+  explicit FailOnDemandLeader(bool fail_now = false) : fail{fail_now} {}
+  std::vector<float> read() override {
+    if (fail.load()) throw std::runtime_error("leader read failed");
+    return {0.0f};
+  }
+  void write(const std::vector<float>&) override {}
+
+  /// Set to make read() throw.
+  std::atomic<bool> fail;
 };
 
 /// Checks @p done every millisecond for up to 2 s; returns true once it holds.
@@ -278,6 +299,103 @@ TEST_F(SessionManagerDiscardTest, ProducerPollThrows_DoesNotTerminate) {
   EXPECT_FALSE(sm.is_episode_active());
 }
 
+// SD-11: Stopping an episode after a fault discards it instead of saving it. This is the
+// path the duration auto-stop takes when it ends a faulted episode.
+TEST_F(SessionManagerDiscardTest, StopEpisodeAfterFault_Discards) {
+  SessionManager sm;
+  auto producer = std::make_shared<ThrowingPolledProducer>();
+  sm.add_producer(producer, std::chrono::milliseconds(10));
+  const auto before = sm.stats();
+
+  ASSERT_TRUE(sm.start_episode());
+  ASSERT_TRUE(wait_until([&producer]() { return producer->polls.load() > 0; }));
+  sm.stop_episode();
+
+  const auto after = sm.stats();
+  EXPECT_EQ(after.total_episodes_completed, before.total_episodes_completed);
+  EXPECT_EQ(after.current_episode_index, before.current_episode_index);
+}
+
+// SD-12: After a mirror failure, start_episode() refuses until a new session.
+TEST_F(SessionManagerDiscardTest, StartEpisodeRefusedAfterFault) {
+  SessionManager sm;
+  auto controller = std::make_shared<TeleopController>(
+    std::make_shared<FailOnDemandLeader>(true), nullptr, TeleopController::Config{});
+  sm.add_teleop(controller);
+  const auto before = sm.stats();
+
+  ASSERT_TRUE(sm.start_episode());
+  ASSERT_TRUE(wait_until([&controller]() { return controller->failed(); }));
+  sm.stop_episode();
+  EXPECT_EQ(sm.stats().total_episodes_completed, before.total_episodes_completed);
+
+  EXPECT_FALSE(sm.start_episode());
+  EXPECT_FALSE(sm.is_episode_active());
+}
+
+// SD-13: After a fault, discard_last_episode() keeps the last saved episode, since no episode
+// can start again to replace it.
+TEST_F(SessionManagerDiscardTest, DiscardLastEpisodeRefusedAfterFault) {
+  SessionManager sm;
+  auto leader = std::make_shared<FailOnDemandLeader>();
+  auto controller = std::make_shared<TeleopController>(
+    leader, nullptr, TeleopController::Config{});
+  sm.add_teleop(controller);
+
+  ASSERT_TRUE(sm.start_episode());
+  sm.stop_episode();
+  const auto saved = sm.stats();
+
+  leader->fail.store(true);
+  ASSERT_TRUE(wait_until([&controller]() { return controller->failed(); }));
+  sm.discard_last_episode();
+
+  EXPECT_EQ(sm.stats().total_episodes_completed, saved.total_episodes_completed);
+  EXPECT_EQ(sm.stats().current_episode_index, saved.current_episode_index);
+}
+
+// SD-14: A mirror that fails while the next episode is being set up stops that start
+// before the hardware is re-armed.
+TEST_F(SessionManagerDiscardTest, StartEpisodeRefusedAfterFaultDuringSetup) {
+  SessionManager sm;
+  auto leader = std::make_shared<FailOnDemandLeader>();
+  auto controller = std::make_shared<TeleopController>(
+    leader, nullptr, TeleopController::Config{});
+  sm.add_teleop(controller);
+  ASSERT_TRUE(sm.start_episode());
+  sm.stop_episode();  // the mirror keeps running between episodes
+
+  sm.on_pre_episode([&leader, &controller]() {
+    leader->fail.store(true);
+    return wait_until([&controller]() { return controller->failed(); });
+  });
+  EXPECT_FALSE(sm.start_episode());
+  EXPECT_FALSE(sm.is_episode_active());
+}
+
+// SD-15: An episode the duration monitor stops after a fault is discarded and still
+// reported as an auto-stop.
+TEST_F(SessionManagerDiscardTest, DurationStopAfterFault_IsAutoStop) {
+  nlohmann::json short_episode = {
+    {"session_manager", {
+      {"type", "session_manager"},
+      {"max_duration", 0.5},
+      {"max_episodes", 100},
+      {"backend_type", "null"}
+    }}
+  };
+  trossen::configuration::GlobalConfig::instance().load_from_json(short_episode);
+  SessionManager sm;
+  SetUpTestSuite();  // restore the suite config; sm keeps its 0.5 s duration
+  auto producer = std::make_shared<ThrowingPolledProducer>();
+  sm.add_producer(producer, std::chrono::milliseconds(10));
+  const auto before = sm.stats();
+
+  ASSERT_TRUE(sm.start_episode());
+  EXPECT_TRUE(sm.wait_for_auto_stop(std::chrono::seconds(3)));
+  EXPECT_EQ(sm.stats().total_episodes_completed, before.total_episodes_completed);
+}
+
 // End-to-end: SessionManager wired to the real TrossenMCAP backend, verifying that
 // discard_last_episode() deletes the previous episode's actual .mcap file on disk (the
 // newest one) while leaving earlier episodes intact. This exercises the full path that the
@@ -287,7 +405,10 @@ protected:
   std::filesystem::path dataset_dir;
 
   void SetUp() override {
-    dataset_dir = std::filesystem::temp_directory_path() / "sm_mcap_discard_test";
+    // One dataset per test, since CTest runs each test as its own process in parallel.
+    const std::string dataset_id = std::string{"sm_mcap_discard_test_"} +
+      ::testing::UnitTest::GetInstance()->current_test_info()->name();
+    dataset_dir = std::filesystem::temp_directory_path() / dataset_id;
     std::filesystem::remove_all(dataset_dir);
 
     nlohmann::json config = {
@@ -301,7 +422,7 @@ protected:
       {"trossen_mcap_backend", {
         {"type", "trossen_mcap_backend"},
         {"root", std::filesystem::temp_directory_path().string()},
-        {"dataset_id", "sm_mcap_discard_test"},
+        {"dataset_id", dataset_id},
         {"robot_name", "trossen_solo_ai"}
       }}
     };
@@ -349,4 +470,20 @@ TEST_F(SessionManagerMcapDiscardTest, DiscardLastEpisode_RemovesPreviousMcapFile
   EXPECT_FALSE(std::filesystem::exists(second)) << "previous episode's file should be deleted";
   EXPECT_TRUE(std::filesystem::exists(first)) << "earlier episode's file should remain";
   EXPECT_EQ(sm.stats().total_episodes_completed, 1u);
+}
+
+// A start that aborts after the backend has opened its file leaves no episode file behind.
+TEST_F(SessionManagerMcapDiscardTest, AbortedStart_LeavesNoMcapFile) {
+  SessionManager sm;
+  sm.on_pre_episode([]() { return false; });
+
+  EXPECT_FALSE(sm.start_episode());
+  std::size_t mcap_files = 0;
+  if (std::filesystem::exists(dataset_dir)) {
+    for (const auto& entry : std::filesystem::recursive_directory_iterator(dataset_dir)) {
+      if (entry.path().extension() == ".mcap") ++mcap_files;
+    }
+  }
+  EXPECT_EQ(mcap_files, 0u);
+  EXPECT_TRUE(sm.stats().current_episode_path.empty());
 }
