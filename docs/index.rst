@@ -21,3 +21,4 @@ Contents
     read.rst
     convert.rst
     convert_v3.rst
+    producers.rst
