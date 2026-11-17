@@ -16,9 +16,10 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
-#include <system_error>
 #include <thread>
 #include <vector>
+
+#include <unistd.h>
 
 #include "gtest/gtest.h"
 #include "nlohmann/json.hpp"
@@ -576,10 +577,7 @@ TEST_F(SessionManagerDiscardTest, CtrlCDuringEpisode_Stops) {
   sm.stop_episode();
 }
 
-// End-to-end: SessionManager wired to the real TrossenMCAP backend, verifying that
-// discard_last_episode() deletes the previous episode's actual .mcap file on disk (the
-// newest one) while leaving earlier episodes intact. This exercises the full path that the
-// null-backend SD-* tests can't: SessionManager -> fresh MCAP backend -> find_latest.
+// SessionManager wired to the real TrossenMCAP backend, checking the episode files on disk.
 class SessionManagerMcapDiscardTest : public ::testing::Test {
 protected:
   std::filesystem::path dataset_dir;
@@ -637,19 +635,38 @@ TEST_F(SessionManagerMcapDiscardTest, DiscardLastEpisode_RemovesPreviousMcapFile
   ASSERT_TRUE(std::filesystem::exists(second));
   ASSERT_EQ(sm.stats().total_episodes_completed, 2u);
 
-  // Make `first` unambiguously older so `second` is deterministically the newest, regardless
-  // of filesystem mtime granularity.
-  std::error_code ec;
-  std::filesystem::last_write_time(
-    first, std::filesystem::file_time_type::clock::now() - std::chrono::seconds(10), ec);
-  ASSERT_FALSE(ec) << "failed to backdate episode mtime: " << ec.message();
-
   // Discard the previous (last completed) episode.
   sm.discard_last_episode();
 
   EXPECT_FALSE(std::filesystem::exists(second)) << "previous episode's file should be deleted";
   EXPECT_TRUE(std::filesystem::exists(first)) << "earlier episode's file should remain";
   EXPECT_EQ(sm.stats().total_episodes_completed, 1u);
+}
+
+// A failed delete keeps the episode's file and index, and a retry once it can delete succeeds.
+TEST_F(SessionManagerMcapDiscardTest, DiscardLastEpisode_KeepsEpisodeWhenDeleteFails) {
+  if (geteuid() == 0) GTEST_SKIP() << "running as root";
+  SessionManager sm;
+  std::filesystem::path saved;
+  sm.on_episode_ended([&saved](const SessionManager::Stats& stats) {
+    saved = stats.current_episode_path;
+  });
+  ASSERT_TRUE(sm.start_episode());
+  sm.stop_episode();
+  const auto before = sm.stats();
+
+  // A read-only folder blocks deleting its files.
+  namespace fs = std::filesystem;
+  fs::permissions(dataset_dir, fs::perms::owner_read | fs::perms::owner_exec);
+  sm.discard_last_episode();
+  fs::permissions(dataset_dir, fs::perms::owner_all);
+  EXPECT_TRUE(fs::exists(saved));
+  EXPECT_EQ(sm.stats().total_episodes_completed, before.total_episodes_completed);
+  EXPECT_EQ(sm.stats().current_episode_index, before.current_episode_index);
+
+  sm.discard_last_episode();
+  EXPECT_FALSE(fs::exists(saved));
+  EXPECT_EQ(sm.stats().total_episodes_completed, before.total_episodes_completed - 1);
 }
 
 // A start that aborts after the backend has opened its file leaves no episode file behind.

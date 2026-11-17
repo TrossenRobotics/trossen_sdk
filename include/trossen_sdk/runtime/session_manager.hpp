@@ -170,12 +170,11 @@ public:
   /**
    * @brief Discard the last completed episode (during reset)
    *
-   * Creates a temporary backend, points it at the last completed episode
-   * index, and calls discard_episode() to delete its files.
-   * Decrements next_episode_index_ so the next start_episode() reuses
-   * the same index.
+   * Deletes the files of the last episode saved in this session. Decrements
+   * next_episode_index_ so the next start_episode() reuses the same index. If a file
+   * cannot be deleted, prints the error and keeps the episode and its index.
    *
-   * @note No-op if no episodes have been completed.
+   * @note No-op if no episode was saved in this session.
    * @note Refuses after a teleop controller or polled producer fault, since no episode can
    *   start again to replace it; the last saved episode is kept.
    */
@@ -556,6 +555,10 @@ private:
 
   /// @brief Current backend instance (per episode)
   std::shared_ptr<io::Backend> current_backend_;
+
+  /// @brief Closed backend of the last episode saved in this session; null when there is
+  /// none or it was discarded
+  std::shared_ptr<io::Backend> last_backend_;
 
   /// @brief Current scheduler instance (per episode)
   std::unique_ptr<Scheduler> scheduler_;

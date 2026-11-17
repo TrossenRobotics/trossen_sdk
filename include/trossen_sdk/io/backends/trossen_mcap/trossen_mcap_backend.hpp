@@ -158,6 +158,8 @@ public:
 
   /**
    * @brief Discard episode data and delete the MCAP file
+   *
+   * @throws std::runtime_error naming the file if it cannot be deleted; the file stays
    */
   void discard_episode() override;
 
@@ -204,16 +206,6 @@ private:
    * Caller must hold writer_mutex_.
    */
   void close_resources();
-
-  /**
-   * @brief Find the most-recently-written <uuid>.mcap episode file in the dataset dir
-   *
-   * Used by discard_episode() when this backend never opened a file (the re-record
-   * path creates a fresh backend), so there is no stored path_ to delete.
-   *
-   * @return Path to the newest matching episode file, or an empty path if none found
-   */
-  std::filesystem::path find_latest_episode_file() const;
 
   /**
    * @brief The dataset_info this session records: producer stream info plus the backend's
