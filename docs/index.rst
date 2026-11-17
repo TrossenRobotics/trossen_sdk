@@ -18,4 +18,5 @@ Contents
     record.rst
     visualize.rst
     replay.rst
+    read.rst
     convert.rst
