@@ -159,7 +159,7 @@
       "max_angular_rps": 1.2,
       "max_lift_mps": 0.05,
       "home_on_configure": true,
-      "command_timeout_ms": 500.0
+      "command_timeout_ms": 100.0
     },
     "cameras": [
       {

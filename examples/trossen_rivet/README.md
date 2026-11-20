@@ -144,7 +144,8 @@ something says otherwise. A teleop loop that dies, or a host wedged on something
 else, would otherwise leave a moving robot with nobody at the controls.
 
 So the base commands a standstill if no fresh command arrives within
-`command_timeout_ms` (default 500 ms, against a teleop mirror writing at 1 kHz).
+`command_timeout_ms` (default 500 ms; this config sets 100 ms, against a teleop mirror
+writing at 1 kHz).
 It logs when it fires and again when commands resume. The check arms on the first
 command, so connecting without ever driving does not trip it.
 
