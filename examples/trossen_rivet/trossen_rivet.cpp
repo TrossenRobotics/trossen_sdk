@@ -163,8 +163,16 @@ int main(int argc, char** argv) {
     session_ctrls;
 
   for (const auto& [id, ctrl_cfg] : cfg.hardware.controls) {
-    auto component = trossen::hw::HardwareRegistry::create(
-      ctrl_cfg.type, id, ctrl_cfg.to_json(), true);
+    // Return instead of throwing out of main(), so the arms above are released.
+    std::shared_ptr<trossen::hw::HardwareComponent> component;
+    try {
+      component = trossen::hw::HardwareRegistry::create(
+        ctrl_cfg.type, id, ctrl_cfg.to_json(), true);
+    } catch (const std::exception& e) {
+      std::cerr << "Error: control [" << id << "] failed to come up: " << e.what() << "\n";
+      trossen::hw::ActiveHardwareRegistry::clear();
+      return 1;
+    }
     controls[id] = component;
 
     if (auto sc = std::dynamic_pointer_cast<

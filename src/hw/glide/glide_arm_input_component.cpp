@@ -6,11 +6,15 @@
 #include "trossen_sdk/hw/glide/glide_arm_input_component.hpp"
 
 #include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
 #include <iostream>
 #include <memory>
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -19,6 +23,24 @@
 #include "trossen_sdk/hw/hardware_registry.hpp"
 
 namespace trossen::hw::glide {
+
+namespace {
+
+/// How long configure() waits for each stick to center.
+constexpr std::chrono::seconds kCenterTimeout{10};
+
+/// Polling interval while waiting.
+constexpr std::chrono::milliseconds kCenterPollPeriod{20};
+
+/// 15% of half the stick's range, in raw counts.
+constexpr int kCenterToleranceCounts = (kJoystickMax - kJoystickMin) * 15 / 200;
+
+bool axis_centered(std::uint16_t raw) {
+  constexpr int middle = (kJoystickMin + kJoystickMax) / 2;
+  return std::abs(static_cast<int>(raw) - middle) <= kCenterToleranceCounts;
+}
+
+}  // namespace
 
 GlideArmInputComponent::~GlideArmInputComponent() { unregister_all(); }
 
@@ -83,6 +105,73 @@ void GlideArmInputComponent::configure(const nlohmann::json& config) {
       throw std::runtime_error(
         "GlideArmInputComponent '" + get_identifier() + "': arm '" + arm_id +
         "' has no driver; it must be configured before this component reads it");
+    }
+
+    // An arm controller that missed the trigger at boot reports its joint as
+    // exactly 0 / 0 / 0, which a live motor never does.
+    {
+      auto driver = arm->get_hardware();
+      const auto pos = driver->get_all_positions();
+      const auto vel = driver->get_all_velocities();
+      const auto eff = driver->get_all_efforts();
+      if (!pos.empty() && pos.back() == 0.0 && vel.back() == 0.0 &&
+          eff.back() == 0.0) {
+        unregister_all();
+        throw std::runtime_error(
+          "GlideArmInputComponent '" + get_identifier() + "': arm '" + arm_id +
+          "' reports its trigger joint as exactly zero, so the arm controller did "
+          "not detect the trigger or handle at boot. Check the handle cable, then "
+          "power-cycle this Glide and restart.");
+      }
+    }
+
+    // An undetected handle reports the stick at raw (0, 0), which reads as full
+    // deflection. Require a centered stick before teleop can use it.
+    {
+      auto driver = arm->get_hardware();
+      const auto deadline = std::chrono::steady_clock::now() + kCenterTimeout;
+      bool centered = false;
+      bool reported_waiting = false;
+      std::uint16_t last_x = 0;
+      std::uint16_t last_y = 0;
+      try {
+        while (true) {
+          const auto report = driver->get_input_report();
+          last_x = report.joystick_x;
+          last_y = report.joystick_y;
+          centered = axis_centered(last_x) && axis_centered(last_y);
+          if (centered || std::chrono::steady_clock::now() >= deadline) break;
+          if (!reported_waiting) {
+            reported_waiting = true;
+            std::cout << "GlideArmInputComponent '" << get_identifier()
+                      << "': the stick of '" << arm_id << "' is not centered (raw x="
+                      << last_x << ", y=" << last_y << "). Release it; waiting up to "
+                      << kCenterTimeout.count() << " s..." << std::endl;
+          }
+          std::this_thread::sleep_for(kCenterPollPeriod);
+        }
+      } catch (const std::exception& e) {
+        unregister_all();
+        throw std::runtime_error(
+          "GlideArmInputComponent '" + get_identifier() + "': reading the stick of "
+          "arm '" + arm_id + "' failed: " + e.what());
+      }
+      if (!centered) {
+        unregister_all();
+        throw std::runtime_error(
+          "GlideArmInputComponent '" + get_identifier() + "': the stick of arm '" +
+          arm_id + "' did not center within " +
+          std::to_string(kCenterTimeout.count()) + " s (raw x=" +
+          std::to_string(last_x) + ", y=" + std::to_string(last_y) + "). If the "
+          "stick was held, release it and restart. If it was released, the arm "
+          "controller did not detect the handle: check the handle cable, then "
+          "power-cycle this Glide and restart.");
+      }
+      if (reported_waiting) {
+        std::cout << "GlideArmInputComponent '" << get_identifier()
+                  << "': the stick of '" << arm_id << "' is centered, continuing"
+                  << std::endl;
+      }
     }
 
     // Weak, deliberately. GlideSession is process-global and outlives any one
